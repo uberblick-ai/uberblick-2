@@ -1,21 +1,19 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   chmodSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
-  readlinkSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join } from "node:path";
+import { treeDigest, withMcpSession } from "./lib/homebrew-proof.mjs";
 
 const [formulaName, expectedVersion, formulaPath] = process.argv.slice(2);
 if (formulaName === undefined || expectedVersion === undefined || formulaPath === undefined) {
@@ -53,22 +51,6 @@ function expect(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function treeDigest(root) {
-  const hash = createHash("sha256");
-  const visit = (dir) => {
-    for (const name of readdirSync(dir).sort()) {
-      const path = join(dir, name);
-      const stat = lstatSync(path);
-      hash.update(relative(root, path));
-      hash.update(String(stat.mode));
-      if (stat.isDirectory()) visit(path);
-      else hash.update(stat.isSymbolicLink() ? readlinkSync(path) : readFileSync(path));
-    }
-  };
-  visit(root);
-  return hash.digest("hex");
-}
-
 function freePort() {
   return new Promise((resolve, reject) => {
     const server = createServer();
@@ -86,82 +68,18 @@ function freePort() {
 }
 
 async function listDocsOverStdio() {
-  const child = spawn("ub", ["mcp", "serve"], {
-    cwd,
-    env: proofEnv,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  let stderr = "";
-  const closed = new Promise((resolve) => child.once("close", resolve));
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk;
-  });
-  let buffer = "";
-  let nextId = 1;
-  const pending = new Map();
-  const failPending = (error) => {
-    for (const waiter of pending.values()) waiter.reject(error);
-    pending.clear();
-  };
-  child.stdout.on("data", (chunk) => {
-    buffer += chunk;
-    for (;;) {
-      const newline = buffer.indexOf("\n");
-      if (newline === -1) break;
-      const line = buffer.slice(0, newline).trim();
-      buffer = buffer.slice(newline + 1);
-      if (line === "") continue;
-      let message;
-      try {
-        message = JSON.parse(line);
-      } catch {
-        failPending(new Error(`MCP server wrote non-JSON stdout: ${line.slice(0, 120)}`));
-        continue;
-      }
-      const waiter = pending.get(message.id);
-      if (waiter === undefined) continue;
-      pending.delete(message.id);
-      if (message.error === undefined) waiter.resolve(message.result);
-      else waiter.reject(new Error(message.error.message));
-    }
-  });
-  child.once("exit", (code, signal) => {
-    failPending(
-      new Error(
-        `ub mcp serve ${signal === null ? `exited ${code}` : `ended from ${signal}`}: ${stderr}`,
-      ),
-    );
-  });
-  const request = (method, params) =>
-    new Promise((resolve, reject) => {
-      const id = nextId++;
-      pending.set(id, { resolve, reject });
-      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
-    });
-  const deadline = setTimeout(() => {
-    failPending(new Error(`ub mcp serve did not answer within 60s: ${stderr}`));
-    child.kill("SIGKILL");
-  }, 60_000);
-  try {
-    await request("initialize", {
-      protocolVersion: "2025-06-18",
-      capabilities: {},
-      clientInfo: { name: "homebrew-formula-proof", version: expectedVersion },
-    });
-    child.stdin.write(
-      `${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`,
-    );
-    const result = await request("tools/call", { name: "list_docs", arguments: {} });
-    const text = result?.content?.[0]?.text;
-    expect(typeof text === "string", "list_docs returned no text content");
-    const listed = JSON.parse(text);
-    expect(Array.isArray(listed.docs), "list_docs returned no docs array");
-  } finally {
-    clearTimeout(deadline);
-    child.stdin.end();
-    child.kill("SIGTERM");
-    await closed;
-  }
+  await withMcpSession(
+    {
+      cwd,
+      env: proofEnv,
+      clientName: "homebrew-formula-proof",
+      clientVersion: expectedVersion,
+    },
+    async (callTool) => {
+      const listed = await callTool("list_docs");
+      expect(Array.isArray(listed.docs), "list_docs returned no docs array");
+    },
+  );
 }
 
 async function proveOpen() {

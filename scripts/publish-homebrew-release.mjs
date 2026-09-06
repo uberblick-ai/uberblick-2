@@ -38,11 +38,19 @@ function assetUrl(tag, version) {
 	return `https://github.com/${SOURCE_REPOSITORY}/releases/download/${tag}/${assetName(version)}`;
 }
 
-export function formulaFor(tag, version, sha256) {
+/**
+ * The formula the tap holds for one version.
+ *
+ * `url` defaults to the published asset and is overridden only by
+ * scripts/homebrew-upgrade-proof.mjs, which installs two locally built payloads
+ * through this same text so its probe upgrades the formula a release publishes
+ * rather than one written for the probe.
+ */
+export function formulaFor(tag, version, sha256, url = assetUrl(tag, version)) {
 	return `class Uberblick < Formula
   desc "Local-first collaborative documents for people and agents"
   homepage "https://github.com/${SOURCE_REPOSITORY}"
-  url "${assetUrl(tag, version)}"
+  url "${url}"
   version "${version}"
   sha256 "${sha256}"
   license "MIT"

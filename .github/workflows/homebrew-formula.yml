@@ -4,13 +4,21 @@ on:
   pull_request:
     paths:
       - Formula/uberblick.rb
+      - scripts/build-install-payload.mjs
       - scripts/homebrew-formula-proof.mjs
+      - scripts/homebrew-upgrade-proof.mjs
+      - scripts/lib/homebrew-proof.mjs
+      - scripts/publish-homebrew-release.mjs
       - .github/workflows/homebrew-formula.yml
   push:
     branches: [main]
     paths:
       - Formula/uberblick.rb
+      - scripts/build-install-payload.mjs
       - scripts/homebrew-formula-proof.mjs
+      - scripts/homebrew-upgrade-proof.mjs
+      - scripts/lib/homebrew-proof.mjs
+      - scripts/publish-homebrew-release.mjs
       - .github/workflows/homebrew-formula.yml
 
 permissions:
@@ -45,3 +53,31 @@ jobs:
           brew audit --strict "$tap/uberblick"
           node "$GITHUB_WORKSPACE/scripts/homebrew-formula-proof.mjs" \
             "$tap/uberblick" 0.1.0 "$GITHUB_WORKSPACE/Formula/uberblick.rb"
+
+  upgrade:
+    name: Apple Silicon upgrade
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+
+      # The proof builds the two payloads it upgrades between, so unlike the
+      # job above it needs the workspace's dependencies.
+      - run: mise run install
+        env:
+          PNPM_STORE_DIR: ~/.pnpm-store
+
+      # Two versions built here stand in for two published releases; the public
+      # transcript belongs to the tap's second publication (#842).
+      - name: Upgrade an installed release through Homebrew
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          node scripts/homebrew-upgrade-proof.mjs 0.1.0 0.1.1

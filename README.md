@@ -55,6 +55,29 @@ What this supports is exactly one arrangement: **one workspace, one trusted user
 multiple clients and machines; no login and no tenant isolation.** Everything
 below is a consequence of that.
 
+### Updating a Homebrew installation
+
+A copy installed from the `uberblick-ai/tap` Homebrew tap is updated by
+Homebrew, with no step of its own beyond these two — the first refreshes the
+tap, the second replaces the installed copy with the newest release published
+to it ([RELEASING.md](RELEASING.md) is how a version gets there):
+
+```sh
+brew update
+brew upgrade uberblick-ai/tap/uberblick
+```
+
+`ub --version` then prints the new version, and `ub` and `uberblick` stay on
+PATH where they were. The upgrade replaces only what Homebrew installed:
+everything under [Where your files live](#where-your-files-live) —
+configuration, credentials, workspaces and their databases — is untouched, and
+`ub status` still reports the same workspace with the documents it already
+held. `.github/workflows/homebrew-formula.yml` proves that on an Apple Silicon
+runner for every change to the formula or its payload.
+
+This is the update path for an installed copy, not for a clone: a checkout
+follows `git pull` and `mise run setup` above.
+
 ### The signing secret
 
 `HUB_AUTH_TOKEN` is the HMAC **secret** hub tokens are signed with, not a token.
