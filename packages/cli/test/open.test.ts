@@ -1429,6 +1429,64 @@ describe("ub open", () => {
     expect((await restarted.interrupt()).status).toBe(0);
   });
 
+  it("exits and releases the serving role when its replica is quarantined", async () => {
+    const { box, env } = configured();
+    const upstream = await startHub(box);
+    const hubUrl = `ws://127.0.0.1:${upstream.port}`;
+    pointAt(box, hubUrl);
+    const webPort = await freePort();
+    const app = await open(box, ["--port", String(webPort)], env);
+    const room = directoryRoom(WORKSPACE);
+    const remoteDoc = new Y.Doc();
+    const remote = new HocuspocusProvider({
+      url: hubUrl,
+      name: room,
+      document: remoteDoc,
+      token: await authMessage("read-write"),
+    });
+
+    try {
+      await waitUntil("the upstream peer to sync", () => remote.isSynced);
+      const databasePath = resolveMcpConfig({
+        ...box.env,
+        ...env,
+        WORKSPACE_ID: WORKSPACE,
+      }).databasePath;
+      const database = new DatabaseSync(databasePath);
+      database.exec(`
+        CREATE TRIGGER refuse_updates
+        BEFORE INSERT ON updates
+        BEGIN
+          SELECT RAISE(FAIL, 'simulated append refusal');
+        END
+      `);
+      database.close();
+
+      // A remote update is already in this engine replica when its observer
+      // reaches the refused append, which is the quarantine boundary.
+      remoteDoc.getMap("quarantine-probe").set("changed", true);
+      const stopped = await app.wait();
+      expect(stopped).toEqual({ status: 1, signal: null });
+      const terminalLines = app
+        .stderr()
+        .split("\n")
+        .filter((line) => line.startsWith("ub open: local replica quarantined"));
+      expect(terminalLines).toHaveLength(1);
+      expect(terminalLines[0]).toContain(room);
+      expect(terminalLines[0]).toContain("simulated append refusal");
+      expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
+
+      const repaired = new DatabaseSync(databasePath);
+      repaired.exec("DROP TRIGGER refuse_updates");
+      repaired.close();
+      const restarted = await open(box, ["--port", String(webPort)], env);
+      expect((await restarted.interrupt()).status).toBe(0);
+    } finally {
+      remote.destroy();
+      remoteDoc.destroy();
+    }
+  });
+
   it("serves the configuration document uncached, ahead of the SPA fallback", async () => {
     const { box, env } = configured();
     const webPort = await freePort();

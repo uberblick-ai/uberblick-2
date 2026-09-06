@@ -75,10 +75,7 @@ export function collectServingSyncStatus(
   rooms: Iterable<string>,
 ): ServingSyncStatus {
   const servedRooms = [...new Set(rooms)].sort();
-  if (
-    engine.health.status !== "healthy" ||
-    engine.refreshStatus.status !== "running"
-  ) {
+  if (engine.refreshStatus.status !== "running") {
     return unavailableServingStatus(servedRooms);
   }
 
