@@ -10,7 +10,8 @@
 #   floor prunes the cache only once free space actually falls below it.
 # Worktrees — an agent run removes its own, so abandoned ones accumulate. Old
 #   ones go here, never with `--force`: a locked worktree, or one holding
-#   modified or untracked files, is reported and left for a human.
+#   modified or untracked files, is reported and left for a human. So is one
+#   whose age cannot be read under either the GNU or BSD `stat` dialect.
 #   Clean detached worktrees are removable: durable recovery is a remote commit
 #   or PR, never an unreferenced local commit (`AGENTS.md`, Claim and recovery).
 # On Docker Desktop for macOS, headroom is the host volume containing its default
@@ -141,7 +142,15 @@ stale_worktrees() {
     case $current in
       "$wt"|"$wt"/*) continue ;;
     esac
-    mtime=$(stat -c %Y "$wt" 2>/dev/null) || continue
+    if ! mtime=$(stat -c %Y "$wt" 2>/dev/null) &&
+       ! mtime=$(stat -f %m "$wt" 2>/dev/null); then
+      if [ -n "$dry" ]; then
+        echo "would keep (age unavailable): $wt -- could not read worktree age"
+      else
+        echo "housekeeping: kept worktree (age unavailable): $wt -- could not read worktree age"
+      fi
+      continue
+    fi
     age_h=$(( (now - mtime) / 3600 ))
     [ "$age_h" -ge "$worktree_max_age_h" ] || continue
     if [ -n "$dry" ]; then

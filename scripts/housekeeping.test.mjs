@@ -70,6 +70,90 @@ function runGit(cwd, args) {
 	return result.stdout;
 }
 
+function worktreeScenario(t) {
+	const { base, bin, calls } = fixture(t);
+	runGit(base, ["init", "-q"]);
+	runGit(base, ["config", "user.email", "housekeeping@example.test"]);
+	runGit(base, ["config", "user.name", "Housekeeping Test"]);
+	writeFileSync(join(base, "tracked"), "tracked\n");
+	runGit(base, ["add", "tracked"]);
+	runGit(base, ["commit", "-q", "-m", "fixture"]);
+
+	const worktreeRoot = join(base, ".claude", "worktrees");
+	mkdirSync(worktreeRoot, { recursive: true });
+	const clean = join(worktreeRoot, "clean");
+	const dirty = join(worktreeRoot, "dirty");
+	const locked = join(worktreeRoot, "locked");
+	const current = join(worktreeRoot, "current");
+	const young = join(worktreeRoot, "young");
+	const outside = join(base, "outside-worktree");
+	for (const [branch, path] of [
+		["clean", clean],
+		["dirty", dirty],
+		["locked", locked],
+		["current", current],
+		["young", young],
+		["outside", outside],
+	]) {
+		runGit(base, ["worktree", "add", "-q", "-b", branch, path]);
+	}
+	writeFileSync(join(dirty, "untracked"), "keep me\n");
+	runGit(base, ["worktree", "lock", locked]);
+	const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+	for (const path of [clean, dirty, locked, current, outside]) {
+		utimesSync(path, old, old);
+	}
+	successfulDocker(bin);
+	const env = environment(bin, calls, {
+		HOUSEKEEPING_DOCKER_ROOT: base,
+		HOUSEKEEPING_WARN_FREE_GB: "0",
+		HOUSEKEEPING_WORKTREE_MAX_AGE_H: "1",
+	});
+
+	return { bin, clean, current, dirty, env, locked, outside, young };
+}
+
+function proveWorktreeCleanup({ clean, current, dirty, env, locked, outside, young }) {
+	const dryRun = spawnSync("sh", [script, "test-sha", "--dry-run"], {
+		cwd: current,
+		encoding: "utf8",
+		env,
+	});
+	assert.equal(dryRun.status, 0, dryRun.stderr);
+	assert.match(
+		dryRun.stdout,
+		/would: docker builder prune -f --min-free-space 5GB/,
+	);
+	assert.ok(dryRun.stdout.includes(`would: git worktree remove ${clean} (2h old)`));
+	assert.ok(
+		dryRun.stdout.includes(`would keep (2h old): ${dirty} -- modified or untracked files`),
+	);
+	assert.ok(dryRun.stdout.includes(`would keep (2h old): ${locked} -- locked`));
+	assert.equal(dryRun.stdout.includes(current), false);
+	assert.equal(dryRun.stdout.includes(young), false);
+	assert.equal(dryRun.stdout.includes(outside), false);
+	assert.equal(existsSync(clean), true);
+
+	const realRun = spawnSync("sh", [script, "test-sha"], {
+		cwd: current,
+		encoding: "utf8",
+		env,
+	});
+	assert.equal(realRun.status, 0, realRun.stderr);
+	assert.ok(realRun.stdout.includes(`housekeeping: removed worktree (2h old): ${clean}`));
+	assert.ok(realRun.stdout.includes(`housekeeping: kept worktree (2h old): ${dirty}`));
+	assert.ok(realRun.stdout.includes(`housekeeping: kept worktree (2h old): ${locked}`));
+	assert.equal(realRun.stdout.includes(current), false);
+	assert.equal(realRun.stdout.includes(young), false);
+	assert.equal(realRun.stdout.includes(outside), false);
+	assert.equal(existsSync(clean), false);
+	assert.equal(existsSync(dirty), true);
+	assert.equal(existsSync(locked), true);
+	assert.equal(existsSync(current), true);
+	assert.equal(existsSync(young), true);
+	assert.equal(existsSync(outside), true);
+}
+
 test("cleans every named and expired review image plus stale Docker artifacts", (t) => {
 	const { base, bin, calls } = fixture(t);
 	fakeDocker(
@@ -399,83 +483,51 @@ test("does not substitute another filesystem when Docker's root is unavailable",
 });
 
 test("dry-run and real cleanup agree on removable, dirty, locked, and current worktrees", (t) => {
-	const { base, bin, calls } = fixture(t);
-	runGit(base, ["init", "-q"]);
-	runGit(base, ["config", "user.email", "housekeeping@example.test"]);
-	runGit(base, ["config", "user.name", "Housekeeping Test"]);
-	writeFileSync(join(base, "tracked"), "tracked\n");
-	runGit(base, ["add", "tracked"]);
-	runGit(base, ["commit", "-q", "-m", "fixture"]);
+	proveWorktreeCleanup(worktreeScenario(t));
+});
 
-	const worktreeRoot = join(base, ".claude", "worktrees");
-	mkdirSync(worktreeRoot, { recursive: true });
-	const clean = join(worktreeRoot, "clean");
-	const dirty = join(worktreeRoot, "dirty");
-	const locked = join(worktreeRoot, "locked");
-	const current = join(worktreeRoot, "current");
-	const young = join(worktreeRoot, "young");
-	const outside = join(base, "outside-worktree");
-	for (const [branch, path] of [
-		["clean", clean],
-		["dirty", dirty],
-		["locked", locked],
-		["current", current],
-		["young", young],
-		["outside", outside],
-	]) {
-		runGit(base, ["worktree", "add", "-q", "-b", branch, path]);
-	}
-	writeFileSync(join(dirty, "untracked"), "keep me\n");
-	runGit(base, ["worktree", "lock", locked]);
-	const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
-	for (const path of [clean, dirty, locked, current, outside]) {
-		utimesSync(path, old, old);
-	}
-	successfulDocker(bin);
-	const env = environment(bin, calls, {
-		HOUSEKEEPING_DOCKER_ROOT: base,
-		HOUSEKEEPING_WARN_FREE_GB: "0",
-		HOUSEKEEPING_WORKTREE_MAX_AGE_H: "1",
-	});
+test("uses BSD stat when GNU stat is unavailable", (t) => {
+	const scenario = worktreeScenario(t);
+	fakeExecutable(
+		scenario.bin,
+		"stat",
+		'case "$1 $2" in\n' +
+			'  "-c %Y") exit 1 ;;\n' +
+			'  "-f %m") exec date -r "$3" +%s ;;\n' +
+			'  *) exit 2 ;;\n' +
+			'esac',
+	);
+	proveWorktreeCleanup(scenario);
+});
+
+test("keeps and reports a worktree when neither stat dialect can read its age", (t) => {
+	const scenario = worktreeScenario(t);
+	fakeExecutable(scenario.bin, "stat", "exit 1");
 
 	const dryRun = spawnSync("sh", [script, "test-sha", "--dry-run"], {
-		cwd: current,
+		cwd: scenario.current,
 		encoding: "utf8",
-		env,
+		env: scenario.env,
 	});
 	assert.equal(dryRun.status, 0, dryRun.stderr);
-	assert.match(
-		dryRun.stdout,
-		/would: docker builder prune -f --min-free-space 5GB/,
-	);
-	assert.ok(dryRun.stdout.includes(`would: git worktree remove ${clean} (2h old)`));
 	assert.ok(
-		dryRun.stdout.includes(`would keep (2h old): ${dirty} -- modified or untracked files`),
+		dryRun.stdout.includes(
+			`would keep (age unavailable): ${scenario.clean} -- could not read worktree age`,
+		),
 	);
-	assert.ok(dryRun.stdout.includes(`would keep (2h old): ${locked} -- locked`));
-	assert.equal(dryRun.stdout.includes(current), false);
-	assert.equal(dryRun.stdout.includes(young), false);
-	assert.equal(dryRun.stdout.includes(outside), false);
-	assert.equal(existsSync(clean), true);
 
 	const realRun = spawnSync("sh", [script, "test-sha"], {
-		cwd: current,
+		cwd: scenario.current,
 		encoding: "utf8",
-		env,
+		env: scenario.env,
 	});
 	assert.equal(realRun.status, 0, realRun.stderr);
-	assert.ok(realRun.stdout.includes(`housekeeping: removed worktree (2h old): ${clean}`));
-	assert.ok(realRun.stdout.includes(`housekeeping: kept worktree (2h old): ${dirty}`));
-	assert.ok(realRun.stdout.includes(`housekeeping: kept worktree (2h old): ${locked}`));
-	assert.equal(realRun.stdout.includes(current), false);
-	assert.equal(realRun.stdout.includes(young), false);
-	assert.equal(realRun.stdout.includes(outside), false);
-	assert.equal(existsSync(clean), false);
-	assert.equal(existsSync(dirty), true);
-	assert.equal(existsSync(locked), true);
-	assert.equal(existsSync(current), true);
-	assert.equal(existsSync(young), true);
-	assert.equal(existsSync(outside), true);
+	assert.ok(
+		realRun.stdout.includes(
+			`housekeeping: kept worktree (age unavailable): ${scenario.clean} -- could not read worktree age`,
+		),
+	);
+	assert.equal(existsSync(scenario.clean), true);
 });
 
 test("rejects no arguments and --dry-run alone before invoking Docker", (t) => {
