@@ -23,7 +23,7 @@ interface RoleData {
   defaultRuntime: "claude" | "codex";
   runtimes: {
     claude: { adapter: string; permissionMode: "auto"; allowedTools: string[] };
-    codex: { adapter: string; sandbox: "workspace-write" };
+    codex: { adapter: string; sandbox: "workspace-write" | "danger-full-access" };
   };
 }
 
