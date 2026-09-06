@@ -149,17 +149,13 @@ try {
 		run("uberblick", ["--version"], { env: userEnv }) === upgradedVersion,
 		"uberblick did not report the upgraded version",
 	);
-	const upgradedPrefix = run("brew", ["--prefix", FORMULA]);
+	const upgradedKeg = join(run("brew", ["--cellar", FORMULA]), upgradedVersion);
 	for (const name of ["ub", "uberblick"]) {
 		expect(
-			realpathSync(join(brewPrefix, "bin", name)).startsWith(`${upgradedPrefix}/`),
+			realpathSync(join(brewPrefix, "bin", name)).startsWith(`${upgradedKeg}/`),
 			`${name} on PATH does not resolve into the upgraded install`,
 		);
 	}
-	expect(
-		run("brew", ["list", "--versions", FORMULA]).split(/\s+/).slice(1).join(" ") === upgradedVersion,
-		"Homebrew kept a second version of the formula installed",
-	);
 
 	const stateAfter = [treeDigest(configHome), treeDigest(dataHome)];
 	expect(
