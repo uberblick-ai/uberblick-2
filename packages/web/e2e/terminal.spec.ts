@@ -59,6 +59,16 @@ function control(page: Page): Locator {
   return page.getByRole("button", { name: /^(Pause|Play)$/ });
 }
 
+/**
+ * The control as the *cascade* leaves it, which is the only way to see it.
+ * `getByRole` honours the `hidden` attribute whatever the stylesheet computes,
+ * so a control the attribute hides and CSS still paints counts as absent to it
+ * while a reader sees and tabs to a blank button (#906).
+ */
+function toggle(page: Page): Locator {
+  return page.locator(".ub-terminal-toggle");
+}
+
 /** Move the caret out of the terminal block, into the prose above it. */
 async function caretAway(page: Page): Promise<void> {
   await page.locator(".ub-editor .ProseMirror > *").first().click();
@@ -74,7 +84,12 @@ async function frameText(page: Page): Promise<string> {
  * in it. `fillerLines` paragraphs go in front of it, for the one test that
  * needs the block to be scrollable out of the viewport.
  */
-async function writeDemo(page: Page, url: string, fillerLines = 0): Promise<void> {
+async function writeDemo(
+  page: Page,
+  url: string,
+  fillerLines = 0,
+  transcript = TRANSCRIPT,
+): Promise<void> {
   await page.goto(url);
   await expect(page.locator(".ub-list-head")).toBeVisible();
   await page.getByRole("button", { name: "+ new doc" }).click();
@@ -93,11 +108,13 @@ async function writeDemo(page: Page, url: string, fillerLines = 0): Promise<void
   await blocks.last().hover();
   await page.locator(".ub-gutter-add").click();
   await page.getByRole("option", { name: "Terminal demo" }).click();
-  await page.keyboard.type("$ ub init", { delay: 10 });
-  // Enter inside a source block is a newline, so this is the transcript's
-  // second line rather than a second block.
-  await page.keyboard.press("Enter");
-  await page.keyboard.type("workspace ready", { delay: 10 });
+  const lines = transcript === "" ? [] : transcript.split("\n");
+  for (const [index, line] of lines.entries()) {
+    // Enter inside a source block is a newline, so these are the transcript's
+    // own lines rather than further blocks.
+    if (index > 0) await page.keyboard.press("Enter");
+    await page.keyboard.type(line, { delay: 10 });
+  }
 }
 
 test("a transcript plays on screen, opens under the caret, and stops on its control", async ({
@@ -177,9 +194,10 @@ test("reduced motion gets the whole transcript, and no control at all", async ({
 
   await expect(panel(page)).toBeVisible();
   await expect.poll(() => frameText(page)).toBe(TRANSCRIPT);
-  // Nothing moves, so there is nothing to stop — and no tab stop that would do
-  // nothing if there were.
-  await expect(control(page)).toHaveCount(0);
+  // Nothing moves, so there is nothing to stop — and nothing painted where the
+  // control would be. Computed visibility, not the role: the attribute alone
+  // satisfied the role engine while the cascade still painted the button.
+  await expect(toggle(page)).toBeHidden();
   const settled = await frameText(page);
   await page.waitForTimeout(3_000);
   expect(await frameText(page)).toBe(settled);
@@ -188,7 +206,26 @@ test("reduced motion gets the whole transcript, and no control at all", async ({
   // either way round, without a reload.
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await expect(control(page)).toHaveText("Pause");
+  await expect(toggle(page)).toBeVisible();
   await expect.poll(() => frameText(page)).not.toBe(settled);
+
+  // …and turned back on mid-run the control goes again, rather than standing
+  // there as a button that would stop nothing.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(toggle(page)).toBeHidden();
+  await expect.poll(() => frameText(page)).toBe(TRANSCRIPT);
+});
+
+test("an empty transcript is an idle panel with no control on it", async ({ page }) => {
+  if (started === null) throw new Error("e2e: the harness is not running");
+  await writeDemo(page, started.appUrl, 0, "");
+  await caretAway(page);
+
+  // Nothing plays, so the same rule holds for a reason that has nothing to do
+  // with motion — and here the button would be blank as well as inert, because
+  // a panel that never plays never writes a label on it.
+  await expect(panel(page)).toBeVisible();
+  await expect(toggle(page)).toBeHidden();
 });
 
 test("assistive technology is offered the transcript, not the animation", async ({

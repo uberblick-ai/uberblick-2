@@ -3233,19 +3233,17 @@ h3.ub-heading {
   color: var(--foreground);
 }
 
+/* The control is removed, not merely greyed, where nothing plays — a reduced
+   motion preference, or a transcript with nothing in it. `hidden` says so, and
+   a rule that shows the control must therefore not claim a hidden one: a later
+   `[hidden]` rule would lose this selector's specificity and leave a blank
+   button painted and focusable (#906). */
 .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-terminal-screen,
-.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-terminal-toggle {
+.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-terminal-toggle:not([hidden]) {
   display: block;
 }
 
 .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) > .ub-terminal-source {
-  display: none;
-}
-
-/* The control is removed, not merely greyed, where nothing plays — a reduced
-   motion preference, or a transcript with nothing in it. After the rules above,
-   because `hidden` has to win over them. */
-.ub-terminal-toggle[hidden] {
   display: none;
 }
 

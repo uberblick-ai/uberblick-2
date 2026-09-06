@@ -286,9 +286,9 @@ describe("the picker", () => {
   });
 
   /**
-   * `code`, `mermaid` and `table` are source text: the schema gives them no
-   * `docLink`, so offering one there would be offering something the block
-   * cannot hold.
+   * `code`, `mermaid`, `table` and `terminal` are source text: the schema gives
+   * them no `docLink`, so offering one there would be offering something the
+   * block cannot hold.
    */
   it("never opens in a source block", () => {
     const { context } = directory();

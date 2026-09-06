@@ -305,6 +305,17 @@ describe("the terminal block", () => {
       vi.advanceTimersByTime(20_000);
       expect(shown(editor)).toBe(held);
 
+      // …and the hold survives the panel scrolling away and back. The reader
+      // stopped it deliberately, so coming back to a blank panel under a
+      // `Play` button would read as a broken block rather than a paused one.
+      leaveViewport();
+      vi.advanceTimersByTime(1_000);
+      enterViewport();
+      vi.advanceTimersByTime(1_000);
+      expect(shown(editor)).toBe(held);
+      expect(control?.textContent).toBe("Play");
+      expect(vi.getTimerCount()).toBe(0);
+
       control?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       expect(control?.textContent).toBe("Pause");
       vi.advanceTimersByTime(2_000);
@@ -360,6 +371,13 @@ describe("the terminal block", () => {
       expect(spokenTranscript(editor)).toBe(TRANSCRIPT);
       // Nothing is announced as it happens: no live region anywhere in the block.
       expect(block(editor)?.querySelector("[aria-live]")).toBeNull();
+
+      // With the caret in the block the reader is given the editable source,
+      // so the copy beside it would be that same transcript a second time.
+      editor.commands.setTextSelection(insideBlock(editor, 1));
+      expect(spokenTranscript(editor)).toBeNull();
+      editor.commands.setTextSelection(insideBlock(editor, 2));
+      expect(spokenTranscript(editor)).toBe(TRANSCRIPT);
 
       // Where the frame is already the whole transcript, the off-screen copy
       // goes — one reading, never two.

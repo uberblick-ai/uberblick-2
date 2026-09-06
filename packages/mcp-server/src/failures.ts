@@ -200,7 +200,7 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Call get_doc for the block's current text, its type and its `doc_links`, then link a range that fits — " +
       "`reason` says which of the three is in the way: `empty` (the range covers no characters), `not-prose` " +
-      "(a code, mermaid or table block holds source text and carries no inline links) or `overlap` (the range " +
+      "(a code, mermaid, table or terminal block holds source text and carries no inline links) or `overlap` (the range " +
       "is already an external link, and one range cannot be both).",
   },
   // Never `retry`: the directory is a synced document, so a target this

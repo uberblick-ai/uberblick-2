@@ -27,13 +27,17 @@
  * reasons and neither substitutes for the control:
  *
  * - **the reader paused it.** Held frame, held generator: play resumes where
- *   pause left off.
+ *   pause left off, and scrolling away and back does not throw that away — a
+ *   panel that came back blank under a `Play` button would read as broken
+ *   rather than paused.
  * - **`prefers-reduced-motion: reduce`**, watched live so a reader who turns it
  *   on mid-run is answered immediately. Nothing plays, so there is no control
  *   to offer and the panel shows the complete transcript instead.
  * - **off screen**, via `IntersectionObserver`: a demonstration nobody can see
- *   is a timer nobody needs. A browser without the observer never animates —
- *   the static transcript is the honest fallback, not an unpaced run.
+ *   is a timer nobody needs. A run that was playing comes back from the top; a
+ *   run the reader paused is held, per the bullet above. A browser without the
+ *   observer never animates — the static transcript is the honest fallback,
+ *   not an unpaced run.
  * - **the caret is in the block**, which is also when the stylesheet swaps the
  *   panel for the source. Coming back is a fresh run from the top, because the
  *   text the reader just edited is the text the demonstration is of.
@@ -239,7 +243,10 @@ export const terminalBlockView: NodeViewRenderer = ({
       if (next.done === true) return;
     }
     paint(next.value.text, next.value.cursor);
-    timer = setTimeout(play, next.value.delay);
+    // Through the boundary, not raw: every later step of a run is a fresh call
+    // stack of its own, and a throw on one of them must degrade the panel the
+    // same way a throw on the first one does.
+    timer = setTimeout(() => guarded(play), next.value.delay);
   };
 
   /** Whether the reader's caret is in *this* block — the stylesheet's rule. */
@@ -277,6 +284,8 @@ export const terminalBlockView: NodeViewRenderer = ({
   const sync = (): void => {
     const transcript = current.textContent;
     const drawn = !carriesComment(current);
+    /** Whether the stylesheet is showing the source instead of the panel. */
+    const sourceShown = !drawn || beingEdited();
 
     if (!animates() || !playable(transcript)) {
       // Nothing plays, so there is no control to offer (WCAG 2.2.2 asks for one
@@ -292,24 +301,29 @@ export const terminalBlockView: NodeViewRenderer = ({
     }
 
     toggle.hidden = false;
-    spoken.hidden = false;
+    // The off-screen copy is the *animation's* stand-in. Where the stylesheet
+    // shows the editable source instead, that source is the reading, and the
+    // copy beside it is the same transcript announced twice.
+    spoken.hidden = sourceShown;
     frame.setAttribute("aria-hidden", "true");
     toggle.textContent = paused ? "Play" : "Pause";
     toggle.title = paused
       ? "Play this terminal demonstration"
       : "Pause this terminal demonstration";
 
-    if (!drawn || !onScreen || beingEdited()) {
+    if (paused) {
+      // Before the viewport: a reader who deliberately stopped the run keeps
+      // the frame they stopped on, whatever they scroll past in the meantime.
+      stop();
+      return;
+    }
+    if (sourceShown || !onScreen) {
       // Out of sight is a fresh run when it comes back: the reader who edited
       // the transcript, or scrolled away and back, is owed the demonstration
       // from its start rather than its middle.
       stop();
       steps = null;
       paint("");
-      return;
-    }
-    if (paused) {
-      stop();
       return;
     }
     if (timer === null) play();

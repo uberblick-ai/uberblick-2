@@ -1536,8 +1536,10 @@ export function registerTools(
       description:
         "Insert one block after `after_block_id`, or at the top of the document when it is omitted. " +
         `Block types are the closed set the schema owns — ${BLOCK_TYPES.join(", ")} — which is the editor's ` +
-        "whole palette too. Nothing nests: a list is a run of adjacent list-item blocks, and a table's text is " +
-        "GFM table source, so every block has one text an agent can edit.\n\n" +
+        "whole palette too. Nothing nests: a list is a run of adjacent list-item blocks, a table's text is " +
+        "GFM table source, and a terminal's text is a transcript in which a line beginning `$ ` is a command " +
+        "typed out and every other line is output shown whole — the format has no escape, so an output line " +
+        "that itself begins `$ ` cannot be written. Every block has one text an agent can edit.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
@@ -2100,7 +2102,7 @@ export function registerTools(
     {
       title: "Export a document as markdown",
       description:
-        "Render the document as markdown, including fenced code and mermaid blocks. " +
+        "Render the document as markdown, including fenced code, mermaid and terminal blocks. " +
         "Export only: markdown is never the storage format, and there is no import tool." +
         failureContract("export_markdown"),
       inputSchema: strictInput({
