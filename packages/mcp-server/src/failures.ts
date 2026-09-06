@@ -249,8 +249,8 @@ const RECOVERIES: Record<string, Recovery> = {
   revival_trigger_missing: {
     recoveryClass: "manual",
     guidance:
-      "Add a heading whose text is exactly `Reconsidering`, followed by at least one block with non-whitespace " +
-      "text, then call set_status again.",
+      "Add a heading whose text is exactly `Reconsidering`, immediately followed by a non-heading block with " +
+      "non-whitespace text, then call set_status again.",
   },
   governs_not_requirement: {
     recoveryClass: "reread",
