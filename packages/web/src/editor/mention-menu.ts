@@ -31,9 +31,9 @@
  *
  * ## Prose only
  *
- * `code`, `mermaid` and `table` are source text: the schema gives them
- * `code: true` and the comment mark alone, so a `docLink` cannot live in one.
- * The gate here reads that spec rather than listing the three names, so a block
+ * `code`, `mermaid`, `table` and `terminal` are source text: the schema gives
+ * them `code: true` and the comment mark alone, so a `docLink` cannot live in
+ * one. The gate here reads that spec rather than listing the names, so a block
  * type's marks and its picker stay one decision.
  *
  * ## The block is named by id, the range is re-derived

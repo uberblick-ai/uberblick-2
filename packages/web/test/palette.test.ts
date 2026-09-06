@@ -48,6 +48,7 @@ describe("the palette is exactly the schema's block types", () => {
       "paragraph",
       "quote",
       "table",
+      "terminal",
       "text",
     ]);
     expect(BLOCK_NODE_NAMES).toEqual([
@@ -58,6 +59,7 @@ describe("the palette is exactly the schema's block types", () => {
       "list-item",
       "quote",
       "table",
+      "terminal",
     ]);
     // The closed mark set: the schema package's six inline marks, plus the
     // annotation anchor.

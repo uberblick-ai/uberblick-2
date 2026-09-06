@@ -374,8 +374,8 @@ const INLINE_RUNS =
   "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: " +
   "`[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) " +
   "and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the " +
-  "run texts joined together are the block's text. Source blocks — code, mermaid, table — hold source text and " +
-  "ignore it.\n\n" +
+  "run texts joined together are the block's text. Source blocks — code, mermaid, table, terminal — hold source " +
+  "text and ignore it.\n\n" +
   "A `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", " +
   "marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this " +
   "replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes " +
@@ -796,7 +796,7 @@ export function registerTools(
   /**
    * One block input, with `inline` resolved only where it is going to be used.
    *
-   * A source block — code, mermaid, table — carries no inline marks, so the
+   * A source block — code, mermaid, table, terminal — carries no inline marks, so the
    * schema writes its `text` and drops `inline` entirely. Resolving anyway
    * would make an unknown reference target refuse a call whose inline runs were
    * never going to be written, so the type check lives here, once, in front of
@@ -1536,8 +1536,10 @@ export function registerTools(
       description:
         "Insert one block after `after_block_id`, or at the top of the document when it is omitted. " +
         `Block types are the closed set the schema owns — ${BLOCK_TYPES.join(", ")} — which is the editor's ` +
-        "whole palette too. Nothing nests: a list is a run of adjacent list-item blocks, and a table's text is " +
-        "GFM table source, so every block has one text an agent can edit.\n\n" +
+        "whole palette too. Nothing nests: a list is a run of adjacent list-item blocks, a table's text is " +
+        "GFM table source, and a terminal's text is a transcript in which a line beginning `$ ` is a command " +
+        "typed out and every other line is output shown whole — the format has no escape, so an output line " +
+        "that itself begins `$ ` cannot be written. Every block has one text an agent can edit.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
@@ -2053,9 +2055,9 @@ export function registerTools(
         "`currentText` and `currentRev` to re-measure against. Indices are clamped to the text and swapped if " +
         "reversed; a range that clamps to nothing is refused.\n\n" +
         "A range that is already a reference is RETARGETED. A range that is already an external link is refused — " +
-        "one range cannot be both — and so is a code, mermaid or table block, which holds source text. The answer " +
-        "carries the target's current `title` for information; the label in the document is the text you linked, " +
-        "and it does not follow a later rename.\n\n" +
+        "one range cannot be both — and so is a code, mermaid, table or terminal block, which holds source text. " +
+        "The answer carries the target's current `title` for information; the label in the document is the text " +
+        "you linked, and it does not follow a later rename.\n\n" +
         "The target must be a document this replica's directory knows, or the call refuses with " +
         "`doclink_target_not_known_locally` and writes nothing. An archived target is accepted.\n\n" +
         "The edge shows up in backlinks without touching `meta.links`, which stays the curated doc-level list " +
@@ -2100,7 +2102,7 @@ export function registerTools(
     {
       title: "Export a document as markdown",
       description:
-        "Render the document as markdown, including fenced code and mermaid blocks. " +
+        "Render the document as markdown, including fenced code, mermaid and terminal blocks. " +
         "Export only: markdown is never the storage format, and there is no import tool." +
         failureContract("export_markdown"),
       inputSchema: strictInput({

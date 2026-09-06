@@ -9,7 +9,7 @@
  *   - `blocks`      Y.XmlFragment: one Y.XmlElement per block, each holding a
  *                   single Y.XmlText of plain-text source
  *                   (types: paragraph, heading, code, mermaid, list-item,
- *                   quote, table), formatted by the closed inline-mark set
+ *                   quote, table, terminal), formatted by the closed inline-mark set
  *                   (bold, italic, strike, inlineCode, link, docLink) on
  *                   prose blocks
  *   - `annotations` Y.Map of one Y.Map per thread — anchor, resolved flag and

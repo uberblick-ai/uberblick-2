@@ -397,9 +397,9 @@ export type InlineLinkRangeErrorReason = "empty" | "not-prose";
  * label and nothing to anchor to. The same rule {@link AnnotationRangeError}
  * has, for the same reason.
  *
- * `"not-prose"`: `code`, `mermaid` and `table` blocks hold source text and
- * carry only the annotation anchor, so an inline link has nowhere to live in
- * one.
+ * `"not-prose"`: `code`, `mermaid`, `table` and `terminal` blocks hold source
+ * text and carry only the annotation anchor, so an inline link has nowhere to
+ * live in one.
  *
  * A range already carrying an external `link` is refused with
  * {@link ConflictingLinkMarksError} instead — that error names both targets,

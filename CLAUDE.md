@@ -242,10 +242,11 @@ the fallback, which is exactly why CI is high priority.
   description, TL;DR, changelog suggestion, tags as flat per-tag presence entries,
   links-by-UUID, kind, status, supersedes, and internal decision remove/add levels), `blocks`
   (Y.XmlFragment, one element per block with stable `id` attrs; types:
-  paragraph, heading, code, mermaid, list-item, quote, table), `annotations`
-  (Y.Map of one Y.Map per thread: anchor block, resolved flag, and the
-  thread's own comments as a nested Y.Array — a comment list held inside the
-  thread's replaced JSON value silently lost concurrent replies, #461), and
+  paragraph, heading, code, mermaid, list-item, quote, table, terminal),
+  `annotations` (Y.Map of one Y.Map per thread: anchor block, resolved flag,
+  and the thread's own comments as a nested Y.Array — a comment list held
+  inside the thread's replaced JSON value silently lost concurrent replies,
+  #461), and
   `decisions` (Y.Array of decision-document UUID
   strings in stored order: the fixed decision-log slot). An older client that
   never opens an unknown root type preserves it across Yjs edit and sync; the
@@ -261,13 +262,16 @@ the fallback, which is exactly why CI is high priority.
   two disjoint target spaces: a write refuses a range carrying both, and
   because two Yjs keys have no cross-key exclusion, a read of a merged pair
   resolves to `docLink`. Prose blocks
-  (paragraph, heading, list-item, quote) carry inline marks; `code`, `mermaid`
-  and `table` are source text and carry only `comment`. A list is a *run of
-  adjacent `list-item` blocks* carrying `list` (bullet|ordered) and `indent`
-  (0–3) — markdown's own model, so nothing nests; a `table` stores GFM table
-  markdown as its text and is rendered from it, so an agent edits a table with
-  `edit_block` in the format it already writes. The mark is named
-  `inlineCode` rather than
+  (paragraph, heading, list-item, quote) carry inline marks; `code`, `mermaid`,
+  `table` and `terminal` are source text and carry only `comment`. A list is a
+  *run of adjacent `list-item` blocks* carrying `list` (bullet|ordered) and
+  `indent` (0–3) — markdown's own model, so nothing nests; a `table` stores GFM
+  table markdown as its text and is rendered from it, so an agent edits a table
+  with `edit_block` in the format it already writes. A `terminal` stores an
+  authored transcript — a line beginning `$ ` is a command typed out, every
+  other line is output shown whole — and plays it on a loop while it is on
+  screen, with a pause control and nothing about the run stored. The mark is
+  named `inlineCode` rather than
   `code` because ProseMirror forbids one name being both a node and a mark,
   and a mark's name is its Yjs key. Links reference UUIDs, never paths or
   titles — the curated doc-level list is `meta.links`, and inline doc-to-doc
@@ -283,9 +287,9 @@ the fallback, which is exactly why CI is high priority.
   must not exist.
 - The web editor is Tiptap + y-prosemirror with custom nodes matching the
   schema-owned shape; the block palette is restricted to the closed set the
-  schema owns — paragraph, heading, code, mermaid, list-item, quote, table —
-  and stock Tiptap list and table extensions are rejected, because a nested
-  list or cell tree has no block-scoped text for an agent to edit; unknown
+  schema owns — paragraph, heading, code, mermaid, list-item, quote, table,
+  terminal — and stock Tiptap list and table extensions are rejected, because a
+  nested list or cell tree has no block-scoped text for an agent to edit; unknown
   blocks degrade loudly (visible placeholder, explicit export marker), never
   silently dropped.
 - Markdown is an export format, never the storage format.

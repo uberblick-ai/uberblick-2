@@ -18,6 +18,7 @@ import { ListBlocks } from "./list-keys.js";
 import { MermaidBlocks } from "./mermaid.js";
 import { paletteExtensions } from "./nodes.js";
 import { TableBlocks } from "./table.js";
+import { TerminalBlocks } from "./terminal.js";
 
 /** The palette without collaboration — the schema, and nothing that needs a Y.Doc. */
 export const paletteOnlyExtensions: Extensions = [...paletteExtensions];
@@ -72,6 +73,10 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // under the caret. Nothing else — a diagram has no typed or pasted door,
     // because a mermaid block is one the reader asks for by name.
     MermaidBlocks,
+    // …and the terminal block's one: the same class again, opening a
+    // demonstration's transcript under the caret — which is also what stops the
+    // demonstration playing while it is being written.
+    TerminalBlocks,
     // …and the document reference's: the two typed and pasted spellings, the
     // live anchor, and the address they resolve against. Behaviour again — the
     // mark itself is schema, declared once in `marks.ts`, because

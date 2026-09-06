@@ -197,6 +197,17 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     type: "mermaid",
     attrs: {},
   },
+  {
+    // No trigger either: a transcript is prose until a `$ ` line makes it one,
+    // and `$ ` is far too common a thing to type to convert a block on.
+    id: "terminal",
+    label: "Terminal demo",
+    group: "Source",
+    trigger: null,
+    keywords: ["console", "command", "cli", "transcript", "prompt", "demo"],
+    type: "terminal",
+    attrs: {},
+  },
 ];
 
 /**
