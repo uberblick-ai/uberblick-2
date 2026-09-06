@@ -515,6 +515,9 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   await page.getByRole("button", { name: "Dark", exact: true }).click();
 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  expect(await painted(page, "body", "background-image")).toBe(
+    "radial-gradient(at 0% 0%, oklch(0.184 0.022 65), oklch(0.094 0.011 65))",
+  );
   // Two surfaces, neither of which knows a theme exists: both are painted from
   // tokens, and both moved.
   expect(await painted(page, ".ub-list", "background-color")).not.toBe(sidebar);
