@@ -304,15 +304,15 @@ type CopyResult = "idle" | "copied" | "failed";
 export function CopyLink({
   room,
   segment,
-  label = "Copy link",
-  identity = false,
+  shortUuid,
 }: {
   room: string;
   segment: string;
-  label?: string;
-  identity?: boolean;
+  shortUuid?: string;
 }): ReactElement {
   const [result, setResult] = useState<CopyResult>("idle");
+  const label = shortUuid === undefined ? "Copy link" : `uuid ${shortUuid}`;
+  const identity = shortUuid !== undefined;
 
   useEffect(() => {
     if (result === "idle") return;
@@ -337,11 +337,11 @@ export function CopyLink({
         // `title` is not reliably announced, so the accessible name carries the
         // action and the address that lands on the clipboard even where the
         // visible label is only the document's short uuid.
-        aria-label={`Copy canonical document URL for ${address}`}
-        title={`Copy canonical document URL for ${address}`}
+        aria-label={`${label} — copies the canonical document URL for ${address}`}
+        title={`${label} — copies the canonical document URL for ${address}`}
         onClick={() => void copy()}
       >
-        <span className="ub-copy-label">{label}</span>
+        {label}
       </button>
       {/* Rendered always, empty when idle: `role="status"` only announces
           changes to a region the reader was already in. */}
@@ -434,8 +434,7 @@ export function DocMetaLine({
             <CopyLink
               room={connection.room}
               segment={segment}
-              label={`uuid ${meta.uuid.slice(0, 8)}`}
-              identity
+              shortUuid={meta.uuid.slice(0, 8)}
             />
             <span className="ub-doc-rev"> · rev {rev ?? "········"}</span>
           </span>

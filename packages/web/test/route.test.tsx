@@ -369,7 +369,7 @@ describe("a fresh deep link does not open a writable empty replica", () => {
     const copy = host.querySelector(".ub-copy-link");
     expect(copy?.textContent).toBe("Copy link");
     expect(copy?.getAttribute("aria-label")).toBe(
-      `Copy canonical document URL for ${WS}/${UUID}`,
+      `Copy link — copies the canonical document URL for ${WS}/${UUID}`,
     );
 
     // Now the document's own room delivers, exactly as sync would.
@@ -684,7 +684,9 @@ describe("the copy control hands back the document's canonical link", () => {
     expect(revisionIsInsideControl).toBe(false);
     // The accessible name adds the part a reader cannot see — the address that
     // lands on the clipboard. `title` is not reliably announced.
-    expect(ariaLabel).toBe(`Copy canonical document URL for ${WS}/${UUID}`);
+    expect(ariaLabel).toBe(
+      `uuid ${UUID.slice(0, 8)} — copies the canonical document URL for ${WS}/${UUID}`,
+    );
 
     // Exactly what `parseRoute` resolves back to this document.
     expect(written).toEqual([`${window.location.origin}/${WS}/${UUID}`]);
@@ -719,7 +721,7 @@ describe("the copy control hands back the document's canonical link", () => {
     // The accessible name announces what the click actually produces, so it
     // follows the address rather than the room key the button no longer shows.
     expect(ariaLabel).toBe(
-      `Copy canonical document URL for ${DECORATED}/${UUID}`,
+      `uuid ${UUID.slice(0, 8)} — copies the canonical document URL for ${DECORATED}/${UUID}`,
     );
     // And it is a link that resolves back to this document.
     expect(route(new URL(written[0] as string).pathname)).toEqual({

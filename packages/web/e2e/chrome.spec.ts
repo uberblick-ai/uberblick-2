@@ -2080,10 +2080,12 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
 
   // The identity confirmation uses the target's lower half: it neither moves
   // nor intersects the uuid, revision, title or actions when it appears.
+  await page.setViewportSize({ width: 360, height: 620 });
+  await page.getByRole("button", { name: "Hide document list" }).click();
   const headerRects = (): Promise<Record<string, DOMRect>> =>
     page.evaluate(() => {
       const selectors = {
-        uuid: ".ub-copy-label",
+        uuid: ".ub-copy-link",
         revision: ".ub-doc-rev",
         title: ".ub-title",
         actions: ".ub-actions-trigger",
@@ -2111,9 +2113,10 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
       };
       const feedback = rangeFor(".ub-copied");
       const separatedFrom = [
-        rangeFor(".ub-copy-label"),
+        rangeFor(".ub-copy-link"),
         rangeFor(".ub-doc-rev"),
         document.querySelector(".ub-title")?.getBoundingClientRect(),
+        document.querySelector(".ub-actions-trigger")?.getBoundingClientRect(),
       ];
       return separatedFrom.every(
         (box) =>
@@ -2139,7 +2142,12 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
       const range = document.createRange();
       range.selectNodeContents(note);
       const shown = range.getBoundingClientRect();
-      return shown.left >= box.left - 0.5 && shown.right <= box.right + 0.5;
+      return (
+        shown.left >= box.left - 0.5 &&
+        shown.right <= box.right + 0.5 &&
+        shown.top >= box.top - 0.5 &&
+        shown.bottom <= box.bottom + 0.5
+      );
     });
   };
 
