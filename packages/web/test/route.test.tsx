@@ -366,9 +366,11 @@ describe("a fresh deep link does not open a writable empty replica", () => {
     // here too; a link is *more* worth sending from a document that has not
     // arrived, and the address bar is not a keyboard-reachable control
     // (Codex round 1).
-    expect(
-      host.querySelector(".ub-copy-link")?.getAttribute("aria-label"),
-    ).toBe(`Copy link to ${WS}/${UUID}`);
+    const copy = host.querySelector(".ub-copy-link");
+    expect(copy?.textContent).toBe("Copy link");
+    expect(copy?.getAttribute("aria-label")).toBe(
+      `Copy canonical document URL for ${WS}/${UUID}`,
+    );
 
     // Now the document's own room delivers, exactly as sync would.
     const remote = new Y.Doc();
@@ -618,7 +620,12 @@ describe("an address that resolves to no document says which one, and why", () =
  */
 async function clickCopy(
   segment = WS,
-): Promise<{ label: string; ariaLabel: string; said: string }> {
+): Promise<{
+  label: string;
+  ariaLabel: string;
+  said: string;
+  revisionIsInsideControl: boolean;
+}> {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   const host = document.createElement("div");
@@ -638,6 +645,8 @@ async function clickCopy(
   const button = host.querySelector<HTMLButtonElement>(".ub-copy-link");
   const label = button?.textContent ?? "";
   const ariaLabel = button?.getAttribute("aria-label") ?? "";
+  const revisionIsInsideControl =
+    button?.contains(host.querySelector(".ub-doc-rev")) ?? false;
   await act(async () => {
     button?.click();
   });
@@ -645,7 +654,7 @@ async function clickCopy(
 
   act(() => root.unmount());
   host.remove();
-  return { label, ariaLabel, said };
+  return { label, ariaLabel, said, revisionIsInsideControl };
 }
 
 describe("the copy control hands back the document's canonical link", () => {
@@ -668,14 +677,14 @@ describe("the copy control hands back the document's canonical link", () => {
       },
     });
 
-    const { label, ariaLabel, said } = await clickCopy();
+    const { label, ariaLabel, said, revisionIsInsideControl } = await clickCopy();
 
-    // The visible words say what the button does; the room key they used to be
-    // is out of the header entirely (#535).
-    expect(label).toBe("Copy link");
+    // The short uuid is the action now; the revision remains outside it.
+    expect(label).toBe(`uuid ${UUID.slice(0, 8)}`);
+    expect(revisionIsInsideControl).toBe(false);
     // The accessible name adds the part a reader cannot see — the address that
     // lands on the clipboard. `title` is not reliably announced.
-    expect(ariaLabel).toBe(`Copy link to ${WS}/${UUID}`);
+    expect(ariaLabel).toBe(`Copy canonical document URL for ${WS}/${UUID}`);
 
     // Exactly what `parseRoute` resolves back to this document.
     expect(written).toEqual([`${window.location.origin}/${WS}/${UUID}`]);
@@ -684,7 +693,7 @@ describe("the copy control hands back the document's canonical link", () => {
       workspace,
       uuid: UUID,
     });
-    expect(said).toBe("link copied");
+    expect(said).toBe("URL copied to clipboard");
   });
 
   it("copies the workspace as the address spells it, slug and all", async () => {
@@ -706,10 +715,12 @@ describe("the copy control hands back the document's canonical link", () => {
     const { label, ariaLabel } = await clickCopy(DECORATED);
 
     expect(written).toEqual([`${window.location.origin}/${DECORATED}/${UUID}`]);
-    expect(label).toBe("Copy link");
+    expect(label).toBe(`uuid ${UUID.slice(0, 8)}`);
     // The accessible name announces what the click actually produces, so it
     // follows the address rather than the room key the button no longer shows.
-    expect(ariaLabel).toBe(`Copy link to ${DECORATED}/${UUID}`);
+    expect(ariaLabel).toBe(
+      `Copy canonical document URL for ${DECORATED}/${UUID}`,
+    );
     // And it is a link that resolves back to this document.
     expect(route(new URL(written[0] as string).pathname)).toEqual({
       kind: "doc",
@@ -742,7 +753,7 @@ describe("the copy control hands back the document's canonical link", () => {
     const { said } = await clickCopy();
 
     expect(copied).toEqual([`${window.location.origin}/${WS}/${UUID}`]);
-    expect(said).toBe("link copied");
+    expect(said).toBe("URL copied to clipboard");
   });
 
   it("says so when the copy fails, rather than looking like it worked", async () => {
@@ -752,6 +763,6 @@ describe("the copy control hands back the document's canonical link", () => {
     });
     (document as unknown as { execCommand: unknown }).execCommand = (): boolean => false;
 
-    expect((await clickCopy()).said).toBe("copy failed");
+    expect((await clickCopy()).said).toBe("Copy failed");
   });
 });

@@ -2287,7 +2287,7 @@ body {
   background: var(--destructive);
 }
 
-/* ---- copying the document's link (#68), in the identity line (#535) ---- */
+/* ---- copying the document's link (#68, #607) ---- */
 
 /* The confirmation is positioned against this, so it is placed relative to the
    control rather than to whatever happens to be positioned above it. */
@@ -2297,8 +2297,7 @@ body {
   flex: none;
 }
 
-/* The control *is* the touch target: 44x44 of its own box, with the words
-   centred in it.
+/* The control *is* the touch target: 44x44 of its own box.
 
    It was a pseudo-element overhanging a 25px row, and both directions it could
    overhang were already taken (#535). Downward is `.ub-title`, which is
@@ -2315,10 +2314,8 @@ body {
   background: none;
   border: none;
   padding: 0 0.15rem;
-  /* 44px for a thumb, and never narrower than the confirmation drawn over it.
-     `em`, because that confirmation is set in this control's own font, which is
-     the identity line's 0.75rem here and the waiting screen's inherited size
-     there — a `rem` floor would fit one and not the other. */
+  /* 44px for a thumb, and never narrower than the waiting screen's explicit
+     label and confirmation. */
   min-width: max(2.75rem, 6em);
   min-height: 2.75rem;
   display: inline-flex;
@@ -2338,9 +2335,23 @@ body {
   border-radius: var(--radius-sm);
 }
 
+/* On a hydrated document the short uuid is the copy control. Its confirmation
+   sits in the unused lower half of the existing 44px target, below both machine
+   facts. It therefore changes no box when it appears and covers neither fact. */
+.ub-copy-identity {
+  align-self: stretch;
+}
+
+.ub-copy-identity .ub-copy-link {
+  min-width: 2.75rem;
+  justify-content: flex-start;
+}
+
 /* Out of flow, and only there while it has something to say: a confirmation
    that took part in the layout would push everything after it sideways for a
-   second and a half.
+   second and a half. The identity-line modifier above uses the target's lower
+   half; the waiting screen still draws the confirmation over its explicit
+   button, where no identity is hidden.
 
    Over the control itself, because every direction around it belongs to
    something this header keeps. Above is the pane's clip edge, which cuts the
@@ -2359,12 +2370,24 @@ body {
   border-radius: var(--radius-sm);
   background: var(--secondary);
   color: var(--secondary-foreground);
-  white-space: nowrap;
+  padding: 0.15rem;
+  font-size: 0.65rem;
+  line-height: 1.1;
+  text-align: center;
   pointer-events: none;
 }
 
 .ub-copied:empty {
   display: none;
+}
+
+.ub-copy-identity .ub-copied {
+  inset: auto auto 0 0.15rem;
+  border-radius: 0;
+  background: none;
+  font-size: 0.6rem;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .ub-pending {
@@ -2690,6 +2713,8 @@ body {
 .ub-doc-ids {
   font-family: var(--font-mono);
   flex: none;
+  display: inline-flex;
+  align-items: center;
 }
 
 /* The live document's lifecycle and sidebar curation share one compact home at
