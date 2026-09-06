@@ -26,8 +26,8 @@ afterEach(() => {
 interface Controls {
   connected: boolean;
   draining: boolean;
-  healthy: boolean;
   quiet: boolean;
+  refreshRunning: boolean;
   refreshes: number;
 }
 
@@ -38,8 +38,8 @@ function fakeEngine(
   const controls: Controls = {
     connected: true,
     draining: false,
-    healthy: true,
     quiet: true,
+    refreshRunning: true,
     refreshes: 0,
   };
   const replicaSet = {
@@ -58,16 +58,11 @@ function fakeEngine(
   const engine = {
     store,
     replicas: replicaSet,
-    get health() {
-      return controls.healthy
-        ? { status: "healthy" as const }
-        : {
-            status: "quarantined" as const,
-            room: replicas[0]?.room ?? "unknown",
-            message: "simulated persistence failure",
-          };
+    get refreshStatus() {
+      return controls.refreshRunning
+        ? { status: "running" as const }
+        : { status: "failed" as const, message: "simulated refresh failure" };
     },
-    refreshStatus: { status: "running" },
   } as unknown as UberblickMcpEngine;
   return { engine, controls };
 }
@@ -122,7 +117,7 @@ describe("serving sync status", () => {
     });
   });
 
-  it("keeps the corpus false through attach drain, hub loss and quarantine", () => {
+  it("keeps the corpus false through attach drain, hub loss and a stopped refresh", () => {
     const store = new MirrorStore(tempDatabasePath(), WORKSPACE);
     stores.push(store);
     const room = `${WORKSPACE}/${randomUUID()}`;
@@ -142,7 +137,7 @@ describe("serving sync status", () => {
     });
 
     controls.connected = true;
-    controls.healthy = false;
+    controls.refreshRunning = false;
     expect(collectServingSyncStatus(engine, [room])).toEqual({
       caughtUp: false,
       rooms: { [room]: { hubAcked: false } },
