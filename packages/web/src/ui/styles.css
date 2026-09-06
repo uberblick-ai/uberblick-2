@@ -228,6 +228,7 @@
      black over a light ground and black over a dark one are both "less light
      here".*/
   --shadow-float: 0 8px 24px oklch(0 0 0 / 25%);
+  --shadow-callout: 0 18px 40px oklch(0 0 0 / 12%);
 
   /* The reading composition. Prose wider than ~75ch is hard to track back to
      the next line; the other three values keep its origin, the comments rail
@@ -3443,57 +3444,101 @@ h3.ub-heading {
 /* ---- the document's person-facing quick summary (#534) ---- */
 
 .ub-tldr {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.65rem;
+  position: relative;
+  overflow: hidden;
   margin: 0 0 0.85rem;
-  padding: 0.7rem 0.8rem;
-  border: 1px solid var(--brand);
-  border-radius: var(--radius);
-  background: var(--brand-subtle);
+  padding: 0.75rem 1.25rem;
+  border: 1px solid color-mix(in oklab, var(--brand) 22%, var(--border));
+  border-radius: 1rem;
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--brand) 16%, var(--card)) 0%,
+    color-mix(in oklab, var(--card) 96%, transparent) 62%
+  );
   color: var(--foreground);
+  box-shadow: var(--shadow-callout);
+}
+
+.ub-tldr::before {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 0.25rem;
+  background: var(--brand);
+  content: "";
+}
+
+.ub-tldr-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  padding-left: 0.25rem;
 }
 
 .ub-tldr-mark {
-  display: grid;
+  display: inline-grid;
   place-items: center;
-  align-self: start;
-  width: 1.75rem;
-  height: 1.75rem;
-  border-radius: var(--radius-sm);
-  background: var(--card);
-  color: var(--brand-ink);
+  flex: 0 0 2.5rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid color-mix(in oklab, var(--brand) 28%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in oklab, var(--brand) 18%, transparent);
+  color: var(--foreground);
 }
 
 .ub-tldr-icon {
-  width: 1.1rem;
-  height: 1.1rem;
+  width: 1.25rem;
+  height: 1.25rem;
   fill: currentColor;
 }
 
+.ub-tldr-heading,
 .ub-tldr-body {
   min-width: 0;
 }
 
+.ub-tldr-body {
+  position: relative;
+  margin-top: 0.75rem;
+  color: color-mix(in oklab, var(--foreground) 88%, transparent);
+  font-size: 1rem;
+  line-height: 1.75;
+}
+
 .ub-tldr-label {
   display: block;
-  color: var(--brand-ink);
-  font-size: 0.7rem;
-  font-weight: 500;
-  letter-spacing: 0.08em;
+  color: color-mix(in oklab, var(--foreground) 55%, transparent);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
 .ub-tldr h2 {
-  margin: 0.05rem 0 0.25rem;
-  font-size: 0.9rem;
+  margin: 0;
+  color: var(--foreground);
+  font-family: "Fraunces", Georgia, "Times New Roman", serif;
+  font-size: 1.25rem;
   font-weight: 500;
+  line-height: 1.25;
 }
 
 .ub-tldr p {
   margin: 0;
-  line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+@media (min-width: 640px) {
+  .ub-tldr {
+    padding: 0.875rem 1.5rem;
+  }
+
+  .ub-tldr h2 {
+    font-size: 1.5rem;
+  }
 }
 
 .ub-tldr-form {

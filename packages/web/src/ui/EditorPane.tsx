@@ -178,12 +178,16 @@ function TldrCallout({
 
   return (
     <section className="ub-tldr" aria-labelledby="ub-tldr-title">
-      <span className="ub-tldr-mark">
-        <SparklesIcon />
-      </span>
+      <div className="ub-tldr-header">
+        <span className="ub-tldr-mark">
+          <SparklesIcon />
+        </span>
+        <div className="ub-tldr-heading">
+          <span className="ub-tldr-label">Quick summary</span>
+          <h2 id="ub-tldr-title">TL;DR</h2>
+        </div>
+      </div>
       <div className="ub-tldr-body">
-        <span className="ub-tldr-label">Quick summary</span>
-        <h2 id="ub-tldr-title">TL;DR</h2>
         {editing ? (
           <form
             className="ub-tldr-form"

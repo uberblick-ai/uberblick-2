@@ -539,6 +539,96 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   expect(await painted(page, ".ub-list", "background-color")).toBe(sidebar);
 });
 
+for (const scheme of ["light", "dark"] as const) {
+  test(`the TL;DR callout keeps its reference hierarchy and wraps at both reading widths — ${scheme}`, async ({
+    browser,
+  }) => {
+    const page = await openApp(browser, scheme);
+    await page.getByRole("button", { name: "+ new doc" }).click();
+    await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+    await page.getByRole("button", { name: "Document actions" }).click();
+    await page.getByRole("menuitem", { name: "Add TL;DR" }).click();
+    await page
+      .getByLabel(
+        "Write one or two plain-English sentences that help a reader understand this document.",
+      )
+      .fill("Summary without layout surprises. ".repeat(9).slice(0, 300));
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByRole("button", { name: "Hide document list" }).click();
+
+    const callout = page.locator(".ub-tldr");
+    const mark = callout.locator(".ub-tldr-mark");
+    const label = callout.locator(".ub-tldr-label");
+    const title = callout.getByRole("heading", { name: "TL;DR" });
+    const summary = callout.locator(".ub-tldr-body > p");
+    await expect(callout).toBeVisible();
+    await expect(mark).toHaveCSS("width", "40px");
+    await expect(mark).toHaveCSS("height", "40px");
+    await expect(mark).toHaveCSS("border-radius", "12px");
+    await expect(label).toHaveCSS("text-transform", "uppercase");
+    expect(Number.parseFloat(await paintedIn(label, "letter-spacing"))).toBeGreaterThan(1.7);
+    expect(await paintedIn(title, "font-family")).toContain("Fraunces");
+    await expect(summary).toHaveCSS("font-size", "16px");
+    await expect(summary).toHaveCSS("line-height", "28px");
+
+    const card = await callout.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const accent = getComputedStyle(element, "::before");
+      return {
+        background: style.backgroundImage,
+        radius: style.borderRadius,
+        shadow: style.boxShadow,
+        accentWidth: accent.width,
+        accentTop: accent.top,
+        accentBottom: accent.bottom,
+        accentColor: accent.backgroundColor,
+      };
+    });
+    expect(card.background).toContain("linear-gradient");
+    expect(card.radius).toBe("16px");
+    expect(card.shadow).not.toBe("none");
+    expect(card.accentWidth).toBe("4px");
+    expect([card.accentTop, card.accentBottom]).toEqual(["0px", "0px"]);
+    expect(card.accentColor).not.toBe("rgba(0, 0, 0, 0)");
+
+    for (const [width, titleSize, padding] of [
+      [375, "20px", "12px 20px"],
+      [1280, "24px", "14px 24px"],
+    ] as const) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(title).toHaveCSS("font-size", titleSize);
+      await expect(callout).toHaveCSS("padding", padding);
+      const geometry = await callout.evaluate((element) => {
+        const header = element.querySelector<HTMLElement>(".ub-tldr-header");
+        const body = element.querySelector<HTMLElement>(".ub-tldr-body");
+        const text = body?.querySelector<HTMLElement>("p") ?? null;
+        if (header === null || body === null || text === null) {
+          throw new Error("TL;DR layout is incomplete");
+        }
+        const headerBox = header.getBoundingClientRect();
+        const bodyBox = body.getBoundingClientRect();
+        const textBox = text.getBoundingClientRect();
+        return {
+          sameLeft: Math.round(headerBox.left) === Math.round(bodyBox.left),
+          sameWidth: Math.round(headerBox.width) === Math.round(bodyBox.width),
+          bodyBelowHeader: bodyBox.top >= headerBox.bottom,
+          wraps: textBox.height > Number.parseFloat(getComputedStyle(text).lineHeight),
+          fitsCard: element.scrollWidth <= element.clientWidth,
+          fitsBody: text.scrollWidth <= text.clientWidth,
+        };
+      });
+      expect(geometry).toEqual({
+        sameLeft: true,
+        sameWidth: true,
+        bodyBelowHeader: true,
+        wraps: true,
+        fitsCard: true,
+        fitsBody: true,
+      });
+    }
+  });
+}
+
 test("the open document owns the remaining chrome and its one sync-details handle", async ({
   browser,
 }) => {
