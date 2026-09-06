@@ -305,6 +305,7 @@ describe("the sidebar is the _sidebar document", () => {
     expect(groupNames(host)).toEqual(["Reading", "Later"]);
     expect(rowTitles(host, 0)).toEqual(["Overview", "Editing"]);
     expect(rowTitles(host, 1)).toEqual(["Sync"]);
+    expect(host.querySelectorAll(".ub-group-count")).toHaveLength(0);
 
     // ---- within a group: "Editing" to the top ----
     drag(rows(host, 0)[1] ?? null, docSlots(host, 0)[0] ?? null);
@@ -495,6 +496,7 @@ describe("the sidebar is the _sidebar document", () => {
 
     act(() => groupToggle(host, 0)?.click());
     expect(groupToggle(host, 0)?.getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelectorAll(".ub-group-count")).toHaveLength(0);
     // Still in the DOM — the transition is a CSS animation (#110) — and inert,
     // so a collapsed group is out of the tab order all the same.
     expect(body()?.dataset.collapsed).toBe("true");

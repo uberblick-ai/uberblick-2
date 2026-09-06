@@ -868,11 +868,7 @@ function GroupSection({
           >
             <Chevron />
             <span className="ub-group-label">{group.name}</span>
-            {/* The hairline across to the count — decoration, and announced as
-                nothing. It is what carries the label to the end of the row
-                instead of the count being pushed there. */}
             <span className="ub-group-rule" aria-hidden="true" />
-            <span className="ub-group-count">{group.docs.length}</span>
           </button>
         )}
         {!editing && ydoc !== null && (
