@@ -359,6 +359,56 @@ it("validates unique names and converges create, retire, and restore with a peer
   expect(host.textContent).toContain("zeta");
 });
 
+/** The Retire or Restore control of one entry, by its accessible name. */
+function lifecycle(host: HTMLElement, name: string): HTMLButtonElement {
+  const control = [
+    ...host.querySelectorAll<HTMLButtonElement>(".ub-settings-tag-list button"),
+  ].find((button) => button.textContent === name);
+  if (control === undefined) throw new Error(`no “${name}” control`);
+  return control;
+}
+
+/** Activate a control the way a keyboard does: on the focused element. */
+function activate(control: HTMLButtonElement): void {
+  act(() => {
+    control.focus();
+    control.click();
+  });
+}
+
+it("leaves focus on the nearest lifecycle control after a retire or restore", async () => {
+  const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  const host = await mountTags(room.connection);
+
+  // The entry that took the retired one's place in the list it left.
+  activate(lifecycle(host, "Retire billing"));
+  expect(document.activeElement).toBe(lifecycle(host, "Retire mcp"));
+
+  // Restoring the only retired entry empties that list: its own new control.
+  activate(lifecycle(host, "Restore billing"));
+  expect(document.activeElement).toBe(lifecycle(host, "Retire billing"));
+
+  // The last entry has no successor, so the new last one takes the focus.
+  activate(lifecycle(host, "Retire sync"));
+  expect(document.activeElement).toBe(lifecycle(host, "Retire permissions"));
+});
+
+it("leaves focus untouched when a peer changes the catalog", async () => {
+  const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  const peer = peerOf(room.connection.ydoc);
+  const host = await mountTags(room.connection);
+  const focused = lifecycle(host, "Retire mcp");
+  act(() => focused.focus());
+
+  act(() => createTagCatalogEntry(peer, "product"));
+  expect(document.activeElement).toBe(focused);
+
+  const auth = listTagCatalog(peer).find((entry) => entry.name === "auth");
+  act(() => retireTagCatalogEntry(peer, auth?.id ?? ""));
+  expect(host.textContent).toContain("Restore auth");
+  expect(document.activeElement).toBe(focused);
+});
+
 it("takes offline and refusal readings live from the shared status derivation", async () => {
   const room = statusRoom(SYNCED);
   const host = await mount(room.connection);
