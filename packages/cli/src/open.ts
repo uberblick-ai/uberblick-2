@@ -456,15 +456,17 @@ async function takeBuildLock(
     }
     if (Date.now() >= deadline) {
       io.err(
-        "ub open: another `ub open` has been building the web app for more than " +
-          `${BUILD_WAIT_MS / 60_000} minutes. If nothing is building, remove ` +
-          `${path} and run \`ub open\` again.\n`,
+        "ub open: another `ub open` or `ub update` has been building the web app " +
+          `for more than ${BUILD_WAIT_MS / 60_000} minutes. If nothing is building, ` +
+          `remove ${path} and run \`ub open\` again.\n`,
       );
       return "gave-up";
     }
     if (!announced) {
       announced = true;
-      io.err("ub open: another `ub open` is building the web app — waiting for it\n");
+      io.err(
+        "ub open: another `ub open` or `ub update` is building the web app — waiting for it\n",
+      );
     }
     await sleep(BUILD_RETRY_MS);
   }

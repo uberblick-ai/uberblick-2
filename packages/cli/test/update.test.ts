@@ -18,7 +18,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { buildLockPath } from "../src/build-lock.js";
 import type { Io } from "../src/io.js";
 import {
@@ -182,6 +182,26 @@ describe("ub update on a checkout", () => {
       expect(io.stderr).toContain("run `ub update` again");
       expect(labels().at(-1)).toBe(step);
     }
+  });
+
+  it("reports a lock operation failure as itself, not as contention", async () => {
+    const { root, cliDir } = checkout();
+    const unusableTemp = join(root, "not-a-directory");
+    writeFileSync(unusableTemp, "a file where the temp directory should be\n", "utf8");
+    const { host, labels } = fake(cliDir);
+    const io = recorder();
+
+    vi.stubEnv("TMPDIR", unusableTemp);
+    try {
+      expect(await updateCommand([], io, host)).toBe(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    expect(labels().at(-1)).toBe("mise run install");
+    expect(io.stderr).toContain("could not take the web-build lock");
+    expect(io.stderr).not.toContain("has held");
+    expect(io.stderr).not.toContain("10 minutes");
   });
 
   it("refuses an argument before it looks at anything", async () => {

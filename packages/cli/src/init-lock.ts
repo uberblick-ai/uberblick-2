@@ -187,6 +187,9 @@ export interface TryLockOptions {
   path?: string;
 }
 
+/** Contention lasted for the caller's whole wait, rather than the lock operation failing. */
+export class LockWaitTimeoutError extends Error {}
+
 /**
  * Try to take `path` exactly once.
  *
@@ -296,7 +299,7 @@ export async function acquireInitLock(
     }
 
     if (Date.now() >= deadline) {
-      throw new Error(
+      throw new LockWaitTimeoutError(
         `another \`ub init\` is holding ${path} (${describeAge(path)}). Wait ` +
           "for it to finish and run `ub init` again — or, if nothing is " +
           `running, remove it: rm -- ${shellQuote(path)}`,

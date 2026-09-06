@@ -319,6 +319,33 @@ describe("the versioned install payload", () => {
     expect(run.stderr).toContain("brew install uberblick-ai/tap/uberblick");
   });
 
+  it("refuses an unpacked payload even when it sits inside a checkout", () => {
+    const checkout = join(scratch, "checkout-containing-payload");
+    mkdirSync(checkout, { recursive: true });
+    writeFileSync(join(checkout, "package.json"), '{ "name": "uberblick" }\n', "utf8");
+    writeFileSync(join(checkout, "mise.toml"), "[env]\n", "utf8");
+    const nested = join(checkout, "dist", `uberblick-${VERSION}`);
+    mkdirSync(dirname(nested), { recursive: true });
+    cpSync(payload, nested, { recursive: true });
+    const log = join(checkout, "commands.log");
+    for (const command of ["git", "mise", "pnpm"]) {
+      writeFileSync(join(nested, "bin", command), `#!/bin/sh\necho "${command} $*" >> "${log}"\n`, {
+        encoding: "utf8",
+        mode: 0o755,
+      });
+    }
+    const box = sandbox();
+
+    // There is deliberately no `brew` on PATH: this payload is nobody's
+    // installation, and its containing checkout must not become the target.
+    const run = runPayload(box, ["update"], { root: nested });
+
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("neither a Homebrew installation nor a checkout");
+    expect(existsSync(log)).toBe(false);
+  });
+
   it.each([
     ["missing", (root: string) => rmSync(join(root, "packages", "web", "dist", "index.html"))],
     [

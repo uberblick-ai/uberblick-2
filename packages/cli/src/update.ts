@@ -46,8 +46,7 @@ import { fileURLToPath } from "node:url";
 import { buildLockPath } from "./build-lock.js";
 import { findCheckoutRoot } from "./checkout.js";
 import { takeHelp } from "./help.js";
-import type { InitLock } from "./init-lock.js";
-import { acquireInitLock } from "./init-lock.js";
+import { type InitLock, acquireInitLock, LockWaitTimeoutError } from "./init-lock.js";
 import { isInstallPayload } from "./installation.js";
 import type { Io } from "./io.js";
 
@@ -198,9 +197,14 @@ function within(parent: string, child: string): boolean {
  * `brew upgrade` would not replace.
  */
 export function classify(host: UpdateHost): Installation {
+  // A versioned payload stays a payload wherever somebody unpacked it: only a
+  // Homebrew-owned one can be updated, and an ancestor checkout is not the copy
+  // this process is running from.
+  if (host.installPayload) {
+    return withinHomebrew(host) ? { kind: "homebrew" } : { kind: "unknown" };
+  }
   const root = findCheckoutRoot(host.cliDir);
   if (root !== null) return { kind: "checkout", root };
-  if (host.installPayload && withinHomebrew(host)) return { kind: "homebrew" };
   return { kind: "unknown" };
 }
 
@@ -327,12 +331,15 @@ async function refresh(root: string, io: Io, host: UpdateHost): Promise<string |
       waitMs: BUILD_WAIT_MS,
       onWait: () => io.err("ub update: another build of the web app is running — waiting for it\n"),
     });
-  } catch {
-    // Its own message names `ub init`; the wait is what was reused, not the text.
-    return (
-      `another build of the web app has held ${path} for more than ` +
-      `${BUILD_WAIT_MS / 60_000} minutes — if nothing is building, remove that file`
-    );
+  } catch (error) {
+    if (error instanceof LockWaitTimeoutError) {
+      // Its own message names `ub init`; the wait is what was reused, not the text.
+      return (
+        `another build of the web app has held ${path} for more than ` +
+        `${BUILD_WAIT_MS / 60_000} minutes — if nothing is building, remove that file`
+      );
+    }
+    return `could not take the web-build lock at ${path} (${message(error)})`;
   }
   try {
     return await host.run("mise", ["run", "build-web"], root);

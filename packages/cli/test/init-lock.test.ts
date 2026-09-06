@@ -14,7 +14,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { acquireInitLock, tryAcquireInitLock } from "../src/init-lock.js";
+import {
+  acquireInitLock,
+  LockWaitTimeoutError,
+  tryAcquireInitLock,
+} from "../src/init-lock.js";
 import { removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -103,6 +107,18 @@ describe("the init lock", () => {
       expect(waited).toBeGreaterThan(CEILING_MS);
     } finally {
       vi.unstubAllEnvs();
+    }
+  });
+
+  it("identifies exhausted contention separately from a lock operation failure", async () => {
+    const box = sandbox();
+    const holder = await acquireInitLock(box.env);
+    try {
+      await expect(acquireInitLock(box.env, { waitMs: 0 })).rejects.toBeInstanceOf(
+        LockWaitTimeoutError,
+      );
+    } finally {
+      holder.release();
     }
   });
 
