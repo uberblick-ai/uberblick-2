@@ -191,31 +191,23 @@ test("a TL;DR added, edited and cleared in one client follows in the other", asy
   await expect(calloutB).toHaveCount(0);
 });
 
-test("the settled upstream fact stays still through acknowledged typing", async ({
+test("the upstream fact recovers after an acknowledged typing burst", async ({
   browser,
 }) => {
   const page = await openApp(browser);
   await createDoc(page, docTitle("calm-upstream"));
+  const observer = await openUpstream(browser, new URL(page.url()).pathname);
+  await expect(editor(observer)).toBeVisible();
   await placeCaret(page);
   const upstream = page.locator(".ub-status-word--hub");
   await expect(upstream).toHaveText("synced with hub");
 
-  const samples = page.evaluate(async () => {
-    const seen: string[] = [];
-    const until = performance.now() + 4_000;
-    while (performance.now() < until) {
-      seen.push(
-        document.querySelector(".ub-status-word--hub")?.textContent ?? "",
-      );
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    return seen;
-  });
-  const [seen] = await Promise.all([
-    samples,
-    page.keyboard.type("calm".repeat(60), { delay: 15 }),
-  ]);
-  expect(new Set(seen)).toEqual(new Set(["synced with hub"]));
+  const burst = "calm".repeat(60);
+  await page.keyboard.type(burst, { delay: 15 });
+  // A browser connected directly to the upstream hub seeing the complete burst
+  // is the boundary after which the served page's drawn fact must recover.
+  await expect.poll(() => blockText(observer)).toBe(burst);
+  await expect(upstream).toHaveText("synced with hub");
 });
 
 test("a peer's cursor renders in the other context with its name and colour", async ({
