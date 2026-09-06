@@ -55,12 +55,30 @@ What this supports is exactly one arrangement: **one workspace, one trusted user
 multiple clients and machines; no login and no tenant isolation.** Everything
 below is a consequence of that.
 
-### Updating a Homebrew installation
+### Updating
 
-A copy installed from the `uberblick-ai/tap` Homebrew tap is updated by
-Homebrew, with no step of its own beyond these two — the first refreshes the
-tap, the second replaces the installed copy with the newest release published
-to it ([RELEASING.md](RELEASING.md) is how a version gets there):
+```sh
+ub update
+```
+
+One command for both installation kinds, and which one it updates comes from
+where that `ub`'s own files live — never from the directory you are standing
+in, so a Homebrew `ub` typed inside a checkout still updates Homebrew's copy.
+A copy installed from the `uberblick-ai/tap` Homebrew tap is handed to
+Homebrew, exactly as below. A checkout **on `main`** is fast-forwarded to
+`origin/main` and its dependencies and web app are refreshed to match, so it is
+runnable at the new head with nothing left to run by hand; a checkout on any
+other branch is not updated. Nothing is ever stashed, discarded, rebased or
+switched: git decides whether the fast-forward is safe — divergence, or
+uncommitted changes an incoming commit would overwrite, are its refusal to
+make — and when it refuses you get git's own reason and an unchanged checkout.
+Unpushed commits on `main` are not a refusal: that checkout already contains
+`origin/main`, so it goes straight to the refresh and keeps them.
+
+The Homebrew commands are these two, and running them directly is the same
+thing — the first refreshes the tap, the second replaces the installed copy
+with the newest release published to it ([RELEASING.md](RELEASING.md) is how a
+version gets there):
 
 ```sh
 brew update
@@ -74,9 +92,6 @@ configuration, credentials, workspaces and their databases — is untouched, and
 `ub status` still reports the same workspace with the documents it already
 held. `.github/workflows/homebrew-formula.yml` proves that on an Apple Silicon
 runner for every change to the formula or its payload.
-
-This is the update path for an installed copy, not for a clone: a checkout
-follows `git pull` and `mise run setup` above.
 
 ### The signing secret
 
@@ -316,6 +331,7 @@ the checkout does:
 ```
 ub init            # identity, workspace, signing secret
 ub init <hub-url>  # the same, with the new workspace created on that hub
+ub update          # update this copy — Homebrew, or a checkout on main
 ub open            # serve the web app and a hub, and open the browser
 ub status          # workspace, hub, credential, sync state
 ub status --json   # the same, as one JSON object

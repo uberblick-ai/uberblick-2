@@ -22,6 +22,7 @@ import { openCommand } from "./open.js";
 import { remoteCommand } from "./remote.js";
 import { serveCommand } from "./serve.js";
 import { statusCommand } from "./status.js";
+import { updateCommand } from "./update.js";
 import { cliVersion } from "./version.js";
 import { workspaceCommand } from "./workspace.js";
 
@@ -32,6 +33,8 @@ usage: ub <command> [options]
 commands:
   init [hub-url]         identity, workspace and a signing secret — with a hub
                          given, the new workspace is created on that hub
+  update                 update the copy of uberblick you are running — a
+                         Homebrew installation, or a checkout on main
   launch <role>          keep one agent entry role running in this terminal
   open [options]         serve the web app and a hub in the foreground, and
                          open the browser
@@ -86,6 +89,9 @@ export async function runCli(
   }
   if (command === "init") {
     return await initCommand(rest, io);
+  }
+  if (command === "update") {
+    return await updateCommand(rest, io);
   }
   if (command === "launch") {
     return await launchCommand(rest, io);
