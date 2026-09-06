@@ -116,6 +116,21 @@ async function freePort(): Promise<number> {
 }
 
 /**
+ * A second connection to a store a live `ub open` process is serving.
+ *
+ * That process writes while these tests provoke it, so a connection with
+ * SQLite's default zero busy timeout throws `database is locked` on a loaded
+ * host instead of waiting the write out — an intermittent false red on the
+ * whole review gate (#901). The wait matches the store's own
+ * `BUSY_TIMEOUT_MS` (`packages/mcp-server/src/store.ts`).
+ */
+function openStore(databasePath: string): DatabaseSync {
+  const database = new DatabaseSync(databasePath);
+  database.exec("PRAGMA busy_timeout = 5000");
+  return database;
+}
+
+/**
  * A process holding a port and answering nothing — the unidentified case.
  *
  * It never answers at all, so the probe's verdict does not depend on beating a
@@ -1414,7 +1429,7 @@ describe("ub open", () => {
       ...env,
       WORKSPACE_ID: WORKSPACE,
     }).databasePath;
-    const database = new DatabaseSync(databasePath);
+    const database = openStore(databasePath);
     database.exec("DROP TABLE snapshots");
     database.close();
 
@@ -1452,7 +1467,7 @@ describe("ub open", () => {
         ...env,
         WORKSPACE_ID: WORKSPACE,
       }).databasePath;
-      const database = new DatabaseSync(databasePath);
+      const database = openStore(databasePath);
       database.exec(`
         CREATE TRIGGER refuse_updates
         BEFORE INSERT ON updates
@@ -1476,7 +1491,7 @@ describe("ub open", () => {
       expect(terminalLines[0]).toContain("simulated append refusal");
       expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
 
-      const repaired = new DatabaseSync(databasePath);
+      const repaired = openStore(databasePath);
       repaired.exec("DROP TRIGGER refuse_updates");
       repaired.close();
       const restarted = await open(box, ["--port", String(webPort)], env);
