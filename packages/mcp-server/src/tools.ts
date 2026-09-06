@@ -1741,8 +1741,8 @@ export function registerTools(
         "status; the result names both, so adoption is never silent. A document that already has a kind accepts " +
         "only that kind's statuses. Its kind is fixed through MCP: if it was adopted in error, retrying with the " +
         "other kind's status cannot change it. Moving a decision to `decided` also requires a heading whose text " +
-        "is exactly `Reconsidering`, followed by at least one block with non-whitespace text; otherwise the call " +
-        "is refused and changes nothing.\n\n" +
+        "is exactly `Reconsidering`, immediately followed by a non-heading block with non-whitespace text; " +
+        "otherwise the call is refused and changes nothing.\n\n" +
         LIFECYCLE_RECORDS_STATE +
         "\n\n" +
         ARCHIVED_IS_READ_ONLY +
@@ -1773,7 +1773,7 @@ export function registerTools(
           throw new ToolError(
             "revival_trigger_missing",
             "A decision can be set to decided only when it has a heading whose text is exactly `Reconsidering`, " +
-              "followed by at least one block with non-whitespace text.",
+              "immediately followed by a non-heading block with non-whitespace text.",
             { uuid, kind, status },
           );
         }

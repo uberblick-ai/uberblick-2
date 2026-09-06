@@ -32,6 +32,9 @@ import {
 import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
+const REVIVAL_TRIGGER_RULE =
+  "a heading whose text is exactly `Reconsidering`, immediately followed by a non-heading block with " +
+  "non-whitespace text";
 
 async function localRig(): Promise<Rig> {
   const rig = await startServer(testConfig());
@@ -575,10 +578,12 @@ describe("set_status", () => {
       [
         { type: "heading", text: "Reconsidering", level: 2 },
         { type: "paragraph", text: "   " },
+        { type: "paragraph", text: "Revisit when usage changes." },
       ],
       [
         { type: "heading", text: "Reconsidering", level: 2 },
-        { type: "heading", text: "References", level: 2 },
+        { type: "heading", text: "Trigger", level: 3 },
+        { type: "paragraph", text: "Revisit when usage changes." },
       ],
       [
         { type: "paragraph", text: "Reconsidering" },
@@ -603,12 +608,12 @@ describe("set_status", () => {
 
       expect(refused.payload).toMatchObject({
         error: "revival_trigger_missing",
-        message: expect.stringContaining("Reconsidering"),
+        message: expect.stringContaining(REVIVAL_TRIGGER_RULE),
         uuid: decision.uuid,
         kind: "decision",
         status: "decided",
       });
-      expect(refused.payload.message).toContain("non-whitespace");
+      expect(refused.payload.recovery).toContain(REVIVAL_TRIGGER_RULE);
       expect(await rig.ok("get_doc", { uuid: decision.uuid })).toEqual(before);
       expect(stub(rig, decision.uuid)).toEqual(beforeStub);
     }
@@ -645,6 +650,9 @@ describe("lifecycle tool text", () => {
       expect(description, name).toContain("`status`");
       expect(description, name).toContain("do not authorize");
     }
+    expect(tools.find((tool) => tool.name === "set_status")?.description).toContain(
+      REVIVAL_TRIGGER_RULE,
+    );
     const exported = tools.find((tool) => tool.name === "export_markdown");
     if (exported === undefined) throw new Error("no tool export_markdown");
     const frontmatter = (exported.inputSchema as any).properties.frontmatter;
