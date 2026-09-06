@@ -87,6 +87,12 @@ for (const key of ["HUB_AUTH_TOKEN", "HUB_DB_PATH", "HUB_URL", "UBERBLICK_DB", "
 
 const ub = (args) => run("ub", args, { env: userEnv });
 
+// Homebrew keeps everything it needs from the host, but resolves user state
+// through the same XDG home the digests watch: an install or upgrade that
+// reached into a person's configuration or data has to reach into these.
+const brewEnv = { ...process.env, XDG_CONFIG_HOME: configHome, XDG_DATA_HOME: dataHome };
+const brew = (args) => run("brew", args, { env: brewEnv });
+
 function buildPayload(version) {
 	run("node", [join(REPOSITORY_ROOT, "scripts", "build-install-payload.mjs"), version], {
 		cwd: REPOSITORY_ROOT,
@@ -115,12 +121,12 @@ async function documentText(uuid) {
 const installedPayload = buildPayload(installedVersion);
 const upgradedPayload = buildPayload(upgradedVersion);
 
-run("brew", ["tap-new", TAP]);
-const tapFormulaPath = join(run("brew", ["--repository", TAP]), "Formula", "uberblick.rb");
+brew(["tap-new", TAP]);
+const tapFormulaPath = join(brew(["--repository", TAP]), "Formula", "uberblick.rb");
 
 try {
 	publishToTap(tapFormulaPath, installedVersion, installedPayload);
-	run("brew", ["install", "--build-from-source", FORMULA]);
+	brew(["install", "--build-from-source", FORMULA]);
 	expect(ub(["--version"]) === installedVersion, "the installed formula reported the wrong version");
 
 	// What the person has before the upgrade: a workspace and a document in it.
@@ -142,14 +148,14 @@ try {
 	const stateBefore = [treeDigest(configHome), treeDigest(dataHome)];
 
 	publishToTap(tapFormulaPath, upgradedVersion, upgradedPayload);
-	run("brew", ["upgrade", "--build-from-source", FORMULA]);
+	brew(["upgrade", "--build-from-source", FORMULA]);
 
 	expect(ub(["--version"]) === upgradedVersion, "ub did not report the upgraded version");
 	expect(
 		run("uberblick", ["--version"], { env: userEnv }) === upgradedVersion,
 		"uberblick did not report the upgraded version",
 	);
-	const upgradedKeg = join(run("brew", ["--cellar", FORMULA]), upgradedVersion);
+	const upgradedKeg = join(brew(["--cellar", FORMULA]), upgradedVersion);
 	for (const name of ["ub", "uberblick"]) {
 		expect(
 			realpathSync(join(brewPrefix, "bin", name)).startsWith(`${upgradedKeg}/`),
