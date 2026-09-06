@@ -847,10 +847,15 @@ test("document actions stay reachable, close with the route, and archive into Re
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();
 
-  // A touch pointer takes the same outside-dismissal path.
+  // A touch pointer takes the same outside-dismissal path. The dialog layer's
+  // first passive effect queues the zero-delay timer that arms its document
+  // pointerdown listener. The following timer is scheduled over a later CDP
+  // round trip, behind that arming timer. This ordering, not an elapsed
+  // interval, makes the single touch tap deterministic.
   await trigger.click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
   await expect(confirmation).toHaveCount(1);
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
   await page.touchscreen.tap(4, 4);
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();
