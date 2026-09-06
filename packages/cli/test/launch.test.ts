@@ -317,6 +317,13 @@ const evidence = process.argv[2];
 process.on("SIGTERM", () => fs.appendFileSync(evidence, "SIGTERM\\n"));
 fs.writeFileSync(evidence, String(process.pid) + "\\n");
 setInterval(() => {}, 1000);
+setTimeout(() => {
+  try {
+    fs.rmSync(process.cwd(), { recursive: true, force: true });
+  } finally {
+    process.exit(0);
+  }
+}, 8000);
 `,
       );
       writeFileSync(
@@ -830,6 +837,12 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
       );
       chmodSync(fakeClaude, 0o755);
       let output = "";
+      let processLookupFails = false;
+      const sessionProcesses: SessionProcesses = {
+        inWorktree: () =>
+          processLookupFails ? { error: "test process lookup failed" } : { pids: [] },
+        signal: () => {},
+      };
       const services = createLaunchServices(
         root,
         launchEnvironment({
@@ -845,7 +858,7 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
           },
           err: () => {},
         },
-        noWorktreeProcesses,
+        sessionProcesses,
       );
       const entry = readLaunchData(REPO_ROOT).entryRoles["issue-preparer"];
       expect(entry).toBeDefined();
@@ -881,9 +894,18 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
       expect(worktrees.stdout.match(/^worktree /gm)).toHaveLength(1);
 
       writeFileSync(failure, "fail\n");
+      processLookupFails = true;
       const firstFailure = await services.runSession("issue-preparer", "claude", entry!);
+      processLookupFails = false;
       const secondFailure = await services.runSession("issue-preparer", "claude", entry!);
-      expect(firstFailure).toMatchObject({ started: true, code: 23 });
+      expect(firstFailure).toMatchObject({
+        started: true,
+        code: 23,
+        processCleanup: "failed",
+      });
+      expect(firstFailure.detail).toContain(
+        "test process lookup failed; session exited with status 23; worktree preserved at",
+      );
       expect(secondFailure).toMatchObject({ started: true, code: 23 });
       preserved = firstFailure.detail?.match(/worktree preserved at (.+)$/)?.[1] ?? "";
       expect(preserved).not.toBe("");

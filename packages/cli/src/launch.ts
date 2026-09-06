@@ -800,18 +800,21 @@ export function createLaunchServices(
           ? lastLine(readFileSync(lastPath, "utf8"))
           : result.lastLine,
       };
+      const failedSession = !result.started || result.code !== 0 || result.signal !== null;
+      const sessionFailure = result.signal === null
+        ? `session exited with status ${result.code}`
+        : `session ended from ${result.signal}`;
       if (result.processCleanup === "failed") {
         preservedFailureWorktree ??= worktree;
         return {
           ...withLastLine,
-          detail: `${result.detail ?? "session process cleanup failed"}; worktree preserved at ${worktree}`,
+          detail: `${result.detail ?? "session process cleanup failed"}${
+            failedSession ? `; ${sessionFailure}` : ""
+          }; worktree preserved at ${worktree}`,
         };
       }
-      if (!result.started || result.code !== 0 || result.signal !== null) {
-        const failure = result.detail ??
-          (result.signal === null
-            ? `session exited with status ${result.code}`
-            : `session ended from ${result.signal}`);
+      if (failedSession) {
+        const failure = result.detail ?? sessionFailure;
         if (preservedFailureWorktree === null) {
           preservedFailureWorktree = worktree;
           return {
