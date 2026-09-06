@@ -410,11 +410,12 @@ It is every document in the workspace in one readable file; treat it exactly
 like the signing secret. Naming an existing directory, or a directory that is
 not writable, is refused before the hub is stopped.
 
-**Clients keep working while the hub is stopped.** Caddy stays up and serves the
-app; `/ws` answers 502 for those seconds; every MCP server and browser tab goes
-on editing its own replica offline and converges when the socket returns. The
-window is a few seconds — but take backups when you would take a deploy, not
-mid-sentence for somebody.
+**Agents keep working while the hub is stopped; browser tabs pause.** Caddy
+stays up and serves the app; `/ws` answers 502 for those seconds. Every MCP
+server keeps editing its local replica offline and converges when the socket
+returns. An open browser keeps the document this page already received but is
+read-only until the socket returns. The window is a few seconds — but take
+backups when you would take a deploy, not mid-sentence for somebody.
 
 ### Restoring one
 

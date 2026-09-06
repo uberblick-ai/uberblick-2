@@ -207,7 +207,6 @@ it("counts only the routed directory after server state, across disconnects", as
     hasReceivedServerState: false,
     hasAnswered: true,
     writable: false,
-    storeRefused: true,
   });
   seedDocuments(unread.connection, 2);
   const host = await mount(unread.connection);
@@ -218,7 +217,6 @@ it("counts only the routed directory after server state, across disconnects", as
     synced: true,
     hasReceivedServerState: true,
     writable: true,
-    storeRefused: false,
   });
   expect(facts(host).get("Documents")).toBe("2");
 
