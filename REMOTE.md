@@ -307,9 +307,9 @@ dialling it. An entry of `workspaces` that is not a workspace id is dropped
 rather than offered, and a list with nothing usable in it degrades to the
 bundle's own — which on this deployment is empty, so `/` says there is no
 workspace while document links keep working. A document with no `hubAuthToken`
-leaves a client that renders from its local cache and says "no hub token"; there
-is no fallback secret, and the client re-reads the document on its next connect
-attempt rather than giving up for the life of the tab.
+leaves the page with no document content and says "no hub token"; there is no
+browser cache or fallback secret, and the client re-reads the document on its
+next connect attempt rather than giving up for the life of the tab.
 
 Rotating the secret is the same edit: set it in `.env` and recreate the two
 containers with `sh remote-compose.sh up --detach`. It is no longer a rebuild —
@@ -410,11 +410,12 @@ It is every document in the workspace in one readable file; treat it exactly
 like the signing secret. Naming an existing directory, or a directory that is
 not writable, is refused before the hub is stopped.
 
-**Clients keep working while the hub is stopped.** Caddy stays up and serves the
-app; `/ws` answers 502 for those seconds; every MCP server and browser tab goes
-on editing its own replica offline and converges when the socket returns. The
-window is a few seconds — but take backups when you would take a deploy, not
-mid-sentence for somebody.
+**Agents keep working while the hub is stopped; browser tabs pause.** Caddy
+stays up and serves the app; `/ws` answers 502 for those seconds. Every MCP
+server keeps editing its local replica offline and converges when the socket
+returns. An open browser keeps the document this page already received but is
+read-only until the socket returns. The window is a few seconds — but take
+backups when you would take a deploy, not mid-sentence for somebody.
 
 ### Restoring one
 

@@ -282,7 +282,7 @@ export function RoutePane({
           </div>
           <p className="ub-notice">
             <strong>Waiting for sync.</strong> Document <code>{route.uuid}</code>{" "}
-            has not reached this replica yet. It opens here as soon as it arrives.
+            has not reached this page yet. It opens here as soon as it arrives.
           </p>
         </PaneNotice>
       );

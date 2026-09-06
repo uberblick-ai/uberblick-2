@@ -199,13 +199,28 @@ it("renders only live client-held facts and preserves each unknown rule", async 
   expect(unknown.get("Documents")).toBe("—");
 });
 
-it("counts only the routed directory after its server has answered", async () => {
-  const unread = statusRoom({ ...SYNCED, hasAnswered: false });
+it("counts only the routed directory after server state, across disconnects", async () => {
+  const unread = statusRoom({
+    ...SYNCED,
+    connected: false,
+    synced: false,
+    hasReceivedServerState: false,
+    hasAnswered: true,
+    writable: false,
+  });
   seedDocuments(unread.connection, 2);
   const host = await mount(unread.connection);
   expect(facts(host).get("Documents")).toBe("—");
 
-  unread.update({ hasAnswered: true });
+  unread.update({
+    connected: true,
+    synced: true,
+    hasReceivedServerState: true,
+    writable: true,
+  });
+  expect(facts(host).get("Documents")).toBe("2");
+
+  unread.update({ connected: false, synced: false, writable: false });
   expect(facts(host).get("Documents")).toBe("2");
 
   const foreign = statusRoom(

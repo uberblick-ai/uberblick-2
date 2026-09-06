@@ -55,11 +55,11 @@ function GeneralSettings({
   const status = useRoomStatus(connection);
   const state = useCalmSyncState(rawSyncState(status));
   const reading = statusReading(status, state);
-  const directoryAnswered =
+  const directoryReceived =
     connection !== null &&
     connection.room === directoryRoom(workspace.uuid) &&
-    status.hasAnswered;
-  const documents = directoryAnswered ? listDirectory(connection.ydoc).length : null;
+    status.hasReceivedServerState;
+  const documents = directoryReceived ? listDirectory(connection.ydoc).length : null;
 
   return (
     <section className="ub-pane ub-settings-page" aria-labelledby="ub-settings-title">
