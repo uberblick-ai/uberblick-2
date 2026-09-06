@@ -847,20 +847,14 @@ test("document actions stay reachable, close with the route, and archive into Re
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();
 
-  // A touch pointer takes the same outside-dismissal path — but that path does
-  // not exist yet when the confirmation becomes observable. Radix's
-  // DismissableLayer arms the document `pointerdown` listener from a zero-delay
-  // timer its mount effect schedules, and at this point the effect has run
-  // (the body is isolated) while the timer has not (the document carries no
-  // `pointerdown` listener at all) — measured in every round of a repeat probe
-  // on #858. The mouse dismissal above never sees it because `locator.click`
-  // spends its actionability roundtrips there; `page.touchscreen.tap`
-  // dispatches at once, so the tap has to wait for the arming itself.
-  //
-  // Body isolation is a later effect of the same commit, so once it is applied
-  // the arming timer is already queued — and a zero-delay timer queued behind
-  // it runs behind it. That ordering, not an interval, is what makes the single
-  // tap below land on an armed layer.
+  // A touch pointer takes the same outside-dismissal path, but Radix arms that
+  // path from a zero-delay timer scheduled by the dialog layer's passive
+  // effect. The body is already isolated by the still-open menu layer, so the
+  // value read below does not observe the dialog layer. `waitForFunction` does,
+  // however, cross a requestAnimationFrame boundary: by then React has flushed
+  // the dialog's passive effects and queued its arming timer. The following
+  // zero-delay timer is therefore queued behind the arming timer. That
+  // ordering, not an elapsed interval, makes the single touch tap deterministic.
   await trigger.click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
   await expect(confirmation).toHaveCount(1);
