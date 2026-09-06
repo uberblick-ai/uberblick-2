@@ -16,11 +16,25 @@ it does not replace implementation correctness review.
 against — every later statement in the preflight is a claim about that commit,
 not about your memory of the repo. Against it, read what the issue targets: the
 current behavior, the modules, interfaces, invariants and tests it lives in,
-related open issues and PRs, and the files the change is likely to touch. Verify
-each load-bearing noun and promised outcome has a current substrate: shipped
-concepts exist in current code, and settled targets exist in the current corpus.
+related open issues and PRs, and the files the change is likely to touch. Read
+the intended outcome of the effort this issue belongs to, and the owner
+decisions already recorded for it, from the records that exist: the `Parent:`
+header and its umbrella thread, the milestone, an `Implements:` requirement
+document, and the Pointers citations — draft inside those decisions instead of
+reopening them. Where none of those records exists that read is a no-op; an
+ordinary issue needs no parent, planning map or overview. Verify each
+load-bearing noun and promised outcome has a current substrate: shipped concepts
+exist in current code, and settled targets exist in the current corpus.
 Closed issue history is evidence only when a pointer or a missing substrate
 makes it relevant; do not sweep `NOT_PLANNED` work as a separate gate.
+
+When the issue is an investigation, its contract names the decision that
+investigation informs, the uncertain assumption, and an observation that could
+support or overturn it — the frame `.agents/protocols/issue-shaping.md` states
+under "Keep the effort oriented", sized by `.github/ISSUE_SPEC.md`'s Sizing
+rule. A bounded negative result resolves it, so neither the eventual feature
+working nor the design that would follow it is a deliverable. This binds
+investigations only; every other issue states its outcomes as usual.
 
 Before drafting on **every** route, self-check included, list the files changed by
 every open PR and compare them with the likely footprint. A file-list hit is the
@@ -28,7 +42,11 @@ start of the check: inspect the relevant PR diff before deciding whether the
 overlap is a dependency, semantic conflict or mechanical reconciliation. Record real
 overlap while it is still cheap to reshape or defer the issue. Prefer tracked
 file searches (`git ls-files`, `rg`) and exclude `.claude/worktrees/` and
-`.worktrees/`; copied agent worktrees are not additional grounding evidence.
+`.worktrees/`; copied agent worktrees are not additional grounding evidence. The
+same question runs one step wider before `ready`: where this outcome affects
+related planned work, record the affected contract or dependency in the prepared
+issue itself — its Pointers, or `Depends-on` for a real prerequisite. The other
+issue is not edited.
 
 Grounding is proportional, not exhaustive — enough to establish the outcome,
 approach and material risks. A proven mechanical, local correction may skip broad
@@ -79,6 +97,10 @@ with current work, and a coherent, independently useful work shape. Apply
 ISSUE_SPEC's intent and sizing rules. Both preparer and adversary distinguish
 missing outcomes or invariants from optional engineering approaches; correct the
 former without making the latter requirements or enumerating every edge case.
+They also separate an empirical uncertainty from an owner choice and from
+ordinary engineering judgment, as `.agents/protocols/issue-shaping.md` defines
+those three: answer the first from repository and corpus evidence, send only the
+second to the owner, and leave the third to implementation.
 
 The adversary classifies each material finding as `correctable-findings` when
 settled intent or repository evidence is enough, or `owner-boundary` for product
@@ -156,3 +178,9 @@ completed adversary record and report only material changes and dispositions;
 do not repeat the final body or narrate the run. Follow the README's expiry
 rules, reusing a completed adversary for the same pass. An owner answer or first
 implementer return resumes from durable work, refreshing only affected evidence.
+
+Preparer-authored prose names an issue by a descriptive title alongside its
+`#N`: the prepared body's What, Why and Out of scope, a `needs-decision`
+question, and this handoff. Machine-read records and reference lists keep bare
+identifiers and their own grammar — `Depends-on`, `Parent:`, `Implements:`,
+claim, delegation and `Done:` records, `Closes`, and the Pointers list.
