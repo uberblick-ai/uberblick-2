@@ -131,6 +131,8 @@ export async function agentsPrototypeCommand(argv: string[], io: Io): Promise<nu
           entry.runtimes.codex.sandbox,
           "-c",
           "sandbox_workspace_write.network_access=true",
+          "-c",
+          `projects.${JSON.stringify(project)}.trust_level="trusted"`,
           "--ephemeral",
           prompt,
         ],
