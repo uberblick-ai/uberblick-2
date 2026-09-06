@@ -1122,28 +1122,74 @@ function listen(server: Server, host: string, port: number): Promise<void> {
   });
 }
 
+/** Who holds the web port, as far as one probe of it could establish. */
+export type PortHolder = "ub-open" | "foreign" | "unidentified";
+
 /**
- * Who holds the web port — another `ub open`, or something else entirely.
+ * Who holds the web port — another `ub open`, something else entirely, or
+ * nobody this probe could name.
  *
- * The two want different advice (`--port` versus "stop that process"), and the
- * only honest way to tell them apart is to ask the thing on the port for the
- * document only this command serves.
+ * The first two want different advice (`--port` versus "stop that process"),
+ * and the only honest way to tell them apart is to ask the thing on the port
+ * for the document only this command serves. What separates them is a
+ * **complete** answer, read to its end within the budget: one that is this
+ * command's configuration document is another `ub open`, and any other complete
+ * answer — a refusal, a different document, a body that is not JSON at all — is
+ * another process.
+ *
+ * Anything short of a complete answer identifies nobody, and that is a third
+ * result rather than either of the first two. A healthy `ub open` that answered
+ * too late lands there, and reading its expiry as a stranger is what sent a user
+ * to stop their own process (#600). Guessing the other way round is no better:
+ * a stranger that accepts the connection and never answers looks exactly the
+ * same from here.
  */
-async function whoHoldsPort(port: number): Promise<"ub-open" | "foreign"> {
+export async function whoHoldsPort(port: number): Promise<PortHolder> {
+  let body: string;
+  let ok: boolean;
   try {
     const response = await fetch(`http://${WEB_HOST}:${port}${CONFIG_PATH}`, {
       cache: "no-store",
       signal: AbortSignal.timeout(budget(1_000)),
     });
-    if (!response.ok) {
-      return "foreign";
-    }
-    const body: unknown = await response.json();
-    const hubUrl = (body as { hubUrl?: unknown } | null)?.hubUrl;
+    // Before the status, because a refusal only counts as an answer once its
+    // body is in hand: headers followed by a body that never arrives is the
+    // unidentified case, whatever the status line claimed.
+    body = await response.text();
+    ok = response.ok;
+  } catch {
+    return "unidentified";
+  }
+  if (!ok) return "foreign";
+  try {
+    const parsed: unknown = JSON.parse(body);
+    const hubUrl = (parsed as { hubUrl?: unknown } | null)?.hubUrl;
     return typeof hubUrl === "string" ? "ub-open" : "foreign";
   } catch {
     return "foreign";
   }
+}
+
+/** What to say about a taken web port, given who — if anyone — answered on it. */
+function portTakenMessage(port: number, holder: PortHolder): string {
+  if (holder === "ub-open") {
+    return (
+      `ub open: port ${port} is already serving an uberblick web app — ` +
+      "that is another `ub open`; use --port to run a second one\n"
+    );
+  }
+  if (holder === "foreign") {
+    return (
+      `ub open: port ${port} is in use by another process — ` +
+      "stop it, or serve the web app elsewhere with --port\n"
+    );
+  }
+  // Names no holder, because none was established — so the only advice here is
+  // the one that is safe whichever it turns out to be.
+  return (
+    `ub open: port ${port} is in use, and its holder did not answer in time to ` +
+    "say what it is — serve the web app elsewhere with --port\n"
+  );
 }
 
 // --- the hub -----------------------------------------------------------------
@@ -1717,14 +1763,7 @@ export async function openCommand(
         `ub open: another \`ub open\` is already serving this store: ${message(error)}\n`,
       );
     } else if (code === "EADDRINUSE") {
-      const holder = await whoHoldsPort(options.port);
-      io.err(
-        holder === "ub-open"
-          ? `ub open: port ${options.port} is already serving an uberblick web app — ` +
-            `that is another \`ub open\`; use --port to run a second one\n`
-          : `ub open: port ${options.port} is in use by another process — ` +
-            "stop it, or serve the web app elsewhere with --port\n",
-      );
+      io.err(portTakenMessage(options.port, await whoHoldsPort(options.port)));
     } else {
       io.err(`ub open: could not serve on port ${options.port}: ${message(error)}\n`);
     }

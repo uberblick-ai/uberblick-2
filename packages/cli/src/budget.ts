@@ -19,7 +19,8 @@
  * probes of something remote: the two hub budgets below, `open.ts`'s 1 s
  * port-owner probe and `probes.ts`'s 2 s clock observation. Expiry is a
  * permitted answer for each of them, but not a free one — `whoHoldsPort` reads a
- * timeout as `foreign`, `probeHubClock` reads one as no observation at all, and
+ * timeout as a holder it could not identify (never as a stranger, which would
+ * accuse a slow `ub open`), `probeHubClock` reads one as no observation at all, and
  * `ub doctor` reports a hub that missed its budget as down. What makes them safe
  * to cap is a **margin, not a category**: each waits on something that answers
  * in milliseconds when it answers at all, against the hundreds a suite sets
