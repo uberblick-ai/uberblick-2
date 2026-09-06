@@ -511,6 +511,47 @@ function toBlockInput(
 }
 
 /**
+ * Does this block sequence record what would reopen a decision?
+ *
+ * The rule: a heading whose text is exactly `Reconsidering`, immediately
+ * followed by a non-heading block with non-whitespace text. One predicate for
+ * both doors — `set_status`'s transition and `create_doc`'s seeded blocks —
+ * because a shape one accepted and the other refused would leave a decision
+ * reachable but not repeatable (#856).
+ */
+function hasRevivalTrigger(
+  blocks: readonly { type: string; text: string }[],
+): boolean {
+  return blocks.some((block, index) => {
+    const next = blocks[index + 1];
+    return (
+      block.type === "heading" &&
+      block.text === "Reconsidering" &&
+      next !== undefined &&
+      next.type !== "heading" &&
+      next.text.trim().length > 0
+    );
+  });
+}
+
+/**
+ * The text a seeded block will actually store, so the gate above judges what
+ * the document receives rather than what the caller typed.
+ *
+ * This mirrors the schema's own `inlineOf` (`packages/schema/src/blocks.ts`):
+ * on a prose block an `inline` array replaces `text` entirely — an empty array
+ * included — while a source block ignores `inline` and keeps `text`. The runs
+ * are the resolved ones {@link toBlockInput} was handed, so a docLink label
+ * filled in from its target's title counts as the text it will become.
+ */
+function storedTextOf(input: BlockInput): string {
+  if (input.inline !== undefined && isProseBlockType(input.type)) {
+    return input.inline.map((run) => run.text).join("");
+  }
+  return input.text ?? "";
+}
+
+/**
  * Where a new document goes in the sidebar — optional, and the whole of it.
  *
  * Placement implies pinning, so there is no `pinned` boolean and no `state`
@@ -975,6 +1016,10 @@ export function registerTools(
         "reference is immutable, is returned by get_doc, and is a derived link: backlinks on the earlier " +
         "decision exposes every successor without editing that earlier document. A non-decision target or a " +
         "self-reference is refused before any room is written. " +
+        "A decision created with `status: decided` must seed the record of what would reopen it: a heading whose " +
+        "text is exactly `Reconsidering`, immediately followed by a non-heading block with non-whitespace text — " +
+        "another heading does not count as that content. Without it the call is refused before a UUID is " +
+        "allocated or a room is written, so nothing is created. " +
         "\n\n" +
         CREATE_DOC_PLACEMENT +
         "\n\n" +
@@ -1088,6 +1133,36 @@ export function registerTools(
       // Same reason, same place: an inline reference to a target this replica
       // does not know refuses the whole call before there is a document.
       const inputs = (blocks ?? []).map(blockInputFor);
+
+      // The other door on the same rule: a decision born `decided` must already
+      // record what would reopen it, or it is decided and unrepeatable, since
+      // `set_status` would refuse to re-affirm the status it was created with.
+      // Judged here because inline resolution is what fixes a block's stored
+      // text, and still before a UUID exists, so a refused call creates nothing.
+      if (
+        lifecycle?.kind === "decision" &&
+        lifecycle.status === "decided" &&
+        !hasRevivalTrigger(
+          inputs.map((input) => ({
+            type: input.type,
+            text: storedTextOf(input),
+          })),
+        )
+      ) {
+        throw new ToolError(
+          "revival_trigger_missing",
+          "A decision can be created decided only when its blocks carry a heading whose text is exactly " +
+            "`Reconsidering`, immediately followed by a non-heading block with non-whitespace text.",
+          {
+            kind: lifecycle.kind,
+            status: lifecycle.status,
+            recoveryClass: "manual",
+            recovery:
+              "Seed a heading whose text is exactly `Reconsidering`, immediately followed by a non-heading block " +
+              "with non-whitespace text, then call create_doc again. Nothing was created by this refused call.",
+          },
+        );
+      }
 
       const uuid = randomUUID();
       const replica = replicas.replica(uuid);
@@ -1758,18 +1833,7 @@ export function registerTools(
       const kind = stored.kind ?? kindForStatus(status);
 
       if (kind === "decision" && status === "decided") {
-        const blocks = getBlocks(replica.doc);
-        const hasRevivalTrigger = blocks.some((block, index) => {
-          const next = blocks[index + 1];
-          return (
-            block.type === "heading" &&
-            block.text === "Reconsidering" &&
-            next !== undefined &&
-            next.type !== "heading" &&
-            next.text.trim().length > 0
-          );
-        });
-        if (!hasRevivalTrigger) {
+        if (!hasRevivalTrigger(getBlocks(replica.doc))) {
           throw new ToolError(
             "revival_trigger_missing",
             "A decision can be set to decided only when it has a heading whose text is exactly `Reconsidering`, " +

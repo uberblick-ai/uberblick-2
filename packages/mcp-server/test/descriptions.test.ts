@@ -51,6 +51,32 @@ async function lifecycleDoc(
   });
 }
 
+/**
+ * Block lists that are not a revival trigger — the last entry is no blocks at
+ * all. Shared by both doors on purpose: a shape one refused and the other
+ * accepted is the drift #856 closes.
+ */
+const REVIVAL_TRIGGER_MISSES: (Record<string, unknown>[] | undefined)[] = [
+  [{ type: "paragraph", text: "Revisit when usage changes." }],
+  [
+    { type: "heading", text: "reconsidering", level: 2 },
+    { type: "paragraph", text: "Revisit when usage changes." },
+  ],
+  [
+    { type: "heading", text: "Reconsidering", level: 2 },
+    { type: "paragraph", text: "   " },
+  ],
+  [
+    { type: "heading", text: "Reconsidering", level: 2 },
+    { type: "heading", text: "References", level: 2 },
+  ],
+  [
+    { type: "paragraph", text: "Reconsidering" },
+    { type: "paragraph", text: "Revisit when usage changes." },
+  ],
+  undefined,
+];
+
 function stub(rig: Rig, uuid: string): DirectoryEntry {
   const entry = getDirectoryEntry(rig.instance.replicas.directory().doc, uuid);
   if (entry === null) {
@@ -423,6 +449,10 @@ describe("lifecycle metadata reaches discovery", () => {
       tags: ["billing"],
       kind: "decision",
       status: "decided",
+      blocks: [
+        { type: "heading", text: "Reconsidering", level: 2 },
+        { type: "paragraph", text: "Revisit when billing changes." },
+      ],
     });
     await rig.ok("archive_doc", { uuid: archivedDecision.uuid });
 
@@ -566,28 +596,8 @@ describe("set_status", () => {
 
   it("refuses to decide without an exact, populated Reconsidering section", async () => {
     const rig = await localRig();
-    const invalidBlocks = [
-      [{ type: "paragraph", text: "Revisit when usage changes." }],
-      [
-        { type: "heading", text: "reconsidering", level: 2 },
-        { type: "paragraph", text: "Revisit when usage changes." },
-      ],
-      [
-        { type: "heading", text: "Reconsidering", level: 2 },
-        { type: "paragraph", text: "   " },
-      ],
-      [
-        { type: "heading", text: "Reconsidering", level: 2 },
-        { type: "heading", text: "References", level: 2 },
-      ],
-      [
-        { type: "paragraph", text: "Reconsidering" },
-        { type: "paragraph", text: "Revisit when usage changes." },
-      ],
-      undefined,
-    ];
 
-    for (const [index, blocks] of invalidBlocks.entries()) {
+    for (const [index, blocks] of REVIVAL_TRIGGER_MISSES.entries()) {
       const decision = await rig.ok("create_doc", {
         title: `Unfinished decision ${index}`,
         description: "A decision that does not yet name its revival trigger.",
@@ -635,6 +645,110 @@ describe("set_status", () => {
   });
 });
 
+describe("create_doc's revival trigger", () => {
+  it("refuses to be born decided without one, and creates nothing", async () => {
+    const rig = await localRig();
+    const requirement = await lifecycleDoc(rig, "Governed requirement", {
+      kind: "requirement",
+    });
+
+    for (const [index, blocks] of REVIVAL_TRIGGER_MISSES.entries()) {
+      const refused = await rig.call("create_doc", {
+        title: `Unfinished decision ${index}`,
+        description: "A decision that does not yet name its revival trigger.",
+        kind: "decision",
+        status: "decided",
+        governs: requirement.uuid,
+        ...(blocks === undefined ? {} : { blocks }),
+      });
+
+      expect(refused.payload).toMatchObject({
+        error: "revival_trigger_missing",
+        message: expect.stringContaining("Reconsidering"),
+        kind: "decision",
+        status: "decided",
+        applied: false,
+        partial: false,
+      });
+      expect(refused.payload.message).toContain("non-whitespace");
+      expect(refused.payload.recovery).toContain("call create_doc again");
+      expect(refused.payload.recovery).not.toContain("set_status");
+      expect(refused.payload.uuid).toBeUndefined();
+    }
+
+    // Nothing reached a room: no decision exists under any listing, and the
+    // requirement this call named still has an empty decision log.
+    expect(
+      (await rig.ok("list_docs", { kind: "decision", include_deleted: true }))
+        .docs,
+    ).toEqual([]);
+    expect(
+      (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions,
+    ).toEqual([]);
+  });
+
+  it("judges a seeded trigger on the text the blocks will store", async () => {
+    const rig = await localRig();
+    const inlineTrigger = [
+      { type: "heading", level: 2, text: "", inline: [{ text: "Reconsidering", marks: {} }] },
+      { type: "paragraph", text: "Revisit when usage changes." },
+    ];
+
+    const born = await rig.ok("create_doc", {
+      title: "Inline-written trigger",
+      description: "A decision whose trigger heading is written as inline runs.",
+      kind: "decision",
+      status: "decided",
+      blocks: inlineTrigger,
+    });
+    expect(born).toMatchObject({ kind: "decision", status: "decided" });
+    // The same blocks satisfy the other door, so neither can drift.
+    const twin = await rig.ok("create_doc", {
+      title: "Inline-written trigger, decided later",
+      description: "The same blocks, seeded open and decided afterwards.",
+      kind: "decision",
+      blocks: inlineTrigger,
+    });
+    expect(
+      await rig.ok("set_status", { uuid: twin.uuid, status: "decided" }),
+    ).toMatchObject({ status: "decided" });
+
+    // `inline` replaces `text` outright, so a raw `Reconsidering` the inline
+    // runs override is not a trigger — at either door.
+    const overridden = [
+      {
+        type: "heading",
+        level: 2,
+        text: "Reconsidering",
+        inline: [{ text: "References", marks: {} }],
+      },
+      { type: "paragraph", text: "Revisit when usage changes." },
+    ];
+    expect(
+      (
+        await rig.call("create_doc", {
+          title: "Overridden trigger",
+          description: "A decision whose trigger text never reaches the block.",
+          kind: "decision",
+          status: "decided",
+          blocks: overridden,
+        })
+      ).payload.error,
+    ).toBe("revival_trigger_missing");
+
+    const later = await rig.ok("create_doc", {
+      title: "Overridden trigger, decided later",
+      description: "The same overridden blocks, seeded open.",
+      kind: "decision",
+      blocks: overridden,
+    });
+    expect(
+      (await rig.call("set_status", { uuid: later.uuid, status: "decided" }))
+        .payload.error,
+    ).toBe("revival_trigger_missing");
+  });
+});
+
 describe("lifecycle tool text", () => {
   it("names the recorded fields and their authority boundary on every surface", async () => {
     const rig = await localRig();
@@ -651,6 +765,19 @@ describe("lifecycle tool text", () => {
     expect(frontmatter.description).toContain("kind");
     expect(frontmatter.description).toContain("status");
     expect(frontmatter.description).toContain("do not authorize");
+  });
+
+  it("states create_doc's revival-trigger gate in the words the code enforces", async () => {
+    const rig = await localRig();
+    const { tools } = await rig.client.listTools();
+    const description = tools.find(
+      (tool) => tool.name === "create_doc",
+    )?.description;
+    expect(description).toContain("`status: decided`");
+    expect(description).toContain(
+      "immediately followed by a non-heading block with non-whitespace text",
+    );
+    expect(description).toContain("another heading does not count");
   });
 
   it("states the decision-listing default wherever archive discovery is described", async () => {
@@ -766,6 +893,10 @@ describe("decision log tools", () => {
     const earlier = await lifecycleDoc(rig, "Earlier decision", {
       kind: "decision",
       status: "decided",
+      blocks: [
+        { type: "heading", text: "Reconsidering", level: 2 },
+        { type: "paragraph", text: "Revisit if the constraint changes." },
+      ],
     });
     const before = await rig.ok("get_doc", { uuid: earlier.uuid });
 
