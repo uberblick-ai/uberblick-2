@@ -228,6 +228,8 @@
      black over a light ground and black over a dark one are both "less light
      here".*/
   --shadow-float: 0 8px 24px oklch(0 0 0 / 25%);
+  /* The TL;DR is an inset editorial card rather than floating chrome. The
+     Rails reference gives it a wider, softer lift at less than half the ink. */
   --shadow-callout: 0 18px 40px oklch(0 0 0 / 12%);
 
   /* The reading composition. Prose wider than ~75ch is hard to track back to
@@ -3469,11 +3471,14 @@ h3.ub-heading {
 }
 
 .ub-tldr-header {
-  position: relative;
   display: flex;
   align-items: center;
   gap: 0.75rem;
   min-width: 0;
+}
+
+.ub-tldr-header,
+.ub-tldr-body {
   padding-left: 0.25rem;
 }
 
@@ -3495,17 +3500,12 @@ h3.ub-heading {
   fill: currentColor;
 }
 
-.ub-tldr-heading,
-.ub-tldr-body {
+.ub-tldr-heading {
   min-width: 0;
 }
 
 .ub-tldr-body {
-  position: relative;
   margin-top: 0.75rem;
-  color: color-mix(in oklab, var(--foreground) 88%, transparent);
-  font-size: 1rem;
-  line-height: 1.75;
 }
 
 .ub-tldr-label {
@@ -3526,8 +3526,11 @@ h3.ub-heading {
   line-height: 1.25;
 }
 
-.ub-tldr p {
+.ub-tldr-body > p {
   margin: 0;
+  color: color-mix(in oklab, var(--foreground) 88%, transparent);
+  font-size: 1rem;
+  line-height: 1.75;
   overflow-wrap: anywhere;
 }
 
