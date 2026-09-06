@@ -4,6 +4,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cpSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -251,6 +252,71 @@ describe("the versioned install payload", () => {
       ).toBe(true);
     }
     expect(treeDigest(payload)).toBe(initialPayload);
+  });
+
+  /**
+   * `ub update` reaches Homebrew and nothing else.
+   *
+   * The tree is the shape #849 installs — the payload under Homebrew's prefix —
+   * and `brew`, `git` and `mise` are all on PATH, all recording what they were
+   * asked to do. The working directory is this repository's own checkout on
+   * purpose: which copy `ub update` updates comes from where `ub`'s own files
+   * live, so a Homebrew `ub` typed inside a checkout must still be Homebrew's.
+   */
+  it("updates a Homebrew installation through Homebrew, and touches nothing else", () => {
+    const prefix = join(scratch, "homebrew");
+    const keg = join(prefix, "Cellar", "uberblick", VERSION, "libexec");
+    mkdirSync(dirname(keg), { recursive: true });
+    cpSync(payload, keg, { recursive: true });
+    const fakeBin = join(scratch, "homebrew-bin");
+    mkdirSync(fakeBin, { recursive: true });
+    const log = join(scratch, "homebrew-commands.log");
+    writeFileSync(
+      join(fakeBin, "brew"),
+      `#!/bin/sh\necho "brew $*" >> "${log}"\n[ "$1" = "--prefix" ] && echo "${prefix}"\nexit 0\n`,
+      { encoding: "utf8", mode: 0o755 },
+    );
+    for (const other of ["git", "mise", "pnpm"]) {
+      writeFileSync(join(fakeBin, other), `#!/bin/sh\necho "${other} $*" >> "${log}"\nexit 0\n`, {
+        encoding: "utf8",
+        mode: 0o755,
+      });
+    }
+    const box = sandbox();
+    const before = treeDigest(keg);
+
+    const run = spawnSync("ub", ["update"], {
+      cwd: REPO_ROOT,
+      env: { ...runtimeEnv(box, keg), PATH: `${fakeBin}:${join(keg, "bin")}:${nodeBin}` },
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+
+    expect(run.status, run.stderr).toBe(0);
+    expect(readFileSync(log, "utf8").split("\n").filter(Boolean)).toEqual([
+      // The recognition read: only a payload under the prefix Homebrew itself
+      // reports is one `brew upgrade` can replace.
+      "brew --prefix",
+      "brew update",
+      "brew upgrade uberblick-ai/tap/uberblick",
+    ]);
+    // No repository operation, no build, and nothing under the XDG layout: this
+    // path resolves no configuration and writes no state of its own.
+    expect(existsSync(box.configHome)).toBe(false);
+    expect(existsSync(box.dataHome)).toBe(false);
+    expect(treeDigest(keg)).toBe(before);
+  });
+
+  it("refuses to update a payload Homebrew did not install", () => {
+    const box = sandbox();
+
+    // No `brew` on this PATH, so the payload is nobody's installation.
+    const run = runPayload(box, ["update"]);
+
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("neither a Homebrew installation nor a checkout");
+    expect(run.stderr).toContain("brew install uberblick-ai/tap/uberblick");
   });
 
   it.each([

@@ -77,12 +77,10 @@
  */
 
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import { isIPv4 } from "node:net";
-import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -113,6 +111,7 @@ import {
   type ServingSyncStatus,
   type UberblickMcpEngine,
 } from "@uberblick/mcp-server";
+import { buildLockPath } from "./build-lock.js";
 import { budget, resolveMcpConfig } from "./budget.js";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
@@ -427,39 +426,6 @@ const BUILD_RETRY_MS = 50;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((done) => setTimeout(done, ms));
-}
-
-/**
- * The lock a build of `dir` holds.
- *
- * **Named after the directory, because the directory is the resource.** The
- * hazard is two builds emptying and rewriting one `dist`, so what has to be
- * mutually exclusive is builds of the same output — not runs that happen to
- * share a configuration. Keying it on the config root instead would let two runs
- * of one checkout under different `XDG_CONFIG_HOME` values build at once, which
- * is exactly what this repository's own test rig and its parallel agents
- * produce.
- *
- * In the temp directory because the two other candidates are both wrong: a
- * checkout is not a place this CLI writes state into, and the config root is
- * the key that must not decide this. The name is a digest rather than the path
- * itself so that any directory — spaces, separators, length — yields one
- * portable file name. `wx` on it means a name somebody else already holds is a
- * refusal rather than a hijack.
- *
- * So the *name* is the output's, and the directory it lives in is
- * `os.tmpdir()` — which is the one thing two runs have to agree about. It is
- * environment (`TMPDIR`), nothing in `ub` or in this repository varies it, and
- * runs deliberately given different temp roots get two locks and no exclusion;
- * the cost when that happens is the transient broken serve, never lost work.
- * Which accounts share that root is the platform's answer: per-user on macOS,
- * usually the shared `/tmp` on Linux — whose sticky bit is why the timeout
- * message below can only name a stale lock rather than promise it is yours to
- * remove.
- */
-function buildLockPath(dir: string): string {
-  const key = createHash("sha256").update(resolve(dir)).digest("hex").slice(0, 16);
-  return join(tmpdir(), `uberblick-build-${key}.lock`);
 }
 
 /**

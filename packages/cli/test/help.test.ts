@@ -42,6 +42,7 @@ import {
   REMOTE_JOIN_HELP,
 } from "../src/remote.js";
 import { STATUS_HELP, STATUS_OPTIONS } from "../src/status.js";
+import { UPDATE_HELP } from "../src/update.js";
 import {
   WORKSPACE_HELP,
   WORKSPACE_LIST_HELP,
@@ -103,6 +104,7 @@ const ROOT_PATH: Path = { argv: [], help: HELP, options: {} };
 const PATHS: Path[] = [
   ROOT_PATH,
   { argv: ["init"], help: INIT_HELP, options: INIT_OPTIONS },
+  { argv: ["update"], help: UPDATE_HELP, options: {} },
   { argv: ["launch"], help: LAUNCH_HELP, options: LAUNCH_OPTIONS },
   { argv: ["open"], help: OPEN_HELP, options: OPEN_OPTIONS },
   { argv: ["status"], help: STATUS_HELP, options: STATUS_OPTIONS },
