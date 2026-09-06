@@ -20,9 +20,9 @@
  * nothing, newlines intact. Not markdown, not a fence — the source.
  *
  * {@link sourceEditingPlugin} at the foot is the other half a source block that
- * draws itself needs, and it is here for the same reason: `table` and `mermaid`
- * decide which representation to show by exactly the same rule, and one copy of
- * that rule is one place for it to be wrong.
+ * draws itself needs, and it is here for the same reason: `table`, `mermaid`
+ * and `terminal` decide which representation to show by exactly the same rule,
+ * and one copy of that rule is one place for it to be wrong.
  */
 
 import type { NodeViewRenderer, NodeViewRendererProps } from "@tiptap/core";
@@ -208,6 +208,29 @@ export const mermaidChrome: SourceBlockChrome = {
   sync: (node, root) => mirrorAttribute(root, "id", node.attrs.id),
 };
 
+/**
+ * `<div class="ub-terminal" data-block-type="terminal">…<pre
+ * class="ub-terminal-source">…</pre></div>`
+ *
+ * The content `<pre>` is classed rather than left bare, unlike mermaid's: this
+ * block's panel holds `<pre>`s of its own, and a selector that could not tell
+ * them apart would style and hide the wrong one.
+ */
+export const terminalChrome: SourceBlockChrome = {
+  root: () => {
+    const div = document.createElement("div");
+    div.className = "ub-terminal";
+    div.setAttribute("data-block-type", "terminal");
+    return div;
+  },
+  content: () => {
+    const pre = document.createElement("pre");
+    pre.className = "ub-terminal-source";
+    return pre;
+  },
+  sync: (node, root) => mirrorAttribute(root, "id", node.attrs.id),
+};
+
 /* ------------------------------------------------- the block under the caret */
 
 /**
@@ -238,10 +261,10 @@ export function selectedBlock(
  * Put `className` on the `typeName` block the selection sits in, so the
  * stylesheet can show that block's source and hide its rendering.
  *
- * The two blocks that draw themselves — `table` and `mermaid` — share this, and
- * they share the reason: which representation a reader sees is derived from the
- * selection on every draw rather than remembered, because a mode nobody stores
- * cannot get out of step with the document.
+ * The blocks that draw themselves — `table`, `mermaid` and `terminal` — share
+ * this, and they share the reason: which representation a reader sees is
+ * derived from the selection on every draw rather than remembered, because a
+ * mode nobody stores cannot get out of step with the document.
  */
 export function sourceEditingPlugin(typeName: string, className: string): Plugin {
   return new Plugin({

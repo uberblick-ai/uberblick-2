@@ -64,6 +64,7 @@ const BLOCK_LABELS: Record<BlockType, string> = {
   "list-item": "List item",
   quote: "Quote",
   table: "Table",
+  terminal: "Terminal demo",
 };
 
 /**

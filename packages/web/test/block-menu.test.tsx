@@ -201,6 +201,7 @@ describe("the registry", () => {
       "Code",
       "Table",
       "Mermaid",
+      "Terminal demo",
     ]);
   });
 
@@ -241,6 +242,7 @@ describe("the registry", () => {
     expect(labels("##")).toEqual(["Heading 2", "Heading 3"]);
     expect(labels("```")).toEqual(["Code"]);
     expect(labels("diagram")).toEqual(["Mermaid"]);
+    expect(labels("console")).toEqual(["Terminal demo"]);
     expect(labels("nothing here")).toEqual([]);
   });
 });

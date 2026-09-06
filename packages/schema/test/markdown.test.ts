@@ -156,6 +156,49 @@ describe("importMarkdown", () => {
 
 });
 
+describe("the terminal fence", () => {
+  /**
+   * The fence's info string is the block type, exactly as `mermaid`'s is. What
+   * this defends is the pair: a transcript that exported as a plain ```` ``` ````
+   * fence would come back as a code block, and the demonstration would be gone.
+   */
+  it("round-trips a terminal block, and leaves a code block that says terminal alone", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Demo" });
+    appendBlock(doc, { type: "terminal", text: "$ ub init\n\nworkspace ready" });
+    appendBlock(doc, { type: "code", text: "not a demo", language: "terminal" });
+
+    const exported = exportMarkdown(doc, { frontmatter: false });
+    expect(exported).toBe(
+      [
+        "```terminal",
+        "$ ub init",
+        "",
+        "workspace ready",
+        "```",
+        "",
+        "```terminal",
+        "not a demo",
+        "```",
+        "",
+      ].join("\n"),
+    );
+
+    // The blank line inside the transcript is a step of it, so it survives.
+    expect(importMarkdown(exported).blocks).toEqual([
+      { type: "terminal", text: "$ ub init\n\nworkspace ready" },
+      { type: "terminal", text: "not a demo" },
+    ]);
+
+    // …and the code block is untouched in the document it was written in: the
+    // info string is a rendering of `language`, never a re-type of the block.
+    expect(getBlocks(doc).map((block) => [block.type, block.language])).toEqual([
+      ["terminal", undefined],
+      ["code", "terminal"],
+    ]);
+  });
+});
+
 describe("markdown round-trip", () => {
   it("import → export → import is stable for a representative document", () => {
     const doc = docFrom(SOURCE);

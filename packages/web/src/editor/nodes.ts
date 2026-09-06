@@ -1,5 +1,5 @@
 /**
- * The editor palette: seven custom block nodes, seven marks, nothing else.
+ * The editor palette: eight custom block nodes, seven marks, nothing else.
  *
  * The marks live in marks.ts — the six inline ones (`bold`, `italic`, `strike`,
  * `inlineCode`, `link`, `docLink`) plus the `comment` anchor defined below.
@@ -14,6 +14,7 @@
  *   <list-item id="…" list="bullet" indent="1">  Y.XmlText
  *   <quote     id="…">        Y.XmlText
  *   <table     id="…">        Y.XmlText (GFM source)
+ *   <terminal  id="…">        Y.XmlText (a scripted terminal transcript)
  *
  * A list is a *run* of adjacent `list-item` blocks, exactly as markdown means
  * it — no `bulletList` wrapper, no nested `listItem` tree. Stock Tiptap's list
@@ -45,10 +46,10 @@
  *    block **deletes the Y.XmlText from the document** — data loss, not a render
  *    failure.
  *
- *    Prose blocks take `PROSE_MARKS` on top of that — the inline set. `code` and
- *    `mermaid` never do: their text is source, so `comment` is the only mark
- *    they may hold, and an inline mark found inside one is foreign content the
- *    palette gate refuses to bind (see palette.ts).
+ *    Prose blocks take `PROSE_MARKS` on top of that — the inline set. `code`,
+ *    `mermaid`, `table` and `terminal` never do: their text is source, so
+ *    `comment` is the only mark they may hold, and an inline mark found inside
+ *    one is foreign content the palette gate refuses to bind (see palette.ts).
  */
 
 import { Node, Mark, mergeAttributes } from "@tiptap/core";
@@ -58,6 +59,7 @@ import { PROSE_MARKS, inlineMarkExtensions } from "./marks.js";
 import { mermaidBlockView } from "./mermaid.js";
 import { codeBlockChrome, sourceBlockView } from "./source-chrome.js";
 import { tableBlockView } from "./table.js";
+import { terminalBlockView } from "./terminal.js";
 
 /**
  * The stable block id, assigned by `BlockIds` (see block-ids.ts) and owned by
@@ -363,6 +365,45 @@ export const Table = Node.create({
 });
 
 /**
+ * A scripted terminal demonstration, stored as its transcript (#843).
+ *
+ * A source block like `code`, `mermaid` and `table` — the node spec is theirs.
+ * Everything that makes the transcript play, and everything that stops it,
+ * lives in the NodeView (terminal.ts); nothing about a run is stored, so the
+ * text remains the only representation of the demonstration.
+ */
+export const Terminal = Node.create({
+  name: "terminal",
+  group: "block",
+  content: "text*",
+  marks: COMMENT_MARK,
+  code: true,
+  defining: true,
+  whitespace: "pre",
+  addAttributes() {
+    return { id: idAttribute };
+  },
+  parseHTML() {
+    return [{ tag: "div[data-block-type=terminal]", preserveWhitespace: "full" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return [
+      "div",
+      mergeAttributes(
+        { class: "ub-terminal", "data-block-type": "terminal" },
+        HTMLAttributes,
+      ),
+      ["pre", { class: "ub-terminal-source" }, 0],
+    ];
+  },
+  addNodeView() {
+    return terminalBlockView;
+  },
+  // See CodeBlock: Enter is handled by the core keymap, driven by `code: true`,
+  // so a newline in the transcript is a newline and never a new block.
+});
+
+/**
  * The annotation anchor.
  *
  * `excludes` is left at its ProseMirror default — "exclusive with marks of the
@@ -430,6 +471,7 @@ export const paletteExtensions = [
   ListItem,
   Quote,
   Table,
+  Terminal,
   CommentMark,
   ...inlineMarkExtensions,
 ];

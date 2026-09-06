@@ -672,6 +672,13 @@ function renderBlock(
       const fence = fenceFor(block.text);
       return `${fence}mermaid\n${block.text}\n${fence}`;
     }
+    case "terminal": {
+      // Same shape as `mermaid`: the fence's info string *is* the block type,
+      // so the transcript comes back as a terminal demonstration rather than a
+      // code block that happens to say `terminal`.
+      const fence = fenceFor(block.text);
+      return `${fence}terminal\n${block.text}\n${fence}`;
+    }
     case "list-item": {
       // One item, one line — a second line would be a continuation the reader
       // resolves against the marker's column, which no flat block can promise.
@@ -745,9 +752,9 @@ function renderDecision(
  * Render the document as markdown.
  *
  * headings → `#`×level, paragraphs → their text, code → a fenced block tagged
- * with its language, mermaid → a ```mermaid fence, list items → a `- `/`1. `
- * line indented by their level, quotes → `> ` on every line, tables → their
- * source verbatim.
+ * with its language, mermaid → a ```mermaid fence, terminal → a ```terminal
+ * fence, list items → a `- `/`1. ` line indented by their level, quotes → `> `
+ * on every line, tables → their source verbatim.
  *
  * Blocks are separated by a blank line, except two adjacent list items: a blank
  * line between them is what makes a reader render the list *loose*, so a run of
@@ -1671,9 +1678,9 @@ function advanceColumn(text: string, column: number): number {
 /**
  * Parse markdown into the pieces needed to build a document: title,
  * description, tags, links and a flat block list. Handles frontmatter, ATX
- * headings, fenced code (with language), mermaid fences, list items, block
- * quotes and GFM tables; everything else becomes a paragraph, with its inline
- * formatting read into `inline`.
+ * headings, fenced code (with language), mermaid and terminal fences, list
+ * items, block quotes and GFM tables; everything else becomes a paragraph, with
+ * its inline formatting read into `inline`.
  *
  * Title precedence: frontmatter `title`, else a leading level-1 heading — which
  * is then *consumed*, so the title is not duplicated as a block. Any other
@@ -1864,6 +1871,8 @@ export function importMarkdown(markdown: string): ImportedDoc {
       const text = body.join("\n");
       if (info === "mermaid") {
         blocks.push({ type: "mermaid", text });
+      } else if (info === "terminal") {
+        blocks.push({ type: "terminal", text });
       } else {
         blocks.push({ type: "code", text, language: info });
       }

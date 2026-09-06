@@ -3128,6 +3128,127 @@ h3.ub-heading {
   display: none;
 }
 
+/* ---- the terminal block (#843) ----
+
+   The mermaid block's rule again: the panel is what a reader sees and the
+   transcript is what they get with their caret in the block. `data-rendered`
+   is `false` for the one thing that keeps the transcript on screen — a block
+   carrying an annotation anchor, whose highlighted range a panel would hide.
+
+   The panel is dark in both appearances on purpose. A terminal is a terminal:
+   inverting it in a light theme would make the demonstration look like
+   something other than the thing it is a demonstration of. */
+.ub-terminal {
+  position: relative;
+  margin: 0.7em 0;
+}
+
+.ub-terminal-source {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--brand);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.ub-terminal::before {
+  content: "terminal transcript";
+  display: block;
+  font-size: 0.7rem;
+  color: var(--muted-foreground);
+  margin-bottom: 0.2rem;
+}
+
+.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing)::before {
+  content: none;
+}
+
+.ub-terminal-screen {
+  display: none;
+  border-radius: var(--radius-sm);
+  background: #12151a;
+  padding: 1.6rem 0.9rem 0.75rem;
+  cursor: text;
+  overflow-x: auto;
+}
+
+/* The panel is the control that opens the transcript, so it looks like one when
+   the keyboard is on it — the same ring the diagram and the annotation
+   highlights use. */
+.ub-terminal-screen:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* A floor rather than a height: the panel must not resize line by line as the
+   demonstration fills it, and must not collapse to nothing while it is empty. */
+.ub-terminal-frame {
+  margin: 0;
+  min-height: 4.5em;
+  color: #d6dde6;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Solid, not blinking: the cursor says where the typing is, and a second
+   animation would be one more thing for a reader to have to stop. */
+.ub-terminal-cursor {
+  display: inline-block;
+  width: 0.55ch;
+  height: 1.05em;
+  margin-left: 0.05ch;
+  vertical-align: text-bottom;
+  background: #7fd6a2;
+}
+
+.ub-terminal-toggle {
+  display: none;
+  position: absolute;
+  top: 0.15rem;
+  left: 0.4rem;
+  min-width: 6ch;
+  padding: 0.05rem 0.3rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ub-terminal-toggle:hover,
+.ub-terminal-toggle:focus-visible {
+  color: var(--foreground);
+}
+
+.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-terminal-screen,
+.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-terminal-toggle {
+  display: block;
+}
+
+.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) > .ub-terminal-source {
+  display: none;
+}
+
+/* The control is removed, not merely greyed, where nothing plays — a reduced
+   motion preference, or a transcript with nothing in it. After the rules above,
+   because `hidden` has to win over them. */
+.ub-terminal-toggle[hidden] {
+  display: none;
+}
+
 /* An annotated range. Amber ground plus an amber underline — the underline is
    what keeps the range legible when the ground alone is too quiet (a highlight
    the reader has to hunt for is not a highlight). Clickable: it focuses the
@@ -3630,6 +3751,7 @@ h3.ub-heading {
 
 .ub-code:hover .ub-copy,
 .ub-mermaid:hover .ub-copy,
+.ub-terminal:hover .ub-copy,
 .ub-copy:hover,
 .ub-copy:focus-visible {
   opacity: 1;

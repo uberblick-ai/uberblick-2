@@ -39,6 +39,7 @@ interface Built {
     item: string;
     quote: string;
     table: string;
+    terminal: string;
   };
   threadId: string;
 }
@@ -89,13 +90,17 @@ function buildDocument(): Built {
     type: "table",
     text: "| name | count |\n| --- | ---: |\n| alpha | 1 |",
   });
+  const terminal = appendBlock(ydoc, {
+    type: "terminal",
+    text: "$ ub init\nworkspace ready",
+  });
 
   // "quick" in the paragraph.
   const annotation = createAnnotation(ydoc, paragraph, 4, 9, "tester", "why quick?");
 
   return {
     ydoc,
-    ids: { heading, paragraph, code, mermaid, item, quote, table },
+    ids: { heading, paragraph, code, mermaid, item, quote, table, terminal },
     threadId: annotation.id,
   };
 }
@@ -164,8 +169,8 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     const editor = mount(ydoc);
 
     const doc = editor.state.doc;
-    const indexes = [0, 1, 2, 3, 4, 5, 6];
-    expect(doc.childCount).toBe(7);
+    const indexes = [0, 1, 2, 3, 4, 5, 6, 7];
+    expect(doc.childCount).toBe(8);
     expect(indexes.map((i) => doc.child(i).type.name)).toEqual([
       "heading",
       "paragraph",
@@ -174,6 +179,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       "list-item",
       "quote",
       "table",
+      "terminal",
     ]);
     expect(indexes.map((i) => doc.child(i).attrs.id)).toEqual([
       ids.heading,
@@ -183,6 +189,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       ids.item,
       ids.quote,
       ids.table,
+      ids.terminal,
     ]);
 
     // Attributes arrive verbatim, as the strings the schema wrote.
@@ -194,6 +201,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     // Text survives, newlines included.
     expect(doc.child(2).textContent).toBe("const answer = 42;\nreturn answer;");
     expect(doc.child(3).textContent).toBe("graph TD;\n  A-->B;");
+    expect(doc.child(7).textContent).toBe("$ ub init\nworkspace ready");
 
     // Every formatting mark becomes a ProseMirror mark, the comment carrying its
     // thread id and the link its href — one text node per run, in order.
@@ -244,7 +252,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     expect(after.map((block) => block.nodeName)).toEqual(
       before.map((block) => block.nodeName),
     );
-    expect(after).toHaveLength(7);
+    expect(after).toHaveLength(8);
 
     // Identity and attributes: byte-identical, including value *types*.
     expect(after.map((block) => block.attributes)).toEqual(
@@ -261,9 +269,10 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     });
     expect(after[5]?.attributes).toEqual({ id: ids.quote });
     expect(after[6]?.attributes).toEqual({ id: ids.table });
+    expect(after[7]?.attributes).toEqual({ id: ids.terminal });
 
     // Only the edited block's text changed.
-    for (const index of [0, 2, 3, 4, 5, 6]) {
+    for (const index of [0, 2, 3, 4, 5, 6, 7]) {
       expect(after[index]?.text).toBe(before[index]?.text);
     }
     expect(after[1]?.text).toBe("The quick brown fox jumps. Then it stopped.");
@@ -312,6 +321,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       [ids.item, "list-item"],
       [ids.quote, "quote"],
       [ids.table, "table"],
+      [ids.terminal, "terminal"],
     ]);
     expect(blocks[0]?.level).toBe(3);
     expect(blocks[2]?.language).toBe("ts");
@@ -323,6 +333,8 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     expect(blocks[6]?.text).toBe(
       "| name | count |\n| --- | ---: |\n| alpha | 1 |",
     );
+    // The transcript's newlines are its steps, and survive the same way.
+    expect(blocks[7]?.text).toBe("$ ub init\nworkspace ready");
   });
 
   it("splits a paragraph on Enter into two valid blocks with a fresh id", () => {
@@ -345,6 +357,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       "list-item",
       "quote",
       "table",
+      "terminal",
     ]);
 
     // First half keeps the original id; the second half is a new block.
@@ -394,6 +407,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       "list-item",
       "quote",
       "table",
+      "terminal",
     ]);
   });
 });

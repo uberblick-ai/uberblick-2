@@ -679,8 +679,8 @@ describe("inline marks in the document", () => {
       { text: "const x = **1**;", marks: {} },
     ]);
 
-    // And `inline` on a code or mermaid input is ignored, not written.
-    for (const type of ["code", "mermaid"] as const) {
+    // And `inline` on a source-block input is ignored, not written.
+    for (const type of ["code", "mermaid", "table", "terminal"] as const) {
       const other = seeded();
       const id = appendBlock(other, {
         type,
@@ -741,7 +741,7 @@ describe("inline marks in the document", () => {
     });
     const thread = createAnnotation(doc, id, 0, 5, "reviewer", "hm");
 
-    for (const type of ["code", "mermaid", "table"] as const) {
+    for (const type of ["code", "mermaid", "table", "terminal"] as const) {
       expect(() => setBlockType(doc, id, type), type).toThrow(
         MarksNotAllowedError,
       );
