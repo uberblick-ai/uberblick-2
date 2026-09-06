@@ -1,8 +1,11 @@
 # Issue shaping — conversation to intake
 
 This protocol owns the conversation that turns a behavioral request into a
-confirmed GitHub intake. It ends when a concise intake is handed off or created
-with `needs-preparation`. It does not prepare the issue, decide that it is
+confirmed GitHub intake. Use it when the owner wants to explore or shape new
+functionality, even before they ask for an issue. Discussion may end with a
+clearer direction or an unresolved question; issue creation is not required.
+The intake path ends with a concise handoff or an issue created with
+`needs-preparation`. It does not prepare the issue, decide that it is
 `ready`, or replace `.github/ISSUE_SPEC.md`.
 
 ## Start with discovery, not a draft
@@ -35,6 +38,46 @@ cases may help formulate a question. They are agent inferences until the owner
 adopts them. Say which is which: use language such as "You said…" for an owner
 statement and "I infer…" or "A possible implication is…" for an inference.
 
+## Keep the effort oriented
+
+For a substantial discussion, establish the intended outcome in one or two
+sentences and use it to choose which questions matter next. Keep a compact
+working overview of settled decisions, open questions, detail not yet clear
+enough to specify, and work outside this effort. Ordinary small requests need
+no overview. Refresh it when decisions change or the conversation resumes,
+not after every message. Refer to issues by descriptive linked titles in prose;
+retain the identifiers required by machine-readable records.
+
+Separate an empirical uncertainty from an owner choice and an ordinary
+engineering judgment. Read available evidence to answer factual questions;
+ask the owner about unresolved intent or trade-offs; leave routine technical
+choices to preparation and implementation. Do not reopen a settled owner
+choice without new conflicting evidence or changed direction. Name the
+conflict when one exists.
+
+Before proposing an investigation, identify the decision it would inform, the
+uncertain assumption, and an observation that could support or overturn it.
+Prefer the cheapest useful evidence before elaborating dependent designs.
+A bounded negative result can be useful. Use read-only exploration during
+shaping; follow existing authorization and repository rules for experiments.
+Do not turn every question into a spike, or require the eventual feature to
+work for an investigation to succeed.
+
+Specify only work whose purpose is clear. Keep unclear future detail in the
+overview instead of inventing implementation slices or decision tickets.
+Deferred detail remains distinct from work outside the intended outcome;
+neither is automatically a new issue. Multiple decisions may be resolved in
+one conversation.
+
+For continuity across sessions, offer to preserve the overview on an existing
+relevant effort issue. Once the owner authorizes that write, record a concise
+comment linking authoritative decisions and relevant issues rather than copying
+their contracts. On resumption, read that context and subsequent decisions;
+an overview is an index, not a competing authority. This permission to record
+context does not grant queue transitions, dependency edits, a new umbrella, or
+new decision tickets. If no effort issue exists, retain the overview in the
+conversation until a confirmed intake is appropriate.
+
 ## Reflect meaning before writing
 
 When the material meaning is clear, reflect it back compactly for correction:
@@ -48,7 +91,9 @@ When the material meaning is clear, reflect it back compactly for correction:
 
 Ask the user to correct the meaning. Do not treat silence, a topic change, or a
 request for more analysis as confirmation to write. Create or update a GitHub
-issue only after explicit confirmation of the reflected intake.
+intake only after explicit confirmation of the reflected meaning. Existing
+explicit authorization counts; do not ask for the same confirmation again.
+Recording an effort overview follows the scoped authorization above.
 
 ## The confirmed intake
 
