@@ -262,7 +262,7 @@ const DOC_LINK_STATE_ATTRIBUTE = "data-doc-link-state";
 const STATE_TITLE: Record<DocLinkState, string | null> = {
   resolved: null,
   unresolved:
-    "This document has not reached this replica's directory yet — the link " +
+    "This document has not reached this page's directory yet — the link " +
     "opens it as soon as it arrives.",
   archived: "This document is archived. The link opens it read-only.",
 };
