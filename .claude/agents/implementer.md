@@ -12,3 +12,6 @@ missing. Your assignment is that role's queue: pick and claim one eligible item
 under its `Pickup` section, and complete only that one — no preselected target
 is supplied or needed. Then stop after the durable handoff the contract names;
 the next assignment starts a fresh session.
+Ending this turn ends this headless session, so doing so while a delegation
+record names this run as `Parent:` and remains `pending` or `running` abandons
+the run; use the waiting and renewal mechanics named by the contract instead.

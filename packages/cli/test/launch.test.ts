@@ -1,12 +1,21 @@
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   type LaunchServices,
   type LaunchSignals,
+  type SessionProcesses,
   type SessionResult,
   LAUNCH_HELP,
   claudeSessionArgs,
@@ -22,6 +31,13 @@ import {
 import { REPO_ROOT, removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
+
+const noWorktreeProcesses: SessionProcesses = {
+  inWorktree: () => ({ pids: [] }),
+  signal(pid, signal) {
+    process.kill(pid, signal);
+  },
+};
 
 function result(overrides: Partial<SessionResult> = {}): SessionResult {
   return {
@@ -181,6 +197,7 @@ describe("ub launch", () => {
           err: () => {},
         },
         source as LaunchSignals,
+        noWorktreeProcesses,
       );
       for (let attempt = 0; attempt < 100 && !stdout.includes("ready"); attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 10));
@@ -218,6 +235,8 @@ describe("ub launch", () => {
             terminal += text;
           },
         },
+        process,
+        noWorktreeProcesses,
       );
 
       expect(outcome).toMatchObject({ started: true, code: 1, lastLine: "thinking" });
@@ -273,10 +292,147 @@ const ready = setInterval(() => {
         root,
         process.env,
         { out: () => {}, err: () => {} },
+        process,
+        noWorktreeProcesses,
       );
 
       expect(outcome).toMatchObject({ started: true, code: 23, interrupted: null });
       expect(readFileSync(evidence, "utf8")).toBe("ready\nSIGTERM\n");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("escalates and reaps a detached helper attributed to the session worktree", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-child-"));
+    const evidence = join(root, "evidence");
+    const helper = join(root, "helper.cjs");
+    const leader = join(root, "leader.cjs");
+    let helperPid = 0;
+    try {
+      writeFileSync(
+        helper,
+        `const fs = require("node:fs");
+const evidence = process.argv[2];
+process.on("SIGTERM", () => fs.appendFileSync(evidence, "SIGTERM\\n"));
+fs.writeFileSync(evidence, String(process.pid) + "\\n");
+setInterval(() => {}, 1000);
+`,
+      );
+      writeFileSync(
+        leader,
+        `const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+const helper = process.argv[2];
+const evidence = process.argv[3];
+spawn(process.execPath, [helper, evidence], {
+  cwd: process.cwd(),
+  detached: true,
+  stdio: "ignore",
+}).unref();
+const ready = setInterval(() => {
+  if (fs.existsSync(evidence)) {
+    clearInterval(ready);
+    process.exit(0);
+  }
+}, 10);
+`,
+      );
+      const worktreeProcesses: SessionProcesses = {
+        inWorktree() {
+          if (!existsSync(evidence)) return { pids: [] };
+          helperPid = Number(readFileSync(evidence, "utf8").split(/\s/)[0]);
+          try {
+            process.kill(helperPid, 0);
+            return { pids: [helperPid] };
+          } catch {
+            return { pids: [] };
+          }
+        },
+        signal(pid, signal) {
+          process.kill(pid, signal);
+        },
+      };
+
+      const outcome = await runForeground(
+        process.execPath,
+        [leader, helper, evidence],
+        root,
+        process.env,
+        { out: () => {}, err: () => {} },
+        process,
+        worktreeProcesses,
+      );
+
+      expect(outcome).toMatchObject({
+        started: true,
+        code: 0,
+        interrupted: null,
+        processCleanup: "terminated",
+      });
+      expect(readFileSync(evidence, "utf8")).toContain("SIGTERM\n");
+      expect(() => process.kill(helperPid, 0)).toThrow();
+    } finally {
+      if (helperPid !== 0) {
+        try {
+          process.kill(helperPid, "SIGKILL");
+        } catch {}
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 10_000);
+
+  it("does not call ordinary child shutdown an abandoned session", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-child-"));
+    try {
+      const leader = join(root, "leader.cjs");
+      writeFileSync(
+        leader,
+        `const { spawn } = require("node:child_process");
+spawn(process.execPath, ["-e", "setTimeout(() => {}, 120)"], { stdio: "inherit" });
+process.exit(0);
+`,
+      );
+
+      const outcome = await runForeground(
+        process.execPath,
+        [leader],
+        root,
+        process.env,
+        { out: () => {}, err: () => {} },
+        process,
+        noWorktreeProcesses,
+      );
+
+      expect(outcome).toMatchObject({ started: true, code: 0 });
+      expect(outcome.processCleanup).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when session process absence cannot be established", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-child-"));
+    try {
+      const outcome = await runForeground(
+        process.execPath,
+        ["-e", "process.exit(0)"],
+        root,
+        process.env,
+        { out: () => {}, err: () => {} },
+        process,
+        {
+          inWorktree: () => ({ error: "test process lookup failed" }),
+          signal: () => {},
+        },
+      );
+
+      expect(outcome).toMatchObject({
+        started: true,
+        code: 0,
+        processCleanup: "failed",
+        detail: "test process lookup failed",
+      });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -594,6 +750,38 @@ esac
     expect(current.stderr()).not.toContain("retrying");
   });
 
+  it("reports abandoned processes and stops without retry when cleanup cannot prove absence", async () => {
+    const ended = rig({
+      sessions: [
+        result({
+          processCleanup: "terminated",
+          lastLine: "No eligible implementer work: test fixture.",
+        }),
+      ],
+      waits: ["SIGINT"],
+    });
+    expect(await launchCommand(["implementer"], ended.io, ended.services)).toBe(130);
+    expect(ended.stderr()).toContain(
+      "launch: implementer codex session left processes running; ended them",
+    );
+
+    const failed = rig({
+      sessions: [
+        result({
+          processCleanup: "failed",
+          detail:
+            "session processes remained reachable after SIGKILL; worktree preserved at /tmp/ub-launch-test",
+        }),
+      ],
+    });
+    expect(await launchCommand(["implementer"], failed.io, failed.services)).toBe(1);
+    expect(failed.seen.sessions).toHaveLength(1);
+    expect(failed.seen.waits).toEqual([]);
+    expect(failed.stderr()).toContain("worktree preserved at /tmp/ub-launch-test");
+    expect(failed.stderr()).toContain("; stopped");
+    expect(failed.stderr()).not.toContain("retrying");
+  });
+
   it("removes an ambient HUB_URL from the environment runtime children receive", () => {
     const box = sandbox();
     const env = launchEnvironment({ ...box.env, HUB_URL: "ws://ambient.invalid:9999" });
@@ -657,6 +845,7 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
           },
           err: () => {},
         },
+        noWorktreeProcesses,
       );
       const entry = readLaunchData(REPO_ROOT).entryRoles["issue-preparer"];
       expect(entry).toBeDefined();
