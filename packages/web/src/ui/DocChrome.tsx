@@ -272,7 +272,7 @@ const COPIED_MS = 1_500;
 type CopyResult = "idle" | "copied" | "failed";
 
 /**
- * Copy this document's shareable link (#68), at the end of the identity line.
+ * Copy this document's shareable link (#68).
  *
  * It used to be the room key under the title, which was both the label and the
  * affordance. The key itself is gone from the header (#535) — the sync panel is
@@ -298,18 +298,21 @@ type CopyResult = "idle" | "copied" | "failed";
  * back to `execCommand`, and reports whether either worked — so a failure is
  * said out loud rather than swallowed into a button that quietly does nothing.
  *
- * The confirmation is positioned out of flow for the reason the rest of this
- * row is built the way it is (#76): nothing here may move sideways, and a word
- * appearing in the row would move everything after it.
+ * The hydrated identity line supplies its short uuid as the visible label. The
+ * waiting screen has no identity line yet, so it keeps the explicit label.
  */
 export function CopyLink({
   room,
   segment,
+  shortUuid,
 }: {
   room: string;
   segment: string;
+  shortUuid?: string;
 }): ReactElement {
   const [result, setResult] = useState<CopyResult>("idle");
+  const label = shortUuid === undefined ? "Copy link" : `uuid ${shortUuid}`;
+  const identity = shortUuid !== undefined;
 
   useEffect(() => {
     if (result === "idle") return;
@@ -327,23 +330,24 @@ export function CopyLink({
   };
 
   return (
-    <span className="ub-copy-wrap">
+    <span className={`ub-copy-wrap${identity ? " ub-copy-identity" : ""}`}>
       <button
         type="button"
         className="ub-copy-link"
-        // The visible words name the action; `title` is not reliably announced,
-        // so the accessible name carries them *and* the address that lands on
-        // the clipboard — which is the part a reader cannot see.
-        aria-label={`Copy link to ${address}`}
-        title={`Copy link to ${address}`}
+        // `title` is not reliably announced, so the accessible name carries the
+        // action and the address that lands on the clipboard even where the
+        // visible label is only the document's short uuid.
+        aria-label={`${label} — copies the canonical document URL for ${address}`}
+        title={`${label} — copies the canonical document URL for ${address}`}
         onClick={() => void copy()}
       >
-        Copy link
+        {label}
       </button>
       {/* Rendered always, empty when idle: `role="status"` only announces
           changes to a region the reader was already in. */}
       <span className="ub-copied" role="status">
-        {result !== "idle" && (result === "copied" ? "link copied" : "copy failed")}
+        {result !== "idle" &&
+          (result === "copied" ? "URL copied to clipboard" : "Copy failed")}
       </span>
     </span>
   );
@@ -427,12 +431,13 @@ export function DocMetaLine({
             canWrite={() => connection.status.writable}
           />
           <span className="ub-doc-ids">
-            uuid {meta.uuid.slice(0, 8)}
+            <CopyLink
+              room={connection.room}
+              segment={segment}
+              shortUuid={meta.uuid.slice(0, 8)}
+            />
             <span className="ub-doc-rev"> · rev {rev ?? "········"}</span>
           </span>
-          {/* Archived or not: a tombstoned document still has an address, and
-              handing somebody the link to it is not a write. */}
-          <CopyLink room={connection.room} segment={segment} />
           {!archived && (
             <DocumentActions
               key={connection.room}

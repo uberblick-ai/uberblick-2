@@ -756,13 +756,11 @@ test("document actions stay reachable, close with the route, and archive into Re
   await expect(page.locator(".ub-list")).toHaveCount(0);
 
   const trigger = page.getByRole("button", { name: "Document actions" });
-  const uuid = page.locator(".ub-doc-ids");
-  const copy = page.locator(".ub-copy-link");
+  const uuid = page.locator(".ub-copy-identity .ub-copy-link");
   const title = page.locator(".ub-title");
   for (const [name, control] of [
     ["title", title],
     ["uuid", uuid],
-    ["copy", copy],
     ["actions", trigger],
   ] as const) {
     await expect(control).toBeVisible();
@@ -771,7 +769,8 @@ test("document actions stay reachable, close with the route, and archive into Re
     expect(box.x, name).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width, name).toBeLessThanOrEqual(360);
   }
-  await expect(uuid).toContainText(/^uuid [0-9a-f]{8}/);
+  await expect(uuid).toHaveText(/^uuid [0-9a-f]{8}/);
+  await expect(page.locator(".ub-doc-meta")).not.toContainText("Copy link");
   expect(
     await page.evaluate(() => {
       const body = document.querySelector<HTMLElement>(".ub-body");
@@ -784,8 +783,8 @@ test("document actions stay reachable, close with the route, and archive into Re
     }),
   ).toEqual({ body: [360, 360], pane: [360, 360] });
 
-  await copy.click();
-  await expect(page.locator(".ub-copied")).toHaveText("link copied");
+  await uuid.click();
+  await expect(page.locator(".ub-copied")).toHaveText("URL copied to clipboard");
 
   await trigger.click();
   await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
@@ -2004,14 +2003,16 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
   ): Promise<{
     liveHeight: number;
     liveWidth: number;
+    takesTheRevision: boolean;
     takesTheTitle: boolean;
     scrolled: number;
   }> =>
     page.evaluate((flush) => {
       const control = document.querySelector(".ub-copy-link");
+      const revision = document.querySelector(".ub-doc-rev");
       const title = document.querySelector(".ub-title");
       const pane = document.querySelector(".ub-pane");
-      if (control === null || title === null || pane === null) {
+      if (control === null || revision === null || title === null || pane === null) {
         throw new Error("e2e: no document identity line");
       }
       if (flush) {
@@ -2038,9 +2039,14 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
       while (answers(x, bottom + 1)) bottom += 1;
       while (answers(left - 1, y)) left -= 1;
       while (answers(right + 1, y)) right += 1;
+      const revisionBox = revision.getBoundingClientRect();
       return {
         liveHeight: bottom - top + 1,
         liveWidth: right - left + 1,
+        takesTheRevision: answers(
+          Math.round(revisionBox.x + revisionBox.width / 2),
+          Math.round(revisionBox.y + revisionBox.height / 2),
+        ),
         takesTheTitle: answers(x, title.getBoundingClientRect().top + 1),
         scrolled: pane.scrollTop,
       };
@@ -2061,7 +2067,8 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
     // The target a thumb needs is really there, not merely declared…
     expect(rest.liveHeight).toBeGreaterThanOrEqual(44);
     expect(rest.liveWidth).toBeGreaterThanOrEqual(44);
-    // …and it is not paid for with the title underneath.
+    // …and it is not paid for with either adjacent fact.
+    expect(rest.takesTheRevision).toBe(false);
     expect(rest.takesTheTitle).toBe(false);
 
     // Then again with the header scrolled up against the clip edge. A
@@ -2071,16 +2078,66 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
     expect(scrolled.scrolled).toBeGreaterThan(0);
     expect(scrolled.liveHeight).toBeGreaterThanOrEqual(44);
     expect(scrolled.liveWidth).toBeGreaterThanOrEqual(44);
+    expect(scrolled.takesTheRevision).toBe(false);
     expect(scrolled.takesTheTitle).toBe(false);
   }
 
-  // The confirmation is drawn over the control rather than beside it, because
-  // beside it are the `uuid … · rev …` facts this line exists to show, and on
-  // the waiting screen the whole sync reading. Containment inside the control's
-  // own box is the claim, since it holds whatever the row happens to carry.
+  // The identity confirmation uses the target's lower half: it neither moves
+  // nor intersects the uuid, revision, title or actions when it appears.
+  await page.setViewportSize({ width: 360, height: 620 });
+  await page.getByRole("button", { name: "Hide document list" }).click();
+  const headerRects = (): Promise<Record<string, DOMRect>> =>
+    page.evaluate(() => {
+      const selectors = {
+        uuid: ".ub-copy-link",
+        revision: ".ub-doc-rev",
+        title: ".ub-title",
+        actions: ".ub-actions-trigger",
+      } as const;
+      return Object.fromEntries(
+        Object.entries(selectors).map(([name, selector]) => {
+          const element = document.querySelector(selector);
+          if (element === null) throw new Error(`e2e: missing ${selector}`);
+          return [name, element.getBoundingClientRect().toJSON()];
+        }),
+      );
+    });
+  const beforeCopy = await headerRects();
+  await page.locator(".ub-copy-link").click();
+  await expect(page.locator(".ub-copied")).toHaveText("URL copied to clipboard");
+  expect(await headerRects()).toEqual(beforeCopy);
+  expect(
+    await page.evaluate(() => {
+      const rangeFor = (selector: string): DOMRect => {
+        const element = document.querySelector(selector);
+        if (element === null) throw new Error(`e2e: missing ${selector}`);
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        return range.getBoundingClientRect();
+      };
+      const feedback = rangeFor(".ub-copied");
+      const separatedFrom = [
+        rangeFor(".ub-copy-link"),
+        rangeFor(".ub-doc-rev"),
+        document.querySelector(".ub-title")?.getBoundingClientRect(),
+        document.querySelector(".ub-actions-trigger")?.getBoundingClientRect(),
+      ];
+      return separatedFrom.every(
+        (box) =>
+          box !== undefined &&
+          (feedback.right <= box.left ||
+            feedback.left >= box.right ||
+            feedback.bottom <= box.top ||
+            feedback.top >= box.bottom),
+      );
+    }),
+  ).toBe(true);
+
+  // The waiting screen still carries the explicit text control. Its feedback
+  // remains inside that button because there is no hydrated identity to hide.
   const confirmationIsContained = async (open: Page): Promise<boolean> => {
     await open.locator(".ub-copy-link").click();
-    await expect(open.locator(".ub-copied")).not.toBeEmpty();
+    await expect(open.locator(".ub-copied")).toHaveText("URL copied to clipboard");
     return open.evaluate(() => {
       const control = document.querySelector(".ub-copy-link");
       const note = document.querySelector(".ub-copied");
@@ -2089,13 +2146,15 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
       const range = document.createRange();
       range.selectNodeContents(note);
       const shown = range.getBoundingClientRect();
-      return shown.left >= box.left - 0.5 && shown.right <= box.right + 0.5;
+      return (
+        shown.left >= box.left - 0.5 &&
+        shown.right <= box.right + 0.5 &&
+        shown.top >= box.top - 0.5 &&
+        shown.bottom <= box.bottom + 0.5
+      );
     });
   };
-  expect.soft(await confirmationIsContained(page)).toBe(true);
 
-  // And on the waiting screen, where the control inherits a larger font and the
-  // same words are wider — the reason its width floor is in `em`.
   const waiting = await openApp(
     browser,
     "light",
