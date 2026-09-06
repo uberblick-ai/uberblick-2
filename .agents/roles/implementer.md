@@ -82,6 +82,9 @@ implementer starts a Codex reviewer — under the README's delegation record and
 the transport in `.claude/skills/next-issue/review-protocol.md`. Stay in the
 assignment, renewing your claim, until that mutable record contains the durable
 verdict or records a failed dispatch.
+Ending this turn ends the session, so doing so while a delegation record names
+this run as `Parent:` and remains `pending` or `running` abandons the run; stay
+alive with the waiting and renewal mechanics in the review protocol and README.
 
 When only one challenge is required, apply clearly correct, in-scope findings
 in one batch and answer the rest with evidence; that answer is not a

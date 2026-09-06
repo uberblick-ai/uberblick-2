@@ -27,11 +27,12 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  realpathSync,
   statSync,
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
@@ -89,6 +90,8 @@ export interface SessionResult {
   signal: NodeJS.Signals | null;
   interrupted: NodeJS.Signals | null;
   lastLine: string;
+  /** Present only when the session left reachable processes behind. */
+  processCleanup?: "terminated" | "failed";
   detail?: string;
   /** The end of both captured streams — read only when the session failed. */
   tail?: string;
@@ -124,13 +127,77 @@ export interface LaunchSignals {
   off(signal: NodeJS.Signals, listener: () => void): unknown;
 }
 
+export interface SessionProcesses {
+  /** PIDs whose current working directory is inside this session's private worktree. */
+  inWorktree(root: string): { pids: number[]; error?: undefined } | { pids?: undefined; error: string };
+  signal(pid: number, signal: NodeJS.Signals): void;
+}
+
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repositoryRoot = dirname(dirname(packageRoot));
 const IDLE_MS = 30 * 60 * 1_000;
 const FAILURE_BACKOFF_MS = 5_000;
+// Normal runtime children may still be closing their inherited stdio when the
+// leader exits. Only processes that remain after this settle window count as
+// abandoned work that the launcher had to end.
+const SESSION_EXIT_SETTLE_MS = 500;
+// A nested Codex supervisor uses up to 2.8s to stop and observe its own group.
+const SESSION_TERMINATION_GRACE_MS = 4_000;
+const SESSION_KILL_WAIT_MS = 1_000;
+const SESSION_PROCESS_POLL_MS = 100;
 const IDLE_LABEL = `${IDLE_MS / 60_000}min`;
 const BACKOFF_LABEL = `${FAILURE_BACKOFF_MS / 1_000}s`;
 const TAIL_LIMIT = 4_096;
+
+const systemSessionProcesses: SessionProcesses = {
+  inWorktree(root) {
+    // The supported macOS host has no /proc, and helpers spawned by either
+    // runtime may reparent into their own session. A cwd inside the unique
+    // per-run worktree is therefore the attribution boundary. A helper that
+    // also leaves that worktree is outside this launcher guarantee and belongs
+    // to housekeeping rather than to an unsafe guess at process ownership.
+    const uid = process.getuid?.();
+    if (uid === undefined) {
+      return { error: "cannot establish session process absence on this platform" };
+    }
+    const listed = spawnSync("lsof", ["-a", "-d", "cwd", "-u", String(uid), "-F", "pn"], {
+      cwd: tmpdir(),
+      encoding: "utf8",
+      timeout: 1_000,
+    });
+    if ((listed.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+      return { error: "cannot establish session process absence because lsof is unavailable" };
+    }
+    if (listed.status !== 0) {
+      const reason = listed.error?.message || listed.stderr.trim() || `lsof exited ${listed.status}`;
+      return {
+        error: `cannot establish session process absence (lsof status ${listed.status}): ${lastLine(reason)}`,
+      };
+    }
+    const worktree = realpathSync(root);
+    const pids = new Set<number>();
+    let pid: number | undefined;
+    for (const line of listed.stdout.split(/\r?\n/)) {
+      if (/^p[1-9][0-9]*$/.test(line)) {
+        pid = Number(line.slice(1));
+      } else if (
+        pid !== undefined &&
+        line.startsWith("n") &&
+        (line.slice(1) === worktree || line.slice(1).startsWith(`${worktree}${sep}`))
+      ) {
+        pids.add(pid);
+      }
+    }
+    return { pids: [...pids] };
+  },
+  signal(pid, signal) {
+    try {
+      process.kill(pid, signal);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  },
+};
 
 /**
  * A failure no amount of waiting repairs: the loop stops instead of retrying.
@@ -355,6 +422,7 @@ export function runForeground(
   env: NodeJS.ProcessEnv,
   io: Io,
   signals: LaunchSignals = process,
+  processes: SessionProcesses = systemSessionProcesses,
 ): Promise<SessionResult> {
   return new Promise((resolve) => {
     const child = spawn(command, [...args], {
@@ -370,44 +438,131 @@ export function runForeground(
     let tail = "";
     let interrupted: NodeJS.Signals | null = null;
     let settled = false;
+    let closeResult: { code: number; signal: NodeJS.Signals | null } | null = null;
+    let exitResult: { code: number; signal: NodeJS.Signals | null } | null = null;
+    let cleanupFinished = false;
+    let processCleanup: SessionResult["processCleanup"];
+    let cleanupDetail: string | undefined;
     const handlers = new Map(FORWARDED.map((signal) => [signal, () => forward(signal)]));
 
-    const sendToGroup = (signal: NodeJS.Signals): void => {
+    const signalGroup = (signal: NodeJS.Signals | 0): boolean => {
       try {
         if (child.pid === undefined) throw new Error("child has no process id");
         process.kill(-child.pid, signal);
-      } catch {
-        if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+        return true;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code !== "ESRCH";
       }
+    };
+
+    const reachable = (): { pids: number[]; error?: undefined } | { error: string; pids?: undefined } => {
+      const found = processes.inWorktree(root);
+      if (found.error !== undefined) return found;
+      return { pids: found.pids.filter((pid) => pid !== process.pid && pid !== child.pid) };
+    };
+    const absence = (): { absent: boolean; error?: undefined } | { error: string; absent?: undefined } => {
+      const found = reachable();
+      if (found.error !== undefined) return found;
+      return { absent: !signalGroup(0) && found.pids.length === 0 };
+    };
+    const waitForAbsence = async (
+      milliseconds: number,
+    ): Promise<{ absent: boolean; error?: undefined } | { error: string; absent?: undefined }> => {
+      const limit = Date.now() + milliseconds;
+      for (;;) {
+        const result = absence();
+        if (result.error !== undefined || result.absent || Date.now() >= limit) return result;
+        await new Promise((resolveWait) => setTimeout(resolveWait, SESSION_PROCESS_POLL_MS));
+      }
+    };
+    const signalReachable = (signal: NodeJS.Signals): string | undefined => {
+      signalGroup(signal);
+      const found = reachable();
+      if (found.error !== undefined) return found.error;
+      try {
+        for (const pid of found.pids) processes.signal(pid, signal);
+      } catch (error) {
+        return `could not signal a session process: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      return undefined;
+    };
+    const cleanupProcesses = async (): Promise<{
+      outcome?: "terminated" | "failed";
+      detail?: string;
+    }> => {
+      const settledNaturally = await waitForAbsence(SESSION_EXIT_SETTLE_MS);
+      if (settledNaturally.error !== undefined) {
+        return { outcome: "failed", detail: settledNaturally.error };
+      }
+      if (settledNaturally.absent) return {};
+
+      const termFailure = signalReachable("SIGTERM");
+      if (termFailure !== undefined) return { outcome: "failed", detail: termFailure };
+      const afterTerm = await waitForAbsence(SESSION_TERMINATION_GRACE_MS);
+      if (afterTerm.error !== undefined) return { outcome: "failed", detail: afterTerm.error };
+      if (afterTerm.absent) return { outcome: "terminated" };
+
+      const killFailure = signalReachable("SIGKILL");
+      if (killFailure !== undefined) return { outcome: "failed", detail: killFailure };
+      const afterKill = await waitForAbsence(SESSION_KILL_WAIT_MS);
+      if (afterKill.error !== undefined) return { outcome: "failed", detail: afterKill.error };
+      return afterKill.absent
+        ? { outcome: "terminated" }
+        : { outcome: "failed", detail: "session processes remained reachable after SIGKILL" };
     };
 
     const finish = (result: SessionResult): void => {
       if (settled) return;
       settled = true;
       for (const [signal, handler] of handlers) signals.off(signal, handler);
+      child.stdout?.off("data", onStdout);
+      child.stderr?.off("data", onStderr);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
       resolve(result);
+    };
+    const finishWhenReady = (): void => {
+      if (!cleanupFinished || exitResult === null) return;
+      // A failed cleanup must not wait forever on a survivor holding inherited
+      // stdio. finish() removes the listeners before runSession closes its fd.
+      if (processCleanup !== "failed" && closeResult === null) return;
+      const outcome = closeResult ?? exitResult;
+      finish({
+        started: true,
+        code: outcome.code,
+        signal: outcome.signal,
+        interrupted,
+        lastLine: lastLine(outputTail),
+        tail,
+        ...(processCleanup === undefined ? {} : { processCleanup }),
+        ...(cleanupDetail === undefined ? {} : { detail: cleanupDetail }),
+      });
     };
     const forward = (signal: NodeJS.Signals): void => {
       if (interrupted !== null) return;
       interrupted = signal;
-      sendToGroup(signal);
+      if (!signalGroup(signal) && child.exitCode === null && child.signalCode === null) {
+        child.kill(signal);
+      }
     };
     for (const [signal, handler] of handlers) signals.on(signal, handler);
 
     const keepTail = (text: string): void => {
       tail = `${tail}${text}`.slice(-TAIL_LIMIT);
     };
-    child.stdout?.on("data", (chunk: Buffer) => {
+    const onStdout = (chunk: Buffer): void => {
       const text = chunk.toString("utf8");
       outputTail = `${outputTail}${text}`.slice(-65_536);
       keepTail(text);
       io.out(text);
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
+    };
+    const onStderr = (chunk: Buffer): void => {
       const text = chunk.toString("utf8");
       keepTail(text);
       io.err(text);
-    });
+    };
+    child.stdout?.on("data", onStdout);
+    child.stderr?.on("data", onStderr);
     child.once("error", (error: NodeJS.ErrnoException) => {
       finish({
         started: false,
@@ -420,19 +575,24 @@ export function runForeground(
       });
     });
     child.once("exit", (code, signal) => {
-      if (interrupted === null && (code !== 0 || signal !== null)) {
-        sendToGroup("SIGTERM");
-      }
+      exitResult = { code: code ?? 1, signal };
+      void cleanupProcesses()
+        .then((cleanup) => {
+          processCleanup = cleanup.outcome;
+          cleanupDetail = cleanup.detail;
+        })
+        .catch((error) => {
+          processCleanup = "failed";
+          cleanupDetail = `session process cleanup failed: ${error instanceof Error ? error.message : String(error)}`;
+        })
+        .finally(() => {
+          cleanupFinished = true;
+          finishWhenReady();
+        });
     });
     child.once("close", (code, signal) => {
-      finish({
-        started: true,
-        code: code ?? 1,
-        signal,
-        interrupted,
-        lastLine: lastLine(outputTail),
-        tail,
-      });
+      closeResult = { code: code ?? 1, signal };
+      finishWhenReady();
     });
   });
 }
@@ -504,6 +664,7 @@ export function createLaunchServices(
   root: string,
   env: NodeJS.ProcessEnv,
   io: Io,
+  processes: SessionProcesses = systemSessionProcesses,
 ): LaunchServices {
   let scratch: string | null = null;
   let preservedFailureWorktree: string | null = null;
@@ -617,6 +778,8 @@ export function createLaunchServices(
               worktree,
               env,
               capture,
+              process,
+              processes,
             )
           : await runForeground(
               "codex",
@@ -624,6 +787,8 @@ export function createLaunchServices(
               worktree,
               env,
               capture,
+              process,
+              processes,
             );
       } finally {
         closeSync(handle);
@@ -635,11 +800,21 @@ export function createLaunchServices(
           ? lastLine(readFileSync(lastPath, "utf8"))
           : result.lastLine,
       };
-      if (!result.started || result.code !== 0 || result.signal !== null) {
-        const failure = result.detail ??
-          (result.signal === null
-            ? `session exited with status ${result.code}`
-            : `session ended from ${result.signal}`);
+      const failedSession = !result.started || result.code !== 0 || result.signal !== null;
+      const sessionFailure = result.signal === null
+        ? `session exited with status ${result.code}`
+        : `session ended from ${result.signal}`;
+      if (result.processCleanup === "failed") {
+        preservedFailureWorktree ??= worktree;
+        return {
+          ...withLastLine,
+          detail: `${result.detail ?? "session process cleanup failed"}${
+            failedSession ? `; ${sessionFailure}` : ""
+          }; worktree preserved at ${worktree}`,
+        };
+      }
+      if (failedSession) {
+        const failure = result.detail ?? sessionFailure;
         if (preservedFailureWorktree === null) {
           preservedFailureWorktree = worktree;
           return {
@@ -826,6 +1001,14 @@ export async function launchCommand(
         io.err(`launch: ${parsed.role} ${runtime} ${session.detail}${transcriptSuffix(session)}\n`);
       }
       return await stopFromSignal(services, session.interrupted);
+    }
+    if (session.processCleanup === "terminated") {
+      io.err(`launch: ${parsed.role} ${runtime} session left processes running; ended them\n`);
+    } else if (session.processCleanup === "failed") {
+      io.err(
+        `launch: ${parsed.role} ${runtime} ${session.detail ?? "session process cleanup failed"}${transcriptSuffix(session)}; stopped\n`,
+      );
+      return 1;
     }
     if (!session.started || session.code !== 0 || session.signal !== null) {
       const detail = session.detail ??
