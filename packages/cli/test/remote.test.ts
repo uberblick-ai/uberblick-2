@@ -39,6 +39,8 @@ import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
 import {
   appendBlock,
   directoryRoom,
+  getBlocks,
+  getMeta,
   initDoc,
   roomForDoc,
   tombstoneDirectoryEntry,
@@ -61,19 +63,26 @@ const OTHER_SECRET = "a-different-secret-the-remote-was-deployed-with";
 const WORKSPACE = "b7c3d914-5a20-4e6f-8d13-9f04a2c68e75";
 
 /**
- * `remote join` can spend 35 s in preflight (connect plus two sync waits),
- * 50 s moving the mirror (connect plus three sync waits), and another 35 s
- * verifying it: 120 s in capped, named waits. Ten seconds above that ceiling
- * also leaves more than twice the slowest observed 57.9 s run.
+ * One `remote join` can spend 20 s reading the directory, 50 s moving the
+ * mirror (connect plus three sync waits), and another 35 s verifying it: 105 s
+ * in capped, named waits. Ten seconds above that ceiling keeps a child-process
+ * timeout from replacing the condition the command itself can name.
  */
-const LARGE_CORPUS_JOIN_TIMEOUT_MS = 130_000;
+const LARGE_CORPUS_JOIN_ATTEMPT_TIMEOUT_MS = 115_000;
+
+/**
+ * A retryable first attempt stops before verification, after at most 70 s of
+ * named waits. One such refusal plus one complete attempt and twenty seconds
+ * of scheduling margin therefore fit inside this overall recovery bound.
+ */
+const LARGE_CORPUS_JOIN_RECOVERY_TIMEOUT_MS = 195_000;
 
 /**
  * The slowest observed seed took roughly 25 s. This stays another ten seconds
- * above that seed plus the child deadline, so the child's named failure wins
- * before Vitest's generic timeout.
+ * above that seed plus the recovery bound, so a command or harness diagnostic
+ * wins before Vitest's generic timeout.
  */
-const LARGE_CORPUS_TEST_TIMEOUT_MS = 165_000;
+const LARGE_CORPUS_TEST_TIMEOUT_MS = 230_000;
 
 /** A JWT-ish token: base64url of `{"sub"…` always starts `eyJ`. */
 const TOKEN_SHAPE = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/;
@@ -212,6 +221,18 @@ async function webTombstone(
   const directory = await openRoom(hub, directoryRoom(WORKSPACE), secret);
   upsertDirectoryEntry(directory.doc, { uuid, title, tags: [] });
   tombstoneDirectoryEntry(directory.doc, uuid);
+  await directory.done();
+}
+
+/** Put a live entry in the hub's directory without creating its document room. */
+async function webDirectoryOnly(
+  hub: Hub,
+  uuid: string,
+  title: string,
+  secret: string = SECRET,
+): Promise<void> {
+  const directory = await openRoom(hub, directoryRoom(WORKSPACE), secret);
+  upsertDirectoryEntry(directory.doc, { uuid, title, tags: [] });
   await directory.done();
 }
 
@@ -737,6 +758,81 @@ describe("ub remote join", () => {
     ]);
   });
 
+  it("repairs a remote directory-only live document from the local replica", async () => {
+    const title = "Partial join held here";
+    const local = sandbox();
+    const uuid = await withMcp(
+      local,
+      { WORKSPACE_ID: WORKSPACE },
+      async (call) => {
+        const created = await call("create_doc", {
+          title,
+          description: "A live room held only by the joining machine.",
+          blocks: [{ type: "paragraph", text: "Upload me on the rerun." }],
+        });
+        return created.uuid as string;
+      },
+    );
+    const remote = await startHub(OTHER_SECRET);
+    await webDirectoryOnly(remote, uuid, title, OTHER_SECRET);
+
+    const run = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(local, OTHER_SECRET),
+      ],
+      local,
+    );
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toContain("joined 1 document — directory verified");
+    expect(persistedHubUrl(local)).toBe(url(remote));
+    expect(readConfigFile(local, "config.json").workspace).toBe(WORKSPACE);
+
+    const remoteCopy = await openRoom(
+      remote,
+      roomForDoc(WORKSPACE, uuid),
+      OTHER_SECRET,
+    );
+    try {
+      expect(getMeta(remoteCopy.doc).uuid).toBe(uuid);
+      expect(getBlocks(remoteCopy.doc).map((block) => block.text)).toEqual([
+        "Upload me on the rerun.",
+      ]);
+    } finally {
+      await remoteCopy.done();
+    }
+  });
+
+  it("refuses a live directory entry whose content neither side can produce", async () => {
+    const title = "Missing live room";
+    const uuid = randomUUID();
+    const remote = await startHub(OTHER_SECRET);
+    await webDirectoryOnly(remote, uuid, title, OTHER_SECRET);
+    const local = sandbox();
+
+    const run = await runUbAsync(
+      [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(local, OTHER_SECRET),
+      ],
+      local,
+    );
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain(uuid);
+    expect(run.stderr).toContain(title);
+    expect(run.stderr).toContain("another replica that still holds the content");
+    expect(run.stdout).not.toContain("moved and verified");
+    expect(existsSync(join(local.configHome, "uberblick", "config.json"))).toBe(
+      false,
+    );
+  });
+
   it("refuses an archive whose content neither side can produce", async () => {
     const title = "Lost archive";
     const archived = randomUUID();
@@ -805,22 +901,47 @@ describe("ub remote join", () => {
   it(
     "joins 5,000 local documents and persists the verified binding",
     async () => {
+      // Loaded-host proof, 2026-09-06: this exact case passed in 16.45 s with
+      // eight foreground `yes` workers (the #803 probe shape), and the cleanup
+      // trap left `pgrep -c -x yes` at zero. Under a slower runner, only the
+      // command's own specific local-rerun instruction earns the second try.
       const remote = await startHub(OTHER_SECRET);
       const local = sandbox();
       await seedLocalCorpus(local, 5_000);
 
-      const run = await runUbAsync(
-        [
-          "remote",
-          "join",
-          joinUrl(remote),
-          "--secret-file",
-          secretFile(local, OTHER_SECRET),
-        ],
-        local,
-        { UB_TEST_MAX_WAIT_MS: "15000" },
-        LARGE_CORPUS_JOIN_TIMEOUT_MS,
-      );
+      const args = [
+        "remote",
+        "join",
+        joinUrl(remote),
+        "--secret-file",
+        secretFile(local, OTHER_SECRET),
+      ];
+      const deadline = Date.now() + LARGE_CORPUS_JOIN_RECOVERY_TIMEOUT_MS;
+      const runAttempt = async () => {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          throw new Error(
+            `timed out waiting for the 5,000-document join recovery within ${LARGE_CORPUS_JOIN_RECOVERY_TIMEOUT_MS}ms`,
+          );
+        }
+        return await runUbAsync(
+          args,
+          local,
+          { UB_TEST_MAX_WAIT_MS: "15000" },
+          Math.min(LARGE_CORPUS_JOIN_ATTEMPT_TIMEOUT_MS, remaining),
+        );
+      };
+
+      let run = await runAttempt();
+      const instructedRerun =
+        run.status === 1 &&
+        /has not acknowledged \d+ rooms?, so this sync did not finish inside its time limit:/.test(
+          run.stderr,
+        ) &&
+        run.stderr.includes("Rerun this command on this machine once");
+      if (instructedRerun) {
+        run = await runAttempt();
+      }
 
       expect(run.status, run.stderr).toBe(0);
       expect(run.stdout).toContain("joined 5000 documents — directory verified");
