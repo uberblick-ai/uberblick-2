@@ -307,9 +307,9 @@ dialling it. An entry of `workspaces` that is not a workspace id is dropped
 rather than offered, and a list with nothing usable in it degrades to the
 bundle's own — which on this deployment is empty, so `/` says there is no
 workspace while document links keep working. A document with no `hubAuthToken`
-leaves a client that renders from its local cache and says "no hub token"; there
-is no fallback secret, and the client re-reads the document on its next connect
-attempt rather than giving up for the life of the tab.
+leaves the page with no document content and says "no hub token"; there is no
+browser cache or fallback secret, and the client re-reads the document on its
+next connect attempt rather than giving up for the life of the tab.
 
 Rotating the secret is the same edit: set it in `.env` and recreate the two
 containers with `sh remote-compose.sh up --detach`. It is no longer a rebuild —

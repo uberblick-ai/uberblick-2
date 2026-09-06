@@ -363,9 +363,13 @@ describe("what a reference says about its target", () => {
       // screen — which is what makes cmd-click a new tab.
       expect(anchor?.getAttribute("href")).toBe(`/${WORKSPACE}/${TARGET}`);
       expect(anchor?.getAttribute("data-doc-link-state")).toBe("unresolved");
+      expect(anchor?.getAttribute("title")).toBe(
+        "This document has not reached this page's directory yet — the link opens it as soon as it arrives.",
+      );
 
       upsertDirectoryEntry(directory, { uuid: TARGET, title: "The hub" });
       expect(anchor?.getAttribute("data-doc-link-state")).toBe("resolved");
+      expect(anchor?.getAttribute("title")).toBeNull();
 
       // A tombstone is not an absence: the document is still readable, and the
       // link still opens it — it just says which of the two it is.

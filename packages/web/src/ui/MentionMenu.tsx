@@ -261,7 +261,7 @@ export function MentionMenu({
         // knows of no documents, and claiming there are none would be a claim
         // this client cannot make (see `shell/DocumentList.tsx`).
         <p className="ub-blockmenu-empty ub-muted">
-          No document this replica knows matches.
+          No document this page knows matches.
         </p>
       ) : (
         <div className="ub-blockmenu-list" role="listbox" aria-label="Documents">

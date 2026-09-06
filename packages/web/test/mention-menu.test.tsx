@@ -319,7 +319,7 @@ describe("the picker", () => {
       // which a partly synced replica cannot claim.
       const card = mounted.card();
       expect(card?.querySelector(".ub-blockmenu-empty")?.textContent).toBe(
-        "No document this replica knows matches.",
+        "No document this page knows matches.",
       );
 
       // Nothing to move over or pick, so the keys are the prose's again: this

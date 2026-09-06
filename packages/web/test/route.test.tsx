@@ -569,6 +569,8 @@ describe("an address that resolves to no document says which one, and why", () =
     const text = paneText({ kind: "doc", workspace, uuid: UUID }, meta(""));
     expect(text).toContain("Waiting for sync");
     expect(text).toContain(UUID);
+    expect(text).toContain("has not reached this page yet");
+    expect(text).not.toContain("replica");
     // Never the word for a document that does not exist: it may yet arrive.
     expect(text).not.toContain("not found");
   });
