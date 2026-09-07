@@ -1703,7 +1703,8 @@ export function registerTools(
         "to canonical ids before storage. An existing retired or unresolved assignment may be preserved by passing " +
         "the id returned by get_doc; it may be removed, but cannot be newly added. Any unknown or newly assigned " +
         "retired value refuses the whole mutation before the document, directory stub or index changes and names " +
-        "every invalid value; call list_tags for the active vocabulary.\n\n" +
+        "every invalid value; call list_tags for the active vocabulary. This is the tool the `tagHint` on an " +
+        "untagged write points at.\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
