@@ -112,6 +112,8 @@ describe("the workspace tag catalog", () => {
       group: "Reference",
     });
     expect(pinned.tagHint).toBeUndefined();
+    const archived = await rig.ok("archive_doc", { uuid: created.uuid });
+    expect(archived.tagHint).toBeUndefined();
   });
 
   it("does not nudge an assigned document or one with no active local choices", async () => {
