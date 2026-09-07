@@ -1,30 +1,10 @@
 # Role contracts
 
-The delivery workflow has three continuous entry roles: `issue-preparer`,
-`implementer` and `integrator`. They delegate the exact-key internal roles
-`issue-adversary` and `implementation-reviewer`. Each file beside this one is one
-role's contract, with thin runtime adapters pointing back at it. There is no
-coordinator role: a multi-issue program is a milestone plus `umbrella` parents,
-ordered by `Depends-on` and dispatched by the ordinary queues (owner decision,
-2026-09-04).
-
-This file states what every role obeys, so no contract repeats it. Repository
-policy — `AGENTS.md`, `CLAUDE.md`, `.github/ISSUE_SPEC.md` — wins on conflicts,
-with the owner-authorized exceptions recorded here: each role posts its own
-claim, and an issue-preparer may grant `ready` after the one-pass clearance its
-contract defines (owner corrections on #467 and #477, 2026-08-29), narrowed for
-an issue carrying `Implements:` by the owner-decision gate in
-`.github/ISSUE_SPEC.md`. Installing
-these descriptions starts nothing, and merge authority still comes only from
-repository policy. The role split's reasoning is Uberblick project agent
-workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
-
-Issue shaping before queue entry follows
-`.agents/protocols/issue-shaping.md` and grants no lifecycle state beyond a
-confirmed `needs-preparation` intake. The issue-preparer owns queue authority
-and side effects; `.agents/protocols/issue-preparation.md` owns its shared
-grounding, challenge, and recheck procedure; `.github/ISSUE_SPEC.md` alone owns
-the final issue schema and lifecycle.
+Shared identity, ownership and recovery for delivery roles. Read the assigned
+role for pickup and action order; the issue schema lives in
+`.github/ISSUE_SPEC.md`, and executable gates in
+`.agents/protocols/delivery-policy.md`. Product intent and workflow reasoning
+live in the MCP corpus. These are distinct authorities, not duplicate policies.
 
 ## One bounded assignment
 
@@ -106,49 +86,10 @@ in a different place.) A top-level handoff opens `Done: <role>
 mutable delegation record above instead. Handoffs stay proportional: link evidence
 instead of narrating transcripts. GitHub must be sufficient for recovery.
 
-**A durable comment reaches GitHub as composed.** Every durable comment body —
-including claims, renewals, withdrawals, takeovers, delegation updates,
-returns, `Done:` handoffs, review rounds, finding dispositions, merge reports
-and retrospective replies — must land byte for byte: line breaks intact,
-backticks and `$` literal. Write it into a file under the run's own scratch
-directory, `<scratch>` here, and post or patch from that file; any composition
-with that property is fine, and a quoted heredoc is one. Writing the file is
-only half: the posting or patching command must also read its bytes. For
-example, `-f body=@<path>` sends the literal `@<path>`; the `-F` form in the
-PATCH example below reads the file.
-
-```sh
-rm -f <scratch>/done.md
-cat > <scratch>/done.md <<'EOF'
-Done: issue-preparer <run id>
-Grounding: <origin/main SHA>
-Preparation: trivial-self-check
-Outcome: ready
-EOF
-gh issue comment <N> --body-file <scratch>/done.md
-```
-
-For a mutable record, resolve its immutable comment id from the matching run id
-and patch that exact object:
-
-```sh
-gh api --method PATCH repos/<owner>/<repo>/issues/comments/<comment-id> \
-  -F body=@<scratch>/record.md
-```
-
-Never use "edit last": another role or human may have commented since the
-assignment, and mutating that record would corrupt coordination state.
-
-The `rm -f` is load-bearing: the run shell sets `noclobber`, so `>` onto a
-file that already exists fails — and `gh` then posts the file's *previous*
-body as if it were this one (observed 2026-08-31: a claim renewal carrying
-the prior renewal's timestamp).
-
-#491 lost a `Done:` to both at once: a shell expanded `` `ub --help` `` into the
-verdict — as `--body "…"` and a bare `<<EOF` both do — and its line breaks
-arrived as the two literal characters `\n`, which no shell had touched. A
-garbled record survives only in the launching session's transcript, the private
-channel every rule here exists to keep out of the record.
+**Durable records.** Post comment bodies from files (`gh ... --body-file`),
+and update a mutable record by its immutable comment id (`gh api ... -F
+body=@<file>`), never "edit last". Preserve literal text and newlines. Confirm
+scratch-file writes succeeded before posting; noclobber can leave stale content.
 
 **The race rule.** A live top-level claim makes the item ineligible for every
 other queue pickup. An internal child's mutable assignment record is its
@@ -175,21 +116,13 @@ one: touch the body so the comment's `updated_at` moves, appending or replacing 
 single `Renewed: <UTC timestamp>` line. Do not renew before that `updated_at` is
 25 minutes old; renew before it reaches 30 minutes.
 
-Editing rather than appending is what lets the two timestamps do two different
-jobs. `created_at` never moves, so it keeps the holder's position in the claim
-order above and a superseded holder still cannot write its way back to the
-front. `updated_at` moves on every renewal and is the liveness signal. Both are
-on the REST comment object, so a reclaimer reads them with no new machinery, and
-GitHub's comment edit history keeps the renewals auditable. A renewal says only
-"still here", so posting it as a comment buries the claim, the delegation
-record, the gate evidence and the triage under records that carry nothing.
-
 A top-level claim other than an implementation claim is stale when no completion
 exists and its claim comment's `updated_at` is more than 60 minutes old; the
 window is twice the renewal interval so that a healthy foreground run is never
 reclaimed in the gap between two renewals.
-Every implementation claim uses `AGENTS.md`'s 30-minute durable-liveness
-rule. A later valid claim takes over a stale one and continues the current
+An implementation claim is stale when no matching later implementer Done
+exists and the claim's updated_at is more than 30 minutes old. A later valid
+claim takes over a stale one and continues the current
 remote branch head; the superseded holder stops if it resumes.
 
 A nested **non-implementation** assignment expires when its record remains
@@ -221,14 +154,6 @@ its own so that a run which dies without stopping it cannot leave it running
 indefinitely. A renewer that outlives its run is worse than none, because it
 keeps an abandoned claim looking alive instead of letting it age into recovery.
 
-This is not housekeeping for its own sake. The harness reaps background tasks
-under memory pressure, and it does so with `SIGTERM` — which a trap can catch,
-and which leaves a spawned tree behind when nothing does. On 2026-09-02 an
-implementation-reviewer's headless Chromium probes outlived their run by two and
-a half days and held 1.4 GB across 36 processes on a swapless host, which makes
-the next reap more likely rather than less. Reclaiming what leaks anyway is a
-separate mechanism and belongs with the housekeeping script, not here.
-
 ## Product context, proportional to the action
 
 Current Uberblick context is required before a product-sensitive choice or a
@@ -248,3 +173,18 @@ correctable specification findings are not.
 Delegating a bounded subtask is allowed and stays bounded; the delegating role
 still owns the outcome and the durable record. A context reset never erases
 authorship — the author of a diff is never its independent reviewer.
+
+## Worktrees and completion
+
+New implementation starts from freshly fetched origin/main in this run's own
+isolated worktree. Recovery continues the current remote head without rebase or
+force-push. Never share, delete or repurpose another run's worktree. Re-read
+ownership before pushing and stop if a valid takeover superseded it. A pickup
+that stops before editing must release any implementation claim it posted.
+A stopped process resumes only as a fresh assignment from durable records.
+
+Entry-role outcomes use their exact Worked, No eligible, or Blocked final line.
+The launcher immediately relaunches after work, waits about 30 minutes after an
+empty queue, and stops on permission/authentication blockage. An unrecognized
+line is an unconfirmed outcome. GitHub remains the durable coordination record;
+the launcher does not interpret claims or findings to choose work.

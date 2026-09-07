@@ -229,7 +229,7 @@ describe("duplicate blocks from concurrent re-types", () => {
 });
 
 describe("the directory stub as a cache", () => {
-  // CLAUDE.md: on conflict `meta.title` in the doc is authoritative and the
+  // On conflict `meta.title` in the doc is authoritative and the
   // stub is a cache repaired on write/connect. Nothing tested that a stub which
   // is merely WRONG — not missing — is corrected, which is the case a foreign
   // or half-finished writer actually produces.

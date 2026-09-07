@@ -4,10 +4,5 @@ description: Issue preparer role for one item from the uberblick issue-preparati
 effort: high
 ---
 
-Read `.agents/roles/issue-preparer.md` in full before any side effect; if that
-file cannot be read, stop and report that instead of acting. Your assignment is
-that role's queue: pick and claim one eligible item under its `Pickup` section,
-and complete only that one — no preselected target is supplied or needed.
-Require your role and your session or run identity, and refuse before any side
-effect when they are missing. Stop after the durable handoff that contract
-names; the next assignment starts a fresh session.
+Read `AGENTS.md`, then `.agents/roles/issue-preparer.md` in full.
+Follow that neutral contract for assignment, execution and stopping.

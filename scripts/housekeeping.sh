@@ -13,7 +13,7 @@
 #   modified or untracked files, is reported and left for a human. So is one
 #   whose age cannot be read under either the GNU or BSD `stat` dialect.
 #   Clean detached worktrees are removable: durable recovery is a remote commit
-#   or PR, never an unreferenced local commit (`AGENTS.md`, Claim and recovery).
+#   or PR, never an unreferenced local commit (`.agents/roles/README.md`, ownership and recovery).
 # On Docker Desktop for macOS, headroom is the host volume containing its default
 #   sparse disk image, not the image's configured VM capacity. A moved image is
 #   reported as unresolved rather than measuring a different filesystem.

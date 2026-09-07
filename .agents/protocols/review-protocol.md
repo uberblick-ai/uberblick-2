@@ -1,7 +1,7 @@
 # Review protocol — external rounds, and what happens once a review returns
 
 Read this whenever a PR has an external round to request or a finding to
-handle. When CLAUDE.md requires the pair, the implementer owns the first
+handle. When delivery-policy.md requires the pair, the implementer owns the first
 challenge before handoff, on the other runtime from the diff's author, and the
 integrator owns the second, a fresh session of the author's runtime; when it
 requires one, the implementer owns that round. These are real adversarial
@@ -10,61 +10,22 @@ risk-scoped final-head round. `integration.md` beside this file owns the
 gates' order and mechanics.
 
 How many challenges a diff owes, who owns each, and the candidate-head freeze
-are CLAUDE.md's gate. "Requesting the round" covers dispatch; "Findings and
+are delivery-policy.md's gate. "Requesting the round" covers dispatch; "Findings and
 corrections" covers reviewer records and fix-ups; "Verification and completion"
 is the integrator's.
 
 ## Requesting the round
 
-CLAUDE.md's gate list is the authority on *when* a pre-handoff review is
+delivery-policy.md's gate list is the authority on *when* a pre-handoff review is
 required. The implementer opens a draft PR and posts the README's exact-PR
 delegation at its current head before starting a fresh
 `implementation-reviewer`. Add `Round: N` to that mutable record; the reviewer
 edits its status and appends its verdict there rather than posting claim and
-completion comments. A `Round: 2` of CLAUDE.md's required pair also carries one
-`Boundary:` line naming which of CLAUDE.md's listed boundaries fires, or the
+completion comments. A `Round: 2` of delivery-policy.md's required pair also carries one
+`Boundary:` line naming which of delivery-policy.md's listed boundaries fires, or the
 concrete unresolved risk; a package path is neither, and without that line the
-round is not dispatched. One transport per *reviewer* runtime — the command
-is chosen by the runtime the round must run on, not by the caller's, so a
-same-runtime round (a `--model codex` integrator on a Codex-authored PR) uses the
-same two commands. Both run from the parent's own worktree, named explicitly
-for Codex instead of inherited from the shell, and detached (a foreground shell
-call is killed at ten minutes), with the prompt read from a file and the log
-kept in private scratch. Put a Codex reviewer's prompt at
-`<scratch>/<child-run-id>.prompt`, then start the runner as one background Bash
-call; it writes its own sibling `.log` and `.status` files and leaves the
-borrowed parent worktree registered. An empty scratch directory is not a
-substitute, even with `--skip-git-repo-check`: it holds neither the role
-contracts nor current code, so bypassing the trust refusal only makes the round
-fail later.
-
-```sh
-# A Codex reviewer — the repository runner supervises Codex and records the
-# transport's log and exit status in private scratch.
-node scripts/run-codex-role.mjs implementation-reviewer <child-run-id> <parent-worktree> <scratch>
-
-# A Claude reviewer — the project adapter selects the role.
-( claude -p --agent implementation-reviewer --model opus --permission-mode bypassPermissions < <prompt-file> > <scratch-log> 2>&1; echo $? > <scratch-log>.status )
-```
-
-Each is a fresh top-level session: `codex exec` always is, and a headless
-`claude -p` carries its own `Claude-Session` trailer. A Claude parent may
-instead start the reviewer with the `Agent` tool (`subagent_type:
-implementation-reviewer`, `model: opus`). That child shares its launcher's
-authorship identity, so it may review only a diff that identity did not
-author — proven the way an integrator proves its own independence: no commit
-in the head carries the launcher's `Claude-Session` trailer, and the launcher
-launched no implementer whose commit is in the head. Under that proof the
-`Agent` child is the Claude transport for a Codex-authored diff (owner
-decision, 2026-09-01); without it, it is never a reviewer.
-
-`codex exec` selects no `.codex/agents/*.toml` adapter, so the prompt tells a
-Codex child to read the `implementation-reviewer` role contract; the Claude
-adapter already does. Either assignment names the exact PR, head, child run id
-and parent run id, and nothing else — the reviewer contract supplies the
-critical brief. Read the verdict from the completed PR record; inspect the
-private scratch log only when dispatch fails or no durable verdict appears, so
-the child's reasoning transcript does not consume the parent context.
+round is not dispatched. Use `.agents/adapters/runtime-dispatch.md` for the chosen runtime's invocation.
+Read the review from its completed durable record, not the private transcript.
 
 The implementer stays in the assignment, renewing its claim, until the
 reviewer completes its durable record. A dispatch failure edits that record to
@@ -130,7 +91,7 @@ risk, affected verdict, and review scope before dispatch. A new head, severity
 disagreement, or P3-only verdict is insufficient. Replacement reviews examine
 the delta first and use the runtime of the verdict they replace.
 
-Merge requires CLAUDE.md's gates, no open P1, and an explicit disposition for
+Merge requires delivery-policy.md's gates, no open P1, and an explicit disposition for
 every finding. Record carried-forward review evidence with a brief scope and
 rationale. The final ruling links to the ledger and gate results without
 repeating them.

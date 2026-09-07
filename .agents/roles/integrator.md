@@ -19,7 +19,7 @@ implementer's queue until it changes — no live integrator claim, no
 `needs-human` label, and not authored by this session. A review record is not a
 pickup prerequisite: an
 otherwise-eligible unreviewed PR may be claimed so this role can decide whether
-`CLAUDE.md` requires the independent round and delegate it when it does.
+`.agents/protocols/delivery-policy.md` requires the independent round and delegate it when it does.
 The owner makes a parked tier-3 PR eligible by replacing `needs-human` with
 `human-approved`; that label changes order and tier. Order:
 `human-approved` first, then ascending PR number. Inspect earlier candidates
@@ -43,15 +43,15 @@ lineage.
 
 ## Outcome
 
-Every gate `CLAUDE.md` requires, run at the SHA the merge will use, and every
-finding dispositioned against `CLAUDE.md`'s permitted dispositions — a finding
+Every gate `.agents/protocols/delivery-policy.md` requires, run at the SHA the merge will use, and every
+finding dispositioned against `.agents/protocols/delivery-policy.md`'s permitted dispositions — a finding
 is never left undispositioned, silence is never one, and each disposition is
-recorded on the PR. The merge executes `CLAUDE.md`'s merge policy as written,
-including its named exceptions. `CLAUDE.md` step 5 makes the post-merge
+recorded on the PR. The merge executes `.agents/protocols/delivery-policy.md`'s merge policy as written,
+including its named exceptions. `.agents/protocols/delivery-policy.md` step 5 makes the post-merge
 documentation pass part of this pickup too, and so is closing an `umbrella`
 parent whose final child this merge closed.
 
-When CLAUDE.md's dual-challenge gate applies, require both distinct adversarial
+When delivery-policy.md's dual-challenge gate applies, require both distinct adversarial
 records: the implementer's challenge on the other runtime from the diff's
 author, and a second challenge owned by this integrator on the author's
 runtime, in a fresh session. Neither verdict substitutes for the other, and
@@ -84,13 +84,13 @@ Re-read the head before using that result; a review of another SHA is evidence
 only under that explicit risk-scoped carry-forward rule.
 
 The mechanics are repository procedure, followed there rather than copied:
-`.claude/skills/next-issue/integration.md` for the gate sequence and merge
+`.agents/protocols/integration.md` for the gate sequence and merge
 execution, and `review-protocol.md` for the external round, fix-up waves and
 convergence. Rule P2/P3 from the bounded record or park its focused owner
 question `needs-human`, @-mentioning the product owner (`@bk-one`) in the
 ruling so the park is seen; never dispatch a reviewer merely to debate severity.
 A ruling whose findings are all P3 merges at the reviewed head, each P3
-recorded as accepted debt on the PR — the disposition `CLAUDE.md` already
+recorded as accepted debt on the PR — the disposition `.agents/protocols/delivery-policy.md` already
 permits — instead of parking for a fix-up wave; parking a P3-only ruling
 requires naming, in the ruling, the artifact the accepted debt would leave
 misleading (owner decision, 2026-09-04: three P3-only waves on PRs #763,

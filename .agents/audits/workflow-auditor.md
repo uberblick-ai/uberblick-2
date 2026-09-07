@@ -41,7 +41,7 @@ claims to verify, not ground truth.
 ## Grounding and sample
 
 Record fresh `origin/main` and read the current versions of `AGENTS.md`,
-`CLAUDE.md`, `.github/ISSUE_SPEC.md`, the five role contracts, and only the
+.agents/protocols/delivery-policy.md, `.github/ISSUE_SPEC.md`, the five role contracts, and only the
 procedures implicated by the audit window.
 
 Record workflow-rule commits since the prior report's grounding. Judge a
@@ -90,7 +90,8 @@ repository, but do not substitute copied issue text for required corpus truth.
 Respect Editorial contract
 (`5e0e25d8-c71f-44c3-9bf3-93662712c1fc`): the corpus describes current or
 settled near-term product truth; GitHub describes proposed and in-flight change;
-`CLAUDE.md` holds binding architecture and invariants; decision documents hold
+corpus architecture documents hold architectural guarantees; neutral local
+protocols hold executable workflow rules; decision documents hold
 choices and triggers. Duplicated or stale truth is itself a possible finding.
 
 ## Audit method

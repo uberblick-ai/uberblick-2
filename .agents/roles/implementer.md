@@ -25,7 +25,7 @@ One GitHub-only shallow pass, in this order.
    PR otherwise draws one launch per idle cycle and burns the lane on runs
    that cannot move its head (owner decision, 2026-09-03, after PR #740).
 2. **Recovery** — a `ready` issue whose implementation claim is stale under
-   `AGENTS.md`; oldest claim first.
+   the shared role README; oldest claim first.
 3. **New issue** — `ready`, every `Depends-on` closed, not `in-progress`, in
    `.github/ISSUE_SPEC.md`'s order and under its cap of 6 work units. `ready` is the preparation verdict; do not
    prepare again.
@@ -72,14 +72,14 @@ complexity, or needs an owner decision, do not deviate: a top-level run posts
 
 ## Critical review
 
-Open the PR as a draft. First apply `CLAUDE.md`'s exemption: a test-only,
+Open the PR as a draft. First apply `.agents/protocols/delivery-policy.md`'s exemption: a test-only,
 docs-only or narrowly mechanical diff that preserves production behavior owes
 no challenge — write `Challenge: none owed (<reason>)` in the handoff and
-dispatch nothing. Otherwise, where `CLAUDE.md` says an outside read earns its
+dispatch nothing. Otherwise, where `.agents/protocols/delivery-policy.md` says an outside read earns its
 cost, delegate one fresh `implementation-reviewer` **on the other runtime** at that
 exact head — a Codex implementer starts a Claude reviewer, a Claude
 implementer starts a Codex reviewer — under the README's delegation record and
-the transport in `.claude/skills/next-issue/review-protocol.md`. Stay in the
+the transport in `.agents/protocols/review-protocol.md`. Stay in the
 assignment, renewing your claim, until that mutable record contains the durable
 verdict or records a failed dispatch.
 Ending this turn ends the session, so doing so while a delegation record names
@@ -95,7 +95,7 @@ second verdict at that same head and batch both. A P1 may interrupt the freeze;
 correct it before handoff and refresh the challenge evidence the changed risk
 requires. No second implementer-owned round and no severity debate: the
 integrator rules. Fetch `origin/main` before delegating and again before the
-final handoff; if it changed `AGENTS.md`, `CLAUDE.md`, `.github/ISSUE_SPEC.md`
+final handoff; if it changed `AGENTS.md`, `.agents/protocols/delivery-policy.md`, `.github/ISSUE_SPEC.md`
 or this contract, re-read them before continuing. This never authorizes
 rebasing a fix-up.
 
@@ -106,6 +106,8 @@ write to a branch whose claim you do not hold, and nothing outside the issue's
 footprint — scope found mid-flight becomes a finding or a new issue. Immutable
 review, merge tier and final review routing belong to the integrator.
 
+Read the preparer-selected corpus documents and relevant linked decisions.
+Expand discovery if the code or findings expose missing context.
 A Uberblick document the issue cites is a required live read whenever the
 change may affect its product meaning. If the MCP route cannot serve it, stop
 before editing and record the exact tool and failure on the issue or PR; a
@@ -163,24 +165,3 @@ When a permission or authentication failure — not the queue — is what stoppe
 the run, that line is `Blocked implementer: <reason>.` instead, naming the
 command or credential that was refused. It stops the loop, so never use it for
 work that finished.
-
-## Known traps
-
-Each of these was re-derived by several runs in Discussion #522. Read once;
-do not investigate again.
-
-- `mise run review` takes the SHA positionally. Without it you review your own
-  checkout and get a green result indistinguishable from the real one.
-- The run shell sets `noclobber`: `rm -f` a scratch file before `>` to it, or
-  a stale body is posted as if it were fresh.
-- The registered uberblick MCP server can fail with `CONNECTION_CLOSED`; the
-  fallback is a throwaway `ub mcp serve` stdio client started from a scratch
-  directory outside the worktree.
-- On a macOS host, `packages/cli`'s `mise-welcome` and `remote-update` tests
-  fail with pty and `flock` errors and pass in CI. Record that once as
-  environmental.
-- `codex exec` refuses an untrusted directory. Run it from the run's worktree,
-  never from an empty scratch directory, and detach it: a foreground shell call
-  is killed at ten minutes. Its `workspace-write` sandbox denies `git commit`
-  (`.git/index.lock: Operation not permitted`): a reviewer runs under it, an
-  implementer cannot, and the launcher owns that choice.
