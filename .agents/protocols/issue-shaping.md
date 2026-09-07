@@ -118,9 +118,10 @@ it does not authorize preparation, `ready`, Priority, or implementation.
 Use the installed MCP server's discovered tool schemas, so this path works from
 a machine with only `ub`, its MCP server, and the shaping skill. Read the live
 Editorial contract and active tag catalog through MCP, then create one document
-with `kind: requirement`, `status: draft`, a concise description, one to four
-applicable catalog tags, and blocks carrying the confirmed problem, intended
-outcome, success evidence, constraints, trade-offs, and scope boundary.
+with `kind: requirement`, `status: draft`, a concise description, applicable
+catalog tags under that live contract, and blocks carrying the confirmed
+problem, intended outcome, success evidence, constraints, trade-offs, and scope
+boundary.
 Preserve the human's language and do not invent missing product meaning. State
 every unresolved human choice in the explicit lifecycle language the Editorial
 contract requires of a Product Document.
@@ -165,11 +166,16 @@ on current block revisions and decision state.
 When the human explicitly declares the requirement planned, set its status to
 `planned` and ask them to group the product outcomes into the intakes they want.
 This is their product grouping, not technical PR decomposition. Before creating
-anything, search both open and closed GitHub issues for the exact requirement
-uuid in `Implements:` lines and read the matches. Compare outcome block ids
-where they are present; a uuid-only `Implements:` line covers the whole
-requirement. Create only missing groups, so a retry after a failed creation or
-an interrupted run does not duplicate an intake.
+anything, enumerate open and closed issues with
+`gh api --paginate "repos/uberblick-ai/uberblick-2/issues?state=all&per_page=100"`,
+exclude pull requests, and inspect their bodies locally for an exact requirement
+uuid in `Implements:` lines; do not depend on GitHub's full-text search index
+for retry safety. Compare the exact outcome grouping the human confirmed. A
+prior line covers a retry only when it names the same outcome block ids; a
+uuid-only line matches only a uuid-only group. If a newly requested group
+overlaps an earlier intake, show the overlap and create it only after the human
+explicitly confirms it. Create only missing confirmed groups, so a retry after
+a failed creation or an interrupted run does not duplicate an intake.
 
 On resumption of an already-planned requirement, do not set the same status or
 ask for the same lifecycle decision again. Confirm only the outcome grouping
@@ -188,8 +194,9 @@ Follow those lines with the confirmed intake sections below. Add only
 or `ready`. The issue-preparer later completes the machine-readable header and
 grounds the contract. If the repository's `scripts/create-issue.mjs` helper is
 available, use it with Request Source `Human`. Otherwise create with `gh`, leave
-Request Source unset as the issue contract permits, and tell the human; promise
-no additional failure record.
+Request Source unset as the issue contract permits, and tell the human; use
+`--repo uberblick-ai/uberblick-2` so no checkout is required, and promise no
+additional failure record.
 
 ### Create a small intake
 
@@ -218,9 +225,10 @@ The GitHub form may render the section headings with empty values.
 When the human chooses this exit, create the intake with
 `needs-preparation` through `.github/ISSUE_SPEC.md`'s **Request source** path,
 recording `Human` for the person's request. If its helper is unavailable, use
-`gh issue create`, leave Request Source unset, and tell the human. Never infer
-or write Priority, `Depends-on`, `Touches`, `Parent`, architecture,
-implementation detail, acceptance criteria, Pointers, or `ready`. The
+`gh issue create --repo uberblick-ai/uberblick-2`, leave Request Source unset,
+and tell the human. Never infer or write Priority, `Depends-on`, `Touches`,
+`Parent`, architecture, implementation detail, acceptance criteria, Pointers,
+or `ready`. The
 issue-preparer derives the technical contract from the current repository and
 corpus under `.agents/protocols/issue-preparation.md`; a human choice that
 remains unresolved may later take the existing `needs-decision` path.

@@ -67,7 +67,8 @@ Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
 
   **`Implements:` narrows who may hold `ready`.** An issue carrying it holds
   `ready` only while its body also carries a human's own dated
-  decision covering the outcomes it names, on a line of its own reading
+  decision covering the outcomes it names. That line identifies the human and
+  gives clear provenance for how their decision reached the issue, and reads
   `Owner decision, <YYYY-MM-DD>: <what was decided>`. Markdown emphasis around
   that line is permitted — `**Owner decision, 2026-08-26: …**`, the form #272
   uses, is the shape. The lowercase parenthetical `(owner decision, <date>)`

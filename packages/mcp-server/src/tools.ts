@@ -2101,15 +2101,14 @@ export function registerTools(
       const who = author ?? replicas.name;
 
       if (thread_id !== undefined) {
-        let updated: Annotation | null = null;
         // Both schema helpers transact; this outer transaction folds a reply
         // plus its resolution into one Yjs update and therefore one durable
         // append, while keeping their independently reusable schema contracts.
-        replica.doc.transact(() => {
-          updated = addComment(replica.doc, thread_id, who, text);
-          if (updated !== null && resolved !== undefined) {
-            updated = setAnnotationResolved(replica.doc, thread_id, resolved);
-          }
+        const updated = replica.doc.transact(() => {
+          const added = addComment(replica.doc, thread_id, who, text);
+          return added !== null && resolved !== undefined
+            ? setAnnotationResolved(replica.doc, thread_id, resolved)
+            : added;
         });
         if (updated === null) {
           throw new ToolError(

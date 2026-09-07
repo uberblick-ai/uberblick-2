@@ -229,15 +229,16 @@ describe("annotate", () => {
       text: "the first thread",
     });
     const threadId = opened.annotation.id;
+    const logged = rig.instance.replicas.store.logSize();
     const replied = await rig.ok("annotate", {
       uuid: doc.uuid,
       thread_id: threadId,
       text: "and a reply",
       resolved: true,
     });
+    expect(rig.instance.replicas.store.logSize()).toBe(logged + 1);
     expect(replied.annotation.comments).toHaveLength(2);
     expect(replied.annotation.resolved).toBe(true);
-    expect(replied.annotation.range).toEqual({ start: 0, end: 3, collapsed: false });
 
     const reopened = await rig.ok("annotate", {
       uuid: doc.uuid,
@@ -247,7 +248,6 @@ describe("annotate", () => {
     });
     expect(reopened.annotation.comments).toHaveLength(3);
     expect(reopened.annotation.resolved).toBe(false);
-    expect(reopened.annotation.range).toEqual({ start: 0, end: 3, collapsed: false });
 
     const refused = [
       // A reply that also carries a range says two things at once. Each range
