@@ -95,7 +95,7 @@ diff is waived out of a boundary it crosses.
 
 | Condition | Reviews owed | Who requests each |
 | --- | --- | --- |
-| `boundary` — the diff changes schema meaning, persistence, synchronization, concurrency, auth, runtime dependencies or decided architecture, or the implementer or integrator names a concrete unresolved risk warranting both perspectives | 2 | `implementer` on the other runtime, then `integrator` on the author's runtime |
+| `boundary` — the diff changes schema meaning, persistence, synchronization, concurrency, auth, runtime dependencies or decided architecture (the `boundary` values in the table's executable form), or the implementer or integrator names a concrete unresolved risk warranting both perspectives | 2 | `implementer` on the other runtime, then `integrator` on the author's runtime |
 | `exempt` — a test-only, docs-only or narrowly mechanical diff that preserves production behavior, where focused validation directly proves the contract and it is not an agent-authored process change | 0 | nobody |
 | `otherwise` — every other diff, including an agent-authored process change that would otherwise be exempt | 1 | `implementer` on the other runtime |
 

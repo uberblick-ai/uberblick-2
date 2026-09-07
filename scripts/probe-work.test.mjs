@@ -11,7 +11,15 @@
  */
 
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -21,22 +29,33 @@ import { fileURLToPath } from "node:url";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const script = join(root, "scripts/probe-work.sh");
 
-/** Run the probe with a `gh` that answers `count`, or fails when it is null. */
+/**
+ * Run the probe with a `gh` that answers `count`, or fails when it is null, and
+ * records every argument list it was called with in `calls`.
+ */
 function probe(t, role, count) {
 	const base = mkdtempSync(join(tmpdir(), "probe-work-"));
 	t.after(() => rmSync(base, { recursive: true, force: true }));
 	const bin = join(base, "bin");
+	const calls = join(base, "gh-calls");
 	mkdirSync(bin);
 	const gh = join(bin, "gh");
 	writeFileSync(
 		gh,
-		count === null ? "#!/bin/sh\nexit 1\n" : `#!/bin/sh\necho ${count}\n`,
+		count === null
+			? '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$PROBE_TEST_CALLS"\nexit 1\n'
+			: `#!/bin/sh\nprintf '%s\\n' "$*" >> "$PROBE_TEST_CALLS"\necho ${count}\n`,
 	);
 	chmodSync(gh, 0o755);
-	return spawnSync("sh", [script, role], {
+	const run = spawnSync("sh", [script, role], {
 		encoding: "utf8",
-		env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
+		env: {
+			...process.env,
+			PATH: `${bin}:${process.env.PATH ?? ""}`,
+			PROBE_TEST_CALLS: calls,
+		},
 	});
+	return { ...run, calls: existsSync(calls) ? readFileSync(calls, "utf8") : "" };
 }
 
 test("counts read naturally in both numbers", (t) => {
@@ -59,10 +78,14 @@ test("an empty queue idles and an unreadable GitHub never launches", (t) => {
 	assert.equal(broken.stdout.trim(), "");
 });
 
-test("every launchable entry role has its own read", (t) => {
+test("the reviewer read is unindexed, because a request seconds old must count", (t) => {
 	const reviewer = probe(t, "implementation-reviewer", 2);
 	assert.equal(reviewer.status, 0);
 	assert.equal(reviewer.stdout.trim(), "probe-work: implementation-reviewer: 2 candidates");
+	// GitHub's comment-search index lags durable state, and the request a
+	// reviewer loop must not miss is the one an implementer just posted.
+	assert.match(reviewer.calls, /^pr list /m);
+	assert.doesNotMatch(reviewer.calls, /search|--match comments/);
 });
 
 test("an unknown role is a usage error, not an idle", (t) => {

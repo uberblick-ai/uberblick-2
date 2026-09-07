@@ -21,9 +21,11 @@ case "$role" in
     m=$(gh search prs -R "$REPO" --state open --match comments fix-now --json number --jq length) || exit 2
     n=$((n + m)) ;;
   implementation-reviewer)
-    # a review request lives in a PR comment; head, runtime and claims are the
-    # role's own check, so any PR whose thread mentions one is a candidate
-    n=$(gh search prs -R "$REPO" --state open --match comments "Review-request" --json number --jq length) || exit 2 ;;
+    # a review request lives in a PR comment, and a request seconds old is
+    # exactly the one a reviewer loop must not miss — GitHub's comment search
+    # index lags durable state, so count open PRs from the unindexed list and
+    # leave request, head, runtime and claim to the role's own read
+    n=$(gh pr list -R "$REPO" --state open --json number --jq length) || exit 2 ;;
   integrator)
     n=$(gh pr list -R "$REPO" --state open --json isDraft,labels --jq \
       '[.[] | select(.isDraft | not) | select(.labels | map(.name) | index("needs-human") | not)] | length') || exit 2 ;;

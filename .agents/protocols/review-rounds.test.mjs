@@ -66,6 +66,26 @@ describe("reviews owed", () => {
     );
   });
 
+  it("states each condition's own predicate, not only its name", () => {
+    // Row names, counts and requesters can all stay put while the prose that
+    // decides *which* diffs land in a row drifts away from `classify`. Every
+    // term the predicate branches on therefore has to appear in its own row.
+    const cell = new Map(
+      TABLE.map(([condition]) => [condition.match(/`([a-z]+)`/)?.[1], condition]),
+    );
+    // A token is `runtime-dependency`; the prose may hyphenate or space its
+    // words and may pluralize the last one.
+    const phrase = (token) => new RegExp(token.replace(/-/g, "[- ]").replace(/y$/, "(?:y|ies)"));
+    for (const boundary of AXES.boundary.filter((value) => value !== "none"))
+      assert.match(cell.get("boundary"), phrase(boundary), boundary);
+    assert.match(cell.get("boundary"), /concrete unresolved risk/);
+    for (const shape of AXES.shape.filter((value) => value !== "behavioral"))
+      assert.match(cell.get("exempt"), phrase(shape), shape);
+    assert.match(cell.get("exempt"), /focused validation/);
+    assert.match(cell.get("exempt"), /process change/);
+    assert.match(cell.get("otherwise"), /process change/);
+  });
+
   it("counts every risk shape the way the table does", () => {
     const table = new Map(
       TABLE.map(([condition, owed, who]) => [
