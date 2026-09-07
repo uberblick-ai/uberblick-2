@@ -1,5 +1,5 @@
 diff --git a/dist/hocuspocus-server.cjs b/dist/hocuspocus-server.cjs
-index 39719e3862b1ff097c49f2673dafc445f90bd218..154c5d30eb67a7ad2cccf510d40434c137aec0a1 100644
+index 39719e3862b1ff097c49f2673dafc445f90bd218..4d538b449e41b1edf0d8049ee98296afdcaaf651 100644
 --- a/dist/hocuspocus-server.cjs
 +++ b/dist/hocuspocus-server.cjs
 @@ -853,6 +853,7 @@ var ClientConnection = class {
@@ -34,7 +34,7 @@ index 39719e3862b1ff097c49f2673dafc445f90bd218..154c5d30eb67a7ad2cccf510d40434c1
  					return;
  				}
  				if (this.incomingMessageQueue[rawKey] === void 0) {
-+					if (decoding.readVarUint(tmpMsg.decoder) !== MessageType.Auth) return;
++					if (lib0_decoding.readVarUint(tmpMsg.decoder) !== MessageType.Auth) return;
  					if (this.getPendingDocumentCount() >= this.maxPendingDocuments) {
  						console.warn(`Hocuspocus: closing connection ${this.socketId}: too many pending unauthenticated documents (maxPendingDocuments ${this.maxPendingDocuments}). Last requested document: "${documentName}".`);
  						this.terminate(_hocuspocus_common.ResetConnection);

@@ -272,30 +272,13 @@ function frameBarrier(target: FrameSink, count: number): Promise<void> {
   });
 }
 
-/** The same barrier for the next client to connect, which has no object yet. */
-function frameBarrierForNextClient(
-  hocuspocus: Hocuspocus<Context>,
-  count: number,
-): Promise<void> {
-  const accept = hocuspocus.handleConnection.bind(hocuspocus);
-  return new Promise((resolve) => {
-    hocuspocus.handleConnection = (...args: Parameters<typeof accept>) => {
-      hocuspocus.handleConnection = accept;
-      const client = accept(...args);
-      void frameBarrier(client, count).then(resolve);
-      return client;
-    };
-  });
-}
-
 /**
  * The connection object the server builds for the next client, so a test can
  * read the server's own state instead of inferring it from a symptom.
- * `handleConnection` returns the `ClientConnection` (the same handle
- * `frameBarrierForNextClient` wraps), and the shipped build carries
- * `getPendingDocumentCount()` on it — the number `ClientConnection.ts:612`
- * enforces the ceiling from — whatever the published declaration says about it
- * being private.
+ * `handleConnection` returns the `ClientConnection`, and the shipped build
+ * carries `getPendingDocumentCount()` on it — the number
+ * `ClientConnection.ts:612` enforces the ceiling from — whatever the published
+ * declaration says about it being private.
  */
 type ServerConnection = FrameSink & { getPendingDocumentCount: () => number };
 
@@ -311,6 +294,20 @@ function nextClientConnection(
       return client;
     };
   });
+}
+
+/**
+ * The same barrier for the next client to connect, which has no object yet.
+ * The wrapper is installed a microtask after `handleConnection` returns, which
+ * is still before the socket can deliver a frame to it.
+ */
+function frameBarrierForNextClient(
+  hocuspocus: Hocuspocus<Context>,
+  count: number,
+): Promise<void> {
+  return nextClientConnection(hocuspocus).then((client) =>
+    frameBarrier(client, count),
+  );
 }
 
 /**
