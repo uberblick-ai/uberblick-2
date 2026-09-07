@@ -106,7 +106,7 @@ export type RecoveryClass = "retry" | "reread" | "manual";
  * half, and a contract test checks the two together against what the server
  * actually registers — so a tool added later is classified or the suite fails.
  */
-export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
+export const DOCUMENT_MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "create_doc",
   "edit_block",
   "insert_block",
@@ -122,6 +122,10 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "restore_doc",
   "annotate",
   "link_range",
+]);
+
+export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
+  ...DOCUMENT_MUTATING_TOOLS,
   "pin_doc",
   "unpin_doc",
   "sidebar_group",
@@ -158,6 +162,10 @@ interface Recovery {
  * the call that finishes it — but never contradict the class.
  */
 const RECOVERIES: Record<string, Recovery> = {
+  guidance_required: {
+    recoveryClass: "reread",
+    guidance: "Read each unread guidance document with get_doc, then retry the refused tool call.",
+  },
   persistence_failed: {
     recoveryClass: "manual",
     guidance:

@@ -99,8 +99,11 @@ import {
   ToolError,
   failureContract,
   guarded,
+  DOCUMENT_MUTATING_TOOLS,
   hydrationRecovery,
 } from "./failures.js";
+import { GUIDANCE_INSTRUCTIONS } from "./guidance.js";
+import type { GuidanceBriefing } from "./guidance.js";
 import { strictInput } from "./inputs.js";
 import type { ToolMode } from "./inputs.js";
 import { docLinkRanges } from "./replica.js";
@@ -682,7 +685,12 @@ const ANNOTATE_SHAPES =
 export function registerTools(
   server: McpServer,
   replicas: Replicas,
+  briefing: GuidanceBriefing,
 ): void {
+  const toolContract = (tool: string): string =>
+    (DOCUMENT_MUTATING_TOOLS.has(tool) ? `\n\n${GUIDANCE_INSTRUCTIONS}` : "") +
+    failureContract(tool);
+
   /**
    * Resolve a document, or fail with a hub-aware message: a uuid in the
    * directory whose room has not reached this replica yet is a different
@@ -1052,7 +1060,7 @@ export function registerTools(
         CREATE_DOC_DURABILITY +
         "\n\n" +
         SYNCED_MEANS +
-        failureContract("create_doc"),
+        toolContract("create_doc"),
       // `{sidebar: {...}, pinned: true}` must be refused wherever the redundant
       // key sits, so the nested placement object is strict too — see
       // {@link sidebarPlacementArg}. The top level is strict like every tool's.
@@ -1094,6 +1102,7 @@ export function registerTools(
       sidebar,
     }) => {
       await replicas.settle();
+      briefing.require();
 
       const lifecycle =
         kind === undefined ? null : { kind, status: status ?? firstStatus(kind) };
@@ -1416,7 +1425,10 @@ export function registerTools(
         "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
         "`text` is plain and mark-free, as it has always been. A block that carries inline references to other " +
         "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
-        "link_range speak in, and absent where there are none. Only prose blocks can hold them." +
+        "link_range speak in, and absent where there are none. Only prose blocks can hold them.\n\n" +
+        "Reading eligible guidance with get_doc counts toward this process’s briefing. The last required read " +
+        "starts a ten-minute lease; expiry requires fresh reads. This best-effort memory never fails the read " +
+        "or writes usage to a room or update log, and is lost on restart." +
         failureContract("get_doc"),
       inputSchema: strictInput({ uuid: uuidArg }),
     },
@@ -1424,7 +1436,7 @@ export function registerTools(
       await replicas.settle();
       const replica = requireDoc(uuid);
       const meta = getMeta(replica.doc);
-      return json({
+      const result = json({
         ...meta,
         tags: documentTags(replica),
         room: replica.room,
@@ -1434,6 +1446,8 @@ export function registerTools(
           annotationJson(replica, annotation),
         ),
       });
+      briefing.recordRead(uuid);
+      return result;
     }),
   );
 
@@ -1602,7 +1616,7 @@ export function registerTools(
         SYNCED_MEANS +
         "\n\n" +
         TLDR_AFTER_CONTENT_CHANGE +
-        failureContract("edit_block"),
+        toolContract("edit_block"),
       inputSchema: strictInput({
         uuid: uuidArg,
         block_id: z.string().min(1),
@@ -1617,6 +1631,7 @@ export function registerTools(
     },
     guarded("edit_block", async ({ uuid, block_id, old_text, new_text, rev }) => {
       await replicas.settle();
+      briefing.require();
       const replica = requireWritableDoc(uuid);
       editBlock(replica.doc, block_id, old_text, new_text, {
         ...(rev === undefined ? {} : { rev }),
@@ -1646,7 +1661,7 @@ export function registerTools(
         SYNCED_IS_ACKNOWLEDGED +
         "\n\n" +
         TLDR_AFTER_CONTENT_CHANGE +
-        failureContract("insert_block"),
+        toolContract("insert_block"),
       inputSchema: strictInput({
         uuid: uuidArg,
         after_block_id: z
@@ -1659,6 +1674,7 @@ export function registerTools(
     },
     guarded("insert_block", async ({ uuid, after_block_id, type, text, level, language, inline }) => {
       await replicas.settle();
+      briefing.require();
       const replica = requireWritableDoc(uuid);
       // Before the insert: an unknown reference target refuses the call with
       // nothing written.
@@ -1688,11 +1704,12 @@ export function registerTools(
         SYNCED_IS_ACKNOWLEDGED +
         "\n\n" +
         TLDR_AFTER_CONTENT_CHANGE +
-        failureContract("delete_block"),
+        toolContract("delete_block"),
       inputSchema: strictInput({ uuid: uuidArg, block_id: z.string().min(1) }),
     },
     guarded("delete_block", async ({ uuid, block_id }) => {
       await replicas.settle();
+      briefing.require();
       const replica = requireWritableDoc(uuid);
       deleteBlock(replica.doc, block_id);
       return json({ uuid, blockId: block_id, ...contentDurability(replica) });
@@ -1713,11 +1730,12 @@ export function registerTools(
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
-        failureContract("set_tags"),
+        toolContract("set_tags"),
       inputSchema: strictInput({ uuid: uuidArg, tags: z.array(z.string().min(1)) }),
     },
     guarded("set_tags", async ({ uuid, tags }) => {
       await replicas.settle();
+      briefing.require();
       const replica = requireWritableDoc(uuid);
       const tagIds = resolveTagSelectors(
         replicas,
@@ -1741,11 +1759,12 @@ export function registerTools(
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
-        failureContract("set_links"),
+        toolContract("set_links"),
       inputSchema: strictInput({ uuid: uuidArg, links: z.array(linkArg) }),
     },
     guarded("set_links", async ({ uuid, links }) => {
       await replicas.settle();
+      briefing.require();
       const replica = requireWritableDoc(uuid);
       setLinks(replica.doc, links);
       return json({ uuid, links, ...durability(replica) });
@@ -1769,11 +1788,12 @@ export function registerTools(
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
-        failureContract("set_title"),
+        toolContract("set_title"),
       inputSchema: strictInput({ uuid: uuidArg, title: titleArg }),
     },
     guarded("set_title", async ({ uuid, title }) => {
       await replicas.settle();
+      briefing.require();
       const replica = requireWritableDoc(uuid);
       setTitle(replica.doc, title);
       return json({ uuid, title, ...durability(replica) });
@@ -1799,11 +1819,12 @@ export function registerTools(
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
-        failureContract("set_description"),
+        toolContract("set_description"),
       inputSchema: strictInput({ uuid: uuidArg, description: descriptionArg }),
     },
     guarded("set_description", async ({ uuid, description }) => {
       await replicas.settle();
+      briefing.require();
       const replica = requireWritableDoc(uuid);
       setDescription(replica.doc, description);
       return json({ uuid, description, ...durability(replica) });
@@ -1823,11 +1844,12 @@ export function registerTools(
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
-        failureContract("set_tldr"),
+        toolContract("set_tldr"),
       inputSchema: strictInput({ uuid: uuidArg, tldr: tldrArg }),
     },
     guarded("set_tldr", async ({ uuid, tldr }) => {
       await replicas.settle();
+      briefing.require();
       const replica = requireWritableDoc(uuid);
       setTldr(replica.doc, tldr);
       return json({ uuid, tldr, ...durability(replica) });
@@ -1850,11 +1872,12 @@ export function registerTools(
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
-        failureContract("set_status"),
+        toolContract("set_status"),
       inputSchema: strictInput({ uuid: uuidArg, status: documentStatusArg }),
     },
     guarded("set_status", async ({ uuid, status }) => {
       await replicas.settle();
+      briefing.require();
       const replica = requireWritableDoc(uuid);
       const stored = getMeta(replica.doc);
       const kind = stored.kind ?? kindForStatus(status);
@@ -1937,7 +1960,7 @@ export function registerTools(
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
-        failureContract("set_changelog_suggestion"),
+        toolContract("set_changelog_suggestion"),
       inputSchema: strictInput({
         uuid: uuidArg,
         suggestion: changelogSuggestionArg,
@@ -1945,6 +1968,7 @@ export function registerTools(
     },
     guarded("set_changelog_suggestion", async ({ uuid, suggestion }) => {
       await replicas.settle();
+      briefing.require();
       const replica = requireWritableDoc(uuid);
       setChangelogSuggestion(replica.doc, suggestion);
       return json({
@@ -1989,11 +2013,12 @@ export function registerTools(
         ARCHIVE_IS_LAST_WRITE_WINS +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
-        failureContract("archive_doc"),
+        toolContract("archive_doc"),
       inputSchema: strictInput({ uuid: uuidArg }),
     },
     guarded("archive_doc", async ({ uuid }) => {
       await replicas.settle();
+      briefing.require();
       const stub = requireStub(uuid);
       const directory = replicas.directory();
       const title = titleFor(uuid, stub);
@@ -2034,11 +2059,12 @@ export function registerTools(
         ARCHIVE_IS_LAST_WRITE_WINS +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
-        failureContract("restore_doc"),
+        toolContract("restore_doc"),
       inputSchema: strictInput({ uuid: uuidArg }),
     },
     guarded("restore_doc", async ({ uuid }) => {
       await replicas.settle();
+      briefing.require();
       const stub = requireStub(uuid);
       const directory = replicas.directory();
       restoreDirectoryEntry(directory.doc, uuid);
@@ -2073,7 +2099,7 @@ export function registerTools(
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
-        failureContract("annotate"),
+        toolContract("annotate"),
       inputSchema: strictInput(
         {
           uuid: uuidArg,
@@ -2097,6 +2123,7 @@ export function registerTools(
     },
     guarded("annotate", async ({ uuid, text, thread_id, block_id, start, end, resolved, author }) => {
       await replicas.settle();
+      briefing.require();
       const replica = requireWritableDoc(uuid);
       const who = author ?? replicas.name;
 
@@ -2168,7 +2195,7 @@ export function registerTools(
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
-        failureContract("link_range"),
+        toolContract("link_range"),
       inputSchema: strictInput({
         uuid: uuidArg,
         block_id: z.string().min(1),
@@ -2183,6 +2210,7 @@ export function registerTools(
     },
     guarded("link_range", async ({ uuid, block_id, start, end, doc_id, rev }) => {
       await replicas.settle();
+      briefing.require();
       const replica = requireWritableDoc(uuid);
       // Before the mark: an unknown target refuses with nothing written.
       const title = linkTitle(doc_id);
