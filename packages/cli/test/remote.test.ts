@@ -35,7 +35,12 @@ import {
   silentLogger,
 } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/hub/protocol";
-import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
+import {
+  bridgeConfig,
+  createMcpServer,
+  inspectRemote,
+  resolveMcpConfig,
+} from "@uberblick/mcp-server";
 import {
   appendBlock,
   directoryRoom,
@@ -804,6 +809,27 @@ describe("ub remote join", () => {
     } finally {
       await remoteCopy.done();
     }
+  });
+
+  it("reports a sampled live directory entry with no document room as missing", async () => {
+    const title = "Missing sampled room";
+    const uuid = randomUUID();
+    const remote = await startHub();
+    await webDirectoryOnly(remote, uuid, title);
+    const local = sandbox();
+
+    const corpus = await inspectRemote(
+      bridgeConfig(
+        resolveMcpConfig({ ...local.env, WORKSPACE_ID: WORKSPACE }),
+        { hubUrl: url(remote), authSecret: SECRET },
+      ),
+      { documents: "sample" },
+    );
+
+    expect(corpus.complete).toBe(true);
+    expect(corpus.unsettled).toEqual([]);
+    expect(corpus.missing).toEqual([{ uuid, title }]);
+    expect(corpus.entries).toEqual([]);
   });
 
   it("refuses a live directory entry whose content neither side can produce", async () => {
