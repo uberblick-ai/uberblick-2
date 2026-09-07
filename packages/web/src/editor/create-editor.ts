@@ -17,6 +17,7 @@ import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
 import { MermaidBlocks } from "./mermaid.js";
 import { paletteExtensions } from "./nodes.js";
+import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TableBlocks } from "./table.js";
 import { TerminalBlocks } from "./terminal.js";
 
@@ -62,6 +63,9 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // node and mark set alone. After `BlockIds`, because a rule names the block
     // it converts by the id that plugin assigns.
     BlockInputRules,
+    // Code colouring is derived from source text and its language attribute as
+    // inline decorations. It is behaviour, never another stored mark.
+    CodeHighlighting,
     // Behaviour too: Tab/Shift-Tab/Enter/Backspace inside a list item — the
     // bindings refuse everywhere else, so the core keymap still owns those keys
     // in every other block — plus the numbers an ordered item is drawn with.

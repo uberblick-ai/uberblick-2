@@ -23,6 +23,7 @@
     "@uberblick/ablauf": "0.1.0",
     "@uberblick/hub": "workspace:*",
     "@uberblick/schema": "workspace:*",
+    "lowlight": "^3.3.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "y-prosemirror": "catalog:",

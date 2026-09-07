@@ -1,0 +1,85 @@
+/**
+ * Syntax colouring in the browser (#922).
+ *
+ * The jsdom contract test owns document invariants and grammar routing. This
+ * proof is only for what needs a CSS engine and real key events: token ink in
+ * both appearances, live language changes, and Enter remaining a newline in
+ * the existing code block.
+ */
+
+import { expect, test } from "@playwright/test";
+import type { Locator } from "@playwright/test";
+import { startHarness } from "./harness.js";
+import type { Harness } from "./harness.js";
+
+test.describe.configure({ mode: "serial" });
+
+let started: Harness | null = null;
+
+test.beforeAll(async () => {
+  started = await startHarness();
+});
+
+test.afterAll(async () => {
+  const running = started;
+  started = null;
+  await running?.stop();
+});
+
+async function ink(element: Locator): Promise<string> {
+  return element.evaluate((node) => getComputedStyle(node).color);
+}
+
+test("code tokens follow the appearance while language and Enter stay live", async ({
+  page,
+}) => {
+  if (started === null) throw new Error("e2e: the harness is not running");
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto(started.appUrl);
+  await expect(page.locator(".ub-list-head")).toBeVisible();
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
+  await page.locator(".ub-title").fill("syntax highlighting");
+
+  const first = page.locator(".ub-editor .ProseMirror > *").first();
+  await first.hover();
+  await page.locator(".ub-gutter-add").click();
+  await page.getByRole("option", { name: "Code" }).click();
+  await page.keyboard.type("const answer = 42;", { delay: 15 });
+
+  const language = page.getByRole("textbox", { name: "Code language" });
+  await expect(language).toBeVisible();
+  await language.fill("ts");
+
+  const block = page.locator(".ub-code");
+  const source = block.locator("code");
+  const keyword = block.locator(".hljs-keyword").first();
+  await expect(keyword).toHaveText("const");
+  const lightKeyword = await ink(keyword);
+  expect(lightKeyword).not.toBe(await ink(source));
+
+  await page.evaluate(() =>
+    document.documentElement.setAttribute("data-theme", "dark"),
+  );
+  await expect.poll(() => ink(keyword)).not.toBe(lightKeyword);
+  expect(await ink(keyword)).not.toBe(await ink(source));
+
+  // Unknown means plain source, not auto-detection or an error. The same field
+  // turns highlighting back on immediately when it names a bundled alias.
+  await language.fill("not-a-language");
+  await expect(block.locator("[class^=hljs-]")).toHaveCount(0);
+  await expect(source).toHaveText("const answer = 42;");
+  await language.fill("ts");
+  await expect(keyword).toHaveText("const");
+
+  const blocksBefore = await page.locator(".ub-editor .ProseMirror > *").count();
+  await source.click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("return answer;", { delay: 15 });
+  await expect(source).toHaveText("const answer = 42;\nreturn answer;");
+  await expect(block.locator(".hljs-keyword")).toHaveCount(2);
+  await expect(page.locator(".ub-editor .ProseMirror > *")).toHaveCount(
+    blocksBefore,
+  );
+});
