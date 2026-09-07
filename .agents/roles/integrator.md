@@ -51,6 +51,14 @@ including its named exceptions. `.agents/protocols/delivery-policy.md` step 5 ma
 documentation pass part of this pickup too, and so is closing an `umbrella`
 parent whose final child this merge closed.
 
+The documentation pass rewrites, it never appends. For each claim the merge
+made wrong, rewrite the affected sentences to the new present-tense truth and
+delete what they replace; add a block only for a fact no existing block owns.
+No PR or issue number, merge date, run id or "since" clause reaches a Regular
+Document — GitHub owns that provenance — and every new or changed block passes
+the corpus test at the top of Editorial contract
+(`5e0e25d8-c71f-44c3-9bf3-93662712c1fc`).
+
 When delivery-policy.md's dual-challenge gate applies, require both distinct adversarial
 records: the implementer's challenge on the other runtime from the diff's
 author, and a second challenge owned by this integrator on the author's

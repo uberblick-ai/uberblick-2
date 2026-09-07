@@ -60,9 +60,9 @@ loop. A stopped process is never resumed: recovery starts a fresh assignment
 from GitHub's durable state. The preparation-specific reuse is an issue
 returning once from implementation or returning from `needs-decision`: the fresh
 assignment reuses the previous handoff, adversary verdict, return evidence,
-question and owner answer as applicable, and rechecks only what those records or
+question and human answer as applicable, and rechecks only what those records or
 intervening upstream changes affected. A second consecutive implementer return
-without an owner answer goes to `needs-decision`, not a new automatic
+without a human answer goes to `needs-decision`, not a new automatic
 preparation pass.
 
 Before creating a follow-up issue discovered during a run, fetch
@@ -72,7 +72,7 @@ Create it through `.github/ISSUE_SPEC.md`'s **Request source** path so its
 provenance is set and read back without becoming a gate.
 
 `Priority` means the organization issue field: Urgent → High → Medium → Low.
-The product owner owns every explicit value; agents never write it. Unset is
+A human owns every explicit value; agents never write it. Unset is
 ignored by preparation and sorts as Medium for implementation pickup.
 
 **The claim record.** The implementer claims in `.github/ISSUE_SPEC.md`'s

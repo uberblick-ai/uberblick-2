@@ -27,7 +27,7 @@ against — every later statement in the preflight is a claim about that commit,
 not about your memory of the repo. Against it, read what the issue targets: the
 current behavior, the modules, interfaces, invariants and tests it lives in,
 related open issues and PRs, and the files the change is likely to touch. Read
-the intended outcome of the effort this issue belongs to, and the owner
+the intended outcome of the effort this issue belongs to, and the human
 decisions already recorded for it, from the records that exist: the `Parent:`
 header and its umbrella thread, the milestone, an `Implements:` requirement
 document, and the Pointers citations — draft inside those decisions instead of
@@ -73,12 +73,12 @@ stale workflow rules is not a valid recheck.
 ## Classify the route
 
 First check for a valid top-level implementer `Returned:` record after the latest
-preparer handoff. On the first consecutive return since an owner answer, use
+preparer handoff. On the first consecutive return since a human answer, use
 route `resumed`: read the prior preparation and adversary evidence, refresh the
 reported conflict and affected upstream grounding, and correct only that part
 of the issue. Do not reclassify, repeat broad grounding, or launch another
 adversary by default. A second consecutive return is already parked on
-`needs-decision`; after the owner answers, resume the same way and treat that
+`needs-decision`; after a human answers, resume the same way and treat that
 answer as resetting the count. A return that exposes a new owner boundary goes
 to `needs-decision` rather than back to `ready`.
 
@@ -107,10 +107,10 @@ with current work, and a coherent, independently useful work shape. Apply
 ISSUE_SPEC's intent and sizing rules. Both preparer and adversary distinguish
 missing outcomes or invariants from optional engineering approaches; correct the
 former without making the latter requirements or enumerating every edge case.
-They also separate an empirical uncertainty from an owner choice and from
+They also separate an empirical uncertainty from a human choice and from
 ordinary engineering judgment, as `.agents/protocols/issue-shaping.md` defines
 those three: answer the first from repository and corpus evidence, send only the
-second to the owner, and leave the third to implementation.
+second to a human, and leave the third to implementation.
 
 The adversary classifies each material finding as `correctable-findings` when
 settled intent or repository evidence is enough, or `owner-boundary` for product
@@ -152,7 +152,7 @@ options and a recommendation, not another automatic adversary round.
 Use the role's existing handoff and label sequence after the recheck. Link the
 completed adversary record and report only material changes and dispositions;
 do not repeat the final body or narrate the run. Follow the README's expiry
-rules, reusing a completed adversary for the same pass. An owner answer or first
+rules, reusing a completed adversary for the same pass. A human answer or first
 implementer return resumes from durable work, refreshing only affected evidence.
 
 Preparer-authored prose names an issue by a descriptive title alongside its

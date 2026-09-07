@@ -73,8 +73,8 @@ evidence.
 Refresh only the disputed contract, affected grounding and intervening upstream
 changes; do not repeat classification, broad grounding or an adversary by
 default. The same bounded continuation applies after `needs-decision`: include
-the focused question and owner answer, which resets the consecutive-return
-count. A second return without an intervening owner answer is already
+the focused question and human answer, which resets the consecutive-return
+count. A second return without an intervening human answer is already
 `needs-decision`, not another automatic preparation pass.
 
 ## Boundaries
@@ -84,7 +84,7 @@ issue, disposition the one adversary's findings, set its final preparation
 label, or close only through the `wontfix` route above; that is one assignment,
 not self-review of code. Never invent product
 meaning or silently waive a serious finding. Never set Priority: every explicit
-value belongs to the product owner.
+value belongs to a human.
 
 ## Context
 

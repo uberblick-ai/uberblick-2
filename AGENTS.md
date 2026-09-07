@@ -20,6 +20,9 @@ unresolved choice beyond that authorization.
 
 ## Read for the action
 
+Use `gh` CLI for GitHub reads and writes; use Uberblick MCP for the product
+corpus. GitHub MCP is not required.
+
 MCP access is expected for every session. Discover documents through `list_docs`
 and search, then read the relevant documents and linked decisions. Do not load
 the whole corpus. If required context cannot be read, stop dependent decisions
@@ -31,7 +34,9 @@ reasons in the issue. Implementers start from that reading guide, read the live
 documents, and expand discovery when code or findings reveal missing context.
 A pointer is a route to the source, not a substitute for reading it.
 
-- **Discuss or shape:** `.agents/protocols/issue-shaping.md` plus relevant corpus.
+- **Discuss or shape:** `.agents/protocols/issue-shaping.md` plus relevant corpus;
+  it governs the human’s choice of draft requirement or confirmed intake, and
+  resuming a requirement by UUID. A draft grants no queue authority.
 - **Assigned role:** `.agents/roles/<role>.md`; follow its pickup order. Empty
   queue checks do not require a corpus sweep or implementation worktree.
 - **Before role side effects:** `.agents/roles/README.md` for shared ownership.

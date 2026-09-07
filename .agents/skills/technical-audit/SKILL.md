@@ -95,6 +95,15 @@ Do not demand one-to-one documentation for internal mechanics. Report only a
 gap that could mislead a user or agent, hide an invariant, cause a wrong product
 choice, or make recovery materially harder.
 
+Check the mechanical half of Editorial contract on the documents the run reads
+and report it as lane-1 evidence: an undescribed document, an h1 block that
+repeats the title, a heading past h3, a paragraph far past the contract's
+length rule, a raw uuid typed as prose instead of a docLink, a dangling
+document link, or PR, issue and date citations in a non-decision document.
+Attribute a provenance finding to the merge that appended it where history
+makes that derivable, because it measures whether that change's docs pass
+rewrote or appended.
+
 For `corpus-ahead` or `code-ahead`, identify the merge or PR that introduced the
 gap when history makes it derivable. The audit measures whether the owning
 change completed the delivery policy's merge-then-docs obligation; it does not become a

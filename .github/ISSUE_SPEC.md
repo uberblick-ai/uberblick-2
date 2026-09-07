@@ -66,8 +66,9 @@ Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
   gates nothing.
 
   **`Implements:` narrows who may hold `ready`.** An issue carrying it holds
-  `ready` only while its body also carries the product owner's own dated
-  decision covering the outcomes it names, on a line of its own reading
+  `ready` only while its body also carries a human's own dated
+  decision covering the outcomes it names. That line identifies the human and
+  gives clear provenance for how their decision reached the issue, and reads
   `Owner decision, <YYYY-MM-DD>: <what was decided>`. Markdown emphasis around
   that line is permitted — `**Owner decision, 2026-08-26: …**`, the form #272
   uses, is the shape. The lowercase parenthetical `(owner decision, <date>)`
@@ -121,11 +122,11 @@ Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
   (ascending issue number). An issue's effective Priority is the highest of its
   own and of every open issue whose `Depends-on` chain reaches it: a Medium
   that blocks a High is picked as a High, and the oldest Urgent goes before any
-  High (owner direction, 2026-09-01). An unset value sorts as Medium — the owner
+  High (owner direction, 2026-09-01). An unset value sorts as Medium — a human
   sets a value to move an issue, not to admit it — and does not make prepared
   work ineligible. Dependencies otherwise gate eligibility —
-  every `Depends-on` closed — and earn no other place in line. The product
-  owner owns every explicit Priority value. Agents may report evidence that
+  every `Depends-on` closed — and earn no other place in line. A human owns
+  every explicit Priority value. Agents may report evidence that
   the order looks wrong, but never write the field.
 
 `Priority` is that field, read through the API — never a line in the issue body:
@@ -196,10 +197,10 @@ choosing product behavior beyond delegated authority is an owner decision.
 
 `needs-decision` exit path: the preparer asks one focused question as an issue
 comment, with concrete options and its recommendation, and replaces
-`needs-preparation` or `ready` with `needs-decision`. A direct answer from the
-product owner to that question is authority. Another person's comment is
-evidence unless the owner explicitly adopts it; an off-GitHub owner answer may
-be recorded only with clear provenance. Once the answer is durable, replace
+`needs-preparation` or `ready` with `needs-decision`. A direct answer from a
+human to that question is authority. An agent's comment is evidence unless a
+human explicitly adopts it; an off-GitHub human answer may be recorded only
+with clear provenance. Once the answer is durable, replace
 `needs-decision` with `needs-preparation`. A fresh preparer assignment reuses
 the previous handoff, adversary verdict, question and answer, and rechecks only
 the affected grounding and intervening upstream changes. It does not repeat
@@ -215,7 +216,7 @@ Reason: <stale-contract|unsafe|unnecessary-complexity|owner-decision> — <one s
 Evidence: <URL or concise pointer>
 ```
 
-The first consecutive return since the latest product-owner answer to a return
+The first consecutive return since the latest human answer to a return
 question removes `ready` and `in-progress` and adds `needs-preparation`. Its
 preparer reuses the prior pass and refreshes only the affected contract and
 grounding; another adversary is not the default. A second consecutive return
@@ -257,8 +258,10 @@ The PR supplies the branch, head SHA, diff and check state; do not copy them
 into the handoff or add a second completion comment to the issue. Recovery and
 independent-review rules live in the shared role README and delivery policy.
 
-Conversation-to-intake behavior lives in
-`.agents/protocols/issue-shaping.md`; it grants no `ready` state. The shared
+The human's shaping choice between a draft requirement for coworker review and
+a confirmed `needs-preparation` intake, plus later requirement resumption by
+uuid, lives in `.agents/protocols/issue-shaping.md`; neither exit grants
+`ready`. The shared
 preparation detail lives in `.agents/protocols/issue-preparation.md`: it owns
 the grounded trivial-vs-challenged classification, challenge questions,
 recheck, and focused parity test. The issue-preparer role owns queue authority

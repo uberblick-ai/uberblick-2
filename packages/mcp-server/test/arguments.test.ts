@@ -12,8 +12,8 @@
  * - **`create_doc` lifecycle shapes select exactly one branch.** An omitted
  *   kind is ordinary; an explicit kind selects only its matching record shape.
  * - **`annotate` is two shapes, never a mixture.** Opening a thread names a
- *   block and a range; a reply names a thread. Both at once was accepted and
- *   the range quietly ignored.
+ *   block and a range; a reply names a thread and may resolve or reopen it.
+ *   Fields from both shapes at once were accepted and quietly ignored.
  * - **`sidebar_group` is three shapes, and each takes only its own field.** A
  *   `rename` carrying an `index` moved nothing and said nothing.
  *
@@ -204,7 +204,7 @@ describe("create_doc lifecycle arguments", () => {
 });
 
 describe("annotate", () => {
-  it("advertises two shapes and accepts nothing in between", async () => {
+  it("advertises two shapes and resolves threads only through replies", async () => {
     const rig = await localRig();
     const doc = await seeded(rig);
 
@@ -217,7 +217,7 @@ describe("annotate", () => {
       {
         title: "Opening a thread over a range",
         required: ["block_id", "start", "end"],
-        properties: { thread_id: false },
+        properties: { thread_id: false, resolved: false },
       },
     ]);
 
@@ -229,12 +229,25 @@ describe("annotate", () => {
       text: "the first thread",
     });
     const threadId = opened.annotation.id;
+    const logged = rig.instance.replicas.store.logSize();
     const replied = await rig.ok("annotate", {
       uuid: doc.uuid,
       thread_id: threadId,
       text: "and a reply",
+      resolved: true,
     });
+    expect(rig.instance.replicas.store.logSize()).toBe(logged + 1);
     expect(replied.annotation.comments).toHaveLength(2);
+    expect(replied.annotation.resolved).toBe(true);
+
+    const reopened = await rig.ok("annotate", {
+      uuid: doc.uuid,
+      thread_id: threadId,
+      text: "reopening with a reason",
+      resolved: false,
+    });
+    expect(reopened.annotation.comments).toHaveLength(3);
+    expect(reopened.annotation.resolved).toBe(false);
 
     const refused = [
       // A reply that also carries a range says two things at once. Each range
@@ -246,6 +259,9 @@ describe("annotate", () => {
       { block_id: doc.blockId },
       { block_id: doc.blockId, start: 4 },
       { start: 4, end: 7 },
+      // Resolution belongs only to a reply.
+      { block_id: doc.blockId, start: 4, end: 7, resolved: true },
+      { resolved: true },
       // Neither shape at all.
       {},
     ];
@@ -259,10 +275,12 @@ describe("annotate", () => {
       expect(result.payload.error, JSON.stringify(args)).toBe("schema_validation");
     }
 
-    // The document holds what the two valid calls put there, and nothing else.
+    // The document holds what the three valid calls put there, and nothing else.
     const read = await rig.ok("get_doc", { uuid: doc.uuid });
     expect(read.annotations).toHaveLength(1);
-    expect(read.annotations[0].comments).toHaveLength(2);
+    expect(read.annotations[0].comments).toHaveLength(3);
+    expect(read.annotations[0].resolved).toBe(false);
+    expect(read.annotations[0].range).toEqual({ start: 0, end: 3, collapsed: false });
   });
 });
 
