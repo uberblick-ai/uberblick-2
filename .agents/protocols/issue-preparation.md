@@ -143,6 +143,14 @@ only grounding affected by an upstream change, then re-read the issue, parent
 claim, nested adversary handoff and labels.
 
 Check the final body against ISSUE_SPEC, including distinct observable outcomes.
+Keep What to the outcome, acceptance criteria to the guarantees, and Pointers to
+useful source locations and non-obvious traps. Remove discovery narration and
+repeated rationale; preserve constraints and failure boundaries that change what
+must be built. Corpus pointers give title, UUID and a short reason to read the
+live source, not excerpts or summaries of it. Record material work-in-flight
+overlap and its consequence, not a snapshot of every changed file. Length follows
+the contract's complexity; neither a word target nor an exhaustive inventory is
+required.
 
 | Parent still owns the issue | Final finding state | Outcome | Labels | Comment |
 |---|---|---|---|---|
@@ -160,11 +168,17 @@ options and a recommendation, not another automatic adversary round.
 
 ## Record once
 
-Use the role's existing handoff and label sequence after the recheck. Link the
-completed adversary record and report only material changes and dispositions;
-do not repeat the final body or narrate the run. Follow the README's expiry
-rules, reusing a completed adversary for the same pass. A human answer or first
-implementer return resumes from durable work, refreshing only affected evidence.
+Give each durable record one job: the issue body carries the final contract,
+the adversary record carries the challenge and its evidence, and the preparer
+handoff links that record and states the disposition. When all findings were
+applied, say so once; do not explain each finding again. Explain an individual
+disposition only when it is not evident from the final body and linked verdict,
+such as a rejected finding or an unresolved owner choice. Retain the required
+handoff fields and route reason, then follow the role's label sequence.
+
+Follow the README's expiry rules, reusing a completed adversary for the same
+pass. A human answer or first implementer return resumes from durable work,
+refreshing only affected evidence.
 
 Preparer-authored prose names an issue by a descriptive title alongside its
 `#N`: the prepared body's What, Why and Out of scope, a `needs-decision`

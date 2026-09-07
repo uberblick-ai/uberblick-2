@@ -103,10 +103,10 @@ Preparation: trivial-self-check|one-adversary|resumed|grounded-wontfix
 Outcome: ready|needs-decision|split|wontfix
 ```
 
-Link the adversary handoff where one ran; summarize edits, dispositions and
-evidence only where material to recovery. Keep it short and easy for a human to
-scan: do not restate the final body, narrate the run, list generic gates, or put
-the self-assessment on the issue. Do not back up the original intake after
+Follow the protocol's “Record once” rule: link the adversary handoff where one
+ran and state the disposition without repeating its findings. Include only
+additional information needed for recovery; do not narrate the run, list generic
+gates, or put the self-assessment on the issue. Do not back up the original intake after
 rewriting it; retain its material intent in the final contract and record only
 material decisions or corrections. Then apply the named label transition. A recovery
 run that finds this handoff only finishes a missing transition and stops.
