@@ -4,6 +4,13 @@ Invocation differences only. Neutral role and review protocols own assignment,
 independence, grants and outcomes. These are the current repository transports;
 this file does not implement independently queued review or portable grants.
 
+Claude sessions launched by `ub launch` default
+`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` to `0`, preventing print mode's independent
+600-second background-wait cutoff. An explicit operator value is preserved.
+This is transport configuration, not a child deadline: use finite child/waiter
+deadlines, renew ownership and wait within the active parent session. For manual
+headless Claude dispatch, set the same variable if it is not already inherited.
+
 ## Implementation reviewer
 
 One transport per *reviewer* runtime — the command

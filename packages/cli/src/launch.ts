@@ -776,7 +776,13 @@ export function createLaunchServices(
               "claude",
               claudeSessionArgs(role, prompt, entry.runtimes.claude.permissionMode),
               worktree,
-              env,
+              {
+                ...env,
+                // Claude print mode otherwise kills background work after 600s.
+                // Role-owned deadlines and claim renewal govern delegated work;
+                // preserve an operator's explicit ceiling if one was supplied.
+                CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS ?? "0",
+              },
               capture,
               process,
               processes,

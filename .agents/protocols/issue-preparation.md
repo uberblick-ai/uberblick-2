@@ -125,6 +125,17 @@ transport fails. Record a failed dispatch by updating that delegation, not by
 claiming a verdict exists; name the runtime that actually performed a challenge.
 Inspect private logs only to diagnose missing results.
 
+Wait inside this active session with blocking tool waits or bounded foreground
+polls, rechecking the durable verdict, transport status and renewal deadlines
+between waits. A detached child or background waiter does not keep the parent
+session alive. Do not send a terminal response promising to report later while
+a delegation is unfinished. On child expiry, record failure and follow the
+shared role README's replacement rule; on a permission/authentication stop,
+record the failure and emit the role's Blocked outcome. On success, apply the
+verdict and complete the recheck, durable handoff and label transition before
+the final Worked line. Each child and waiter still needs its own finite deadline
+and cleanup; disabling a runtime's background-wait ceiling does not waive them.
+
 ## Recheck, then decide
 
 Last thing before posting the outcome, `git fetch origin main` again. Refresh

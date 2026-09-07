@@ -795,7 +795,7 @@ esac
     expect(env.HUB_URL).toBeUndefined();
   });
 
-  it("runs Claude in a fresh worktree and retains at most one failed worktree", async () => {
+  it.each([undefined, "1200000"])("runs Claude with background ceiling %s and retains at most one failed worktree", async (ceiling) => {
     const root = mkdtempSync(join(tmpdir(), "ub-launch-runtime-"));
     let preserved = "";
     try {
@@ -829,6 +829,7 @@ fs.writeFileSync(process.env.LAUNCH_EVIDENCE, JSON.stringify({
   argv: process.argv.slice(2),
   cwd: process.cwd(),
   hub: process.env.HUB_URL ?? null,
+  backgroundWaitCeiling: process.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS,
   marker: fs.readFileSync("marker", "utf8"),
 }));
 if (fs.existsSync(process.env.LAUNCH_FAILURE)) process.exit(23);
@@ -849,6 +850,7 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
           ...process.env,
           PATH: `${bin}:${process.env.PATH ?? ""}`,
           HUB_URL: "ws://ambient.invalid:9999",
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: ceiling,
           LAUNCH_EVIDENCE: evidence,
           LAUNCH_FAILURE: failure,
         }),
@@ -876,6 +878,7 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
       expect(readFileSync(outcome.transcript as string, "utf8")).toContain(
         "No eligible issue-preparer work: test fixture.",
       );
+      expect(observed.backgroundWaitCeiling).toBe(ceiling ?? "0");
       expect(observed.hub).not.toBe("ws://ambient.invalid:9999");
       expect(observed.cwd).not.toBe(root);
       expect(observed.marker).toBe("main\n");
