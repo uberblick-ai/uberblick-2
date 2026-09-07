@@ -3071,8 +3071,10 @@ h3.ub-heading {
 .ub-code .hljs-attr,
 .ub-code .hljs-attribute,
 .ub-code .hljs-name,
+.ub-code .hljs-selector-attr,
 .ub-code .hljs-selector-class,
 .ub-code .hljs-selector-id,
+.ub-code .hljs-selector-pseudo,
 .ub-code .hljs-title,
 .ub-code .hljs-variable {
   color: var(--syntax-name);

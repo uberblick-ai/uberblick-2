@@ -9,11 +9,14 @@
 
 import { Extension } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { Plugin } from "@tiptap/pm/state";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { common, createLowlight } from "lowlight";
 
 const highlighter = createLowlight(common);
+export const codeHighlightingKey = new PluginKey<DecorationSet>(
+  "uberblickCodeHighlighting",
+);
 
 type HighlightNode =
   | { type: "text"; value: string }
@@ -69,18 +72,28 @@ function highlightedCode(node: PMNode, pos: number): Decoration[] {
   return decorations;
 }
 
-function codeHighlightingPlugin(): Plugin {
-  return new Plugin({
+function highlightedDocument(doc: PMNode): DecorationSet {
+  const decorations: Decoration[] = [];
+  doc.descendants((node, pos) => {
+    if (node.type.name !== "code") return;
+    decorations.push(...highlightedCode(node, pos));
+    return false;
+  });
+  return DecorationSet.create(doc, decorations);
+}
+
+function codeHighlightingPlugin(): Plugin<DecorationSet> {
+  return new Plugin<DecorationSet>({
+    key: codeHighlightingKey,
+    state: {
+      init: (_config, state) => highlightedDocument(state.doc),
+      apply: (transaction, previous) =>
+        transaction.docChanged
+          ? highlightedDocument(transaction.doc)
+          : previous.map(transaction.mapping, transaction.doc),
+    },
     props: {
-      decorations(state): DecorationSet {
-        const decorations: Decoration[] = [];
-        state.doc.descendants((node, pos) => {
-          if (node.type.name !== "code") return;
-          decorations.push(...highlightedCode(node, pos));
-          return false;
-        });
-        return DecorationSet.create(state.doc, decorations);
-      },
+      decorations: (state) => codeHighlightingKey.getState(state) ?? null,
     },
   });
 }

@@ -17,6 +17,7 @@ import {
   setBlockLanguage,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
+import { codeHighlightingKey } from "../src/editor/syntax-highlighting.js";
 import { threadIdFromTarget } from "../src/ui/threads.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
 
@@ -39,6 +40,12 @@ function code(element: HTMLElement, language: string): HTMLElement {
   );
   if (block === null) throw new Error(`no ${language} code block`);
   return block;
+}
+
+function highlightingState(editor: Editor) {
+  const decorations = codeHighlightingKey.getState(editor.state);
+  if (decorations === undefined) throw new Error("no syntax-highlighting plugin");
+  return decorations;
 }
 
 describe("code syntax highlighting", () => {
@@ -121,5 +128,23 @@ describe("code syntax highlighting", () => {
     expect(exportMarkdown(live, { frontmatter: false })).toBe(
       '```typescript\nconst ready = "yes";\n```\n',
     );
+  });
+
+  it("reuses decorations for selection changes and refreshes them for document edits", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "highlight-updates", title: "Updates" });
+    appendBlock(ydoc, {
+      type: "code",
+      language: "ts",
+      text: "const answer = 42;",
+    });
+    const { editor } = mount(ydoc);
+
+    const initial = highlightingState(editor);
+    editor.commands.setTextSelection(2);
+    expect(highlightingState(editor)).toBe(initial);
+
+    editor.commands.insertContent(" ");
+    expect(highlightingState(editor)).not.toBe(initial);
   });
 });
