@@ -259,12 +259,12 @@
      uuids, sync detail, group labels. Both are bundled (see the @font-face
      block below), with a system stack behind them for the swap period.
 
-     The document title is the one surface set in neither, and it carries no
-     token: Fraunces is written at `.ub-title` because that rule is its only
-     use site, and a token exists to stop a value drifting across several
-     (#536). */
+     The document title and TL;DR heading are the two editorial surfaces set
+     in neither. Both use `--font-display` so their shared Fraunces stack
+     cannot drift between its use sites (#536). */
   --font-sans: "Geist", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
 
   font-family: var(--font-sans);
   /* Geist is a low-contrast grotesque; subpixel rendering thickens its stems
@@ -2182,10 +2182,10 @@ body {
 
 /* The doc title is the document's h1 and is set like one — same size, leading
    and tracking as `h1.ub-heading` below, and differing from it in family
-   alone: the title is the app's one editorial surface and is set in Fraunces,
-   while every heading inside the prose stays Geist (#41, #536). The
-   placeholder needs no rule of its own; an input paints it in the field's own
-   face. */
+   alone. It and the TL;DR heading are the app's two editorial surfaces and use
+   Fraunces through `--font-display`, while every heading inside the prose
+   stays Geist (#41, #536). The placeholder needs no rule of its own; an input
+   paints it in the field's own face. */
 .ub-title {
   font-size: 2.05rem;
   font-weight: 500;
@@ -2196,7 +2196,7 @@ body {
   background: none;
   padding: 0.2rem 0;
   color: inherit;
-  font-family: "Fraunces", Georgia, "Times New Roman", serif;
+  font-family: var(--font-display);
 }
 
 .ub-title:focus {
@@ -3571,7 +3571,7 @@ h3.ub-heading {
 .ub-tldr h2 {
   margin: 0;
   color: var(--foreground);
-  font-family: "Fraunces", Georgia, "Times New Roman", serif;
+  font-family: var(--font-display);
   font-size: 1.25rem;
   font-weight: 500;
   line-height: 1.25;
