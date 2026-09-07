@@ -2,7 +2,9 @@
 
 Executable review, validation and merge rules. Product intent, architecture and
 principles live in the MCP corpus; this file owns operational authority only.
-Independent-review changes take effect only when their executable protocols land.
+Independent review runs on the durable requests `review-protocol.md` defines,
+answered by independently launched reviewers; the counts below are executable
+in `review-rounds.mjs` beside it.
 
 ## Development workflow (every functionality)
 
@@ -33,27 +35,21 @@ Independent-review changes take effect only when their executable protocols land
      shared checkout can change during review;
    - integrator validation against the issue's acceptance criteria;
    - **independent implementation challenge, proportionate to semantic risk.**
-     First the exemption: a test-only, docs-only or narrowly mechanical diff
-     that preserves production behavior owes **no** challenge when focused
-     validation directly proves the contract — the implementer writes
-     `Challenge: none owed (<reason>)` in its handoff and dispatches nothing,
-     and the integrator dispatches nothing either. The process-change challenge
-     required by AGENTS.md still applies. Otherwise two challenges
-     are required when the diff changes schema meaning,
-     persistence, synchronization, concurrency, auth, runtime dependencies, or
-     decided architecture, or when the implementer or integrator names a
-     concrete unresolved risk warranting both perspectives: first a fresh
-     `implementation-reviewer` on the other runtime from the diff's author,
-     delegated by the implementer before handoff; then a separate
-     `implementation-reviewer` on the author's runtime in a fresh session,
-     delegated by the integrator. Both challenges target the same frozen
-     candidate head before ordinary P2/P3 corrections: the implementer hands
-     off the first verdict without changing that head, the integrator obtains
-     the second, and one ruling batches both sets of findings. A P1 may break
-     the freeze; its corrected head re-establishes the required independent
-     evidence before merge. One implementer-owned cross-runtime
-     challenge is enough when an outside read is useful but those boundaries
-     do not fire. Every
+     How many challenges a candidate owes and who requests each is the
+     "Reviews owed" table below; `review-rounds.mjs` beside this file is that
+     table in executable form and `review-rounds.test.mjs` holds the two in
+     parity. A challenge is never a child of the role that owes it: the
+     requester posts the durable review request `review-protocol.md` defines,
+     and an independently launched `implementation-reviewer` claims it and
+     answers at the exact candidate head. Where the table owes nothing, the
+     implementer writes `Challenge: none owed (<reason>)` in its handoff and
+     requests nothing, and the integrator requests nothing either. Where it
+     owes two, both target the same frozen candidate head before ordinary
+     P2/P3 corrections: the implementer hands off the first verdict without
+     changing that head, the integrator requests and awaits the second, and one
+     ruling batches both sets of findings. A P1 may break the freeze; its
+     corrected head re-establishes the required independent evidence before
+     merge. Every
      challenge actively hunts for counterexamples, missing failure paths,
      incorrect assumptions, overengineering and overtesting; integrator gate
      work and Copilot do not substitute for a required challenge;
@@ -89,6 +85,19 @@ Independent-review changes take effect only when their executable protocols land
    "Review isolation" states the full boundary.
 5. **Merge, then docs.** After the gates pass, merge per the merge policy
    below; then update the product docs (through the Uberblick MCP tools) to the new status quo.
+
+### Reviews owed
+
+The count is a function of what the diff decides, never of where it landed:
+paths identify what to inspect and buy no round on their own. A listed boundary
+or a named concrete risk is settled before the exemption is considered, so no
+diff is waived out of a boundary it crosses.
+
+| Condition | Reviews owed | Who requests each |
+| --- | --- | --- |
+| `boundary` — the diff changes schema meaning, persistence, synchronization, concurrency, auth, runtime dependencies or decided architecture, or the implementer or integrator names a concrete unresolved risk warranting both perspectives | 2 | `implementer` on the other runtime, then `integrator` on the author's runtime |
+| `exempt` — a test-only, docs-only or narrowly mechanical diff that preserves production behavior, where focused validation directly proves the contract and it is not an agent-authored process change | 0 | nobody |
+| `otherwise` — every other diff, including an agent-authored process change that would otherwise be exempt | 1 | `implementer` on the other runtime |
 
 ### Merge policy — the rules are the authority, not a session
 

@@ -1,6 +1,3 @@
 {
-  "enabledMcpjsonServers": ["uberblick"],
-  "permissions": {
-    "allow": ["Bash(node scripts/run-codex-role.mjs implementation-reviewer:*)"]
-  }
+  "enabledMcpjsonServers": ["uberblick"]
 }

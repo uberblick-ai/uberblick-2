@@ -20,10 +20,14 @@ case "$role" in
     n=$(gh issue list -R "$REPO" --state open --limit 200 --label ready --json number --jq length) || exit 2
     m=$(gh search prs -R "$REPO" --state open --match comments fix-now --json number --jq length) || exit 2
     n=$((n + m)) ;;
+  implementation-reviewer)
+    # a review request lives in a PR comment; head, runtime and claims are the
+    # role's own check, so any PR whose thread mentions one is a candidate
+    n=$(gh search prs -R "$REPO" --state open --match comments "Review-request" --json number --jq length) || exit 2 ;;
   integrator)
     n=$(gh pr list -R "$REPO" --state open --json isDraft,labels --jq \
       '[.[] | select(.isDraft | not) | select(.labels | map(.name) | index("needs-human") | not)] | length') || exit 2 ;;
-  *) echo "usage: probe-work.sh issue-preparer|implementer|integrator" >&2; exit 2 ;;
+  *) echo "usage: probe-work.sh issue-preparer|implementer|implementation-reviewer|integrator" >&2; exit 2 ;;
 esac
 if [ "$n" -eq 1 ]; then noun=candidate; else noun=candidates; fi
 echo "probe-work: $role: $n $noun"

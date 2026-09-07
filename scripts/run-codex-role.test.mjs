@@ -103,11 +103,9 @@ esac
 			...(claimUpdatedAt === undefined
 				? {}
 				: { CODEX_TEST_CLAIM_UPDATED_AT: claimUpdatedAt }),
-			CODEX_TEST_CLAIM_LINE: role === "implementation-reviewer"
-				? `Delegated: implementation-reviewer ${runId}`
-				: role === "implementer"
-					? `Implementer: codex ${runId}`
-					: `Claim: ${role} ${runId}`,
+			CODEX_TEST_CLAIM_LINE: role === "implementer"
+				? `Implementer: codex ${runId}`
+				: `Claim: ${role} ${runId}`,
 			CODEX_TEST_EXIT: codexExit,
 			CODEX_TEST_GIT: join(base, "git-calls"),
 			CODEX_TEST_RUN_ID: runId,
@@ -187,7 +185,7 @@ test("reports a real nonzero exit and removes the normal run worktree", (t) => {
 	assert.equal(groupExists(Number(readFileSync(pgidFile, "utf8").trim())), false);
 });
 
-test("runs an implementation reviewer sandboxed without removing its parent worktree", (t) => {
+test("runs an implementation reviewer sandboxed, owning its worktree like any entry role", (t) => {
 	const current = fixture(t, { role: "implementation-reviewer" });
 	const result = spawnSync(
 		process.execPath,
@@ -196,8 +194,8 @@ test("runs an implementation reviewer sandboxed without removing its parent work
 	);
 
 	assert.equal(result.status, 0, result.stderr);
-	assert.equal(existsSync(current.worktree), true);
-	assert.equal(existsSync(current.env.CODEX_TEST_GIT), false);
+	assert.equal(existsSync(current.worktree), false);
+	assert.match(readFileSync(current.env.CODEX_TEST_GIT, "utf8"), /worktree remove/);
 	assert.doesNotMatch(readFileSync(current.env.CODEX_TEST_ARGS, "utf8"), /dangerously-bypass/);
 	assert.match(readFileSync(current.env.CODEX_TEST_ARGS, "utf8"), /-s workspace-write/);
 });
@@ -370,7 +368,7 @@ test("a live supervisor reports deadline expiry distinctly and preserves recover
 	assert.equal(groupExists(pgid), false);
 });
 
-test("a pre-existing reviewer delegation is found when its run is lost", async (t) => {
+test("a reviewer's own claim is found when its run is lost, and its worktree is kept", async (t) => {
 	const current = fixture(t, {
 		claimUpdatedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
 		role: "implementation-reviewer",
@@ -391,7 +389,8 @@ test("a pre-existing reviewer delegation is found when its run is lost", async (
 
 	assert.equal(result.code, 1, result.stderr);
 	assert.match(result.stdout, /durable claim: found/);
-	assert.match(result.stdout, /Parent worktree remains/);
+	assert.match(result.stdout, /Worktree preserved and registered/);
+	assert.equal(existsSync(current.worktree), true);
 });
 
 test("an indeterminate claim lookup keeps the lost run worktree registered", async (t) => {

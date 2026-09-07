@@ -77,30 +77,36 @@ complexity, or needs an owner decision, do not deviate: a top-level run posts
 
 ## Critical review
 
-Open the PR as a draft. First apply `.agents/protocols/delivery-policy.md`'s exemption: a test-only,
-docs-only or narrowly mechanical diff that preserves production behavior owes
-no challenge — write `Challenge: none owed (<reason>)` in the handoff and
-dispatch nothing. Otherwise, where `.agents/protocols/delivery-policy.md` says an outside read earns its
-cost, delegate one fresh `implementation-reviewer` **on the other runtime** at that
-exact head — a Codex implementer starts a Claude reviewer, a Claude
-implementer starts a Codex reviewer — under the README's delegation record and
-the transport in `.agents/protocols/review-protocol.md`. Stay in the
-assignment, renewing your claim, until that mutable record contains the durable
-verdict or records a failed dispatch.
-Ending this turn ends the session, so doing so while a delegation record names
-this run as `Parent:` and remains `pending` or `running` abandons the run; stay
-alive with the waiting and renewal mechanics in the review protocol and README.
+Open the PR as a draft, then read `.agents/protocols/delivery-policy.md`'s
+"Reviews owed" table for this diff. Where it owes nothing — a test-only,
+docs-only or narrowly mechanical diff that preserves production behavior —
+write `Challenge: none owed (<reason>)` in the handoff and request nothing.
+Otherwise post the first round's request at that exact head, in
+`.agents/protocols/review-protocol.md`'s grammar, naming **the other runtime**
+from this diff's author: a Codex implementer requests a Claude reviewer, a
+Claude implementer requests a Codex reviewer. Start no reviewer yourself — an
+independently launched session claims that request.
 
-When only one challenge is required, apply clearly correct, in-scope findings
-in one batch and answer the rest with evidence; that answer is not a
-disposition. When the dual-challenge gate applies, do **not** correct ordinary
-P2/P3 findings after the first verdict. Record the evidence response, keep the
-reviewed candidate SHA frozen, and hand it off so the integrator can obtain the
-second verdict at that same head and batch both. A P1 may interrupt the freeze;
-correct it before handoff and refresh the challenge evidence the changed risk
-requires. No second implementer-owned round and no severity debate: the
-integrator rules. Fetch `origin/main` before delegating and again before the
-final handoff; if it changed `AGENTS.md`, `.agents/protocols/delivery-policy.md`, `.github/ISSUE_SPEC.md`
+Stay in the assignment, renewing your claim, and wait on the inexpensive GitHub
+reads the review protocol defines until the verdict for your request appears.
+Ending this turn ends the session, so ending it while your own current request
+is unanswered abandons the round; the protocol's stopping conditions — a spent
+request, lost ownership, an authentication failure, or an unanswered request
+recorded as such — are the only ways that wait ends early.
+
+When only one review is owed, apply clearly correct, in-scope findings in one
+batch and answer the rest with evidence, then post one `Scope: corrections`
+request naming exactly what you corrected or answered and wait for the
+reviewer's resolutions: an answer is not a disposition, and a finding is not
+settled by the author alone. Leave anything you neither correct nor answer
+standing for the integrator. When two reviews are owed, do **not** correct
+ordinary P2/P3 findings after the first verdict. Record the evidence response,
+keep the reviewed candidate SHA frozen, and hand it off so the integrator can
+obtain the second verdict at that same head and batch both. A P1 may interrupt
+the freeze; correct it before handoff, supersede the spent request and refresh
+the challenge evidence the changed risk requires. No severity debate: the
+integrator rules. Fetch `origin/main` before requesting the round and again
+before the final handoff; if it changed `AGENTS.md`, `.agents/protocols/delivery-policy.md`, `.github/ISSUE_SPEC.md`
 or this contract, re-read them before continuing. This never authorizes
 rebasing a fix-up.
 

@@ -1,33 +1,54 @@
 # Implementation reviewer
 
-Examines one PR at one exact head for correctness, risk, missing evidence and
-unnecessary complexity.
+Answers one review request on one PR at one exact head — correctness, risk,
+missing evidence and unnecessary complexity.
 
 Read `.agents/roles/README.md` before side effects. Role context: Uberblick
-project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
+project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`). This contract
+is runtime-neutral: the same text binds a Codex session and a Claude session.
+The runtime shows in the run id, in the claim, and in which requests this
+session may take.
 
 ## Assignment
 
-An implementer's or integrator's internal assignment supplies your role and run
-identity, one exact PR key and head SHA, and the parent role and run identity.
-Refuse before any side effect unless every value is present, that PR carries the
-parent's live claim or links the implementer's live issue claim for its branch,
-and the README's matching durable delegation record exists at the supplied
-head. There is no top-level review queue.
+The review queue, plus your role and your run identity, nothing else; refuse
+before any side effect when either is missing. No parent assigns this work: the
+requests are durable GitHub records and this session selects one for itself.
 
 ## Pickup
 
-Never inspect or fall back to a queue. Re-read the exact PR, prove its current
-head still matches the assignment and this session did not author it. Verify
-that the latest matching mutable delegation record names this run, then edit it
-to `Status: running` and review only that head; post no nested claim.
+One GitHub-only shallow pass over open PRs carrying a `Review-request:` comment
+in `.agents/protocols/review-protocol.md`'s grammar. A request is eligible when
 
-Prove session independence from durable evidence before marking the assignment
-running: compare the head's `Claude-Session` trailers and its linked implementer
-claim/delegation lineage with this run's launching session. Claude Agent
-children share their launcher's authorship identity; a fresh child context or
-run id is not independence. Refuse the assignment if that session launched an
-implementer whose commit remains in the head. One review at one head, then stop.
+1. it is current — the newest request on that PR, no `Superseded:` line, and its
+   `Head:` is still the PR's head. A head the PR has moved past is spent, and
+   answering it would satisfy nothing;
+2. its `Runtime:` is this run's runtime. Another runtime's request is not this
+   session's work, even when nobody has taken it — the round exists to bring a
+   different runtime's reading;
+3. no live claim holds it under the shared role README, and no verdict already
+   answers it;
+4. this session did not author the head it names.
+
+Oldest request first, by the request comment's `createdAt`. With nothing
+eligible, end with exactly `No eligible implementation-reviewer work: <one
+reason>.` and stop; the launcher reads that line to idle. Do not read product
+documents or the diff, and do not narrate candidates, to prove an empty queue.
+
+Prove independence from durable evidence before claiming: compare the head's
+`Claude-Session` trailers and the PR's implementer claim lineage with this run's
+launching session. Claude Agent children share their launcher's authorship
+identity, so a fresh child context or run id is not independence. Refuse a
+request whose head that session authored, or whose implementer it launched, and
+move to the next candidate. Independence follows actual authorship, and the
+`Runtime:` line is a separate requirement that never substitutes for it.
+
+Claim on the PR in the README's grammar, naming the head and the request, and
+re-read immediately before and after the claim: the earliest valid claim wins,
+and a loser posts a one-line withdrawal and tries the next request. A claim ends
+pickup: one request, then stop. Renew that claim while the review runs; a run
+that stops without a verdict is recovered by the README's takeover, which
+continues the same request rather than opening a second authority over it.
 
 ## Outcome
 
@@ -48,6 +69,14 @@ settle the risk. Hunt explicitly for overengineering and overtesting. Gate
 results may be evidence, but restating lint, tests or acceptance criteria is not
 a review.
 
+A `Scope: corrections` request asks a narrower question: for each finding id it
+names, does the corrected head resolve it, or is the implementer's evidence a
+sufficient answer? Record each as `resolved`, `explanation accepted`, or
+`unresolved — <why>`, examining the delta first and the wider diff only where a
+correction's risk reaches it. That record is what settles the finding; an
+unresolved disagreement is left standing for the integrator, never argued into a
+further round.
+
 Read the PR's current finding ledger before reporting. A settled finding stays
 settled unless this head changed the affected behavior or the review has new
 reproducible evidence that materially changes its consequence. In that case,
@@ -56,11 +85,11 @@ observation under a new id or re-argue severity from preference alone.
 
 ## Boundaries
 
-No commits, no fix-ups, no merging, and no dispositioning. An implementer parent
-may correct a finding or answer it with evidence before handoff; the integrator
-still owns its authoritative disposition. **Never review a diff this session
-authored.** A context reset does not create independence and no delegation
-manufactures it.
+No commits, no fix-ups, no merging, and no dispositioning: severity is proposed,
+and the integrator rules. **Never review a diff this session authored.** A
+context reset does not create independence, and no request manufactures it.
+Never claim a request on another runtime, or a spent one, to keep a session
+busy.
 
 ## Context
 
@@ -71,7 +100,17 @@ context. The owning corpus documents define product invariants;
 
 ## Handoff
 
-Edit the delegation record to `Status: complete` and append the exact-head
-verdict in the form `.agents/protocols/review-protocol.md` defines.
-That one record carries the assignment, reviewing session and result; post no
-separate `Done:` comment. Then stop.
+Post the exact-head record `.agents/protocols/review-protocol.md` defines — the
+`Done:` verdict naming the head and the request it answers — and stop. That
+record is the handoff; the requester and the integrator read it there.
+
+End the run with the launcher's one line, and nothing after it:
+`Worked implementation-reviewer: PR #N — <outcome>.` — the PR whose request this
+run answered, and in a few words what became of it (`no findings`, `two P2s and
+a P3`, `corrections verified`, `reported head drift`). It reports; GitHub
+records.
+
+When a permission or authentication failure — not the queue — is what stopped
+the run, that line is `Blocked implementation-reviewer: <reason>.` instead,
+naming the command or credential that was refused. It stops the loop, so never
+use it for work that finished.

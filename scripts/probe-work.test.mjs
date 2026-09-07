@@ -59,6 +59,12 @@ test("an empty queue idles and an unreadable GitHub never launches", (t) => {
 	assert.equal(broken.stdout.trim(), "");
 });
 
+test("every launchable entry role has its own read", (t) => {
+	const reviewer = probe(t, "implementation-reviewer", 2);
+	assert.equal(reviewer.status, 0);
+	assert.equal(reviewer.stdout.trim(), "probe-work: implementation-reviewer: 2 candidates");
+});
+
 test("an unknown role is a usage error, not an idle", (t) => {
 	const unknown = probe(t, "reviewer", 3);
 	assert.equal(unknown.status, 2);

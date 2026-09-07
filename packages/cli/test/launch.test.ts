@@ -463,6 +463,8 @@ process.exit(0);
     for (const [argv, expected] of [
       [["issue-preparer"], ["issue-preparer", "claude"]],
       [["implementer"], ["implementer", "codex"]],
+      [["implementation-reviewer"], ["implementation-reviewer", "claude"]],
+      [["implementation-reviewer", "--model", "codex"], ["implementation-reviewer", "codex"]],
       [["integrator", "--model", "codex"], ["integrator", "codex"]],
       [["implementer", "--model", "claude"], ["implementer", "claude"]],
     ] as const) {
@@ -481,7 +483,6 @@ process.exit(0);
 
   it("refuses internal roles and an unknown --model before a child starts", async () => {
     for (const argv of [
-      ["implementation-reviewer"],
       ["issue-adversary"],
       ["implementer", "--model", "gpt"],
       ["implementer", "--model"],
