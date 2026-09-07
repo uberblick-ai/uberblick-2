@@ -1,5 +1,5 @@
 diff --git a/dist/hocuspocus-server.cjs b/dist/hocuspocus-server.cjs
-index 39719e3862b1ff097c49f2673dafc445f90bd218..1c9785b943b62e0e335ab4ed8c3c34ef4927516f 100644
+index 39719e3862b1ff097c49f2673dafc445f90bd218..154c5d30eb67a7ad2cccf510d40434c137aec0a1 100644
 --- a/dist/hocuspocus-server.cjs
 +++ b/dist/hocuspocus-server.cjs
 @@ -853,6 +853,7 @@ var ClientConnection = class {
@@ -30,7 +30,15 @@ index 39719e3862b1ff097c49f2673dafc445f90bd218..1c9785b943b62e0e335ab4ed8c3c34ef
  					this.documentConnectionsEstablished.delete(rawKey);
  					delete this.hookPayloads[rawKey];
  					delete this.incomingMessageQueue[rawKey];
-@@ -1012,6 +1017,7 @@ var ClientConnection = class {
+@@ -992,6 +997,7 @@ var ClientConnection = class {
+ 					return;
+ 				}
+ 				if (this.incomingMessageQueue[rawKey] === void 0) {
++					if (decoding.readVarUint(tmpMsg.decoder) !== MessageType.Auth) return;
+ 					if (this.getPendingDocumentCount() >= this.maxPendingDocuments) {
+ 						console.warn(`Hocuspocus: closing connection ${this.socketId}: too many pending unauthenticated documents (maxPendingDocuments ${this.maxPendingDocuments}). Last requested document: "${documentName}".`);
+ 						this.terminate(_hocuspocus_common.ResetConnection);
+@@ -1012,6 +1018,7 @@ var ClientConnection = class {
  						context: { ...this.defaultContext },
  						providerVersion: null
  					};
@@ -38,7 +46,7 @@ index 39719e3862b1ff097c49f2673dafc445f90bd218..1c9785b943b62e0e335ab4ed8c3c34ef
  				}
  				this.handleQueueingMessage(data, rawKey, documentName);
  			} catch (closeError) {
-@@ -1040,6 +1046,7 @@ var ClientConnection = class {
+@@ -1040,6 +1047,7 @@ var ClientConnection = class {
  			delete this.incomingMessageQueueBytes[rawKey];
  		}
  		for (const rawKey of Object.keys(this.hookPayloads)) delete this.hookPayloads[rawKey];
@@ -46,7 +54,7 @@ index 39719e3862b1ff097c49f2673dafc445f90bd218..1c9785b943b62e0e335ab4ed8c3c34ef
  		this.documentConnectionsEstablished.clear();
  	}
  	/**
-@@ -1066,9 +1073,7 @@ var ClientConnection = class {
+@@ -1066,9 +1074,7 @@ var ClientConnection = class {
  		return total;
  	}
  	getPendingDocumentCount() {
@@ -58,7 +66,7 @@ index 39719e3862b1ff097c49f2673dafc445f90bd218..1c9785b943b62e0e335ab4ed8c3c34ef
  	/**
  	* Set a callback that will be triggered when the connection is closed
 diff --git a/dist/hocuspocus-server.esm.js b/dist/hocuspocus-server.esm.js
-index 0fce8e277d9cb44197070c7e52c43586b65b306d..f96e6ba87267f3d3046ab8a6fc633e3e5acea792 100644
+index 0fce8e277d9cb44197070c7e52c43586b65b306d..7f762f46fbb5f8d953a5f6737043a420a9722406 100644
 --- a/dist/hocuspocus-server.esm.js
 +++ b/dist/hocuspocus-server.esm.js
 @@ -823,6 +823,7 @@ var ClientConnection = class {
@@ -89,7 +97,15 @@ index 0fce8e277d9cb44197070c7e52c43586b65b306d..f96e6ba87267f3d3046ab8a6fc633e3e
  					this.documentConnectionsEstablished.delete(rawKey);
  					delete this.hookPayloads[rawKey];
  					delete this.incomingMessageQueue[rawKey];
-@@ -982,6 +987,7 @@ var ClientConnection = class {
+@@ -962,6 +967,7 @@ var ClientConnection = class {
+ 					return;
+ 				}
+ 				if (this.incomingMessageQueue[rawKey] === void 0) {
++					if (decoding.readVarUint(tmpMsg.decoder) !== MessageType.Auth) return;
+ 					if (this.getPendingDocumentCount() >= this.maxPendingDocuments) {
+ 						console.warn(`Hocuspocus: closing connection ${this.socketId}: too many pending unauthenticated documents (maxPendingDocuments ${this.maxPendingDocuments}). Last requested document: "${documentName}".`);
+ 						this.terminate(ResetConnection);
+@@ -982,6 +988,7 @@ var ClientConnection = class {
  						context: { ...this.defaultContext },
  						providerVersion: null
  					};
@@ -97,7 +113,7 @@ index 0fce8e277d9cb44197070c7e52c43586b65b306d..f96e6ba87267f3d3046ab8a6fc633e3e
  				}
  				this.handleQueueingMessage(data, rawKey, documentName);
  			} catch (closeError) {
-@@ -1010,6 +1016,7 @@ var ClientConnection = class {
+@@ -1010,6 +1017,7 @@ var ClientConnection = class {
  			delete this.incomingMessageQueueBytes[rawKey];
  		}
  		for (const rawKey of Object.keys(this.hookPayloads)) delete this.hookPayloads[rawKey];
@@ -105,7 +121,7 @@ index 0fce8e277d9cb44197070c7e52c43586b65b306d..f96e6ba87267f3d3046ab8a6fc633e3e
  		this.documentConnectionsEstablished.clear();
  	}
  	/**
-@@ -1036,9 +1043,7 @@ var ClientConnection = class {
+@@ -1036,9 +1044,7 @@ var ClientConnection = class {
  		return total;
  	}
  	getPendingDocumentCount() {
@@ -117,7 +133,7 @@ index 0fce8e277d9cb44197070c7e52c43586b65b306d..f96e6ba87267f3d3046ab8a6fc633e3e
  	/**
  	* Set a callback that will be triggered when the connection is closed
 diff --git a/src/ClientConnection.ts b/src/ClientConnection.ts
-index 9ac688ae4c7038639cfd0ce6044e56cf926d2d7a..54eabff7636dad53413a2e3cc80fafdf5332a703 100644
+index 9ac688ae4c7038639cfd0ce6044e56cf926d2d7a..3d8315686404b2885f08749bc682f4cda14d2b0e 100644
 --- a/src/ClientConnection.ts
 +++ b/src/ClientConnection.ts
 @@ -76,6 +76,8 @@ export class ClientConnection<Context = any> {
@@ -137,22 +153,10 @@ index 9ac688ae4c7038639cfd0ce6044e56cf926d2d7a..54eabff7636dad53413a2e3cc80fafdf
  		this.documentConnectionsEstablished.clear();
  	}
  
-@@ -225,20 +228,16 @@ export class ClientConnection<Context = any> {
- 	}
- 
- 	// Number of distinct documents on this connection that have not yet finished
--	// authenticating. Each holds its own queue and hook payload, so this is capped
--	// to prevent a single connection from amplifying memory usage by fanning out
--	// across many document names. We count by `isAuthenticated` (not by whether an
--	// Auth frame has been seen) so that sending an Auth frame first — which marks
--	// the document as "establishing" but keeps its hook payload alive while a slow
--	// `onAuthenticate` runs — cannot be used to bypass the limit.
-+	// authenticating. Each holds its own queue and hook payload, so this is capped
-+	// to prevent a single connection from amplifying memory usage by fanning out
-+	// across many document names. We count by `isAuthenticated` (not by whether an
-+	// Auth frame has been seen) so that sending an Auth frame first — which marks
-+	// the document as "establishing" but keeps its hook payload alive while a slow
-+	// `onAuthenticate` runs — cannot be used to bypass the limit.
+@@ -231,14 +234,10 @@ export class ClientConnection<Context = any> {
+ 	// Auth frame has been seen) so that sending an Auth frame first — which marks
+ 	// the document as "establishing" but keeps its hook payload alive while a slow
+ 	// `onAuthenticate` runs — cannot be used to bypass the limit.
 +	// Kept incrementally so admitting one document remains O(1)
 +	// no matter how many authenticated documents the socket already holds.
  	private getPendingDocumentCount(): number {
@@ -167,7 +171,7 @@ index 9ac688ae4c7038639cfd0ce6044e56cf926d2d7a..54eabff7636dad53413a2e3cc80fafdf
  	}
  
  	/**
-@@ -528,8 +521,12 @@ export class ClientConnection<Context = any> {
+@@ -528,8 +527,12 @@ export class ClientConnection<Context = any> {
  						};
  					},
  				);
@@ -182,7 +186,7 @@ index 9ac688ae4c7038639cfd0ce6044e56cf926d2d7a..54eabff7636dad53413a2e3cc80fafdf
  				this.hasAuthenticated = true;
  
  				// Let the client know that authentication was successful.
-@@ -551,6 +548,11 @@ export class ClientConnection<Context = any> {
+@@ -551,6 +554,11 @@ export class ClientConnection<Context = any> {
  
  				// Clean up all state for this document so a retry is treated
  				// as a fresh first connection attempt.
@@ -194,7 +198,30 @@ index 9ac688ae4c7038639cfd0ce6044e56cf926d2d7a..54eabff7636dad53413a2e3cc80fafdf
  				this.documentConnectionsEstablished.delete(rawKey);
  				delete this.hookPayloads[rawKey];
  				delete this.incomingMessageQueue[rawKey];
-@@ -629,6 +631,7 @@ export class ClientConnection<Context = any> {
+@@ -597,6 +605,22 @@ export class ClientConnection<Context = any> {
+ 
+ 			const isFirst = this.incomingMessageQueue[rawKey] === undefined;
+ 			if (isFirst) {
++				// A document is opened by its Auth message. A provider sends its token
++				// before anything else for a document (`HocuspocusProvider.ts:537-543`)
++				// and one socket delivers frames in order, so a first frame that is not
++				// an Auth message belongs to a document this connection has already torn
++				// down — refused by `onAuthenticate`, or thrown out of
++				// `setUpNewConnection` after authenticating — whose client has not heard
++				// the refusal yet. Opening a pending document for it would take a slot
++				// nothing can give back: that client sends no further token, so the slot
++				// is held for the life of the socket, and enough of them terminate a
++				// socket whose other rooms are healthy. Such a frame is also never
++				// delivered anywhere: a queue that no authentication ever drains is
++				// discarded when the socket closes.
++				if (decoding.readVarUint(tmpMsg.decoder) !== MessageType.Auth) {
++					return;
++				}
++
+ 				// Cap the number of documents a single connection can open before
+ 				// authenticating any of them. Each pending document allocates its own
+ 				// queue and hook payload, so this prevents memory amplification by
+@@ -629,6 +653,7 @@ export class ClientConnection<Context = any> {
  					},
  					providerVersion: null as string | null,
  				};

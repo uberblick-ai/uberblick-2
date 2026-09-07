@@ -288,6 +288,60 @@ function frameBarrierForNextClient(
   });
 }
 
+/**
+ * The connection object the server builds for the next client, so a test can
+ * read the server's own state instead of inferring it from a symptom.
+ * `handleConnection` returns the `ClientConnection` (the same handle
+ * `frameBarrierForNextClient` wraps), and the shipped build carries
+ * `getPendingDocumentCount()` on it — the number `ClientConnection.ts:612`
+ * enforces the ceiling from — whatever the published declaration says about it
+ * being private.
+ */
+type ServerConnection = FrameSink & { getPendingDocumentCount: () => number };
+
+function nextClientConnection(
+  hocuspocus: Hocuspocus<Context>,
+): Promise<ServerConnection> {
+  const accept = hocuspocus.handleConnection.bind(hocuspocus);
+  return new Promise((resolve) => {
+    hocuspocus.handleConnection = (...args: Parameters<typeof accept>) => {
+      hocuspocus.handleConnection = accept;
+      const client = accept(...args);
+      resolve(client as unknown as ServerConnection);
+      return client;
+    };
+  });
+}
+
+/**
+ * Await an event barrier under a label. `waitUntil` (`helpers.ts:258-270`) does
+ * this for a predicate; the barriers here are promises, and a bare `await` on
+ * one can fail only as the suite timeout — the failure that left this file's
+ * own flake unreadable until its awaits were hand-instrumented (#944). The
+ * deadline is not the barrier: the test still advances on the event, and the
+ * timer only decides what the failure says.
+ */
+async function waitFor<T>(
+  label: string,
+  barrier: Promise<T>,
+  timeoutMs = 5_000,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      barrier,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`timed out waiting for ${label}`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 describe("ClientConnection.ts:426 — the pre-auth queue drains before `connected`", () => {
   /**
    * A provider sends its token and then its first sync message without waiting
@@ -405,72 +459,130 @@ describe("ClientConnection.ts:516-546 — a refused token sets up no connection"
 });
 
 describe("ClientConnection pending-document counter", () => {
+  /**
+   * The hub states this ceiling itself (`MAX_PENDING_DOCUMENTS`, 100, in
+   * `packages/hub/src/config.ts`) and the MCP client's attach budget is
+   * deliberately below it, so what the number counts is a contract both sides
+   * rest on: at every moment exactly the documents on this socket whose
+   * authentication has not completed.
+   *
+   * Both tests read that number from the server's own connection object and
+   * watch the socket's lifecycle — the ceiling warning and the socket's close —
+   * from the first document onward. Reading only the client's symptoms cannot
+   * tell a socket terminated for the ceiling from a barrier that advanced too
+   * early: past the cap Hocuspocus does not refuse the document, it
+   * `terminate()`s the whole socket, and this socket's reconnect delay is 60s,
+   * so a terminated socket looks exactly like a document that never syncs.
+   */
   it("counts only documents whose authentication has not completed", async () => {
     const heldAuthenticationStarted = gate();
     const releaseHeldAuthentication = gate();
     const failedAfterAuthentication = "failed after authentication";
-
-    const { port } = await startServer({
-      maxPendingDocuments: 1,
-      onAuthenticate: async ({ documentName }) => {
-        if (documentName === "refused-before-authentication") {
-          throw { reason: "refused before authentication" };
-        }
-        if (documentName === "held-during-authentication") {
-          heldAuthenticationStarted.open();
-          await releaseHeldAuthentication.opened;
-        }
-      },
-      onLoadDocument: async ({ documentName }) => {
-        if (documentName === "failed-after-authentication") {
-          throw { reason: failedAfterAuthentication };
-        }
-      },
-    });
-    const websocket = sharedWebsocket(port);
-
-    const refused = connect({
-      port,
-      room: "refused-before-authentication",
-      awareness: null,
-      websocketProvider: websocket,
-    });
-    await websocket.connect();
-    await refused.authenticationFailed;
-
-    const failed = connect({
-      port,
-      room: "failed-after-authentication",
-      awareness: null,
-      websocketProvider: websocket,
-    });
-    expect(await failed.authenticationFailed).toBe(failedAfterAuthentication);
-
-    // Authenticated documents stay on this socket, but no longer consume its
-    // one pending slot. Crossing the ceiling cumulatively must stay healthy.
-    for (let index = 0; index < 3; index += 1) {
-      await connect({
-        port,
-        room: `authenticated-${index}`,
-        awareness: null,
-        websocketProvider: websocket,
-      }).synced;
-    }
-
-    connect({
-      port,
-      room: "held-during-authentication",
-      awareness: null,
-      websocketProvider: websocket,
-    });
-    await heldAuthenticationStarted.opened;
-
     const warnings: string[] = [];
+    const closes: string[] = [];
+    // Installed before the first document: the ceiling warning names the
+    // socket-level cause, and it is written when the socket is torn down —
+    // which, in the phases below, is before a spy installed later would exist.
     const logged = vi.spyOn(console, "warn").mockImplementation((...args) => {
       warnings.push(args.map(String).join(" "));
     });
 
     try {
+      const { port, hocuspocus } = await startServer({
+        maxPendingDocuments: 1,
+        onAuthenticate: async ({ documentName }) => {
+          if (documentName === "refused-before-authentication") {
+            throw { reason: "refused before authentication" };
+          }
+          if (documentName === "held-during-authentication") {
+            heldAuthenticationStarted.open();
+            await releaseHeldAuthentication.opened;
+          }
+        },
+        onLoadDocument: async ({ documentName }) => {
+          if (documentName === "failed-after-authentication") {
+            throw { reason: failedAfterAuthentication };
+          }
+        },
+      });
+      const accepted = nextClientConnection(hocuspocus);
+      const websocket = sharedWebsocket(port);
+      websocket.on("close", () => {
+        closes.push("socket closed");
+      });
+
+      const refused = connect({
+        port,
+        room: "refused-before-authentication",
+        awareness: null,
+        websocketProvider: websocket,
+      });
+      await websocket.connect();
+      const client = await waitFor(
+        "the server to accept the shared socket",
+        accepted,
+      );
+      const observed = (pending: number) => ({
+        pending,
+        ceilingWarnings: warnings.filter((line) =>
+          line.includes("too many pending unauthenticated documents"),
+        ).length,
+        socketCloses: closes.length,
+      });
+      const read = () => observed(client.getPendingDocumentCount());
+      const healthy = observed(0);
+
+      expect(
+        await waitFor(
+          "the refused document's authentication to fail",
+          refused.authenticationFailed,
+        ),
+      ).toBe("refused before authentication");
+      expect(read()).toEqual(healthy);
+
+      const failed = connect({
+        port,
+        room: "failed-after-authentication",
+        awareness: null,
+        websocketProvider: websocket,
+      });
+      expect(
+        await waitFor(
+          "the document that fails after authentication to be denied",
+          failed.authenticationFailed,
+        ),
+      ).toBe(failedAfterAuthentication);
+      expect(read()).toEqual(healthy);
+
+      // Authenticated documents stay on this socket, but no longer consume its
+      // one pending slot. Crossing the ceiling cumulatively must stay healthy.
+      for (let index = 0; index < 3; index += 1) {
+        await waitFor(
+          `authenticated-${index} to sync`,
+          connect({
+            port,
+            room: `authenticated-${index}`,
+            awareness: null,
+            websocketProvider: websocket,
+          }).synced,
+        );
+        expect(read()).toEqual(healthy);
+      }
+
+      connect({
+        port,
+        room: "held-during-authentication",
+        awareness: null,
+        websocketProvider: websocket,
+      });
+      await waitFor(
+        "the held document's authentication to start",
+        heldAuthenticationStarted.opened,
+      );
+      // The one document whose authentication has not completed, and the only
+      // reading in this test where the count is not zero.
+      expect(read()).toEqual(observed(1));
+
       connect({
         port,
         room: "one-past-the-pending-ceiling",
@@ -485,9 +597,93 @@ describe("ClientConnection pending-document counter", () => {
             line.includes("too many pending unauthenticated documents"),
           ),
       );
+      await waitUntil(
+        "the terminated socket to reach the client",
+        () => closes.length > 0,
+      );
     } finally {
       logged.mockRestore();
       releaseHeldAuthentication.open();
+    }
+  });
+
+  /**
+   * A refused document is cleaned up completely — hook payload, queue and
+   * established-connection entry — "so a retry is treated as a fresh first
+   * connection attempt". The client is not told to stop talking: its provider
+   * stays attached, and an ordinary local edit sends an update frame for that
+   * document. Arriving after the cleanup, that frame is a first frame again.
+   *
+   * Opening a pending document for it takes a slot nothing can give back: the
+   * client will send no further token, so the slot is held for the life of the
+   * socket, and enough of them terminate a socket whose other rooms are
+   * healthy. The patch answers that by opening a pending document only for an
+   * Auth frame, which is what a retry sends.
+   */
+  it("takes no slot for a refused document its client still writes to", async () => {
+    const warnings: string[] = [];
+    const closes: string[] = [];
+    const logged = vi.spyOn(console, "warn").mockImplementation((...args) => {
+      warnings.push(args.map(String).join(" "));
+    });
+
+    try {
+      const { port, hocuspocus } = await startServer({
+        maxPendingDocuments: 1,
+        onAuthenticate: async ({ documentName }) => {
+          if (documentName === "refused-before-authentication") {
+            throw { reason: "refused before authentication" };
+          }
+        },
+      });
+      const accepted = nextClientConnection(hocuspocus);
+      const websocket = sharedWebsocket(port);
+      websocket.on("close", () => {
+        closes.push("socket closed");
+      });
+
+      const refused = connect({
+        port,
+        room: "refused-before-authentication",
+        awareness: null,
+        websocketProvider: websocket,
+      });
+      await websocket.connect();
+      const client = await waitFor(
+        "the server to accept the shared socket",
+        accepted,
+      );
+      await waitFor(
+        "the refused document's authentication to fail",
+        refused.authenticationFailed,
+      );
+
+      const arrived = frameBarrier(client, 1);
+      refused.text.insert(0, "typed after the refusal");
+      await waitFor(
+        "the refused document's later frame to reach the server",
+        arrived,
+      );
+
+      expect({
+        pending: client.getPendingDocumentCount(),
+        socketCloses: closes.length,
+      }).toEqual({ pending: 0, socketCloses: 0 });
+
+      // And the slot is free in the way that matters: the next document on the
+      // same socket still authenticates and syncs.
+      await waitFor(
+        "a healthy document to sync after the refusal",
+        connect({
+          port,
+          room: "healthy-after-the-refusal",
+          awareness: null,
+          websocketProvider: websocket,
+        }).synced,
+      );
+      expect(warnings).toEqual([]);
+    } finally {
+      logged.mockRestore();
     }
   });
 });
