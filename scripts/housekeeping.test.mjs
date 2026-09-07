@@ -6,6 +6,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	utimesSync,
 	writeFileSync,
@@ -19,7 +20,11 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const script = join(root, "scripts/housekeeping.sh");
 
 function fixture(t) {
-	const base = mkdtempSync(join(tmpdir(), "housekeeping-"));
+	// `realpathSync` because macOS `tmpdir()` is `/var/folders/...`, a symlink
+	// into `/private/var`, and `git worktree list` reports the resolved path.
+	// Comparing the script's output against an unresolved path matches nothing
+	// there, which is why every worktree case failed on Darwin.
+	const base = realpathSync(mkdtempSync(join(tmpdir(), "housekeeping-")));
 	t.after(() => rmSync(base, { recursive: true, force: true }));
 	const bin = join(base, "bin");
 	mkdirSync(bin);
