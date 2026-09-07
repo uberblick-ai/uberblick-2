@@ -43,12 +43,12 @@
  * the single reason the image cannot be published. Serving it instead changes
  * *where* the same secret is published, not *whether*: anyone who can fetch
  * this document has full read-write on the workspaces it names. The boundary
- * that makes that acceptable is the tailnet (REMOTE.md, CLAUDE.md) — the
+ * that makes that acceptable is the tailnet (REMOTE.md) — the
  * owner's own devices and nothing else — and it includes `mise run web`, which
  * serves the owner's own secret to anything that can reach the dev server.
  * Real per-session credentials are the replacement, deferred with #388.
  *
- * Rule from CLAUDE.md: no hardcoded hub addresses anywhere except the in-code
+ * Configuration invariant: no hardcoded hub addresses anywhere except the in-code
  * fallback default. There are still exactly two, both fallbacks behind the
  * served document: the one vite.config.ts substitutes when HUB_URL is unset in
  * the build environment, and FALLBACK_HUB_URL below, which applies when this

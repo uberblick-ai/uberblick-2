@@ -1,7 +1,7 @@
 /**
  * The restricted palette, and what happens to content outside it.
  *
- * The rule from CLAUDE.md is that unknown blocks degrade loudly, never silently.
+ * The contract is that unknown blocks degrade loudly, never silently.
  * Two halves to that:
  *
  *  - Foreign *node types* must be rejected by the ProseMirror schema, not

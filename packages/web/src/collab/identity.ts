@@ -5,8 +5,8 @@
  * user menu (#74) stores it, and `rooms.ts` publishes the stored one over this
  * for every room. The name has no such override — nothing has asked for one.
  *
- * Self-asserted for now. CLAUDE.md's hosted future derives identity from token
- * claims instead — which is why `AwarenessUser` is a value passed into the
+ * Self-asserted for now. Identity can later be derived from authenticated token
+ * claims — which is why `AwarenessUser` is a value passed into the
  * provider rather than something the provider invents.
  */
 

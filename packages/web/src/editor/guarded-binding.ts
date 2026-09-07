@@ -2,7 +2,7 @@
  * Binding an editor to a fragment without letting it destroy content.
  *
  * This is the load-time *and* run-time half of the palette gate, in one place,
- * because both halves have to be right for the CLAUDE.md rule to hold: unknown
+ * because both halves have to be right for the preservation rule to hold: unknown
  * blocks degrade loudly, never silently dropped.
  *
  * ## The hazard

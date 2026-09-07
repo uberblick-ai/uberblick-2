@@ -65,12 +65,13 @@ manufactures it.
 ## Context
 
 GitHub carries the PR, its diff and its threads. Read the product documents the
-issue's Pointers cite where a finding turns on product intent. `CLAUDE.md` owns
-the invariants a finding is measured against.
+issue's Pointers cite and expand discovery where a finding depends on missing
+context. The owning corpus documents define product invariants;
+`.agents/protocols/delivery-policy.md` defines executable review and merge gates.
 
 ## Handoff
 
 Edit the delegation record to `Status: complete` and append the exact-head
-verdict in the form `.claude/skills/next-issue/review-protocol.md` defines.
+verdict in the form `.agents/protocols/review-protocol.md` defines.
 That one record carries the assignment, reviewing session and result; post no
 separate `Done:` comment. Then stop.

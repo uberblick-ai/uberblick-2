@@ -12,6 +12,16 @@ it does not replace implementation correctness review.
 
 ## Ground it at a commit
 
+After pickup, scan the corpus catalog with `list_docs` and use descriptions,
+issue context and targeted search to select relevant product, architecture,
+principle and decision documents. Read those documents, following links where
+they govern the outcome; a catalog scan is not a read of every document body.
+In the existing Pointers section, link each document the implementer needs by
+title and UUID, with a short reason or relevant section. Preserve governing
+constraints through those citations rather than copying the documents into the
+issue. Mark a missing source as a gap; do not invent its intended content.
+For a resumed pass, refresh only the affected discovery and links.
+
 `git fetch origin main` and record the exact `origin/main` SHA you ground
 against — every later statement in the preflight is a claim about that commit,
 not about your memory of the repo. Against it, read what the issue targets: the
@@ -49,8 +59,8 @@ issue itself — its Pointers, or `Depends-on` for a real prerequisite. The othe
 issue is not edited.
 
 Grounding is proportional, not exhaustive — enough to establish the outcome,
-approach and material risks. A proven mechanical, local correction may skip broad
-repository and issue corpus searches when the handoff says why. Repeating MCP
+approach and material risks. A proven mechanical, local correction may stop after the catalog scan
+when no product document governs the change; say why in the handoff. Repeating MCP
 calls to prove an absence is not grounding. If `main` advances while you are
 here, refresh only the grounding and challenge the new commits actually affect;
 a merge elsewhere in the tree does not invalidate a challenge about this one.
@@ -109,45 +119,11 @@ applies correctable findings in this same run and repeats the affected grounding
 and final recheck. It does not call a second adversary to review those edits.
 Another adversary is exceptional and requires an explicit owner request.
 
-**Dispatching the other runtime.** Follow "Requesting the round" in
-`.claude/skills/next-issue/review-protocol.md` for the common transport mechanics.
-From Codex, use its Claude command with `issue-adversary` in place of
-`implementation-reviewer`. From Claude, start the Codex adversary directly — the
-repository runner is authorized only for implementation review:
-
-```sh
-( codex exec -C <parent-worktree> -s workspace-write -c 'sandbox_workspace_write.network_access=true' - < <prompt-file> > <scratch-log> 2>&1; echo $? > <scratch-log>.status )
-```
-
-`codex exec` selects no
-`.codex/agents/*.toml` adapter, so that prompt tells the child to read the
-`issue-adversary` role contract and supplies the exact issue, child run id and
-parent run id. Do not route this through the companion `codex-rescue`/task
-helper: its read-only Git metadata cannot satisfy the role's grounding fetch.
-Read the verdict from the issue's completed mutable delegation record, not the
-terminal or log. The private scratch log prevents the child's reasoning
-transcript from consuming the parent's context and is inspected only when the
-command fails or no durable verdict appears.
-
-**Hold the pass open until the verdict exists.** A round takes 15–20 minutes
-and a foreground shell call is killed at ten, so a foreground dispatch
-guarantees a dead child and a lost round (observed 2026-08-31: SIGTERM at
-exactly 10:00, replacement delegation required). Dispatch `codex exec`
-detached — a background command still writing the scratch log — then stay in
-the assignment, watch the issue for the delegation record to become
-`Status: complete`, and keep renewing your own claim meanwhile. A preparer that
-ends its turn while that record is still `pending` or `running` leaves a live
-claim and a promised verdict nobody is waiting on, which reads to every other
-role exactly like work in progress.
-
-**A dispatch that produces no verdict is recorded, never papered over.** If the
-other runtime does not run, edit its delegation record to `Status: failed` with
-one reason instead of adding a failure comment; if a same-runtime adversary
-stands in, its record names the runtime that actually challenged. A degradation
-nobody can see is worse than the round being skipped: the cross-runtime
-preference exists because a different model reads the same body differently, and
-a record claiming a round that never happened spends that credibility for
-nothing.
+Use `.agents/adapters/runtime-dispatch.md` for invocation. Keep the assignment
+open and renew ownership until the child's durable record completes or the
+transport fails. Record a failed dispatch by updating that delegation, not by
+claiming a verdict exists; name the runtime that actually performed a challenge.
+Inspect private logs only to diagnose missing results.
 
 ## Recheck, then decide
 

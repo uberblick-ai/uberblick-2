@@ -25,7 +25,7 @@
  * same reason.
  *
  * The convert path goes through the sanctioned re-type (`setNodeMarkup`, id
- * carried over) rather than replacing the block: the invariant in CLAUDE.md is
+ * carried over) rather than replacing the block: the block-identity invariant is
  * that a type change keeps the block id, and an id churned here would orphan
  * every reference to that block. The insert path is the opposite case — a block
  * that did not exist before — so it is created with a null id and the block-id

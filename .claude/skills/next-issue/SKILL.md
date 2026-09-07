@@ -17,8 +17,7 @@ the caller.
 **Roles.** The continuous entry roles named in `.agents/launch.json`:
 `issue-preparer`, `implementer`, `integrator`. `issue-adversary` and
 `implementation-reviewer` are internal — their parent starts them under
-`.agents/protocols/issue-preparation.md` or `review-protocol.md` beside this
-file, never here. Any other name: say so and return.
+`.agents/protocols/issue-preparation.md` or `.agents/protocols/review-protocol.md`, never here. Any other name: say so and return.
 
 **Runtime.** Claude only, because this surface exists to put a role in an
 interactive session's own transcript. For a Codex run, or for an unattended
@@ -53,7 +52,7 @@ nothing here.
    session's final line verbatim — `No eligible <role slug> work: <reason>.`,
    `Worked <role slug>: <issue|PR> #N — <outcome>.` or
    `Blocked <role slug>: <reason>.`, whose meaning for the caller's pacing is
-   AGENTS.md's `Loop pacing`. A session that ends any other way is reported as
+   `.agents/roles/README.md`'s `Worktrees and completion`. A session that ends any other way is reported as
    an unconfirmed outcome, never guessed at. Then stop.
 
 Everything else belongs to the role: this file observes no GitHub state,

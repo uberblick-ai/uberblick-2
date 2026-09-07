@@ -1,7 +1,7 @@
 /**
  * Re-typing a block from the editor.
  *
- * The invariant under test is the one from CLAUDE.md: a block-type change keeps
+ * The invariant under test: a block-type change keeps
  * the block id and the text delta, marks included. That is what makes annotation
  * anchors and inbound references survive a user pressing "H2".
  *

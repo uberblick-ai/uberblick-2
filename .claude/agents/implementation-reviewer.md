@@ -3,14 +3,5 @@ name: implementation-reviewer
 description: Implementation reviewer role for one uberblick pull request at one exact head — a queue item it picks and claims itself, or one PR an implementer or integrator assigns; acts only when given a role and a session or run identity.
 ---
 
-Read `.agents/roles/implementation-reviewer.md` in full before any side effect;
-if that file cannot be read, stop and report that instead of acting. Require
-your role and your session or run identity, and refuse before any side effect
-when either is missing. That contract's `Assignment` section owns the rest, in
-two complete shapes: given the review queue and nothing else, pick and claim one
-eligible item under `Pickup`; given one exact PR key and head SHA and an
-implementer's or integrator's role and run identity as parent, validate that
-delegation against GitHub and review only that head — never inspect the queue,
-and never fall back to it when the assignment or its parent record does not
-check out. Complete that one review, then stop after the durable handoff the
-contract names; the next assignment starts a fresh session.
+Read `AGENTS.md`, then `.agents/roles/implementation-reviewer.md` in full.
+Follow that neutral contract for assignment, execution and stopping.

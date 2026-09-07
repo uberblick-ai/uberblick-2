@@ -45,7 +45,7 @@ than treating absence from the current sample as improvement.
 ## Establish the evidence boundary
 
 Fetch `origin/main`, record its exact SHA, and inspect from that immutable tree.
-Read `AGENTS.md`, `CLAUDE.md`, workspace manifests, TypeScript and Biome config,
+Read `AGENTS.md`, `.agents/protocols/delivery-policy.md`, workspace manifests, TypeScript and Biome config,
 the documented `mise` tasks, and the live package layout. Derive package counts,
 line counts, dependency versions, and commands rather than hard-coding them.
 
@@ -76,8 +76,8 @@ Treat alignment as a first-class technical result. Sample both directions:
 2. For each governing corpus claim sampled, identify its current implementation
    and observable proof, or establish that it is explicitly future or unresolved.
 3. Check the truth lives in the correct source: corpus for current or settled
-   near-term product truth, GitHub for changing work, `CLAUDE.md` for binding
-   architecture and invariants, decision documents for choices and triggers.
+   near-term product truth, GitHub for changing work, the corpus for architecture and guarantees, neutral local protocols for
+   operational rules, decision documents for choices and triggers.
 
 Classify each material check:
 
@@ -106,7 +106,7 @@ rewrote or appended.
 
 For `corpus-ahead` or `code-ahead`, identify the merge or PR that introduced the
 gap when history makes it derivable. The audit measures whether the owning
-change completed `CLAUDE.md`'s merge-then-docs obligation; it does not become a
+change completed the delivery policy's merge-then-docs obligation; it does not become a
 later documentation safety net. If attribution cannot be established, say so.
 Before proposing corpus text, name which information source owns the claim.
 Product documents should not duplicate volatile repository procedure merely to
@@ -137,7 +137,8 @@ boundary changed during the current code window.
    or duplicated logic, error handling, dependency advisories, brittle or
    implementation-trivia tests, and gaps in invariant coverage.
 
-Use `CLAUDE.md` as the binding invariant index, not proof that code conforms.
+Use the relevant corpus architecture and decision documents as the guarantee
+index, and code/tests to establish whether implementation conforms.
 Prefer focused code tracing and failure-path probes over broad tool output.
 Existing lint, typecheck, and test failures are evidence but are not findings
 without a reachable consequence. Never recommend tests solely from a coverage
@@ -162,7 +163,7 @@ For each suspected finding, establish exact evidence, reachability inside the
 supported usage model, concrete consequence, confidence (`proven`, `strong`, or
 `hypothesis`), and the smallest correction with its appropriate owner. Use the
 `P1`, `P2`, and `P3` definitions in
-`.claude/skills/next-issue/review-protocol.md`. A hypothesis belongs in `Watch`,
+`.agents/protocols/review-protocol.md`. A hypothesis belongs in `Watch`,
 not `Findings`. Record important suspicions rejected and recommend at most three
 actions. Do not create an issue or repair code or corpus.
 

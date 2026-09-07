@@ -8,8 +8,8 @@ certificate. The hub is not published directly.
 
 > the host serves the shared write-token signing secret to the app, in `/uberblick-config.json` — anyone who can fetch that document has full read-write. This deployment is supported only on a private Tailscale network until server-minted sessions exist; an unguessable public hostname is not a security boundary.
 
-Server-minted sessions are the planned replacement; see
-[Hosted future](CLAUDE.md#hosted-future-directional--shapes-cheap-now-choices-only).
+The access-control boundary and broader-access requirements are described in
+the corpus Configuration and auth (62c70b7c-6e4c-40a4-a6bb-a7edbee08360).
 
 ## Host prerequisites
 

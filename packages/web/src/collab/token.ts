@@ -23,7 +23,7 @@
  * The client mints its own token from the shared signing secret, which reaches
  * it in the served configuration document (#426, `src/config.ts`). Anyone who
  * can fetch that document has full read-write: the tailnet is the boundary that
- * makes it acceptable (CLAUDE.md, REMOTE.md), and per-session credentials are
+ * makes it acceptable (REMOTE.md), and per-session credentials are
  * the replacement, deferred with #388. Hosted, the hub mints per OAuth session
  * and the secret never leaves the server — which is the change this module
  * exists to confine.

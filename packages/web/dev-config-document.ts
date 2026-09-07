@@ -15,7 +15,7 @@
  *
  * **It serves the signing secret**, because since #426 that is where the client
  * reads it. On a dev server that is the owner's own secret handed to anything
- * that can reach the port — acceptable under the tailnet boundary (CLAUDE.md,
+ * that can reach the port — acceptable under the tailnet boundary (
  * REMOTE.md) and on loopback, which is what `vite` binds without `--host`.
  */
 

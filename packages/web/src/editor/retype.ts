@@ -1,7 +1,7 @@
 /**
  * Changing a block's type from the editor.
  *
- * The invariant (CLAUDE.md): a block-type change preserves the block id and the
+ * The invariant: a block-type change preserves the block id and the
  * text delta, marks included. Never delete-and-reinsert, which churns ids and
  * orphans annotation anchors.
  *

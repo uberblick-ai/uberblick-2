@@ -27,7 +27,7 @@
  * single reason the image cannot be published; serving it changes where the
  * same secret is published, not whether. Anyone who can fetch this document has
  * full read-write, and the boundary that makes that acceptable is the tailnet
- * (#410, CLAUDE.md, REMOTE.md) — the owner's own devices, nothing else. It has
+ * (REMOTE.md) — the owner's own devices, nothing else. It has
  * no fallback and one further contract of its own: a read that carried no
  * secret is *not* remembered, because a tab that could never authenticate for
  * as long as it stayed open would be worse than one that tries again.

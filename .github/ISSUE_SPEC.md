@@ -72,7 +72,7 @@ Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
   `Owner decision, <YYYY-MM-DD>: <what was decided>`. Markdown emphasis around
   that line is permitted — `**Owner decision, 2026-08-26: …**`, the form #272
   uses, is the shape. The lowercase parenthetical `(owner decision, <date>)`
-  that runs through `CLAUDE.md` and the role contracts is a citation of a
+  that runs through `.agents/protocols/delivery-policy.md` and the role contracts is a citation of a
   decision recorded elsewhere, not this line. The decision line may name the
   umbrella thread it came from, but it stands in the implementing issue's own
   body: approval lives in GitHub, never in a document field any client can
@@ -256,7 +256,7 @@ Grounding: <origin/main SHA>
 
 The PR supplies the branch, head SHA, diff and check state; do not copy them
 into the handoff or add a second completion comment to the issue. Recovery and
-independent-review rules live only in `AGENTS.md`.
+independent-review rules live in the shared role README and delivery policy.
 
 The human's shaping choice between a draft requirement for coworker review and
 a confirmed `needs-preparation` intake, plus later requirement resumption by
@@ -284,8 +284,8 @@ doesn't answer? Then the issue is not `ready`.**
   State what must be true, not how to prove it: unit/e2e scenarios, test files and implementation
   steps belong in Pointers, not in checkboxes. Repository hygiene and delivery
   gates — lint, typecheck, the general test suite, review and CI — already live
-  in `AGENTS.md`, `CLAUDE.md` and CI; they are never issue acceptance criteria.
-  A post-merge corpus update sequenced by `CLAUDE.md` is not a diff acceptance
+  in `AGENTS.md`, `.agents/protocols/delivery-policy.md` and CI; they are never issue acceptance criteria.
+  A post-merge corpus update sequenced by `.agents/protocols/delivery-policy.md` is not a diff acceptance
   criterion either; distinguish pre-merge acceptance from verification that
   requires a release, and never report the latter as already passed. Point the
   integrator's post-merge pass to the document under Pointers.
@@ -293,15 +293,16 @@ doesn't answer? Then the issue is not `ready`.**
   is the "least code wins" principle made enforceable: it is what scope
   creep gets rejected against.
 - **Pointers** — where a fresh agent should look before writing anything:
-  relevant files/modules, prior PRs and issues, CLAUDE.md sections, product
-  docs, and known gotchas (e.g. "y-prosemirror deletes unknown elements —
+  relevant files/modules, prior PRs and issues, relevant neutral procedures, owning corpus
+  documents, and known gotchas (e.g. "y-prosemirror deletes unknown elements —
   see #14"). Cite a product doc as `title (uuid)` — e.g. "Editing and blocks
   (b1d5d904-c8b6-46a1-a4df-22251875bcdb)"; `list_docs` against the live
   workspace is the authoritative — and only — source of a uuid. The repository
   holds no copy of the corpus and no uuid table. Cite, never restate: the agent
   reads the doc itself at dispatch, so a pointer that copies its content only
-  ages. `None.` only when CLAUDE.md genuinely
-  covers it. Every implementing agent starts with zero session memory; this
+  ages. `None.` only when the grounded change needs no additional pointers;
+  explain why no corpus document governs it. Operational policy cannot
+  substitute for product context. Every implementing agent starts with zero session memory; this
   section is what makes that cheap instead of expensive.
 
 ## Sizing
@@ -332,7 +333,7 @@ The exception runs the other way: individually-trivial issues declaring the
 same `Touches` set may be implemented by one agent as one PR closing several
 (`Closes #a, #b`), provided the combined diff is still reviewable in one
 sitting, the gate check above is applied to that combined diff against the
-shared set, and the PR carries the tier-2 merge report of CLAUDE.md's merge
+shared set, and the PR carries the tier-2 merge report of delivery-policy.md's merge
 policy, checking each issue's acceptance criteria separately — a batch PR
 carries that report even where it would otherwise be tier 1.
 
@@ -361,7 +362,7 @@ tier routes approval, not design.
 
 - **Mechanism belongs in a document, not an issue.** When the corpus is
   unreachable and a design lands in an issue body instead, that is a recorded
-  debt to repay, not a precedent — see CLAUDE.md's dogfooding contract.
+  debt to repay, not a precedent — see the corpus Editorial contract and AGENTS.md’s authority routing.
 
 Close a parent when its final child closes — the integrator whose merge closes
 that child does it in the post-merge pass.

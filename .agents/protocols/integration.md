@@ -1,6 +1,6 @@
 # integration — advancing one PR through the gates to a merge
 
-The mechanics of the `integrator` role, for one PR at one head SHA. CLAUDE.md's
+The mechanics of the `integrator` role, for one PR at one head SHA. delivery-policy.md's
 "Development workflow" owns *which* gates exist and when each applies,
 including the dual challenge; drive them in the order it lists.
 This file owns only their mechanics, and `review-protocol.md` beside it owns the
@@ -8,11 +8,11 @@ findings-conditional protocol.
 
 ## Gate mechanics
 
-- Resolve and record the PR's immutable `headRefOid`. Where CLAUDE.md's gate
+- Resolve and record the PR's immutable `headRefOid`. Where delivery-policy.md's gate
   list requires the Docker review, fetch that commit and run
   `mise run review <headRefOid>` — never check the PR branch out to
   review it, and never treat tests from a mutable shared checkout as review
-  evidence; CLAUDE.md's review paragraph and README's "Review isolation" state
+  evidence; delivery-policy.md's review paragraph and README's "Review isolation" state
   what the runner refuses and why. Otherwise the immutable review is CI at
   that exact head: `gh api repos/{owner}/{repo}/commits/<headRefOid>/check-runs
   --jq '.check_runs[]|select(.name|test("gates"))|.conclusion'` must print
@@ -20,7 +20,7 @@ findings-conditional protocol.
   is not a fast path; it routes back to the Docker review.
 - Run the verification container without network, and pass no secrets, host
   mounts, privileged mode or Docker socket to either the build or the container.
-  Keep the SHA-tagged image long enough for the failure-path probes CLAUDE.md
+  Keep the SHA-tagged image long enough for the failure-path probes delivery-policy.md
   requires at stateful boundaries, then remove it when the PR is settled.
 - For a browser-observable outcome, run the relevant `mise run e2e` proof early.
   A failure may be called environmental only after the same failing spec is run
@@ -53,6 +53,8 @@ findings-conditional protocol.
   ref and worktree. Never push either. Exact-head gates are insufficient once
   the base moves, and `merge-tree` reporting textual mergeability never
   substitutes for the suite on the tree that will ship.
+- Inspect candidate contents at the recorded head, never the trusted runner’s
+  main checkout, when evaluating acceptance criteria.
 - Check an acceptance box on a linked issue only with evidence (command output,
   test name), and check that the diff stays within the declared `Touches` — the
   shared set when the PR closes a batch.
@@ -70,95 +72,23 @@ wave per review head, risk-scoped re-review with the round-count rule, and the
 exit condition. Read it whenever a PR has a round to request or a finding to
 disposition.
 
-## The fan-out — one round's gates at once
+## Run the required checks
 
-The gates above do not depend on each other, so run them as one fan-out instead
-of a queue, and start the long pole first.
+Determine the required review and gates from the diff and delivery policy.
+Start an owed independent review early; perform mechanical checks concurrently
+when their inputs and workspaces are independent. Ordinary commands suffice:
+do not create an agent per mechanical check. The integrator owns acceptance
+judgment, tier classification and durable results.
 
-- **The read that decides the round precedes the fan-out.** Deciding an external
-  round is owed, and writing the brief that makes its wall time worth spending,
-  is a `CLAUDE.md` judgment made from the change: read the diff far enough to
-  make it before launching anything. That read is the ordering's precondition,
-  not one of its members, and it is the integrator's own — "Tier check" below
-  classifies from the same full diff, never from a gate agent's summary.
-  `review-protocol.md` decides whether a round is owed and who owns it;
-  dispatching it before the fan-out is ordering only and never creates one. Its
-  wait then overlaps the mechanical gates rather than following them.
-- **A tier 1 PR on CI's fast path launches no gate agents.** The integrator
-  reads the small diff against the acceptance criteria itself, runs the
-  `Touches` check as one command (`git diff --name-only <base>..<headRefOid>`
-  against the header), and links the CI check run; an e2e proof is still run
-  where the outcome is browser-observable.
-- **Otherwise, one agent per gate, each in its own checkout.** Launch the
-  mechanical gates concurrently — the immutable container review, the e2e proof
-  where the outcome is browser-observable, the acceptance-criteria read, the
-  `Touches` scope check — with the `Agent` tool's `isolation: "worktree"`, so
-  each works in a checkout of its own. Sharing one checkout is not an option: concurrent gates install,
-  build and check out in it at the same time. Every worktree inherits the
-  launching checkout's `HEAD`, so launch only from a checkout at freshly fetched
-  `origin/main` with `mise.toml`, `Dockerfile.review` and `.dockerignore`
-  unmodified: that is the state the container review must still be in when it
-  runs, and it is necessary rather than sufficient — see its gate below.
-- **Every gate agent grades the PR head, and its first commands say which tree
-  it reads.** A fresh worktree binds a gate agent in ways that look like a red
-  gate and are not branch results. `mise` trusts config by path and every
-  worktree is a new path, so `mise trust` precedes any task there. And the
-  worktrees share one ref store, so simultaneous `git fetch origin` calls lose a
-  `cannot lock ref …: is at <new> but expected <old>` race — the one trap the
-  fan-out itself creates, and it fires tens of percent of the time. Whichever
-  ref lost, that signature fires because the objects landed and the loser's ref
-  already holds the winner's value, so a fetch that exits non-zero with it is
-  re-run rather than reported as a red gate — any other fetch failure still is
-  one. Then, by gate:
-  - **The acceptance-criteria read and the `Touches` scope check** — `git fetch
-    origin`, then `git checkout --detach <headRefOid>`. They read that tree and
-    run no task, so no `mise trust`. Left on the launch checkout's `origin/main`
-    they grade `main`: every criterion of the form "X is unchanged" reads true
-    there for free, and every "the file now says Y" reads false and costs a
-    fix-up wave the branch never earned.
-  - **The e2e proof** — the same two commands, then `mise trust` and `mise run
-    install`. `mise run e2e` takes no SHA and runs whatever its checkout holds,
-    and it opens with a `pnpm --filter` exec that a fresh worktree's empty
-    `node_modules` cannot serve. A red run is classified *before* the agent
-    returns, because the environmental-failure rule above needs a base run and
-    this is the only installed worktree — it is gone once the agent returns.
-    That base is `origin/main`, the tree the container review runs from and the
-    one the PR merges into: `git checkout --detach origin/main`, `mise run
-    install` again — the head's `node_modules` is not the base's — then the same
-    spec, and report both outcomes with both SHAs.
-  - **The immutable container review** — the exception, and the only gate whose
-    own checkout stays at freshly fetched `origin/main`: `main` supplies the
-    build recipe (README, "Review isolation"), and archiving the SHA it is
-    passed is what lets it grade the head from there. So `mise trust`, then
-    `mise run review <headRefOid>`, which needs that commit already in the
-    shared object store — the fetch "Gate mechanics" opens with. `mise run
-    review` re-fetches `main` and re-compares at run time while a worktree's
-    `HEAD` is frozen at creation, so a gate agent it refuses moves its worktree to
-    freshly fetched `origin/main` and re-runs instead of reporting a red gate.
-    The SHA-tagged image outlives that worktree on the host daemon, so the
-    failure-path probes above stay the integrator's own work, never the gate
-    agent's.
-- **Every gate agent reports; none writes.** Each returns its `gate`, `outcome`,
-  a short `summary`, the `sha` it ran at, and its `start` and `end`, and performs
-  no GitHub write at all — no claim, comment, label, review or merge. The
-  integrator owns every durable record, so a gate result reaches the PR only
-  through it.
-- **`needs-runtime` is routing, never a pass.** A gate agent that cannot settle
-  an acceptance criterion from static evidence answers `needs-runtime` and names
-  the gate that covers it — a criterion observable only in a running browser goes
-  to the e2e gate — instead of guessing. The integrator then reconciles that
-  gate's result into a pass or fail for the criterion, at the same fresh head,
-  before ruling; when the named gate was not launched — the browser-observability
-  call is made before the acceptance read returns — launch it in a second wave at
-  that same head and reconcile against its result.
-- **Freshness survives the fan-out.** Every evidence item names the SHA it ran
-  at. A commit landing mid-fan-out is resolved by the per-gate freshness rules
-  above and in `review-protocol.md` — re-run what the new commit invalidates —
-  never by carrying an item forward to a head it did not run at.
-- **Telemetry stays out of the ruling.** Gate agents may return start/end times
-  to the integrator for the workflow retrospective, but the PR record links the
-  exact-head outcome only. GitHub already timestamps the claim, review records,
-  checks and ruling; repeating those times and counts obscures the decision.
+Every check names the exact commit it examined. Read candidate code at that
+commit; run browser checks in its own installed worktree. The immutable review
+runner instead uses the trusted base checkout and receives the candidate SHA.
+Keep mutating builds out of shared worktrees. Re-read the head before using a
+result and apply the freshness rules above when head or base changed.
+
+A criterion needing runtime evidence is not a static pass. Run the appropriate
+proof and compare a failing case with the base before calling it environmental.
+Record outcomes and links, not gate-agent transcripts or timing reports.
 
 ## Immediately before merging
 
@@ -170,7 +100,7 @@ the PR's base is `main` (`gh pr view <n> --json baseRefName`) — a stacked PR
 merges into its parent feature branch and can orphan the reviewed work; retarget
 the PR to `main` (or merge the parent first) before merging.
 
-**Tier check.** Classify the PR against CLAUDE.md's "Merge policy" tiers by
+**Tier check.** Classify the PR against delivery-policy.md's "Merge policy" tiers by
 reading its full diff (`gh pr diff <n>`) and how its review findings were
 dispositioned — never from the issue's `Touches`. `--name-only` is just the
 pathname inventory: it identifies hunks to classify but never fires tier 3 by
@@ -188,7 +118,7 @@ label is merge-authorized: execute the merge as tier 2 (merge report first),
 every other gate unchanged — evidence fresh at the exact merge head, zero
 unaddressed remarks. The owner sets the label directly or explicitly directs a
 session to set it for named PRs; that session posts the direction as provenance.
-**An owner decision on the closed issue is also that approval** (`CLAUDE.md`,
+**An owner decision on the closed issue is also that approval** (`.agents/protocols/delivery-policy.md`,
 owner decision 2026-09-05): when the issue carries the owner's dated decision
 fixing the PR's intended shape — the shaping confirmation, an `Owner decision`
 comment, or the answer that lifted `needs-decision` — verify the diff conforms
@@ -226,8 +156,8 @@ gates.
 ## After ruling
 
 After a merge, confirm every issue the PR closes auto-closed. Then update the
-product docs to the new status quo (uberblick MCP tools once registered; until
-then, comment on the PR that the doc update is pending). Record the result on
+affected product docs through MCP to the new status quo. If MCP fails, record
+the concrete failure and outstanding update on the PR for recovery. Record the result on
 the PR. A fresh integrator does not own or restart another session's development
 processes.
 

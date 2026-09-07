@@ -90,7 +90,7 @@ value belongs to a human.
 
 GitHub carries the issue and its history. Read the corpus for the product intent
 this issue depends on. `.github/ISSUE_SPEC.md` governs the issue's shape and
-`CLAUDE.md` the rules it must not violate.
+`.agents/protocols/delivery-policy.md` the rules it must not violate.
 
 ## Handoff
 
