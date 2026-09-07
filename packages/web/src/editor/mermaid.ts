@@ -40,7 +40,7 @@
  *    drawable one means parsing it, which is what that cap exists to prevent
  *    (R6-1).
  * 3. The block carries a `comment` mark. The schema lets annotations anchor in
- *    this block's text (CLAUDE.md), and a drawn diagram hides the text they are
+ *    this block's text, and a drawn diagram hides the text they are
  *    anchored in — so an annotated block stays source rather than swallowing
  *    the annotation.
  * 4. Anything else at all. The catch is total — it wraps the parse, the layout,

@@ -293,15 +293,16 @@ doesn't answer? Then the issue is not `ready`.**
   is the "least code wins" principle made enforceable: it is what scope
   creep gets rejected against.
 - **Pointers** — where a fresh agent should look before writing anything:
-  relevant files/modules, prior PRs and issues, .agents/protocols/delivery-policy.md sections, product
-  docs, and known gotchas (e.g. "y-prosemirror deletes unknown elements —
+  relevant files/modules, prior PRs and issues, relevant neutral procedures, owning corpus
+  documents, and known gotchas (e.g. "y-prosemirror deletes unknown elements —
   see #14"). Cite a product doc as `title (uuid)` — e.g. "Editing and blocks
   (b1d5d904-c8b6-46a1-a4df-22251875bcdb)"; `list_docs` against the live
   workspace is the authoritative — and only — source of a uuid. The repository
   holds no copy of the corpus and no uuid table. Cite, never restate: the agent
   reads the doc itself at dispatch, so a pointer that copies its content only
-  ages. `None.` only when .agents/protocols/delivery-policy.md genuinely
-  covers it. Every implementing agent starts with zero session memory; this
+  ages. `None.` only when the grounded change needs no additional pointers;
+  explain why no corpus document governs it. Operational policy cannot
+  substitute for product context. Every implementing agent starts with zero session memory; this
   section is what makes that cheap instead of expensive.
 
 ## Sizing

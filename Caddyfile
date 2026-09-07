@@ -11,7 +11,7 @@
 	#
 	# Serving the secret is the recorded model, not an oversight: anyone who can
 	# fetch this document has full read-write, and the tailnet is the boundary
-	# that makes that acceptable (REMOTE.md, CLAUDE.md).
+	# that makes that acceptable (REMOTE.md).
 	#
 	# `workspaces` is written as one comma-separated string because that is all
 	# an environment substitution can produce; the client reads that spelling and

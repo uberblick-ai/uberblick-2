@@ -12,7 +12,7 @@
  *
  * Tiptap ships one, and it is a trap here: it `setBlockType`s the range, which
  * ProseMirror implements by *replacing* the node. A replaced node is a new node,
- * so it gets a fresh block id — and CLAUDE.md's invariant is that a type change
+ * so it gets a fresh block id — and the block-identity invariant is that a type change
  * preserves the id, because every annotation anchor, backlink and `edit_block`
  * call in the system addresses blocks by it. So the conversion goes through the
  * sanctioned `retypeBlockInTransaction` (`setNodeMarkup`, id carried over), the

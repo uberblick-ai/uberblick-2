@@ -1,5 +1,6 @@
 # Local development
 
+Run `mise trust` before using tasks in a new trusted worktree.
 Use the repository's `mise` tasks; their definitions are the command authority.
 Document tasks rather than direct package-manager invocations.
 
@@ -12,8 +13,9 @@ Document tasks rather than direct package-manager invocations.
 Tasks needing configuration use `fnox exec -- ub env -- <command>`. Do not dump
 resolved environment or credentials. Keep secrets in the supported credential
 store; never commit plaintext tokens or create secret .env files. Read the corpus
-Configuration and auth document when changing configuration behavior.
+Configuration and auth (62c70b7c-6e4c-40a4-a6bb-a7edbee08360) document when changing configuration behavior.
 
 Run focused checks while editing, then the required checks on the final change.
-A failing test is not automatically environmental: compare the relevant base
+Always pass the intended SHA to `mise run review`; omitting it reviews the
+runner checkout’s HEAD. A failing test is not automatically environmental: compare the relevant base
 before attributing the failure. Record real limitations, not assumed passes.

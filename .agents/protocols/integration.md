@@ -53,6 +53,8 @@ findings-conditional protocol.
   ref and worktree. Never push either. Exact-head gates are insufficient once
   the base moves, and `merge-tree` reporting textual mergeability never
   substitutes for the suite on the tree that will ship.
+- Inspect candidate contents at the recorded head, never the trusted runner’s
+  main checkout, when evaluating acceptance criteria.
 - Check an acceptance box on a linked issue only with evidence (command output,
   test name), and check that the diff stays within the declared `Touches` — the
   shared set when the PR closes a batch.

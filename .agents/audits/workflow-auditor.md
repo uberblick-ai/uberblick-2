@@ -41,7 +41,7 @@ claims to verify, not ground truth.
 ## Grounding and sample
 
 Record fresh `origin/main` and read the current versions of `AGENTS.md`,
-.agents/protocols/delivery-policy.md, `.github/ISSUE_SPEC.md`, the five role contracts, and only the
+`.agents/protocols/delivery-policy.md`, `.github/ISSUE_SPEC.md`, the five role contracts, and only the
 procedures implicated by the audit window.
 
 Record workflow-rule commits since the prior report's grounding. Judge a

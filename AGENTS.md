@@ -8,6 +8,7 @@ Runtime-specific files supply metadata and invocation only.
 - **MCP corpus:** product intent, adopted principles, architecture and guarantees,
   and the human explanation of the workflow. Start from Product Overview and
   Information types and sources of truth when unfamiliar with the project.
+  Discover their current UUIDs through the corpus catalog before citing them.
 - **Local protocols:** exact steps, permissions, records and operational gates.
 - **Code and tests:** implemented behavior. Comments explain nearby non-obvious
   constraints; they do not authorize product or process changes.
@@ -27,7 +28,9 @@ MCP access is expected for every session. Discover documents through `list_docs`
 and search, then read the relevant documents and linked decisions. Do not load
 the whole corpus. If required context cannot be read, stop dependent decisions
 or edits and report the concrete failure; diagnosis and independent mechanical
-work can continue.
+work can continue. Classify work as mechanical only after establishing that
+its relevant guarantees are understood; a small diff is not evidence of that.
+If a required local contract cannot be read, stop the dependent action.
 
 The preparer scans the corpus catalog and supplies relevant document links and
 reasons in the issue. Implementers start from that reading guide, read the live
@@ -47,7 +50,10 @@ A pointer is a route to the source, not a substitute for reading it.
 - **Review or integrate:** `.agents/protocols/delivery-policy.md`, then the
   review or integration procedure relevant to the current action.
 - **Edit corpus:** read Editorial contract; update the owning document rather
-  than copying its content into repository instructions.
+  than copying its content into repository instructions. Corpus edits must stay
+  within recorded authorization: update descriptions of delivered behavior,
+  but do not weaken a guarantee or expand agent authority through a doc edit.
+  An unsettled change to those commitments requires an owner decision.
 
 When instructions come from a different checkout than the code being examined,
 identify both sources and revisions. Verify code and path claims at the stated
