@@ -127,7 +127,10 @@ Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
   work ineligible. Dependencies otherwise gate eligibility —
   every `Depends-on` closed — and earn no other place in line. A human owns
   every explicit Priority value. Agents may report evidence that
-  the order looks wrong, but never write the field.
+  the order looks wrong, but never write the field on their own judgement. The
+  one agent write is a shaping session recording the value the human stated in
+  that conversation, with a provenance comment on the issue
+  (`.agents/protocols/issue-shaping.md`; owner decision, 2026-09-07).
 
 `Priority` is that field, read through the API — never a line in the issue body:
 
