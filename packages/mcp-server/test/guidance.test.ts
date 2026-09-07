@@ -103,8 +103,10 @@ it("keeps a lease through guidance changes, expires without wall-clock sleeps, a
   const next = await doc(rig, "Next");
   mark(rig, first.uuid);
   await rig.ok("get_doc", { uuid: first.uuid });
+  now += 300_000;
+  await rig.ok("get_doc", { uuid: first.uuid }); // A reread must not extend the lease.
   setTags(rig.instance.replicas.replica(next.uuid).doc, [marker]);
-  now += 599_999;
+  now += 299_999;
   await rig.ok("set_title", { uuid: first.uuid, title: "Changed in lease" });
   now += 1;
   const refusal = await rig.call("set_title", { uuid: first.uuid, title: "After expiry" });

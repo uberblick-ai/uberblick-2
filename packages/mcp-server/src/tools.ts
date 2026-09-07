@@ -102,7 +102,7 @@ import {
   DOCUMENT_MUTATING_TOOLS,
   hydrationRecovery,
 } from "./failures.js";
-import { GUIDANCE_INSTRUCTIONS } from "./guidance.js";
+import { GUIDANCE_WRITE_INSTRUCTIONS } from "./guidance.js";
 import type { GuidanceBriefing } from "./guidance.js";
 import { strictInput } from "./inputs.js";
 import type { ToolMode } from "./inputs.js";
@@ -688,7 +688,7 @@ export function registerTools(
   briefing: GuidanceBriefing,
 ): void {
   const toolContract = (tool: string): string =>
-    (DOCUMENT_MUTATING_TOOLS.has(tool) ? `\n\n${GUIDANCE_INSTRUCTIONS}` : "") +
+    (DOCUMENT_MUTATING_TOOLS.has(tool) ? `\n\n${GUIDANCE_WRITE_INSTRUCTIONS}` : "") +
     failureContract(tool);
 
   /**
