@@ -8,8 +8,10 @@ eligibility, scheduling, and footprint rules. Do not infer missing product
 decisions from this file.
 
 Before an issue enters that workflow, `.agents/protocols/issue-shaping.md`
-governs conversation to a confirmed `needs-preparation` intake. The
-issue-preparer role owns queue authority and side effects, while
+governs conversation to the human's choice of a draft requirement for coworker
+review or a confirmed `needs-preparation` intake, and governs later requirement
+resumption by uuid. The issue-preparer role owns queue authority and side
+effects, while
 `.agents/protocols/issue-preparation.md` owns its provider-neutral grounding,
 challenge, and recheck procedure.
 
@@ -36,8 +38,8 @@ issue-preparer's own run, and `ready` is that verdict. Two consequences are
 agent-neutral, because reclaimers and reviewers depend on them: a pickup that
 stops before any repository edit never leaves an `in-progress` label behind, and
 a top-level issue whose contract turns out to be stale, or to need a decision
-only the owner can make, is returned instead of being implemented. The first
-consecutive return since the latest owner answer gets one focused
+only a human can make, is returned instead of being implemented. The first
+consecutive return since the latest human answer gets one focused
 `needs-preparation` repair that reuses prior grounding and challenge work. A
 second goes to `needs-decision`; an immediate owner boundary may go there on the
 first return. The exact record and label transitions live in
