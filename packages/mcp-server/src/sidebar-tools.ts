@@ -199,8 +199,9 @@ const SIDEBAR_SHAPE =
   "Every sidebar tool answers with the whole sidebar — `groups`, in order, each with its `id`, its `name` and its " +
   "`docs` in order — so a caller never has to re-read to see where a change landed. A pinned document's `title` " +
   "comes from its directory stub, never from opening the document. `status` is `ok`, `archived` (the document is " +
-  "tombstoned but still pinned) or `unknown` (no directory entry at all — a document nothing can resolve, left " +
-  "visible so it can be unpinned).";
+  "tombstoned but still pinned — archive_doc unpins, so this is a pin_doc on an archived target or an archive that " +
+  "raced this pin on another replica) or `unknown` (no directory entry at all — a document nothing can resolve, " +
+  "left visible so it can be unpinned).";
 
 /**
  * `sidebar_group`'s three shapes, stated once for the boundary and for
@@ -285,8 +286,9 @@ export function registerSidebarTools(
       await replicas.settle();
       // The sidebar stores uuids and nothing else, so a typo pinned here is a
       // reference nothing can ever resolve. Identity is checked against the
-      // directory — an archived document is still pinnable, because archiving
-      // is a directory act and get_sidebar surfaces it either way.
+      // directory — an archived document is still pinnable, deliberately:
+      // archive_doc unpins (#957), so this is the one way back to a pin, and
+      // get_sidebar surfaces the archived state either way.
       context.requireStub(uuid);
       const sidebar = replicas.sidebar();
       const groups = readSidebar(sidebar.doc);

@@ -2755,12 +2755,21 @@ body {
   color: var(--brand-ink);
 }
 
+/* A card, not the sidebar's ground. `DialogContent` supplies the portal and the
+   dimmed overlay and no surface at all, so this class is the whole panel — and
+   it used to name `--popover`/`--popover-foreground`, which nothing in this
+   file defines: an undefined custom property makes the background `transparent`
+   and the text `canvastext`, so a destructive confirmation was read through the
+   page it covered. `--card` is the pair the other plain-CSS floating panels
+   take (`.ub-composer`, `.ub-blockmenu`); the sidebar's ground belongs to
+   surfaces that belong to that column (#480), and a modal centred over the
+   whole page does not. */
 .ub-confirm {
   width: min(28rem, calc(100vw - 2rem));
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--popover);
-  color: var(--popover-foreground);
+  background: var(--card);
+  color: var(--card-foreground);
   box-shadow: var(--shadow-float);
   padding: 1rem;
 }

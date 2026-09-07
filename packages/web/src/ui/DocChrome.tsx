@@ -550,7 +550,7 @@ function DocumentActions({
               }}
             >
               {onArchive === null
-                ? "Archive unavailable — no directory connection, or no live entry for this document"
+                ? "Archive unavailable — the directory or sidebar room is not ready to write, or there is no live entry for this document"
                 : "Archive document"}
             </DropdownMenuItem>
           </DropdownMenuContent>

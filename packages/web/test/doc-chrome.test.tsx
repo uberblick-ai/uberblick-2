@@ -106,7 +106,7 @@ describe("the document identity line keeps its local controls", () => {
       ].find(
         (item) =>
           item.textContent ===
-          "Archive unavailable — no directory connection, or no live entry for this document",
+          "Archive unavailable — the directory or sidebar room is not ready to write, or there is no live entry for this document",
       );
       expect(unavailable?.getAttribute("aria-disabled")).toBe("true");
       expect(document.activeElement?.textContent).toBe("Pin to sidebar");

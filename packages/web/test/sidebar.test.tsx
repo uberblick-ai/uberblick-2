@@ -519,8 +519,10 @@ describe("the sidebar is the _sidebar document", () => {
     const reading = createGroup(sidebar, "Reading");
     pinDoc(sidebar, reading, ONE);
     pinDoc(sidebar, reading, TWO);
-    // The pair an agent works over: `archive_doc` tombstones the directory
-    // stub, `get_sidebar` reads that stub through the pins.
+    // The pair an agent works over: a tombstoned directory stub, and the pins
+    // `get_sidebar` reads through it. The tombstone arrives over the wire from
+    // a peer rather than from this client's own archive, because a local
+    // archive would take the pin with it (#957).
     const directoryPeer = peerOf(directory);
     const sidebarPeer = peerOf(sidebar);
 
@@ -537,7 +539,9 @@ describe("the sidebar is the _sidebar document", () => {
     expect(host.querySelector(".ub-list")?.textContent ?? "").not.toContain(
       ONE.slice(0, 8),
     );
-    // The pin is untouched: archiving is not unpinning (#210).
+    // The pin is untouched. Archiving unpins now (#957), but this archive came
+    // from another replica, so nothing here removed the pin — which is exactly
+    // the race that leaves an archived pin to render.
     expect(stored(sidebarPeer)).toEqual([["Reading", [ONE, TWO]]]);
 
     // ---- restored: the ordinary row, in its place ----

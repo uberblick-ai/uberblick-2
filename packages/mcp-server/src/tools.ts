@@ -69,6 +69,7 @@ import {
   readDirectoryTags,
   readDecisions,
   readDocumentTags,
+  readSidebar,
   resolveTagAssignments,
   resolveAnnotationRange,
   restoreDirectoryEntry,
@@ -82,6 +83,7 @@ import {
   setStatus,
   setTitle,
   tombstoneDirectoryEntry,
+  unpinDoc,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type {
@@ -636,6 +638,22 @@ const RECOVERY: Record<string, string> & { other: string } = {
     "predicate — and get_sidebar what the rooms in `completed` left behind.",
 };
 
+/** What to do after a partial archive, by the room whose write the log refused. */
+const ARCHIVE_RECOVERY: Record<string, string> & { other: string } = {
+  directory:
+    "Nothing survived: the refused write is the tombstone itself, so the document is still listed and still " +
+    "pinned. Restart the MCP server — the failure is sticky and every tool refuses until then — then call " +
+    "archive_doc again.",
+  sidebar:
+    "The tombstone is durable, so the document is archived; only its sidebar pin is still there, and " +
+    "get_sidebar reports it with `status: \"archived\"`. Restart the MCP server, then call unpin_doc with this " +
+    "uuid to finish it. Do NOT call archive_doc again — it is already archived.",
+  other:
+    "The log refused a write to a room this call does not own — another document syncing while it ran. Restart " +
+    "the MCP server, then check with list_docs — `include_deleted: true` — and get_sidebar what the rooms in " +
+    "`completed` left behind.",
+};
+
 const REQUIREMENT_DIRECTORY_RECOVERY =
   "The decision, its directory stub and the governed requirement update are durable; a later directory append " +
   "was refused, usually the requirement's follow-up stub repair. Restart the MCP server, then read the requirement " +
@@ -678,6 +696,112 @@ const ANNOTATE_SHAPES =
   "ignoring whichever fields do not fit. `text` and `author` belong to both. A reply may also carry `resolved`: " +
   "true resolves the thread and false reopens it in the same document update as the reply; a new thread cannot " +
   "carry that field.";
+
+/**
+ * The one answer a multi-room write that stopped part-way gives, whichever way
+ * it stopped: what is durable, what is not, that nothing was rolled back, and
+ * what to do. One shape, because a caller that learns to read a refused append
+ * must not have to learn a second one — for a `create_doc` whose group
+ * disappeared underneath it, or for an `archive_doc` whose unpin the log
+ * refused.
+ *
+ * `applied`, `partial` and `synced` come from the shared stamp in
+ * ./failures.ts; only what the call knows on top of them is here.
+ */
+function stoppedPartWay(detail: {
+  code: string;
+  message: string;
+  uuid: string;
+  /** The rooms this call wrote before the one that failed. */
+  completed: readonly { purpose: string; room: string }[];
+  failed: { purpose: string; room: string };
+  recovery: string;
+  extra?: Record<string, unknown>;
+}): ToolError {
+  return new ToolError(detail.code, detail.message, {
+    uuid: detail.uuid,
+    // Some of this call's work is durable whenever a room completed before the
+    // one that failed — `completed` is which, and there is no rollback that
+    // could make it false.
+    partial: detail.completed.length > 0,
+    recoveryClass: "manual",
+    rolledBack: false,
+    completed: detail.completed.map((entry) => ({ ...entry, applied: true })),
+    failed: detail.failed,
+    // The room every other failure of this kind names, kept so a caller that
+    // reads one field reads the same field here.
+    room: detail.failed.room,
+    recovery: detail.recovery,
+    ...(detail.extra ?? {}),
+  });
+}
+
+/**
+ * Stage a write across several rooms: write one, then check the log took it
+ * before touching the next.
+ *
+ * A refused append is recorded rather than thrown (see replica.ts), so without
+ * this check the next room would be written on top of a failure and the caller
+ * would hear one room name for a call that had touched three. Stopping here is
+ * what makes `completed` true.
+ *
+ * The failed room is the one the log named, not the stage that noticed: writing
+ * a document publishes its directory stub through the observer, so the
+ * directory is where a document write can fail. The recorded failure is the
+ * first refused append, so a room written before it — this stage's own, when
+ * the two names differ — did reach the log.
+ *
+ * The boundary: a second room failing inside this same call (another document
+ * syncing while it ran) is the one case where the sticky failure names a room
+ * this stage did not write, so the stage's own append is reported durable
+ * without having been re-checked. The caller's `other` recovery is why that is
+ * survivable — it tells the caller to re-verify with `list_docs` and
+ * `get_sidebar` rather than trust `completed`.
+ *
+ * `purposeOf` names the room a failure reports; `recoveryFor` turns the stage
+ * that was running and the room that failed into the sentence the caller acts
+ * on, because what a partial write costs is the calling tool's own knowledge.
+ */
+function roomStages(
+  replicas: Replicas,
+  tool: string,
+  uuid: string,
+  purposeOf: (room: string) => string,
+  recoveryFor: (stagePurpose: string, failedPurpose: string) => string,
+): {
+  completed: { purpose: string; room: string }[];
+  stage: (purpose: string, target: Replica, write: () => void) => void;
+} {
+  const completed: { purpose: string; room: string }[] = [];
+  const stage = (
+    purpose: string,
+    target: Replica,
+    write: () => void,
+  ): void => {
+    write();
+    const failure = replicas.persistenceError();
+    if (failure === null) {
+      completed.push({ purpose, room: target.room });
+      return;
+    }
+    const failedAt = purposeOf(failure.room);
+    if (failure.room !== target.room) {
+      completed.push({ purpose, room: target.room });
+    }
+    throw stoppedPartWay({
+      code: "persistence_failed",
+      message:
+        `The update log refused the write to ${failure.room}, so ${tool} stopped part-way. ` +
+        "Nothing was rolled back: the rooms in `completed` are durable and the rooms after " +
+        `the failure were never written. Cause: ${failure.message}`,
+      uuid,
+      completed,
+      failed: { purpose: failedAt, room: failure.room },
+      recovery: recoveryFor(purpose, failedAt),
+    });
+  };
+  return { completed, stage };
+}
 
 export function registerTools(
   server: McpServer,
@@ -1197,7 +1321,6 @@ export function registerTools(
       replicas.touch(replica);
       const directory = replicas.directory();
       const sidebarReplica = replicas.sidebar();
-      const completed: { purpose: string; room: string }[] = [];
 
       /** Which of this call's rooms a failed append names. */
       const purposeOf = (room: string): string => {
@@ -1210,88 +1333,18 @@ export function registerTools(
         return "other";
       };
 
-      /**
-       * Write one room, then check the log took it before touching the next.
-       *
-       * A refused append is recorded rather than thrown (see replica.ts), so
-       * without this check the next room would be written on top of a failure
-       * and the caller would hear one room name for a call that had touched
-       * three. Stopping here is what makes `completed` true.
-       *
-       * The failed room is the one the log named, not the stage that noticed:
-       * writing a document publishes its directory stub through the observer,
-       * so the directory is where a document write can fail. The recorded
-       * failure is the first refused append, so a room written before it — this
-       * stage's own, when the two names differ — did reach the log.
-       *
-       * The boundary: a second room failing inside this same call (another
-       * document syncing while it ran) is the one case where the sticky failure
-       * names a room this stage did not write, so the stage's own append is
-       * reported durable without having been re-checked. `RECOVERY.other` is
-       * why that is survivable — it tells the caller to re-verify with
-       * list_docs and get_sidebar rather than trust `completed`.
-       */
-      /**
-       * The one answer a create that stopped part-way gives, whichever way it
-       * stopped: what is durable, what is not, that nothing was rolled back,
-       * and what to do. One shape, because a caller that learns to read a
-       * refused append must not have to learn a second one for a group that
-       * disappeared underneath the same call.
-       */
-      const stoppedPartWay = (
-        code: string,
-        message: string,
-        failed: { purpose: string; room: string },
-        recovery: string,
-        extra: Record<string, unknown> = {},
-      ): ToolError =>
-        // `applied`, `partial` and `synced` come from the shared stamp in
-        // ./failures.ts; only what this call knows on top of them is here.
-        new ToolError(code, message, {
-          uuid,
-          // Some of this call's work is durable whenever a room completed
-          // before the one that failed — `completed` is which, and there is no
-          // rollback that could make it false.
-          partial: completed.length > 0,
-          recoveryClass: "manual",
-          rolledBack: false,
-          completed: completed.map((entry) => ({ ...entry, applied: true })),
-          failed,
-          // The room every other failure of this kind names, kept so a caller
-          // that reads one field reads the same field here.
-          room: failed.room,
-          recovery,
-          ...extra,
-        });
-
-      const stage = (
-        purpose: string,
-        target: Replica,
-        write: () => void,
-      ): void => {
-        write();
-        const failure = replicas.persistenceError();
-        if (failure === null) {
-          completed.push({ purpose, room: target.room });
-          return;
-        }
-        const failedAt = purposeOf(failure.room);
-        if (failure.room !== target.room) {
-          completed.push({ purpose, room: target.room });
-        }
-        throw stoppedPartWay(
-          "persistence_failed",
-          `The update log refused the write to ${failure.room}, so create_doc stopped part-way. ` +
-            "Nothing was rolled back: the rooms in `completed` are durable and the rooms after " +
-            `the failure were never written. Cause: ${failure.message}`,
-          { purpose: failedAt, room: failure.room },
+      const { completed, stage } = roomStages(
+        replicas,
+        "create_doc",
+        uuid,
+        purposeOf,
+        (purpose, failedAt) =>
           purpose === "requirement" && failedAt === "directory"
             ? REQUIREMENT_DIRECTORY_RECOVERY
             : requirement !== null && failedAt === "directory"
               ? DECISION_DIRECTORY_RECOVERY
-            : (RECOVERY[failedAt] ?? RECOVERY.other),
-        );
-      };
+              : (RECOVERY[failedAt] ?? RECOVERY.other),
+      );
 
       stage("document", replica, () => {
         // One transaction, so the document's room is ONE append: without it the
@@ -1369,16 +1422,20 @@ export function registerTools(
             ) {
               throw error;
             }
-            throw stoppedPartWay(
-              "group_not_found",
-              `Document ${uuid} was created, but sidebar group ${group.id} disappeared before it ` +
+            throw stoppedPartWay({
+              code: "group_not_found",
+              message:
+                `Document ${uuid} was created, but sidebar group ${group.id} disappeared before it ` +
                 "could be pinned there. Nothing was rolled back: the document and its directory " +
                 "stub are durable, and only the placement is missing.",
-              { purpose: "sidebar", room: sidebarReplica.room },
-              `The document exists — do NOT create it again. Call pin_doc with uuid ${uuid} and a ` +
+              uuid,
+              completed,
+              failed: { purpose: "sidebar", room: sidebarReplica.room },
+              recovery:
+                `The document exists — do NOT create it again. Call pin_doc with uuid ${uuid} and a ` +
                 "group that exists (get_sidebar lists them; pin_doc creates one by name).",
-              { group: group.id },
-            );
+              extra: { group: group.id },
+            });
           }
         });
       }
@@ -1959,24 +2016,37 @@ export function registerTools(
   );
 
   /**
-   * Archiving and restoring both write the *directory*, not the document.
+   * Archiving and restoring never write the *document*.
    *
-   * Two consequences. They report durability for the directory room, because
-   * that is the room whose update has to reach the hub. And they do not touch
-   * the derived index themselves: `Replicas` reconciles it from the directory
-   * update, which means the index follows an archive on every replica that
-   * observes it, not only on the one that called the tool.
+   * Restore writes the directory alone, and reports durability for that room,
+   * because that is the room whose update has to reach the hub. Archive writes
+   * the sidebar too (#957): a document that has left every other listing is not
+   * an entry point, so archiving unpins it and reports both rooms. Restore does
+   * not put the pin back — pinning again is a separate, deliberate act.
+   *
+   * Neither touches the derived index itself: `Replicas` reconciles it from the
+   * directory update, which means the index follows an archive on every replica
+   * that observes it, not only on the one that called the tool.
    */
   server.registerTool(
     "archive_doc",
     {
       title: "Archive a document",
       description:
-        "Hide a document: tombstones its directory stub, so it leaves list_docs, the web sidebar and the search index. " +
+        "Hide a document: tombstones its directory stub, so it leaves list_docs and the search index. " +
         "This is not erasure and not a delete. Every block, mark and annotation stays exactly where it was: get_doc still " +
         "serves the document by uuid, and list_docs with `include_deleted: true` still lists it, flagged `deleted`; " +
         "for a decision, add a matching `kind`, `status` or `tag` predicate. " +
         "There is no tool that erases content, by design.\n\n" +
+        "It also leaves the sidebar, because it is unpinned: a document that has left every other listing is not an " +
+        "entry point. `unpinned` says whether there was a pin to remove. restore_doc does NOT put it back — pin_doc " +
+        "is how a restored document becomes an entry point again.\n\n" +
+        "So this call writes two independently persisted rooms — the directory, and the sidebar when the document " +
+        "was pinned — and reports them one by one. `rooms` lists every room it touched with its own `applied` and " +
+        "`synced`; the top-level `synced` is the AND over them and is never true while one is still pending. It is " +
+        "NOT transactional: there is no rollback and no remote atomicity. If the local update log refuses the unpin, " +
+        "the call fails with `persistence_failed` carrying the `uuid`, the rooms already `completed`, the `failed` " +
+        "room, `rolledBack: false` and a recovery line — never as a completed archive.\n\n" +
         DECISION_LOG_LIFECYCLES_ARE_INDEPENDENT +
         "\n\n" +
         "What the tombstone does cost is writing: while it stands the document is read-only, and every mutating tool " +
@@ -1996,17 +2066,51 @@ export function registerTools(
       await replicas.settle();
       const stub = requireStub(uuid);
       const directory = replicas.directory();
+      const sidebarReplica = replicas.sidebar();
       const title = titleFor(uuid, stub);
-      tombstoneDirectoryEntry(directory.doc, uuid);
+      // Read before the tombstone, and from the sidebar rather than from the
+      // stub: the pin lives in another room, and `settle()` has already given
+      // the hub its chance to fill it. `unpinDoc` is a no-op without a visible
+      // pin, so this decides only whether the sidebar is a room this call
+      // touched — and a room it never wrote does not belong in `rooms`.
+      const pinned = readSidebar(sidebarReplica.doc).some((group) =>
+        group.docs.includes(uuid),
+      );
+      const { completed, stage } = roomStages(
+        replicas,
+        "archive_doc",
+        uuid,
+        (room) =>
+          room === directory.room
+            ? "directory"
+            : room === sidebarReplica.room
+              ? "sidebar"
+              : "other",
+        (_purpose, failedAt) => ARCHIVE_RECOVERY[failedAt] ?? ARCHIVE_RECOVERY.other,
+      );
+
+      // The directory first, so a refused append leaves the document listed and
+      // pinned rather than unpinned and still listed: an archive nobody can see
+      // is worse than a pin the reader can still remove. The unpin follows only
+      // once the tombstone is durable.
+      stage("directory", directory, () => {
+        tombstoneDirectoryEntry(directory.doc, uuid);
+      });
+      if (pinned) {
+        stage("sidebar", sidebarReplica, () => {
+          unpinDoc(sidebarReplica.doc, uuid);
+        });
+      }
       return json({
         uuid,
         title,
         archived: true,
+        unpinned: pinned,
         // Withdrawing a document needs no copy of it, so hydration cannot make
         // this false — but a store that refused the write can, and then the
         // uuid stays queued for a later retry rather than being reported done.
         indexed: replicas.indexReconciled(uuid),
-        ...durability(directory),
+        ...durabilityAcross(directory, completed),
       });
     }),
   );
@@ -2017,8 +2121,10 @@ export function registerTools(
       title: "Restore an archived document",
       description:
         "Lift a document's archive tombstone: it returns to the default list_docs listing unless it is a decision, " +
-        "returns to matching filtered listings either way, and returns to the web sidebar and search index, with the " +
-        "title and tags the directory recorded for it. The counterpart to archive_doc, and the sanctioned way " +
+        "returns to matching filtered listings either way, and returns to the search index, with the " +
+        "title and tags the directory recorded for it. It does NOT return to the sidebar: archive_doc unpinned it, " +
+        "and putting an entry point back is pin_doc's deliberate act, not a side effect of restoring. " +
+        "The counterpart to archive_doc, and the sanctioned way " +
         "back — a rename or a retag from a replica that has seen the archive deliberately cannot revive a document. " +
         "Restoring one that is not archived leaves its archive state alone, but is not quite a no-op: the directory " +
         "entry is a cache of the document's own metadata, and this trues it up, so a stub that had drifted is " +
