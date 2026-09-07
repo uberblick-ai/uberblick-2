@@ -19,17 +19,21 @@
  * are Working, requirements are Product and decisions are Decisions. It opens
  * on Working and classifies no row by opening its document room.
  *
- * Served by `ub open`, the query goes to the store's full-text index through
- * `/api/search`: titles, descriptions and block text under the same matching
- * rules as the MCP `search` tool. The endpoint returns identities only; rows,
- * modes, ordering, pins and navigation remain this list's derivation over the
- * directory and sidebar. Against a remote hub there is no honest index to ask,
- * so the field says it is unavailable and filters nothing.
+ * The field above the table is the same derivation narrowed once more, and it
+ * asks nobody anything: it keeps the rows of the selected mode whose *title*
+ * contains what was typed, case-insensitively. The stub caches every title, so
+ * it consults nothing else, fetches nothing, and behaves identically whether
+ * the page is served by `ub open` or opened straight at a hub. Querying
+ * descriptions and block text through `/api/search` is what this page used to
+ * do; whole-corpus search from here is deferred to a later stage (owner
+ * statement, #956), and the endpoint and its index are untouched and still
+ * served.
  *
  * **An empty listing is never a claim this client cannot make.** Nothing heard
- * yet is not "no documents", and nothing matched among what has arrived is not
- * "nothing matches" — until the directory has synced, both say what they
- * actually know.
+ * yet is not "no documents", and nothing matching among what has arrived is
+ * not "nothing matches" — until the directory has synced, both say what they
+ * actually know. The filter inherits that rule rather than restating it: it
+ * narrows an arrived set, so it can only ever speak about the arrived set.
  *
  * **Two orders, and the reader picks.** Last changed first is what a working
  * session opens on; title order is the other scan a corpus is read with — *what
@@ -53,31 +57,26 @@
  * stay one hover away, and the machine value in `dateTime`.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useRoomStatus } from "../ui/hooks.js";
 import { LifecycleBadge } from "../ui/LifecycleBadge.js";
 import { formatTimestamp, useTimestampClock } from "../ui/timestamps.js";
-import type { DocumentSearchClient, DocumentSearchResult } from "./document-search.js";
 
 /**
- * The field's label, which is also the whole answer to *what does typing here
- * do?* — both halves of it, so nobody has to guess at the half that is missing.
- * Short, because a label is also the accessible name a screen reader repeats
- * every time the field is reached and in every listing of the form's controls.
+ * What the field does, said twice on purpose.
+ *
+ * {@link FILTER_LABEL} is the accessible name a screen reader repeats every
+ * time the field is reached and in every listing of the form's controls;
+ * {@link FILTER_HINT} is the hint drawn inside the empty field, which is what
+ * makes an otherwise blank box read as something to type in — and which
+ * disappears the moment anyone does. Neither may promise more than the filter
+ * delivers: this narrows the list already on screen, by title.
  */
-const SEARCH_LABEL = "Search document text";
-
-/** Recheck only while a search answer may still lag the hub. */
-export const SEARCH_STATUS_POLL_MS = 1_000;
-
-type SearchState =
-  | { kind: "idle" }
-  | { kind: "loading"; query: string }
-  | ({ kind: "ready"; query: string; caughtUp: boolean } & DocumentSearchResult)
-  | { kind: "failed"; query: string };
+const FILTER_LABEL = "Filter this list by title";
+const FILTER_HINT = "Filter by title";
 
 /**
  * The stamp, if a `Date` can actually hold it.
@@ -139,6 +138,23 @@ const MODE_EMPTY_LABELS: Record<Mode, string> = {
 
 function inMode(entry: DirectoryEntry, mode: Mode): boolean {
   return mode === "working" ? entry.kind === undefined : entry.kind === mode;
+}
+
+/**
+ * Case-insensitive substring over the stub's own title, and nothing else.
+ *
+ * `needle` arrives already trimmed and lowercased, so the comparison is one
+ * `includes` per row over data the list is already holding — no request, no
+ * document room, no index.
+ *
+ * Deliberately not the *Untitled* the row draws for an empty title: that word
+ * is this list's label for the absence of a title, not a title to match
+ * against, so typing it finds documents actually called "Untitled" and not the
+ * unnamed ones. An empty needle matches everything, which is what clearing the
+ * field has to mean.
+ */
+function titleMatches(entry: DirectoryEntry, needle: string): boolean {
+  return entry.title.toLowerCase().includes(needle);
 }
 
 /**
@@ -236,7 +252,6 @@ export function DocumentList({
   connection,
   entries,
   groups,
-  searchClient,
   onSelect,
   onTogglePin,
 }: {
@@ -250,15 +265,12 @@ export function DocumentList({
   entries: readonly DirectoryEntry[];
   /** The sidebar as it stands: which group, if any, a row is pinned in. */
   groups: readonly SidebarGroup[];
-  /** Undefined while configuration loads; null when this page talks to a hub directly. */
-  searchClient?: DocumentSearchClient | null | undefined;
   onSelect: (uuid: string) => void;
   /** Pin or unpin a row, or null when there is no sidebar room to write to. */
   onTogglePin: ((uuid: string) => void) | null;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const [query, setQuery] = useState("");
-  const [search, setSearch] = useState<SearchState>({ kind: "idle" });
   const [mode, setMode] = useState<Mode>("working");
   /**
    * The chosen order, held beside the query rather than derived from it: the
@@ -282,84 +294,16 @@ export function DocumentList({
     }
     return named;
   }, [groups]);
-  const needle = query.trim();
-  useEffect(() => {
-    if (needle === "" || searchClient === null || searchClient === undefined) {
-      setSearch({ kind: "idle" });
-      return;
-    }
-    const controller = new AbortController();
-    let active = true;
-    setSearch({ kind: "loading", query: needle });
-    void Promise.all([
-      searchClient.search(needle, controller.signal),
-      // Search is still a valid local answer when the hub-status reading is
-      // unavailable. Keep it, conservatively caveated, instead of turning a
-      // status failure into a false search failure.
-      searchClient.status(controller.signal).catch(() => ({ caughtUp: false })),
-    ]).then(
-      ([result, next]) => {
-        if (active) {
-          setSearch({ kind: "ready", query: needle, ...result, caughtUp: next.caughtUp });
-        }
-      },
-      () => {
-        if (active) setSearch({ kind: "failed", query: needle });
-      },
-    );
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [needle, searchClient]);
-
-  const ready = search.kind === "ready" && search.query === needle ? search : null;
-  useEffect(() => {
-    if (ready === null || ready.caughtUp || searchClient == null) return;
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async (): Promise<void> => {
-      try {
-        const next = await searchClient.status(controller.signal);
-        if (controller.signal.aborted) return;
-        if (next.caughtUp) {
-          // The old answer was computed while the local store could still be
-          // behind. Refresh it before removing that caveat: otherwise a stale
-          // empty answer silently becomes an asserted caught-up empty answer.
-          const result = await searchClient.search(needle, controller.signal);
-          if (controller.signal.aborted) return;
-          setSearch((current) =>
-            current.kind === "ready" && current.query === needle
-              ? { kind: "ready", query: needle, ...result, caughtUp: true }
-              : current,
-          );
-          return;
-        }
-      } catch {
-        if (controller.signal.aborted) return;
-      }
-      timer = setTimeout(() => void poll(), SEARCH_STATUS_POLL_MS);
-    };
-    timer = setTimeout(() => void poll(), SEARCH_STATUS_POLL_MS);
-    return () => {
-      if (timer !== undefined) clearTimeout(timer);
-      controller.abort();
-    };
-  }, [needle, ready, searchClient]);
-
-  const hitIds = useMemo(() => new Set(ready?.hits ?? []), [ready]);
+  const needle = query.trim().toLowerCase();
   const rows = useMemo(
     () =>
       sortDirectory(
-        entries.filter(
-          (entry) => (needle === "" ? inMode(entry, mode) : hitIds.has(entry.uuid)),
-        ),
+        entries.filter((entry) => inMode(entry, mode) && titleMatches(entry, needle)),
         sort.order,
         sort.direction,
       ),
-    [entries, hitIds, mode, needle, sort],
+    [entries, mode, needle, sort],
   );
-  const hasHiddenHits = ready !== null && rows.length < ready.hits.length;
 
   return (
     <section className="ub-pane">
@@ -381,36 +325,19 @@ export function DocumentList({
             ))}
           </div>
         </fieldset>
+        {/* Enabled from first paint, whatever this page is connected to: the
+            rows it narrows are already here, so there is nothing to wait for
+            and no state in which it is unavailable. */}
         <label className="ub-docs-search-label">
-          <span>
-            {searchClient === null ? "Search unavailable without ub open" : SEARCH_LABEL}
-          </span>
+          <span className="ub-sr-only">{FILTER_LABEL}</span>
           <input
             type="search"
             className="ub-docs-search"
+            placeholder={FILTER_HINT}
             value={query}
-            disabled={searchClient === null || searchClient === undefined}
             onChange={(event) => setQuery(event.currentTarget.value)}
           />
         </label>
-        {searchClient === null && (
-          <p className="ub-muted ub-docs-search-state">
-            This page is connected directly to a remote hub, which has no browser search.
-          </p>
-        )}
-        {searchClient === undefined && (
-          <p className="ub-muted ub-docs-search-state">Loading search…</p>
-        )}
-        {ready !== null && (!ready.caughtUp || ready.capped || hasHiddenHits) && (
-          <p className="ub-muted ub-docs-search-state" role="status">
-            {!ready.caughtUp && "Results are from this machine and may lag the hub."}
-            {!ready.caughtUp && (ready.capped || hasHiddenHits) && " "}
-            {ready.capped && `Showing the first ${ready.limit} matches.`}
-            {ready.capped && hasHiddenHits && " "}
-            {hasHiddenHits &&
-              "Some matching documents have not reached this list yet."}
-          </p>
-        )}
         <table className="ub-docs-table">
           <colgroup>
             <col />
@@ -462,14 +389,10 @@ export function DocumentList({
               <tr>
                 <td colSpan={3} className="ub-docs-empty-cell">
                   <p className="ub-muted ub-docs-empty">
-                    {needle !== "" && searchClient !== null
-                      ? search.kind === "failed" && search.query === needle
-                        ? "Search failed."
-                        : ready === null
-                          ? "Searching document text…"
-                          : ready.hits.length === 0
-                            ? "No documents match your search."
-                            : "Matching documents have not reached this list yet."
+                    {needle !== ""
+                      ? status.synced
+                        ? `No ${MODE_EMPTY_LABELS[mode]} have a matching title.`
+                        : `No ${MODE_EMPTY_LABELS[mode]} synced so far have a matching title.`
                       : entries.length !== 0
                         ? status.synced
                           ? `No ${MODE_EMPTY_LABELS[mode]} in this workspace.`

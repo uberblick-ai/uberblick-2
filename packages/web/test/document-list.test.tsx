@@ -8,10 +8,10 @@
  * peer. A listing that agreed with local history but not with the directory
  * would be a second corpus, which is the one thing discovery cannot be.
  *
- * The type mode remains a directory derivation. Full-text search instead
- * consumes UUID-only answers from `ub open`, then renders those identities
- * through the same rows, ordering and navigation as the unfiltered list. The
- * tests inject that one HTTP boundary; the browser proof exercises it for real.
+ * Both filters are that same derivation: the type mode reads the cached
+ * lifecycle shape, and the field narrows by the cached title. Neither crosses
+ * a boundary, so there is nothing to inject and nothing to await — which is
+ * itself asserted, because "consults only the directory" is the claim.
  *
  * The app is mounted whole over shared Y.Docs (the `sidebar.test.tsx`
  * harness): a room is a plain Y.Doc, because the transport is not what is
@@ -44,15 +44,7 @@ import {
 } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { allPath, canonicalPath, parseRoute } from "../src/ui/route.js";
-import {
-  DocumentList,
-  SEARCH_STATUS_POLL_MS,
-  sortDirectory,
-} from "../src/shell/DocumentList.js";
-import type {
-  DocumentSearchClient,
-  DocumentSearchResult,
-} from "../src/shell/document-search.js";
+import { DocumentList, sortDirectory } from "../src/shell/DocumentList.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { formatTimestamp } from "../src/ui/timestamps.js";
 
@@ -179,6 +171,13 @@ function rowTitles(host: HTMLElement): string[] {
   );
 }
 
+/** The uuid each row opens, which is what a row is when two share a title. */
+function rowUuids(host: HTMLElement): string[] {
+  return [...host.querySelectorAll(".ub-docs-open")].map(
+    (node) => node.getAttribute("title") ?? "",
+  );
+}
+
 /** Change a controlled input through the native setter, like a keystroke. */
 function typeInto(input: HTMLInputElement, value: string): void {
   const native = Object.getOwnPropertyDescriptor(
@@ -189,41 +188,23 @@ function typeInto(input: HTMLInputElement, value: string): void {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-function search(host: HTMLElement): HTMLInputElement {
+function filter(host: HTMLElement): HTMLInputElement {
   const field = host.querySelector<HTMLInputElement>(".ub-docs-search");
-  if (field === null) throw new Error("the search field is missing");
+  if (field === null) throw new Error("the filter field is missing");
   return field;
 }
 
-function searchClient(
-  find: (query: string, signal: AbortSignal) => Promise<DocumentSearchResult>,
-  caughtUp: () => Promise<boolean> = async () => true,
-): DocumentSearchClient {
-  return {
-    search: vi.fn(find),
-    status: vi.fn(async () => ({ caughtUp: await caughtUp(), rooms: {} })),
-  };
-}
-
-async function flushSearch(): Promise<void> {
+/**
+ * Let anything the render scheduled actually run.
+ *
+ * The filter has nothing to await, which is the claim; this is what makes
+ * "issued no request" an observation rather than a race the assertion won.
+ */
+async function flushMicrotasks(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
     await Promise.resolve();
   });
-}
-
-function deferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (reason?: unknown) => void;
-} {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((yes, no) => {
-    resolve = yes;
-    reject = no;
-  });
-  return { promise, resolve, reject };
 }
 
 function entry(over: Partial<DirectoryEntry> & { uuid: string }): DirectoryEntry {
@@ -674,8 +655,8 @@ describe("the list", () => {
   });
 });
 
-describe("the search", () => {
-  it("opens on Working and keeps the type mode over full-text hits", async () => {
+describe("the filter", () => {
+  it("opens on Working and keeps each type mode to its own rows", async () => {
     const peer = peerOf(directoryDoc());
     upsertDirectoryEntry(peer, {
       uuid: ONE,
@@ -733,12 +714,7 @@ describe("the search", () => {
     );
   });
 
-  it("renders the endpoint's full-text hits as ordinary rows and clears locally", async () => {
-    const api = searchClient(async (query) => ({
-      hits: query === "lighthouse*" ? [ONE, TWO] : [],
-      limit: 100,
-      capped: false,
-    }));
+  it("keeps the rows whose title contains the text, and nothing a description says", async () => {
     const selected = vi.fn();
     const host = await mount(
       <DocumentList
@@ -747,196 +723,142 @@ describe("the search", () => {
           entry({ uuid: ONE, title: "Overview" }),
           entry({
             uuid: TWO,
-            title: "Editing",
+            title: "Editing and blocks",
+            description: "How the overview pane composes a document.",
+          }),
+          entry({ uuid: THREE, title: "Roadmap" }),
+        ]}
+        groups={[]}
+        onSelect={selected}
+        onTogglePin={null}
+      />,
+    );
+    const field = filter(host);
+
+    // Case-insensitive, and a substring rather than a prefix.
+    await act(async () => typeInto(field, "VIE"));
+    expect(rowTitles(host)).toEqual(["Overview"]);
+
+    // The word occurs in the second entry's description and in the first
+    // entry's title. Only the title is consulted, so the description is not a
+    // second corpus this field quietly searches.
+    await act(async () => typeInto(field, "overview pane"));
+    expect(rowTitles(host)).toEqual([]);
+
+    // Two rows, and the second matches only because the comparison folds case.
+    await act(async () => typeInto(field, "r"));
+    expect(rowTitles(host)).toEqual(["Overview", "Roadmap"]);
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>(".ub-docs-open")?.click(),
+    );
+    expect(selected).toHaveBeenCalledWith(ONE);
+
+    // Clearing restores the unfiltered list.
+    await act(async () => typeInto(field, ""));
+    expect(rowTitles(host)).toEqual([
+      "Editing and blocks",
+      "Overview",
+      "Roadmap",
+    ]);
+  });
+
+  it("never matches the Untitled a row draws in place of an absent title", async () => {
+    const host = await mount(
+      <DocumentList
+        connection={null}
+        entries={[
+          entry({ uuid: ONE, title: "" }),
+          entry({ uuid: TWO, title: "Untitled" }),
+        ]}
+        groups={[]}
+        onSelect={() => {}}
+        onTogglePin={null}
+      />,
+    );
+    // Both rows read "Untitled" on screen — one because that is its title, one
+    // because the list draws the word in italics where a title is absent.
+    expect(rowTitles(host)).toEqual(["Untitled", "Untitled"]);
+    expect(host.querySelectorAll(".ub-docs-title em")).toHaveLength(1);
+
+    await act(async () => typeInto(filter(host), "untitled"));
+    // The fallback is this list's word for *no title*, not a title to match
+    // against, so only the document actually called "Untitled" survives.
+    expect(rowUuids(host)).toEqual([TWO]);
+    expect(host.querySelector(".ub-docs-title em")).toBeNull();
+  });
+
+  it("narrows inside the chosen tab, and re-applies the text to the next tab", async () => {
+    const host = await mount(
+      <DocumentList
+        connection={null}
+        entries={[
+          entry({ uuid: ONE, title: "Search plan" }),
+          entry({
+            uuid: TWO,
+            title: "Search requirement",
             kind: "requirement",
             status: "planned",
           }),
           entry({ uuid: THREE, title: "Roadmap" }),
         ]}
         groups={[]}
-        searchClient={api}
-        onSelect={selected}
-        onTogglePin={null}
-      />,
-    );
-    const field = search(host);
-    await act(async () => typeInto(field, "lighthouse*"));
-    await flushSearch();
-    expect(api.search).toHaveBeenCalledWith("lighthouse*", expect.any(AbortSignal));
-    expect(rowTitles(host)).toEqual(["Editing", "Overview"]);
-
-    await act(async () =>
-      host.querySelector<HTMLButtonElement>(".ub-docs-open")?.click(),
-    );
-    expect(selected).toHaveBeenCalledWith(TWO);
-
-    const requests = vi.mocked(api.search).mock.calls.length;
-    await act(async () => typeInto(field, ""));
-    // Full-text search spans types; clearing restores the full active mode.
-    expect(rowTitles(host)).toEqual(["Overview", "Roadmap"]);
-    expect(api.search).toHaveBeenCalledTimes(requests);
-  });
-
-  it("keeps a late answer from replacing the query now in the field", async () => {
-    const first = deferred<DocumentSearchResult>();
-    const second = deferred<DocumentSearchResult>();
-    const api = searchClient((query) => (query === "first" ? first.promise : second.promise));
-    const host = await mount(
-      <DocumentList
-        connection={null}
-        entries={[
-          entry({ uuid: ONE, title: "First" }),
-          entry({ uuid: TWO, title: "Second" }),
-        ]}
-        groups={[]}
-        searchClient={api}
         onSelect={() => {}}
         onTogglePin={null}
       />,
     );
-    await act(async () => typeInto(search(host), "first"));
-    await act(async () => typeInto(search(host), "second"));
-    await act(async () =>
-      first.resolve({ hits: [ONE], limit: 100, capped: false }),
-    );
-    expect(rowTitles(host)).toEqual([]);
-    expect(host.querySelector(".ub-docs-empty")?.textContent).toContain("Searching");
+    const mode = (name: string): HTMLButtonElement | undefined =>
+      [...host.querySelectorAll<HTMLButtonElement>(".ub-docs-mode")].find(
+        (button) => button.textContent === name,
+      );
 
-    await act(async () =>
-      second.resolve({ hits: [TWO], limit: 100, capped: false }),
-    );
-    expect(rowTitles(host)).toEqual(["Second"]);
+    await act(async () => typeInto(filter(host), "search"));
+    // The requirement matches the text too, and still does not appear here.
+    expect(rowTitles(host)).toEqual(["Search plan"]);
+
+    await act(async () => mode("Product")?.click());
+    expect(filter(host).value).toBe("search");
+    expect(rowTitles(host)).toEqual(["Search requirement"]);
   });
 
-  it("names lag until catch-up and keeps a disclosed result cap visible", async () => {
-    vi.useFakeTimers();
-    try {
-      const readings = [false, true];
-      let searches = 0;
-      const api = searchClient(
-        async () => ({
-          hits: [searches++ === 0 ? ONE : TWO],
-          limit: 100,
-          capped: true,
-        }),
-        async () => readings.shift() ?? true,
-      );
-      const host = await mount(
-        <DocumentList
-          connection={null}
-          entries={[
-            entry({ uuid: ONE, title: "Before catch-up" }),
-            entry({ uuid: TWO, title: "After catch-up" }),
-          ]}
-          groups={[]}
-          searchClient={api}
-          onSelect={() => {}}
-          onTogglePin={null}
-        />,
-      );
-      await act(async () => typeInto(search(host), "overview"));
-      await flushSearch();
-      expect(host.querySelector(".ub-docs-search-state")?.textContent).toContain(
-        "may lag the hub",
-      );
-      expect(host.querySelector(".ub-docs-search-state")?.textContent).toContain(
-        "first 100 matches",
-      );
-      expect(rowTitles(host)).toEqual(["Before catch-up"]);
-      await act(async () => vi.advanceTimersByTimeAsync(SEARCH_STATUS_POLL_MS));
-      expect(host.querySelector(".ub-docs-search-state")?.textContent).not.toContain(
-        "may lag the hub",
-      );
-      expect(host.querySelector(".ub-docs-search-state")?.textContent).toContain(
-        "first 100 matches",
-      );
-      expect(rowTitles(host)).toEqual(["After catch-up"]);
-      expect(api.search).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.useRealTimers();
+  it("asks nobody anything, whatever is typed", async () => {
+    const host = await mount(
+      <DocumentList
+        connection={null}
+        entries={[entry({ uuid: ONE, title: "Overview" })]}
+        groups={[]}
+        onSelect={() => {}}
+        onTogglePin={null}
+      />,
+    );
+    for (const text of ["overview", "nothing at all", "*", ""]) {
+      await act(async () => typeInto(filter(host), text));
+      await flushMicrotasks();
     }
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it("shows loading, failure and an answered empty as three different states", async () => {
-    const pending = deferred<DocumentSearchResult>();
-    const api = searchClient(() => pending.promise);
+  it("is enabled from first paint and claims nothing about a search", async () => {
     const host = await mount(
       <DocumentList
         connection={null}
         entries={[entry({ uuid: ONE, title: "Overview" })]}
         groups={[]}
-        searchClient={api}
         onSelect={() => {}}
         onTogglePin={null}
       />,
     );
-    await act(async () => typeInto(search(host), "nothing"));
-    expect(host.querySelector(".ub-docs-empty")?.textContent).toContain("Searching");
-    await act(async () => pending.reject(new Error("refused")));
-    expect(host.querySelector(".ub-docs-empty")?.textContent).toBe(
-      "Search failed.",
+    const field = filter(host);
+    expect(field.disabled).toBe(false);
+    // The accessible name and the in-field hint are the field's whole story,
+    // and neither offers document text. Nothing else on the page qualifies the
+    // answer either — no unavailable state, no lag or cap caveat.
+    expect(field.labels?.[0]?.textContent).toBe("Filter this list by title");
+    expect(field.placeholder).toBe("Filter by title");
+    expect(host.textContent).not.toMatch(
+      /unavailable|document text|lag|first \d+ matches|Loading/i,
     );
 
-    const answered = searchClient(async () => ({ hits: [], limit: 100, capped: false }));
-    unmount();
-    const empty = await mount(
-      <DocumentList
-        connection={null}
-        entries={[entry({ uuid: ONE, title: "Overview" })]}
-        groups={[]}
-        searchClient={answered}
-        onSelect={() => {}}
-        onTogglePin={null}
-      />,
-    );
-    await act(async () => typeInto(search(empty), "nothing"));
-    await flushSearch();
-    expect(empty.querySelector(".ub-docs-empty")?.textContent).toBe(
-      "No documents match your search.",
-    );
-  });
-
-  it("keeps a successful local answer when the catch-up reading fails", async () => {
-    const api: DocumentSearchClient = {
-      search: vi.fn(async () => ({ hits: [ONE], limit: 100, capped: false })),
-      status: vi.fn(async () => {
-        throw new Error("status unavailable");
-      }),
-    };
-    const host = await mount(
-      <DocumentList
-        connection={null}
-        entries={[entry({ uuid: ONE, title: "Overview" })]}
-        groups={[]}
-        searchClient={api}
-        onSelect={() => {}}
-        onTogglePin={null}
-      />,
-    );
-    await act(async () => typeInto(search(host), "overview"));
-    await flushSearch();
-    expect(rowTitles(host)).toEqual(["Overview"]);
-    expect(host.querySelector(".ub-docs-search-state")?.textContent).toContain(
-      "may lag the hub",
-    );
-  });
-
-  it("disables search and filters nothing when the page talks directly to a hub", async () => {
-    const host = await mount(
-      <DocumentList
-        connection={null}
-        entries={[entry({ uuid: ONE, title: "Overview" })]}
-        groups={[]}
-        searchClient={null}
-        onSelect={() => {}}
-        onTogglePin={null}
-      />,
-    );
-    expect(search(host).disabled).toBe(true);
-    expect(search(host).labels?.[0]?.textContent).toContain("unavailable");
-    expect(host.querySelector(".ub-docs-search-state")?.textContent).toContain(
-      "connected directly to a remote hub",
-    );
+    await act(async () => typeInto(field, "overview"));
     expect(rowTitles(host)).toEqual(["Overview"]);
   });
 });
@@ -954,13 +876,11 @@ describe("an empty list", () => {
   }
 
   async function open(synced: boolean, entries: DirectoryEntry[]) {
-    const api = searchClient(async () => ({ hits: [], limit: 100, capped: false }));
     return await mount(
       <DocumentList
         connection={statusOnly(synced)}
         entries={entries}
         groups={[]}
-        searchClient={api}
         onSelect={() => {}}
         onTogglePin={null}
       />,
@@ -983,13 +903,25 @@ describe("an empty list", () => {
     );
   });
 
-  it("reports no matches only after the search endpoint answers", async () => {
+  it("asserts that no title matches only once the directory has synced", async () => {
+    // The filter narrows what has arrived, so before the directory has synced
+    // it can only speak about what has arrived — and it says so rather than
+    // asserting the corpus holds no such title.
     const waiting = await open(false, [entry({ uuid: ONE, title: "Overview" })]);
-    await act(async () => typeInto(search(waiting), "nothing"));
-    await flushSearch();
+    await act(async () => typeInto(filter(waiting), "nothing"));
     expect(waiting.querySelector(".ub-docs-empty")?.textContent).toBe(
-      "No documents match your search.",
+      "No working documents synced so far have a matching title.",
     );
+    unmount();
+
+    const synced = await open(true, [entry({ uuid: ONE, title: "Overview" })]);
+    await act(async () => typeInto(filter(synced), "nothing"));
+    expect(synced.querySelector(".ub-docs-empty")?.textContent).toBe(
+      "No working documents have a matching title.",
+    );
+    // Neither reading is a failed or a pending search: nothing is in flight,
+    // so there is no third state to report.
+    expect(synced.textContent).not.toMatch(/failed|Searching|…/);
   });
 });
 
