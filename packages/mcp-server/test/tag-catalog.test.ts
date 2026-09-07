@@ -72,6 +72,77 @@ afterEach(async () => {
 });
 
 describe("the workspace tag catalog", () => {
+  it("nudges successful writes to untagged documents when the local catalog has active choices", async () => {
+    const rig = await local();
+    const created = await rig.ok("create_doc", {
+      title: "Needs classification",
+      description: "A document created before anyone chose its domain tags.",
+    });
+
+    expect(created).toMatchObject({
+      applied: true,
+      synced: expect.any(Boolean),
+      hub: { status: "disabled" },
+    });
+    expect(created.tagHint).toContain("list_tags");
+    expect(created.tagHint).toContain("set_tags");
+
+    const inserted = await rig.ok("insert_block", {
+      uuid: created.uuid,
+      type: "paragraph",
+      text: "The write still lands while the hint points out the next step.",
+    });
+    expect(inserted).toMatchObject({
+      applied: true,
+      synced: expect.any(Boolean),
+      hub: { status: "disabled" },
+    });
+    expect(inserted.tagHint).toContain("list_tags");
+    expect(inserted.tagHint).toContain("set_tags");
+    expect(
+      (await rig.ok("get_doc", { uuid: created.uuid })).blocks,
+    ).toContainEqual(
+      expect.objectContaining({
+        text: "The write still lands while the hint points out the next step.",
+      }),
+    );
+
+    const pinned = await rig.ok("pin_doc", {
+      uuid: created.uuid,
+      group: "Reference",
+    });
+    expect(pinned.tagHint).toBeUndefined();
+    const archived = await rig.ok("archive_doc", { uuid: created.uuid });
+    expect(archived.tagHint).toBeUndefined();
+  });
+
+  it("does not nudge an assigned document or one with no active local choices", async () => {
+    const rig = await local();
+    const assigned = await rig.ok("create_doc", {
+      title: "Classified before retirement",
+      description: "A retired assignment still records that classification happened.",
+      tags: [AUTH.id],
+    });
+    expect(assigned.tagHint).toBeUndefined();
+
+    retireTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.id);
+    const retained = await rig.ok("insert_block", {
+      uuid: assigned.uuid,
+      type: "paragraph",
+      text: "The only assignment is retired, but it remains an assignment.",
+    });
+    expect(retained.tagHint).toBeUndefined();
+
+    for (const tag of EXAMPLE_TAGS.filter(({ id }) => id !== AUTH.id)) {
+      retireTagCatalogEntry(rig.instance.replicas.settings().doc, tag.id);
+    }
+    const noChoices = await rig.ok("create_doc", {
+      title: "No local vocabulary",
+      description: "An untagged document when the local catalog has no active entry.",
+    });
+    expect(noChoices.tagHint).toBeUndefined();
+  });
+
   it("lists a complete deterministic catalog and persists its offline seed", async () => {
     const databasePath = tempDatabasePath();
     const first = await local(databasePath);
