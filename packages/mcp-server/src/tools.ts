@@ -72,6 +72,7 @@ import {
   resolveTagAssignments,
   resolveAnnotationRange,
   restoreDirectoryEntry,
+  setAnnotationResolved,
   setChangelogSuggestion,
   setDescription,
   setTldr,
@@ -651,8 +652,9 @@ const DECISION_DIRECTORY_RECOVERY =
  *
  * The fields are not independently optional: a reply names a thread, opening
  * one names a block and a range, and a call carrying both says two things at
- * once. The shape is selected on `thread_id` rather than on an added `action`
- * field, so every call an agent already writes stays valid.
+ * once. A reply may also resolve or reopen its thread; opening one cannot.
+ * The shape is selected on `thread_id` rather than on an added `action` field,
+ * so every call an agent already writes stays valid.
  */
 const ANNOTATE_MODES: readonly ToolMode[] = [
   {
@@ -664,6 +666,7 @@ const ANNOTATE_MODES: readonly ToolMode[] = [
     title: "Opening a thread over a range",
     when: { field: "thread_id", present: false },
     requires: ["block_id", "start", "end"],
+    forbids: ["resolved"],
   },
 ];
 
@@ -672,7 +675,9 @@ const ANNOTATE_SHAPES =
   "Two shapes, and a call is exactly one of them: open a thread with `block_id`, `start` and `end` — all three, " +
   "none of them optional — or reply to one with `thread_id` and no range fields at all. Mixing them, or leaving a " +
   "range half-stated, is refused at the input boundary before anything is written, rather than resolved by " +
-  "ignoring whichever fields do not fit. `text` and `author` belong to both.";
+  "ignoring whichever fields do not fit. `text` and `author` belong to both. A reply may also carry `resolved`: " +
+  "true resolves the thread and false reopens it in the same document update as the reply; a new thread cannot " +
+  "carry that field.";
 
 export function registerTools(
   server: McpServer,
@@ -2059,9 +2064,9 @@ export function registerTools(
   server.registerTool(
     "annotate",
     {
-      title: "Annotate a range, or comment on a thread",
+      title: "Annotate a range, or reply to and resolve a thread",
       description:
-        "Open an annotation thread over a range of a block's text, or — with `thread_id` — add a comment to an existing thread. " +
+        "Open an annotation thread over a range of a block's text, or — with `thread_id` — add a comment to an existing thread and optionally resolve or reopen it. " +
         "The range is anchored by a formatting mark on the text itself, so it survives edits, splits and re-types.\n\n" +
         ANNOTATE_SHAPES +
         "\n\n" +
@@ -2081,18 +2086,31 @@ export function registerTools(
           block_id: z.string().min(1).optional().describe("The block to annotate. New thread only."),
           start: z.number().int().min(0).optional().describe("Range start, in characters. New thread only."),
           end: z.number().int().min(0).optional().describe("Range end, exclusive. New thread only."),
+          resolved: z
+            .boolean()
+            .optional()
+            .describe("With thread_id, true resolves the thread and false reopens it."),
           author: z.string().min(1).optional(),
         },
         ANNOTATE_MODES,
       ),
     },
-    guarded("annotate", async ({ uuid, text, thread_id, block_id, start, end, author }) => {
+    guarded("annotate", async ({ uuid, text, thread_id, block_id, start, end, resolved, author }) => {
       await replicas.settle();
       const replica = requireWritableDoc(uuid);
       const who = author ?? replicas.name;
 
       if (thread_id !== undefined) {
-        const updated = addComment(replica.doc, thread_id, who, text);
+        let updated: Annotation | null = null;
+        // Both schema helpers transact; this outer transaction folds a reply
+        // plus its resolution into one Yjs update and therefore one durable
+        // append, while keeping their independently reusable schema contracts.
+        replica.doc.transact(() => {
+          updated = addComment(replica.doc, thread_id, who, text);
+          if (updated !== null && resolved !== undefined) {
+            updated = setAnnotationResolved(replica.doc, thread_id, resolved);
+          }
+        });
         if (updated === null) {
           throw new ToolError(
             "thread_not_found",

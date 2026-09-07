@@ -63,9 +63,11 @@ reviews or merges a diff it authored, and a challenge of a diff always runs on
 a session that did not write it.
 
 Issue shaping is a separate conversation entry point: the Codex and Claude
-`shape-issue` adapters both read `.agents/protocols/issue-shaping.md` and may
-create only a confirmed `needs-preparation` intake. Preparation still begins in
-the issue-preparer role and follows `.agents/protocols/issue-preparation.md`;
+`shape-issue` adapters both read `.agents/protocols/issue-shaping.md`. After the
+human confirms the meaning, they let that human choose between a draft
+requirement for coworker review and a confirmed `needs-preparation` intake;
+they can later resume the requirement by uuid. Preparation still begins in the
+issue-preparer role and follows `.agents/protocols/issue-preparation.md`;
 neither shaping nor its adapters grant `ready` or choose Priority.
 
 ## Development workflow (every functionality)

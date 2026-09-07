@@ -12,7 +12,8 @@
  * a client reads the rule before it sends anything.
  *
  * The second half is for the two tools that multiplex several actions over one
- * name — `annotate` (open a thread over a range, or reply to one) and
+ * name — `annotate` (open a thread over a range, or reply and optionally
+ * resolve or reopen it) and
  * `sidebar_group` (rename, move, delete). Their fields are not independently
  * optional: `thread_id` with `start` is not a call, and a `rename` carrying an
  * `index` says one thing and means another. Publishing them as optional made
