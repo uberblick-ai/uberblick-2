@@ -227,6 +227,11 @@ const DESCRIPTION_NUDGE =
   "This document has no description: call set_description with one or two sentences saying what it is for, so " +
   "list_docs and search can answer for it without anyone opening it.";
 
+/** The one-line prompt a mutating tool carries when a document has no tags. */
+const TAG_NUDGE =
+  "This document has no tag assignments: call list_tags for the active workspace vocabulary, then call set_tags " +
+  "to assign one or more tags.";
+
 /** The expectation carried by every successful block-content mutation. */
 const TLDR_AFTER_CONTENT_CHANGE =
   "After changing document content, review its TL;DR and call set_tldr when the summary needs to change.";
@@ -890,6 +895,20 @@ export function registerTools(
     return { description: null, descriptionHint: DESCRIPTION_NUDGE };
   };
 
+  /** A non-blocking prompt for an untagged document when this replica has choices. */
+  const tagGap = (replica: Replica): Record<string, unknown> => {
+    if (replica.isDirectory || replica.isSidebar || replica.isSettings) {
+      return {};
+    }
+    if (
+      getMeta(replica.doc).tags.length > 0 ||
+      activeTagCatalog(tagCatalog()).length === 0
+    ) {
+      return {};
+    }
+    return { tagHint: TAG_NUDGE };
+  };
+
   /** A non-blocking reminder returned only after document content changes. */
   const tldrReview = (replica: Replica): Record<string, unknown> =>
     getMeta(replica.doc).tldr === null
@@ -914,6 +933,7 @@ export function registerTools(
       synced: replicas.isRoomQuiet(replica.room),
       hub: replicas.sync.state(),
       ...descriptionGap(replica),
+      ...tagGap(replica),
     };
   };
 
@@ -950,6 +970,7 @@ export function registerTools(
       rooms: detail,
       hub: replicas.sync.state(),
       ...descriptionGap(primary),
+      ...tagGap(primary),
     };
   };
 
