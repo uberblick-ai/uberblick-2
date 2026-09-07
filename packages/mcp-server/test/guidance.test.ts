@@ -111,6 +111,20 @@ it("keeps a lease through guidance changes, expires without wall-clock sleeps, a
   now += 1;
   const refusal = await rig.call("set_title", { uuid: first.uuid, title: "After expiry" });
   expect(refusal.payload.unread.map((item: { uuid: string }) => item.uuid).sort()).toEqual([first.uuid, next.uuid].sort());
+  // A read stops counting once its document leaves the guidance set, so re-marking makes it unread again.
+  await rig.ok("get_doc", { uuid: first.uuid });
+  setTags(rig.instance.replicas.replica(first.uuid).doc, []);
+  expect((await rig.call("set_title", { uuid: first.uuid, title: "While unmarked" })).payload.unread)
+    .toEqual([{ uuid: next.uuid, title: "Next" }]);
+  setTitle(rig.instance.replicas.replica(first.uuid).doc, "Revised while unmarked");
+  setTags(rig.instance.replicas.replica(first.uuid).doc, [marker]);
+  const remarked = await rig.call("set_title", { uuid: first.uuid, title: "After remarking" });
+  expect(remarked.payload.unread.map((item: { uuid: string }) => item.uuid).sort()).toEqual([first.uuid, next.uuid].sort());
+  await rig.ok("get_doc", { uuid: next.uuid });
+  expect((await rig.call("set_title", { uuid: first.uuid, title: "Only next read" })).payload.unread)
+    .toEqual([{ uuid: first.uuid, title: "Revised while unmarked" }]);
+  await rig.ok("get_doc", { uuid: first.uuid });
+  now += 600_000; // Drop the lease that completed and continue from the expired state above.
   await rig.ok("get_doc", { uuid: first.uuid });
   // Curation removes the last unread guide: the next write completes briefing.
   setTags(rig.instance.replicas.replica(next.uuid).doc, []);

@@ -44,6 +44,15 @@ export class GuidanceBriefing {
     });
   }
 
+  /** Guidance the gate enforces now; a read stops counting once its document leaves the set. */
+  private enforced(): { uuid: string; title: string }[] {
+    const documents = this.documents();
+    for (const uuid of this.reads) {
+      if (!documents.some((doc) => doc.uuid === uuid)) this.reads.delete(uuid);
+    }
+    return documents;
+  }
+
   private leased(): boolean {
     if (performance.now() < this.expiresAt) return true;
     this.expiresAt = 0;
@@ -52,7 +61,7 @@ export class GuidanceBriefing {
 
   require(): void {
     if (this.leased()) return;
-    const documents = this.documents();
+    const documents = this.enforced();
     const unread = documents.filter(({ uuid }) => !this.reads.has(uuid));
     if (unread.length > 0) {
       throw new ToolError("guidance_required", "Read the workspace guidance before changing documents.", { unread });
@@ -68,7 +77,7 @@ export class GuidanceBriefing {
   recordRead(uuid: string): void {
     try {
       if (this.leased()) return;
-      const documents = this.documents();
+      const documents = this.enforced();
       if (!documents.some((doc) => doc.uuid === uuid)) return;
       this.reads.add(uuid);
       if (documents.every((doc) => this.reads.has(doc.uuid))) {
