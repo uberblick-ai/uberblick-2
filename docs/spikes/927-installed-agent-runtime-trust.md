@@ -37,8 +37,9 @@ control carrying the instrumented runner completed immediately. The evidence
 establishes fresh project bootstrap, but repeatable standing-loop bootstrap is
 not yet established.
 
-The secret-free event reductions, exact identities and configuration hashes are
-in [927-installed-agent-runtime-evidence.json](./927-installed-agent-runtime-evidence.json).
+The secret-free event and configuration-change reductions, with exact
+identities, are in
+[927-installed-agent-runtime-evidence.json](./927-installed-agent-runtime-evidence.json).
 
 ## Demonstrated behaviour
 
