@@ -137,15 +137,19 @@ documents; its uuid is the stable handle for resumption.
 A later shaping conversation may resume a requirement by uuid, whether its
 status is `draft` or already `planned`. Read it with `get_doc`; a title match is
 not identity. Refuse to reinterpret another document kind as a requirement.
-Gather every unresolved annotation on the requirement and every open entry in
-its decision log. Read each open decision document, including its unresolved
-annotations. A decision reference this replica cannot read is a visible
-boundary to surface to the human, never an item to skip.
+Gather every unresolved annotation on the requirement, every unresolved
+annotation on each decision document in its log that this replica can read, and
+every log entry whose own status is still `open`. Read those decision documents
+for their annotations whatever their status: a decision's status and its
+threads' `resolved` flags are independent, so deciding a decision leaves an
+unresolved objection on it unresolved and still owed a disposition. A decision
+reference this replica cannot read is a visible boundary to surface to the
+human, never an item to skip.
 
-Walk through the open items one at a time. For each, first state what material
-change you believe it asks for, then let the human choose: revise, reply and
-resolve with a reason, decide an open decision, or leave it open. Act only on
-that explicit disposition:
+Walk through the gathered items one at a time. For each, first state what
+material change you believe it asks for, then let the human choose: revise,
+reply and resolve with a reason, decide an open decision, or leave it open. Act
+only on that explicit disposition:
 
 - revise the existing requirement or decision block by block with `edit_block`,
   `insert_block`, or `delete_block`; never recreate the document, churn an
@@ -159,8 +163,9 @@ that explicit disposition:
   `Reconsidering` section; or
 - make no write when the human leaves the item open.
 
-Only a resolved annotation or a decided decision drops out of the next
-resumption. Re-read affected documents after writes so the next item is based
+Only a resolved annotation drops out of the next resumption, and a decided
+decision drops out only as a decision item: its own unresolved annotations stay
+in the walk. Re-read affected documents after writes so the next item is based
 on current block revisions and decision state.
 
 When the human explicitly declares the requirement planned, set its status to
