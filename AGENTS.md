@@ -44,6 +44,10 @@ A pointer is a route to the source, not a substitute for reading it.
 - **Edit corpus:** read Editorial contract; update the owning document rather
   than copying its content into repository instructions.
 
+When instructions come from a different checkout than the code being examined,
+identify both sources and revisions. Verify code and path claims at the stated
+code revision; an instruction in the control checkout is not evidence it shipped.
+
 Read each source when needed and reuse it within the session. Refresh affected
 context when the assignment, governing decision or relevant source changes.
 

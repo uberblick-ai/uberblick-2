@@ -59,6 +59,11 @@ worktree, and never rebase or force-push a claimed branch.
 
 ## Outcome
 
+Distinguish authorized requirements from the preparer’s suggested mechanisms.
+For choices left open, verify the proposed mechanism against the governing
+guarantees and concrete failure cases before adopting it; readiness is not proof
+that a suggested design works. Explicit constraints remain binding.
+
 The least code that defends the issue's contract, inside its declared `Touches`
 footprint, with contract and invariant tests rather than tests of trivia. Run
 focused checks while editing; before handoff run the documented lint,
