@@ -56,12 +56,6 @@ nothing here.
    AGENTS.md's `Loop pacing`. A session that ends any other way is reported as
    an unconfirmed outcome, never guessed at. Then stop.
 
-   Before paying for a session the caller may run
-   `sh scripts/probe-work.sh <role>`: exit 1 means nothing can be eligible and
-   exit 2 means the read failed — idle on either; exit 0 launches. The probe is
-   deliberately over-inclusive and claims nothing, and the session's own final
-   line stays the authority.
-
 Everything else belongs to the role: this file observes no GitHub state,
 selects nothing, claims nothing, and performs no gate, review, disposition or
 merge. It never resumes a role after its handoff. The launching session's own
