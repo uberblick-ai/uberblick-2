@@ -420,6 +420,8 @@ test("an indeterminate claim lookup keeps the lost run worktree registered", asy
 	assert.match(readFileSync(current.env.CODEX_TEST_ARGS, "utf8"), /-s workspace-write/);
 });
 
-test("the retired launcher no longer exposes the runner as an entry surface", () => {
-	assert.equal(existsSync(skill), false);
+test("the interactive launcher never exposes the runner as an entry surface", () => {
+	const text = readFileSync(skill, "utf8");
+	assert.doesNotMatch(text, /run-codex-role/);
+	assert.match(text, /`ub launch <role> \[--model claude\|codex\]`/);
 });
