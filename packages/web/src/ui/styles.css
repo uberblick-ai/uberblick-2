@@ -206,6 +206,15 @@
      the hierarchy is carried by contrast rather than by size alone. */
   --prose-text: light-dark(oklch(0.3 0 0), oklch(0.92 0 0));
 
+  /* Syntax ink is presentation-only and theme-owned. Lowlight supplies token
+     names, never a stylesheet; these five roles keep the source readable on
+     the code block's `--muted` ground in both appearances. */
+  --syntax-comment: light-dark(oklch(0.5 0.03 65), oklch(0.72 0.03 65));
+  --syntax-keyword: light-dark(oklch(0.45 0.13 305), oklch(0.8 0.13 305));
+  --syntax-name: light-dark(oklch(0.43 0.11 240), oklch(0.78 0.1 240));
+  --syntax-string: light-dark(oklch(0.42 0.1 145), oklch(0.78 0.12 145));
+  --syntax-number: light-dark(oklch(0.46 0.13 40), oklch(0.8 0.14 40));
+
   /* Text on an awareness colour. Theme-invariant on purpose — the palette
      y-prosemirror writes inline as `#rrggbb` literals (see
      src/collab/identity.ts) is picked for white text: ≥4.69:1 for every
@@ -3042,6 +3051,46 @@ h3.ub-heading {
   color: var(--muted-foreground);
   user-select: none;
   pointer-events: none;
+}
+
+.ub-code .hljs-comment,
+.ub-code .hljs-quote,
+.ub-code .hljs-meta {
+  color: var(--syntax-comment);
+}
+
+.ub-code .hljs-keyword,
+.ub-code .hljs-literal,
+.ub-code .hljs-selector-tag,
+.ub-code .hljs-section,
+.ub-code .hljs-tag,
+.ub-code .hljs-type {
+  color: var(--syntax-keyword);
+}
+
+.ub-code .hljs-attr,
+.ub-code .hljs-attribute,
+.ub-code .hljs-name,
+.ub-code .hljs-selector-class,
+.ub-code .hljs-selector-id,
+.ub-code .hljs-title,
+.ub-code .hljs-variable {
+  color: var(--syntax-name);
+}
+
+.ub-code .hljs-addition,
+.ub-code .hljs-bullet,
+.ub-code .hljs-regexp,
+.ub-code .hljs-string,
+.ub-code .hljs-symbol {
+  color: var(--syntax-string);
+}
+
+.ub-code .hljs-built_in,
+.ub-code .hljs-deletion,
+.ub-code .hljs-number,
+.ub-code .hljs-params {
+  color: var(--syntax-number);
 }
 
 /* ---- the mermaid block (#495) ----
