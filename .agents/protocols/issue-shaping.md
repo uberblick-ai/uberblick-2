@@ -88,7 +88,10 @@ When the material meaning is clear, reflect it back compactly for correction:
 - the success evidence or example;
 - the decision principles, trade-offs, and must-not-change behavior that
   constrain it;
-- the proposed scope boundary; and
+- the proposed scope boundary;
+- a suggested Priority (Urgent, High, Medium or Low) when one seems clear,
+  otherwise the plain question — always ask, since the human owns every
+  explicit Priority value and an unasked field silently sorts as Medium; and
 - any unresolved human choice, explicitly marked unresolved.
 
 Ask the user to correct the meaning. Do not treat silence, a topic change, or a
@@ -231,9 +234,11 @@ When the human chooses this exit, create the intake with
 `needs-preparation` through `.github/ISSUE_SPEC.md`'s **Request source** path,
 recording `Human` for the person's request. If its helper is unavailable, use
 `gh issue create --repo uberblick-ai/uberblick-2`, leave Request Source unset,
-and tell the human. Never infer or write Priority, `Depends-on`, `Touches`,
-`Parent`, architecture, implementation detail, acceptance criteria, Pointers,
-or `ready`. The
+and tell the human. Set Priority to the value the human stated in this
+conversation, with a comment on the issue recording that decision; leave the
+field unset when they gave none, and never infer it. Never infer or write
+`Depends-on`, `Touches`, `Parent`, architecture, implementation detail,
+acceptance criteria, Pointers, or `ready`. The
 issue-preparer derives the technical contract from the current repository and
 corpus under `.agents/protocols/issue-preparation.md`; a human choice that
 remains unresolved may later take the existing `needs-decision` path.
