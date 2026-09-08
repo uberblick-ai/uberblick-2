@@ -2038,9 +2038,12 @@ export function registerTools(
         "for a decision, add a matching `kind`, `status` or `tag` predicate. " +
         "There is no tool that erases content, by design.\n\n" +
         "It also leaves the sidebar, because it is unpinned: a document that has left every other listing is not an " +
-        "entry point. The unpin is unconditional — it also hides a pin made elsewhere that this replica has not " +
-        "received yet, so such a pin cannot merge in behind the archive — and `unpinned` says that, not that a pin " +
-        "was found: it is true whenever the archive completed. restore_doc does NOT put it back — pin_doc " +
+        "entry point. The unpin is unconditional — it does not first look for a pin, and it hides every pin this " +
+        "replica can see — so `unpinned` says what the call asserted, not that a pin was found: it is true whenever " +
+        "the archive completed. It is not a cross-replica lock over pinning, any more than the tombstone is over " +
+        "writing: a pin made elsewhere that this replica has not received can still merge in behind the archive and " +
+        "leave the document archived AND pinned. get_sidebar is where you see that — such a pin lists with " +
+        "`status: \"archived\"` — and unpin_doc is what removes it. restore_doc does NOT put a pin back — pin_doc " +
         "is how a restored document becomes an entry point again, and it still wins over this unpin.\n\n" +
         "So this call always writes two independently persisted rooms — the directory and the sidebar — " +
         "and reports them one by one. `rooms` lists every room it touched with its own `applied` and " +
@@ -2094,9 +2097,13 @@ export function registerTools(
       // made elsewhere can still be in flight, and skipping the write would let
       // it merge in behind the tombstone and leave the document archived *and*
       // pinned for good. Raising the unpin count past everything this replica
-      // can see hides that pin when it lands, while a deliberate `pin_doc`
-      // after the archive still wins. The sidebar is therefore always a room
-      // this call wrote, and `rooms` always names it.
+      // can see hides such a pin when it lands, as long as it was stamped at or
+      // below that ceiling; one stamped above it — made under an unpin this
+      // replica has not received either — still surfaces, which is #969's
+      // window and what the description tells the caller to expect. A
+      // deliberate `pin_doc` after the archive wins in every case. The sidebar
+      // is therefore always a room this call wrote, and `rooms` always names
+      // it.
       stage("sidebar", sidebarReplica, () => {
         unpinDocIncludingUnseen(sidebarReplica.doc, uuid);
       });
@@ -2104,10 +2111,12 @@ export function registerTools(
         uuid,
         title,
         archived: true,
-        // What the call asserts, not what it found: the document is not an
-        // entry point after this, including against a pin this replica had not
-        // received. There is no "there was no pin to remove" case left to
-        // report, so this is true whenever the archive completed.
+        // What the call asserts, not what it found: this replica hid every pin
+        // it could see, whether or not it was holding one, so there is no
+        // "there was no pin to remove" case left to report and this is true
+        // whenever the archive completed. It is not a claim about a pin that
+        // has not arrived here: that one can still surface afterwards, which
+        // is why the description sends the caller to get_sidebar for it.
         unpinned: true,
         // Withdrawing a document needs no copy of it, so hydration cannot make
         // this false — but a store that refused the write can, and then the

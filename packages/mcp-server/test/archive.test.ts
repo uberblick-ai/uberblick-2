@@ -337,6 +337,18 @@ describe("archive_doc", () => {
       { purpose: "directory", room: `${WORKSPACE}/_directory`, applied: true, synced: false },
       { purpose: "sidebar", room: `${WORKSPACE}/_sidebar`, applied: true, synced: false },
     ]);
+
+    // A constant `true` is only honest with the sentence a caller reads beside
+    // it: this replica hid what it could see, and a pin it never received can
+    // still surface, so the tool has to say so and name where to look. Without
+    // this the field reads as a guarantee the write cannot make (#969).
+    const { tools } = await rig.client.listTools();
+    expect(
+      tools.find((tool) => tool.name === "archive_doc")?.description,
+    ).toContain(
+      "a pin made elsewhere that this replica has not received can still merge in behind the archive and " +
+        "leave the document archived AND pinned. get_sidebar is where you see that",
+    );
   });
 
   // The window this closes is ordinary: `settle()` returns when the sync budget
