@@ -51,7 +51,12 @@ import {
   mintToken,
 } from "@uberblick/hub";
 import { wrapToken } from "@uberblick/hub/protocol";
-import { appendBlock, directoryRoom, getBlocksFragment } from "@uberblick/schema";
+import {
+  appendBlock,
+  directoryRoom,
+  getBlocksFragment,
+  MAX_TAG_NAME_LENGTH,
+} from "@uberblick/schema";
 import * as Y from "yjs";
 import { placeCaret, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
@@ -150,6 +155,56 @@ function paintedIn(locator: Locator, property: string): Promise<string> {
     (element, prop) => getComputedStyle(element).getPropertyValue(prop),
     property,
   );
+}
+
+/**
+ * What the identity row's tag strip does with the width it was given (#958).
+ *
+ * The strip's own box says nothing about this: a pill wider than its strip
+ * escapes it without moving it, so the hit test is the *painted* rectangle of
+ * every pill against the machine facts and the actions beside them. Clipping
+ * and the row's height come back with it, because containment bought with a
+ * sideways scroller or a silent clip is the thing criterion 3 rejects. One
+ * helper serves both headers: `.ub-tags` is the writable trigger and the
+ * read-only span alike, and only one of them is on screen at a time.
+ */
+function tagStripGeometry(page: Page): Promise<{
+  overlaps: string[];
+  clipped: number;
+  strip: number;
+  row: number;
+}> {
+  return page.evaluate(() => {
+    const strip = document.querySelector(".ub-tags");
+    const row = document.querySelector(".ub-doc-meta");
+    if (strip === null || row === null) {
+      throw new Error("e2e: no tag strip in the identity line");
+    }
+    const neighbours = [".ub-doc-ids", ".ub-document-actions"].flatMap((selector) => {
+      const element = document.querySelector(selector);
+      return element === null ? [] : [[selector, element.getBoundingClientRect()] as const];
+    });
+    const overlaps: string[] = [];
+    for (const pill of document.querySelectorAll(".ub-tag")) {
+      const box = pill.getBoundingClientRect();
+      for (const [selector, beside] of neighbours) {
+        if (
+          box.left < beside.right &&
+          box.right > beside.left &&
+          box.top < beside.bottom &&
+          box.bottom > beside.top
+        ) {
+          overlaps.push(`${pill.textContent ?? ""} over ${selector}`);
+        }
+      }
+    }
+    return {
+      overlaps,
+      clipped: strip.scrollWidth - strip.clientWidth,
+      strip: strip.getBoundingClientRect().height,
+      row: row.getBoundingClientRect().height,
+    };
+  });
 }
 
 /** How wide something is laid out, so "full-bleed" is a number, not a look. */
@@ -2362,11 +2417,66 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   expect(oklab(fieldFill).L).toBeLessThanOrEqual(oklab(panel).L);
   expect(separation(fieldFill, panel)).toBeGreaterThan(0.02);
 
-  // Leave the seeded catalog as this file's other tests expect to find it.
+  // The wrap between pills cannot answer a single legal name. The catalog
+  // allows 30 characters and a name is one unbroken token of letters, digits
+  // and hyphens, so `aaa…` offers the line breaker nothing and is wider on its
+  // own than the width this row can spare. Criterion 3 rules out both other
+  // ways to contain it, so what has to happen is that the name wraps inside its
+  // own pill.
+  const longest = "a".repeat(MAX_TAG_NAME_LENGTH);
   await page.goto(
     new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href,
   );
-  for (const name of ["design", "hub", "release", "schema", "storage"]) {
+  await page.getByLabel("Create a tag").fill(longest);
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(page.getByRole("button", { name: `Retire ${longest}` })).toBeVisible();
+  // On its own, because one name is the case: with the five short ones beside
+  // it the oversized pill is carried onto a line of its own below the machine
+  // facts, and misses them without being any better contained.
+  await page.goto(documentUrl);
+  await trigger.click();
+  await page.getByRole("option", { name: longest, exact: true }).click();
+  for (const tag of ["auth", "billing", "mcp", "permissions", "sync"]) {
+    await page.getByRole("option", { name: tag, exact: true }).click();
+  }
+  await page.keyboard.press("Escape");
+  await expect(trigger).toContainText(longest);
+  await expect(page.locator(".ub-tag")).toHaveCount(1);
+
+  // The document list is still hidden from the wrap check above, so these are
+  // the widths the reader actually gets.
+  for (const viewport of [420, 375, 320]) {
+    await page.setViewportSize({ width: viewport, height: 620 });
+    const geometry = await tagStripGeometry(page);
+    expect(geometry.overlaps, `writable header at ${viewport}px`).toEqual([]);
+    expect(geometry.clipped, `writable header at ${viewport}px`).toBeLessThanOrEqual(1);
+    expect(geometry.row).toBeGreaterThanOrEqual(geometry.strip);
+  }
+
+  // The read-only header draws the same pills from the same rule, and it is the
+  // surface criterion 2 owns. An archived document is how a reader reaches it;
+  // the actions go with the archive, so the machine facts are the only
+  // neighbour left to paint over.
+  await page.setViewportSize({ width: 1280, height: 620 });
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("menuitem", { name: "Archive document" }).click();
+  await page.getByRole("button", { name: "Archive document" }).click();
+  await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
+  await expect(page.locator(".ub-tags-readonly")).toContainText(longest);
+  for (const viewport of [420, 375, 320]) {
+    await page.setViewportSize({ width: viewport, height: 620 });
+    const geometry = await tagStripGeometry(page);
+    expect(geometry.overlaps, `read-only header at ${viewport}px`).toEqual([]);
+    expect(geometry.clipped, `read-only header at ${viewport}px`).toBeLessThanOrEqual(1);
+    expect(geometry.row).toBeGreaterThanOrEqual(geometry.strip);
+  }
+
+  // Leave the seeded catalog as this file's other tests expect to find it.
+  await page.setViewportSize({ width: 1280, height: 620 });
+  await page.goto(
+    new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href,
+  );
+  for (const name of ["design", "hub", "release", "schema", "storage", longest]) {
     await page.getByRole("button", { name: `Retire ${name}` }).click();
     await expect(page.getByRole("button", { name: `Restore ${name}` })).toBeVisible();
   }

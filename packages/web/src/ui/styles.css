@@ -2608,13 +2608,22 @@ body {
   flex: 1 1 auto;
 }
 
+/* A pill sits at its natural width until the strip has less than that to give,
+   and then the name wraps inside it. A catalog name is up to 30 characters of
+   letters, digits and hyphens, so a single-token one offers the line breaker no
+   opportunity at all: `anywhere` is what gives it one, and — because it is the
+   value that also lowers min-content — what lets this flex item shrink to the
+   room the row has. Without it one legal name is wider than the whole strip and
+   paints over the machine facts beside it, which is neither of the two things
+   the row is allowed to do instead: nothing scrolls sideways and nothing is
+   clipped, the pill just grows downwards and takes the row with it. */
 .ub-tag {
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 0.05rem 0.5rem;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .ub-tag-placeholder {
