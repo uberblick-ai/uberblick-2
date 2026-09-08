@@ -33,6 +33,22 @@
         }
       }
     },
+    "implementation-reviewer": {
+      "contract": ".agents/roles/implementation-reviewer.md",
+      "defaultRuntime": "claude",
+      "probe": ["sh", "scripts/probe-work.sh", "implementation-reviewer"],
+      "runtimes": {
+        "claude": {
+          "adapter": ".claude/agents/implementation-reviewer.md",
+          "sandbox": "runtime",
+          "permissionMode": "auto"
+        },
+        "codex": {
+          "adapter": ".codex/agents/implementation-reviewer.toml",
+          "sandbox": "workspace-write"
+        }
+      }
+    },
     "integrator": {
       "contract": ".agents/roles/integrator.md",
       "defaultRuntime": "claude",

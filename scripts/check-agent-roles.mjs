@@ -35,7 +35,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const SLUGS = ["issue-preparer", "issue-adversary", "implementer",
 	"implementation-reviewer", "integrator"];
-const ENTRY_SLUGS = ["issue-preparer", "implementer", "integrator"];
+const ENTRY_SLUGS = ["issue-preparer", "implementer", "implementation-reviewer",
+	"integrator"];
 
 const ROLES = ".agents/roles";
 const LAUNCH = ".agents/launch.json";

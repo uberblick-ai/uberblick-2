@@ -338,7 +338,7 @@ describe("help before the work", () => {
   const inert: string[][] = [
     ["init", "--yes", "--help"],
     ["init", "--mcp", "--no-mcp", "--help"],
-    ["launch", "implementation-reviewer", "--help"],
+    ["launch", "issue-adversary", "--help"],
     ["open", "--port", "0", "-h"],
     ["status", "--help"],
     ["doctor", "-h"],

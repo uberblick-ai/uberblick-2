@@ -124,7 +124,8 @@ choices and triggers. Duplicated or stale truth is itself a possible finding.
    than automatically as evidence that one more round is valuable. For a
    dual-challenge PR, verify the required pair targeted one frozen candidate
    head before an ordinary correction wave. Count coordination records too:
-   each non-implementation child should occupy one mutable delegation comment,
+   each delegated adversary should occupy one mutable delegation comment, each
+   answered review request one reviewer claim and one verdict,
    each PR one mutable finding ledger, and repeated claim/completion wrappers or
    copied gate tables are churn unless a recovery boundary required them.
 5. Challenge every suspected finding. Record the exact rule, durable evidence,

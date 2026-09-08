@@ -15,14 +15,15 @@ terminal loop and every Codex transport; the loop around this file belongs to
 the caller.
 
 **Roles.** The continuous entry roles named in `.agents/launch.json`:
-`issue-preparer`, `implementer`, `integrator`. `issue-adversary` and
-`implementation-reviewer` are internal — their parent starts them under
-`.agents/protocols/issue-preparation.md` or `.agents/protocols/review-protocol.md`, never here. Any other name: say so and return.
+`issue-preparer`, `implementer`, `implementation-reviewer`, `integrator`.
+`issue-adversary` is internal — its preparer parent starts it under
+`.agents/protocols/issue-preparation.md`, never here. Any other name: say so and return.
 
 **Runtime.** Claude only, because this surface exists to put a role in an
-interactive session's own transcript. For a Codex run, or for an unattended
-loop on either runtime, use `ub launch <role> [--model claude|codex]` and start
-nothing here.
+interactive session's own transcript. A reviewer started here is therefore a
+Claude reviewer, and takes only the review requests that name that runtime.
+For a Codex run, or for an unattended loop on either runtime, use
+`ub launch <role> [--model claude|codex]` and start nothing here.
 
 ## What this does
 
@@ -44,9 +45,10 @@ nothing here.
    Name the run's private scratch directory, `<this session's
    scratchpad>/<run id>`, and the MCP route: the registered uberblick server,
    or — where none is registered — a throwaway `ub mcp serve` stdio client run
-   outside the committed worktree. For an integrator launch, state that the
-   child shares this session's authorship identity and must apply the role's
-   trailer/claim independence check before claiming. The adapter owns effort,
+   outside the committed worktree. For an integrator or
+   implementation-reviewer launch, state that the child shares this session's
+   authorship identity and must apply the role's trailer/claim independence
+   check before claiming. The adapter owns effort,
    isolation and permissions; add no other flag.
 4. **Report and return.** Name the role and the run id, and repeat the
    session's final line verbatim — `No eligible <role slug> work: <reason>.`,

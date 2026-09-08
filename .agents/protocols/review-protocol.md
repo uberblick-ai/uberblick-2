@@ -1,58 +1,117 @@
-# Review protocol — external rounds, and what happens once a review returns
+# Review protocol — independent rounds, and what happens once a review returns
 
-Read this whenever a PR has an external round to request or a finding to
-handle. When delivery-policy.md requires the pair, the implementer owns the first
-challenge before handoff, on the other runtime from the diff's author, and the
-integrator owns the second, a fresh session of the author's runtime; when it
-requires one, the implementer owns that round. These are real adversarial
-reads, not gate checks. The integrator owns authoritative dispositions and any
-risk-scoped final-head round. `integration.md` beside this file owns the
-gates' order and mechanics.
+Read this whenever a PR owes a review, carries a request to answer, or has a
+finding to handle. delivery-policy.md's "Reviews owed" table is the authority on
+how many challenges a candidate owes and who requests each; this file owns the
+durable request, the wait, the reviewer's records and the correction cycle.
+`integration.md` beside it owns the gates' order and mechanics. These are real
+adversarial reads, not gate checks. The integrator owns authoritative
+dispositions and any risk-scoped final-head round.
 
-How many challenges a diff owes, who owns each, and the candidate-head freeze
-are delivery-policy.md's gate. "Requesting the round" covers dispatch; "Findings and
-corrections" covers reviewer records and fix-ups; "Verification and completion"
-is the integrator's.
+No role starts a reviewer as its own child. The role that owes a round posts a
+request on the PR; a separately launched `implementation-reviewer` session
+selects that request from GitHub, claims it under `.agents/roles/README.md`'s
+claim and race rules, and answers it there. Both sides work from the durable
+record, so neither waits on the other's runtime to deliver a result.
 
-## Requesting the round
+## The review request
 
-delivery-policy.md's gate list is the authority on *when* a pre-handoff review is
-required. The implementer opens a draft PR and posts the README's exact-PR
-delegation at its current head before starting a fresh
-`implementation-reviewer`. Add `Round: N` to that mutable record; the reviewer
-edits its status and appends its verdict there rather than posting claim and
-completion comments. A `Round: 2` of delivery-policy.md's required pair also carries one
-`Boundary:` line naming which of delivery-policy.md's listed boundaries fires, or the
-concrete unresolved risk; a package path is neither, and without that line the
-round is not dispatched. Use `.agents/adapters/runtime-dispatch.md` for the chosen runtime's invocation.
-Read the review from its completed durable record, not the private transcript.
+One comment on the PR, posted by the role that owes the round — the implementer
+before its handoff, the integrator for the second owed challenge and for a
+risk-scoped round of its own:
 
-The implementer stays in the assignment, renewing its claim, until the
-reviewer completes its durable record. A dispatch failure edits that record to
-`Status: failed — <reason>` and is never presented as a review or repeated in a
-new failure comment; the integrator later supplies the missing challenge as
-well as its own. The failure is recorded at once, not at the end of the verdict
-window: a `<scratch-log>.status` that is nonzero, or a log that ends in a
-startup or overload error before any verdict — a transport that exited before
-starting, an HTTP 529 — marks the delegation failed on the dispatching role's
-next check, with the status and the log's last line as the reason (owner
-decision, 2026-09-04: seven dispatches failed in two days — PRs #750 twice,
-#761 three times, #763, #771 — and each one silently moved the owed round to
-the integrator, one of them at the cost of an owner question and a whole extra
-integrator session). A further round is never a resumed session — it is a fresh
-reviewer at the new head, within the re-review scoping below. Every brief says:
-be critical, try to falsify the implementation with focused failure-path or
-mutation probes, and hunt specifically for overtesting and overengineering per
-this repo's principles (KISS/YAGNI, least code wins, tests defend contracts and
-invariants rather than implementation trivia).
+```text
+Review-request: implementation-reviewer
+Round: <n>
+Head: <candidate sha>
+Runtime: <claude|codex>
+Requester: <implementer|integrator> <claude|codex> <run id>
+Scope: full | corrections <finding ids>
+```
+
+`Runtime:` is the runtime the round must run on — the other runtime from the
+diff's author for the first challenge, the author's runtime for the second — and
+a reviewer session on any other runtime leaves the request alone rather than
+consuming it. A `Round: 2` of delivery-policy.md's required pair also carries one
+`Boundary:` line naming which listed boundary fires, or the concrete unresolved
+risk; a package path is neither, and without that line the round is not
+requested. `Scope: corrections` names the finding ids the requester corrected or
+answered and asks for nothing else; it keeps the `Runtime:` and `Round:` of the
+verdict it answers, so the reviewer that raised those findings can take it, and
+it owes no `Boundary:` line — repeating a round number to verify its own
+findings at the corrected head is not a second challenge.
+
+A request is current while it is the newest `Review-request:` on the PR, carries
+no `Superseded:` line, and its `Head:` is still the PR's head. Anything else is
+spent. A moved head therefore supersedes its own request: a requester that
+changes the head posts a fresh request rather than retargeting the old one, and
+a requester that no longer wants the round edits its own request to append
+`Superseded: <reason>`. A reviewer never consumes a spent request, and a verdict
+at a head the PR has moved past does not satisfy the round that head owed.
+
+## Waiting for a verdict
+
+The requester stays in its own assignment, renewing its claim on README's
+cadence, and waits on inexpensive GitHub reads: re-read the PR thread every few
+minutes for a reviewer record naming this request and head. Nothing is
+delegated, so no result has to survive another runtime. A helper may do that
+polling and renewal; it reads GitHub and renews, and it never interprets a
+finding or chooses a disposition.
+
+The wait ends when
+
+- the verdict for this request appears — read it from the PR, never from a
+  private transcript;
+- the request is spent, or ownership is lost: a valid takeover of the
+  requester's own claim, or a head that moved for a reason this role did not
+  make. Stop, leaving the durable record as it stands;
+- a permission or authentication failure blocks the reads. Stop with the role's
+  `Blocked` line naming the refused command;
+- it goes unanswered: no reviewer claim on the request about 90 minutes after
+  it was posted, or a reviewer claim that went stale under README without a
+  verdict. Record `Waiting: unanswered — <what was observed>` on the request at
+  once rather than at the end of the run, and hand off. The round is still owed,
+  and the integrator's gate is what sees that.
+
+## Claiming and answering a request
+
+A reviewer claims the request on the PR under README's claim grammar and race
+rule, naming the head it will review and the request it answers:
+
+```text
+Claim: implementation-reviewer <run id>
+Head: <candidate sha>
+Request: <request comment URL>
+```
+
+Two sessions never own one request: the earliest valid claim wins and a loser
+withdraws in one line. A reviewer that stops without a verdict is recovered
+through README's staleness and takeover rules, not through a second
+coordination authority. The reviewer reviews that head only and records its
+result in one comment:
+
+```text
+Done: implementation-reviewer <run id>
+Head: <candidate sha>
+Request: <request comment URL>
+Verdict: <no findings | P1 <n>, P2 <n>, P3 <n>>
+```
+
+followed by the findings, or by the resolutions a `corrections` scope asked for.
+A head that moves during the review is drift: report it and stop rather than
+retargeting; a review at the new head is a new request and a new pickup.
+
+Every review is critical: try to falsify the implementation with focused
+failure-path or mutation probes, and hunt specifically for overtesting and
+overengineering per this repo's principles (KISS/YAGNI, least code wins, tests
+defend contracts and invariants rather than implementation trivia).
 
 ## Findings and corrections
 
-Reviewers record findings in their delegation verdict using stable IDs
-(`R<round>-F<number>`). Each finding names the affected code, supported-usage
-consequence, proposed severity, and reproducible evidence. Separate observations
-from assumptions. Record successful probes only when they resolve a finding or
-establish a material limitation.
+Reviewers record findings using stable IDs (`R<round>-F<number>`). Each finding
+names the affected code, supported-usage consequence, proposed severity, and
+reproducible evidence. Separate observations from assumptions. Record successful
+probes only when they resolve a finding or establish a material limitation.
 
 The integrator maintains one finding ledger: ID, disposition, evidence link, and
 verification result. Evidence stays in the reviewer's verdict; later records
@@ -66,18 +125,31 @@ Severity follows impact:
 - **P2:** another concrete defect in supported usage.
 - **P3:** minor or theoretical impact.
 
+The implementer may correct a finding on its branch or answer it with evidence,
+but it cannot settle one alone. Every finding it corrected or answered goes back
+in a `Scope: corrections` request at the corrected head, and the reviewer that
+takes it records each named id as `resolved`, `explanation accepted`, or
+`unresolved — <why>`. An unresolved material disagreement stands for the
+integrator; no round is opened to argue severity. A finding the implementer
+neither corrects nor answers needs no corrections round: it stands as written,
+for the integrator to disposition.
+
+When two challenges are owed, both are collected on the same head before any
+ordinary correction, so the implementer corrects nothing at that stage: it hands
+off the first verdict at the frozen head and the integrator requests the second
+there. Only a P1 breaks the freeze, and its corrected head re-establishes the
+evidence delivery-policy.md requires. Then one batched fix-up brief carries the
+finding IDs, required outcomes and verification. Include P3 corrections only
+when local and inexpensive; they must not drive a redesign or another round.
+
 The integrator chooses the disposition. Fix P1s and contained supported-usage
 P2s. A branch-caused failure of a required check must be fixed. A non-blocking P2
 may be deferred to a linked issue with its accepted consequence recorded; never
 defer data loss, security exposure, or violated invariants. Accept P3s without
 creating issues by default. Reject unsupported findings with a brief
-evidence-based reason.
-
-When two challenges are required, collect both on the same head before
-corrections, except for P1. Then issue one batched fix-up brief containing
-finding IDs, required outcomes, and verification. Include P3 corrections only
-when local and inexpensive; they must not drive a redesign or another external
-round.
+evidence-based reason. A finding the integrator raises after the initial review
+becomes a focused correction request on the PR, which a fresh implementer
+session takes as its own pickup.
 
 ## Verification and completion
 
@@ -85,11 +157,13 @@ The integrator verifies corrections through focused diff inspection and
 relevant tests or failure-path probes. Tests defend the affected contract, not
 the implementation mechanism.
 
-Repeat an external challenge only when a correction introduces a concrete
-unresolved risk or invalidates that challenge's earlier reasoning. Record the
-risk, affected verdict, and review scope before dispatch. A new head, severity
-disagreement, or P3-only verdict is insufficient. Replacement reviews examine
-the delta first and use the runtime of the verdict they replace.
+Repeat a *challenge* only when a correction introduces a concrete unresolved
+risk or invalidates that challenge's earlier reasoning. Record the risk,
+affected verdict, and review scope, then post a fresh full-scope request at the
+new head. A new head, severity disagreement, or P3-only verdict is insufficient.
+A `corrections` round is not a repeated challenge: it verifies the named
+findings at the corrected head and nothing else. Replacement reviews examine the
+delta first and use the runtime of the verdict they replace.
 
 Merge requires delivery-policy.md's gates, no open P1, and an explicit disposition for
 every finding. Record carried-forward review evidence with a brief scope and

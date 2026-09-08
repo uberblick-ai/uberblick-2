@@ -198,7 +198,6 @@ if (existsSync(deadlineFile)) await waitForGroupExit();
 const duration = Math.max(0, Math.round((Date.now() - startedAt.getTime()) / 1000));
 
 function removeWorktree() {
-	if (role === "implementation-reviewer") return true;
 	const removed = spawnSync("git", ["-C", root, "worktree", "remove", "--force", worktree], {
 		encoding: "utf8",
 	});
@@ -250,9 +249,7 @@ function claimState() {
 	// `.github/ISSUE_SPEC.md`; keep this lookup aligned if their grammar moves.
 	const claimLine = role === "implementer"
 		? `Implementer: codex ${runId}`
-		: role === "implementation-reviewer"
-			? `Delegated: implementation-reviewer ${runId}`
-			: `Claim: ${role} ${runId}`;
+		: `Claim: ${role} ${runId}`;
 	return commentsResult.stdout.split(/\r?\n/).includes(claimLine) ? "found" : "not found";
 }
 
@@ -266,9 +263,7 @@ if (existsSync(deadlineFile)) {
 		),
 	);
 	process.stdout.write(
-		role === "implementation-reviewer"
-			? `Parent worktree remains at ${worktree}; this reviewer did not own it.\n`
-			: `Worktree preserved and registered at ${worktree} because the run reached its deadline.\n`,
+		`Worktree preserved and registered at ${worktree} because the run reached its deadline.\n`,
 	);
 	process.exit(1);
 }
@@ -281,9 +276,7 @@ await new Promise((resolve) =>
 	),
 );
 process.stdout.write(
-	role === "implementation-reviewer"
-		? `Parent worktree remains at ${worktree}; this reviewer did not own it.\n`
-		: `Worktree preserved and registered at ${worktree} because the run was lost.\n`,
+	`Worktree preserved and registered at ${worktree} because the run was lost.\n`,
 );
 
 if (completion.error) {
