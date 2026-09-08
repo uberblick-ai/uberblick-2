@@ -498,8 +498,12 @@ export function unpinDoc(sidebarDoc: Y.Doc, uuid: string): void {
  * received yet is neither removed nor counted: it merges in afterwards and the
  * document reads as pinned again. That is right for an unpin, which is a
  * request about the pin somebody is looking at. It is wrong for an archive,
- * which claims the document is no longer an entry point at all — and the claim
- * has to hold against a pin that was made before it and simply has not arrived.
+ * which claims the document is no longer an entry point at all, so it raises the
+ * counter whether or not a pin is visible. What that achieves is bounded: it
+ * hides every pin stamped at or below the level this replica can see, including
+ * one that has not arrived here yet. A pin stamped above that level — made
+ * under an unpin this replica has not received either — still surfaces
+ * afterwards (#969).
  *
  * Raising the counter with nothing visible is safe for the same reason the
  * ordinary unpin is: it only ever raises *this* client's own key, one past
