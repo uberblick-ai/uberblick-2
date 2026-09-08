@@ -8,6 +8,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1097,6 +1098,39 @@ describe("launch data", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("refuses launch data, contracts and adapters whose symlinks leave the project", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-symlink-"));
+    try {
+      const selected = join(root, "selected");
+      const sibling = join(root, "sibling");
+      mkdirSync(selected);
+      mkdirSync(sibling);
+      writeProject(selected, { implementer: role() });
+      writeProject(sibling, { implementer: role() });
+
+      const contract = join(selected, ".agents/roles/implementer.md");
+      rmSync(contract);
+      symlinkSync(join(sibling, ".agents/roles/implementer.md"), contract);
+      expect(() => readLaunchData(selected)).toThrow(/role contract that is not a readable file/);
+
+      rmSync(contract);
+      writeProject(selected, { implementer: role() });
+      const adapter = join(selected, ".codex/agents/implementer.toml");
+      rmSync(adapter);
+      symlinkSync(join(sibling, ".codex/agents/implementer.toml"), adapter);
+      expect(() => readLaunchData(selected)).toThrow(/codex adapter that is not a readable file/);
+
+      rmSync(adapter);
+      writeProject(selected, { implementer: role() });
+      const launch = join(selected, ".agents/launch.json");
+      rmSync(launch);
+      symlinkSync(join(sibling, ".agents/launch.json"), launch);
+      expect(() => readLaunchData(selected)).toThrow(/not a readable file inside the selected project/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("the selected project", () => {
@@ -1117,6 +1151,17 @@ describe("the selected project", () => {
       expect(resolveProjectRoot(".", project, process.env).project?.root).toBe(real);
       expect(resolveProjectRoot(project, outside, process.env).project?.root).toBe(real);
       expect(resolveProjectRoot("project/packages/deep", root, process.env).project?.root).toBe(real);
+
+      const other = join(root, "other");
+      mkdirSync(other);
+      expect(spawnSync("git", ["init", "-b", "main"], { cwd: other }).status).toBe(0);
+      expect(
+        resolveProjectRoot(project, outside, {
+          ...process.env,
+          GIT_DIR: join(other, ".git"),
+          GIT_WORK_TREE: other,
+        }).project?.root,
+      ).toBe(real);
 
       expect(resolveProjectRoot(undefined, outside, process.env).error).toBe(
         `no Git project at or above ${outside}`,

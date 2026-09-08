@@ -119,19 +119,28 @@ describe("ub agents launch, against real projects", () => {
       const bin = join(root, "bin");
       mkdirSync(bin);
       write(join(bin, "claude"), FAKE_CLAUDE, 0o755);
+      // This test owns project selection, not process discovery. Supplying the
+      // no-survivor answer keeps it valid in the immutable review image, which
+      // intentionally has no host `lsof`; focused launch tests exercise the
+      // real cleanup outcomes through the SessionProcesses boundary.
+      write(join(bin, "lsof"), "#!/bin/sh\nexit 0\n", 0o755);
 
       // Outside both projects, and outside this checkout: the caller's own
       // directory decides nothing here, because `--project` does.
       const box = sandbox();
-      const evidence = (name: string) => ({
+      const evidence = (name: string, other: string) => ({
         LAUNCH_EVIDENCE: join(root, `${name}.session.json`),
         PROBE_EVIDENCE: join(root, `${name}.probe.txt`),
         PATH: `${bin}:${box.env.PATH ?? ""}`,
+        // These selectors name the other project on purpose. The selected
+        // project must win for resolution and every Git command beneath it.
+        GIT_DIR: join(other, ".git"),
+        GIT_WORK_TREE: other,
       });
 
       const [alpha, beta] = await Promise.all([
-        runUbAsync(["agents", "launch", "shipper", "--project", first], box, evidence("alpha"), 60_000),
-        runUbAsync(["agents", "launch", "shipper", "--project", second], box, evidence("beta"), 60_000),
+        runUbAsync(["agents", "launch", "shipper", "--project", first], box, evidence("alpha", second), 60_000),
+        runUbAsync(["agents", "launch", "shipper", "--project", second], box, evidence("beta", first), 60_000),
       ]);
 
       for (const [run, control, contract, other] of [

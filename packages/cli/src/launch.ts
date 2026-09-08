@@ -63,7 +63,7 @@ import {
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
-import { resolveProjectRoot } from "./project.js";
+import { resolveProjectRoot, withoutRepositorySelectors } from "./project.js";
 
 export const LAUNCH_OPTIONS = {
   model: { type: "string" },
@@ -263,7 +263,12 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]):
 
 function pathIsFile(root: string, relative: string): boolean {
   try {
-    return statSync(join(root, relative)).isFile();
+    const project = realpathSync(root);
+    const target = realpathSync(join(project, relative));
+    return (
+      (target === project || target.startsWith(`${project}${sep}`)) &&
+      statSync(target).isFile()
+    );
   } catch {
     return false;
   }
@@ -307,6 +312,9 @@ export function readLaunchData(root: string): LaunchData {
   const path = launchDataPath(root);
   let parsed: unknown;
   try {
+    if (!pathIsFile(root, ".agents/launch.json")) {
+      throw new Error("the path is not a readable file inside the selected project");
+    }
     parsed = JSON.parse(readFileSync(path, "utf8"));
   } catch (error) {
     throw new Error(
@@ -760,7 +768,11 @@ export function createLaunchServices(
 ): LaunchServices {
   let scratch: string | null = null;
   let preservedFailureWorktree: string | null = null;
-  const remote = runSync("git", ["remote", "get-url", "origin"], root, env);
+  // This boundary is also called directly in tests and integrations. Keep all
+  // project Git operations and their descendants independent of ambient
+  // repository selectors even when the caller did not use launchEnvironment.
+  const projectEnv = withoutRepositorySelectors(env);
+  const remote = runSync("git", ["remote", "get-url", "origin"], root, projectEnv);
 
   return {
     root,
@@ -773,7 +785,7 @@ export function createLaunchServices(
       if (!pathIsFile(root, adapter)) {
         return `${runtime} adapter ${adapter} is missing; restore it from origin/main before retrying`;
       }
-      const version = runSync(runtime, ["--version"], root, env);
+      const version = runSync(runtime, ["--version"], root, projectEnv);
       if ((version.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
         return `${runtime} is not installed; install it and authenticate before retrying`;
       }
@@ -782,8 +794,8 @@ export function createLaunchServices(
       }
       const auth =
         runtime === "claude"
-          ? runSync("claude", ["auth", "status", "--json"], root, env)
-          : runSync("codex", ["login", "status"], root, env);
+          ? runSync("claude", ["auth", "status", "--json"], root, projectEnv)
+          : runSync("codex", ["login", "status"], root, projectEnv);
       if (auth.status !== 0) {
         return `${runtime} is not authenticated; log in with ${runtime} before retrying`;
       }
@@ -799,7 +811,7 @@ export function createLaunchServices(
       return null;
     },
     refreshMain() {
-      const branch = runSync("git", ["branch", "--show-current"], root, env);
+      const branch = runSync("git", ["branch", "--show-current"], root, projectEnv);
       if (branch.status !== 0) {
         return {
           detail: "could not inspect the main checkout; retrying may resolve a concurrent git operation",
@@ -809,7 +821,7 @@ export function createLaunchServices(
       if (branch.stdout.trim() !== "main") {
         return { detail: "run `ub agents launch` from the project's `main` checkout", retry: false };
       }
-      const fetched = runSync("git", ["fetch", "origin", "main"], root, env);
+      const fetched = runSync("git", ["fetch", "origin", "main"], root, projectEnv);
       if (fetched.status !== 0) {
         // Git's own words, because they are what says whether waiting helps.
         return {
@@ -817,7 +829,7 @@ export function createLaunchServices(
           retry: true,
         };
       }
-      const merged = runSync("git", ["merge", "--ff-only", "origin/main"], root, env);
+      const merged = runSync("git", ["merge", "--ff-only", "origin/main"], root, projectEnv);
       if (merged.status !== 0) {
         return {
           detail: merged.stderr.trim() || "git merge --ff-only origin/main failed without an error message",
@@ -829,7 +841,7 @@ export function createLaunchServices(
     async runProbe(command) {
       const [executable, ...args] = command;
       if (executable === undefined) return { status: 2, output: "probe command is empty" };
-      const result = runSync(executable, args, root, env);
+      const result = runSync(executable, args, root, projectEnv);
       if (result.stdout) io.out(result.stdout);
       return {
         status: result.status ?? 2,
@@ -841,7 +853,12 @@ export function createLaunchServices(
       const prompt = launchAssignment(role, runId, entry.contract);
       scratch ??= mkdtempSync(join(tmpdir(), "ub-launch-"));
       const worktree = join(scratch, runId);
-      const added = runSync("git", ["worktree", "add", "--detach", worktree, "origin/main"], root, env);
+      const added = runSync(
+        "git",
+        ["worktree", "add", "--detach", worktree, "origin/main"],
+        root,
+        projectEnv,
+      );
       if (added.status !== 0) {
         return {
           started: false,
@@ -869,11 +886,12 @@ export function createLaunchServices(
               claudeSessionArgs(role, prompt, entry.runtimes.claude.permissionMode),
               worktree,
               {
-                ...env,
+                ...projectEnv,
                 // Claude print mode otherwise kills background work after 600s.
                 // Role-owned deadlines and claim renewal govern delegated work;
                 // preserve an operator's explicit ceiling if one was supplied.
-                CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS ?? "0",
+                CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:
+                  projectEnv.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS ?? "0",
               },
               capture,
               process,
@@ -883,7 +901,7 @@ export function createLaunchServices(
               "codex",
               codexSessionArgs(worktree, lastPath, prompt, entry.runtimes.codex.sandbox),
               worktree,
-              env,
+              projectEnv,
               capture,
               process,
               processes,
@@ -920,7 +938,12 @@ export function createLaunchServices(
             detail: `${failure}; worktree preserved at ${worktree}`,
           };
         }
-        const removed = runSync("git", ["worktree", "remove", "--force", worktree], root, env);
+        const removed = runSync(
+          "git",
+          ["worktree", "remove", "--force", worktree],
+          root,
+          projectEnv,
+        );
         if (removed.status !== 0) {
           return {
             ...withLastLine,
@@ -932,7 +955,12 @@ export function createLaunchServices(
           detail: `${failure}; first failed worktree preserved at ${preservedFailureWorktree}`,
         };
       }
-      const removed = runSync("git", ["worktree", "remove", "--force", worktree], root, env);
+      const removed = runSync(
+        "git",
+        ["worktree", "remove", "--force", worktree],
+        root,
+        projectEnv,
+      );
       if (removed.status !== 0) {
         return {
           ...withLastLine,
@@ -951,7 +979,7 @@ export function createLaunchServices(
 
 /** The environment every probe and runtime child inherits. */
 export function launchEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return resolveConfig({ env }).env;
+  return withoutRepositorySelectors(resolveConfig({ env }).env);
 }
 
 interface Parsed {
