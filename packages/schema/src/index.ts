@@ -151,6 +151,7 @@ export {
   readSidebar,
   renameGroup,
   unpinDoc,
+  unpinDocIncludingUnseen,
 } from "./sidebar.js";
 
 export {

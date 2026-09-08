@@ -198,10 +198,14 @@ describe("resolving what the sidebar pins", () => {
       tags: [],
     });
 
+    // A pinned *archived* document, the only two ways one still exists now that
+    // archive_doc unpins (#957): pin_doc naming an archived target, which it
+    // still accepts deliberately, or a pin racing an archive on another
+    // replica. The pin comes second here because that is the supported call.
     const archived = await createDoc(rig, "Archived");
+    await rig.ok("archive_doc", { uuid: archived });
     await rig.ok("pin_doc", { uuid: archived, group: "Start here" });
     await rig.ok("pin_doc", { uuid: remote, group: "Start here" });
-    await rig.ok("archive_doc", { uuid: archived });
 
     // A uuid nothing in the directory knows, pinned the way another replica's
     // sidebar update would deliver it.

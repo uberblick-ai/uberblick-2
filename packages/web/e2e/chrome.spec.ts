@@ -158,6 +158,17 @@ function paintedIn(locator: Locator, property: string): Promise<string> {
 }
 
 /**
+ * The alpha channel of a computed colour, so "opaque" is a number rather than a
+ * look. `getComputedStyle` serialises to `rgb(...)` or `rgba(..., a)`, and the
+ * three-argument form has no alpha because it is 1.
+ */
+function alphaOf(color: string): number {
+  const parts = color.match(/[\d.]+/g);
+  if (parts === null) throw new Error(`unreadable colour: ${color}`);
+  return parts.length < 4 ? 1 : Number(parts[3]);
+}
+
+/**
  * What the identity row's tag strip does with the width it was given (#958).
  *
  * The strip's own box says nothing about this: a pill wider than its strip
@@ -1016,9 +1027,56 @@ test("document actions stay reachable, close with the route, and archive into Re
     "contenteditable",
     "false",
   );
+  // The archive took the pin with it (#957), so the sidebar stops listing the
+  // document altogether rather than carrying it with an archived marker.
   await page.getByRole("button", { name: "Show document list" }).click();
-  await expect(page.getByRole("button", { name: /Lifecycle notes.*archived/ })).toBeVisible();
+  await expect(page.locator(".ub-list")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Lifecycle notes/ }),
+  ).toHaveCount(0);
 });
+
+/**
+ * The archive confirmation is a surface, and a destructive one, so it owes the
+ * proof a dialog owes: opaque in both appearances. Only a browser can settle
+ * it — `light-dark()` resolves in the engine, and an undefined custom property
+ * (which is what `--popover` was here) computes to `transparent` rather than
+ * failing anywhere jsdom could see.
+ */
+for (const scheme of ["light", "dark"] as const) {
+  test(`the archive confirmation is opaque over the page — ${scheme}`, async ({
+    browser,
+  }) => {
+    const page = await openApp(browser, scheme);
+    await page.getByRole("button", { name: "+ new doc" }).click();
+    await page.locator(".ub-title").fill("Lifecycle notes");
+    await page.getByRole("button", { name: "Document actions" }).click();
+    await page.getByRole("menuitem", { name: "Archive document" }).click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+
+    // Fully opaque: any alpha below 1 is the page showing through, and
+    // `rgba(0, 0, 0, 0)` is what an undefined custom property computes to.
+    const background = await painted(page, ".ub-confirm", "background-color");
+    expect(alphaOf(background), background).toBe(1);
+
+    // Opaque paint is not enough on its own: the panel has to cover the page
+    // rather than sit over a hole in itself, so nothing behind it is readable.
+    // The overlay is the dimmed page; this asks what a point inside the panel
+    // actually hits.
+    expect(
+      await page.evaluate(() => {
+        const panel = document.querySelector(".ub-confirm");
+        if (panel === null) throw new Error("no confirmation panel");
+        const box = panel.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          box.left + box.width / 2,
+          box.top + box.height / 2,
+        );
+        return panel.contains(hit);
+      }),
+    ).toBe(true);
+  });
+}
 
 test("MCP connections counts a connected agent session, and stops when it goes", async ({
   browser,

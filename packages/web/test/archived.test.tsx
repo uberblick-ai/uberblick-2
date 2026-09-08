@@ -54,9 +54,16 @@ const UUID = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
 /** A second, live document — the "switched away from" half of the route test. */
 const OTHER = "1f77c0d9-6b42-4a18-9e35-2c8d0f6a1b73";
 
-const OFFLINE: RoomStatus = {
-  connected: false,
-  synced: false,
+/**
+ * What every stubbed room reports: connected, admitted and synchronized. The
+ * transport is mocked away, so this is the state the app is meant to be read
+ * against — and archiving now asks the sidebar room for it (#957), because an
+ * admitted room that has not received the sidebar yet reads as carrying no pins
+ * at all, and unpinning nothing would look exactly like success.
+ */
+const LIVE: RoomStatus = {
+  connected: true,
+  synced: true,
   hasReceivedServerState: true,
   writable: true,
   storeRefused: false,
@@ -73,21 +80,52 @@ const OFFLINE: RoomStatus = {
  */
 const rooms = new Map<string, RoomConnection>();
 
+/**
+ * What one named room reports, where `LIVE` is not what a test is about. Set
+ * before the room is first acquired, and cleared with the rooms: archiving asks
+ * the *sidebar* room for its own state, so this suite has to be able to say
+ * that one room is behind while the rest of the app is live.
+ */
+const roomStatus = new Map<string, RoomStatus>();
+
+/** Who is listening to each room, so a test can move it after the app mounted. */
+const statusListeners = new Map<string, Set<(next: RoomStatus) => void>>();
+
 function room(name: string): RoomConnection {
   const existing = rooms.get(name);
   if (existing !== undefined) return existing;
+  if (!roomStatus.has(name)) roomStatus.set(name, LIVE);
+  const listeners = new Set<(next: RoomStatus) => void>();
+  statusListeners.set(name, listeners);
   const connection = {
     room: name,
     ydoc: new Y.Doc(),
     provider: { awareness: null },
-    status: OFFLINE,
+    get status(): RoomStatus {
+      return roomStatus.get(name) ?? LIVE;
+    },
     onStatusChange: (listener: (next: RoomStatus) => void) => {
-      listener(OFFLINE);
-      return () => {};
+      listener(roomStatus.get(name) ?? LIVE);
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
   } as unknown as RoomConnection;
   rooms.set(name, connection);
   return connection;
+}
+
+/**
+ * One room's status changes under the mounted app — a reconnect, a lost write
+ * grant — the way the provider announces it.
+ */
+function emitStatus(name: string, change: Partial<RoomStatus>): void {
+  const next = { ...(roomStatus.get(name) ?? LIVE), ...change };
+  roomStatus.set(name, next);
+  act(() => {
+    for (const listener of statusListeners.get(name) ?? []) listener(next);
+  });
 }
 
 vi.mock("../src/collab/rooms.js", () => ({
@@ -135,6 +173,8 @@ afterEach(() => {
     open.host.remove();
   }
   rooms.clear();
+  roomStatus.clear();
+  statusListeners.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -216,7 +256,7 @@ function action(label: string): HTMLElement | undefined {
 }
 
 describe("an archived document is readable, says so, and offers one way back", () => {
-  it("curates and archives from the identity-row menu without losing the pin", async () => {
+  it("curates and archives from the identity-row menu, taking the pin with it", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
     const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
@@ -272,11 +312,17 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
     expect(host.querySelector(".ub-actions-trigger")).toBeNull();
     expect(document.activeElement).toBe(restoreButton(host));
-    expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
+    // The archive took the pin with it (#957): a document that has left every
+    // other listing is not an entry point, so it leaves the sidebar too.
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
 
     // The confirmed archive owns exactly one focus transfer. A later restore
     // and remote re-archive must not replay that stale local intent.
     act(() => restoreDirectoryEntry(directory, UUID));
+    // The same write the Restore action makes (`onRestore`), and it lifts the
+    // tombstone only: coming back is not being an entry point again, and
+    // re-pinning stays the reader's deliberate act.
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
     const title = host.querySelector<HTMLInputElement>(".ub-title");
     title?.focus();
     act(() => tombstoneDirectoryEntry(directory, UUID));
@@ -291,6 +337,96 @@ describe("an archived document is readable, says so, and offers one way back", (
     act(() => tombstoneDirectoryEntry(directory, UUID));
     expect(document.activeElement).toBe(restoreButton(host));
   });
+
+  // The condition is the sidebar room's own state, not an observed pin: an
+  // admitted room that has not received the sidebar yet reads as carrying no
+  // pins at all, so archiving through it would report success having silently
+  // unpinned nothing. Both readings refuse in place, the way a read-only
+  // directory already does.
+  for (const [why, sidebarState] of [
+    ["is read-only", { writable: false }],
+    ["has not arrived yet", { synced: false }],
+  ] as const) {
+    it(`refuses to archive while the sidebar room ${why}`, async () => {
+      roomStatus.set(sidebarRoom(WORKSPACE), { ...LIVE, ...sidebarState });
+      const directory = room(directoryRoom(WORKSPACE)).ydoc;
+      const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
+      const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+      initDoc(ydoc, { uuid: UUID, title: "Retired protocol" });
+      upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired protocol" });
+      pinDoc(sidebar, createGroup(sidebar, "Reading"), UUID);
+
+      const host = await openApp(`/${WORKSPACE}/${UUID}`);
+      openActions(host);
+      expect(action("Archive document")).toBeUndefined();
+      const unavailable = [
+        ...document.querySelectorAll<HTMLElement>(
+          "[data-slot=dropdown-menu-item]",
+        ),
+      ].find((item) => item.textContent?.startsWith("Archive unavailable"));
+      expect(unavailable?.getAttribute("aria-disabled")).toBe("true");
+
+      // Saying so in place means saying so instead of doing it: no
+      // confirmation, no tombstone, and the pin the archive would have taken is
+      // still there.
+      act(() => {
+        unavailable?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+        );
+      });
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
+      expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
+    });
+  }
+
+  // The same refusal has to hold when readiness is lost *inside* the open
+  // confirmation, which is the ordinary disconnect boundary: the red button
+  // would otherwise close the dialog exactly as a successful archive does and
+  // write nothing. Both rooms, because either one going unwritable removes the
+  // action, and the reader cannot tell which.
+  for (const [which, roomName] of [
+    ["directory", directoryRoom(WORKSPACE)],
+    ["sidebar", sidebarRoom(WORKSPACE)],
+  ] as const) {
+    it(`says so in the open confirmation when the ${which} room stops being ready`, async () => {
+      const directory = room(directoryRoom(WORKSPACE)).ydoc;
+      const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
+      const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+      initDoc(ydoc, { uuid: UUID, title: "Retired protocol" });
+      upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired protocol" });
+      pinDoc(sidebar, createGroup(sidebar, "Reading"), UUID);
+
+      const host = await openApp(`/${WORKSPACE}/${UUID}`);
+      openActions(host);
+      act(() => action("Archive document")?.click());
+      expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+
+      emitStatus(roomName, { writable: false });
+      act(() => {
+        document
+          .querySelector<HTMLButtonElement>('[role="alertdialog"] .ub-tool-danger')
+          ?.click();
+      });
+
+      // In place: the confirmation is still there, and it now explains itself
+      // instead of pretending the archive happened.
+      const dialog = document.querySelector('[role="alertdialog"]');
+      expect(dialog?.textContent).toContain("Archive unavailable");
+      expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
+      expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
+
+      // And it goes back to being the archive it was once the room returns.
+      emitStatus(roomName, { writable: true });
+      act(() => {
+        document
+          .querySelector<HTMLButtonElement>('[role="alertdialog"] .ub-tool-danger')
+          ?.click();
+      });
+      expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
+      expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
+    });
+  }
 
   it("follows the directory tombstone in both directions, under an open pane", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;

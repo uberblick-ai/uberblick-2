@@ -513,10 +513,12 @@ it("leaves an archived starter document archived, and re-pins nothing", async ()
   // A tombstone is sticky, so a document the user threw away must not read as
   // "missing" — re-seeding it would be refused every time and complained about
   // every time. Uses the workspace the first cases seeded.
-  const before = sidebarFromLog();
   await withTools(async (call) =>
     call("archive_doc", { uuid: uuidOf(TEMPLATES[0]!.file) }),
   );
+  // Read after the archive, not before it: archiving unpins (#957), so what
+  // `ub init` must leave alone is the sidebar the throwing-away left behind.
+  const before = sidebarFromLog();
 
   const run = init();
 
@@ -524,8 +526,9 @@ it("leaves an archived starter document archived, and re-pins nothing", async ()
   // document the importer had to skip and none about an incomplete seed.
   expect(run.output).not.toContain("skipping a seed document");
   expect(run.output).not.toContain("starter documents");
-  // The sidebar is what it was: archiving is not unpinning, and `ub init` is
-  // not a repair crew for a workspace that already has its layout.
+  // The sidebar is what the archive left: `ub init` is not a repair crew for a
+  // workspace that already has its layout, and a starter document the user
+  // threw away does not come back as an entry point.
   expect(sidebarFromLog()).toEqual(before);
   await withTools(async (call) => {
     const { docs } = await call("list_docs");

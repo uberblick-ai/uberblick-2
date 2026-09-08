@@ -27,6 +27,7 @@ import {
   settingsRoom,
   sidebarRoom,
   tombstoneDirectoryEntry,
+  unpinDoc,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
@@ -608,13 +609,27 @@ export function App(): ReactElement {
    * Archive only a live directory stub, matching the MCP lifecycle boundary.
    * The pane follows the resulting tombstone through `useArchived`; there is no
    * optimistic archived state here.
+   *
+   * Archiving unpins (#957), so this writes the sidebar room as well as the
+   * directory — the two rooms `archive_doc` writes, in the same order.
+   * Both rooms are re-read here rather than taken from the render's props, for
+   * the reason `togglePin` gives: a remote write that landed between paint and
+   * click is already in the document. `unpinDoc` is a no-op without a visible
+   * pin, so an unpinned document needs no special case — but an unsynchronized
+   * sidebar reads as carrying no pins at all, which is why `synced` is part of
+   * the gate below and not merely `writable`. That gate is this surface's
+   * answer to the pin it cannot see; `archive_doc`, which has no such gate to
+   * refuse behind, raises the unpin count unconditionally instead.
    */
   const onArchive = useCallback(() => {
     if (
       directory === null ||
       doc === null ||
+      sidebar === null ||
       selected === null ||
-      !directory.status.writable
+      !directory.status.writable ||
+      !sidebar.status.writable ||
+      !sidebar.status.synced
     ) {
       return;
     }
@@ -622,7 +637,8 @@ export function App(): ReactElement {
     if (entry === null || entry.deleted === true) return;
     restoreFocusRoom.current = doc.room;
     tombstoneDirectoryEntry(directory.ydoc, selected);
-  }, [directory, doc, selected]);
+    unpinDoc(sidebar.ydoc, selected);
+  }, [directory, doc, sidebar, selected]);
 
   /**
    * Normalise the address to the one form the app hands out: `/` becomes the
@@ -958,7 +974,9 @@ export function App(): ReactElement {
               selectedDirectoryEntry !== null &&
               selectedDirectoryEntry !== undefined &&
               selectedDirectoryEntry.deleted !== true &&
-              directoryStatus.writable
+              directoryStatus.writable &&
+              sidebarStatus.writable &&
+              sidebarStatus.synced
                 ? onArchive
                 : null
             }

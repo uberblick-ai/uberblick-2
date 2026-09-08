@@ -6,12 +6,14 @@
  * sticky, and that restoring is the one thing that lifts it, are pinned in
  * `packages/schema/test/directory.test.ts`. What this suite defends is the tool
  * contract an agent actually relies on: archiving removes a document from
- * discovery and from search without touching a byte of it, and restoring is a
- * true reversal.
+ * discovery, from search and from the sidebar without touching a byte of it,
+ * and restoring is a true reversal of the tombstone alone.
  */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
+import * as Y from "yjs";
 import {
+  pinDoc,
   setTags,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
@@ -66,6 +68,29 @@ class CountingStore extends MirrorStore {
       throw new Error("simulated unindex failure");
     }
     super.unindexDoc(uuid);
+  }
+}
+
+/**
+ * A real store that refuses every append to one named room.
+ *
+ * Archiving writes two rooms now, so "the log said no" has to be reachable for
+ * the second one on its own: the directory tombstone is durable and the unpin
+ * is not, which is the partial this tool has to report rather than call an
+ * archive.
+ */
+class RefusingStore extends MirrorStore {
+  refuseRoom: string | null = null;
+
+  override appendUpdate(
+    room: string,
+    payload: Uint8Array,
+    origin: Parameters<MirrorStore["appendUpdate"]>[2],
+  ): number {
+    if (room === this.refuseRoom) {
+      throw new Error("simulated append failure");
+    }
+    return super.appendUpdate(room, payload, origin);
   }
 }
 
@@ -251,6 +276,177 @@ describe("archive_doc", () => {
 
     expect(store.indexed).toEqual([renamed.uuid]);
     expect(store.indexed).not.toContain(bystander.uuid);
+  });
+
+  it("takes the sidebar pin with it, and restoring does not put it back", async () => {
+    const rig = await localRig();
+    const doc = await seedDoc(rig);
+    const bystander = await rig.ok("create_doc", {
+      title: "Still an entry point",
+      description: "A test document that is not being archived.",
+    });
+    await rig.ok("pin_doc", { uuid: doc.uuid, group: "Start here" });
+    await rig.ok("pin_doc", { uuid: bystander.uuid, group: "Start here" });
+
+    const archived = await rig.ok("archive_doc", { uuid: doc.uuid });
+    expect(archived).toMatchObject({ archived: true, unpinned: true });
+
+    // Both rooms this call wrote, reported one by one — no single boolean can
+    // describe two independently logged and independently acknowledged rooms.
+    expect(archived.rooms).toEqual([
+      { purpose: "directory", room: `${WORKSPACE}/_directory`, applied: true, synced: false },
+      { purpose: "sidebar", room: `${WORKSPACE}/_sidebar`, applied: true, synced: false },
+    ]);
+    expect(archived.applied).toBe(true);
+    expect(archived.synced).toBe(false);
+
+    // The sidebar stops carrying it, and the neighbour keeps its place.
+    const sidebar = await rig.ok("get_sidebar");
+    expect(sidebar.groups[0].docs).toEqual([
+      { uuid: bystander.uuid, title: "Still an entry point", status: "ok" },
+    ]);
+    const listed = await rig.ok("list_docs", { include_deleted: true });
+    expect(
+      listed.docs.find((entry: any) => entry.uuid === doc.uuid).pinned,
+    ).toBe(false);
+
+    // Restore lifts the tombstone and nothing else: being reachable again is
+    // not being an entry point again.
+    const restored = await rig.ok("restore_doc", { uuid: doc.uuid });
+    expect(restored.archived).toBe(false);
+    expect((await rig.ok("get_sidebar")).groups[0].docs).toEqual([
+      { uuid: bystander.uuid, title: "Still an entry point", status: "ok" },
+    ]);
+    expect(
+      (await rig.ok("list_docs")).docs.find(
+        (entry: any) => entry.uuid === doc.uuid,
+      ).pinned,
+    ).toBe(false);
+  });
+
+  it("names both rooms even when this replica can see no pin", async () => {
+    const rig = await localRig();
+    const doc = await seedDoc(rig);
+
+    // The unpin is unconditional, so the sidebar is a room this call wrote
+    // whatever this replica happened to hold — and `unpinned` reports what the
+    // call asserts rather than what its read found.
+    const archived = await rig.ok("archive_doc", { uuid: doc.uuid });
+    expect(archived.unpinned).toBe(true);
+    expect(archived.rooms).toEqual([
+      { purpose: "directory", room: `${WORKSPACE}/_directory`, applied: true, synced: false },
+      { purpose: "sidebar", room: `${WORKSPACE}/_sidebar`, applied: true, synced: false },
+    ]);
+
+    // A constant `true` is only honest with the sentence a caller reads beside
+    // it: this replica hid what it could see, and a pin it never received can
+    // still surface, so the tool has to say so and name where to look. Without
+    // this the field reads as a guarantee the write cannot make (#969).
+    const { tools } = await rig.client.listTools();
+    expect(
+      tools.find((tool) => tool.name === "archive_doc")?.description,
+    ).toContain(
+      "a pin made elsewhere that this replica has not received can still merge in behind the archive and " +
+        "leave the document archived AND pinned. get_sidebar is where you see that",
+    );
+  });
+
+  // The window this closes is ordinary: `settle()` returns when the sync budget
+  // expires as readily as when the hub answered, so the sidebar can be behind
+  // while the directory is current. An unpin that only removed what this
+  // replica could see would leave the pin to merge in behind the tombstone,
+  // and the document would read archived *and* pinned until a person noticed.
+  it("hides a pin this replica never received, and lets a later pin_doc win", async () => {
+    const rig = await localRig();
+    const doc = await seedDoc(rig);
+    const bystander = await rig.ok("create_doc", {
+      title: "Still an entry point",
+      description: "A test document that is not being archived.",
+    });
+    await rig.ok("pin_doc", { uuid: bystander.uuid, group: "Start here" });
+    const sidebar = rig.instance.replicas.sidebar().doc;
+    const group = (await rig.ok("get_sidebar")).groups[0];
+    const neighbour = {
+      uuid: bystander.uuid,
+      title: "Still an entry point",
+      status: "ok",
+    };
+
+    // A second replica pins the document. Its update is held back, so this
+    // replica archives without ever having seen the pin.
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(sidebar));
+    pinDoc(peer, group.id, doc.uuid);
+    const pinUpdate = Y.encodeStateAsUpdate(peer, Y.encodeStateVector(sidebar));
+
+    expect((await rig.ok("archive_doc", { uuid: doc.uuid })).unpinned).toBe(true);
+
+    Y.applyUpdate(sidebar, pinUpdate);
+    expect((await rig.ok("get_sidebar")).groups[0].docs).toEqual([neighbour]);
+    expect(
+      (await rig.ok("list_docs", { include_deleted: true })).docs.find(
+        (entry: any) => entry.uuid === doc.uuid,
+      ).pinned,
+    ).toBe(false);
+
+    // Hiding an unseen pin is not a lock on the document: pinning an archived
+    // target deliberately is still that caller's decision, and it still wins.
+    await rig.ok("pin_doc", { uuid: doc.uuid, group: group.id });
+    expect((await rig.ok("get_sidebar")).groups[0].docs).toEqual([
+      neighbour,
+      { uuid: doc.uuid, title: "Concepts", status: "archived" },
+    ]);
+  });
+
+  it("reports a refused unpin as a partial write, never as a completed archive", async () => {
+    const store = new RefusingStore(tempDatabasePath(), WORKSPACE);
+    const rig = await startServer(testConfig(), store);
+    rigs.push(rig);
+    const doc = await seedDoc(rig);
+    await rig.ok("pin_doc", { uuid: doc.uuid, group: "Start here" });
+
+    store.refuseRoom = `${WORKSPACE}/_sidebar`;
+    const refused = await rig.call("archive_doc", { uuid: doc.uuid });
+    expect(refused.isError).toBe(true);
+    expect(refused.payload).toMatchObject({
+      error: "persistence_failed",
+      uuid: doc.uuid,
+      partial: true,
+      rolledBack: false,
+      applied: false,
+      completed: [
+        { purpose: "directory", room: `${WORKSPACE}/_directory`, applied: true },
+      ],
+      failed: { purpose: "sidebar", room: `${WORKSPACE}/_sidebar` },
+      room: `${WORKSPACE}/_sidebar`,
+      recoveryClass: "manual",
+    });
+    // The caller is told to finish the unpin, and told not to re-archive.
+    expect(refused.payload.recovery).toContain("unpin_doc");
+    expect(refused.payload.recovery).toContain("Do NOT call archive_doc again");
+  });
+
+  it("claims no pin the document never had when the tombstone is refused", async () => {
+    const store = new RefusingStore(tempDatabasePath(), WORKSPACE);
+    const rig = await startServer(testConfig(), store);
+    rigs.push(rig);
+    const doc = await seedDoc(rig);
+
+    // Nothing was pinned, and nothing was written: a recovery line that says
+    // the document is "still pinned" would send the caller looking for a pin
+    // that never existed.
+    store.refuseRoom = `${WORKSPACE}/_directory`;
+    const refused = await rig.call("archive_doc", { uuid: doc.uuid });
+    expect(refused.isError).toBe(true);
+    expect(refused.payload).toMatchObject({
+      error: "persistence_failed",
+      uuid: doc.uuid,
+      partial: false,
+      rolledBack: false,
+      failed: { purpose: "directory", room: `${WORKSPACE}/_directory` },
+    });
+    expect(refused.payload.recovery).toContain("its pin state is unchanged");
+    expect(refused.payload.recovery).toContain("archive_doc again");
   });
 
   it("refuses a uuid the workspace has never heard of", async () => {
