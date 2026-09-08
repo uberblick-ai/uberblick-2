@@ -236,4 +236,30 @@ describe("ub agents launch, against real projects", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("resolves and validates a project the same way under the `ub launch` alias", async () => {
+    // `ub launch` stays a compatibility alias of this command (owner decision,
+    // 2026-09-08), so the two spellings are one route: the same argv takes the
+    // same project resolution and the same validation to the same exit status.
+    // This is the launch path — past argv, into the selected project — stopped
+    // where it stops for everyone, before any child process starts, so the
+    // equivalence costs no session. The usage errors are the same equivalence
+    // in `help.test.ts`.
+    const root = mkdtempSync(join(tmpdir(), "ub-agents-alias-"));
+    try {
+      git(["init", "-b", "main"], root);
+      const box = sandbox();
+
+      const canonical = await runUbAsync(["agents", "launch", "shipper", "--project", root], box);
+      const alias = await runUbAsync(["launch", "shipper", "--project", root], box);
+
+      expect(canonical.status).toBe(1);
+      expect(canonical.stderr).toContain(join(root, ".agents/launch.json"));
+      expect(alias.status).toBe(canonical.status);
+      expect(alias.stdout).toBe(canonical.stdout);
+      expect(alias.stderr).toBe(canonical.stderr);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

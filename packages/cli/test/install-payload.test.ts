@@ -178,8 +178,11 @@ describe("the versioned install payload", () => {
     // An installed payload ships no `.agents` of its own, and that is exactly
     // why it advertises `ub agents`: the roles come from the project the caller
     // selects, so the surface belongs in an installed help rather than being
-    // hidden from it.
+    // hidden from it. The compatibility alias is disclosed for the same reason
+    // — it reaches the selected project's roles too — which is why the payload
+    // no longer strips a launch row it once had no roles to back.
     expect(help.stdout).toContain("agents <command>");
+    expect(help.stdout).toContain("compatibility alias for `ub agents launch`");
     const agents = runPayload(box, ["agents", "--help"]);
     expect(agents.status, agents.stderr).toBe(0);
     expect(agents.stdout).toContain("launch <role>");

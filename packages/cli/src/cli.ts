@@ -35,6 +35,7 @@ commands:
   update                 update the copy of uberblick you are running — a
                          Homebrew installation, or a checkout on main
   agents <command>       run the agent roles of a project you select
+  launch <role>          compatibility alias for \`ub agents launch\`
   open [options]         serve the web app and a hub in the foreground, and
                          open the browser
   status [--json]        workspace, hub, credential, database and sync state
@@ -88,6 +89,12 @@ export async function runCli(
   }
   if (command === "agents") {
     return await agentsCommand(rest, io);
+  }
+  // The compatibility alias (owner decision, 2026-09-08): `ub launch` is the
+  // spelling this surface shipped under, kept pointing at the canonical route
+  // rather than at a copy of it, so both spellings can only ever behave alike.
+  if (command === "launch") {
+    return await agentsCommand(["launch", ...rest], io);
   }
   if (command === "open") {
     return await openCommand(rest, io);

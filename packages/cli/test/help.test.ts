@@ -113,6 +113,9 @@ const PATHS: Path[] = [
     children: ["launch"],
   },
   { argv: ["agents", "launch"], help: LAUNCH_HELP, options: LAUNCH_OPTIONS },
+  // The compatibility alias is one of the paths this manifest is for: it is
+  // typed by people, so it owes the same help as the command it aliases.
+  { argv: ["launch"], help: LAUNCH_HELP, options: LAUNCH_OPTIONS },
   { argv: ["open"], help: OPEN_HELP, options: OPEN_OPTIONS },
   { argv: ["status"], help: STATUS_HELP, options: STATUS_OPTIONS },
   { argv: ["doctor"], help: DOCTOR_HELP, options: DOCTOR_OPTIONS },
@@ -403,14 +406,22 @@ describe("what is not a request for help", () => {
     }
   });
 
-  it("no longer answers the retired top-level `ub launch`", async () => {
-    // The surface moved under `ub agents`; the old spelling is a typo now, and
-    // says so the way every other unknown command does.
-    const run = await dispatch(["launch", "implementer"]);
-    expect(run.status).toBe(2);
-    expect(run.stdout).toBe("");
-    expect(run.stderr).toMatch(/unknown command "launch"/);
-    expect(HELP).not.toContain("launch");
+  it("takes `ub launch` down the route `ub agents launch` names", async () => {
+    // `ub launch` is the spelling this surface shipped under and stays a
+    // compatibility alias (owner decision, 2026-09-08). What that promises is
+    // one route, not one wording: the same argv reaches the same behaviour and
+    // the same exit status either way. Here that is the usage errors, which the
+    // dispatcher answers before anything is resolved or started; the launch
+    // path itself is the same equivalence in `agents-launch.test.ts`.
+    for (const rest of [[], ["implementer", "--model", "gpt"], ["a", "b"]]) {
+      const canonical = await dispatch(["agents", "launch", ...rest]);
+      const alias = await dispatch(["launch", ...rest]);
+      expect(canonical.status, rest.join(" ")).toBe(2);
+      expect(alias, `ub launch ${rest.join(" ")}`).toEqual(canonical);
+    }
+    // And the root help says the alias is one, so a reader of the catalog is
+    // not left with two commands to choose between.
+    expect(HELP).toContain("compatibility alias for `ub agents launch`");
   });
 
   it("still refuses an unknown option, on stderr, with exit 2", async () => {
