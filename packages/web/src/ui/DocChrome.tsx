@@ -456,6 +456,17 @@ export function DocMetaLine({
   );
 }
 
+/**
+ * Why Archive is refused, in the menu and inside an already-open confirmation.
+ *
+ * One sentence for both, because they are one refusal: the rooms this action
+ * writes can stop being ready between opening the menu and confirming, and a
+ * dialog that closed silently on that click would be indistinguishable from an
+ * archive that happened.
+ */
+const ARCHIVE_UNAVAILABLE =
+  "Archive unavailable — the directory or sidebar room is not ready to write, or there is no live entry for this document";
+
 function DocumentActions({
   title,
   pinned,
@@ -549,9 +560,7 @@ function DocumentActions({
                 setConfirming(true);
               }}
             >
-              {onArchive === null
-                ? "Archive unavailable — the directory or sidebar room is not ready to write, or there is no live entry for this document"
-                : "Archive document"}
+              {onArchive === null ? ARCHIVE_UNAVAILABLE : "Archive document"}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -568,8 +577,9 @@ function DocumentActions({
         >
           <DialogTitle>Archive {title}?</DialogTitle>
           <DialogDescription>
-            Its content is preserved, but the document becomes read-only and
-            leaves normal listings until you Restore it.
+            {onArchive === null
+              ? `${ARCHIVE_UNAVAILABLE}. Nothing has been archived.`
+              : "Its content is preserved, but the document becomes read-only and leaves normal listings until you Restore it."}
           </DialogDescription>
           <span className="ub-confirm-actions">
             <DialogClose asChild>
@@ -580,9 +590,15 @@ function DocumentActions({
             <button
               type="button"
               className="ub-tool ub-tool-danger"
+              disabled={onArchive === null}
               onClick={() => {
+                // Readiness can be lost while this dialog is open, and then
+                // closing on the click would look exactly like a successful
+                // archive. Refuse in place instead: the dialog stays, saying
+                // why, and Cancel is still the way out.
+                if (onArchive === null) return;
                 setConfirming(false);
-                onArchive?.();
+                onArchive();
               }}
             >
               Archive document

@@ -88,22 +88,44 @@ const rooms = new Map<string, RoomConnection>();
  */
 const roomStatus = new Map<string, RoomStatus>();
 
+/** Who is listening to each room, so a test can move it after the app mounted. */
+const statusListeners = new Map<string, Set<(next: RoomStatus) => void>>();
+
 function room(name: string): RoomConnection {
   const existing = rooms.get(name);
   if (existing !== undefined) return existing;
-  const status = roomStatus.get(name) ?? LIVE;
+  if (!roomStatus.has(name)) roomStatus.set(name, LIVE);
+  const listeners = new Set<(next: RoomStatus) => void>();
+  statusListeners.set(name, listeners);
   const connection = {
     room: name,
     ydoc: new Y.Doc(),
     provider: { awareness: null },
-    status,
+    get status(): RoomStatus {
+      return roomStatus.get(name) ?? LIVE;
+    },
     onStatusChange: (listener: (next: RoomStatus) => void) => {
-      listener(status);
-      return () => {};
+      listener(roomStatus.get(name) ?? LIVE);
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
   } as unknown as RoomConnection;
   rooms.set(name, connection);
   return connection;
+}
+
+/**
+ * One room's status changes under the mounted app — a reconnect, a lost write
+ * grant — the way the provider announces it.
+ */
+function emitStatus(name: string, change: Partial<RoomStatus>): void {
+  const next = { ...(roomStatus.get(name) ?? LIVE), ...change };
+  roomStatus.set(name, next);
+  act(() => {
+    for (const listener of statusListeners.get(name) ?? []) listener(next);
+  });
 }
 
 vi.mock("../src/collab/rooms.js", () => ({
@@ -152,6 +174,7 @@ afterEach(() => {
   }
   rooms.clear();
   roomStatus.clear();
+  statusListeners.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -354,6 +377,54 @@ describe("an archived document is readable, says so, and offers one way back", (
       expect(document.querySelector('[role="alertdialog"]')).toBeNull();
       expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
       expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
+    });
+  }
+
+  // The same refusal has to hold when readiness is lost *inside* the open
+  // confirmation, which is the ordinary disconnect boundary: the red button
+  // would otherwise close the dialog exactly as a successful archive does and
+  // write nothing. Both rooms, because either one going unwritable removes the
+  // action, and the reader cannot tell which.
+  for (const [which, roomName] of [
+    ["directory", directoryRoom(WORKSPACE)],
+    ["sidebar", sidebarRoom(WORKSPACE)],
+  ] as const) {
+    it(`says so in the open confirmation when the ${which} room stops being ready`, async () => {
+      const directory = room(directoryRoom(WORKSPACE)).ydoc;
+      const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
+      const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+      initDoc(ydoc, { uuid: UUID, title: "Retired protocol" });
+      upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired protocol" });
+      pinDoc(sidebar, createGroup(sidebar, "Reading"), UUID);
+
+      const host = await openApp(`/${WORKSPACE}/${UUID}`);
+      openActions(host);
+      act(() => action("Archive document")?.click());
+      expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+
+      emitStatus(roomName, { writable: false });
+      act(() => {
+        document
+          .querySelector<HTMLButtonElement>('[role="alertdialog"] .ub-tool-danger')
+          ?.click();
+      });
+
+      // In place: the confirmation is still there, and it now explains itself
+      // instead of pretending the archive happened.
+      const dialog = document.querySelector('[role="alertdialog"]');
+      expect(dialog?.textContent).toContain("Archive unavailable");
+      expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
+      expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
+
+      // And it goes back to being the archive it was once the room returns.
+      emitStatus(roomName, { writable: true });
+      act(() => {
+        document
+          .querySelector<HTMLButtonElement>('[role="alertdialog"] .ub-tool-danger')
+          ?.click();
+      });
+      expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
+      expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
     });
   }
 

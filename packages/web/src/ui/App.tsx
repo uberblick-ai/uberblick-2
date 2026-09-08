@@ -611,13 +611,15 @@ export function App(): ReactElement {
    * optimistic archived state here.
    *
    * Archiving unpins (#957), so this writes the sidebar room as well as the
-   * directory — the same two writes `archive_doc` makes, in the same order.
+   * directory — the two rooms `archive_doc` writes, in the same order.
    * Both rooms are re-read here rather than taken from the render's props, for
    * the reason `togglePin` gives: a remote write that landed between paint and
    * click is already in the document. `unpinDoc` is a no-op without a visible
    * pin, so an unpinned document needs no special case — but an unsynchronized
    * sidebar reads as carrying no pins at all, which is why `synced` is part of
-   * the gate below and not merely `writable`.
+   * the gate below and not merely `writable`. That gate is this surface's
+   * answer to the pin it cannot see; `archive_doc`, which has no such gate to
+   * refuse behind, raises the unpin count unconditionally instead.
    */
   const onArchive = useCallback(() => {
     if (

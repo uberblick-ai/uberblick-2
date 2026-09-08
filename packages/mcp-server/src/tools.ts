@@ -69,7 +69,6 @@ import {
   readDirectoryTags,
   readDecisions,
   readDocumentTags,
-  readSidebar,
   resolveTagAssignments,
   resolveAnnotationRange,
   restoreDirectoryEntry,
@@ -83,7 +82,7 @@ import {
   setStatus,
   setTitle,
   tombstoneDirectoryEntry,
-  unpinDoc,
+  unpinDocIncludingUnseen,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type {
@@ -641,13 +640,13 @@ const RECOVERY: Record<string, string> & { other: string } = {
 /** What to do after a partial archive, by the room whose write the log refused. */
 const ARCHIVE_RECOVERY: Record<string, string> & { other: string } = {
   directory:
-    "Nothing survived: the refused write is the tombstone itself, so the document is still listed and still " +
-    "pinned. Restart the MCP server — the failure is sticky and every tool refuses until then — then call " +
-    "archive_doc again.",
+    "Nothing survived: the refused write is the tombstone itself, so the document is still listed and its pin " +
+    "state is unchanged. Restart the MCP server — the failure is sticky and every tool refuses until then — " +
+    "then call archive_doc again.",
   sidebar:
-    "The tombstone is durable, so the document is archived; only its sidebar pin is still there, and " +
-    "get_sidebar reports it with `status: \"archived\"`. Restart the MCP server, then call unpin_doc with this " +
-    "uuid to finish it. Do NOT call archive_doc again — it is already archived.",
+    "The tombstone is durable, so the document is archived; only the unpin is missing, so any pin it has is " +
+    "still there and get_sidebar reports such a pin with `status: \"archived\"`. Restart the MCP server, then " +
+    "call unpin_doc with this uuid to finish it. Do NOT call archive_doc again — it is already archived.",
   other:
     "The log refused a write to a room this call does not own — another document syncing while it ran. Restart " +
     "the MCP server, then check with list_docs — `include_deleted: true` — and get_sidebar what the rooms in " +
@@ -2039,10 +2038,12 @@ export function registerTools(
         "for a decision, add a matching `kind`, `status` or `tag` predicate. " +
         "There is no tool that erases content, by design.\n\n" +
         "It also leaves the sidebar, because it is unpinned: a document that has left every other listing is not an " +
-        "entry point. `unpinned` says whether there was a pin to remove. restore_doc does NOT put it back — pin_doc " +
-        "is how a restored document becomes an entry point again.\n\n" +
-        "So this call writes two independently persisted rooms — the directory, and the sidebar when the document " +
-        "was pinned — and reports them one by one. `rooms` lists every room it touched with its own `applied` and " +
+        "entry point. The unpin is unconditional — it also hides a pin made elsewhere that this replica has not " +
+        "received yet, so such a pin cannot merge in behind the archive — and `unpinned` says that, not that a pin " +
+        "was found: it is true whenever the archive completed. restore_doc does NOT put it back — pin_doc " +
+        "is how a restored document becomes an entry point again, and it still wins over this unpin.\n\n" +
+        "So this call always writes two independently persisted rooms — the directory and the sidebar — " +
+        "and reports them one by one. `rooms` lists every room it touched with its own `applied` and " +
         "`synced`; the top-level `synced` is the AND over them and is never true while one is still pending. It is " +
         "NOT transactional: there is no rollback and no remote atomicity. If the local update log refuses the unpin, " +
         "the call fails with `persistence_failed` carrying the `uuid`, the rooms already `completed`, the `failed` " +
@@ -2068,14 +2069,6 @@ export function registerTools(
       const directory = replicas.directory();
       const sidebarReplica = replicas.sidebar();
       const title = titleFor(uuid, stub);
-      // Read before the tombstone, and from the sidebar rather than from the
-      // stub: the pin lives in another room, and `settle()` has already given
-      // the hub its chance to fill it. `unpinDoc` is a no-op without a visible
-      // pin, so this decides only whether the sidebar is a room this call
-      // touched — and a room it never wrote does not belong in `rooms`.
-      const pinned = readSidebar(sidebarReplica.doc).some((group) =>
-        group.docs.includes(uuid),
-      );
       const { completed, stage } = roomStages(
         replicas,
         "archive_doc",
@@ -2096,16 +2089,26 @@ export function registerTools(
       stage("directory", directory, () => {
         tombstoneDirectoryEntry(directory.doc, uuid);
       });
-      if (pinned) {
-        stage("sidebar", sidebarReplica, () => {
-          unpinDoc(sidebarReplica.doc, uuid);
-        });
-      }
+      // Unconditionally, and without asking this replica whether it holds a
+      // pin: `settle()` is not a promise that the sidebar arrived, so a pin
+      // made elsewhere can still be in flight, and skipping the write would let
+      // it merge in behind the tombstone and leave the document archived *and*
+      // pinned for good. Raising the unpin count past everything this replica
+      // can see hides that pin when it lands, while a deliberate `pin_doc`
+      // after the archive still wins. The sidebar is therefore always a room
+      // this call wrote, and `rooms` always names it.
+      stage("sidebar", sidebarReplica, () => {
+        unpinDocIncludingUnseen(sidebarReplica.doc, uuid);
+      });
       return json({
         uuid,
         title,
         archived: true,
-        unpinned: pinned,
+        // What the call asserts, not what it found: the document is not an
+        // entry point after this, including against a pin this replica had not
+        // received. There is no "there was no pin to remove" case left to
+        // report, so this is true whenever the archive completed.
+        unpinned: true,
         // Withdrawing a document needs no copy of it, so hydration cannot make
         // this false — but a store that refused the write can, and then the
         // uuid stays queued for a later retry rather than being reported done.

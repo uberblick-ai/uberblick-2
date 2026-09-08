@@ -199,8 +199,8 @@ const SIDEBAR_SHAPE =
   "Every sidebar tool answers with the whole sidebar — `groups`, in order, each with its `id`, its `name` and its " +
   "`docs` in order — so a caller never has to re-read to see where a change landed. A pinned document's `title` " +
   "comes from its directory stub, never from opening the document. `status` is `ok`, `archived` (the document is " +
-  "tombstoned but still pinned — archive_doc unpins, so this is a pin_doc on an archived target or an archive that " +
-  "raced this pin on another replica) or `unknown` (no directory entry at all — a document nothing can resolve, " +
+  "tombstoned but still pinned — archive_doc unpins, so this is a pin that outlived the archive) or " +
+  "`unknown` (no directory entry at all — a document nothing can resolve, " +
   "left visible so it can be unpinned).";
 
 /**

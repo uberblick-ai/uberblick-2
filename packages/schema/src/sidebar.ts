@@ -98,6 +98,10 @@
  *     visible again — a deliberate re-pin beats the unpins it has seen.
  *   - `moveDoc` carries the existing pin's `since` across unchanged. Moving is
  *     not re-pinning, and must not silently clear an unpin.
+ *   - `unpinDocIncludingUnseen` is that same write without the visible-pin
+ *     check, for the one caller that must also hide a pin it has not received
+ *     yet: archiving (#957), whose claim is about the document rather than
+ *     about a pin somebody is looking at.
  *
  * Two properties make this sound, and both are deliberate:
  *
@@ -483,6 +487,31 @@ export function pinDoc(
  */
 export function unpinDoc(sidebarDoc: Y.Doc, uuid: string): void {
   if (visiblePin(sidebarDoc, uuid) === null) return;
+  raiseUnpin(sidebarDoc, uuid);
+}
+
+/**
+ * Unpin a document whether or not this replica can see a pin — what archiving
+ * needs (#957).
+ *
+ * {@link unpinDoc} asks for a visible pin first, so a pin this replica has not
+ * received yet is neither removed nor counted: it merges in afterwards and the
+ * document reads as pinned again. That is right for an unpin, which is a
+ * request about the pin somebody is looking at. It is wrong for an archive,
+ * which claims the document is no longer an entry point at all — and the claim
+ * has to hold against a pin that was made before it and simply has not arrived.
+ *
+ * Raising the counter with nothing visible is safe for the same reason the
+ * ordinary unpin is: it only ever raises *this* client's own key, one past
+ * everything this replica can see, and a deliberate {@link pinDoc} afterwards
+ * still wins, because it stamps the level it can then see.
+ */
+export function unpinDocIncludingUnseen(sidebarDoc: Y.Doc, uuid: string): void {
+  raiseUnpin(sidebarDoc, uuid);
+}
+
+/** Hide every pin of `uuid` this replica can see, and count the unpin. */
+function raiseUnpin(sidebarDoc: Y.Doc, uuid: string): void {
   const next = unpinCeiling(sidebarDoc, uuid) + 1;
   const key = `${uuid}${CLIENT_SEPARATOR}${sidebarDoc.clientID}`;
   sidebarDoc.transact(() => {
