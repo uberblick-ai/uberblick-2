@@ -933,7 +933,6 @@ export function App(): ReactElement {
             connection={directory}
             entries={entries}
             groups={sidebarGroups}
-            searchClient={documentSearch}
             onSelect={onSelect}
             onTogglePin={sidebarStatus.writable ? onTogglePinDoc : null}
           />

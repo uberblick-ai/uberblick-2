@@ -4174,26 +4174,25 @@ h3.ub-heading {
   color: var(--brand-ink);
 }
 
+/* The label carries only the field's accessible name, which is drawn
+   off-screen because the hint inside the field already says it on screen. The
+   wrapper still needs a box of its own so the input can fill the column. */
 .ub-docs-search-label {
   display: grid;
-  gap: 0.25rem;
-  color: var(--muted-foreground);
-  font-size: 0.8rem;
 }
 
+/* The full width of `.ub-docs-table` below it: a filter over that table reads
+   as belonging to it, and a box capped well short of the content it narrows
+   reads as decoration. Both are children of the same `.ub-column`, so 100% is
+   the same width in both. */
 .ub-docs-search {
-  width: min(24rem, 100%);
+  width: 100%;
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--background);
   color: var(--foreground);
   font: inherit;
-}
-
-.ub-docs-search-state {
-  margin: 0;
-  font-size: 0.8rem;
 }
 
 /* Its own class rather than the sidebar's `.ub-empty`: two components on one
