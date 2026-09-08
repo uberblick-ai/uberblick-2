@@ -2797,6 +2797,15 @@ body {
   color: var(--destructive-foreground);
 }
 
+/* Readiness can be lost while the confirmation is open, and then the button is
+   refused rather than removed — the dialog says why. The same treatment the
+   other disabled `.ub-tool`s get, so a destructive control that cannot act does
+   not go on looking like one that can. */
+.ub-confirm-actions .ub-tool:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* ---- editor chrome above the prose ---- */
 
 /* The row that used to hold the block-type buttons. Block types now come from
