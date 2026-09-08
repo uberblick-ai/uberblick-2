@@ -70,6 +70,7 @@ function rig(options: {
   const waits = [...(options.waits ?? [])];
   const refreshes = [...(options.refreshes ?? [])];
   const seen = {
+    dataLoads: [] as Array<string | undefined>,
     preflight: [] as Array<{ runtime: string; adapter: string }>,
     refreshes: 0,
     probes: [] as Array<readonly string[]>,
@@ -80,7 +81,10 @@ function rig(options: {
   const services: LaunchServices = {
     root: REPO_ROOT,
     linkBase: options.linkBase ?? null,
-    loadData: () => data,
+    loadData(activeRuntime) {
+      seen.dataLoads.push(activeRuntime);
+      return data;
+    },
     preflight(runtime, adapter) {
       seen.preflight.push({ runtime, adapter });
       return options.preflight ?? null;
@@ -558,6 +562,7 @@ process.exit(0);
           adapter: `.${expected[1]}/agents/${expected[0]}.${expected[1] === "claude" ? "md" : "toml"}`,
         },
       ]);
+      expect(current.seen.dataLoads).toEqual([undefined, expected[1]]);
       expect(current.stdout()).toBe(
         `ub agents launch: ${expected[0]} on ${expected[1]} in ${REPO_ROOT}\n`,
       );
@@ -1123,6 +1128,23 @@ describe("launch data", () => {
 
       rmSync(adapter);
       writeProject(selected, { implementer: role() });
+      const claudeAdapter = join(selected, ".claude/agents/implementer.md");
+      const siblingClaudeAdapter = join(sibling, ".claude/agents/implementer.md");
+      mkdirSync(dirname(claudeAdapter), { recursive: true });
+      mkdirSync(dirname(siblingClaudeAdapter), { recursive: true });
+      writeFileSync(claudeAdapter, "selected project adapter\n");
+      writeFileSync(siblingClaudeAdapter, "sibling project adapter\n");
+      expect(readLaunchData(selected, "claude").entryRoles.implementer).toBeDefined();
+
+      // A normal fast-forward can replace the adapter after initial preflight.
+      // The runtime-scoped reload must confine it again before starting work.
+      rmSync(claudeAdapter);
+      symlinkSync(siblingClaudeAdapter, claudeAdapter);
+      expect(() => readLaunchData(selected, "claude")).toThrow(
+        /claude adapter that is not a readable file/,
+      );
+
+      rmSync(claudeAdapter);
       const launch = join(selected, ".agents/launch.json");
       rmSync(launch);
       symlinkSync(join(sibling, ".agents/launch.json"), launch);

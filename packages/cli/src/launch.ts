@@ -145,7 +145,7 @@ export interface LaunchServices {
    * the one switch between linked and plain `#123`.
    */
   linkBase: string | null;
-  loadData(): LaunchData;
+  loadData(activeRuntime?: Runtime): LaunchData;
   preflight(runtime: Runtime, adapter: string): string | null;
   refreshMain(): { detail: string; retry: boolean } | null;
   runProbe(command: readonly string[]): Promise<ProbeResult>;
@@ -308,7 +308,7 @@ function launchDataPath(root: string): string {
  * every adopter. The adapter path is the one exception, and the reason it is
  * one is at the check itself.
  */
-export function readLaunchData(root: string): LaunchData {
+export function readLaunchData(root: string, activeRuntime?: Runtime): LaunchData {
   const path = launchDataPath(root);
   let parsed: unknown;
   try {
@@ -398,11 +398,14 @@ export function readLaunchData(root: string): LaunchData {
           `${named} ${runtime} "adapter" is ${JSON.stringify(rawRuntime.adapter)}; this runtime resolves ${adapter}`,
         );
       }
-      // Only the Codex adapter is required to exist this early: a Claude
-      // adapter directory is excluded from some build contexts, and the
-      // runtime preflight below reports its absence before a session starts.
-      if (runtime === "codex" && !pathIsFile(root, adapter)) {
-        throw new Error(`${named} names a codex adapter that is not a readable file: ${join(root, adapter)}`);
+      // Codex's adapter is always present in the project data we validate.
+      // Claude's can be absent from build contexts that never select Claude,
+      // so require it only once that runtime is active. The loop passes that
+      // choice again after every refresh, before a probe or session can start.
+      if ((runtime === "codex" || runtime === activeRuntime) && !pathIsFile(root, adapter)) {
+        throw new Error(
+          `${named} names a ${runtime} adapter that is not a readable file: ${join(root, adapter)}`,
+        );
       }
       parsedRuntimes[runtime] = {
         adapter,
@@ -780,7 +783,7 @@ export function createLaunchServices(
       process.stdout.isTTY === true && remote.status === 0
         ? gitHubBase(remote.stdout)
         : null,
-    loadData: () => readLaunchData(root),
+    loadData: (activeRuntime) => readLaunchData(root, activeRuntime),
     preflight(runtime, adapter) {
       if (!pathIsFile(root, adapter)) {
         return `${runtime} adapter ${adapter} is missing; restore it from origin/main before retrying`;
@@ -1125,7 +1128,7 @@ export async function launchCommand(
       continue;
     }
     try {
-      entry = services.loadData().entryRoles[parsed.role];
+      entry = services.loadData(runtime).entryRoles[parsed.role];
     } catch (error) {
       io.err(`ub agents launch: ${error instanceof Error ? error.message : String(error)}\n`);
       return 1;
