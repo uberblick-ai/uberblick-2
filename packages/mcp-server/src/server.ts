@@ -16,6 +16,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpConfig } from "./config.js";
 import { FAILURE_INSTRUCTIONS } from "./failures.js";
+import { GuidanceBriefing, GUIDANCE_INSTRUCTIONS, registerGuidanceResources } from "./guidance.js";
 import { log } from "./log.js";
 import { Replicas } from "./replica.js";
 import { MirrorStore } from "./store.js";
@@ -62,6 +63,7 @@ export function createMcpServer(
   store: MirrorStore = new MirrorStore(config.databasePath, config.workspaceId),
 ): UberblickMcpServer {
   const replicas = new Replicas(config, store);
+  const briefing = new GuidanceBriefing(replicas);
 
   const server = new McpServer(
     { name: "uberblick", version: "0.0.0" },
@@ -76,7 +78,7 @@ export function createMcpServer(
         "Read with get_doc, which returns a `rev` per block, and write one block at a time with " +
         "edit_block, passing the old_text and rev you read. There is no whole-document write. " +
         "Discovery is list_docs and search; links and backlinks are by document UUID.\n\n" +
-        FAILURE_INSTRUCTIONS,
+        GUIDANCE_INSTRUCTIONS + "\n\n" + FAILURE_INSTRUCTIONS,
     },
   );
 
@@ -89,7 +91,8 @@ export function createMcpServer(
     replicas.setAgentName(agentDisplayName(server.server.getClientVersion()));
   };
 
-  registerTools(server, replicas);
+  registerTools(server, replicas, briefing);
+  registerGuidanceResources(server, replicas, briefing);
 
   let closed = false;
 
