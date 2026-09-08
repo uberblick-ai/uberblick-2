@@ -10,6 +10,13 @@ other, and it claims a durable request under
 `.agents/protocols/review-protocol.md`; the runtime a round must run on is the
 request's `Runtime:` line, not a caller's choice of command.
 
+Two of those loops are therefore part of the operating set, beside the
+implementer and integrator loops: `ub launch implementation-reviewer --model
+claude` and `--model codex`. No role produces a round any more, and a request
+names the runtime it needs, so a round whose runtime has no loop running goes
+unanswered until an operator starts one — which the integrator parks
+`needs-human` for rather than merging past.
+
 Claude sessions launched by `ub launch` default
 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` to `0`, preventing print mode's independent
 600-second background-wait cutoff. An explicit operator value is preserved.

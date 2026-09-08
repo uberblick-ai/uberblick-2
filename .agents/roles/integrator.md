@@ -90,7 +90,11 @@ does — this assignment reaches a disposition, an acceptance verdict, a tier
 call or a merge only after the PR carries that verdict, or the request carries
 the review protocol's record that it went unanswered. Wait for it on the
 protocol's inexpensive GitHub reads, renewing this claim, rather than on a
-child this session started.
+child this session started. An owed round recorded unanswered has one outcome,
+and it is not a merge: park the PR `needs-human`, naming the round, its request
+and the runtime it needs, and @-mention the owner (`@bk-one`), because only an
+operator can start the loop that would answer it. This role neither supplies the
+missing round itself nor rules without it.
 Re-read the head before using that result; a review of another SHA is evidence
 only under that explicit risk-scoped carry-forward rule.
 

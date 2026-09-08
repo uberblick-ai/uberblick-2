@@ -36,7 +36,10 @@ consuming it. A `Round: 2` of delivery-policy.md's required pair also carries on
 `Boundary:` line naming which listed boundary fires, or the concrete unresolved
 risk; a package path is neither, and without that line the round is not
 requested. `Scope: corrections` names the finding ids the requester corrected or
-answered and asks for nothing else.
+answered and asks for nothing else; it keeps the `Runtime:` and `Round:` of the
+verdict it answers, so the reviewer that raised those findings can take it, and
+it owes no `Boundary:` line — repeating a round number to verify its own
+findings at the corrected head is not a second challenge.
 
 A request is current while it is the newest `Review-request:` on the PR, carries
 no `Superseded:` line, and its `Head:` is still the PR's head. Anything else is
