@@ -51,6 +51,7 @@ import type { Transaction } from "@tiptap/pm/state";
 import { endUndoCapture, isTypedHere } from "./block-menu.js";
 import { replaceWithDocLink } from "./doc-links.js";
 import type { DocLinkCandidate, DocLinkContext } from "./doc-links.js";
+import { foldForTitleMatch } from "../title-fold.js";
 
 /** An open mention session: the block it belongs to, what was typed, and where. */
 export interface MentionTrigger {
@@ -188,13 +189,14 @@ export function filterMentions(
   query: string,
   openDocId: string | null,
 ): DocLinkCandidate[] {
-  // `toLowerCase`, not `toLocaleLowerCase`: needle and haystack must fold the
-  // same way, and a locale-aware fold does not (see `shell/DocumentList.tsx`).
-  const needle = query.toLowerCase();
+  // One fold, run over needle and haystack alike, and the same one the Documents
+  // page filter runs (see `title-fold.ts`): the two surfaces match these same
+  // titles, so a query that finds a document in one has to offer it in the other.
+  const needle = foldForTitleMatch(query);
   const found: DocLinkCandidate[] = [];
   for (const candidate of candidates) {
     if (candidate.docId === openDocId) continue;
-    if (!candidate.label.toLowerCase().includes(needle)) continue;
+    if (!foldForTitleMatch(candidate.label).includes(needle)) continue;
     found.push(candidate);
     if (found.length === MENTION_LIMIT) break;
   }
