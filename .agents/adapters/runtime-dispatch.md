@@ -5,19 +5,19 @@ independence, grants and outcomes. These are the current repository transports;
 this file does not implement portable grants.
 
 Implementation review is not dispatched from here. A reviewer is an entry role
-that `ub launch implementation-reviewer [--model claude|codex]` starts like any
-other, and it claims a durable request under
+that `ub agents launch implementation-reviewer [--model claude|codex]` starts
+like any other, and it claims a durable request under
 `.agents/protocols/review-protocol.md`; the runtime a round must run on is the
 request's `Runtime:` line, not a caller's choice of command.
 
 Two of those loops are therefore part of the operating set, beside the
-implementer and integrator loops: `ub launch implementation-reviewer --model
-claude` and `--model codex`. No role produces a round any more, and a request
-names the runtime it needs, so a round whose runtime has no loop running goes
-unanswered until an operator starts one — which the integrator parks
-`needs-human` for rather than merging past.
+implementer and integrator loops: `ub agents launch implementation-reviewer
+--model claude` and `--model codex`. No role produces a round any more, and a
+request names the runtime it needs, so a round whose runtime has no loop
+running goes unanswered until an operator starts one — which the integrator
+parks `needs-human` for rather than merging past.
 
-Claude sessions launched by `ub launch` default
+Claude sessions launched by `ub agents launch` default
 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` to `0`, preventing print mode's independent
 600-second background-wait cutoff. An explicit operator value is preserved.
 This is transport configuration, not a child deadline: use finite child/waiter

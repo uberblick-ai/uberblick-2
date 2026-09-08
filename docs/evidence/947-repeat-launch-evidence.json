@@ -1,0 +1,63 @@
+{
+  "issue": 947,
+  "fixture": "947-repeat-launch-fixture.mjs",
+  "recorded": "2026-09-08T07:38:48.523Z",
+  "ub": "/tmp/scratch-claude-implementer-20260908T071112Z-e61535/installed/uberblick-0.947.0/bin/ub",
+  "model": "claude",
+  "control": "/tmp/scratch-claude-implementer-20260908T071112Z-e61535/evidence-run/control",
+  "workspacePinnedByProjectEntry": "ba1223d3-1cd8-4eb5-86b0-6441bd7b3c4b",
+  "runs": [
+    {
+      "index": 1,
+      "exit": null,
+      "signal": "SIGINT",
+      "startupLine": "ub agents launch: prober on claude in /tmp/scratch-claude-implementer-20260908T071112Z-e61535/evidence-run/control",
+      "idleLine": "work: evidence run complete; will idle for 30min",
+      "freshResultFiles": [
+        "claude-prober-20260908T073848Z-15862f.json"
+      ],
+      "result": {
+        "run": "claude-prober-20260908T073848Z-15862f",
+        "project": "repeat-launch-control",
+        "workspace": "ba1223d3-1cd8-4eb5-86b0-6441bd7b3c4b"
+      },
+      "ok": true,
+      "problems": []
+    },
+    {
+      "index": 2,
+      "exit": null,
+      "signal": "SIGINT",
+      "startupLine": "ub agents launch: prober on claude in /tmp/scratch-claude-implementer-20260908T071112Z-e61535/evidence-run/control",
+      "idleLine": "work: evidence run complete; will idle for 30min",
+      "freshResultFiles": [
+        "claude-prober-20260908T073920Z-d48f36.json"
+      ],
+      "result": {
+        "run": "claude-prober-20260908T073920Z-d48f36",
+        "project": "repeat-launch-control",
+        "workspace": "ba1223d3-1cd8-4eb5-86b0-6441bd7b3c4b"
+      },
+      "ok": true,
+      "problems": []
+    },
+    {
+      "index": 3,
+      "exit": null,
+      "signal": "SIGINT",
+      "startupLine": "ub agents launch: prober on claude in /tmp/scratch-claude-implementer-20260908T071112Z-e61535/evidence-run/control",
+      "idleLine": "work: evidence run complete; will idle for 30min",
+      "freshResultFiles": [
+        "claude-prober-20260908T073950Z-805f22.json"
+      ],
+      "result": {
+        "run": "claude-prober-20260908T073950Z-805f22",
+        "project": "repeat-launch-control",
+        "workspace": "ba1223d3-1cd8-4eb5-86b0-6441bd7b3c4b"
+      },
+      "ok": true,
+      "problems": []
+    }
+  ],
+  "repeatable": true
+}

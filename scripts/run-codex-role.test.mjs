@@ -422,5 +422,5 @@ test("an indeterminate claim lookup keeps the lost run worktree registered", asy
 test("the interactive launcher never exposes the runner as an entry surface", () => {
 	const text = readFileSync(skill, "utf8");
 	assert.doesNotMatch(text, /run-codex-role/);
-	assert.match(text, /`ub launch <role> \[--model claude\|codex\]`/);
+	assert.match(text, /`ub agents launch <role> \[--model claude\|codex\]`/);
 });

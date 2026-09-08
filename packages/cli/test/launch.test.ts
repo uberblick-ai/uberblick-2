@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -18,6 +19,7 @@ import {
   type SessionProcesses,
   type SessionResult,
   LAUNCH_HELP,
+  LAUNCH_OPTIONS,
   claudeSessionArgs,
   codexSessionArgs,
   createLaunchServices,
@@ -28,6 +30,7 @@ import {
   readLaunchData,
   runForeground,
 } from "../src/launch.js";
+import { resolveProjectRoot } from "../src/project.js";
 import { REPO_ROOT, removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -121,16 +124,64 @@ function rig(options: {
   };
 }
 
-describe("ub launch", () => {
+
+/** One entry-role declaration, with every path the project's own to choose. */
+function role(
+  overrides: {
+    role?: string;
+    contract?: string;
+    probe?: string[];
+    claudeAdapter?: string;
+  } = {},
+) {
+  const name = overrides.role ?? "implementer";
+  return {
+    contract: overrides.contract ?? `.agents/roles/${name}.md`,
+    defaultRuntime: "codex",
+    probe: overrides.probe ?? ["sh", "scripts/probe-work.sh", name],
+    runtimes: {
+      claude: {
+        adapter: overrides.claudeAdapter ?? `.claude/agents/${name}.md`,
+        sandbox: "runtime",
+        permissionMode: "auto",
+      },
+      codex: {
+        adapter: `.codex/agents/${name}.toml`,
+        sandbox: "unsandboxed",
+      },
+    },
+  };
+}
+
+/** The whole launch file for one declared role, without writing its files. */
+function launchData(declared: ReturnType<typeof role>) {
+  return { version: 1, entryRoles: { implementer: declared } };
+}
+
+/** A project on disk whose launch data is exactly what it declares. */
+function writeProject(root: string, roles: Record<string, ReturnType<typeof role>>): void {
+  const launch = join(root, ".agents/launch.json");
+  mkdirSync(dirname(launch), { recursive: true });
+  writeFileSync(launch, `${JSON.stringify({ version: 1, entryRoles: roles }, null, 2)}\n`);
+  for (const entry of Object.values(roles)) {
+    for (const relative of [entry.contract, entry.runtimes.codex.adapter]) {
+      if (relative.startsWith("..") || relative.startsWith("/")) continue;
+      const path = join(root, relative);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, "declared by the project\n");
+    }
+  }
+}
+
+describe("ub agents launch", () => {
   it("builds a fresh runtime identity and a contract-scoped assignment", () => {
     const runId = makeRunId("codex", "implementer");
     expect(runId).toMatch(/^codex-implementer-\d{8}T\d{6}Z-[0-9a-f]{6}$/);
-    expect(launchAssignment("implementer", runId)).toContain(
-      `role \`implementer\`, run id \`${runId}\``,
-    );
-    expect(launchAssignment("implementer", runId)).toContain(
-      ".agents/roles/implementer.md",
-    );
+    const assignment = launchAssignment("implementer", runId, "contracts/roles/implementer.md");
+    expect(assignment).toContain(`role \`implementer\`, run id \`${runId}\``);
+    // The contract path is the project's, not a shape the CLI knows.
+    expect(assignment).toContain("contracts/roles/implementer.md");
+    expect(assignment).toContain("launched by `ub agents launch`");
   });
 
   it("builds argv-only Codex sessions from the declared sandbox", () => {
@@ -159,6 +210,35 @@ describe("ub launch", () => {
     expect(() => codexSessionArgs("/worktree", "/last", prompt, "runtime")).toThrow(
       /invalid Codex sandbox/,
     );
+  });
+
+  it("adds no candidate-selection, trust or approval surface of its own", () => {
+    // The whole command surface: one runtime choice and one project. A
+    // candidate tree to inspect is an input a project's own role or adapter
+    // supplies, so the launcher has nowhere to put one — and nothing it hands
+    // a runtime widens what the project declared.
+    expect(Object.keys(LAUNCH_OPTIONS).sort()).toEqual(["model", "project"]);
+
+    const workspaceWrite = codexSessionArgs("/worktree", "/last", "prompt", "workspace-write");
+    const claude = claudeSessionArgs("shipper", "prompt", "auto");
+    for (const argv of [workspaceWrite, codexSessionArgs("/w", "/l", "p", "unsandboxed"), claude]) {
+      for (const invented of [
+        "--add-dir",
+        "--candidate",
+        "--ephemeral",
+        "--setting-sources",
+        "trust_level",
+        "projects.",
+      ]) {
+        expect(argv.join(" "), invented).not.toContain(invented);
+      }
+    }
+    // Every option either argv carries is a declared mode or a transport path.
+    expect(claude.filter((part) => part.startsWith("--"))).toEqual([
+      "--agent",
+      "--permission-mode",
+    ]);
+    expect(workspaceWrite.filter((part) => part.startsWith("--"))).toEqual([]);
   });
 
   it("builds the data-owned headless Claude permission mode", () => {
@@ -477,7 +557,9 @@ process.exit(0);
           adapter: `.${expected[1]}/agents/${expected[0]}.${expected[1] === "claude" ? "md" : "toml"}`,
         },
       ]);
-      expect(current.stdout()).toBe(`ub launch: ${expected[0]} on ${expected[1]}\n`);
+      expect(current.stdout()).toBe(
+        `ub agents launch: ${expected[0]} on ${expected[1]} in ${REPO_ROOT}\n`,
+      );
     }
   });
 
@@ -734,7 +816,7 @@ esac
 
       expect(runGit(["switch", "-c", "topic"]).status).toBe(0);
       expect(services.refreshMain()).toEqual({
-        detail: "run `ub launch` from the repository's `main` checkout",
+        detail: "run `ub agents launch` from the project's `main` checkout",
         retry: false,
       });
     } finally {
@@ -949,36 +1031,102 @@ describe("launch data", () => {
       const launch = join(root, ".agents/launch.json");
       mkdirSync(dirname(launch), { recursive: true });
       writeFileSync(launch, "not json\n");
+      // A refusal names the file it read, because the caller chose the project
+      // and the whole failure is which project that turned out to be.
+      expect(() => readLaunchData(root)).toThrow(launch);
       expect(() => readLaunchData(root)).toThrow(/invalid JSON/);
 
-      writeFileSync(
-        launch,
-        JSON.stringify({
-          version: 1,
-          entryRoles: {
-            implementer: {
-              contract: ".agents/roles/implementer.md",
-              defaultRuntime: "codex",
-              probe: ["sh", "scripts/probe-work.sh", "implementer"],
-              runtimes: {
-                claude: {
-                  adapter: ".claude/agents/implementer.md",
-                  sandbox: "runtime",
-                  permissionMode: "auto",
-                },
-                codex: { adapter: ".codex/agents/implementer.toml", sandbox: "unsandboxed" },
-              },
-            },
-          },
-        }),
+      writeFileSync(launch, JSON.stringify(launchData(role())));
+      expect(() => readLaunchData(root)).toThrow(
+        `names a role contract that is not a readable file: ${join(root, ".agents/roles/implementer.md")}`,
       );
-      expect(() => readLaunchData(root)).toThrow(/readable role contract/);
 
       mkdirSync(join(root, ".agents/roles"), { recursive: true });
       mkdirSync(join(root, ".codex/agents"), { recursive: true });
       writeFileSync(join(root, ".agents/roles/implementer.md"), "# Implementer\n");
       writeFileSync(join(root, ".codex/agents/implementer.toml"), 'name = "implementer"\n');
       expect(readLaunchData(root).entryRoles.implementer).toBeDefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("takes the project's own paths, names and probe rather than a convention of its own", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-owned-"));
+    try {
+      const declared = role({
+        contract: "workflow/roles/shipper.md",
+        probe: ["node", "workflow/probe.mjs", "--role", "shipper"],
+        role: "shipper",
+      });
+      writeProject(root, { shipper: declared });
+
+      const entry = readLaunchData(root).entryRoles.shipper;
+      expect(entry).toEqual({
+        contract: "workflow/roles/shipper.md",
+        defaultRuntime: "codex",
+        probe: ["node", "workflow/probe.mjs", "--role", "shipper"],
+        runtimes: {
+          claude: {
+            adapter: ".claude/agents/shipper.md",
+            sandbox: "runtime",
+            permissionMode: "auto",
+          },
+          codex: { adapter: ".codex/agents/shipper.toml", sandbox: "unsandboxed" },
+        },
+      });
+
+      // The adapter is the one path the CLI does not take on trust: a Claude
+      // session is started with `--agent <role>`, so a datum naming another
+      // file would describe something no runtime opens.
+      writeProject(root, { shipper: role({ role: "shipper", claudeAdapter: "workflow/claude/shipper.md" }) });
+      expect(() => readLaunchData(root)).toThrow(/this runtime resolves \.claude\/agents\/shipper\.md/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a launch datum that names a path outside the project", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-escape-"));
+    try {
+      for (const outside of ["../elsewhere/implementer.md", "/etc/passwd", "roles/../../out.md"]) {
+        writeProject(root, { implementer: role({ contract: outside }) });
+        expect(() => readLaunchData(root), outside).toThrow(/no "contract" path inside/);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the selected project", () => {
+  it("resolves the Git root at or above the working directory, and --project the same way", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-project-"));
+    try {
+      const project = join(root, "project");
+      const nested = join(project, "packages", "deep");
+      mkdirSync(nested, { recursive: true });
+      const outside = join(root, "outside");
+      mkdirSync(outside);
+      expect(spawnSync("git", ["init", "-b", "main"], { cwd: project }).status).toBe(0);
+
+      // Every spelling lands on the same root, and none of them is this
+      // executable's own directory.
+      const real = realpathSync(project);
+      expect(resolveProjectRoot(undefined, nested, process.env).project?.root).toBe(real);
+      expect(resolveProjectRoot(".", project, process.env).project?.root).toBe(real);
+      expect(resolveProjectRoot(project, outside, process.env).project?.root).toBe(real);
+      expect(resolveProjectRoot("project/packages/deep", root, process.env).project?.root).toBe(real);
+
+      expect(resolveProjectRoot(undefined, outside, process.env).error).toBe(
+        `no Git project at or above ${outside}`,
+      );
+      expect(resolveProjectRoot(join(root, "absent"), root, process.env).error).toMatch(
+        /absent does not exist$/,
+      );
+      expect(resolveProjectRoot(join(project, ".git", "HEAD"), root, process.env).error).toMatch(
+        /HEAD is not a directory$/,
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

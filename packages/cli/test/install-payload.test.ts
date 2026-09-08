@@ -175,7 +175,40 @@ describe("the versioned install payload", () => {
     ).toBe(VERSION);
     const help = runPayload(box, ["--help"]);
     expect(help.status, help.stderr).toBe(0);
-    expect(help.stdout).not.toContain("launch <role>");
+    // An installed payload ships no `.agents` of its own, and that is exactly
+    // why it advertises `ub agents`: the roles come from the project the caller
+    // selects, so the surface belongs in an installed help rather than being
+    // hidden from it.
+    expect(help.stdout).toContain("agents <command>");
+    const agents = runPayload(box, ["agents", "--help"]);
+    expect(agents.status, agents.stderr).toBe(0);
+    expect(agents.stdout).toContain("launch <role>");
+
+    // With only Node on PATH there is no Git to resolve a project with, and
+    // the refusal says so before anything starts.
+    const noGit = runPayload(box, ["agents", "launch", "shipper"]);
+    expect(noGit.status).toBe(1);
+    expect(noGit.stderr).toContain("git is not installed");
+
+    // Given Git, it looks for the roles where the *caller* is and never beside
+    // itself: a payload ships no `.agents`, so the only launch data it can ever
+    // find is the selected project's.
+    const project = join(scratch, "caller-project");
+    const nested = join(project, "packages", "deep");
+    mkdirSync(nested, { recursive: true });
+    expect(spawnSync("git", ["init", "-b", "main"], { cwd: project }).status).toBe(0);
+    const unadopted = spawnSync("ub", ["agents", "launch", "shipper"], {
+      cwd: nested,
+      env: {
+        ...runtimeEnv(box),
+        PATH: `${join(payload, "bin")}:${nodeBin}:${process.env.PATH ?? ""}`,
+      },
+      encoding: "utf8",
+      timeout: 25_000,
+    });
+    expect(unadopted.status).toBe(1);
+    expect(unadopted.stderr).toContain(join(project, ".agents/launch.json"));
+    expect(unadopted.stderr).not.toContain(payload);
     expect(filesBelow(payload).some((path) => path.endsWith(".map"))).toBe(false);
 
     const initialized = runPayload(box, ["init", "--yes", "--no-mcp"], {

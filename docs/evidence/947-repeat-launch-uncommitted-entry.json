@@ -1,0 +1,67 @@
+{
+  "issue": 947,
+  "fixture": "947-repeat-launch-fixture.mjs",
+  "recorded": "2026-09-08T07:32:25.320Z",
+  "ub": "/tmp/scratch-claude-implementer-20260908T071112Z-e61535/installed/uberblick-0.947.0/bin/ub",
+  "model": "claude",
+  "control": "/tmp/scratch-claude-implementer-20260908T071112Z-e61535/evidence-run/control",
+  "workspacePinnedByProjectEntry": "039f7bb4-a22e-41be-8eb1-9bbdf35607b2",
+  "runs": [
+    {
+      "index": 1,
+      "exit": null,
+      "signal": "SIGINT",
+      "startupLine": "ub agents launch: prober on claude in /tmp/scratch-claude-implementer-20260908T071112Z-e61535/evidence-run/control",
+      "idleLine": "work: evidence run complete; will idle for 30min",
+      "freshResultFiles": [
+        "claude-prober-20260908T073225Z-a06ad9.json"
+      ],
+      "result": {
+        "run": "claude-prober-20260908T073225Z-a06ad9",
+        "project": "repeat-launch-control",
+        "workspace": "039f7bb4-a22e-41be-8eb1-9bbdf35607b2"
+      },
+      "ok": true,
+      "problems": []
+    },
+    {
+      "index": 2,
+      "exit": null,
+      "signal": "SIGINT",
+      "startupLine": "ub agents launch: prober on claude in /tmp/scratch-claude-implementer-20260908T071112Z-e61535/evidence-run/control",
+      "idleLine": "work: evidence run complete; will idle for 30min",
+      "freshResultFiles": [
+        "claude-prober-20260908T073427Z-b6770d.json"
+      ],
+      "result": {
+        "run": "claude-prober-20260908T073427Z-b6770d",
+        "project": "repeat-launch-control",
+        "workspace": "bd526fa1-4cb6-4590-bda6-ccb7262e30a2"
+      },
+      "ok": false,
+      "problems": [
+        "result names workspace \"bd526fa1-4cb6-4590-bda6-ccb7262e30a2\", not the project's pinned \"039f7bb4-a22e-41be-8eb1-9bbdf35607b2\""
+      ]
+    },
+    {
+      "index": 3,
+      "exit": null,
+      "signal": "SIGINT",
+      "startupLine": "ub agents launch: prober on claude in /tmp/scratch-claude-implementer-20260908T071112Z-e61535/evidence-run/control",
+      "idleLine": "work: evidence run complete; will idle for 30min",
+      "freshResultFiles": [
+        "claude-prober-20260908T073620Z-5d8578.json"
+      ],
+      "result": {
+        "run": "claude-prober-20260908T073620Z-5d8578",
+        "project": "repeat-launch-control",
+        "workspace": "bd526fa1-4cb6-4590-bda6-ccb7262e30a2"
+      },
+      "ok": false,
+      "problems": [
+        "result names workspace \"bd526fa1-4cb6-4590-bda6-ccb7262e30a2\", not the project's pinned \"039f7bb4-a22e-41be-8eb1-9bbdf35607b2\""
+      ]
+    }
+  ],
+  "repeatable": false
+}

@@ -23,6 +23,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { AGENTS_HELP } from "../src/agents.js";
 import { HELP, MCP_HELP, runCli } from "../src/cli.js";
 import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
 import { ENV_HELP } from "../src/env.js";
@@ -105,7 +106,13 @@ const PATHS: Path[] = [
   ROOT_PATH,
   { argv: ["init"], help: INIT_HELP, options: INIT_OPTIONS },
   { argv: ["update"], help: UPDATE_HELP, options: {} },
-  { argv: ["launch"], help: LAUNCH_HELP, options: LAUNCH_OPTIONS },
+  {
+    argv: ["agents"],
+    help: AGENTS_HELP,
+    options: {},
+    children: ["launch"],
+  },
+  { argv: ["agents", "launch"], help: LAUNCH_HELP, options: LAUNCH_OPTIONS },
   { argv: ["open"], help: OPEN_HELP, options: OPEN_OPTIONS },
   { argv: ["status"], help: STATUS_HELP, options: STATUS_OPTIONS },
   { argv: ["doctor"], help: DOCTOR_HELP, options: DOCTOR_OPTIONS },
@@ -140,6 +147,7 @@ ROOT_PATH.children = PATHS.flatMap(({ argv }) => (argv.length === 1 ? argv : [])
 const DISPATCHERS = [
   { file: "cli.ts", group: [], variable: "command" },
   { file: "cli.ts", group: ["mcp"], variable: "subcommand" },
+  { file: "agents.ts", group: ["agents"], variable: "sub" },
   { file: "workspace.ts", group: ["workspace"], variable: "sub" },
   { file: "remote.ts", group: ["remote"], variable: "sub" },
 ];
@@ -338,7 +346,7 @@ describe("help before the work", () => {
   const inert: string[][] = [
     ["init", "--yes", "--help"],
     ["init", "--mcp", "--no-mcp", "--help"],
-    ["launch", "issue-adversary", "--help"],
+    ["agents", "launch", "issue-adversary", "--help"],
     ["open", "--port", "0", "-h"],
     ["status", "--help"],
     ["doctor", "-h"],
@@ -386,13 +394,23 @@ describe("what is not a request for help", () => {
     // A group answers for itself only when its own one argument is the
     // question. `ub workspace bogus --help` is a typo, not a request, and every
     // level says so the same way — the top level always has.
-    for (const group of [[], ["workspace"], ["remote"], ["mcp"]]) {
+    for (const group of [[], ["workspace"], ["remote"], ["mcp"], ["agents"]]) {
       const argv = [...group, "bogus", "--help"];
       const run = await dispatch(argv);
       expect(run.status, argv.join(" ")).toBe(2);
       expect(run.stdout, argv.join(" ")).toBe("");
       expect(run.stderr, argv.join(" ")).toMatch(/bogus/);
     }
+  });
+
+  it("no longer answers the retired top-level `ub launch`", async () => {
+    // The surface moved under `ub agents`; the old spelling is a typo now, and
+    // says so the way every other unknown command does.
+    const run = await dispatch(["launch", "implementer"]);
+    expect(run.status).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toMatch(/unknown command "launch"/);
+    expect(HELP).not.toContain("launch");
   });
 
   it("still refuses an unknown option, on stderr, with exit 2", async () => {
