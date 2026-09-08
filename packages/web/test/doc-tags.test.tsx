@@ -148,6 +148,21 @@ function addCatalogTags(
   for (const name of names) createTagCatalogEntry(catalog, name, TAGS[name]);
 }
 
+/**
+ * `count` further active entries, named and identified deterministically, so a
+ * test can stand either side of the panel's ten-entry search threshold.
+ */
+function addManyTags(catalog: Y.Doc, count: number): void {
+  for (let index = 0; index < count; index += 1) {
+    const suffix = String(index).padStart(2, "0");
+    createTagCatalogEntry(
+      catalog,
+      `topic-${suffix}`,
+      `20000000-0000-4000-8000-0000000000${suffix}`,
+    );
+  }
+}
+
 function click(element: Element | null | undefined): void {
   act(() => (element as HTMLElement | null | undefined)?.click());
 }
@@ -186,33 +201,80 @@ function option(name: string): HTMLButtonElement | undefined {
 }
 
 describe("the document tag picker", () => {
-  it("renders one searchable control from the catalog, without tag-derived navigation", async () => {
+  it("renders assigned tags as pills and lists a short catalog with no search field", async () => {
     const fix = documentFixture([TAGS.sync]);
     addCatalogTags(fix.catalog.ydoc, ["sync", "billing", "mcp"]);
     const host = await openApp();
 
     expect(picker(host)?.textContent).toContain("sync");
+    expect(host.querySelectorAll(".ub-tag")).toHaveLength(1);
     expect(host.querySelector(".ub-tag-x")).toBeNull();
     expect(host.querySelector(".ub-lifecycle-badge")).toBeNull();
     expect(host.querySelector(".ub-badge")).toBeNull();
 
     click(picker(host));
+    // Three entries is below the threshold, so the panel is a list and nothing
+    // else — there is no field to type into and none to filter through.
+    expect(search()).toBeNull();
     expect(options().map((entry) => entry.textContent?.trim())).toEqual([
       "billing",
       "mcp",
       "✓sync",
     ]);
     expect(option("sync")?.getAttribute("aria-selected")).toBe("true");
+    expect(document.body.textContent).not.toContain("Create");
+  });
 
-    act(() => typeInto(search(), "MC"));
-    expect(options().map((entry) => entry.textContent?.trim())).toEqual(["mcp"]);
-    expect(document.body.textContent).not.toContain("Create MC");
+  it("offers the search field only from ten entries, and takes its filter away with it", async () => {
+    const fix = documentFixture([TAGS.legacy]);
+    addManyTags(fix.catalog.ydoc, 9);
+    addCatalogTags(fix.catalog.ydoc, ["legacy"]);
+    retireTagCatalogEntry(fix.catalog.ydoc, TAGS.legacy);
+    const host = await openApp();
 
+    // Nine active entries plus the one assigned retired entry: ten.
+    click(picker(host));
+    expect(options()).toHaveLength(10);
+    expect(document.activeElement).toBe(search());
+    expect(document.querySelector(".ub-tag-search-icon")).not.toBeNull();
+
+    // Composition keystrokes are not navigation; a real ArrowDown enters the list.
+    act(() => press(search(), "Enter"));
+    expect(getMeta(fix.document.ydoc).tags).toEqual([TAGS.legacy]);
+    act(() => press(search(), "ArrowDown", { isComposing: true }));
+    expect(document.activeElement).toBe(search());
+    act(() => press(search(), "ArrowDown"));
+    expect(document.activeElement?.textContent).toContain("legacy");
+
+    act(() => typeInto(search(), "topic-03"));
+    expect(options().map((entry) => entry.textContent?.trim())).toEqual([
+      "topic-03",
+    ]);
     act(() => typeInto(search(), "missing"));
     expect(options()).toEqual([]);
     expect(document.querySelector(".ub-tag-empty")?.textContent).toBe(
       "No matching tags.",
     );
+
+    // The 10-to-9 case: searching out the retired entry and removing it drops
+    // the count below the threshold. The field goes, the text left in it stops
+    // hiding the other nine, and the focus its option held lands in the list.
+    act(() => typeInto(search(), "legacy"));
+    click(option("legacy"));
+    expect(getMeta(fix.document.ydoc).tags).toEqual([]);
+    expect(search()).toBeNull();
+    expect(options().map((entry) => entry.textContent?.trim())).toEqual([
+      "topic-00",
+      "topic-01",
+      "topic-02",
+      "topic-03",
+      "topic-04",
+      "topic-05",
+      "topic-06",
+      "topic-07",
+      "topic-08",
+    ]);
+    expect(document.activeElement).toBe(options()[0]);
   });
 
   it("distinguishes a hydrated empty catalog from a catalog that has not arrived", async () => {
@@ -223,6 +285,9 @@ describe("the document tag picker", () => {
     expect(document.querySelector(".ub-tag-empty")?.textContent).toBe(
       "No tags available.",
     );
+    // Nothing in the panel can take the keyboard, so the trigger keeps it
+    // rather than letting focus fall to the page body.
+    expect(document.activeElement).toBe(picker(host));
 
     act(() => mounted?.root.unmount());
     mounted?.host.remove();
@@ -270,7 +335,9 @@ describe("the document tag picker", () => {
     click(option("legacy"));
     expect(getMeta(fix.document.ydoc).tags).not.toContain(TAGS.legacy);
     expect(option("legacy")).toBeUndefined();
-    expect(document.activeElement).toBe(search());
+    // The option that held focus has unmounted; below the threshold there is no
+    // search field to fall back to, so the list's first option takes it.
+    expect(document.activeElement).toBe(options()[0]);
 
     // The button can be stale too; the write boundary reads live writability.
     const before = getMeta(fix.document.ydoc).tags;
@@ -279,27 +346,26 @@ describe("the document tag picker", () => {
     expect(getMeta(fix.document.ydoc).tags).toEqual(before);
   });
 
-  it("supports search and option movement from the keyboard, and ignores IME navigation", async () => {
+  it("is operable from the keyboard with no field to enter the list through", async () => {
     const fix = documentFixture();
     addCatalogTags(fix.catalog.ydoc, ["auth", "billing", "mcp"]);
     const host = await openApp();
     const trigger = picker(host);
     click(trigger);
-    expect(document.activeElement).toBe(search());
 
-    act(() => press(search(), "Enter"));
-    expect(getMeta(fix.document.ydoc).tags).toEqual([]);
-    act(() => typeInto(search(), "mcp"));
-    act(() => press(search(), "ArrowDown", { isComposing: true }));
-    expect(document.activeElement).toBe(search());
-
-    act(() => typeInto(search(), ""));
-    act(() => press(search(), "ArrowDown"));
+    // Opening lands on the first option, because there is nothing else to land on.
+    expect(search()).toBeNull();
     expect(document.activeElement?.textContent).toContain("auth");
     act(() => press(document.activeElement, "ArrowDown"));
     expect(document.activeElement?.textContent).toContain("billing");
+    act(() => press(document.activeElement, "End"));
+    expect(document.activeElement?.textContent).toContain("mcp");
+    act(() => press(document.activeElement, "Home"));
+    expect(document.activeElement?.textContent).toContain("auth");
+    act(() => press(document.activeElement, "ArrowUp"));
+    expect(document.activeElement?.textContent).toContain("mcp");
     click(document.activeElement);
-    expect(getMeta(fix.document.ydoc).tags).toContain(TAGS.billing);
+    expect(getMeta(fix.document.ydoc).tags).toContain(TAGS.mcp);
 
     await act(async () => press(document.activeElement, "Escape"));
     expect(document.querySelector(".ub-tag-picker-panel")).toBeNull();
@@ -315,7 +381,22 @@ describe("the document tag picker", () => {
 
     expect(host.querySelector(".ub-tags")?.textContent).toContain("legacy (retired)");
     expect(host.querySelector(".ub-tags")?.textContent).toContain("sync");
+    // The same pills as the writable header draws, and nothing to open.
+    expect(host.querySelectorAll(".ub-tag")).toHaveLength(2);
     expect(picker(host)).toBeNull();
+    expect(host.querySelector(".ub-tag-chevron")).toBeNull();
     expect(document.querySelector(".ub-tag-option")).toBeNull();
+  });
+
+  it("leaves a read-only header with no tags non-interactive", async () => {
+    const fix = documentFixture();
+    addCatalogTags(fix.catalog.ydoc, ["auth", "sync"]);
+    tombstoneDirectoryEntry(fix.directory.ydoc, UUID);
+    const host = await openApp();
+
+    // No "Add tags" fallback and no chevron: an edit this header would refuse.
+    expect(host.querySelector(".ub-tags")?.textContent).toBe("No tags");
+    expect(host.querySelector(".ub-tag-chevron")).toBeNull();
+    expect(picker(host)).toBeNull();
   });
 });

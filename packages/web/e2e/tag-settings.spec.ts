@@ -92,11 +92,14 @@ test("Tags settings is address-selected and its catalog changes converge", async
   const picker = first.getByRole("button", { name: "Edit tags" });
   await picker.focus();
   await picker.press("Enter");
-  const search = first.getByRole("searchbox", { name: "Search tags" });
-  await expect(search).toBeFocused();
-  await search.fill("PRO");
-  await search.press("ArrowDown");
+  // Six entries is under the panel's ten-entry search threshold (#958), so the
+  // keyboard enters the list itself and walks it to the entry just created.
+  await expect(first.getByRole("searchbox", { name: "Search tags" })).toHaveCount(
+    0,
+  );
+  await expect(first.getByRole("option").first()).toBeFocused();
   const product = first.getByRole("option", { name: "product", exact: true });
+  for (let step = 0; step < 4; step += 1) await first.keyboard.press("ArrowDown");
   await expect(product).toBeFocused();
   await product.press("Space");
   await product.press("Escape");

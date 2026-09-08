@@ -2530,9 +2530,11 @@ body {
 /* The eyebrow above the H1 (design surface 1a): what kind of document this is,
    what it is tagged, and which version of it is on screen.
 
-   One row, fixed height, never wrapping. The tag control keeps the same box
-   whether it holds a placeholder or several assignments, and its labels scroll
-   sideways instead of taking a second line. */
+   One row of parts — badge, tags, machine facts — that never breaks apart, and
+   whose `min-height` still reserves a single line before `meta` arrives. What
+   changed with #958 is inside it: the tag pills wrap onto a further line within
+   the strip and grow this row, rather than scrolling sideways in a hidden
+   scroller whose end nobody can see. */
 .ub-doc-meta {
   display: flex;
   align-items: center;
@@ -2563,10 +2565,16 @@ body {
   white-space: nowrap;
 }
 
-/* The catalog-backed tag control, in the row's flexible middle (#509). */
+/* The catalog-backed tag control, in the row's flexible middle (#509, #958).
+
+   Tags, not a form field: pills at their natural width, wrapping within this
+   row. `min-width: 0` is what lets the strip be narrower than its content, and
+   so what lets it wrap at all rather than pushing the machine facts off the
+   end. */
 .ub-tags {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.3rem;
   flex: 1 1 auto;
   min-width: 0;
@@ -2574,46 +2582,48 @@ body {
   font: inherit;
 }
 
+/* Bare on purpose (#958): the pills are the affordance, so the button around
+   them draws no border, no ground and no fixed height. What is left to see is
+   the chevron, which comes up out of its faintness under the pointer. */
 .ub-tag-picker-trigger {
-  height: 2rem;
-  padding: 0.2rem 0.45rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--input);
+  padding: 0;
+  border: 0;
+  background: none;
   text-align: left;
   cursor: pointer;
-}
-
-.ub-tag-picker-trigger:hover {
-  border-color: var(--ring);
 }
 
 .ub-tag-picker-trigger:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
 .ub-tag-selected {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.3rem;
   min-width: 0;
   flex: 1 1 auto;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
 
-.ub-tag-selected::-webkit-scrollbar {
-  display: none;
-}
-
+/* A pill sits at its natural width until the strip has less than that to give,
+   and then the name wraps inside it. A catalog name is up to 30 characters of
+   letters, digits and hyphens, so a single-token one offers the line breaker no
+   opportunity at all: `anywhere` is what gives it one, and — because it is the
+   value that also lowers min-content — what lets this flex item shrink to the
+   room the row has. Without it one legal name is wider than the whole strip and
+   paints over the machine facts beside it, which is neither of the two things
+   the row is allowed to do instead: nothing scrolls sideways and nothing is
+   clipped, the pill just grows downwards and takes the row with it. */
 .ub-tag {
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0.05rem 0.4rem;
-  white-space: nowrap;
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  overflow-wrap: anywhere;
 }
 
 .ub-tag-placeholder {
@@ -2622,16 +2632,24 @@ body {
 
 .ub-tag-chevron {
   flex: none;
+  font-size: 0.65rem;
   opacity: 0.55;
 }
 
+/* The trigger has no edge left to change, so the chevron is the hover cue. */
+.ub-tag-picker-trigger:hover .ub-tag-chevron {
+  opacity: 1;
+}
+
+/* An archived document, or a room refusing writes: the same pills, and they
+   wrap here too — clipping them would hide an assignment this reader has no
+   other way to see. */
 .ub-tags-readonly {
   min-height: 2rem;
-  overflow: hidden;
 }
 
 .ub-tag-picker-panel {
-  width: min(18rem, calc(100vw - 2rem));
+  width: min(20rem, calc(100vw - 2rem));
   padding: 0;
   overflow: hidden;
 }
@@ -2641,19 +2659,51 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-.ub-tag-search {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--input);
-  color: var(--foreground);
-  font: inherit;
+/* The field reads as a field by stepping *down* from the panel, not up (#958).
+   The panel is `--popover`, which the bridge in `ui/tailwind.css` resolves to
+   `--sidebar`; `--input` as a ground is 15% white over it in dark, a wash
+   brighter than the surface it sits on. `--background` is darker than the panel
+   in dark and its own colour in light, which is what every other field in this
+   stylesheet does — and the stroke is `--sidebar-input`, the token #515 derived
+   for exactly this: a field's edge on this surface. */
+.ub-tag-search-field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   padding: 0.35rem 0.5rem;
+  border: 1px solid var(--sidebar-input);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* The ring moves to the composed field, because the input inside it no longer
+   has an edge of its own to draw one around. */
+.ub-tag-search-field:focus-within {
+  outline: 2px solid var(--ring);
+  outline-offset: -1px;
+}
+
+.ub-tag-search-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--muted-foreground);
+}
+
+.ub-tag-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
 }
 
 .ub-tag-search:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -1px;
+  outline: none;
 }
 
 .ub-tag-options {
@@ -2677,9 +2727,14 @@ body {
   cursor: pointer;
 }
 
+/* `--sidebar-accent`, not `--accent`: this panel is painted on `--sidebar`, and
+   in dark `--accent` *is* that value — a highlight that steps nowhere. Without
+   a search field the focused option is the only thing that says the keyboard is
+   in the list, so it has to be visible (#958). The two vendored menus reach the
+   same token through the bridge in `ui/tailwind.css`, for the same reason. */
 .ub-tag-option:hover,
 .ub-tag-option:focus-visible {
-  background: var(--accent);
+  background: var(--sidebar-accent);
   outline: none;
 }
 
