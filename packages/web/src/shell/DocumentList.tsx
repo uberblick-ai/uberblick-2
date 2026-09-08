@@ -152,6 +152,18 @@ function inMode(entry: DirectoryEntry, mode: Mode): boolean {
  * against, so typing it finds documents actually called "Untitled" and not the
  * unnamed ones. An empty needle matches everything, which is what clearing the
  * field has to mean.
+ *
+ * `toLowerCase` is the fold every in-browser filter here already uses — the
+ * document picker over these same titles says so at `filterMentions`, and the
+ * tag picker spells it the same way. It is a simple lowercase, not Unicode
+ * full case folding: `Straße` is not found by `STRASSE`, and `İSTANBUL`
+ * lowercases to a dotted `i` that a typed `istanbul` does not contain. The
+ * alternatives are worse here rather than better — `toLocaleLowerCase("tr")`
+ * finds that one title by breaking every ordinary `I`, and collation-based
+ * matching is the locale-sensitive machinery `byTitle` above deliberately
+ * refuses so that every replica agrees. One fold for every title match in this
+ * app is the honest trade; changing it is a product decision about matching,
+ * not a local repair of this field.
  */
 function titleMatches(entry: DirectoryEntry, needle: string): boolean {
   return entry.title.toLowerCase().includes(needle);
