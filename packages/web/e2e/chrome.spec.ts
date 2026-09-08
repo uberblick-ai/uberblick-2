@@ -2258,3 +2258,119 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
   await expect(waiting.locator(".ub-notice")).toContainText("Waiting for sync");
   expect.soft(await confirmationIsContained(waiting)).toBe(true);
 });
+/**
+ * The document's tags read as tags rather than as a form field (#958).
+ *
+ * Every fact here needs a rendering engine and nothing else can answer it: what
+ * the trigger paints, whether pills wrap or scroll out of sight, where the
+ * keyboard lands when the panel has no field to enter it through, and whether
+ * the field — once ten entries earn one — steps down from the panel it sits on
+ * or washes over it. Dark, because the wash this replaces was `--input` as a
+ * ground, which is 15% white and only visible where `light-dark()` resolved.
+ */
+test("the document's tags are wrapping pills, and the panel earns its search field — dark", async ({
+  browser,
+}) => {
+  const page = await openApp(browser, "dark");
+  await ensureExampleCatalog(page);
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+  const documentUrl = page.url();
+  const trigger = page.getByRole("button", { name: "Edit tags" });
+
+  // Nothing assigned: the fallback stands where the pills will, before the same
+  // chevron, and the control itself draws no box around them.
+  await expect(trigger).toContainText("Add tags");
+  await expect(page.locator(".ub-tag-chevron")).toHaveCount(1);
+  expect(await paintedIn(trigger, "background-color")).toBe("rgba(0, 0, 0, 0)");
+  expect(await paintedIn(trigger, "border-top-width")).toBe("0px");
+
+  // Five entries is under the threshold, so the panel is a list: no field, and
+  // the keyboard enters the list itself.
+  await trigger.focus();
+  await trigger.press("Enter");
+  await expect(page.getByRole("searchbox", { name: "Search tags" })).toHaveCount(0);
+  const first = page.getByRole("option").first();
+  await expect(first).toBeFocused();
+
+  // That focus is the only thing saying the keyboard is in the list, so the
+  // highlight has to step off the panel's own ground — `--accent` and
+  // `--sidebar` are one value in dark, and a cue drawn in it shows nothing.
+  const panelFill = await painted(page, ".ub-tag-picker-panel", "background-color");
+  expect(
+    separation(await paintedIn(first, "background-color"), panelFill),
+  ).toBeGreaterThan(0.02);
+
+  // A comfortable list rather than a narrow box.
+  const panelBox = await page.locator(".ub-tag-picker-panel").boundingBox();
+  expect(panelBox?.width ?? 0).toBeGreaterThanOrEqual(320);
+
+  for (const tag of ["auth", "billing", "mcp", "permissions", "sync"]) {
+    await page.getByRole("option", { name: tag, exact: true }).click();
+  }
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+
+  // Narrow enough that five pills cannot sit on one line. They take a second
+  // line inside the row and the row grows to hold them; the scroller that used
+  // to hide the overflow is gone, so nothing is out of sight.
+  await page.getByRole("button", { name: "Hide document list" }).click();
+  await page.setViewportSize({ width: 420, height: 620 });
+  const strip = await page.evaluate(() => {
+    const selected = document.querySelector(".ub-tag-selected");
+    const pill = document.querySelector(".ub-tag");
+    const row = document.querySelector(".ub-doc-meta");
+    if (selected === null || pill === null || row === null) {
+      throw new Error("e2e: no tag strip in the identity line");
+    }
+    return {
+      clipped: selected.scrollWidth - selected.clientWidth,
+      height: selected.getBoundingClientRect().height,
+      pill: pill.getBoundingClientRect().height,
+      row: row.getBoundingClientRect().height,
+    };
+  });
+  expect(strip.height).toBeGreaterThan(strip.pill * 1.5);
+  expect(strip.clipped).toBeLessThanOrEqual(1);
+  expect(strip.row).toBeGreaterThanOrEqual(strip.height);
+
+  // Past ten entries the field appears — and it is a bordered field carrying a
+  // search icon, on a ground no lighter than the panel under it.
+  await page.setViewportSize({ width: 1280, height: 620 });
+  await page.goto(
+    new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href,
+  );
+  for (const name of ["design", "hub", "release", "schema", "storage"]) {
+    await page.getByLabel("Create a tag").fill(name);
+    await page.getByRole("button", { name: "Create", exact: true }).click();
+    await expect(page.getByRole("button", { name: `Retire ${name}` })).toBeVisible();
+  }
+  await page.goto(documentUrl);
+
+  const search = page.getByRole("searchbox", { name: "Search tags" });
+  await trigger.click();
+  await expect(search).toBeFocused();
+  await expect(page.locator(".ub-tag-search-icon")).toHaveCount(1);
+  const field = page.locator(".ub-tag-search-field");
+  expect(await paintedIn(field, "border-top-width")).toBe("1px");
+  const fieldFill = await paintedIn(field, "background-color");
+  const panel = await painted(page, ".ub-tag-picker-panel", "background-color");
+  // Opaque *and* darker: the two halves of "no lighter than the panel". An
+  // alpha wash reads a lightness of its own while painting the panel brighter,
+  // so the opacity is what makes the lightness answer the question.
+  expect(oklab(fieldFill).alpha).toBe(1);
+  expect(oklab(fieldFill).L).toBeLessThanOrEqual(oklab(panel).L);
+  expect(separation(fieldFill, panel)).toBeGreaterThan(0.02);
+
+  // Leave the seeded catalog as this file's other tests expect to find it.
+  await page.goto(
+    new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href,
+  );
+  for (const name of ["design", "hub", "release", "schema", "storage"]) {
+    await page.getByRole("button", { name: `Retire ${name}` }).click();
+    await expect(page.getByRole("button", { name: `Restore ${name}` })).toBeVisible();
+  }
+  await expect(
+    page.getByRole("region", { name: "Active" }).getByRole("listitem"),
+  ).toHaveCount(5);
+});
