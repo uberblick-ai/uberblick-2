@@ -20,10 +20,21 @@ case "$role" in
     n=$(gh issue list -R "$REPO" --state open --limit 200 --label ready --json number --jq length) || exit 2
     m=$(gh search prs -R "$REPO" --state open --match comments fix-now --json number --jq length) || exit 2
     n=$((n + m)) ;;
+  implementation-reviewer)
+    # a review request lives in a PR comment, and a request seconds old is
+    # exactly the one a reviewer loop must not miss — GitHub's comment search
+    # index lags durable state, so read the unindexed PR list with its comments,
+    # project each comment's first line beside its PR number, and count the PRs
+    # whose thread carries a request; head, runtime, claim and whether the
+    # request is still current stay the role's own read
+    firstlines=$(gh pr list -R "$REPO" --state open --json number,comments --jq \
+      '.[] | .number as $pr | .comments[].body | "\($pr) \(split("\n")[0])"') || exit 2
+    n=$(printf '%s\n' "$firstlines" \
+      | sed -n 's/^\([0-9][0-9]*\) Review-request:.*/\1/p' | sort -u | grep -c .) ;;
   integrator)
     n=$(gh pr list -R "$REPO" --state open --json isDraft,labels --jq \
       '[.[] | select(.isDraft | not) | select(.labels | map(.name) | index("needs-human") | not)] | length') || exit 2 ;;
-  *) echo "usage: probe-work.sh issue-preparer|implementer|integrator" >&2; exit 2 ;;
+  *) echo "usage: probe-work.sh issue-preparer|implementer|implementation-reviewer|integrator" >&2; exit 2 ;;
 esac
 if [ "$n" -eq 1 ]; then noun=candidate; else noun=candidates; fi
 echo "probe-work: $role: $n $noun"

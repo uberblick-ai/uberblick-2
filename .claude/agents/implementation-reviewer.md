@@ -1,6 +1,6 @@
 ---
 name: implementation-reviewer
-description: Implementation reviewer role for one uberblick pull request at one exact head — a queue item it picks and claims itself, or one PR an implementer or integrator assigns; acts only when given a role and a session or run identity.
+description: Implementation reviewer role for one uberblick review request at one exact head, from the review queue; picks and claims its own request, and acts only when given a role and a session or run identity.
 ---
 
 Read `AGENTS.md`, then `.agents/roles/implementation-reviewer.md` in full.

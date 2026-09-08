@@ -12,11 +12,13 @@ An entry role receives its role and session or run identity, then self-picks one
 eligible queue item under its `Pickup` section. Missing either is a refusal
 before side effects.
 
-**An internal subagent is the one exception, and it is the same exception for
-every delegating role** — issue-preparer to issue-adversary, implementer or
-integrator to implementation-reviewer. The
-parent supplies the child's role and run identity, the exact GitHub issue or PR
-key, and its own run identity as parent; nothing else. The child reconstructs
+**An internal subagent is the one exception** — the issue-preparer starting an
+issue-adversary, and nothing else. Implementation review is not delegated: the
+role that owes a round posts the durable request
+`.agents/protocols/review-protocol.md` defines and an independently launched
+`implementation-reviewer` claims it. The
+parent supplies the child's role and run identity, the exact GitHub issue key,
+and its own run identity as parent; nothing else. The child reconstructs
 from GitHub, never searches a queue and never acts on another item, and writes
 its durable result there before the parent acts on it. It does not consume or
 release the parent's claim, and a private transcript is never a handoff.
@@ -27,19 +29,18 @@ item it holds:
 ```text
 Delegated: <child role> <child run id>
 Status: pending
-Target: <issue|PR> #N
+Target: issue #N
 Parent: <parent role> <parent run id>
 ```
 
-For a PR target the record also names `Head: <sha>`. The parent must hold the
-live claim named by `Parent`; for an implementer's pre-handoff PR review, that
-is its issue claim naming the PR branch. The child validates that claim, that
+The parent must hold the
+live claim named by `Parent`. The child validates that claim, that
 the latest `Delegated:` record for its role and target names its run id, and
 every supplied value before its first side effect. A missing or mismatched
 record is a refusal, not permission to fall back to the queue.
 
-Every internal child is a non-implementation child (`issue-adversary` or
-`implementation-reviewer`); no role delegates an implementation. The delegation
+The internal child is the `issue-adversary`; no role delegates an
+implementation or a review. The delegation
 comment is the child's one mutable lifecycle record: the child edits `Status: pending`
 to `Status: running` before substantive work and to `Status: complete` when it
 appends its grounded verdict. It posts no separate nested claim or `Done:`
@@ -78,7 +79,9 @@ ignored by preparation and sorts as Medium for implementation pickup.
 **The claim record.** The implementer claims in `.github/ISSUE_SPEC.md`'s
 grammar: `Claimed: <branch>` / `Implementer: <claude|codex> <id>`. Every
 top-level role other than the implementer posts `Claim: <role> <session-or-run
-id>`, plus the grounding SHA when its outcome is tied to one. (The `Parent:`
+id>`, plus the grounding SHA when its outcome is tied to one; an
+`implementation-reviewer` claims one review request that way, naming the head
+and request `.agents/protocols/review-protocol.md` requires. (The `Parent:`
 line of a delegation record names a role and run id; the `Parent: #N` split
 header `.github/ISSUE_SPEC.md` defines for an issue body is a different record
 in a different place.) A top-level handoff opens `Done: <role>
@@ -125,14 +128,14 @@ exists and the claim's updated_at is more than 30 minutes old. A later valid
 claim takes over a stale one and continues the current
 remote branch head; the superseded holder stops if it resumes.
 
-A nested **non-implementation** assignment expires when its record remains
+A nested adversary assignment expires when its record remains
 `pending` for 10 minutes, when a `running` record's `updated_at` is more than 30
 minutes old, or immediately when the runtime confirms it stopped without a
 verdict. The same live parent marks that record failed and may then delegate
 one replacement; the latest-record check makes a late child refuse. A live
 child may renew by editing its record under the same 25/30-minute cadence as a
 claim. An unfinished attempt produced no verdict, so replacement is not a
-second adversary or review round.
+second adversary round.
 
 ## Every process a run starts is that run's to end
 

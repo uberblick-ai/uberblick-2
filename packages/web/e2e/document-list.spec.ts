@@ -9,12 +9,14 @@
  * browser context, and nothing told this one about them.
  *
  * The semantic table and keyboard-sort contract need the browser's own
- * accessibility and activation behavior. The same production path proves that
- * a body-only query crosses `ub open`'s authenticated search seam, while a page
- * connected directly to a hub names the unavailable state. Request races and
- * empty/failure wording stay in the focused unit suite. The lifecycle scenario
- * is the other browser-only seam: an external writer moves the open header and
- * the directory-backed row without a reload.
+ * accessibility and activation behavior. So does the filter above it, and for
+ * three claims jsdom cannot make: that it issues no request over a real
+ * network from a page a real `ub open` is serving, that it is laid out at the
+ * width of the table it narrows, and that a page connected straight at a hub —
+ * with no `ub open` behind it at all — filters exactly the same way. Which
+ * text it matches, and the wording of an empty list, stay in the focused unit
+ * suite. The lifecycle scenario is the other browser-only seam: an external
+ * writer moves the open header and the directory-backed row without a reload.
  */
 
 import { expect, test } from "@playwright/test";
@@ -130,19 +132,33 @@ test("the workspace address is the list, and it holds what another browser creat
   await changedHeading.getByRole("button", { name: "Last changed" }).click();
   await expect(changedHeading).toHaveAttribute("aria-sort", "descending");
   await expect(listedTitles(reader)).toHaveText([second, first]);
-  // The field calls the store-backed search endpoint through the same real
-  // `ub open`. Both terms occur only in the body, and the second is a prefix.
-  const search = reader.getByRole("searchbox", { name: "Search document text" });
-  await expect(search).toBeEnabled();
-  await search.fill("bodyonly quasartr*");
-  await expect(listedTitles(reader)).toHaveText([second]);
+  // The field narrows the rows already on screen, and asks this real `ub open`
+  // nothing while doing it.
+  const searched: string[] = [];
+  reader.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/search") searched.push(request.url());
+  });
+  const filterField = reader.getByRole("searchbox", {
+    name: "Filter this list by title",
+  });
+  await expect(filterField).toBeEnabled();
+  await expect(filterField).toHaveAttribute("placeholder", "Filter by title");
+  // The width of the table it narrows, resolved by the browser's own layout.
+  const box = await filterField.boundingBox();
+  const tableBox = await table.boundingBox();
+  expect(box?.width).toBeCloseTo(tableBox?.width ?? 0, 0);
 
-  // Titles are part of the same index, and clearing restores the whole list
-  // locally rather than issuing an empty search.
-  await search.fill(first);
+  // The term occurs only in the second document's body, which this field does
+  // not consult — the index still holds it, and nobody asked the index.
+  await filterField.fill("bodyonly");
+  await expect(listedTitles(reader)).toHaveText([]);
+
+  // Titles it does consult, folding case, and clearing restores the list.
+  await filterField.fill(first.toUpperCase());
   await expect(listedTitles(reader)).toHaveText([first]);
-  await search.fill("");
+  await filterField.fill("");
   await expect(listedTitles(reader)).toHaveText([second, first]);
+  expect(searched).toEqual([]);
 
   // The sidebar's fixed entry is the same list at its own address.
   const entry = reader.getByRole("button", { name: "All docs" });
@@ -171,6 +187,8 @@ test("a new document stores the title shown by the list", async ({ browser }) =>
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-title")).toHaveValue("Untitled");
 
+  // The stored title is literally "Untitled", so the title filter finds it —
+  // unlike a row whose title is absent and merely drawn as that word.
   await page.getByRole("button", { name: "All docs" }).click();
   await page.locator(".ub-docs-search").fill("untitled");
   await expect(listedTitles(page)).toHaveText(["Untitled"]);
@@ -184,13 +202,13 @@ test("a lifecycle update outside the browser moves the row and both badges", asy
   // lifecycle UI, so keep its browser on the same upstream as its MCP writer.
   const { context, page } = await openUpstreamApp(browser, harness());
   contexts.push(context);
-  const unavailable = page.getByRole("searchbox", {
-    name: "Search unavailable without ub open",
+  // No `ub open` behind this page, and the filter does not care: what it
+  // narrows already arrived over the hub connection.
+  const filterField = page.getByRole("searchbox", {
+    name: "Filter this list by title",
   });
-  await expect(unavailable).toBeDisabled();
-  await expect(page.locator(".ub-docs-search-state")).toContainText(
-    "connected directly to a remote hub",
-  );
+  await expect(filterField).toBeEnabled();
+  await expect(page.locator(".ub-docs")).not.toContainText("unavailable");
   const session = agent().open({ name: "document-list-e2e" });
   const created = await session.call<{ uuid: string }>("create_doc", {
     title,
@@ -203,6 +221,10 @@ test("a lifecycle update outside the browser moves the row and both badges", asy
   await expect(row.locator(".ub-lifecycle-badge")).toHaveText(
     "Product · planned",
   );
+
+  await filterField.fill(title);
+  await expect(page.locator(".ub-docs-row")).toHaveCount(1);
+  await filterField.fill("");
 
   await row.locator(".ub-docs-open").click();
   await expect(page.locator(".ub-lifecycle-badge")).toHaveText(

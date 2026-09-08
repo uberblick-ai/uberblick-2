@@ -56,7 +56,35 @@ function tagLabel(entry: TagCatalogEntry): string {
   return entry.state === "retired" ? `${entry.name} (retired)` : entry.name;
 }
 
-/** The searchable, catalog-backed multi-select in the document header. */
+/**
+ * How many entries the panel lists before it offers a search field (#958).
+ *
+ * Below it the whole vocabulary is on screen already, and a field would only
+ * stand between the reader and the first option — so the list is the panel,
+ * and the keyboard enters it directly. The count is the live one: it includes
+ * the retired entries this document still carries, and it is read again on
+ * every render, so removing the tenth takes the field away with it rather than
+ * leaving a filter nobody can see.
+ */
+const TAG_SEARCH_THRESHOLD = 10;
+
+/** A magnifier, so the field reads as a search before anything is typed. */
+function TagSearchIcon(): ReactElement {
+  return (
+    <svg className="ub-tag-search-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="6.75" cy="6.75" r="4.25" fill="none" stroke="currentColor" strokeWidth="1.3" />
+      <path
+        d="M9.9 9.9 13.5 13.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** The catalog-backed multi-select in the document header, as inline pills. */
 function TagStrip({
   ydoc,
   tags,
@@ -80,6 +108,8 @@ function TagStrip({
   const search = useRef<HTMLInputElement | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  /** Set when a toggle is about to unmount the option that holds focus. */
+  const repairFocus = useRef(false);
   const listId = useId();
   const arrived =
     catalogConnection !== null && catalogStatus.hasReceivedServerState;
@@ -94,7 +124,11 @@ function TagStrip({
   const options = (catalog?.entries ?? []).filter(
     (entry) => entry.state === "active" || selected.has(entry.id),
   );
-  const normalizedQuery = query.trim().toLowerCase();
+  const showSearch = options.length >= TAG_SEARCH_THRESHOLD;
+  // No field, no filter. `query` survives until the popover closes, so a count
+  // that drops below the threshold while the panel is open would otherwise
+  // leave text nobody can see hiding entries nobody can reach.
+  const normalizedQuery = showSearch ? query.trim().toLowerCase() : "";
   const filtered = options.filter(
     (entry) =>
       normalizedQuery === "" || entry.name.toLowerCase().includes(normalizedQuery),
@@ -103,6 +137,31 @@ function TagStrip({
   useEffect(() => {
     if (readOnly || !arrived) setOpen(false);
   }, [arrived, readOnly]);
+
+  /**
+   * The way into the open panel, as the panel currently is: the search field
+   * where there is one, otherwise the first option — and the trigger where
+   * there is neither, so the keyboard never falls through to the page body.
+   */
+  const focusPanelEntry = (): void => {
+    if (showSearch) {
+      search.current?.focus();
+      return;
+    }
+    const first = filtered.length > 0 ? optionRefs.current[0] : null;
+    if (first !== null && first !== undefined) first.focus();
+    else trigger.current?.focus();
+  };
+
+  // Removing an assigned retired entry unmounts the option holding focus, and
+  // may take the search field with it. Repair after the render that dropped it.
+  // Deliberately unkeyed and guarded by the ref: what this must run after is
+  // *that* render, whichever one it turns out to be.
+  useEffect(() => {
+    if (!repairFocus.current) return;
+    repairFocus.current = false;
+    focusPanelEntry();
+  });
 
   const toggle = (entry: TagCatalogEntry): void => {
     if (
@@ -122,7 +181,7 @@ function TagStrip({
     const isSelected = liveIds.includes(entry.id);
     const liveEntry = getTagCatalogEntry(catalogConnection.ydoc, entry.id);
     if (!isSelected && liveEntry?.state !== "active") return;
-    if (isSelected && liveEntry?.state === "retired") search.current?.focus();
+    if (isSelected && liveEntry?.state === "retired") repairFocus.current = true;
     assignDocumentTags(
       ydoc,
       catalogConnection.ydoc,
@@ -185,33 +244,38 @@ function TagStrip({
         className="ub-tag-picker-panel"
         onOpenAutoFocus={(event) => {
           event.preventDefault();
-          search.current?.focus();
+          focusPanelEntry();
         }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           trigger.current?.focus();
         }}
       >
-        <div className="ub-tag-search-wrap">
-          <input
-            ref={search}
-            type="search"
-            className="ub-tag-search"
-            value={query}
-            placeholder="Search tags"
-            aria-label="Search tags"
-            aria-controls={listId}
-            onChange={(event) => setQuery(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              const native = event.nativeEvent;
-              if (native.isComposing || native.keyCode === 229) return;
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                focusOption(0);
-              }
-            }}
-          />
-        </div>
+        {showSearch && (
+          <div className="ub-tag-search-wrap">
+            <span className="ub-tag-search-field">
+              <TagSearchIcon />
+              <input
+                ref={search}
+                type="search"
+                className="ub-tag-search"
+                value={query}
+                placeholder="Search tags"
+                aria-label="Search tags"
+                aria-controls={listId}
+                onChange={(event) => setQuery(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  const native = event.nativeEvent;
+                  if (native.isComposing || native.keyCode === 229) return;
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    focusOption(0);
+                  }
+                }}
+              />
+            </span>
+          </div>
+        )}
         <div
           id={listId}
           className="ub-tag-options"

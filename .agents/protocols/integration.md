@@ -37,7 +37,7 @@ findings-conditional protocol.
   does not block merge. Any new commit on the branch (fix-ups included)
   invalidates test/typecheck and immutable review evidence: re-run those gates
   at the new `headRefOid`. For either earlier adversarial verdict, follow
-  `review-protocol.md`'s risk-scoped re-review rule; either run a fresh round or
+  `review-protocol.md`'s risk-scoped re-review rule; either request a fresh round or
   record exactly which reasoning still applies and why. The integrator's own
   gate work does not fill a missing challenger slot.
 - An advance of `origin/main` after those exact-head gates fires a separate
@@ -67,7 +67,7 @@ session memory can contradict one that was written down while you were
 elsewhere.
 
 **Findings.** `review-protocol.md` is the whole findings-conditional protocol —
-the external round's mechanism and brief, finding triage, the one batched fix-up
+the durable review request and the wait for its verdict, finding triage, the one batched fix-up
 wave per review head, risk-scoped re-review with the round-count rule, and the
 exit condition. Read it whenever a PR has a round to request or a finding to
 disposition.
@@ -75,7 +75,7 @@ disposition.
 ## Run the required checks
 
 Determine the required review and gates from the diff and delivery policy.
-Start an owed independent review early; perform mechanical checks concurrently
+Request an owed independent review early; perform mechanical checks concurrently
 when their inputs and workspaces are independent. Ordinary commands suffice:
 do not create an agent per mechanical check. The integrator owns acceptance
 judgment, tier classification and durable results.
