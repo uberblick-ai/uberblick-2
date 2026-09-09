@@ -21,7 +21,8 @@
  *
  * The field above the table is the same derivation narrowed once more, and it
  * asks nobody anything: it keeps the rows of the selected mode whose *title*
- * contains what was typed, case-insensitively. The stub caches every title, so
+ * contains what was typed, ignoring case and the diacritics the store's own
+ * index ignores (`title-fold.ts`). The stub caches every title, so
  * it consults nothing else, fetches nothing, and behaves identically whether
  * the page is served by `ub open` or opened straight at a hub. Querying
  * descriptions and block text through `/api/search` is what this page used to
@@ -64,6 +65,7 @@ import type { RoomConnection } from "../collab/rooms.js";
 import { useRoomStatus } from "../ui/hooks.js";
 import { LifecycleBadge } from "../ui/LifecycleBadge.js";
 import { formatTimestamp, useTimestampClock } from "../ui/timestamps.js";
+import { foldForTitleMatch } from "../title-fold.js";
 
 /**
  * What the field does, said twice on purpose.
@@ -141,9 +143,10 @@ function inMode(entry: DirectoryEntry, mode: Mode): boolean {
 }
 
 /**
- * Case-insensitive substring over the stub's own title, and nothing else.
+ * Substring over the stub's own title, and nothing else, under
+ * {@link foldForTitleMatch}.
  *
- * `needle` arrives already trimmed and lowercased, so the comparison is one
+ * `needle` arrives already trimmed and folded, so the comparison is one
  * `includes` per row over data the list is already holding — no request, no
  * document room, no index.
  *
@@ -153,20 +156,17 @@ function inMode(entry: DirectoryEntry, mode: Mode): boolean {
  * unnamed ones. An empty needle matches everything, which is what clearing the
  * field has to mean.
  *
- * `toLowerCase` is the fold every in-browser filter here already uses — the
- * document picker over these same titles says so at `filterMentions`, and the
- * tag picker spells it the same way. It is a simple lowercase, not Unicode
- * full case folding: `Straße` is not found by `STRASSE`, and `İSTANBUL`
- * lowercases to a dotted `i` that a typed `istanbul` does not contain. The
- * alternatives are worse here rather than better — `toLocaleLowerCase("tr")`
- * finds that one title by breaking every ordinary `I`, and collation-based
- * matching is the locale-sensitive machinery `byTitle` above deliberately
- * refuses so that every replica agrees. One fold for every title match in this
- * app is the honest trade; changing it is a product decision about matching,
- * not a local repair of this field.
+ * The fold itself is the `@` picker's fold: `filterMentions` runs the same
+ * function over these same titles, so a title one of them matches for a query
+ * the other offers for it. What it does and why it stops where it does is
+ * documented at its definition; here it is enough that the query and the title
+ * go through it alike. It is not collation — the locale-sensitive machinery
+ * `byTitle` above deliberately refuses so that every replica agrees on order —
+ * and it is not the tag picker's plain lowercase, whose catalog names cannot
+ * carry a diacritic.
  */
 function titleMatches(entry: DirectoryEntry, needle: string): boolean {
-  return entry.title.toLowerCase().includes(needle);
+  return foldForTitleMatch(entry.title).includes(needle);
 }
 
 /**
@@ -306,7 +306,7 @@ export function DocumentList({
     }
     return named;
   }, [groups]);
-  const needle = query.trim().toLowerCase();
+  const needle = foldForTitleMatch(query.trim());
   const rows = useMemo(
     () =>
       sortDirectory(
