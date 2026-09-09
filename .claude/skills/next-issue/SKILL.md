@@ -10,7 +10,7 @@ description: >-
 
 `/next-issue <role>` starts exactly one fresh session of one entry role as a
 child of this one, waits for it to end, and reports how it ended. It is the
-interactive counterpart of `ub launch <role>`, which owns the unattended
+interactive counterpart of `ub agents launch <role>`, which owns the unattended
 terminal loop and every Codex transport; the loop around this file belongs to
 the caller.
 
@@ -23,7 +23,7 @@ the caller.
 interactive session's own transcript. A reviewer started here is therefore a
 Claude reviewer, and takes only the review requests that name that runtime.
 For a Codex run, or for an unattended loop on either runtime, use
-`ub launch <role> [--model claude|codex]` and start nothing here.
+`ub agents launch <role> [--model claude|codex]` and start nothing here.
 
 ## What this does
 

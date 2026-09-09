@@ -23,6 +23,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { AGENTS_HELP } from "../src/agents.js";
 import { HELP, MCP_HELP, runCli } from "../src/cli.js";
 import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
 import { ENV_HELP } from "../src/env.js";
@@ -105,6 +106,15 @@ const PATHS: Path[] = [
   ROOT_PATH,
   { argv: ["init"], help: INIT_HELP, options: INIT_OPTIONS },
   { argv: ["update"], help: UPDATE_HELP, options: {} },
+  {
+    argv: ["agents"],
+    help: AGENTS_HELP,
+    options: {},
+    children: ["launch"],
+  },
+  { argv: ["agents", "launch"], help: LAUNCH_HELP, options: LAUNCH_OPTIONS },
+  // The compatibility alias is one of the paths this manifest is for: it is
+  // typed by people, so it owes the same help as the command it aliases.
   { argv: ["launch"], help: LAUNCH_HELP, options: LAUNCH_OPTIONS },
   { argv: ["open"], help: OPEN_HELP, options: OPEN_OPTIONS },
   { argv: ["status"], help: STATUS_HELP, options: STATUS_OPTIONS },
@@ -140,6 +150,7 @@ ROOT_PATH.children = PATHS.flatMap(({ argv }) => (argv.length === 1 ? argv : [])
 const DISPATCHERS = [
   { file: "cli.ts", group: [], variable: "command" },
   { file: "cli.ts", group: ["mcp"], variable: "subcommand" },
+  { file: "agents.ts", group: ["agents"], variable: "sub" },
   { file: "workspace.ts", group: ["workspace"], variable: "sub" },
   { file: "remote.ts", group: ["remote"], variable: "sub" },
 ];
@@ -338,7 +349,7 @@ describe("help before the work", () => {
   const inert: string[][] = [
     ["init", "--yes", "--help"],
     ["init", "--mcp", "--no-mcp", "--help"],
-    ["launch", "issue-adversary", "--help"],
+    ["agents", "launch", "issue-adversary", "--help"],
     ["open", "--port", "0", "-h"],
     ["status", "--help"],
     ["doctor", "-h"],
@@ -386,13 +397,31 @@ describe("what is not a request for help", () => {
     // A group answers for itself only when its own one argument is the
     // question. `ub workspace bogus --help` is a typo, not a request, and every
     // level says so the same way — the top level always has.
-    for (const group of [[], ["workspace"], ["remote"], ["mcp"]]) {
+    for (const group of [[], ["workspace"], ["remote"], ["mcp"], ["agents"]]) {
       const argv = [...group, "bogus", "--help"];
       const run = await dispatch(argv);
       expect(run.status, argv.join(" ")).toBe(2);
       expect(run.stdout, argv.join(" ")).toBe("");
       expect(run.stderr, argv.join(" ")).toMatch(/bogus/);
     }
+  });
+
+  it("takes `ub launch` down the route `ub agents launch` names", async () => {
+    // `ub launch` is the spelling this surface shipped under and stays a
+    // compatibility alias (owner decision, 2026-09-08). What that promises is
+    // one route, not one wording: the same argv reaches the same behaviour and
+    // the same exit status either way. Here that is the usage errors, which the
+    // dispatcher answers before anything is resolved or started; the launch
+    // path itself is the same equivalence in `agents-launch.test.ts`.
+    for (const rest of [[], ["implementer", "--model", "gpt"], ["a", "b"]]) {
+      const canonical = await dispatch(["agents", "launch", ...rest]);
+      const alias = await dispatch(["launch", ...rest]);
+      expect(canonical.status, rest.join(" ")).toBe(2);
+      expect(alias, `ub launch ${rest.join(" ")}`).toEqual(canonical);
+    }
+    // And the root help says the alias is one, so a reader of the catalog is
+    // not left with two commands to choose between.
+    expect(HELP).toContain("compatibility alias for `ub agents launch`");
   });
 
   it("still refuses an unknown option, on stderr, with exit 2", async () => {

@@ -339,9 +339,32 @@ ub workspace       # the workspace in force, and which layer chose it
 ub workspace list  # workspaces this machine has a database for
 ub workspace use   # make a workspace this machine's default
 ub remote          # the endpoint in force, and what sharing it buys
+ub agents launch   # keep one entry role of a project you select running
 ub mcp install     # register uberblick with an MCP client
 ub mcp serve       # the stdio entry point for an MCP client
 ```
+
+**`ub agents launch <role>` runs *your project's* roles, not uberblick's.** The
+project is the Git root at or above the working directory, or the one
+`--project <dir>` names, and everything the loop needs comes out of that
+project's own `.agents/launch.json`: which entry roles exist, each role's
+contract, its per-runtime adapter, its default runtime, its sandbox or
+permission mode, and the cheap probe that says whether starting a session is
+worth it. Where this executable was installed contributes none of that, so two
+projects that give the same role name different contracts each get their own —
+and a project that has adopted no workflow is refused, by name and by the path
+that was searched, before any child process starts. The command still selects,
+claims and transitions nothing; the role does all of that.
+
+Grants stay yours. You authenticate `claude` and `codex` once, and `ub` writes
+no trust entry, copies no credential and passes a session exactly the sandbox
+or permission mode its project declared. Each runtime does keep its own record
+of the project paths it has seen, in its own user-level configuration — a first
+launch for a path a runtime has not seen before completes without an
+interactive dialog and leaves such a record behind, and a runtime may rewrite
+it again later in the same session. That is the supported setup rather than a
+fault to suppress (owner decision, 2026-09-08). A runtime that is missing or
+logged out stops the launch before any session starts, naming what to do.
 
 Both declared names work — `ub` and `uberblick`. What puts them on PATH is mise:
 `mise.toml` adds the checkout's `node_modules/.bin` to `[env] _.path`, and

@@ -10,14 +10,13 @@
  * reason to run it by hand.
  */
 
+import { agentsCommand } from "./agents.js";
 import { doctorCommand } from "./doctor.js";
 import { envCommand } from "./env.js";
 import { initCommand } from "./init.js";
 import { installCommand } from "./install.js";
-import { isInstallPayload } from "./installation.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
-import { launchCommand } from "./launch.js";
 import { openCommand } from "./open.js";
 import { remoteCommand } from "./remote.js";
 import { serveCommand } from "./serve.js";
@@ -35,7 +34,8 @@ commands:
                          given, the new workspace is created on that hub
   update                 update the copy of uberblick you are running — a
                          Homebrew installation, or a checkout on main
-  launch <role>          keep one agent entry role running in this terminal
+  agents <command>       run the agent roles of a project you select
+  launch <role>          compatibility alias for \`ub agents launch\`
   open [options]         serve the web app and a hub in the foreground, and
                          open the browser
   status [--json]        workspace, hub, credential, database and sync state
@@ -50,12 +50,6 @@ options:
   -h, --help        show this help; after a command, that command's help
   -v, --version     print the version
 `;
-
-function visibleHelp(): string {
-  return isInstallPayload()
-    ? HELP.replace("  launch <role>          keep one agent entry role running in this terminal\n", "")
-    : HELP;
-}
 
 /**
  * `ub mcp` is a group like `workspace` and `remote`, with one human child.
@@ -80,7 +74,7 @@ export async function runCli(
   const [command, ...rest] = argv;
 
   if (command === undefined || command === "help" || command === "--help" || command === "-h") {
-    io.out(visibleHelp());
+    io.out(HELP);
     return 0;
   }
   if (command === "--version" || command === "-v") {
@@ -93,8 +87,14 @@ export async function runCli(
   if (command === "update") {
     return await updateCommand(rest, io);
   }
+  if (command === "agents") {
+    return await agentsCommand(rest, io);
+  }
+  // The compatibility alias (owner decision, 2026-09-08): `ub launch` is the
+  // spelling this surface shipped under, kept pointing at the canonical route
+  // rather than at a copy of it, so both spellings can only ever behave alike.
   if (command === "launch") {
-    return await launchCommand(rest, io);
+    return await agentsCommand(["launch", ...rest], io);
   }
   if (command === "open") {
     return await openCommand(rest, io);
@@ -136,6 +136,6 @@ export async function runCli(
   }
 
   // The help goes to stderr here, so a pipe reading stdout sees nothing at all.
-  io.err(`ub: unknown command ${JSON.stringify(command)}\n\n${visibleHelp()}`);
+  io.err(`ub: unknown command ${JSON.stringify(command)}\n\n${HELP}`);
   return 2;
 }

@@ -6,7 +6,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,6 +20,7 @@ import {
   type SessionProcesses,
   type SessionResult,
   LAUNCH_HELP,
+  LAUNCH_OPTIONS,
   claudeSessionArgs,
   codexSessionArgs,
   createLaunchServices,
@@ -28,6 +31,7 @@ import {
   readLaunchData,
   runForeground,
 } from "../src/launch.js";
+import { resolveProjectRoot } from "../src/project.js";
 import { REPO_ROOT, removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -66,6 +70,7 @@ function rig(options: {
   const waits = [...(options.waits ?? [])];
   const refreshes = [...(options.refreshes ?? [])];
   const seen = {
+    dataLoads: [] as Array<string | undefined>,
     preflight: [] as Array<{ runtime: string; adapter: string }>,
     refreshes: 0,
     probes: [] as Array<readonly string[]>,
@@ -76,7 +81,10 @@ function rig(options: {
   const services: LaunchServices = {
     root: REPO_ROOT,
     linkBase: options.linkBase ?? null,
-    loadData: () => data,
+    loadData(activeRuntime) {
+      seen.dataLoads.push(activeRuntime);
+      return data;
+    },
     preflight(runtime, adapter) {
       seen.preflight.push({ runtime, adapter });
       return options.preflight ?? null;
@@ -121,16 +129,101 @@ function rig(options: {
   };
 }
 
-describe("ub launch", () => {
+
+/** One entry-role declaration, with every path the project's own to choose. */
+function role(
+  overrides: {
+    role?: string;
+    contract?: string;
+    probe?: string[];
+    claudeAdapter?: string;
+  } = {},
+) {
+  const name = overrides.role ?? "implementer";
+  return {
+    contract: overrides.contract ?? `.agents/roles/${name}.md`,
+    defaultRuntime: "codex",
+    probe: overrides.probe ?? ["sh", "scripts/probe-work.sh", name],
+    runtimes: {
+      claude: {
+        adapter: overrides.claudeAdapter ?? `.claude/agents/${name}.md`,
+        sandbox: "runtime",
+        permissionMode: "auto",
+      },
+      codex: {
+        adapter: `.codex/agents/${name}.toml`,
+        sandbox: "unsandboxed",
+      },
+    },
+  };
+}
+
+/** The whole launch file for one declared role, without writing its files. */
+function launchData(declared: ReturnType<typeof role>) {
+  return { version: 1, entryRoles: { implementer: declared } };
+}
+
+function git(root: string, args: string[]) {
+  const ran = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  expect(ran.status, ran.stderr).toBe(0);
+  return ran;
+}
+
+/** Commit whatever `root` currently holds, and point `origin/main` at it. */
+function commitAsOriginMain(root: string): void {
+  git(root, ["init", "-b", "main"]);
+  git(root, ["add", "-A"]);
+  git(root, [
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "commit",
+    "-m",
+    "base",
+  ]);
+  const head = git(root, ["rev-parse", "HEAD"]);
+  git(root, ["update-ref", "refs/remotes/origin/main", head.stdout.trim()]);
+}
+
+/** A fake runtime that records having been started at all, and nothing else. */
+function fakeRuntime(bin: string, name: string): void {
+  mkdirSync(bin, { recursive: true });
+  const executable = join(bin, name);
+  writeFileSync(
+    executable,
+    `#!/usr/bin/env node
+require("node:fs").writeFileSync(process.env.LAUNCH_EVIDENCE, process.cwd());
+process.stdout.write("No eligible shipper work: test fixture.\\n");
+`,
+  );
+  chmodSync(executable, 0o755);
+}
+
+/** A project on disk whose launch data is exactly what it declares. */
+function writeProject(root: string, roles: Record<string, ReturnType<typeof role>>): void {
+  const launch = join(root, ".agents/launch.json");
+  mkdirSync(dirname(launch), { recursive: true });
+  writeFileSync(launch, `${JSON.stringify({ version: 1, entryRoles: roles }, null, 2)}\n`);
+  for (const entry of Object.values(roles)) {
+    for (const relative of [entry.contract, entry.runtimes.codex.adapter]) {
+      if (relative.startsWith("..") || relative.startsWith("/")) continue;
+      const path = join(root, relative);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, "declared by the project\n");
+    }
+  }
+}
+
+describe("ub agents launch", () => {
   it("builds a fresh runtime identity and a contract-scoped assignment", () => {
     const runId = makeRunId("codex", "implementer");
     expect(runId).toMatch(/^codex-implementer-\d{8}T\d{6}Z-[0-9a-f]{6}$/);
-    expect(launchAssignment("implementer", runId)).toContain(
-      `role \`implementer\`, run id \`${runId}\``,
-    );
-    expect(launchAssignment("implementer", runId)).toContain(
-      ".agents/roles/implementer.md",
-    );
+    const assignment = launchAssignment("implementer", runId, "contracts/roles/implementer.md");
+    expect(assignment).toContain(`role \`implementer\`, run id \`${runId}\``);
+    // The contract path is the project's, not a shape the CLI knows.
+    expect(assignment).toContain("contracts/roles/implementer.md");
+    expect(assignment).toContain("launched by `ub agents launch`");
   });
 
   it("builds argv-only Codex sessions from the declared sandbox", () => {
@@ -159,6 +252,35 @@ describe("ub launch", () => {
     expect(() => codexSessionArgs("/worktree", "/last", prompt, "runtime")).toThrow(
       /invalid Codex sandbox/,
     );
+  });
+
+  it("adds no candidate-selection, trust or approval surface of its own", () => {
+    // The whole command surface: one runtime choice and one project. A
+    // candidate tree to inspect is an input a project's own role or adapter
+    // supplies, so the launcher has nowhere to put one — and nothing it hands
+    // a runtime widens what the project declared.
+    expect(Object.keys(LAUNCH_OPTIONS).sort()).toEqual(["model", "project"]);
+
+    const workspaceWrite = codexSessionArgs("/worktree", "/last", "prompt", "workspace-write");
+    const claude = claudeSessionArgs("shipper", "prompt", "auto");
+    for (const argv of [workspaceWrite, codexSessionArgs("/w", "/l", "p", "unsandboxed"), claude]) {
+      for (const invented of [
+        "--add-dir",
+        "--candidate",
+        "--ephemeral",
+        "--setting-sources",
+        "trust_level",
+        "projects.",
+      ]) {
+        expect(argv.join(" "), invented).not.toContain(invented);
+      }
+    }
+    // Every option either argv carries is a declared mode or a transport path.
+    expect(claude.filter((part) => part.startsWith("--"))).toEqual([
+      "--agent",
+      "--permission-mode",
+    ]);
+    expect(workspaceWrite.filter((part) => part.startsWith("--"))).toEqual([]);
   });
 
   it("builds the data-owned headless Claude permission mode", () => {
@@ -477,7 +599,10 @@ process.exit(0);
           adapter: `.${expected[1]}/agents/${expected[0]}.${expected[1] === "claude" ? "md" : "toml"}`,
         },
       ]);
-      expect(current.stdout()).toBe(`ub launch: ${expected[0]} on ${expected[1]}\n`);
+      expect(current.seen.dataLoads).toEqual([undefined, expected[1]]);
+      expect(current.stdout()).toBe(
+        `ub agents launch: ${expected[0]} on ${expected[1]} in ${REPO_ROOT}\n`,
+      );
     }
   });
 
@@ -734,7 +859,7 @@ esac
 
       expect(runGit(["switch", "-c", "topic"]).status).toBe(0);
       expect(services.refreshMain()).toEqual({
-        detail: "run `ub launch` from the repository's `main` checkout",
+        detail: "run `ub agents launch` from the project's `main` checkout",
         retry: false,
       });
     } finally {
@@ -805,9 +930,15 @@ esac
       const failure = join(root, "fail");
       mkdirSync(bin);
       writeFileSync(join(root, "marker"), "main\n");
+      // The session reads its contract and adapter in its own worktree, so a
+      // fixture that starts a runtime commits them like a real project does.
+      for (const relative of [".agents/roles/issue-preparer.md", ".claude/agents/issue-preparer.md"]) {
+        mkdirSync(dirname(join(root, relative)), { recursive: true });
+        writeFileSync(join(root, relative), "declared by the fixture project\n");
+      }
       for (const args of [
         ["init", "-b", "main"],
-        ["add", "marker"],
+        ["add", "-A"],
         ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "base"],
       ]) {
         const ran = spawnSync("git", args, { cwd: root, encoding: "utf8" });
@@ -928,6 +1059,115 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("refuses to start a session whose own worktree does not supply the validated files", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-session-tree-"));
+    try {
+      const bin = join(root, "bin");
+      const evidence = join(root, "started");
+      fakeRuntime(bin, "claude");
+      const sibling = join(root, "sibling");
+      mkdirSync(sibling, { recursive: true });
+      writeProject(sibling, { shipper: role({ role: "shipper" }) });
+      const siblingAdapter = join(sibling, ".claude/agents/shipper.md");
+      mkdirSync(dirname(siblingAdapter), { recursive: true });
+      writeFileSync(siblingAdapter, "sibling project adapter\n");
+
+      const services = (selected: string) =>
+        createLaunchServices(
+          selected,
+          launchEnvironment({
+            ...process.env,
+            PATH: `${bin}:${process.env.PATH ?? ""}`,
+            LAUNCH_EVIDENCE: evidence,
+          }),
+          { out: () => {}, err: () => {} },
+          noWorktreeProcesses,
+        );
+
+      // A safe uncommitted regular file masks a committed escaping symlink at
+      // the same path: the control checks accept, and the fresh worktree of
+      // origin/main is where the session would have read the sibling project.
+      const masked = join(root, "masked");
+      mkdirSync(masked);
+      writeProject(masked, { shipper: role({ role: "shipper" }) });
+      const maskedContract = join(masked, ".agents/roles/shipper.md");
+      const maskedAdapter = join(masked, ".claude/agents/shipper.md");
+      mkdirSync(dirname(maskedAdapter), { recursive: true });
+      rmSync(maskedContract);
+      symlinkSync(join(sibling, ".agents/roles/shipper.md"), maskedContract);
+      symlinkSync(siblingAdapter, maskedAdapter);
+      commitAsOriginMain(masked);
+      for (const [path, text] of [
+        [maskedContract, "selected project contract\n"],
+        [maskedAdapter, "selected project adapter\n"],
+      ] as const) {
+        rmSync(path);
+        writeFileSync(path, text);
+      }
+      expect(git(masked, ["status", "--porcelain"]).stdout).toContain(".agents/roles/shipper.md");
+      const maskedEntry = readLaunchData(masked, "claude").entryRoles.shipper;
+      expect(maskedEntry).toBeDefined();
+
+      const maskedOutcome = await services(masked).runSession("shipper", "claude", maskedEntry!);
+      expect(maskedOutcome).toMatchObject({ started: false, code: 1, malformed: true });
+      expect(maskedOutcome.detail).toBe(
+        "role contract .agents/roles/shipper.md is not a readable file inside the session's " +
+          "worktree of origin/main; commit it inside the selected project before retrying",
+      );
+      expect(existsSync(evidence)).toBe(false);
+      expect(
+        git(masked, ["worktree", "list", "--porcelain"]).stdout.match(/^worktree /gm),
+      ).toHaveLength(1);
+
+      // The same divergence with nothing malicious in it: an adapter the
+      // control checkout has and origin/main does not. `--agent <role>` would
+      // resolve it in the worktree, where it is simply absent.
+      const uncommitted = join(root, "uncommitted");
+      mkdirSync(uncommitted);
+      writeProject(uncommitted, { shipper: role({ role: "shipper" }) });
+      commitAsOriginMain(uncommitted);
+      const localAdapter = join(uncommitted, ".claude/agents/shipper.md");
+      mkdirSync(dirname(localAdapter), { recursive: true });
+      writeFileSync(localAdapter, "selected project adapter\n");
+      const uncommittedEntry = readLaunchData(uncommitted, "claude").entryRoles.shipper;
+      expect(uncommittedEntry).toBeDefined();
+
+      const absent = await services(uncommitted).runSession("shipper", "claude", uncommittedEntry!);
+      expect(absent).toMatchObject({ started: false, code: 1, malformed: true });
+      expect(absent.detail).toContain(
+        "claude adapter .claude/agents/shipper.md is not a readable file inside the session's",
+      );
+      expect(existsSync(evidence)).toBe(false);
+      expect(
+        git(uncommitted, ["worktree", "list", "--porcelain"]).stdout.match(/^worktree /gm),
+      ).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("stops the loop instead of retrying launch data the session tree cannot supply", async () => {
+    const current = rig({
+      sessions: [
+        result({
+          started: false,
+          code: 1,
+          lastLine: "",
+          malformed: true,
+          detail:
+            "claude adapter .claude/agents/implementer.md is not a readable file inside the " +
+            "session's worktree of origin/main; commit it inside the selected project before retrying",
+        }),
+      ],
+    });
+
+    expect(await launchCommand(["implementer"], current.io, current.services)).toBe(1);
+    expect(current.seen.sessions).toHaveLength(1);
+    expect(current.seen.waits).toEqual([]);
+    expect(current.stderr()).toContain("worktree of origin/main");
+    expect(current.stderr()).not.toContain("retrying in 5s");
+  });
 });
 
 describe("launch data", () => {
@@ -949,36 +1189,163 @@ describe("launch data", () => {
       const launch = join(root, ".agents/launch.json");
       mkdirSync(dirname(launch), { recursive: true });
       writeFileSync(launch, "not json\n");
+      // A refusal names the file it read, because the caller chose the project
+      // and the whole failure is which project that turned out to be.
+      expect(() => readLaunchData(root)).toThrow(launch);
       expect(() => readLaunchData(root)).toThrow(/invalid JSON/);
 
-      writeFileSync(
-        launch,
-        JSON.stringify({
-          version: 1,
-          entryRoles: {
-            implementer: {
-              contract: ".agents/roles/implementer.md",
-              defaultRuntime: "codex",
-              probe: ["sh", "scripts/probe-work.sh", "implementer"],
-              runtimes: {
-                claude: {
-                  adapter: ".claude/agents/implementer.md",
-                  sandbox: "runtime",
-                  permissionMode: "auto",
-                },
-                codex: { adapter: ".codex/agents/implementer.toml", sandbox: "unsandboxed" },
-              },
-            },
-          },
-        }),
+      writeFileSync(launch, JSON.stringify(launchData(role())));
+      expect(() => readLaunchData(root)).toThrow(
+        `names a role contract that is not a readable file: ${join(root, ".agents/roles/implementer.md")}`,
       );
-      expect(() => readLaunchData(root)).toThrow(/readable role contract/);
 
       mkdirSync(join(root, ".agents/roles"), { recursive: true });
       mkdirSync(join(root, ".codex/agents"), { recursive: true });
       writeFileSync(join(root, ".agents/roles/implementer.md"), "# Implementer\n");
       writeFileSync(join(root, ".codex/agents/implementer.toml"), 'name = "implementer"\n');
       expect(readLaunchData(root).entryRoles.implementer).toBeDefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("takes the project's own paths, names and probe rather than a convention of its own", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-owned-"));
+    try {
+      const declared = role({
+        contract: "workflow/roles/shipper.md",
+        probe: ["node", "workflow/probe.mjs", "--role", "shipper"],
+        role: "shipper",
+      });
+      writeProject(root, { shipper: declared });
+
+      const entry = readLaunchData(root).entryRoles.shipper;
+      expect(entry).toEqual({
+        contract: "workflow/roles/shipper.md",
+        defaultRuntime: "codex",
+        probe: ["node", "workflow/probe.mjs", "--role", "shipper"],
+        runtimes: {
+          claude: {
+            adapter: ".claude/agents/shipper.md",
+            sandbox: "runtime",
+            permissionMode: "auto",
+          },
+          codex: { adapter: ".codex/agents/shipper.toml", sandbox: "unsandboxed" },
+        },
+      });
+
+      // The adapter is the one path the CLI does not take on trust: a Claude
+      // session is started with `--agent <role>`, so a datum naming another
+      // file would describe something no runtime opens.
+      writeProject(root, { shipper: role({ role: "shipper", claudeAdapter: "workflow/claude/shipper.md" }) });
+      expect(() => readLaunchData(root)).toThrow(/this runtime resolves \.claude\/agents\/shipper\.md/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a launch datum that names a path outside the project", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-escape-"));
+    try {
+      for (const outside of ["../elsewhere/implementer.md", "/etc/passwd", "roles/../../out.md"]) {
+        writeProject(root, { implementer: role({ contract: outside }) });
+        expect(() => readLaunchData(root), outside).toThrow(/no "contract" path inside/);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses launch data, contracts and adapters whose symlinks leave the project", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-symlink-"));
+    try {
+      const selected = join(root, "selected");
+      const sibling = join(root, "sibling");
+      mkdirSync(selected);
+      mkdirSync(sibling);
+      writeProject(selected, { implementer: role() });
+      writeProject(sibling, { implementer: role() });
+
+      const contract = join(selected, ".agents/roles/implementer.md");
+      rmSync(contract);
+      symlinkSync(join(sibling, ".agents/roles/implementer.md"), contract);
+      expect(() => readLaunchData(selected)).toThrow(/role contract that is not a readable file/);
+
+      rmSync(contract);
+      writeProject(selected, { implementer: role() });
+      const adapter = join(selected, ".codex/agents/implementer.toml");
+      rmSync(adapter);
+      symlinkSync(join(sibling, ".codex/agents/implementer.toml"), adapter);
+      expect(() => readLaunchData(selected)).toThrow(/codex adapter that is not a readable file/);
+
+      rmSync(adapter);
+      writeProject(selected, { implementer: role() });
+      const claudeAdapter = join(selected, ".claude/agents/implementer.md");
+      const siblingClaudeAdapter = join(sibling, ".claude/agents/implementer.md");
+      mkdirSync(dirname(claudeAdapter), { recursive: true });
+      mkdirSync(dirname(siblingClaudeAdapter), { recursive: true });
+      writeFileSync(claudeAdapter, "selected project adapter\n");
+      writeFileSync(siblingClaudeAdapter, "sibling project adapter\n");
+      expect(readLaunchData(selected, "claude").entryRoles.implementer).toBeDefined();
+
+      // A normal fast-forward can replace the adapter after initial preflight.
+      // The runtime-scoped reload must confine it again before starting work.
+      rmSync(claudeAdapter);
+      symlinkSync(siblingClaudeAdapter, claudeAdapter);
+      expect(() => readLaunchData(selected, "claude")).toThrow(
+        /claude adapter that is not a readable file/,
+      );
+
+      rmSync(claudeAdapter);
+      const launch = join(selected, ".agents/launch.json");
+      rmSync(launch);
+      symlinkSync(join(sibling, ".agents/launch.json"), launch);
+      expect(() => readLaunchData(selected)).toThrow(/not a readable file inside the selected project/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the selected project", () => {
+  it("resolves the Git root at or above the working directory, and --project the same way", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-project-"));
+    try {
+      const project = join(root, "project");
+      const nested = join(project, "packages", "deep");
+      mkdirSync(nested, { recursive: true });
+      const outside = join(root, "outside");
+      mkdirSync(outside);
+      expect(spawnSync("git", ["init", "-b", "main"], { cwd: project }).status).toBe(0);
+
+      // Every spelling lands on the same root, and none of them is this
+      // executable's own directory.
+      const real = realpathSync(project);
+      expect(resolveProjectRoot(undefined, nested, process.env).project?.root).toBe(real);
+      expect(resolveProjectRoot(".", project, process.env).project?.root).toBe(real);
+      expect(resolveProjectRoot(project, outside, process.env).project?.root).toBe(real);
+      expect(resolveProjectRoot("project/packages/deep", root, process.env).project?.root).toBe(real);
+
+      const other = join(root, "other");
+      mkdirSync(other);
+      expect(spawnSync("git", ["init", "-b", "main"], { cwd: other }).status).toBe(0);
+      expect(
+        resolveProjectRoot(project, outside, {
+          ...process.env,
+          GIT_DIR: join(other, ".git"),
+          GIT_WORK_TREE: other,
+        }).project?.root,
+      ).toBe(real);
+
+      expect(resolveProjectRoot(undefined, outside, process.env).error).toBe(
+        `no Git project at or above ${outside}`,
+      );
+      expect(resolveProjectRoot(join(root, "absent"), root, process.env).error).toMatch(
+        /absent does not exist$/,
+      );
+      expect(resolveProjectRoot(join(project, ".git", "HEAD"), root, process.env).error).toMatch(
+        /HEAD is not a directory$/,
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

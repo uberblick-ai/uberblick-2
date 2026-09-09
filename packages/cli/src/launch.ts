@@ -1,22 +1,42 @@
 /**
- * `ub launch <role>` — one foreground standing loop for one entry role.
+ * `ub agents launch <role>` — one foreground standing loop for one entry role.
  *
- * The CLI owns only transport: resolve repository launch data, start one fresh
- * runtime session, wait for it, and repeat. The launched role owns queue
- * selection and every GitHub transition. In particular, the probe named by the
- * launch data is deliberately over-inclusive; its result can save a session,
- * but the session's own final line remains authoritative.
+ * The CLI owns only transport: resolve the *selected project's* launch data,
+ * start one fresh runtime session, wait for it, and repeat. The launched role
+ * owns queue selection and every GitHub transition. In particular, the probe
+ * named by the launch data is deliberately over-inclusive; its result can save
+ * a session, but the session's own final line remains authoritative.
  *
  * That final line is also the whole of what this command understands about a
  * session's outcome. Each entry role ends with one of three exact lines —
  * `No eligible <role> work: <reason>.`, `Worked <role>: <item> — <outcome>.`,
  * or `Blocked <role>: <reason>.` — and the loop prints one condensed line for
  * it, or stops for the last one. The alternative, reading each role's own
- * claim and handoff grammar back off GitHub, would put the repository's
+ * claim and handoff grammar back off GitHub, would put a project's own
  * workflow policy inside a generic CLI, which is precisely what "Pipeline
  * ownership for ub launch" decided against. A session that ends any other way
  * is reported as an unconfirmed outcome rather than guessed at, and its
  * transcript — which no longer streams to stdout — is named on disk.
+ *
+ * The project is whatever `--project` or the working directory resolves to
+ * (`project.ts`), never where this executable happens to live: an installed
+ * `ub` carries no roles, no contracts and no workspace of its own, so two
+ * projects that declare the same role name with different contracts each get
+ * their own. Every path the loop reads, copies or writes comes out of that
+ * project's launch data or the worktree it makes for the session, which is
+ * resolution isolation and deliberately not an operating-system or credential
+ * boundary — a runtime the project declares unsandboxed can still read the
+ * machine it runs on.
+ *
+ * Grants stay where they were. `ub` writes no trust entry and copies no
+ * credential: the human authenticates each runtime once, and each runtime
+ * keeps its own per-project record in its own user-level configuration, which
+ * a first launch for an unseen project path creates without an interactive
+ * dialog and a runtime may rewrite later in the same session. That is the
+ * supported setup, not a failure to suppress (owner decision, 2026-09-08). A
+ * session is passed exactly the sandbox or permission mode its project
+ * declared, and a missing or unauthenticated runtime stops the launch before
+ * any child starts.
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -32,8 +52,7 @@ import {
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { isAbsolute, join, normalize, sep } from "node:path";
 import { parseArgs } from "node:util";
 import {
   FORWARDED,
@@ -44,21 +63,34 @@ import {
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
+import { resolveProjectRoot, withoutRepositorySelectors } from "./project.js";
 
 export const LAUNCH_OPTIONS = {
   model: { type: "string" },
+  project: { type: "string" },
 } as const;
 
-export const LAUNCH_HELP = `usage: ub launch <role> [--model claude|codex]
+export const LAUNCH_HELP = `usage: ub agents launch <role> [--model claude|codex] [--project <dir>]
 
-Keep one entry role running in this terminal. One fresh session runs at a time;
-completed work is followed immediately, while an empty queue waits about 30
-minutes. Ctrl-C stops the loop and its active session.
+Keep one entry role of one project running in this terminal. One fresh session
+runs at a time; completed work is followed immediately, while an empty queue
+waits about 30 minutes. Ctrl-C stops the loop and its active session.
+
+The roles, their contracts, adapters, default runtime and sandbox come from the
+selected project's own .agents/launch.json — never from wherever this
+executable was installed.
 
 options:
   --model <name>   run the role with claude or codex; the role's own default
                    applies when this is left out
+  --project <dir>  the project to launch: the Git root at or above <dir>. The
+                   working directory is used when this is left out
   -h, --help       show this help
+
+Authenticate claude and codex yourself; ub grants nothing on their behalf and
+stops before starting a session when a runtime is missing or logged out. Each
+runtime keeps its own record of the project paths it has seen, in its own
+user-level configuration — expected, and not something ub writes or suppresses.
 `;
 
 const RUNTIMES = ["claude", "codex"] as const;
@@ -92,6 +124,13 @@ export interface SessionResult {
   lastLine: string;
   /** Present only when the session left reachable processes behind. */
   processCleanup?: "terminated" | "failed";
+  /**
+   * The launch data did not describe the tree the session would have run, so
+   * no child started and no backoff repairs it: the loop exits 1, the class
+   * the CLI contract already gives malformed launch data and an unusable
+   * adapter, rather than retrying a fixed condition every few seconds.
+   */
+  malformed?: true;
   detail?: string;
   /** The end of both captured streams — read only when the session failed. */
   tail?: string;
@@ -113,7 +152,7 @@ export interface LaunchServices {
    * the one switch between linked and plain `#123`.
    */
   linkBase: string | null;
-  loadData(): LaunchData;
+  loadData(activeRuntime?: Runtime): LaunchData;
   preflight(runtime: Runtime, adapter: string): string | null;
   refreshMain(): { detail: string; retry: boolean } | null;
   runProbe(command: readonly string[]): Promise<ProbeResult>;
@@ -133,8 +172,6 @@ export interface SessionProcesses {
   signal(pid: number, signal: NodeJS.Signals): void;
 }
 
-const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const repositoryRoot = dirname(dirname(packageRoot));
 const IDLE_MS = 30 * 60 * 1_000;
 const FAILURE_BACKOFF_MS = 5_000;
 // Normal runtime children may still be closing their inherited stdio when the
@@ -233,35 +270,106 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]):
 
 function pathIsFile(root: string, relative: string): boolean {
   try {
-    return statSync(join(root, relative)).isFile();
+    const project = realpathSync(root);
+    const target = realpathSync(join(project, relative));
+    return (
+      (target === project || target.startsWith(`${project}${sep}`)) &&
+      statSync(target).isFile()
+    );
   } catch {
     return false;
   }
 }
 
-/** Parse and validate the repository-owned launch map before any session starts. */
-export function readLaunchData(root: string): LaunchData {
-  const path = join(root, ".agents/launch.json");
+/**
+ * The same confinement, applied to the tree the session actually reads.
+ *
+ * `readLaunchData` and `preflight` canonicalize files in the control checkout,
+ * and a session runs a fresh detached worktree of `origin/main`. Those are two
+ * filesystems, and nothing makes them agree: an uncommitted regular file masks
+ * a committed escaping symlink at the same path, a fast-forward that never
+ * touches those paths keeps the mask, and an adapter that exists only in the
+ * control checkout is simply absent where `--agent <role>` resolves it. So the
+ * files that govern a session are canonicalized where they govern it, once the
+ * worktree exists and before any runtime child reads them. The control checks
+ * stay: they are what fails a launch early, with a message about the tree the
+ * operator is looking at.
+ */
+function outsideSessionTree(worktree: string, runtime: Runtime, entry: RoleLaunch): string | null {
+  for (const [named, relative] of [
+    ["role contract", entry.contract],
+    [`${runtime} adapter`, entry.runtimes[runtime].adapter],
+  ] as const) {
+    if (!pathIsFile(worktree, relative)) {
+      return (
+        `${named} ${relative} is not a readable file inside the session's worktree of origin/main; ` +
+        "commit it inside the selected project before retrying"
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * A project-relative path the launcher may follow, or null.
+ *
+ * Resolution isolation is a property of paths, so it is checked where a path is
+ * read rather than trusted at each use: a launch datum may name a file *inside*
+ * the project that declared it and nothing else, so an absolute path or one
+ * that climbs out with `..` is malformed data, not a location to visit.
+ */
+function insideProject(value: unknown): string | null {
+  if (typeof value !== "string" || value === "" || isAbsolute(value)) return null;
+  const normalized = normalize(value);
+  if (normalized === ".." || normalized.startsWith(`..${sep}`) || normalized.endsWith(sep)) {
+    return null;
+  }
+  return normalized;
+}
+
+/** Where the launch data of `root` lives — the one path the CLI knows by name. */
+function launchDataPath(root: string): string {
+  return join(root, ".agents/launch.json");
+}
+
+/**
+ * Parse and validate the selected project's launch map before any session starts.
+ *
+ * Every binding a session needs is read from here, so what this refuses is what
+ * a project may not leave unsaid. The shapes are checked; the *values* are the
+ * project's own — a role contract at any readable path inside it, its own probe
+ * argv, its own default runtime and sandbox. Whether those match a naming
+ * convention is the project's business to enforce (this repository's own
+ * `scripts/check-agent-roles.mjs` does), not a rule a general CLI imposes on
+ * every adopter. The adapter path is the one exception, and the reason it is
+ * one is at the check itself.
+ */
+export function readLaunchData(root: string, activeRuntime?: Runtime): LaunchData {
+  const path = launchDataPath(root);
   let parsed: unknown;
   try {
+    if (!pathIsFile(root, ".agents/launch.json")) {
+      throw new Error("the path is not a readable file inside the selected project");
+    }
     parsed = JSON.parse(readFileSync(path, "utf8"));
   } catch (error) {
     throw new Error(
-      `.agents/launch.json is missing or invalid JSON — restore it from origin/main (${error instanceof Error ? error.message : String(error)})`,
+      `${path} is missing or invalid JSON (${error instanceof Error ? error.message : String(error)})`,
     );
   }
 
   const top = record(parsed);
   const entries = record(top?.entryRoles);
   if (top === null || !exactKeys(top, ["version", "entryRoles"]) || top.version !== 1 || entries === null) {
-    throw new Error(".agents/launch.json must contain only version 1 and an entryRoles object — restore it from origin/main");
+    throw new Error(`${path} must contain only version 1 and an entryRoles object`);
   }
   if (Object.keys(entries).length === 0) {
-    throw new Error(".agents/launch.json entryRoles is empty — restore it from origin/main");
+    throw new Error(`${path} declares no entry roles`);
   }
 
   const entryRoles: Record<string, RoleLaunch> = {};
   for (const [role, rawEntry] of Object.entries(entries)) {
+    const named = `${path} entry ${JSON.stringify(role)}`;
     const entry = record(rawEntry);
     const runtimes = record(entry?.runtimes);
     if (
@@ -270,30 +378,35 @@ export function readLaunchData(root: string): LaunchData {
       runtimes === null ||
       !exactKeys(runtimes, ["claude", "codex"])
     ) {
-      throw new Error(`.agents/launch.json entry ${JSON.stringify(role)} has a malformed shape`);
+      throw new Error(`${named} has a malformed shape`);
     }
-    if (entry.contract !== `.agents/roles/${role}.md` || !pathIsFile(root, entry.contract)) {
-      throw new Error(`.agents/launch.json entry ${JSON.stringify(role)} does not name its readable role contract`);
+    const contract = insideProject(entry.contract);
+    if (contract === null) {
+      throw new Error(`${named} names no "contract" path inside ${root}`);
+    }
+    if (!pathIsFile(root, contract)) {
+      throw new Error(`${named} names a role contract that is not a readable file: ${join(root, contract)}`);
     }
     if (entry.defaultRuntime !== "claude" && entry.defaultRuntime !== "codex") {
-      throw new Error(`.agents/launch.json entry ${JSON.stringify(role)} has an invalid defaultRuntime`);
+      throw new Error(`${named} has an invalid "defaultRuntime"; choose ${RUNTIMES.join(" or ")}`);
     }
     if (
       !Array.isArray(entry.probe) ||
       entry.probe.length === 0 ||
-      !entry.probe.every((part) => typeof part === "string" && part.length > 0) ||
-      entry.probe.at(-1) !== role
+      !entry.probe.every((part) => typeof part === "string" && part.length > 0)
     ) {
-      throw new Error(`.agents/launch.json entry ${JSON.stringify(role)} has an invalid probe argv`);
+      throw new Error(`${named} has an invalid "probe" argv`);
     }
 
     const parsedRuntimes = {} as Record<Runtime, RuntimeLaunch>;
-    for (const runtime of ["claude", "codex"] as const) {
+    for (const runtime of RUNTIMES) {
       const rawRuntime = record(runtimes[runtime]);
-      const adapter = rawRuntime?.adapter;
       const sandbox = rawRuntime?.sandbox;
-      const expectedAdapter = `.${runtime}/agents/${role}.${runtime === "claude" ? "md" : "toml"}`;
       const permissionMode = rawRuntime?.permissionMode;
+      // The sandbox and permission vocabularies are the ones this CLI can
+      // actually pass to each runtime, so an unknown word is malformed data
+      // rather than a grant to invent — and there is no value the CLI adds
+      // when the project declared none.
       const sandboxValid =
         runtime === "claude"
           ? sandbox === "runtime"
@@ -304,12 +417,31 @@ export function readLaunchData(root: string): LaunchData {
           rawRuntime,
           runtime === "claude" ? ["adapter", "sandbox", "permissionMode"] : ["adapter", "sandbox"],
         ) ||
-        adapter !== expectedAdapter ||
-        (runtime === "codex" && !pathIsFile(root, expectedAdapter)) ||
         !sandboxValid ||
         (runtime === "claude" && permissionMode !== "auto")
       ) {
-        throw new Error(`.agents/launch.json entry ${JSON.stringify(role)} has invalid ${runtime} launch data`);
+        throw new Error(`${named} has invalid ${runtime} launch data`);
+      }
+      // The adapter path is *not* free, and saying so is the honest thing: a
+      // Claude session is started with `--agent <role>`, so the runtime — not
+      // this CLI — resolves `.claude/agents/<role>.md` inside the project's own
+      // worktree. Data that named a file the runtime will never open would be a
+      // binding that can lie. What is the project's here is the file: two
+      // projects declaring the same role each supply their own.
+      const adapter = `.${runtime}/agents/${role}.${runtime === "claude" ? "md" : "toml"}`;
+      if (rawRuntime.adapter !== adapter) {
+        throw new Error(
+          `${named} ${runtime} "adapter" is ${JSON.stringify(rawRuntime.adapter)}; this runtime resolves ${adapter}`,
+        );
+      }
+      // Codex's adapter is always present in the project data we validate.
+      // Claude's can be absent from build contexts that never select Claude,
+      // so require it only once that runtime is active. The loop passes that
+      // choice again after every refresh, before a probe or session can start.
+      if ((runtime === "codex" || runtime === activeRuntime) && !pathIsFile(root, adapter)) {
+        throw new Error(
+          `${named} names a ${runtime} adapter that is not a readable file: ${join(root, adapter)}`,
+        );
       }
       parsedRuntimes[runtime] = {
         adapter,
@@ -318,7 +450,7 @@ export function readLaunchData(root: string): LaunchData {
       } as RuntimeLaunch;
     }
     entryRoles[role] = {
-      contract: entry.contract,
+      contract,
       defaultRuntime: entry.defaultRuntime,
       probe: [...entry.probe],
       runtimes: parsedRuntimes,
@@ -382,7 +514,7 @@ function recoveryFor(reason: string): string {
   if (/\bclaude\b/i.test(reason)) return "run `claude auth login`";
   if (/\bcodex\b|api\.openai\.com/i.test(reason)) return "run `codex login`";
   if (/\bgh\b|github/i.test(reason)) return "run `gh auth login`";
-  return "restore access, then run `ub launch` again";
+  return "restore access, then run `ub agents launch` again";
 }
 
 /** The role's own reason for an empty queue, from its exact sentinel line. */
@@ -618,10 +750,17 @@ export function makeRunId(runtime: Runtime, role: string): string {
   return `${runtime}-${role}-${timestamp}-${randomBytes(3).toString("hex")}`;
 }
 
-export function launchAssignment(role: string, runId: string): string {
+/**
+ * The one thing a session is told: which contract to follow, and who it is.
+ *
+ * The contract path comes from the project's launch data rather than from a
+ * shape this CLI knows, because naming a role's file is exactly the kind of
+ * workflow policy a general launcher must not hold.
+ */
+export function launchAssignment(role: string, runId: string, contract: string): string {
   return (
-    `Claim and complete one eligible item for the \`${role}\` role per \`.agents/roles/${role}.md\`. ` +
-    `Identifiers: role \`${role}\`, run id \`${runId}\`, launched by \`ub launch\`.\n\n` +
+    `Claim and complete one eligible item for the \`${role}\` role per \`${contract}\`. ` +
+    `Identifiers: role \`${role}\`, run id \`${runId}\`, launched by \`ub agents launch\`.\n\n` +
     "MCP route: use the registered uberblick server. If it cannot start outside mise, use the throwaway " +
     "stdio route `mise x -- ub mcp serve` from scratch outside the committed worktree. Write every durable " +
     "comment from a file, removing that file first because the shell may use noclobber. End with the role " +
@@ -629,7 +768,7 @@ export function launchAssignment(role: string, runId: string): string {
   );
 }
 
-/** Build the direct Codex invocation solely from the repository launch mode. */
+/** Build the direct Codex invocation solely from the project's declared sandbox. */
 export function codexSessionArgs(
   worktree: string,
   lastPath: string,
@@ -648,7 +787,7 @@ export function codexSessionArgs(
   return args;
 }
 
-/** Build the direct Claude invocation from the repository permission mode. */
+/** Build the direct Claude invocation from the project's declared permission mode. */
 export function claudeSessionArgs(
   role: string,
   prompt: string,
@@ -668,7 +807,11 @@ export function createLaunchServices(
 ): LaunchServices {
   let scratch: string | null = null;
   let preservedFailureWorktree: string | null = null;
-  const remote = runSync("git", ["remote", "get-url", "origin"], root, env);
+  // This boundary is also called directly in tests and integrations. Keep all
+  // project Git operations and their descendants independent of ambient
+  // repository selectors even when the caller did not use launchEnvironment.
+  const projectEnv = withoutRepositorySelectors(env);
+  const remote = runSync("git", ["remote", "get-url", "origin"], root, projectEnv);
 
   return {
     root,
@@ -676,12 +819,12 @@ export function createLaunchServices(
       process.stdout.isTTY === true && remote.status === 0
         ? gitHubBase(remote.stdout)
         : null,
-    loadData: () => readLaunchData(root),
+    loadData: (activeRuntime) => readLaunchData(root, activeRuntime),
     preflight(runtime, adapter) {
       if (!pathIsFile(root, adapter)) {
         return `${runtime} adapter ${adapter} is missing; restore it from origin/main before retrying`;
       }
-      const version = runSync(runtime, ["--version"], root, env);
+      const version = runSync(runtime, ["--version"], root, projectEnv);
       if ((version.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
         return `${runtime} is not installed; install it and authenticate before retrying`;
       }
@@ -690,8 +833,8 @@ export function createLaunchServices(
       }
       const auth =
         runtime === "claude"
-          ? runSync("claude", ["auth", "status", "--json"], root, env)
-          : runSync("codex", ["login", "status"], root, env);
+          ? runSync("claude", ["auth", "status", "--json"], root, projectEnv)
+          : runSync("codex", ["login", "status"], root, projectEnv);
       if (auth.status !== 0) {
         return `${runtime} is not authenticated; log in with ${runtime} before retrying`;
       }
@@ -707,7 +850,7 @@ export function createLaunchServices(
       return null;
     },
     refreshMain() {
-      const branch = runSync("git", ["branch", "--show-current"], root, env);
+      const branch = runSync("git", ["branch", "--show-current"], root, projectEnv);
       if (branch.status !== 0) {
         return {
           detail: "could not inspect the main checkout; retrying may resolve a concurrent git operation",
@@ -715,9 +858,9 @@ export function createLaunchServices(
         };
       }
       if (branch.stdout.trim() !== "main") {
-        return { detail: "run `ub launch` from the repository's `main` checkout", retry: false };
+        return { detail: "run `ub agents launch` from the project's `main` checkout", retry: false };
       }
-      const fetched = runSync("git", ["fetch", "origin", "main"], root, env);
+      const fetched = runSync("git", ["fetch", "origin", "main"], root, projectEnv);
       if (fetched.status !== 0) {
         // Git's own words, because they are what says whether waiting helps.
         return {
@@ -725,7 +868,7 @@ export function createLaunchServices(
           retry: true,
         };
       }
-      const merged = runSync("git", ["merge", "--ff-only", "origin/main"], root, env);
+      const merged = runSync("git", ["merge", "--ff-only", "origin/main"], root, projectEnv);
       if (merged.status !== 0) {
         return {
           detail: merged.stderr.trim() || "git merge --ff-only origin/main failed without an error message",
@@ -737,7 +880,7 @@ export function createLaunchServices(
     async runProbe(command) {
       const [executable, ...args] = command;
       if (executable === undefined) return { status: 2, output: "probe command is empty" };
-      const result = runSync(executable, args, root, env);
+      const result = runSync(executable, args, root, projectEnv);
       if (result.stdout) io.out(result.stdout);
       return {
         status: result.status ?? 2,
@@ -746,10 +889,15 @@ export function createLaunchServices(
     },
     async runSession(role, runtime, entry) {
       const runId = makeRunId(runtime, role);
-      const prompt = launchAssignment(role, runId);
+      const prompt = launchAssignment(role, runId, entry.contract);
       scratch ??= mkdtempSync(join(tmpdir(), "ub-launch-"));
       const worktree = join(scratch, runId);
-      const added = runSync("git", ["worktree", "add", "--detach", worktree, "origin/main"], root, env);
+      const added = runSync(
+        "git",
+        ["worktree", "add", "--detach", worktree, "origin/main"],
+        root,
+        projectEnv,
+      );
       if (added.status !== 0) {
         return {
           started: false,
@@ -758,6 +906,20 @@ export function createLaunchServices(
           interrupted: null,
           lastLine: "",
           detail: "could not create the fresh runtime worktree; run `git worktree list` and repair it before retrying",
+        };
+      }
+      const escaping = outsideSessionTree(worktree, runtime, entry);
+      if (escaping !== null) {
+        const removed = runSync("git", ["worktree", "remove", "--force", worktree], root, projectEnv);
+        return {
+          started: false,
+          code: 1,
+          signal: null,
+          interrupted: null,
+          lastLine: "",
+          malformed: true,
+          detail:
+            removed.status === 0 ? escaping : `${escaping}; worktree cleanup failed at ${worktree}`,
         };
       }
       const lastPath = join(scratch, `${runId}.last`);
@@ -777,11 +939,12 @@ export function createLaunchServices(
               claudeSessionArgs(role, prompt, entry.runtimes.claude.permissionMode),
               worktree,
               {
-                ...env,
+                ...projectEnv,
                 // Claude print mode otherwise kills background work after 600s.
                 // Role-owned deadlines and claim renewal govern delegated work;
                 // preserve an operator's explicit ceiling if one was supplied.
-                CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS ?? "0",
+                CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:
+                  projectEnv.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS ?? "0",
               },
               capture,
               process,
@@ -791,7 +954,7 @@ export function createLaunchServices(
               "codex",
               codexSessionArgs(worktree, lastPath, prompt, entry.runtimes.codex.sandbox),
               worktree,
-              env,
+              projectEnv,
               capture,
               process,
               processes,
@@ -828,7 +991,12 @@ export function createLaunchServices(
             detail: `${failure}; worktree preserved at ${worktree}`,
           };
         }
-        const removed = runSync("git", ["worktree", "remove", "--force", worktree], root, env);
+        const removed = runSync(
+          "git",
+          ["worktree", "remove", "--force", worktree],
+          root,
+          projectEnv,
+        );
         if (removed.status !== 0) {
           return {
             ...withLastLine,
@@ -840,7 +1008,12 @@ export function createLaunchServices(
           detail: `${failure}; first failed worktree preserved at ${preservedFailureWorktree}`,
         };
       }
-      const removed = runSync("git", ["worktree", "remove", "--force", worktree], root, env);
+      const removed = runSync(
+        "git",
+        ["worktree", "remove", "--force", worktree],
+        root,
+        projectEnv,
+      );
       if (removed.status !== 0) {
         return {
           ...withLastLine,
@@ -859,11 +1032,18 @@ export function createLaunchServices(
 
 /** The environment every probe and runtime child inherits. */
 export function launchEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return resolveConfig({ env }).env;
+  return withoutRepositorySelectors(resolveConfig({ env }).env);
 }
 
-function parse(argv: string[], io: Io): { role: string; selected: Runtime | null } | number {
-  let values: { model?: string };
+interface Parsed {
+  role: string;
+  selected: Runtime | null;
+  /** The directory the caller pointed at, or undefined for the working one. */
+  project: string | undefined;
+}
+
+function parse(argv: string[], io: Io): Parsed | number {
+  let values: { model?: string; project?: string };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -873,23 +1053,29 @@ function parse(argv: string[], io: Io): { role: string; selected: Runtime | null
       strict: true,
     }));
   } catch (error) {
-    io.err(`ub launch: ${error instanceof Error ? error.message : String(error)}\n\n${LAUNCH_HELP}`);
+    io.err(`ub agents launch: ${error instanceof Error ? error.message : String(error)}\n\n${LAUNCH_HELP}`);
     return 2;
   }
   if (positionals.length !== 1) {
-    io.err("ub launch: expected exactly one <role>\n\n");
+    io.err("ub agents launch: expected exactly one <role>\n\n");
     io.err(LAUNCH_HELP);
     return 2;
   }
   const model = values.model;
   if (model !== undefined && !RUNTIMES.includes(model as Runtime)) {
-    io.err(`ub launch: unknown --model ${JSON.stringify(model)}; choose ${RUNTIMES.join(" or ")}\n\n`);
+    io.err(`ub agents launch: unknown --model ${JSON.stringify(model)}; choose ${RUNTIMES.join(" or ")}\n\n`);
+    io.err(LAUNCH_HELP);
+    return 2;
+  }
+  if (values.project !== undefined && values.project.trim() === "") {
+    io.err("ub agents launch: --project needs a directory\n\n");
     io.err(LAUNCH_HELP);
     return 2;
   }
   return {
     role: positionals[0] as string,
     selected: (model as Runtime | undefined) ?? null,
+    project: values.project,
   };
 }
 
@@ -944,28 +1130,40 @@ export async function launchCommand(
   if (services === undefined) {
     const resolved = resolveConfig();
     for (const warning of resolved.warnings) io.err(`ub: warning: ${warning}\n`);
-    services = createLaunchServices(repositoryRoot, launchEnvironment(resolved.env), io);
+    const env = launchEnvironment(resolved.env);
+    // Before anything else, and never from this executable's own location:
+    // which project's roles are these? Everything below hangs off that answer.
+    const selection = resolveProjectRoot(parsed.project, process.cwd(), env);
+    if (selection.error !== undefined) {
+      io.err(`ub agents launch: ${selection.error}\n`);
+      return 1;
+    }
+    services = createLaunchServices(selection.project.root, env, io);
   }
 
   let data: LaunchData;
   try {
     data = services.loadData();
   } catch (error) {
-    io.err(`ub launch: ${error instanceof Error ? error.message : String(error)}\n`);
+    io.err(`ub agents launch: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
   let entry = data.entryRoles[parsed.role];
   if (entry === undefined) {
-    io.err(`ub launch: ${JSON.stringify(parsed.role)} is not an entry role; choose one from .agents/launch.json\n`);
+    io.err(
+      `ub agents launch: ${JSON.stringify(parsed.role)} is not an entry role of ${services.root}; choose one from ${launchDataPath(services.root)}\n`,
+    );
     return 2;
   }
   const runtime = parsed.selected ?? entry.defaultRuntime;
   const runtimeFailure = services.preflight(runtime, entry.runtimes[runtime].adapter);
   if (runtimeFailure !== null) {
-    io.err(`ub launch: ${runtimeFailure}\n`);
+    io.err(`ub agents launch: ${runtimeFailure}\n`);
     return 1;
   }
-  io.out(`ub launch: ${parsed.role} on ${runtime}\n`);
+  // The project is named once, on the startup line: a run's own evidence that
+  // the caller's selection — and not an installation directory — is in force.
+  io.out(`ub agents launch: ${parsed.role} on ${runtime} in ${services.root}\n`);
   for (;;) {
     const refreshFailure = services.refreshMain();
     if (refreshFailure !== null) {
@@ -980,13 +1178,13 @@ export async function launchCommand(
       continue;
     }
     try {
-      entry = services.loadData().entryRoles[parsed.role];
+      entry = services.loadData(runtime).entryRoles[parsed.role];
     } catch (error) {
-      io.err(`ub launch: ${error instanceof Error ? error.message : String(error)}\n`);
+      io.err(`ub agents launch: ${error instanceof Error ? error.message : String(error)}\n`);
       return 1;
     }
     if (entry === undefined) {
-      io.err(`ub launch: ${JSON.stringify(parsed.role)} is no longer an entry role; restart the launcher\n`);
+      io.err(`ub agents launch: ${JSON.stringify(parsed.role)} is no longer an entry role; restart the launcher\n`);
       return 1;
     }
     const probe = await services.runProbe(entry.probe);
@@ -1021,6 +1219,10 @@ export async function launchCommand(
         (session.signal === null
           ? `session exited with status ${session.code}`
           : `session ended from ${session.signal}`);
+      if (session.malformed === true) {
+        io.err(`ub agents launch: ${detail}\n`);
+        return 1;
+      }
       // The runtime's own dying words are usually on stderr, so the end of
       // both captured streams is what says whether waiting can help.
       if (blocked(io, `${detail}\n${session.tail ?? session.lastLine}`)) return 1;
