@@ -32,13 +32,17 @@
  *       --out; that reduction, not this script's stdout, is the retained
  *       evidence.
  *
- * Two reductions are retained beside this file, both from an installed payload
- * of this branch driving three consecutive Claude runs:
+ * Three reductions are retained beside this file, from an installed payload
+ * driving three consecutive runs per file:
  *
  *   947-repeat-launch-evidence.json
- *       repeatable: true. Three runs, three distinct run ids, each reaching the
- *       project's pinned workspace through the project's own registered MCP
- *       server rather than the machine's configured one.
+ *       repeatable: true for Claude. The project's pinned workspace differs
+ *       from the workspace this host resolves with no project selected, and
+ *       every result also carries the independently expected database path
+ *       that is absent from the control project's tracked files.
+ *   947-repeat-launch-codex-evidence.json
+ *       The same retained distinction for Codex: repeatable: true, with three
+ *       completed runs reaching the project's pinned workspace and database.
  *   947-repeat-launch-uncommitted-entry.json
  *       repeatable: false, and why this fixture registers the MCP entry before
  *       it commits. A session runs in a fresh worktree of origin/main, so an
@@ -94,13 +98,36 @@ export function validateRun({ result, file, expected, seen }) {
       `result names workspace ${JSON.stringify(result.workspace ?? null)}, not the project's pinned ${JSON.stringify(expected.workspace)}`,
     );
   }
+  if (result.database !== expected.database) {
+    problems.push(
+      `result names database ${JSON.stringify(result.database ?? null)}, not the independently expected ${JSON.stringify(expected.database)}`,
+    );
+  }
   return { ok: problems.length === 0, problems, run };
 }
 
+/** Refuse evidence whose project pin cannot be distinguished from host fallback. */
+export function assertDistinctWorkspaces(workspace, workspaceResolvedWithoutProject) {
+  if (workspaceResolvedWithoutProject === workspace) {
+    throw new Error(
+      `--workspace ${JSON.stringify(workspace)} collides with the workspace resolved with no project selected ${JSON.stringify(workspaceResolvedWithoutProject)}`,
+    );
+  }
+}
+
 function selfTest() {
-  const expected = { project: PROJECT, workspace: "11111111-1111-4111-8111-111111111111" };
+  const expected = {
+    project: PROJECT,
+    workspace: "11111111-1111-4111-8111-111111111111",
+    database: "/outside-the-control-worktree/11111111-1111-4111-8111-111111111111.sqlite",
+  };
   const run = "claude-prober-20260908T101500Z-a1b2c3";
-  const good = { run, project: expected.project, workspace: expected.workspace };
+  const good = {
+    run,
+    project: expected.project,
+    workspace: expected.workspace,
+    database: expected.database,
+  };
   const file = `${run}.json`;
 
   const accepted = validateRun({ result: good, file, expected, seen: new Set() });
@@ -118,6 +145,16 @@ function selfTest() {
       seen: new Set(),
     },
     another_project: { result: { ...good, project: "some-other-project" }, file, seen: new Set() },
+    missing_database: {
+      result: { run, project: expected.project, workspace: expected.workspace },
+      file,
+      seen: new Set(),
+    },
+    another_database: {
+      result: { ...good, database: "/somewhere-else/workspace.sqlite" },
+      file,
+      seen: new Set(),
+    },
     reused_result: { result: good, file, seen: new Set([run]) },
     misfiled_result: { result: good, file: "claude-prober-20260908T101500Z-ffffff.json", seen: new Set() },
     no_run_id: { result: { ...good, run: "the launcher said it worked" }, file, seen: new Set() },
@@ -133,6 +170,17 @@ function selfTest() {
   if (accepted_wrongly.length > 0) {
     throw new Error(`validator accepted a counterexample: ${accepted_wrongly.join(", ")}`);
   }
+
+  let collision = null;
+  try {
+    assertDistinctWorkspaces(expected.workspace, expected.workspace);
+  } catch (error) {
+    collision = error instanceof Error ? error.message : String(error);
+  }
+  if (collision === null || !collision.includes(expected.workspace)) {
+    throw new Error("workspace collision guard accepted a colliding host and project pair");
+  }
+  rejected.workspace_collision = [collision];
   process.stdout.write(`${JSON.stringify({ verdict: "pass", accepted: good, rejected }, null, 2)}\n`);
 }
 
@@ -161,7 +209,7 @@ named below, and no investigation of a failure.
 
 1. Call the uberblick MCP tool \`sync_status\` exactly once, through the
    \`uberblick\` MCP server this project registers and through no other route,
-   and keep the \`workspace\` value it returns. If no such server is available
+   and keep the \`workspace\` and \`database\` values it returns. If no such server is available
    to you, do not start one and do not substitute another route: write no
    result file, say which server was missing, and end with the line below.
 2. Read the file \`marker\` in this worktree and keep its contents, trimmed.
@@ -169,7 +217,7 @@ named below, and no investigation of a failure.
    environment variable \`PROBER_RESULTS\` names, holding exactly this JSON
    object and no other key:
 
-   {"run": "<your run id>", "project": "<the marker>", "workspace": "<the workspace>"}
+   {"run": "<your run id>", "project": "<the marker>", "workspace": "<the workspace>", "database": "<the database>"}
 
 4. End with exactly this line and nothing after it:
 
@@ -249,7 +297,7 @@ function launchOnce(ub, control, model, env, timeoutMs) {
   return new Promise((resolveRun, rejectRun) => {
     const args = ["agents", "launch", "prober", "--project", control];
     if (model !== undefined) args.push("--model", model);
-    const child = spawn(ub, args, { cwd: tmpdir(), env });
+    const child = spawn(ub, args, { cwd: tmpdir(), env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let interrupted = false;
@@ -275,11 +323,82 @@ function launchOnce(ub, control, model, env, timeoutMs) {
   });
 }
 
+function localWorkspaceContext(ub, workspace, env) {
+  const listed = run(ub, ["workspace", "list", "--json"], tmpdir(), env);
+  let entries;
+  try {
+    entries = JSON.parse(listed.stdout);
+  } catch (error) {
+    throw new Error(
+      `${ub} workspace list --json returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!Array.isArray(entries)) {
+    throw new Error(`${ub} workspace list --json returned no workspace array`);
+  }
+  const active = entries.filter((entry) => entry?.active === true);
+  if (active.length > 1) {
+    throw new Error(`${ub} workspace list --json returned ${active.length} active workspaces`);
+  }
+  const workspaceResolvedWithoutProject = active.length === 0 ? null : active[0]?.uuid;
+  if (
+    workspaceResolvedWithoutProject !== null &&
+    (typeof workspaceResolvedWithoutProject !== "string" ||
+      !WORKSPACE_UUID.test(workspaceResolvedWithoutProject))
+  ) {
+    throw new Error(
+      `${ub} workspace list --json returned an invalid active workspace: ${JSON.stringify(workspaceResolvedWithoutProject)}`,
+    );
+  }
+  assertDistinctWorkspaces(workspace, workspaceResolvedWithoutProject);
+
+  const matching = entries.filter((entry) => entry?.uuid === workspace);
+  if (matching.length !== 1 || typeof matching[0]?.databasePath !== "string") {
+    throw new Error(
+      `${ub} workspace list --json did not return one local database for --workspace ${JSON.stringify(workspace)}`,
+    );
+  }
+  return {
+    workspaceResolvedWithoutProject,
+    database: matching[0].databasePath,
+  };
+}
+
+function assertExpectedDatabaseAbsent(control, database) {
+  const searched = spawnSync(
+    "git",
+    ["grep", "--quiet", "--fixed-strings", "-e", database, "HEAD"],
+    { cwd: control, encoding: "utf8" },
+  );
+  if (searched.status === 0) {
+    throw new Error(`expected database appears in the control project's tracked files: ${database}`);
+  }
+  if (searched.status !== 1) {
+    throw new Error(
+      `git grep could not check the expected database in ${control}\nstdout:\n${searched.stdout}\nstderr:\n${searched.stderr}`,
+    );
+  }
+}
+
 function liveRun(values) {
   const ub = resolve(values.ub);
   if (!existsSync(ub)) throw new Error(`installed ub is absent: ${ub}`);
   const workspace = values.workspace;
   if (!WORKSPACE_UUID.test(workspace)) throw new Error(`not a workspace uuid: ${workspace}`);
+  const env = {
+    ...process.env,
+    // Nothing ambient may stand in for the project's own pinned binding.
+    WORKSPACE_ID: undefined,
+    HUB_URL: undefined,
+    UBERBLICK_DB: undefined,
+  };
+  delete env.WORKSPACE_ID;
+  delete env.HUB_URL;
+  delete env.UBERBLICK_DB;
+
+  // Resolve the fallback and the independently expected database before the
+  // control project, its MCP entry, or any agent child exists.
+  const local = localWorkspaceContext(ub, workspace, env);
   const runs = Number(values.runs ?? 3);
   if (!Number.isInteger(runs) || runs < 2) throw new Error("--runs must be an integer of at least 2");
   const timeoutMs = Number(values["timeout-ms"] ?? 900_000);
@@ -288,19 +407,12 @@ function liveRun(values) {
 
   const results = join(root, "results");
   mkdirSync(results, { recursive: true });
-  const env = {
-    ...process.env,
-    PATH: `${dirname(ub)}:${process.env.PATH ?? ""}`,
-    PROBER_RESULTS: results,
-    // Nothing ambient may stand in for the project's own pinned binding.
-    WORKSPACE_ID: undefined,
-    HUB_URL: undefined,
-  };
-  delete env.WORKSPACE_ID;
-  delete env.HUB_URL;
+  env.PATH = `${dirname(ub)}:${process.env.PATH ?? ""}`;
+  env.PROBER_RESULTS = results;
 
   const control = makeControl(root, ub, workspace, env);
-  const expected = { project: PROJECT, workspace };
+  assertExpectedDatabaseAbsent(control, local.database);
+  const expected = { project: PROJECT, workspace, database: local.database };
   const seen = new Set();
   const reduction = {
     issue: 947,
@@ -310,6 +422,9 @@ function liveRun(values) {
     model: values.model ?? "the project's declared default",
     control,
     workspacePinnedByProjectEntry: workspace,
+    workspaceResolvedWithoutProject: local.workspaceResolvedWithoutProject,
+    databaseExpectedFromLocalWorkspace: local.database,
+    databaseAbsentFromControlProject: true,
     runs: [],
   };
 
