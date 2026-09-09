@@ -124,6 +124,13 @@ export interface SessionResult {
   lastLine: string;
   /** Present only when the session left reachable processes behind. */
   processCleanup?: "terminated" | "failed";
+  /**
+   * The launch data did not describe the tree the session would have run, so
+   * no child started and no backoff repairs it: the loop exits 1, the class
+   * the CLI contract already gives malformed launch data and an unusable
+   * adapter, rather than retrying a fixed condition every few seconds.
+   */
+  malformed?: true;
   detail?: string;
   /** The end of both captured streams — read only when the session failed. */
   tail?: string;
@@ -272,6 +279,35 @@ function pathIsFile(root: string, relative: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The same confinement, applied to the tree the session actually reads.
+ *
+ * `readLaunchData` and `preflight` canonicalize files in the control checkout,
+ * and a session runs a fresh detached worktree of `origin/main`. Those are two
+ * filesystems, and nothing makes them agree: an uncommitted regular file masks
+ * a committed escaping symlink at the same path, a fast-forward that never
+ * touches those paths keeps the mask, and an adapter that exists only in the
+ * control checkout is simply absent where `--agent <role>` resolves it. So the
+ * files that govern a session are canonicalized where they govern it, once the
+ * worktree exists and before any runtime child reads them. The control checks
+ * stay: they are what fails a launch early, with a message about the tree the
+ * operator is looking at.
+ */
+function outsideSessionTree(worktree: string, runtime: Runtime, entry: RoleLaunch): string | null {
+  for (const [named, relative] of [
+    ["role contract", entry.contract],
+    [`${runtime} adapter`, entry.runtimes[runtime].adapter],
+  ] as const) {
+    if (!pathIsFile(worktree, relative)) {
+      return (
+        `${named} ${relative} is not a readable file inside the session's worktree of origin/main; ` +
+        "commit it inside the selected project before retrying"
+      );
+    }
+  }
+  return null;
 }
 
 /**
@@ -872,6 +908,20 @@ export function createLaunchServices(
           detail: "could not create the fresh runtime worktree; run `git worktree list` and repair it before retrying",
         };
       }
+      const escaping = outsideSessionTree(worktree, runtime, entry);
+      if (escaping !== null) {
+        const removed = runSync("git", ["worktree", "remove", "--force", worktree], root, projectEnv);
+        return {
+          started: false,
+          code: 1,
+          signal: null,
+          interrupted: null,
+          lastLine: "",
+          malformed: true,
+          detail:
+            removed.status === 0 ? escaping : `${escaping}; worktree cleanup failed at ${worktree}`,
+        };
+      }
       const lastPath = join(scratch, `${runId}.last`);
       // The session's raw transcript goes to a file, not to this terminal: the
       // loop reports outcomes, and a failure names this path for diagnosis.
@@ -1169,6 +1219,10 @@ export async function launchCommand(
         (session.signal === null
           ? `session exited with status ${session.code}`
           : `session ended from ${session.signal}`);
+      if (session.malformed === true) {
+        io.err(`ub agents launch: ${detail}\n`);
+        return 1;
+      }
       // The runtime's own dying words are usually on stderr, so the end of
       // both captured streams is what says whether waiting can help.
       if (blocked(io, `${detail}\n${session.tail ?? session.lastLine}`)) return 1;

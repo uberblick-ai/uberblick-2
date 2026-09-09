@@ -1,23 +1,23 @@
 {
   "issue": 947,
   "fixture": "947-repeat-launch-fixture.mjs",
-  "recorded": "2026-09-08T21:53:51.798Z",
-  "ub": "/tmp/codex-implementer-20260908T205446Z-964dd7/installed-bcc/uberblick-0.947.3/bin/ub",
+  "recorded": "2026-09-09T07:37:58.760Z",
+  "ub": "/tmp/scratch-claude-implementer-20260909T072632Z-30c40b/installed/uberblick-0.947.4/bin/ub",
   "model": "claude",
-  "control": "/tmp/codex-implementer-20260908T205446Z-964dd7/evidence-bcc/control",
+  "control": "/tmp/scratch-claude-implementer-20260909T072632Z-30c40b/evidence-root/control",
   "workspacePinnedByProjectEntry": "bd526fa1-4cb6-4590-bda6-ccb7262e30a2",
   "runs": [
     {
       "index": 1,
       "exit": null,
       "signal": "SIGINT",
-      "startupLine": "ub agents launch: prober on claude in /tmp/codex-implementer-20260908T205446Z-964dd7/evidence-bcc/control",
+      "startupLine": "ub agents launch: prober on claude in /tmp/scratch-claude-implementer-20260909T072632Z-30c40b/evidence-root/control",
       "idleLine": "work: evidence run complete; will idle for 30min",
       "freshResultFiles": [
-        "claude-prober-20260908T215352Z-f48586.json"
+        "claude-prober-20260909T073759Z-afccfc.json"
       ],
       "result": {
-        "run": "claude-prober-20260908T215352Z-f48586",
+        "run": "claude-prober-20260909T073759Z-afccfc",
         "project": "repeat-launch-control",
         "workspace": "bd526fa1-4cb6-4590-bda6-ccb7262e30a2"
       },
@@ -28,13 +28,13 @@
       "index": 2,
       "exit": null,
       "signal": "SIGINT",
-      "startupLine": "ub agents launch: prober on claude in /tmp/codex-implementer-20260908T205446Z-964dd7/evidence-bcc/control",
+      "startupLine": "ub agents launch: prober on claude in /tmp/scratch-claude-implementer-20260909T072632Z-30c40b/evidence-root/control",
       "idleLine": "work: evidence run complete; will idle for 30min",
       "freshResultFiles": [
-        "claude-prober-20260908T215418Z-b3a80b.json"
+        "claude-prober-20260909T073827Z-66ba19.json"
       ],
       "result": {
-        "run": "claude-prober-20260908T215418Z-b3a80b",
+        "run": "claude-prober-20260909T073827Z-66ba19",
         "project": "repeat-launch-control",
         "workspace": "bd526fa1-4cb6-4590-bda6-ccb7262e30a2"
       },
@@ -45,13 +45,13 @@
       "index": 3,
       "exit": null,
       "signal": "SIGINT",
-      "startupLine": "ub agents launch: prober on claude in /tmp/codex-implementer-20260908T205446Z-964dd7/evidence-bcc/control",
+      "startupLine": "ub agents launch: prober on claude in /tmp/scratch-claude-implementer-20260909T072632Z-30c40b/evidence-root/control",
       "idleLine": "work: evidence run complete; will idle for 30min",
       "freshResultFiles": [
-        "claude-prober-20260908T215447Z-5d5b87.json"
+        "claude-prober-20260909T073858Z-152b7d.json"
       ],
       "result": {
-        "run": "claude-prober-20260908T215447Z-5d5b87",
+        "run": "claude-prober-20260909T073858Z-152b7d",
         "project": "repeat-launch-control",
         "workspace": "bd526fa1-4cb6-4590-bda6-ccb7262e30a2"
       },

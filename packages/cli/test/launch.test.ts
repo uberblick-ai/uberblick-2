@@ -163,6 +163,43 @@ function launchData(declared: ReturnType<typeof role>) {
   return { version: 1, entryRoles: { implementer: declared } };
 }
 
+function git(root: string, args: string[]) {
+  const ran = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  expect(ran.status, ran.stderr).toBe(0);
+  return ran;
+}
+
+/** Commit whatever `root` currently holds, and point `origin/main` at it. */
+function commitAsOriginMain(root: string): void {
+  git(root, ["init", "-b", "main"]);
+  git(root, ["add", "-A"]);
+  git(root, [
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "commit",
+    "-m",
+    "base",
+  ]);
+  const head = git(root, ["rev-parse", "HEAD"]);
+  git(root, ["update-ref", "refs/remotes/origin/main", head.stdout.trim()]);
+}
+
+/** A fake runtime that records having been started at all, and nothing else. */
+function fakeRuntime(bin: string, name: string): void {
+  mkdirSync(bin, { recursive: true });
+  const executable = join(bin, name);
+  writeFileSync(
+    executable,
+    `#!/usr/bin/env node
+require("node:fs").writeFileSync(process.env.LAUNCH_EVIDENCE, process.cwd());
+process.stdout.write("No eligible shipper work: test fixture.\\n");
+`,
+  );
+  chmodSync(executable, 0o755);
+}
+
 /** A project on disk whose launch data is exactly what it declares. */
 function writeProject(root: string, roles: Record<string, ReturnType<typeof role>>): void {
   const launch = join(root, ".agents/launch.json");
@@ -893,9 +930,15 @@ esac
       const failure = join(root, "fail");
       mkdirSync(bin);
       writeFileSync(join(root, "marker"), "main\n");
+      // The session reads its contract and adapter in its own worktree, so a
+      // fixture that starts a runtime commits them like a real project does.
+      for (const relative of [".agents/roles/issue-preparer.md", ".claude/agents/issue-preparer.md"]) {
+        mkdirSync(dirname(join(root, relative)), { recursive: true });
+        writeFileSync(join(root, relative), "declared by the fixture project\n");
+      }
       for (const args of [
         ["init", "-b", "main"],
-        ["add", "marker"],
+        ["add", "-A"],
         ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "base"],
       ]) {
         const ran = spawnSync("git", args, { cwd: root, encoding: "utf8" });
@@ -1015,6 +1058,115 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
       }
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("refuses to start a session whose own worktree does not supply the validated files", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-session-tree-"));
+    try {
+      const bin = join(root, "bin");
+      const evidence = join(root, "started");
+      fakeRuntime(bin, "claude");
+      const sibling = join(root, "sibling");
+      mkdirSync(sibling, { recursive: true });
+      writeProject(sibling, { shipper: role({ role: "shipper" }) });
+      const siblingAdapter = join(sibling, ".claude/agents/shipper.md");
+      mkdirSync(dirname(siblingAdapter), { recursive: true });
+      writeFileSync(siblingAdapter, "sibling project adapter\n");
+
+      const services = (selected: string) =>
+        createLaunchServices(
+          selected,
+          launchEnvironment({
+            ...process.env,
+            PATH: `${bin}:${process.env.PATH ?? ""}`,
+            LAUNCH_EVIDENCE: evidence,
+          }),
+          { out: () => {}, err: () => {} },
+          noWorktreeProcesses,
+        );
+
+      // A safe uncommitted regular file masks a committed escaping symlink at
+      // the same path: the control checks accept, and the fresh worktree of
+      // origin/main is where the session would have read the sibling project.
+      const masked = join(root, "masked");
+      mkdirSync(masked);
+      writeProject(masked, { shipper: role({ role: "shipper" }) });
+      const maskedContract = join(masked, ".agents/roles/shipper.md");
+      const maskedAdapter = join(masked, ".claude/agents/shipper.md");
+      mkdirSync(dirname(maskedAdapter), { recursive: true });
+      rmSync(maskedContract);
+      symlinkSync(join(sibling, ".agents/roles/shipper.md"), maskedContract);
+      symlinkSync(siblingAdapter, maskedAdapter);
+      commitAsOriginMain(masked);
+      for (const [path, text] of [
+        [maskedContract, "selected project contract\n"],
+        [maskedAdapter, "selected project adapter\n"],
+      ] as const) {
+        rmSync(path);
+        writeFileSync(path, text);
+      }
+      expect(git(masked, ["status", "--porcelain"]).stdout).toContain(".agents/roles/shipper.md");
+      const maskedEntry = readLaunchData(masked, "claude").entryRoles.shipper;
+      expect(maskedEntry).toBeDefined();
+
+      const maskedOutcome = await services(masked).runSession("shipper", "claude", maskedEntry!);
+      expect(maskedOutcome).toMatchObject({ started: false, code: 1, malformed: true });
+      expect(maskedOutcome.detail).toBe(
+        "role contract .agents/roles/shipper.md is not a readable file inside the session's " +
+          "worktree of origin/main; commit it inside the selected project before retrying",
+      );
+      expect(existsSync(evidence)).toBe(false);
+      expect(
+        git(masked, ["worktree", "list", "--porcelain"]).stdout.match(/^worktree /gm),
+      ).toHaveLength(1);
+
+      // The same divergence with nothing malicious in it: an adapter the
+      // control checkout has and origin/main does not. `--agent <role>` would
+      // resolve it in the worktree, where it is simply absent.
+      const uncommitted = join(root, "uncommitted");
+      mkdirSync(uncommitted);
+      writeProject(uncommitted, { shipper: role({ role: "shipper" }) });
+      commitAsOriginMain(uncommitted);
+      const localAdapter = join(uncommitted, ".claude/agents/shipper.md");
+      mkdirSync(dirname(localAdapter), { recursive: true });
+      writeFileSync(localAdapter, "selected project adapter\n");
+      const uncommittedEntry = readLaunchData(uncommitted, "claude").entryRoles.shipper;
+      expect(uncommittedEntry).toBeDefined();
+
+      const absent = await services(uncommitted).runSession("shipper", "claude", uncommittedEntry!);
+      expect(absent).toMatchObject({ started: false, code: 1, malformed: true });
+      expect(absent.detail).toContain(
+        "claude adapter .claude/agents/shipper.md is not a readable file inside the session's",
+      );
+      expect(existsSync(evidence)).toBe(false);
+      expect(
+        git(uncommitted, ["worktree", "list", "--porcelain"]).stdout.match(/^worktree /gm),
+      ).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("stops the loop instead of retrying launch data the session tree cannot supply", async () => {
+    const current = rig({
+      sessions: [
+        result({
+          started: false,
+          code: 1,
+          lastLine: "",
+          malformed: true,
+          detail:
+            "claude adapter .claude/agents/implementer.md is not a readable file inside the " +
+            "session's worktree of origin/main; commit it inside the selected project before retrying",
+        }),
+      ],
+    });
+
+    expect(await launchCommand(["implementer"], current.io, current.services)).toBe(1);
+    expect(current.seen.sessions).toHaveLength(1);
+    expect(current.seen.waits).toEqual([]);
+    expect(current.stderr()).toContain("worktree of origin/main");
+    expect(current.stderr()).not.toContain("retrying in 5s");
   });
 });
 
