@@ -187,7 +187,10 @@ function runValidationSelfTest() {
 
 function launcherData(childRuntime) {
   return `${JSON.stringify({
-    version: 1,
+    version: 2,
+    project: {
+      baseRef: { remote: "origin", branch: "main" },
+    },
     entryRoles: {
       "probe-parent": {
         contract: ".agents/roles/probe-parent.md",

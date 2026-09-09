@@ -2,6 +2,8 @@
 
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const API_VERSION = "X-GitHub-Api-Version: 2026-03-10";
 const FIELD_NAME = "Request Source";
@@ -50,8 +52,12 @@ function parseJson(result, description) {
 
 function repository(explicit) {
 	if (explicit) return explicit;
-	const result = gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]);
-	if (result.status !== 0) fail(`cannot resolve the current repository: ${result.stderr.trim()}`);
+	const helper = join(dirname(fileURLToPath(import.meta.url)), "agent-binding.mjs");
+	const result = spawnSync(process.execPath, [helper, "project.repository"], { encoding: "utf8" });
+	if (result.status !== 0) {
+		process.stderr.write(result.stderr);
+		fail("cannot resolve project.repository from .agents/launch.json");
+	}
 	return result.stdout.trim();
 }
 

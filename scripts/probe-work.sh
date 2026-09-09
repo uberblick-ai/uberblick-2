@@ -6,8 +6,13 @@
 # It reads GitHub only and claims nothing. Every rule is broader than the role's
 # own pickup, because a false yes costs one session that ends with
 # `No eligible <role> work:` while a false no would hide work.
+#
+# Which repository it reads is the adopting project's own binding, resolved
+# before the first read: a probe that fell back to some other project's
+# repository would answer confidently about work that is not this project's.
 set -u
-REPO=uberblick-ai/uberblick-2
+here=$(dirname "$0")
+REPO=$(node "$here/agent-binding.mjs" project.repository) || exit 2
 role=${1:-}
 case "$role" in
   issue-preparer)

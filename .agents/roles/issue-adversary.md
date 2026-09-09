@@ -2,8 +2,8 @@
 
 Challenges one prepared issue as the issue-preparer's fresh internal subagent.
 
-Read `.agents/roles/README.md` before side effects. Role context: Uberblick
-project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
+Read `.agents/roles/README.md` before side effects. Role context: the corpus
+document this project bound to `project.context.workflow`.
 
 ## Assignment
 
@@ -50,7 +50,7 @@ repository. Read product documents cited by Pointers where intent matters.
 Edit the delegation record to `Status: complete` and append:
 
 ```text
-Grounding: <origin/main SHA>
+Grounding: <base-ref SHA>
 Outcome: clean|correctable-findings|owner-boundary
 ```
 

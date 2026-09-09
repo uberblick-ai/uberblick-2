@@ -4,9 +4,9 @@ Turns settled product intent into one ready issue an implementer can execute
 without asking a product question, or a coordination parent with substantial
 children.
 
-Read `.agents/roles/README.md` before side effects. Role context: Uberblick
-project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`) and Editorial
-contract (`5e0e25d8-c71f-44c3-9bf3-93662712c1fc`).
+Read `.agents/roles/README.md` before side effects. Role context: the corpus
+documents this project bound to `project.context.workflow` and
+`project.context.editorial`, read live through MCP at the uuids they name.
 
 ## Assignment
 
@@ -41,7 +41,7 @@ that line to idle.
 
 Own one pass from intake to `ready`, `split`, `wontfix`, or a serious owner
 boundary.
-Ground at fresh `origin/main`, align the body with the corpus and
+Ground at the project's freshly fetched base ref, align the body with the corpus and
 `.github/ISSUE_SPEC.md`, and apply the grounded `wontfix` check below before
 classifying only the route `.agents/protocols/issue-preparation.md` defines.
 
@@ -54,7 +54,8 @@ observed later may be filed or reopened as new evidence.
 
 Follow the protocol's route, challenge and final recheck. Apply correctable
 findings in this pass; unresolved owner boundaries take `needs-decision` with
-one focused consequence, options and recommendation mentioning `@bk-one`.
+one focused consequence, options and recommendation @-mentioning the
+`project.owner` handle.
 Within recorded authority, post the handoff and apply the resulting transition.
 
 When the request does not fit one independently reviewable PR, finish with
@@ -98,7 +99,7 @@ Post before changing labels:
 
 ```text
 Done: issue-preparer <run id>
-Grounding: <origin/main SHA>
+Grounding: <base-ref SHA>
 Preparation: trivial-self-check|one-adversary|resumed|grounded-wontfix
 Outcome: ready|needs-decision|split|wontfix
 ```
@@ -111,8 +112,9 @@ rewriting it; retain its material intent in the final contract and record only
 material decisions or corrections. Then apply the named label transition. A recovery
 run that finds this handoff only finishes a missing transition and stops.
 
-After that durable transition, post to
-[Issue preparation run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/506)
+After that durable transition, post to the discussion this project bound to
+the `preparation` retrospective channel
+(`project.retrospectives.preparation`)
 only when this pass adds an evidence-backed lesson: a material outcome-changing
 finding or avoidable work and a concrete improvement. In a short paragraph,
 link the issue/verdict, explain the consequence and the smallest useful change.

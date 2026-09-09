@@ -22,7 +22,7 @@ constraints through those citations rather than copying the documents into the
 issue. Mark a missing source as a gap; do not invent its intended content.
 For a resumed pass, refresh only the affected discovery and links.
 
-`git fetch origin main` and record the exact `origin/main` SHA you ground
+Fetch the project's base ref and record the exact SHA you ground
 against — every later statement in the preflight is a claim about that commit,
 not about your memory of the repo. Against it, read what the issue targets: the
 current behavior, the modules, interfaces, invariants and tests it lives in,
@@ -61,11 +61,11 @@ issue is not edited.
 Grounding is proportional, not exhaustive — enough to establish the outcome,
 approach and material risks. A proven mechanical, local correction may stop after the catalog scan
 when no product document governs the change; say why in the handoff. Repeating MCP
-calls to prove an absence is not grounding. If `main` advances while you are
+calls to prove an absence is not grounding. If the base advances while you are
 here, refresh only the grounding and challenge the new commits actually affect;
 a merge elsewhere in the tree does not invalidate a challenge about this one.
 
-When that fetch advances `main`, inspect the changed paths. If the new commits
+When that fetch advances the base, inspect the changed paths. If the new commits
 touch this role contract or the procedure files this run is executing, re-read
 those files before continuing; refreshing the issue's code while following
 stale workflow rules is not a valid recheck.
@@ -138,9 +138,10 @@ and cleanup; disabling a runtime's background-wait ceiling does not waive them.
 
 ## Recheck, then decide
 
-Last thing before posting the outcome, `git fetch origin main` again. Refresh
-only grounding affected by an upstream change, then re-read the issue, parent
-claim, nested adversary handoff and labels.
+Last thing before posting the outcome, resolve the project's base-ref binding
+and fetch that remote and branch again. Refresh only grounding affected by an
+upstream change, then re-read the issue, parent claim, nested adversary handoff
+and labels.
 
 Check the final body against ISSUE_SPEC, including distinct observable outcomes.
 Keep What to the outcome, acceptance criteria to the guarantees, and Pointers to

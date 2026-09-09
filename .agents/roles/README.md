@@ -67,8 +67,8 @@ without a human answer goes to `needs-decision`, not a new automatic
 preparation pass.
 
 Before creating a follow-up issue discovered during a run, fetch
-`origin/main` and check the observation against that commit and existing open
-issues. Do not queue work that current main already resolved or already tracks.
+the project's base ref and check the observation against that commit and existing open
+issues. Do not queue work that the current base already resolved or already tracks.
 Create it through `.github/ISSUE_SPEC.md`'s **Request source** path so its
 provenance is set and read back without becoming a gate.
 
@@ -159,7 +159,7 @@ keeps an abandoned claim looking alive instead of letting it age into recovery.
 
 ## Product context, proportional to the action
 
-Current Uberblick context is required before a product-sensitive choice or a
+Current corpus context is required before a product-sensitive choice or a
 judgment against product intent. If it is unavailable and proceeding could change
 product meaning, stop and report what was needed and observed. Mechanical
 inspection, validation and GitHub bookkeeping continue on their own inputs.
@@ -179,7 +179,7 @@ authorship — the author of a diff is never its independent reviewer.
 
 ## Worktrees and completion
 
-New implementation starts from freshly fetched origin/main in this run's own
+New implementation starts from the project's freshly fetched base ref in this run's own
 isolated worktree. Recovery continues the current remote head without rebase or
 force-push. Never share, delete or repurpose another run's worktree. Re-read
 ownership before pushing and stop if a valid takeover superseded it. A pickup

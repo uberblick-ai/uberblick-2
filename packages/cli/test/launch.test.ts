@@ -63,8 +63,15 @@ function rig(options: {
   linkBase?: string | null;
   sessions?: SessionResult[];
   waits?: Array<NodeJS.Signals | null>;
+  /** What the launch data says from the second read on, as an edit would. */
+  reloadedBaseRef?: { remote: string; branch: string };
 } = {}) {
-  const data = readLaunchData(REPO_ROOT);
+  const loaded = readLaunchData(REPO_ROOT);
+  const data = loaded;
+  const reloaded =
+    options.reloadedBaseRef === undefined
+      ? loaded
+      : { ...loaded, project: { ...loaded.project, baseRef: options.reloadedBaseRef } };
   const probes = [...(options.probes ?? [0])];
   const sessions = [...(options.sessions ?? [result({ interrupted: "SIGINT" })])];
   const waits = [...(options.waits ?? [])];
@@ -73,8 +80,9 @@ function rig(options: {
     dataLoads: [] as Array<string | undefined>,
     preflight: [] as Array<{ runtime: string; adapter: string }>,
     refreshes: 0,
+    baseRefs: [] as string[],
     probes: [] as Array<readonly string[]>,
-    sessions: [] as Array<{ role: string; runtime: string }>,
+    sessions: [] as Array<{ role: string; runtime: string; base: string }>,
     waits: [] as number[],
     terminations: [] as NodeJS.Signals[],
   };
@@ -83,13 +91,14 @@ function rig(options: {
     linkBase: options.linkBase ?? null,
     loadData(activeRuntime) {
       seen.dataLoads.push(activeRuntime);
-      return data;
+      return seen.dataLoads.length === 1 ? data : reloaded;
     },
     preflight(runtime, adapter) {
       seen.preflight.push({ runtime, adapter });
       return options.preflight ?? null;
     },
-    refreshMain() {
+    refreshMain(baseRef) {
+      seen.baseRefs.push(`${baseRef.remote}/${baseRef.branch}`);
       seen.refreshes++;
       if (refreshes.length > 0) return refreshes.shift()!;
       return options.refresh ?? null;
@@ -98,8 +107,8 @@ function rig(options: {
       seen.probes.push(command);
       return { status: probes.shift() ?? 0, output: options.probeOutput ?? "" };
     },
-    async runSession(role, runtime) {
-      seen.sessions.push({ role, runtime });
+    async runSession(role, runtime, _entry, project) {
+      seen.sessions.push({ role, runtime, base: `${project.baseRef.remote}/${project.baseRef.branch}` });
       return sessions.shift() ?? result({ interrupted: "SIGINT" });
     },
     async wait(milliseconds) {
@@ -129,7 +138,6 @@ function rig(options: {
   };
 }
 
-
 /** One entry-role declaration, with every path the project's own to choose. */
 function role(
   overrides: {
@@ -158,9 +166,17 @@ function role(
   };
 }
 
+/** The bindings every project must declare, as this suite's projects declare them. */
+function projectBindings(overrides: Record<string, unknown> = {}) {
+  return { baseRef: { remote: "origin", branch: "main" }, ...overrides };
+}
+
 /** The whole launch file for one declared role, without writing its files. */
-function launchData(declared: ReturnType<typeof role>) {
-  return { version: 1, entryRoles: { implementer: declared } };
+function launchData(
+  declared: ReturnType<typeof role>,
+  project: Record<string, unknown> = projectBindings(),
+) {
+  return { version: 2, project, entryRoles: { implementer: declared } };
 }
 
 function git(root: string, args: string[]) {
@@ -201,10 +217,14 @@ process.stdout.write("No eligible shipper work: test fixture.\\n");
 }
 
 /** A project on disk whose launch data is exactly what it declares. */
-function writeProject(root: string, roles: Record<string, ReturnType<typeof role>>): void {
+function writeProject(
+  root: string,
+  roles: Record<string, ReturnType<typeof role>>,
+  project: Record<string, unknown> = projectBindings(),
+): void {
   const launch = join(root, ".agents/launch.json");
   mkdirSync(dirname(launch), { recursive: true });
-  writeFileSync(launch, `${JSON.stringify({ version: 1, entryRoles: roles }, null, 2)}\n`);
+  writeFileSync(launch, `${JSON.stringify({ version: 2, project, entryRoles: roles }, null, 2)}\n`);
   for (const entry of Object.values(roles)) {
     for (const relative of [entry.contract, entry.runtimes.codex.adapter]) {
       if (relative.startsWith("..") || relative.startsWith("/")) continue;
@@ -224,6 +244,23 @@ describe("ub agents launch", () => {
     // The contract path is the project's, not a shape the CLI knows.
     expect(assignment).toContain("contracts/roles/implementer.md");
     expect(assignment).toContain("launched by `ub agents launch`");
+  });
+
+  it("hands a session the project's own briefing and none of its own", () => {
+    const runId = makeRunId("claude", "implementer");
+    const briefed = launchAssignment(
+      "implementer",
+      runId,
+      "contracts/implementer.md",
+      "MCP route: use the registered atlas server.",
+    );
+    expect(briefed).toContain("MCP route: use the registered atlas server.");
+    // Identity, the project's words, and the one shape every role's final line
+    // has — nothing here names a server, a tool or a command of the CLI's own.
+    const bare = launchAssignment("implementer", runId, "contracts/implementer.md");
+    expect(bare).not.toMatch(/uberblick|mise|mcp/i);
+    expect(bare).toContain("End with the role contract's final line.");
+    expect(launchAssignment("implementer", runId, "contracts/implementer.md", "   ")).toBe(bare);
   });
 
   it("builds argv-only Codex sessions from the declared sandbox", () => {
@@ -295,6 +332,28 @@ describe("ub agents launch", () => {
     expect(() => claudeSessionArgs("integrator", "one prompt", undefined)).toThrow(
       /invalid Claude permission mode/,
     );
+  });
+
+  it("passes the tool approvals the project declared, and invents none", () => {
+    // A project's checked-in runtime settings are ignored where the runtime has
+    // not trusted the project, so a declared approval only reaches the session
+    // as an argument. What the project did not declare is not supplied.
+    expect(claudeSessionArgs("integrator", "one prompt", "auto", ["Bash(gh pr list --json number,title)", "Read"])).toEqual([
+      "-p",
+      "--agent",
+      "integrator",
+      "--allowedTools",
+      "Bash(gh pr list --json number,title)",
+      "Read",
+      "--permission-mode",
+      "auto",
+      "one prompt",
+    ]);
+    for (const declared of [undefined, []]) {
+      expect(claudeSessionArgs("integrator", "one prompt", "auto", declared)).not.toContain(
+        "--allowedTools",
+      );
+    }
   });
 
   it("streams a direct child, forwards a terminal signal once, and reaps it", async () => {
@@ -577,6 +636,8 @@ process.exit(0);
 
     expect(await launchCommand(["implementer", "--help"], current.io, current.services)).toBe(0);
     expect(current.stdout()).toBe(LAUNCH_HELP);
+    expect(current.stdout()).toContain("Launch data version 2");
+    expect(current.stdout()).toContain("https://github.com/uberblick-ai/uberblick-2/issues/948");
     expect(current.stderr()).toBe("");
     expect(touched).toBe(false);
   });
@@ -592,7 +653,9 @@ process.exit(0);
     ] as const) {
       const current = rig();
       expect(await launchCommand([...argv], current.io, current.services)).toBe(130);
-      expect(current.seen.sessions).toEqual([{ role: expected[0], runtime: expected[1] }]);
+      expect(current.seen.sessions).toEqual([
+        { role: expected[0], runtime: expected[1], base: "origin/main" },
+      ]);
       expect(current.seen.preflight).toEqual([
         {
           runtime: expected[1],
@@ -852,13 +915,13 @@ esac
       );
 
       writeFileSync(join(root, "marker"), "dirty\n");
-      expect(services.refreshMain()).toEqual({
+      expect(services.refreshMain({ remote: "origin", branch: "main" })).toEqual({
         detail: "fatal: test fast-forward collision",
         retry: true,
       });
 
       expect(runGit(["switch", "-c", "topic"]).status).toBe(0);
-      expect(services.refreshMain()).toEqual({
+      expect(services.refreshMain({ remote: "origin", branch: "main" })).toEqual({
         detail: "run `ub agents launch` from the project's `main` checkout",
         retry: false,
       });
@@ -996,7 +1059,12 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
       );
       const entry = readLaunchData(REPO_ROOT).entryRoles["issue-preparer"];
       expect(entry).toBeDefined();
-      const outcome = await services.runSession("issue-preparer", "claude", entry!);
+      const outcome = await services.runSession(
+        "issue-preparer",
+        "claude",
+        entry!,
+        readLaunchData(REPO_ROOT).project,
+      );
       const observed = JSON.parse(readFileSync(evidence, "utf8"));
 
       expect(outcome).toMatchObject({
@@ -1030,9 +1098,19 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
 
       writeFileSync(failure, "fail\n");
       processLookupFails = true;
-      const firstFailure = await services.runSession("issue-preparer", "claude", entry!);
+      const firstFailure = await services.runSession(
+        "issue-preparer",
+        "claude",
+        entry!,
+        readLaunchData(REPO_ROOT).project,
+      );
       processLookupFails = false;
-      const secondFailure = await services.runSession("issue-preparer", "claude", entry!);
+      const secondFailure = await services.runSession(
+        "issue-preparer",
+        "claude",
+        entry!,
+        readLaunchData(REPO_ROOT).project,
+      );
       expect(firstFailure).toMatchObject({
         started: true,
         code: 23,
@@ -1109,7 +1187,12 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
       const maskedEntry = readLaunchData(masked, "claude").entryRoles.shipper;
       expect(maskedEntry).toBeDefined();
 
-      const maskedOutcome = await services(masked).runSession("shipper", "claude", maskedEntry!);
+      const maskedOutcome = await services(masked).runSession(
+        "shipper",
+        "claude",
+        maskedEntry!,
+        readLaunchData(masked).project,
+      );
       expect(maskedOutcome).toMatchObject({ started: false, code: 1, malformed: true });
       expect(maskedOutcome.detail).toBe(
         "role contract .agents/roles/shipper.md is not a readable file inside the session's " +
@@ -1133,7 +1216,12 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
       const uncommittedEntry = readLaunchData(uncommitted, "claude").entryRoles.shipper;
       expect(uncommittedEntry).toBeDefined();
 
-      const absent = await services(uncommitted).runSession("shipper", "claude", uncommittedEntry!);
+      const absent = await services(uncommitted).runSession(
+        "shipper",
+        "claude",
+        uncommittedEntry!,
+        readLaunchData(uncommitted).project,
+      );
       expect(absent).toMatchObject({ started: false, code: 1, malformed: true });
       expect(absent.detail).toContain(
         "claude adapter .claude/agents/shipper.md is not a readable file inside the session's",
@@ -1145,6 +1233,27 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("never probes or branches from a base ref this iteration has not refreshed", async () => {
+    // The reload between the refresh and the session is where a project
+    // migrating to another remote or branch changes it. Cutting the session's
+    // worktree from the new ref then would branch from something this run never
+    // fetched — stale instructions and stale code for a delivery role.
+    const current = rig({
+      reloadedBaseRef: { remote: "upstream", branch: "trunk" },
+      waits: [null, "SIGINT"],
+    });
+
+    expect(await launchCommand(["implementer"], current.io, current.services)).toBe(130);
+    // Two refreshes: the declared ref, then the one the reload named. Neither
+    // a probe nor a session ran on the unrefreshed ref in between.
+    expect(current.seen.baseRefs).toEqual(["origin/main", "upstream/trunk"]);
+    expect(current.seen.probes).toHaveLength(1);
+    expect(current.seen.sessions).toEqual([
+      { role: "implementer", runtime: "codex", base: "upstream/trunk" },
+    ]);
+    expect(current.stderr()).toContain("base ref changed from origin/main to upstream/trunk");
   });
 
   it("stops the loop instead of retrying launch data the session tree cannot supply", async () => {
@@ -1204,6 +1313,247 @@ describe("launch data", () => {
       writeFileSync(join(root, ".agents/roles/implementer.md"), "# Implementer\n");
       writeFileSync(join(root, ".codex/agents/implementer.toml"), 'name = "implementer"\n');
       expect(readLaunchData(root).entryRoles.implementer).toBeDefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses launch data that leaves the project's own bindings unsaid", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-bindings-"));
+    try {
+      const launch = join(root, ".agents/launch.json");
+      const declared = role({ role: "shipper" });
+      writeProject(root, { shipper: declared });
+      const write = (project: unknown) =>
+        writeFileSync(
+          launch,
+          `${JSON.stringify({ version: 2, project, entryRoles: { shipper: declared } })}\n`,
+        );
+
+      // No bindings at all is not "use the values some other project uses":
+      // the launcher would otherwise ground, fetch and branch every session
+      // against a tree nobody named.
+      writeFileSync(launch, `${JSON.stringify({ version: 2, entryRoles: { shipper: declared } })}\n`);
+      expect(() => readLaunchData(root)).toThrow(/must contain only version 2, a project object/);
+      write({});
+      expect(() => readLaunchData(root)).toThrow(/"project" must declare the bindings/);
+
+      // Version 1 is a deliberate public-surface migration, not malformed data
+      // with a generic answer: name the required shape and its durable rationale.
+      writeFileSync(launch, `${JSON.stringify({ version: 1, entryRoles: { shipper: declared } })}\n`);
+      expect(() => readLaunchData(root)).toThrow(
+        /uses launch data version 1; version 2 requires a "project" object.*issues\/948/,
+      );
+
+      // The base ref is the one binding this launcher reads itself, held to
+      // git's own rules: a name this accepted but `git check-ref-format`
+      // rejected would pass the gate and fail as an impossible checkout.
+      for (const broken of [
+        null,
+        "origin/main",
+        { remote: "origin" },
+        { remote: "origin", branch: "main", extra: "no" },
+        { remote: "or igin", branch: "main" },
+        { remote: "origin/x", branch: "main" },
+        { remote: "origin", branch: "-delete" },
+        { remote: "origin", branch: "release/../etc" },
+        { remote: "origin", branch: "main.lock" },
+        { remote: "origin", branch: ".hidden" },
+        { remote: "origin", branch: "name." },
+        { remote: "origin", branch: "release//2.x" },
+        { remote: "origin", branch: "feat/.hidden" },
+        { remote: "origin.lock", branch: "main" },
+      ]) {
+        write({ baseRef: broken });
+        expect(() => readLaunchData(root), JSON.stringify(broken)).toThrow(
+          /"project\.baseRef" must name a git "remote" and a "branch"/,
+        );
+        // Git's own answer, not a second opinion about it.
+        const branch = (broken as { branch?: unknown })?.branch;
+        if (typeof branch === "string" && branch !== "main") {
+          expect(
+            spawnSync("git", ["check-ref-format", "--branch", branch]).status,
+            branch,
+          ).not.toBe(0);
+        }
+      }
+      // …and the shapes git does accept stay accepted.
+      for (const branch of ["main", "release/2.x", "feat/a-b.c", "v1.0"]) {
+        expect(spawnSync("git", ["check-ref-format", "--branch", branch]).status, branch).toBe(0);
+        write({ baseRef: { remote: "origin", branch } });
+        expect(readLaunchData(root).project.baseRef.branch, branch).toBe(branch);
+      }
+
+      // Everything else is shape-checked and passed through unread, so a
+      // workflow may declare bindings this CLI has never heard of.
+      write({ baseRef: { remote: "upstream", branch: "release/2.x" }, repository: {} });
+      expect(() => readLaunchData(root)).toThrow(
+        /"project\.repository" must name one "<owner>\/<repo>"/,
+      );
+      for (const repository of ["atlas", "atlas/", "/atlas", "https://github.com/atlas-ai/atlas"]) {
+        write({ baseRef: { remote: "upstream", branch: "release/2.x" }, repository });
+        expect(() => readLaunchData(root), repository).toThrow(
+          /"project\.repository" must name one "<owner>\/<repo>"/,
+        );
+      }
+      write({ baseRef: { remote: "upstream", branch: "release/2.x" }, sessionBriefing: 7 });
+      expect(() => readLaunchData(root)).toThrow(/"project\.sessionBriefing" must be text/);
+
+      // A binding nobody can address is malformed data, not a vocabulary this
+      // CLI declines to know: `scripts/agent-binding.mjs` resolves by dotted
+      // path, so a key outside that grammar could never be read at all.
+      for (const key of ["9lives", "owner handle", "owner.handle", ""]) {
+        write({ baseRef: { remote: "upstream", branch: "release/2.x" }, [key]: "value" });
+        expect(() => readLaunchData(root), key).toThrow(/declares a binding no role can name/);
+        write({
+          baseRef: { remote: "upstream", branch: "release/2.x" },
+          retrospectives: { [key]: 1 },
+        });
+        expect(() => readLaunchData(root), key).toThrow(/declares a binding no role can name/);
+      }
+      write({ baseRef: { remote: "upstream", branch: "release/2.x" }, owner_handle: "someone" });
+      expect(readLaunchData(root).project.owner_handle).toBe("someone");
+
+      write({
+        baseRef: { remote: "upstream", branch: "release/2.x" },
+        repository: "atlas-ai/atlas",
+        retrospectives: { implementation: 12 },
+      });
+      expect(readLaunchData(root).project).toEqual({
+        baseRef: { remote: "upstream", branch: "release/2.x" },
+        repository: "atlas-ai/atlas",
+        retrospectives: { implementation: 12 },
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a tool approval that is not a list of tools the project grants", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-grants-"));
+    try {
+      const launch = join(root, ".agents/launch.json");
+      const declared = role({ role: "shipper" });
+      writeProject(root, { shipper: declared });
+      for (const broken of ["Read", [], [""], ["Read", 7]]) {
+        const granted = {
+          ...declared,
+          runtimes: {
+            ...declared.runtimes,
+            claude: { ...declared.runtimes.claude, allowedTools: broken },
+          },
+        };
+        writeFileSync(
+          launch,
+          `${JSON.stringify({ version: 2, project: projectBindings(), entryRoles: { shipper: granted } })}\n`,
+        );
+        expect(() => readLaunchData(root), JSON.stringify(broken)).toThrow(
+          /"allowedTools" must list the tools this project grants/,
+        );
+      }
+
+      const granted = {
+        ...declared,
+        runtimes: {
+          ...declared.runtimes,
+          claude: { ...declared.runtimes.claude, allowedTools: ["Read", "Bash(git log:*)"] },
+        },
+      };
+      writeFileSync(
+        launch,
+        `${JSON.stringify({ version: 2, project: projectBindings(), entryRoles: { shipper: granted } })}\n`,
+      );
+      expect(readLaunchData(root).entryRoles.shipper?.runtimes.claude.allowedTools).toEqual([
+        "Read",
+        "Bash(git log:*)",
+      ]);
+      // Declaring none stays declaring none.
+      writeProject(root, { shipper: declared });
+      expect(readLaunchData(root).entryRoles.shipper?.runtimes.claude.allowedTools).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("links a worked item into the repository the project grounds on", () => {
+    // In a fork, `origin` is the fork and the declared base remote is the
+    // workflow's repository: a `#123` link built from `origin` sends the
+    // operator to a different issue number than every role just used.
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-link-"));
+    try {
+      // The mismatch that matters: the project grounds on `origin`, `origin`
+      // is a fork, and the repository its roles read is upstream. Issue #7 of
+      // the fork is a different issue from #7 of the workflow repository.
+      writeProject(
+        root,
+        { shipper: role({ role: "shipper" }) },
+        projectBindings({ repository: "atlas-ai/atlas" }),
+      );
+      commitAsOriginMain(root);
+      git(root, ["remote", "add", "origin", "https://github.com/someone/fork.git"]);
+      const io = { out: () => {}, err: () => {} };
+      // A link only exists for a terminal that renders one, so this asserts
+      // through that switch rather than around it.
+      const wasTty = process.stdout.isTTY;
+      try {
+        process.stdout.isTTY = true;
+        expect(createLaunchServices(root, process.env, io).linkBase).toBe(
+          "https://github.com/atlas-ai/atlas",
+        );
+        // The base remote still decides whether these numbers are GitHub items
+        // at all, and a project that declared no repository keeps its remote's.
+        writeProject(root, { shipper: role({ role: "shipper" }) });
+        expect(createLaunchServices(root, process.env, io).linkBase).toBe(
+          "https://github.com/someone/fork",
+        );
+        writeProject(
+          root,
+          { shipper: role({ role: "shipper" }) },
+          projectBindings({ repository: "atlas-ai/atlas", baseRef: { remote: "elsewhere", branch: "main" } }),
+        );
+        git(root, ["remote", "add", "elsewhere", "git@git.example.invalid:atlas-ai/atlas.git"]);
+        expect(createLaunchServices(root, process.env, io).linkBase).toBeNull();
+        // A malformed repository is refused at the structural gate rather
+        // than silently discarded in favour of the fork remote.
+        writeProject(
+          root,
+          { shipper: role({ role: "shipper" }) },
+          projectBindings({ repository: "https://github.com/atlas-ai/atlas" }),
+        );
+        expect(() => readLaunchData(root)).toThrow(/"project\.repository" must name one/);
+        expect(createLaunchServices(root, process.env, io).linkBase).toBeNull();
+        // Unreadable launch data leaves no link rather than a guessed one.
+        writeFileSync(join(root, ".agents/launch.json"), "not json\n");
+        expect(createLaunchServices(root, process.env, io).linkBase).toBeNull();
+      } finally {
+        process.stdout.isTTY = wasTty;
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fetches and branches from the base ref the project declared", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-baseref-"));
+    try {
+      writeProject(
+        root,
+        { shipper: role({ role: "shipper" }) },
+        projectBindings({ baseRef: { remote: "upstream", branch: "trunk" } }),
+      );
+      commitAsOriginMain(root);
+      const services = createLaunchServices(root, process.env, { out: () => {}, err: () => {} });
+      // The checkout is on `main`, which is nothing to this project: what the
+      // launcher refuses is a checkout that is not on the declared branch.
+      expect(services.refreshMain({ remote: "upstream", branch: "trunk" })).toEqual({
+        detail: "run `ub agents launch` from the project's `trunk` checkout",
+        retry: false,
+      });
+      git(root, ["checkout", "-b", "trunk"]);
+      expect(services.refreshMain({ remote: "upstream", branch: "trunk" })).toMatchObject({
+        detail: expect.stringContaining("could not fetch upstream/trunk"),
+        retry: true,
+      });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

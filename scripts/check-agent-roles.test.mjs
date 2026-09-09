@@ -24,17 +24,29 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = dirname(here);
 
+/**
+ * A whole adopting project: this repository's own declared workflow, copied.
+ *
+ * The resource list is `.agents/requires.json`'s, so a file the workflow starts
+ * requiring arrives here without anyone remembering to add it — and a fixture
+ * that stopped being complete would be the checker's own failure to report.
+ */
 function completeFixture() {
 	const fixture = mkdtempSync(join(tmpdir(), "agent-roles-"));
 	mkdirSync(join(fixture, "scripts"));
 	copyFileSync(join(here, "check-agent-roles.mjs"), join(fixture, "scripts/check-agent-roles.mjs"));
-	for (const relative of [".agents/roles", ".claude/agents", ".codex/agents"])
-		cpSync(join(root, relative), join(fixture, relative), { recursive: true });
-	copyFileSync(join(root, ".agents/launch.json"), join(fixture, ".agents/launch.json"));
+	const requires = JSON.parse(readFileSync(join(root, ".agents/requires.json"), "utf8"));
+	for (const relative of [...requires.resources, ...requires.projectResources]) {
+		mkdirSync(dirname(join(fixture, relative)), { recursive: true });
+		copyFileSync(join(root, relative), join(fixture, relative));
+	}
+	// Not portable, and this project's own: the shaping skill adapters the
+	// checker requires of itself, and the role triplets it validates.
 	for (const relative of [
-		".agents/protocols",
+		".agents/roles",
+		".claude/agents",
+		".codex/agents",
 		".agents/skills/shape-issue",
-		".agents/adapters",
 		".claude/skills/shape-issue",
 	]) cpSync(join(root, relative), join(fixture, relative), { recursive: true });
 	return fixture;
@@ -167,4 +179,174 @@ test("launch data is complete and stays aligned with the role triplets", { skip:
 	result = run(wrongPermission);
 	assert.equal(result.status, 1);
 	assert.match(result.stderr, /integrator claude permissionMode.*expected auto/);
+
+	const declaredGrant = completeFixture();
+	const grantPath = join(declaredGrant, ".agents/launch.json");
+	const grantData = JSON.parse(readFileSync(grantPath, "utf8"));
+	grantData.entryRoles.integrator.runtimes.claude.allowedTools = ["Bash(gh pr list:*)"];
+	writeFileSync(grantPath, `${JSON.stringify(grantData, null, 2)}\n`);
+	result = run(declaredGrant);
+	assert.equal(result.status, 0, result.stderr);
+	grantData.entryRoles.integrator.runtimes.claude.allowedTools = [];
+	writeFileSync(grantPath, `${JSON.stringify(grantData, null, 2)}\n`);
+	result = run(declaredGrant);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /integrator claude allowedTools must list non-empty tool names/);
+});
+
+test("the portable source keeps no value of this project's own", { skip: claudeSkip }, () => {
+	// Each of these is a value a second project would have to be able to
+	// change, written where nobody could change it: the check exists so the
+	// portability cleanup cannot quietly rot back.
+	for (const [added, expected] of [
+		["Ground at `origin/main` first.\n", /carries "origin\/m" — a base ref/],
+		["Ask @bk-one about it.\n", /carries "@bk-one" — an account handle/],
+		["Ask `@bk-one` about it.\n", /carries "@bk-one" — an account handle/],
+		["Fetch with `git fetch origin main`.\n", /carries "git fetch origin main" — a base ref/],
+		["Read Editorial contract first.\n", /carries "Editorial contract" — a product-document title/],
+		["Build the Docker review image.\n", /carries "Docker" — a build or validation command/],
+		["Run `mise run test` before handoff.\n", /carries "mise" — a build or validation command/],
+		[
+			"Role context: Uberblick project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).\n",
+			/carries "c0bb016d-3d4c-4316-9b4e-da8a7b322e55" — a corpus document uuid/,
+		],
+		[
+			"Post to https://github.com/uberblick-ai/uberblick-2/discussions/522.\n",
+			/carries "github\.com\/uberblick-ai\/uberblick-2" — a repository or discussion URL/,
+		],
+		[
+			"Read /home/someone/uberblick/.agents/roles/implementer.md first.\n",
+			/carries "\/home\/" — an absolute host path/,
+		],
+		// The bare slug is the form the probe and the shaping protocol actually
+		// carried before this workflow was made portable, so the guard has to
+		// fail it and not only the URL form.
+		[
+			"Run `gh issue list -R uberblick-ai/uberblick-2 --state open`.\n",
+			/carries "-R uberblick-ai\/uberblick-2" — a repository operand/,
+		],
+		[
+			"Use `--repo uberblick-ai/uberblick-2` so no checkout is required.\n",
+			/carries "--repo uberblick-ai\/uberblick-2" — a repository operand/,
+		],
+		[
+			"Enumerate `gh api repos/uberblick-ai/uberblick-2/issues`.\n",
+			/carries "repos\/uberblick-ai\/uberblick-2" — a repository in an API path/,
+		],
+		[
+			"The durable record stays in uberblick-ai/uberblick-2.\n",
+			/carries "uberblick-ai\/uberblick-2" — this project's repository/,
+		],
+	]) {
+		const fixture = completeFixture();
+		const contract = join(fixture, ".agents/roles/implementer.md");
+		writeFileSync(contract, `${readFileSync(contract, "utf8")}${added}`);
+		const result = run(fixture);
+		assert.equal(result.status, 1, added);
+		assert.match(result.stderr, expected);
+	}
+
+	// And the shapes that read like a slug but are not one, so the guard stays
+	// usable: a severity pair, a placeholder API path, and a shell variable.
+	const legal = completeFixture();
+	const contract = join(legal, ".agents/roles/implementer.md");
+	writeFileSync(
+		contract,
+		`${readFileSync(contract, "utf8")}\nRule P2/P3 and/or park; read \`repos/{owner}/{repo}/commits\`; run \`gh issue list -R "$REPO"\`.\n`,
+	);
+	assert.equal(run(legal).status, 0, run(legal).stderr);
+});
+
+test("the required-resource declaration stays honest in both directions", { skip: claudeSkip }, () => {
+	const requires = ".agents/requires.json";
+	const read = (fixture) => JSON.parse(readFileSync(join(fixture, requires), "utf8"));
+	const write = (fixture, data) =>
+		writeFileSync(join(fixture, requires), `${JSON.stringify(data, null, 2)}\n`);
+	const complete = completeFixture();
+	const projectResources = read(complete).projectResources;
+	for (const runtimeConfiguration of [
+		".mcp.json",
+		".claude/settings.json",
+		".codex/config.toml",
+		".codex/rules/workflow.rules",
+	]) assert.ok(projectResources.includes(runtimeConfiguration), runtimeConfiguration);
+
+	// A helper an instruction tells an agent to run, that the declaration
+	// omits: the adopting project would receive the instruction without the
+	// helper, so it fails here instead.
+	const undeclaredHelper = completeFixture();
+	const contract = join(undeclaredHelper, ".agents/roles/implementer.md");
+	writeFileSync(
+		contract,
+		`${readFileSync(contract, "utf8")}\nRun \`sh scripts/undeclared-helper.sh\` last.\n`,
+	);
+	writeFileSync(join(undeclaredHelper, "scripts/undeclared-helper.sh"), "#!/bin/sh\n");
+	let result = run(undeclaredHelper);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /names scripts\/undeclared-helper\.sh, which .* does not declare/);
+
+	// The other direction: a portable file nobody declared, and a declared
+	// file nobody shipped.
+	const undeclaredFile = completeFixture();
+	writeFileSync(join(undeclaredFile, ".agents/protocols/new-protocol.md"), "# New\n");
+	result = run(undeclaredFile);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /resources omits the portable file \.agents\/protocols\/new-protocol\.md/);
+
+	const absentResource = completeFixture();
+	const declared = read(absentResource);
+	declared.resources = [...declared.resources, "scripts/absent-helper.sh"].sort();
+	write(absentResource, declared);
+	result = run(absentResource);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /names a file this repository does not have: scripts\/absent-helper\.sh/);
+
+	const misclassifiedProbe = completeFixture();
+	const misclassified = read(misclassifiedProbe);
+	misclassified.projectResources = misclassified.projectResources.filter(
+		(resource) => resource !== "scripts/probe-work.sh",
+	);
+	misclassified.resources = [...misclassified.resources, "scripts/probe-work.sh"].sort();
+	write(misclassifiedProbe, misclassified);
+	result = run(misclassifiedProbe);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /projectResources omits implementer project probe scripts\/probe-work\.sh/);
+
+	const incompleteReviewImage = completeFixture();
+	rmSync(join(incompleteReviewImage, ".github/ISSUE_SPEC.md"));
+	result = run(incompleteReviewImage);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /names a file this repository does not have: \.github\/ISSUE_SPEC\.md/);
+
+	// The immutable review image deliberately excludes these two trees. Their
+	// absence skips only resources beneath the absent roots; every present part
+	// of the declaration and both parity directions are still checked.
+	const reviewImage = completeFixture();
+	rmSync(join(reviewImage, ".claude/agents"), { recursive: true });
+	rmSync(join(reviewImage, ".claude/settings.json"));
+	rmSync(join(reviewImage, ".github"), { recursive: true });
+	result = run(reviewImage);
+	assert.equal(result.status, 0, result.stderr);
+	assert.match(result.stdout, /skipped: \.claude\/agents is absent/);
+	assert.match(result.stdout, /skipped: \.claude\/settings\.json is absent/);
+	assert.match(result.stdout, /skipped: \.github is absent/);
+
+	// And the bindings half: this project must declare what the workflow needs.
+	const missingBinding = completeFixture();
+	const launch = join(missingBinding, ".agents/launch.json");
+	const data = JSON.parse(readFileSync(launch, "utf8"));
+	delete data.project.retrospectives.implementation;
+	writeFileSync(launch, `${JSON.stringify(data, null, 2)}\n`);
+	result = run(missingBinding);
+	assert.equal(result.status, 1);
+	assert.match(
+		result.stderr,
+		/declares no "project\.retrospectives\.implementation", which .* requires of every project/,
+	);
+
+	const malformed = completeFixture();
+	write(malformed, { version: 2, bindings: [], resources: [], projectResources: [] });
+	result = run(malformed);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /expected only version 1, bindings, resources and projectResources/);
 });

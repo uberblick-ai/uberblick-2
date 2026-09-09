@@ -1,8 +1,17 @@
 # Runtime dispatch
 
 Invocation differences only. Neutral role and review protocols own assignment,
-independence, grants and outcomes. These are the current repository transports;
-this file does not implement portable grants.
+independence and outcomes. Every path below is the adopting project's own — the
+parent's worktree, its private scratch, its role contracts and its runtime
+adapters — so nothing here reaches into the checkout this workflow came from.
+
+Grants are the project's, in both places they live. An entry-role session gets
+exactly the sandbox, permission mode and tool approvals its project declared in
+`.agents/launch.json`, passed through by the launcher, and each runtime's own
+configuration stays the project's to write. The one grant this file supplies is
+the internal adversary child's, in the commands below, and it is stated there
+rather than implied: a project that wants a different one edits the transport it
+adopted, and nothing here widens a grant its project declared elsewhere.
 
 Implementation review is not dispatched from here. A reviewer is an entry role
 that `ub agents launch implementation-reviewer [--model claude|codex]` starts

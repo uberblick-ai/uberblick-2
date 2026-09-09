@@ -63,10 +63,21 @@ test("refuses to post when the resolved discussion is not the expected one", (t)
 	assert.deepEqual(mutations(calls), []);
 });
 
-test("rejects an unknown channel, a discussion number and a missing body without calling gh", (t) => {
+test("rejects a discussion number, a bad channel shape and a missing body without calling gh", (t) => {
 	const { body, calls, env } = fixture(t, "https://github.com/uberblick-ai/uberblick-2/discussions/522");
-	for (const args of [["522", body], ["audit", body], ["workflow-audit"], ["technical-audit", join(dirname(body), "absent.md")]]) {
+	for (const args of [["522", body], ["Implementation", body], ["-audit", body], ["workflow-audit"], ["technical-audit", join(dirname(body), "absent.md")]]) {
 		assert.equal(run(args, env).status, 2, args.join(" "));
 	}
+	assert.deepEqual(mutations(calls), []);
+});
+
+test("refuses a channel this project bound to no discussion", (t) => {
+	// The channel vocabulary is the project's declarations, so an undeclared
+	// channel is a missing binding rather than a typo the script can guess at —
+	// and it costs a message, never a post to whatever discussion 1 happens to be.
+	const { body, calls, env } = fixture(t, "https://github.com/uberblick-ai/uberblick-2/discussions/522");
+	const result = run(["audit", body], env);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /no "project\.retrospectives\.audit" binding in .*\.agents\/launch\.json/);
 	assert.deepEqual(mutations(calls), []);
 });

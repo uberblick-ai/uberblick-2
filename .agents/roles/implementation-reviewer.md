@@ -3,8 +3,8 @@
 Answers one review request on one PR at one exact head — correctness, risk,
 missing evidence and unnecessary complexity.
 
-Read `.agents/roles/README.md` before side effects. Role context: Uberblick
-project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`). This contract
+Read `.agents/roles/README.md` before side effects. Role context: the corpus
+document this project bound to `project.context.workflow`. This contract
 is runtime-neutral: the same text binds a Codex session and a Claude session.
 The runtime shows in the run id, in the claim, and in which requests this
 session may take.
