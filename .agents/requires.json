@@ -57,7 +57,11 @@
   ],
   "projectResources": [
     ".agents/launch.json",
+    ".claude/settings.json",
+    ".codex/config.toml",
+    ".codex/rules/workflow.rules",
     ".github/ISSUE_SPEC.md",
+    ".mcp.json",
     "scripts/probe-work.sh"
   ]
 }

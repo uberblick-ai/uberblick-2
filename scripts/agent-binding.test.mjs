@@ -43,7 +43,7 @@ function resolve(base, ...args) {
 }
 
 const declared = {
-	version: 1,
+	version: 2,
 	project: {
 		repository: "atlas-ai/atlas",
 		baseRef: { remote: "upstream", branch: "release/2.x" },

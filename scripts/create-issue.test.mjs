@@ -21,7 +21,7 @@ function fixture(t, fields, readback) {
 	mkdirSync(join(directory, "scripts"));
 	writeFileSync(
 		join(directory, ".agents/launch.json"),
-		`${JSON.stringify({ version: 1, project: { repository: "octo/repo" } }, null, 2)}\n`,
+		`${JSON.stringify({ version: 2, project: { repository: "octo/repo" } }, null, 2)}\n`,
 	);
 	copyFileSync(script, projectScript);
 	copyFileSync(join(root, "scripts/agent-binding.mjs"), join(directory, "scripts/agent-binding.mjs"));
@@ -132,7 +132,7 @@ test("a silently dropped or changed value is reported without hiding the created
 
 test("a missing project repository stops before any GitHub call", (t) => {
 	const context = fixture(t, field, []);
-	writeFileSync(join(dirname(dirname(context.script)), ".agents/launch.json"), '{"version":1,"project":{}}\n');
+	writeFileSync(join(dirname(dirname(context.script)), ".agents/launch.json"), '{"version":2,"project":{}}\n');
 
 	const result = run(context);
 

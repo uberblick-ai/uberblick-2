@@ -80,6 +80,10 @@ The roles, their contracts, adapters, default runtime and sandbox come from the
 selected project's own .agents/launch.json — never from wherever this
 executable was installed.
 
+Launch data version 2 requires a project object declaring that project's
+bindings and grants. To migrate a version 1 file, add that object if absent and
+set version to 2; see https://github.com/uberblick-ai/uberblick-2/issues/948.
+
 options:
   --model <name>   run the role with claude or codex; the role's own default
                    applies when this is left out
@@ -130,12 +134,13 @@ interface BaseRef {
  */
 interface ProjectBindings {
   baseRef: BaseRef;
+  repository?: string;
   /** Every other binding, including the `sessionBriefing` text a session gets. */
   [binding: string]: unknown;
 }
 
 interface LaunchData {
-  version: 1;
+  version: 2;
   project: ProjectBindings;
   entryRoles: Record<string, RoleLaunch>;
 }
@@ -346,6 +351,8 @@ function baseRefName(baseRef: BaseRef): string {
 
 /** A binding name a role can actually address with the resolver beside this. */
 const BINDING_KEY = /^[A-Za-z][A-Za-z0-9_-]*$/;
+/** `<owner>/<repo>`, the one shape a repository binding can be. */
+const REPOSITORY = /^[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*$/;
 
 function pathIsFile(root: string, relative: string): boolean {
   try {
@@ -461,6 +468,12 @@ function readProjectBindings(path: string, value: unknown): ProjectBindings {
   if (project.sessionBriefing !== undefined && typeof project.sessionBriefing !== "string") {
     throw new Error(`${path} "project.sessionBriefing" must be text`);
   }
+  if (
+    project.repository !== undefined &&
+    (typeof project.repository !== "string" || !REPOSITORY.test(project.repository))
+  ) {
+    throw new Error(`${path} "project.repository" must name one "<owner>/<repo>"`);
+  }
   for (const [binding, declared] of Object.entries(project)) {
     if (binding === "baseRef") continue;
     const group = record(declared);
@@ -501,13 +514,20 @@ export function readLaunchData(root: string, activeRuntime?: Runtime): LaunchDat
 
   const top = record(parsed);
   const entries = record(top?.entryRoles);
+  if (top?.version === 1) {
+    throw new Error(
+      `${path} uses launch data version 1; version 2 requires a "project" object. ` +
+        "Add the project's bindings and grants if absent, set version to 2, and see " +
+        "https://github.com/uberblick-ai/uberblick-2/issues/948",
+    );
+  }
   if (
     top === null ||
     !exactKeys(top, ["version", "project", "entryRoles"]) ||
-    top.version !== 1 ||
+    top.version !== 2 ||
     entries === null
   ) {
-    throw new Error(`${path} must contain only version 1, a project object and an entryRoles object`);
+    throw new Error(`${path} must contain only version 2, a project object and an entryRoles object`);
   }
   if (Object.keys(entries).length === 0) {
     throw new Error(`${path} declares no entry roles`);
@@ -618,7 +638,7 @@ export function readLaunchData(root: string, activeRuntime?: Runtime): LaunchDat
       runtimes: parsedRuntimes,
     } as RoleLaunch;
   }
-  return { version: 1, project, entryRoles };
+  return { version: 2, project, entryRoles };
 }
 
 function runSync(command: string, args: readonly string[], root: string, env: NodeJS.ProcessEnv) {
@@ -633,10 +653,6 @@ function runSync(command: string, args: readonly string[], root: string, env: No
 function lastLine(text: string): string {
   return text.trimEnd().split(/\r?\n/).at(-1) ?? "";
 }
-
-/** The `https://github.com/<owner>/<repo>` behind a remote URL, or null. */
-/** `<owner>/<repo>`, the one shape a repository binding can be. */
-const REPOSITORY = /^[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*$/;
 
 /**
  * Where `#123` points: the project's declared repository, on the host its base
@@ -983,13 +999,14 @@ export function claudeSessionArgs(
     "-p",
     "--agent",
     role,
-    "--permission-mode",
-    permissionMode,
-    // Only what the project declared, and nothing when it declared nothing: a
-    // grant this launcher invented would widen an adopted one silently.
+    // `--allowedTools` is variadic. Keep each declaration as its own argv
+    // member, then terminate the list with the next option so a comma inside a
+    // tool pattern is data rather than another tool separator.
     ...(allowedTools === undefined || allowedTools.length === 0
       ? []
-      : ["--allowedTools", allowedTools.join(",")]),
+      : ["--allowedTools", ...allowedTools]),
+    "--permission-mode",
+    permissionMode,
     prompt,
   ];
 }
@@ -1024,10 +1041,7 @@ export function createLaunchServices(
     bindings === null
       ? { status: 1, stdout: "" }
       : runSync("git", ["remote", "get-url", bindings.baseRef.remote], root, projectEnv);
-  const declaredRepository =
-    typeof bindings?.repository === "string" && REPOSITORY.test(bindings.repository)
-      ? bindings.repository
-      : null;
+  const declaredRepository = bindings?.repository ?? null;
 
   return {
     root,

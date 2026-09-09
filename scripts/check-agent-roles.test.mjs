@@ -179,6 +179,19 @@ test("launch data is complete and stays aligned with the role triplets", { skip:
 	result = run(wrongPermission);
 	assert.equal(result.status, 1);
 	assert.match(result.stderr, /integrator claude permissionMode.*expected auto/);
+
+	const declaredGrant = completeFixture();
+	const grantPath = join(declaredGrant, ".agents/launch.json");
+	const grantData = JSON.parse(readFileSync(grantPath, "utf8"));
+	grantData.entryRoles.integrator.runtimes.claude.allowedTools = ["Bash(gh pr list:*)"];
+	writeFileSync(grantPath, `${JSON.stringify(grantData, null, 2)}\n`);
+	result = run(declaredGrant);
+	assert.equal(result.status, 0, result.stderr);
+	grantData.entryRoles.integrator.runtimes.claude.allowedTools = [];
+	writeFileSync(grantPath, `${JSON.stringify(grantData, null, 2)}\n`);
+	result = run(declaredGrant);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /integrator claude allowedTools must list non-empty tool names/);
 });
 
 test("the portable source keeps no value of this project's own", { skip: claudeSkip }, () => {
@@ -249,6 +262,14 @@ test("the required-resource declaration stays honest in both directions", { skip
 	const read = (fixture) => JSON.parse(readFileSync(join(fixture, requires), "utf8"));
 	const write = (fixture, data) =>
 		writeFileSync(join(fixture, requires), `${JSON.stringify(data, null, 2)}\n`);
+	const complete = completeFixture();
+	const projectResources = read(complete).projectResources;
+	for (const runtimeConfiguration of [
+		".mcp.json",
+		".claude/settings.json",
+		".codex/config.toml",
+		".codex/rules/workflow.rules",
+	]) assert.ok(projectResources.includes(runtimeConfiguration), runtimeConfiguration);
 
 	// A helper an instruction tells an agent to run, that the declaration
 	// omits: the adopting project would receive the instruction without the
@@ -302,10 +323,12 @@ test("the required-resource declaration stays honest in both directions", { skip
 	// of the declaration and both parity directions are still checked.
 	const reviewImage = completeFixture();
 	rmSync(join(reviewImage, ".claude/agents"), { recursive: true });
+	rmSync(join(reviewImage, ".claude/settings.json"));
 	rmSync(join(reviewImage, ".github"), { recursive: true });
 	result = run(reviewImage);
 	assert.equal(result.status, 0, result.stderr);
 	assert.match(result.stdout, /skipped: \.claude\/agents is absent/);
+	assert.match(result.stdout, /skipped: \.claude\/settings\.json is absent/);
 	assert.match(result.stdout, /skipped: \.github is absent/);
 
 	// And the bindings half: this project must declare what the workflow needs.

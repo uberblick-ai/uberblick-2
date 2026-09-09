@@ -231,7 +231,10 @@ that same line.
 function launchData() {
   return `${JSON.stringify(
     {
-      version: 1,
+      version: 2,
+      project: {
+        baseRef: { remote: "origin", branch: "main" },
+      },
       entryRoles: {
         prober: {
           contract: ".agents/roles/prober.md",

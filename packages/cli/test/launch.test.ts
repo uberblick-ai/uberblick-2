@@ -176,7 +176,7 @@ function launchData(
   declared: ReturnType<typeof role>,
   project: Record<string, unknown> = projectBindings(),
 ) {
-  return { version: 1, project, entryRoles: { implementer: declared } };
+  return { version: 2, project, entryRoles: { implementer: declared } };
 }
 
 function git(root: string, args: string[]) {
@@ -224,7 +224,7 @@ function writeProject(
 ): void {
   const launch = join(root, ".agents/launch.json");
   mkdirSync(dirname(launch), { recursive: true });
-  writeFileSync(launch, `${JSON.stringify({ version: 1, project, entryRoles: roles }, null, 2)}\n`);
+  writeFileSync(launch, `${JSON.stringify({ version: 2, project, entryRoles: roles }, null, 2)}\n`);
   for (const entry of Object.values(roles)) {
     for (const relative of [entry.contract, entry.runtimes.codex.adapter]) {
       if (relative.startsWith("..") || relative.startsWith("/")) continue;
@@ -338,14 +338,15 @@ describe("ub agents launch", () => {
     // A project's checked-in runtime settings are ignored where the runtime has
     // not trusted the project, so a declared approval only reaches the session
     // as an argument. What the project did not declare is not supplied.
-    expect(claudeSessionArgs("integrator", "one prompt", "auto", ["Bash(git log:*)", "Read"])).toEqual([
+    expect(claudeSessionArgs("integrator", "one prompt", "auto", ["Bash(gh pr list --json number,title)", "Read"])).toEqual([
       "-p",
       "--agent",
       "integrator",
+      "--allowedTools",
+      "Bash(gh pr list --json number,title)",
+      "Read",
       "--permission-mode",
       "auto",
-      "--allowedTools",
-      "Bash(git log:*),Read",
       "one prompt",
     ]);
     for (const declared of [undefined, []]) {
@@ -635,6 +636,8 @@ process.exit(0);
 
     expect(await launchCommand(["implementer", "--help"], current.io, current.services)).toBe(0);
     expect(current.stdout()).toBe(LAUNCH_HELP);
+    expect(current.stdout()).toContain("Launch data version 2");
+    expect(current.stdout()).toContain("https://github.com/uberblick-ai/uberblick-2/issues/948");
     expect(current.stderr()).toBe("");
     expect(touched).toBe(false);
   });
@@ -1324,16 +1327,23 @@ describe("launch data", () => {
       const write = (project: unknown) =>
         writeFileSync(
           launch,
-          `${JSON.stringify({ version: 1, project, entryRoles: { shipper: declared } })}\n`,
+          `${JSON.stringify({ version: 2, project, entryRoles: { shipper: declared } })}\n`,
         );
 
       // No bindings at all is not "use the values some other project uses":
       // the launcher would otherwise ground, fetch and branch every session
       // against a tree nobody named.
-      writeFileSync(launch, `${JSON.stringify({ version: 1, entryRoles: { shipper: declared } })}\n`);
-      expect(() => readLaunchData(root)).toThrow(/must contain only version 1, a project object/);
+      writeFileSync(launch, `${JSON.stringify({ version: 2, entryRoles: { shipper: declared } })}\n`);
+      expect(() => readLaunchData(root)).toThrow(/must contain only version 2, a project object/);
       write({});
       expect(() => readLaunchData(root)).toThrow(/"project" must declare the bindings/);
+
+      // Version 1 is a deliberate public-surface migration, not malformed data
+      // with a generic answer: name the required shape and its durable rationale.
+      writeFileSync(launch, `${JSON.stringify({ version: 1, entryRoles: { shipper: declared } })}\n`);
+      expect(() => readLaunchData(root)).toThrow(
+        /uses launch data version 1; version 2 requires a "project" object.*issues\/948/,
+      );
 
       // The base ref is the one binding this launcher reads itself, held to
       // git's own rules: a name this accepted but `git check-ref-format`
@@ -1378,8 +1388,14 @@ describe("launch data", () => {
       // workflow may declare bindings this CLI has never heard of.
       write({ baseRef: { remote: "upstream", branch: "release/2.x" }, repository: {} });
       expect(() => readLaunchData(root)).toThrow(
-        /"project\.repository" must be one value or a group of named values/,
+        /"project\.repository" must name one "<owner>\/<repo>"/,
       );
+      for (const repository of ["atlas", "atlas/", "/atlas", "https://github.com/atlas-ai/atlas"]) {
+        write({ baseRef: { remote: "upstream", branch: "release/2.x" }, repository });
+        expect(() => readLaunchData(root), repository).toThrow(
+          /"project\.repository" must name one "<owner>\/<repo>"/,
+        );
+      }
       write({ baseRef: { remote: "upstream", branch: "release/2.x" }, sessionBriefing: 7 });
       expect(() => readLaunchData(root)).toThrow(/"project\.sessionBriefing" must be text/);
 
@@ -1429,7 +1445,7 @@ describe("launch data", () => {
         };
         writeFileSync(
           launch,
-          `${JSON.stringify({ version: 1, project: projectBindings(), entryRoles: { shipper: granted } })}\n`,
+          `${JSON.stringify({ version: 2, project: projectBindings(), entryRoles: { shipper: granted } })}\n`,
         );
         expect(() => readLaunchData(root), JSON.stringify(broken)).toThrow(
           /"allowedTools" must list the tools this project grants/,
@@ -1445,7 +1461,7 @@ describe("launch data", () => {
       };
       writeFileSync(
         launch,
-        `${JSON.stringify({ version: 1, project: projectBindings(), entryRoles: { shipper: granted } })}\n`,
+        `${JSON.stringify({ version: 2, project: projectBindings(), entryRoles: { shipper: granted } })}\n`,
       );
       expect(readLaunchData(root).entryRoles.shipper?.runtimes.claude.allowedTools).toEqual([
         "Read",
@@ -1496,6 +1512,15 @@ describe("launch data", () => {
           projectBindings({ repository: "atlas-ai/atlas", baseRef: { remote: "elsewhere", branch: "main" } }),
         );
         git(root, ["remote", "add", "elsewhere", "git@git.example.invalid:atlas-ai/atlas.git"]);
+        expect(createLaunchServices(root, process.env, io).linkBase).toBeNull();
+        // A malformed repository is refused at the structural gate rather
+        // than silently discarded in favour of the fork remote.
+        writeProject(
+          root,
+          { shipper: role({ role: "shipper" }) },
+          projectBindings({ repository: "https://github.com/atlas-ai/atlas" }),
+        );
+        expect(() => readLaunchData(root)).toThrow(/"project\.repository" must name one/);
         expect(createLaunchServices(root, process.env, io).linkBase).toBeNull();
         // Unreadable launch data leaves no link rather than a guessed one.
         writeFileSync(join(root, ".agents/launch.json"), "not json\n");

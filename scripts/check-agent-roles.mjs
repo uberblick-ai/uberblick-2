@@ -89,6 +89,11 @@ const object = (value) =>
 	typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
 const exactKeys = (value, expected) =>
 	Object.keys(value).sort().join(",") === [...expected].sort().join(",");
+const keysWithin = (value, required, optional) => {
+	const keys = Object.keys(value);
+	return required.every((key) => keys.includes(key)) &&
+		keys.every((key) => required.includes(key) || optional.includes(key));
+};
 
 /** `---` fenced frontmatter, one `key: value` per line, and the body after it. */
 function parseFrontmatter(label, text) {
@@ -281,12 +286,12 @@ function checkPortableSource() {
 		}
 	}
 
-	const reviewExcluded = [CLAUDE, ".github"];
+	const reviewExcluded = [CLAUDE, ".claude/settings.json", ".github"];
 	const skipped = new Set();
 	for (const relative of [...lists.resources, ...lists.projectResources]) {
 		if (existsSync(join(root, relative))) continue;
 		const excluded = reviewExcluded.find(
-			(directory) => relative.startsWith(`${directory}/`) && !existsSync(join(root, directory)),
+			(path) => (relative === path || relative.startsWith(`${path}/`)) && !existsSync(join(root, path)),
 		);
 		if (excluded) skipped.add(excluded);
 		else fail(`${REQUIRES}: names a file this repository does not have: ${relative}`);
@@ -400,8 +405,8 @@ else {
 		fail(`${LAUNCH}: invalid JSON`);
 	}
 	const entries = object(launch?.entryRoles);
-	if (launch && (!exactKeys(launch, ["version", "project", "entryRoles"]) || launch.version !== 1))
-		fail(`${LAUNCH}: expected only version 1, project and entryRoles`);
+	if (launch && (!exactKeys(launch, ["version", "project", "entryRoles"]) || launch.version !== 2))
+		fail(`${LAUNCH}: expected only version 2, project and entryRoles`);
 	if (!entries) fail(`${LAUNCH}: entryRoles must be an object`);
 	else {
 		const names = Object.keys(entries).sort();
@@ -432,13 +437,19 @@ else {
 				const expectedSandbox = runtime === "claude"
 					? "runtime"
 					: slug === "implementer" ? "unsandboxed" : "workspace-write";
-				const expectedKeys = runtime === "claude"
+				const requiredKeys = runtime === "claude"
 					? ["adapter", "sandbox", "permissionMode"]
 					: ["adapter", "sandbox"];
-				if (!config || !exactKeys(config, expectedKeys)) {
+				const optionalKeys = runtime === "claude" ? ["allowedTools"] : [];
+				if (!config || !keysWithin(config, requiredKeys, optionalKeys)) {
 					fail(`${LAUNCH}: ${slug} ${runtime} launch data is malformed`);
 					continue;
 				}
+				if (
+					runtime === "claude" && config.allowedTools !== undefined &&
+					(!Array.isArray(config.allowedTools) || config.allowedTools.length === 0 ||
+						!config.allowedTools.every((tool) => typeof tool === "string" && tool.trim() !== ""))
+				) fail(`${LAUNCH}: ${slug} claude allowedTools must list non-empty tool names`);
 				if (config.adapter !== expectedAdapter)
 					fail(`${LAUNCH}: ${slug} ${runtime} adapter is ${JSON.stringify(config.adapter)}, expected ${expectedAdapter}`);
 				if (config.sandbox !== expectedSandbox)

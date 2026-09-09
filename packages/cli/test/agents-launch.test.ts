@@ -57,7 +57,7 @@ function project(root: string, name: string, contractPath: string): string {
     join(control, ".agents/launch.json"),
     `${JSON.stringify(
       {
-        version: 1,
+        version: 2,
         project: {
           baseRef: { remote: "origin", branch: "main" },
           repository: `${name}-org/${name}`,
