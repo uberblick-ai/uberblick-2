@@ -122,10 +122,11 @@ interface BaseRef {
 /**
  * What the project says about itself, for the workflow it adopted to read.
  *
- * The CLI uses exactly one of these — `baseRef`, because it fetches and creates
- * worktrees — and validates the shape of the rest without interpreting it. The
- * repository, owner, discussions, corpus documents and commands a role needs
- * are the project's own words to its own roles, not policy this launcher holds.
+ * The CLI reads `baseRef` to fetch and create worktrees, `repository` to link
+ * worked items, and `sessionBriefing` to brief each session. It validates the
+ * shape of every other binding without interpreting it: the owner, discussions,
+ * corpus documents and commands are the project's own words to its own roles,
+ * not policy this launcher holds.
  */
 interface ProjectBindings {
   baseRef: BaseRef;
@@ -433,13 +434,13 @@ function launchDataPath(root: string): string {
  *
  * A workflow a project adopts carries no repository, base ref, discussion,
  * owner or command of its own, so those values live here and a role resolves
- * the one it needs before the operation that needs it. This launcher reads only
- * `baseRef`, and refuses the file rather than defaulting: a launcher that
- * quietly fell back to some other project's branch would ground, fetch and
- * branch every session against the wrong tree. Everything else is checked to be
- * a named value or a flat group of named values — enough that a typo is caught
- * before a session starts, and not so much that the vocabulary of a workflow
- * this CLI does not run becomes something this CLI has to know.
+ * the one it needs before the operation that needs it. The launcher reads only
+ * `baseRef`, `repository` and `sessionBriefing`; a missing base ref is refused
+ * rather than defaulted, because a fallback could ground, fetch and branch every
+ * session against the wrong tree. Everything else is checked to be a named
+ * value or a flat group of named values — enough that a typo is caught before a
+ * session starts, and not so much that the vocabulary of a workflow this CLI
+ * does not run becomes something this CLI has to know.
  */
 function readProjectBindings(path: string, value: unknown): ProjectBindings {
   const project = record(value);

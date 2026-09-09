@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -16,6 +16,15 @@ function fixture(t, fields, readback) {
 	const calls = join(directory, "calls.jsonl");
 	const input = join(directory, "input.json");
 	const executable = join(directory, "gh");
+	const projectScript = join(directory, "scripts/create-issue.mjs");
+	mkdirSync(join(directory, ".agents"));
+	mkdirSync(join(directory, "scripts"));
+	writeFileSync(
+		join(directory, ".agents/launch.json"),
+		`${JSON.stringify({ version: 1, project: { repository: "octo/repo" } }, null, 2)}\n`,
+	);
+	copyFileSync(script, projectScript);
+	copyFileSync(join(root, "scripts/agent-binding.mjs"), join(directory, "scripts/agent-binding.mjs"));
 	writeFileSync(body, "A grounded issue body.\n");
 	writeFileSync(
 		executable,
@@ -37,6 +46,7 @@ else process.exit(19);
 		body,
 		calls,
 		input,
+		script: projectScript,
 		env: {
 			...process.env,
 			GH_CALLS: calls,
@@ -59,9 +69,7 @@ function run(context) {
 	return spawnSync(
 		process.execPath,
 		[
-			script,
-			"--repo",
-			"octo/repo",
+			context.script,
 			"--source",
 			"Agent",
 			"--title",
@@ -75,7 +83,7 @@ function run(context) {
 	);
 }
 
-test("creates an issue with a name-discovered Request Source and reads it back", (t) => {
+test("creates in the project-bound repository and reads Request Source back", (t) => {
 	const context = fixture(t, field, [
 		{ issue_field_name: "Request Source", single_select_option: { name: "Agent" } },
 	]);
@@ -120,4 +128,15 @@ test("a silently dropped or changed value is reported without hiding the created
 	assert.equal(result.status, 0, result.stderr);
 	assert.match(result.stderr, /Request Source: failed — stored value is Human/);
 	assert.match(result.stderr, /issue was still created/);
+});
+
+test("a missing project repository stops before any GitHub call", (t) => {
+	const context = fixture(t, field, []);
+	writeFileSync(join(dirname(dirname(context.script)), ".agents/launch.json"), '{"version":1,"project":{}}\n');
+
+	const result = run(context);
+
+	assert.equal(result.status, 2);
+	assert.match(result.stderr, /no "project\.repository" binding in .*\.agents\/launch\.json/);
+	assert.equal(existsSync(context.calls), false);
 });

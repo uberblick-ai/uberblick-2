@@ -64,8 +64,9 @@ A pointer is a route to the source, not a substitute for reading it.
   `.agents/protocols/delivery-policy.md` before editing.
 - **Review or integrate:** `.agents/protocols/delivery-policy.md`, then the
   review or integration procedure relevant to the current action.
-- **Edit corpus:** read Editorial contract; update the owning document rather
-  than copying its content into repository instructions. Corpus edits must stay
+- **Edit corpus:** resolve and read `project.context.editorial`; update the
+  owning document rather than copying its content into repository instructions.
+  Corpus edits must stay
   within recorded authorization: update descriptions of delivered behavior,
   but do not weaken a guarantee or expand agent authority through a doc edit.
   An unsettled change to those commitments requires an owner decision.

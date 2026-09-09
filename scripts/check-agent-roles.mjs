@@ -35,9 +35,10 @@
  * project's own and keep their literals.
  *
  * Plain Node, no imports beyond `node:`, like `fue-assert.mjs` beside it.
- * `.claude/agents` is absent from the immutable review image (`.dockerignore`
- * re-admits only `.claude/skills/**`, and the runner builds with main's copy),
- * so that third is skipped loudly there; CI, on a plain checkout, enforces it.
+ * `.claude/agents` and `.github` are absent from the immutable review image
+ * (`.dockerignore` re-admits only `.claude/skills/**`, and the runner builds
+ * with main's copy), so their checks are skipped loudly there; CI, on a plain
+ * checkout, enforces them.
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -194,10 +195,14 @@ const FORBIDDEN = [
 		"a repository operand; resolve project.repository and pass that"],
 	[/\brepos\/[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*/,
 		"a repository in an API path; resolve project.repository and interpolate it"],
+	[/\buberblick-ai\/uberblick-2\b/,
+		"this project's repository; resolve project.repository"],
 	[/\borigin\/[A-Za-z0-9]/, "a base ref; bind project.baseRef and resolve it"],
+	[/\bgit fetch origin main\b/, "a base ref; bind project.baseRef and resolve it"],
 	// Prose only: `@param` and its kin are documentation tags, not mentions.
-	[/(?:^|[\s(])@[A-Za-z0-9][\w-]*/, "an account handle; bind project.owner", ".md"],
-	[/\b(?:mise|fnox|pnpm|npm|yarn|cargo|bazel|gradle|docker)\b/,
+	[/(?:^|[\s(`])(@[A-Za-z0-9][\w-]*)/, "an account handle; bind project.owner", ".md"],
+	[/\bEditorial contract\b/, "a product-document title; bind its uuid under project.context", ".md"],
+	[/\b(?:mise|fnox|pnpm|npm|yarn|cargo|bazel|gradle|docker)\b/i,
 		"a build or validation command; bind it under project.commands"],
 	// An adopting project's roles work in their own worktree; an absolute host
 	// path would send one into the checkout this workflow was copied from.
@@ -276,10 +281,29 @@ function checkPortableSource() {
 		}
 	}
 
+	const reviewExcluded = [CLAUDE, ".github"];
+	const skipped = new Set();
 	for (const relative of [...lists.resources, ...lists.projectResources]) {
-		if (!existsSync(join(root, relative))) fail(`${REQUIRES}: names a file this repository does not have: ${relative}`);
+		if (existsSync(join(root, relative))) continue;
+		const excluded = reviewExcluded.find(
+			(directory) => relative.startsWith(`${directory}/`) && !existsSync(join(root, directory)),
+		);
+		if (excluded) skipped.add(excluded);
+		else fail(`${REQUIRES}: names a file this repository does not have: ${relative}`);
 	}
+	for (const directory of skipped)
+		console.log(`skipped: ${directory} is absent from this checkout, so its declared resources cannot be checked here`);
 	const declared = new Set([...lists.resources, ...lists.projectResources]);
+	const entries = object(launch?.entryRoles);
+	for (const [role, entry] of Object.entries(entries ?? {})) {
+		const probe = object(entry)?.probe;
+		if (!Array.isArray(probe)) continue;
+		for (const argument of probe) {
+			if (typeof argument !== "string" || !argument.includes("/")) continue;
+			if (!lists.projectResources.includes(argument))
+				fail(`${REQUIRES}: projectResources omits ${role} project probe ${argument}`);
+		}
+	}
 	for (const relative of portableFiles()) {
 		if (!lists.resources.includes(relative))
 			fail(`${REQUIRES}: resources omits the portable file ${relative}`);

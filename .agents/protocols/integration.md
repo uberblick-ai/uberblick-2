@@ -167,6 +167,7 @@ merge or parked ruling — once the probes on the retained review image are done
 run the project's `housekeeping` command with every review SHA this run built —
 each exact head it gated and each merged-tree commit from an observed base
 advance — from the same freshly fetched base-ref checkout used for the container
-review, and record a concise summary on the PR. It removes the review artifacts
-this run left on the host; the project's own command states exactly which, and
-supports `--dry-run` to show what it would do.
+review, and record a concise summary on the PR. Besides the named review images,
+the command removes older review images, stopped containers, dangling layers and
+every host-wide unused image older than a week; it may prune build cache when
+disk space is low. It supports `--dry-run` to show what it would do.

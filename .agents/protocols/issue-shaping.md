@@ -119,15 +119,16 @@ it does not authorize preparation, `ready`, Priority, or implementation.
 ### Publish a draft requirement
 
 Use the installed MCP server's discovered tool schemas, so this path works from
-a machine with only `ub`, its MCP server, and the shaping skill. Read the live
-Editorial contract and active tag catalog through MCP, then create one document
+a machine with only `ub`, its MCP server, and the shaping skill. Resolve
+`project.context.editorial`, read that live document and the active tag catalog
+through MCP, then create one document
 with `kind: requirement`, `status: draft`, a concise description, applicable
 catalog tags under that live contract, and blocks carrying the confirmed
 problem, intended outcome, success evidence, constraints, trade-offs, and scope
 boundary.
 Preserve the human's language and do not invent missing product meaning. State
-every unresolved human choice in the explicit lifecycle language the Editorial
-contract requires of a Product Document.
+every unresolved human choice in the explicit lifecycle language the live
+editorial document requires of a Product Document.
 
 Re-read the new document and verify that `list_docs` filtered to
 `kind: requirement`, `status: draft` returns its uuid. Then return its title and

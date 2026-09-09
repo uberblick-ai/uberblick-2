@@ -188,6 +188,10 @@ test("the portable source keeps no value of this project's own", { skip: claudeS
 	for (const [added, expected] of [
 		["Ground at `origin/main` first.\n", /carries "origin\/m" — a base ref/],
 		["Ask @bk-one about it.\n", /carries "@bk-one" — an account handle/],
+		["Ask `@bk-one` about it.\n", /carries "@bk-one" — an account handle/],
+		["Fetch with `git fetch origin main`.\n", /carries "git fetch origin main" — a base ref/],
+		["Read Editorial contract first.\n", /carries "Editorial contract" — a product-document title/],
+		["Build the Docker review image.\n", /carries "Docker" — a build or validation command/],
 		["Run `mise run test` before handoff.\n", /carries "mise" — a build or validation command/],
 		[
 			"Role context: Uberblick project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).\n",
@@ -215,6 +219,10 @@ test("the portable source keeps no value of this project's own", { skip: claudeS
 		[
 			"Enumerate `gh api repos/uberblick-ai/uberblick-2/issues`.\n",
 			/carries "repos\/uberblick-ai\/uberblick-2" — a repository in an API path/,
+		],
+		[
+			"The durable record stays in uberblick-ai/uberblick-2.\n",
+			/carries "uberblick-ai\/uberblick-2" — this project's repository/,
 		],
 	]) {
 		const fixture = completeFixture();
@@ -271,6 +279,34 @@ test("the required-resource declaration stays honest in both directions", { skip
 	result = run(absentResource);
 	assert.equal(result.status, 1);
 	assert.match(result.stderr, /names a file this repository does not have: scripts\/absent-helper\.sh/);
+
+	const misclassifiedProbe = completeFixture();
+	const misclassified = read(misclassifiedProbe);
+	misclassified.projectResources = misclassified.projectResources.filter(
+		(resource) => resource !== "scripts/probe-work.sh",
+	);
+	misclassified.resources = [...misclassified.resources, "scripts/probe-work.sh"].sort();
+	write(misclassifiedProbe, misclassified);
+	result = run(misclassifiedProbe);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /projectResources omits implementer project probe scripts\/probe-work\.sh/);
+
+	const incompleteReviewImage = completeFixture();
+	rmSync(join(incompleteReviewImage, ".github/ISSUE_SPEC.md"));
+	result = run(incompleteReviewImage);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /names a file this repository does not have: \.github\/ISSUE_SPEC\.md/);
+
+	// The immutable review image deliberately excludes these two trees. Their
+	// absence skips only resources beneath the absent roots; every present part
+	// of the declaration and both parity directions are still checked.
+	const reviewImage = completeFixture();
+	rmSync(join(reviewImage, ".claude/agents"), { recursive: true });
+	rmSync(join(reviewImage, ".github"), { recursive: true });
+	result = run(reviewImage);
+	assert.equal(result.status, 0, result.stderr);
+	assert.match(result.stdout, /skipped: \.claude\/agents is absent/);
+	assert.match(result.stdout, /skipped: \.github is absent/);
 
 	// And the bindings half: this project must declare what the workflow needs.
 	const missingBinding = completeFixture();

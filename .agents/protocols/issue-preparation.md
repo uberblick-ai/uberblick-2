@@ -138,9 +138,10 @@ and cleanup; disabling a runtime's background-wait ceiling does not waive them.
 
 ## Recheck, then decide
 
-Last thing before posting the outcome, `git fetch origin main` again. Refresh
-only grounding affected by an upstream change, then re-read the issue, parent
-claim, nested adversary handoff and labels.
+Last thing before posting the outcome, resolve the project's base-ref binding
+and fetch that remote and branch again. Refresh only grounding affected by an
+upstream change, then re-read the issue, parent claim, nested adversary handoff
+and labels.
 
 Check the final body against ISSUE_SPEC, including distinct observable outcomes.
 Keep What to the outcome, acceptance criteria to the guarantees, and Pointers to
