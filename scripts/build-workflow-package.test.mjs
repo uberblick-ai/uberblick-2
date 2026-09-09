@@ -247,6 +247,25 @@ test("two builds of one source commit agree whatever the building checkout's per
 	assert.equal(second.digest.payload, first.digest.payload);
 });
 
+test("a checkout whose bytes git filters still produces the source commit's digest", () => {
+	// The reproducibility trap a umask assertion misses: under `core.autocrlf` a
+	// Windows checkout holds CRLF for a file git reports as unchanged. A digest
+	// taken from the working tree would differ per machine; one taken from the
+	// commit's own blob does not.
+	const root = fixture();
+	const before = build(root).manifest;
+
+	git(root, ["config", "core.autocrlf", "true"]);
+	rmSync(join(root, "AGENTS.md"));
+	git(root, ["checkout", "--", "AGENTS.md"]);
+	assert.equal(readFileSync(join(root, "AGENTS.md"), "utf8").includes("\r\n"), true);
+	assert.equal(git(root, ["diff", "--name-only", "HEAD"]), "");
+
+	const after = build(root).manifest;
+	assert.equal(after.digest.payload, before.digest.payload);
+	assert.deepEqual(after.payload, before.payload);
+});
+
 test("a checkout that differs from the source commit is refused rather than published under it", () => {
 	const root = fixture();
 	writeFileSync(join(root, "AGENTS.md"), "edited after the commit\n");

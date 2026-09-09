@@ -15,9 +15,10 @@
  *
  *  - **Attributable.** Every entry comes from one named source commit. A
  *    checkout whose declared resources differ from that commit is refused
- *    rather than published under it, and the recorded mode is git's, so two
- *    machines building one commit produce one digest and one inventory
- *    whatever their umask is.
+ *    rather than published under it, and both halves of an entry are then read
+ *    from the commit rather than from disk — the mode git recorded and the
+ *    blob's own bytes — so two machines building one commit produce one digest
+ *    and one inventory whatever their umask or content filters are.
  *  - **Declared.** The payload is exactly `.agents/requires.json`'s `resources`
  *    — a declared file missing from the checkout fails, and nothing the
  *    declaration does not name can reach the payload, because the declaration
@@ -70,16 +71,19 @@ function fail(message) {
 	throw new Error(`build-workflow-package: ${message}`);
 }
 
-function git(root, args) {
+function gitBytes(root, args) {
 	const result = spawnSync("git", ["--no-optional-locks", ...args], {
 		cwd: root,
-		encoding: "utf8",
-		maxBuffer: 64 * 1024 * 1024,
+		maxBuffer: 256 * 1024 * 1024,
 	});
 	if (result.status !== 0) {
-		fail(`git ${args.join(" ")} failed: ${(result.stderr ?? "").trim()}`);
+		fail(`git ${args.join(" ")} failed: ${String(result.stderr ?? "").trim()}`);
 	}
 	return result.stdout;
+}
+
+function git(root, args) {
+	return gitBytes(root, args).toString("utf8");
 }
 
 function readJson(root, relative) {
@@ -152,14 +156,14 @@ function assertOrdinaryFile(root, path) {
 	}
 }
 
-/** Every blob of one commit, by path, with the mode git recorded for it. */
+/** Every blob of one commit, by path, with the mode and object git recorded. */
 function commitBlobs(root, commit) {
 	const blobs = new Map();
 	for (const record of git(root, ["ls-tree", "-r", "-z", commit]).split("\0")) {
 		if (record === "") continue;
 		const tab = record.indexOf("\t");
-		const [mode, type] = record.slice(0, tab).split(" ");
-		blobs.set(record.slice(tab + 1), { mode, type });
+		const [mode, type, object] = record.slice(0, tab).split(" ");
+		blobs.set(record.slice(tab + 1), { mode, type, object });
 	}
 	return blobs;
 }
@@ -188,11 +192,20 @@ function payloadEntries(root, commit, resources) {
 			`this checkout differs from source commit ${commit} at ${changed.join(", ")}; commit or restore it before building`,
 		);
 	}
-	return resources.map((path) => ({
-		path,
-		mode: recordedMode(BLOB_MODES.get(blobs.get(path).mode)),
-		content: readFileSync(join(root, path)),
-	}));
+	// Content comes from the commit's own objects rather than from the files on
+	// disk. The checkout is proven equal to the commit just above, but "equal" is
+	// git's judgement, not a byte comparison: a working tree under
+	// `core.autocrlf`, a clean filter or any other content filter holds different
+	// bytes for a file git considers unchanged. Reading the blob is what makes
+	// two machines building one commit produce one digest.
+	return resources.map((path) => {
+		const blob = blobs.get(path);
+		return {
+			path,
+			mode: recordedMode(BLOB_MODES.get(blob.mode)),
+			content: gitBytes(root, ["cat-file", "blob", blob.object]),
+		};
+	});
 }
 
 /**
