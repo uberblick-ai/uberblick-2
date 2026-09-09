@@ -122,6 +122,17 @@ run = 'node scripts/build-install-payload.mjs "${usage_version?}"'
 description = "Publish a version tag's payload and generated Homebrew formula; add --dry-run to inspect"
 run = "node scripts/publish-homebrew-release.mjs"
 
+[tasks.build-workflow-package]
+description = "Build a versioned agent-workflow package from the declared portable source"
+usage = 'arg "<version>" help="Workflow version, for example 0.1.0"'
+run = 'node scripts/build-workflow-package.mjs "${usage_version?}"'
+
+# Reads the package the build task left in dist/ and uploads it; the credential
+# it needs enters only here, never in the build.
+[tasks.publish-workflow-package]
+description = "Publish a workflow-v tag's already-built workflow package to the public tap"
+run = "node scripts/publish-workflow-package.mjs"
+
 # hub + web only. The MCP server is a stdio process spawned by its client
 # (Claude Code et al.), so it is not part of the dev loop; use `mise run mcp`
 # for a standalone smoke test.
