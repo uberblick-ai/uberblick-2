@@ -318,18 +318,32 @@ function isBindingValue(value: unknown): boolean {
   );
 }
 
-/** No leading dash, no whitespace, no `..`: a ref name git will accept as one. */
-const REF_PART = /^[A-Za-z0-9._][A-Za-z0-9._/-]*$/;
+/**
+ * A ref name `git` will accept, checked here so a refusal costs no session.
+ *
+ * These are git's own rules for one ref component, not a looser approximation
+ * of them: a name this accepts but `git check-ref-format` rejects would pass
+ * the structural gate and then fail as an impossible checkout instruction,
+ * which is the failure this gate exists to prevent.
+ */
+const REF_PART = /^[A-Za-z0-9._/-]+$/;
 
 function isRefPart(value: unknown, slashes: boolean): value is string {
-  return (
-    typeof value === "string" &&
-    REF_PART.test(value) &&
-    !value.includes("..") &&
-    !value.endsWith("/") &&
-    (slashes || !value.includes("/"))
-  );
+  if (typeof value !== "string" || !REF_PART.test(value)) return false;
+  if (!slashes && value.includes("/")) return false;
+  if (value.includes("..") || value.startsWith("-") || value.endsWith(".")) return false;
+  return value
+    .split("/")
+    .every((part) => part !== "" && !part.startsWith(".") && !part.endsWith(".lock"));
 }
+
+/** `<remote>/<branch>`, the one spelling every base-ref message and command uses. */
+function baseRefName(baseRef: BaseRef): string {
+  return `${baseRef.remote}/${baseRef.branch}`;
+}
+
+/** A binding name a role can actually address with the resolver beside this. */
+const BINDING_KEY = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
 function pathIsFile(root: string, relative: string): boolean {
   try {
@@ -456,6 +470,14 @@ function readProjectBindings(path: string, value: unknown): ProjectBindings {
       throw new Error(
         `${path} "project.${binding}" must be one value or a group of named values`,
       );
+    }
+    // A binding nobody can name is a binding nobody can read: the resolver a
+    // role uses addresses these by dotted path, so a key outside that grammar
+    // is malformed data rather than a vocabulary this CLI declines to know.
+    for (const key of [binding, ...Object.keys(group ?? {})]) {
+      if (!BINDING_KEY.test(key)) {
+        throw new Error(`${path} "project" declares a binding no role can name: ${JSON.stringify(key)}`);
+      }
     }
   }
   return { ...project, baseRef: { remote, branch } };
@@ -969,7 +991,21 @@ export function createLaunchServices(
   // project Git operations and their descendants independent of ambient
   // repository selectors even when the caller did not use launchEnvironment.
   const projectEnv = withoutRepositorySelectors(env);
-  const remote = runSync("git", ["remote", "get-url", "origin"], root, projectEnv);
+  // The remote a `#123` links into is the one the project grounds on, which in
+  // a fork is not `origin`: linking a worked item into the fork would send an
+  // operator to a different issue number than every role and probe just used.
+  // Unreadable launch data leaves no link at all rather than a guessed one; the
+  // launch itself refuses that data by name a moment later.
+  let baseRemote: string | null = null;
+  try {
+    baseRemote = readLaunchData(root).project.baseRef.remote;
+  } catch {
+    baseRemote = null;
+  }
+  const remote =
+    baseRemote === null
+      ? { status: 1, stdout: "" }
+      : runSync("git", ["remote", "get-url", baseRemote], root, projectEnv);
 
   return {
     root,
@@ -1340,6 +1376,7 @@ export async function launchCommand(
   io.out(`ub agents launch: ${parsed.role} on ${runtime} in ${services.root}\n`);
   let project = data.project;
   for (;;) {
+    const refreshed = baseRefName(project.baseRef);
     const refreshFailure = services.refreshMain(project.baseRef);
     if (refreshFailure !== null) {
       if (blocked(io, refreshFailure.detail)) return 1;
@@ -1363,6 +1400,17 @@ export async function launchCommand(
     if (entry === undefined) {
       io.err(`ub agents launch: ${JSON.stringify(parsed.role)} is no longer an entry role; restart the launcher\n`);
       return 1;
+    }
+    // The reload can move the base ref itself — that is what a project
+    // migrating from one remote or branch to another looks like from here. The
+    // ref just refreshed is then not the ref this session would be cut from, so
+    // start the iteration again and refresh the new one rather than probing and
+    // branching from a ref this run has never fetched.
+    if (baseRefName(project.baseRef) !== refreshed) {
+      io.err(
+        `launch: base ref changed from ${refreshed} to ${baseRefName(project.baseRef)}; refreshing it before the next session\n`,
+      );
+      continue;
     }
     const probe = await services.runProbe(entry.probe);
     if (probe.status !== 0) {

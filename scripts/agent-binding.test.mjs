@@ -49,6 +49,7 @@ const declared = {
 		baseRef: { remote: "upstream", branch: "release/2.x" },
 		retrospectives: { implementation: 12 },
 		commands: { review: "just review" },
+		owner_handle: "someone",
 		empty: "",
 	},
 	entryRoles: {},
@@ -61,6 +62,10 @@ test("prints one declared value, and nothing else, on stdout", (t) => {
 		["project.baseRef.branch", "release/2.x"],
 		["project.retrospectives.implementation", "12"],
 		["project.commands.review", "just review"],
+		// The launcher accepts an underscore in a binding name, so this must
+		// address one: a name that survives launch validation and cannot be
+		// resolved here would be a binding nobody could read.
+		["project.owner_handle", "someone"],
 	]) {
 		const result = resolve(base, binding);
 		assert.equal(result.status, 0, result.stderr);

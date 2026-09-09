@@ -63,8 +63,15 @@ function rig(options: {
   linkBase?: string | null;
   sessions?: SessionResult[];
   waits?: Array<NodeJS.Signals | null>;
+  /** What the launch data says from the second read on, as an edit would. */
+  reloadedBaseRef?: { remote: string; branch: string };
 } = {}) {
-  const data = readLaunchData(REPO_ROOT);
+  const loaded = readLaunchData(REPO_ROOT);
+  const data = loaded;
+  const reloaded =
+    options.reloadedBaseRef === undefined
+      ? loaded
+      : { ...loaded, project: { ...loaded.project, baseRef: options.reloadedBaseRef } };
   const probes = [...(options.probes ?? [0])];
   const sessions = [...(options.sessions ?? [result({ interrupted: "SIGINT" })])];
   const waits = [...(options.waits ?? [])];
@@ -84,7 +91,7 @@ function rig(options: {
     linkBase: options.linkBase ?? null,
     loadData(activeRuntime) {
       seen.dataLoads.push(activeRuntime);
-      return data;
+      return seen.dataLoads.length === 1 ? data : reloaded;
     },
     preflight(runtime, adapter) {
       seen.preflight.push({ runtime, adapter });
@@ -1225,6 +1232,27 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
     }
   });
 
+  it("never probes or branches from a base ref this iteration has not refreshed", async () => {
+    // The reload between the refresh and the session is where a project
+    // migrating to another remote or branch changes it. Cutting the session's
+    // worktree from the new ref then would branch from something this run never
+    // fetched — stale instructions and stale code for a delivery role.
+    const current = rig({
+      reloadedBaseRef: { remote: "upstream", branch: "trunk" },
+      waits: [null, "SIGINT"],
+    });
+
+    expect(await launchCommand(["implementer"], current.io, current.services)).toBe(130);
+    // Two refreshes: the declared ref, then the one the reload named. Neither
+    // a probe nor a session ran on the unrefreshed ref in between.
+    expect(current.seen.baseRefs).toEqual(["origin/main", "upstream/trunk"]);
+    expect(current.seen.probes).toHaveLength(1);
+    expect(current.seen.sessions).toEqual([
+      { role: "implementer", runtime: "codex", base: "upstream/trunk" },
+    ]);
+    expect(current.stderr()).toContain("base ref changed from origin/main to upstream/trunk");
+  });
+
   it("stops the loop instead of retrying launch data the session tree cannot supply", async () => {
     const current = rig({
       sessions: [
@@ -1307,7 +1335,9 @@ describe("launch data", () => {
       write({});
       expect(() => readLaunchData(root)).toThrow(/"project" must declare the bindings/);
 
-      // The base ref is the one binding this launcher reads itself.
+      // The base ref is the one binding this launcher reads itself, held to
+      // git's own rules: a name this accepted but `git check-ref-format`
+      // rejected would pass the gate and fail as an impossible checkout.
       for (const broken of [
         null,
         "origin/main",
@@ -1317,11 +1347,31 @@ describe("launch data", () => {
         { remote: "origin/x", branch: "main" },
         { remote: "origin", branch: "-delete" },
         { remote: "origin", branch: "release/../etc" },
+        { remote: "origin", branch: "main.lock" },
+        { remote: "origin", branch: ".hidden" },
+        { remote: "origin", branch: "name." },
+        { remote: "origin", branch: "release//2.x" },
+        { remote: "origin", branch: "feat/.hidden" },
+        { remote: "origin.lock", branch: "main" },
       ]) {
         write({ baseRef: broken });
         expect(() => readLaunchData(root), JSON.stringify(broken)).toThrow(
           /"project\.baseRef" must name a git "remote" and a "branch"/,
         );
+        // Git's own answer, not a second opinion about it.
+        const branch = (broken as { branch?: unknown })?.branch;
+        if (typeof branch === "string" && branch !== "main") {
+          expect(
+            spawnSync("git", ["check-ref-format", "--branch", branch]).status,
+            branch,
+          ).not.toBe(0);
+        }
+      }
+      // …and the shapes git does accept stay accepted.
+      for (const branch of ["main", "release/2.x", "feat/a-b.c", "v1.0"]) {
+        expect(spawnSync("git", ["check-ref-format", "--branch", branch]).status, branch).toBe(0);
+        write({ baseRef: { remote: "origin", branch } });
+        expect(readLaunchData(root).project.baseRef.branch, branch).toBe(branch);
       }
 
       // Everything else is shape-checked and passed through unread, so a
@@ -1332,6 +1382,21 @@ describe("launch data", () => {
       );
       write({ baseRef: { remote: "upstream", branch: "release/2.x" }, sessionBriefing: 7 });
       expect(() => readLaunchData(root)).toThrow(/"project\.sessionBriefing" must be text/);
+
+      // A binding nobody can address is malformed data, not a vocabulary this
+      // CLI declines to know: `scripts/agent-binding.mjs` resolves by dotted
+      // path, so a key outside that grammar could never be read at all.
+      for (const key of ["9lives", "owner handle", "owner.handle", ""]) {
+        write({ baseRef: { remote: "upstream", branch: "release/2.x" }, [key]: "value" });
+        expect(() => readLaunchData(root), key).toThrow(/declares a binding no role can name/);
+        write({
+          baseRef: { remote: "upstream", branch: "release/2.x" },
+          retrospectives: { [key]: 1 },
+        });
+        expect(() => readLaunchData(root), key).toThrow(/declares a binding no role can name/);
+      }
+      write({ baseRef: { remote: "upstream", branch: "release/2.x" }, owner_handle: "someone" });
+      expect(readLaunchData(root).project.owner_handle).toBe("someone");
 
       write({
         baseRef: { remote: "upstream", branch: "release/2.x" },
@@ -1389,6 +1454,40 @@ describe("launch data", () => {
       // Declaring none stays declaring none.
       writeProject(root, { shipper: declared });
       expect(readLaunchData(root).entryRoles.shipper?.runtimes.claude.allowedTools).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("links a worked item into the repository the project grounds on", () => {
+    // In a fork, `origin` is the fork and the declared base remote is the
+    // workflow's repository: a `#123` link built from `origin` sends the
+    // operator to a different issue number than every role just used.
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-link-"));
+    try {
+      writeProject(
+        root,
+        { shipper: role({ role: "shipper" }) },
+        projectBindings({ baseRef: { remote: "upstream", branch: "main" } }),
+      );
+      commitAsOriginMain(root);
+      git(root, ["remote", "add", "origin", "https://github.com/someone/fork.git"]);
+      git(root, ["remote", "add", "upstream", "https://github.com/atlas-ai/atlas.git"]);
+      const io = { out: () => {}, err: () => {} };
+      // A link only exists for a terminal that renders one, so this asserts
+      // through that switch rather than around it.
+      const wasTty = process.stdout.isTTY;
+      try {
+        process.stdout.isTTY = true;
+        expect(createLaunchServices(root, process.env, io).linkBase).toBe(
+          "https://github.com/atlas-ai/atlas",
+        );
+        // Unreadable launch data leaves no link rather than a guessed one.
+        writeFileSync(join(root, ".agents/launch.json"), "not json\n");
+        expect(createLaunchServices(root, process.env, io).linkBase).toBeNull();
+      } finally {
+        process.stdout.isTTY = wasTty;
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

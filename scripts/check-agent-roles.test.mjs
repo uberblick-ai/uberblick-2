@@ -201,6 +201,21 @@ test("the portable source keeps no value of this project's own", { skip: claudeS
 			"Read /home/someone/uberblick/.agents/roles/implementer.md first.\n",
 			/carries "\/home\/" — an absolute host path/,
 		],
+		// The bare slug is the form the probe and the shaping protocol actually
+		// carried before this workflow was made portable, so the guard has to
+		// fail it and not only the URL form.
+		[
+			"Run `gh issue list -R uberblick-ai/uberblick-2 --state open`.\n",
+			/carries "-R uberblick-ai\/uberblick-2" — a repository operand/,
+		],
+		[
+			"Use `--repo uberblick-ai/uberblick-2` so no checkout is required.\n",
+			/carries "--repo uberblick-ai\/uberblick-2" — a repository operand/,
+		],
+		[
+			"Enumerate `gh api repos/uberblick-ai/uberblick-2/issues`.\n",
+			/carries "repos\/uberblick-ai\/uberblick-2" — a repository in an API path/,
+		],
 	]) {
 		const fixture = completeFixture();
 		const contract = join(fixture, ".agents/roles/implementer.md");
@@ -209,6 +224,16 @@ test("the portable source keeps no value of this project's own", { skip: claudeS
 		assert.equal(result.status, 1, added);
 		assert.match(result.stderr, expected);
 	}
+
+	// And the shapes that read like a slug but are not one, so the guard stays
+	// usable: a severity pair, a placeholder API path, and a shell variable.
+	const legal = completeFixture();
+	const contract = join(legal, ".agents/roles/implementer.md");
+	writeFileSync(
+		contract,
+		`${readFileSync(contract, "utf8")}\nRule P2/P3 and/or park; read \`repos/{owner}/{repo}/commits\`; run \`gh issue list -R "$REPO"\`.\n`,
+	);
+	assert.equal(run(legal).status, 0, run(legal).stderr);
 });
 
 test("the required-resource declaration stays honest in both directions", { skip: claudeSkip }, () => {

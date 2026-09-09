@@ -186,6 +186,14 @@ const FORBIDDEN = [
 		"a corpus document uuid; bind it under project.context and resolve it"],
 	[/github\.com\/[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*/,
 		"a repository or discussion URL; bind project.repository or project.retrospectives"],
+	// The bare slug is the form that actually leaked: `gh -R <owner>/<repo>` and
+	// `gh api repos/<owner>/<repo>/…`. Matched at the operand rather than
+	// anywhere, so `-R "$REPO"`, `--repo` in prose and `repos/{owner}/{repo}`
+	// stay legal and `and/or` is never a repository.
+	[/(?:^|[\s`'"(])((?:-R|--repo)[ =][A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*)/,
+		"a repository operand; resolve project.repository and pass that"],
+	[/\brepos\/[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*/,
+		"a repository in an API path; resolve project.repository and interpolate it"],
 	[/\borigin\/[A-Za-z0-9]/, "a base ref; bind project.baseRef and resolve it"],
 	// Prose only: `@param` and its kin are documentation tags, not mentions.
 	[/(?:^|[\s(])@[A-Za-z0-9][\w-]*/, "an account handle; bind project.owner", ".md"],
@@ -307,7 +315,9 @@ function checkPortableSource() {
 		for (const [pattern, instead, only] of FORBIDDEN) {
 			if (only !== undefined && !relative.endsWith(only)) continue;
 			const found = text.match(pattern);
-			if (found) fail(`${relative}: carries ${JSON.stringify(found[0].trim())} — ${instead}`);
+			// The capture, where a pattern needs one to skip a leading delimiter,
+			// so the message names the value rather than the quote before it.
+			if (found) fail(`${relative}: carries ${JSON.stringify((found[1] ?? found[0]).trim())} — ${instead}`);
 		}
 	}
 }

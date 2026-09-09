@@ -26,8 +26,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const usage = "usage: agent-binding.mjs <binding.path>";
-/** Dotted path from the launch-data root: `project.retrospectives.implementation`. */
-const BINDING = /^[A-Za-z][A-Za-z0-9-]*(?:\.[A-Za-z0-9][A-Za-z0-9-]*)*$/;
+/**
+ * Dotted path from the launch-data root: `project.retrospectives.implementation`.
+ *
+ * The same grammar the launcher holds every declared binding name to, so a name
+ * that survives launch validation can always be resolved here.
+ */
+const BINDING = /^[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*$/;
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const relative = ".agents/launch.json";
