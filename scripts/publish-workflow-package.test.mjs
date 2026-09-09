@@ -272,7 +272,7 @@ test("the credential reaches the upload boundary and not the build", { skip: wor
 	assert.match(workflow, /^ {6}- "workflow-v\[0-9\]\*\.\[0-9\]\*\.\[0-9\]\*"$/m);
 	assert.equal((workflow.match(/^\s+HOMEBREW_TAP_TOKEN:/gm) ?? []).length, 1);
 
-	const steps = workflow.split(/^ {6}- /m).slice(1);
+	const steps = workflow.slice(workflow.indexOf("\n    steps:")).split(/^ {6}- /m).slice(1);
 	const build = steps.findIndex((step) => step.includes("mise run build-workflow-package"));
 	const publish = steps.findIndex((step) => step.includes("HOMEBREW_TAP_TOKEN"));
 	assert.notEqual(build, -1);

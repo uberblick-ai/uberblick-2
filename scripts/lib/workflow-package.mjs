@@ -22,8 +22,8 @@ import { join } from "node:path";
  * a role name, a role count or a file list: those are the declaration's.
  */
 export const WORKFLOW_NAME = "uberblick-workflow";
-export const MANIFEST_VERSION = 1;
-export const DIGEST_ALGORITHM = "sha256";
+const MANIFEST_VERSION = 1;
+const DIGEST_ALGORITHM = "sha256";
 /**
  * The framing the digest is computed under, named in the manifest so a consumer
  * can reproduce it without this code:
@@ -43,14 +43,14 @@ export const MANIFEST_NAME = "manifest.json";
 export const PAYLOAD_DIRECTORY = "payload";
 
 /** The only two modes git records, and therefore the only two an inventory may. */
-export const REGULAR_MODE = "100644";
-export const EXECUTABLE_MODE = "100755";
+const REGULAR_MODE = "100644";
+const EXECUTABLE_MODE = "100755";
 
 const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const TAG_PREFIX = "workflow-v";
 const COMMIT = /^[0-9a-f]{40}$/;
 
-export function fail(message) {
+function fail(message) {
 	throw new Error(`workflow-package: ${message}`);
 }
 
