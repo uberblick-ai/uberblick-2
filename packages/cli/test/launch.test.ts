@@ -1465,14 +1465,16 @@ describe("launch data", () => {
     // operator to a different issue number than every role just used.
     const root = mkdtempSync(join(tmpdir(), "ub-launch-link-"));
     try {
+      // The mismatch that matters: the project grounds on `origin`, `origin`
+      // is a fork, and the repository its roles read is upstream. Issue #7 of
+      // the fork is a different issue from #7 of the workflow repository.
       writeProject(
         root,
         { shipper: role({ role: "shipper" }) },
-        projectBindings({ baseRef: { remote: "upstream", branch: "main" } }),
+        projectBindings({ repository: "atlas-ai/atlas" }),
       );
       commitAsOriginMain(root);
       git(root, ["remote", "add", "origin", "https://github.com/someone/fork.git"]);
-      git(root, ["remote", "add", "upstream", "https://github.com/atlas-ai/atlas.git"]);
       const io = { out: () => {}, err: () => {} };
       // A link only exists for a terminal that renders one, so this asserts
       // through that switch rather than around it.
@@ -1482,6 +1484,19 @@ describe("launch data", () => {
         expect(createLaunchServices(root, process.env, io).linkBase).toBe(
           "https://github.com/atlas-ai/atlas",
         );
+        // The base remote still decides whether these numbers are GitHub items
+        // at all, and a project that declared no repository keeps its remote's.
+        writeProject(root, { shipper: role({ role: "shipper" }) });
+        expect(createLaunchServices(root, process.env, io).linkBase).toBe(
+          "https://github.com/someone/fork",
+        );
+        writeProject(
+          root,
+          { shipper: role({ role: "shipper" }) },
+          projectBindings({ repository: "atlas-ai/atlas", baseRef: { remote: "elsewhere", branch: "main" } }),
+        );
+        git(root, ["remote", "add", "elsewhere", "git@git.example.invalid:atlas-ai/atlas.git"]);
+        expect(createLaunchServices(root, process.env, io).linkBase).toBeNull();
         // Unreadable launch data leaves no link rather than a guessed one.
         writeFileSync(join(root, ".agents/launch.json"), "not json\n");
         expect(createLaunchServices(root, process.env, io).linkBase).toBeNull();

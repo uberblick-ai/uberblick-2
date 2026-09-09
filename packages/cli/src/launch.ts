@@ -170,9 +170,10 @@ export interface ProbeResult {
 export interface LaunchServices {
   root: string;
   /**
-   * `https://github.com/<owner>/<repo>` when this terminal can render a
-   * hyperlink and `origin` is a GitHub remote, and null when either is untrue —
-   * the one switch between linked and plain `#123`.
+   * `https://github.com/<owner>/<repo>` for the repository the project
+   * declared, when this terminal can render a hyperlink and the project's base
+   * remote is a GitHub one — and null when either is untrue, the one switch
+   * between linked and plain `#123`.
    */
   linkBase: string | null;
   loadData(activeRuntime?: Runtime): LaunchData;
@@ -633,6 +634,19 @@ function lastLine(text: string): string {
 }
 
 /** The `https://github.com/<owner>/<repo>` behind a remote URL, or null. */
+/** `<owner>/<repo>`, the one shape a repository binding can be. */
+const REPOSITORY = /^[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*$/;
+
+/**
+ * Where `#123` points: the project's declared repository, on the host its base
+ * remote proves is GitHub. Without a declared repository the remote's own
+ * repository is all there is, and without a GitHub remote there is no link.
+ */
+function repositoryLink(remoteBase: string | null, declared: string | null): string | null {
+  if (remoteBase === null) return null;
+  return declared === null ? remoteBase : `${new URL(remoteBase).origin}/${declared}`;
+}
+
 function gitHubBase(remote: string): string | null {
   const matched = /^(?:https:\/\/github\.com\/|git@github\.com:)(\S+?\/\S+?)(?:\.git)?$/.exec(
     remote.trim(),
@@ -991,27 +1005,34 @@ export function createLaunchServices(
   // project Git operations and their descendants independent of ambient
   // repository selectors even when the caller did not use launchEnvironment.
   const projectEnv = withoutRepositorySelectors(env);
-  // The remote a `#123` links into is the one the project grounds on, which in
-  // a fork is not `origin`: linking a worked item into the fork would send an
-  // operator to a different issue number than every role and probe just used.
-  // Unreadable launch data leaves no link at all rather than a guessed one; the
-  // launch itself refuses that data by name a moment later.
-  let baseRemote: string | null = null;
+  // Which repository a `#123` links into is the project's own answer, not
+  // `origin`'s: a fork's remote names a different repository than the one every
+  // role, probe and durable record uses, so an operator following the link
+  // would land on a different issue with the same number. The declared
+  // repository names it; the declared base remote's URL is what still says
+  // these numbers are GitHub items at all. Unreadable launch data leaves no
+  // link rather than a guessed one, and the launch refuses that data by name a
+  // moment later.
+  let bindings: ProjectBindings | null = null;
   try {
-    baseRemote = readLaunchData(root).project.baseRef.remote;
+    bindings = readLaunchData(root).project;
   } catch {
-    baseRemote = null;
+    bindings = null;
   }
   const remote =
-    baseRemote === null
+    bindings === null
       ? { status: 1, stdout: "" }
-      : runSync("git", ["remote", "get-url", baseRemote], root, projectEnv);
+      : runSync("git", ["remote", "get-url", bindings.baseRef.remote], root, projectEnv);
+  const declaredRepository =
+    typeof bindings?.repository === "string" && REPOSITORY.test(bindings.repository)
+      ? bindings.repository
+      : null;
 
   return {
     root,
     linkBase:
       process.stdout.isTTY === true && remote.status === 0
-        ? gitHubBase(remote.stdout)
+        ? repositoryLink(gitHubBase(remote.stdout), declaredRepository)
         : null,
     loadData: (activeRuntime) => readLaunchData(root, activeRuntime),
     preflight(runtime, adapter) {
