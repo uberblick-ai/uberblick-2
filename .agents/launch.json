@@ -1,5 +1,37 @@
 {
   "version": 1,
+  "project": {
+    "repository": "uberblick-ai/uberblick-2",
+    "baseRef": {
+      "remote": "origin",
+      "branch": "main"
+    },
+    "owner": "bk-one",
+    "retrospectives": {
+      "preparation": 506,
+      "implementation": 522,
+      "workflow-audit": 540,
+      "technical-audit": 541
+    },
+    "context": {
+      "workflow": "c0bb016d-3d4c-4316-9b4e-da8a7b322e55",
+      "editorial": "5e0e25d8-c71f-44c3-9bf3-93662712c1fc",
+      "configuration": "62c70b7c-6e4c-40a4-a6bb-a7edbee08360"
+    },
+    "commands": {
+      "trust": "mise trust",
+      "install": "mise run install",
+      "dev": "mise run dev",
+      "lint": "mise run lint",
+      "typecheck": "mise run typecheck",
+      "test": "mise run test",
+      "e2e": "mise run e2e",
+      "review": "mise run review",
+      "housekeeping": "sh scripts/housekeeping.sh",
+      "env": "fnox exec -- ub env --"
+    },
+    "sessionBriefing": "MCP route: use the registered uberblick server. If it cannot start outside mise, use the throwaway stdio route `mise x -- ub mcp serve` from scratch outside the committed worktree."
+  },
   "entryRoles": {
     "issue-preparer": {
       "contract": ".agents/roles/issue-preparer.md",

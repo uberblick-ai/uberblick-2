@@ -3,8 +3,8 @@
 Reconciles gate evidence and review findings on one PR, dispositions every
 finding, and merges when the executable policy permits it.
 
-Read `.agents/roles/README.md` before side effects. Role context: Uberblick
-project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).
+Read `.agents/roles/README.md` before side effects. Role context: the corpus
+document this project bound to `project.context.workflow`.
 
 ## Assignment
 
@@ -56,8 +56,8 @@ made wrong, rewrite the affected sentences to the new present-tense truth and
 delete what they replace; add a block only for a fact no existing block owns.
 No PR or issue number, merge date, run id or "since" clause reaches a Regular
 Document — GitHub owns that provenance — and every new or changed block passes
-the corpus test at the top of Editorial contract
-(`5e0e25d8-c71f-44c3-9bf3-93662712c1fc`).
+the corpus test at the top of the document this project bound to
+`project.context.editorial`.
 
 When delivery-policy.md's "Reviews owed" table owes two, require both distinct
 adversarial records: the implementer's challenge on the other runtime from the
@@ -92,7 +92,7 @@ the review protocol's record that it went unanswered. Wait for it on the
 protocol's inexpensive GitHub reads, renewing this claim, rather than on a
 child this session started. An owed round recorded unanswered has one outcome,
 and it is not a merge: park the PR `needs-human`, naming the round, its request
-and the runtime it needs, and @-mention the owner (`@bk-one`), because only an
+and the runtime it needs, and @-mention the `project.owner` handle, because only an
 operator can start the loop that would answer it. This role neither supplies the
 missing round itself nor rules without it.
 Re-read the head before using that result; a review of another SHA is evidence
@@ -102,7 +102,7 @@ The mechanics are repository procedure, followed there rather than copied:
 `.agents/protocols/integration.md` for the gate sequence and merge
 execution, and `review-protocol.md` for the external round, fix-up waves and
 convergence. Rule P2/P3 from the bounded record or park its focused owner
-question `needs-human`, @-mentioning the product owner (`@bk-one`) in the
+question `needs-human`, @-mentioning the `project.owner` handle in the
 ruling so the park is seen; never request a review merely to debate severity.
 A ruling whose findings are all P3 merges at the reviewed head, each P3
 recorded as accepted debt on the PR — the disposition `.agents/protocols/delivery-policy.md` already
@@ -150,9 +150,9 @@ head is therefore the top-level claim, at most one review request the reviewer
 answers on its own records, and
 one ruling; the finding ledger is edited, not appended.
 
-After that durable outcome, post one concise
-self-assessment to [Implementation and integration run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/522),
-following its prompt, with
+After that durable outcome, post one concise self-assessment to the discussion
+this project bound to the `implementation` retrospective channel
+(`project.retrospectives.implementation`), following its prompt, with
 `sh scripts/post-retrospective.sh implementation <body-file>` — never with a
 hand-written `addDiscussionComment` call, because a guessed discussion id posts
 to a stranger's repository. Say whether the latest findings were a new defect class

@@ -19,10 +19,25 @@ source. Distinguish implemented behavior from agreed future direction. Apply
 settled owner authorization without asking for it again; escalate only the
 unresolved choice beyond that authorization.
 
+## Read the project's bindings
+
+These instructions are a workflow a project adopts, so they name no repository,
+base ref, discussion, owner, corpus document or validation command of their own.
+Every such value is the adopting project's, declared once in its
+`.agents/launch.json` under `project` and read with
+`node scripts/agent-binding.mjs <binding>` — for example
+`node scripts/agent-binding.mjs project.repository`. The helper prints the
+value alone, or exits non-zero naming the binding and the file and key it
+searched. Resolve a binding immediately before the operation that needs it, so
+a missing one costs a message rather than a claim, a comment or a push against
+the wrong repository; nothing here falls back to another project's values.
+`.agents/requires.json` declares the bindings and resources this workflow needs,
+and `.agents/audits/` and `.agents/skills/` sit outside it as this project's own.
+
 ## Read for the action
 
-Use `gh` CLI for GitHub reads and writes; use Uberblick MCP for the product
-corpus. GitHub MCP is not required.
+Use `gh` CLI for GitHub reads and writes; use the project's corpus MCP server
+for the product corpus. GitHub MCP is not required.
 
 MCP access is expected for every session. Discover documents through `list_docs`
 and search, then read the relevant documents and linked decisions. Do not load

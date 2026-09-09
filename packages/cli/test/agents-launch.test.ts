@@ -58,6 +58,11 @@ function project(root: string, name: string, contractPath: string): string {
     `${JSON.stringify(
       {
         version: 1,
+        project: {
+          baseRef: { remote: "origin", branch: "main" },
+          repository: `${name}-org/${name}`,
+          sessionBriefing: `Reach the ${name} corpus through this project's own MCP entry.`,
+        },
         entryRoles: {
           shipper: {
             contract: contractPath,
@@ -157,6 +162,14 @@ describe("ub agents launch, against real projects", () => {
         // this project chose — not a shape the CLI knows.
         expect(session.prompt).toContain(`per \`${contract}\``);
         expect(session.prompt).toContain("launched by `ub agents launch`");
+        // Everything past identity is this project's own briefing, so a second
+        // project is never told to reach the first one's corpus.
+        expect(session.prompt).toContain(
+          `Reach the ${name} corpus through this project's own MCP entry.`,
+        );
+        expect(session.prompt).not.toContain(
+          `Reach the ${name === "alpha" ? "beta" : "alpha"} corpus`,
+        );
         expect(session.argv.slice(0, 5)).toEqual([
           "-p",
           "--agent",

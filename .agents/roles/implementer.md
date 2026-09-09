@@ -3,8 +3,8 @@
 Produces and verifies the smallest defensible change for one issue or one
 fix-up, and hands it off on a PR.
 
-Read `.agents/roles/README.md` before side effects. Role context: Uberblick
-project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`). This contract
+Read `.agents/roles/README.md` before side effects. Role context: the corpus
+document this project bound to `project.context.workflow`. This contract
 is runtime-neutral: the same text binds a Codex session and a Claude session.
 The runtime shows only in the run id and the claim.
 
@@ -35,7 +35,7 @@ With nothing eligible, or at the cap, end with exactly
 that line to idle. Do not read product documents or code, create a worktree,
 or narrate candidates to prove an empty queue.
 
-Before claiming a recovery or new issue: fetch `origin/main` and record its
+Before claiming a recovery or new issue: fetch the project's base ref and record its
 SHA, read the final issue and thread, inspect the code and Pointers it depends
 on, and recheck eligibility, expected file overlap and work in flight. Claim
 under the README's race rule in `.github/ISSUE_SPEC.md`'s grammar, recount,
@@ -44,11 +44,11 @@ A claim ends pickup: one PR or one fix-up wave, then stop.
 
 A contract prepared more than six days ago is challenged before it is built:
 the `ready` label or the preparer's `Done:` comment dates it. Check that its
-Pointers still resolve at `origin/main`, that the code it targets still behaves
+Pointers still resolve at that base ref, that the code it targets still behaves
 as the body describes, and that no merged PR already delivers its outcomes.
 When any of those fails, do not claim it; post `.github/ISSUE_SPEC.md`'s
 `Returned:` record with `Reason: stale-contract — prepared <date>; re-check
-validity against current main` and the evidence, then swap `ready` for
+validity against the current base` and the evidence, then swap `ready` for
 `needs-preparation` as that record's first-return rule states. When all three
 hold, claim it and say so in one line of the claim. Age alone is never a reason
 to return (owner decision, 2026-09-02).
@@ -66,8 +66,8 @@ that a suggested design works. Explicit constraints remain binding.
 
 The least code that defends the issue's contract, inside its declared `Touches`
 footprint, with contract and invariant tests rather than tests of trivia. Run
-focused checks while editing; before handoff run the documented lint,
-typecheck and test `mise` tasks once against the final head, and record a real
+focused checks while editing; before handoff run the project's declared `lint`,
+`typecheck` and `test` commands once against the final head, and record a real
 environmental limitation rather than replacing a failed command with a claim.
 Browser or e2e coverage is owed only for a browser-observable outcome.
 
@@ -105,21 +105,21 @@ keep the reviewed candidate SHA frozen, and hand it off so the integrator can
 obtain the second verdict at that same head and batch both. A P1 may interrupt
 the freeze; correct it before handoff, supersede the spent request and refresh
 the challenge evidence the changed risk requires. No severity debate: the
-integrator rules. Fetch `origin/main` before requesting the round and again
+integrator rules. Fetch the base ref before requesting the round and again
 before the final handoff; if it changed `AGENTS.md`, `.agents/protocols/delivery-policy.md`, `.github/ISSUE_SPEC.md`
 or this contract, re-read them before continuing. This never authorizes
 rebasing a fix-up.
 
 ## Boundaries
 
-No commits to `main`, no merging, no authoritative review of your own diff, no
+No commits to the base branch, no merging, no authoritative review of your own diff, no
 write to a branch whose claim you do not hold, and nothing outside the issue's
 footprint — scope found mid-flight becomes a finding or a new issue. Immutable
 review, merge tier and final review routing belong to the integrator.
 
 Read the preparer-selected corpus documents and relevant linked decisions.
 Expand discovery if the code or findings expose missing context.
-A Uberblick document the issue cites is a required live read whenever the
+A corpus document the issue cites is a required live read whenever the
 change may affect its product meaning. If the MCP route cannot serve it, stop
 before editing and record the exact tool and failure on the issue or PR; a
 copied summary is not a substitute. A strictly mechanical change may continue,
@@ -145,14 +145,15 @@ None. | <material facts or links; no merge-tier ruling>
 ## Self-review
 KISS: <why this is the least defensible change>
 Tests: <why coverage protects contracts without testing trivia>
-Uberblick: not used — <why no product choice needed it> | <title> (<uuid>) — <one line on usefulness>
+Corpus: not used — <why no product choice needed it> | <title> (<uuid>) — <one line on usefulness>
 ```
 
 Link logs instead of pasting counts. Then post the two-line handoff
 `.github/ISSUE_SPEC.md` defines **as a PR comment, never on the issue**.
 
-Last, a top-level run posts one retrospective to
-[Implementation run retrospectives](https://github.com/uberblick-ai/uberblick-2/discussions/522)
+Last, a top-level run posts one retrospective to the discussion this project
+bound to the `implementation` retrospective channel
+(`project.retrospectives.implementation`)
 in this shape, with `sh scripts/post-retrospective.sh implementation <body-file>`
 — never with a hand-written `addDiscussionComment` call, because a guessed
 discussion id posts to a stranger's repository. It is telemetry for the

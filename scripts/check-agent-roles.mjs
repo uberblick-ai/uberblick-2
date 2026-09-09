@@ -15,11 +15,24 @@
  * an adapter description.
  *
  * It deliberately does not check the contracts' or protocols' prose: no
- * headings, required sentences, uuids, product judgments or readiness rules.
+ * headings, required sentences, product judgments or readiness rules.
  * Encoding editorial rules here would make the documents harder to improve and
  * turn every clarification into a build break. Structure is all it checks, and
  * a green run says nothing about whether a runtime discovers these files or
  * reads a contract.
+ *
+ * The one thing it does read prose for is portability, because that property
+ * cannot survive as a one-time cleanup. `.agents/` is a workflow any project
+ * can adopt, so no file of it may carry this repository's slug, base ref,
+ * discussion, owner handle, corpus uuid or build command; each such value is
+ * declared in this project's own `.agents/launch.json` and resolved at use.
+ * `.agents/requires.json` states which bindings and resources the workflow
+ * needs, and this file holds the two sides together: every declared binding
+ * resolves here, every declared resource exists, every portable file is
+ * declared, and a helper an instruction names but the declaration omits fails
+ * here rather than in whatever project adopts it next. `.agents/audits/` and
+ * `.agents/skills/` are deliberately outside that portable set — they are this
+ * project's own and keep their literals.
  *
  * Plain Node, no imports beyond `node:`, like `fue-assert.mjs` beside it.
  * `.claude/agents` is absent from the immutable review image (`.dockerignore`
@@ -27,7 +40,7 @@
  * so that third is skipped loudly there; CI, on a plain checkout, enforces it.
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -156,6 +169,149 @@ function check(label, slug, keys, required, allowed, tables, body) {
 		fail(`${label}: does not name its contract ${ROLES}/${slug}.md`);
 }
 
+const REQUIRES = ".agents/requires.json";
+/** `.agents/` is the portable source, minus what this project keeps for itself. */
+const PROJECT_OWN = [".agents/audits/", ".agents/skills/", LAUNCH];
+/** Where a portable instruction may name a file, so both sides can be compared. */
+const NAMED_PATH = /(?:\.agents|\.github|\.claude|\.codex|scripts|packages|docs)\/[A-Za-z0-9._/-]+/g;
+const NAMED_FILE = /(?<![\w./-])[A-Za-z][A-Za-z0-9._-]*\.(?:md|mjs|json|sh|toml)(?![\w-])/g;
+/**
+ * The literals a portable file may not carry, each with what to do instead.
+ *
+ * Narrow on purpose: a pattern here fails a build, so each one matches a value
+ * that is unmistakably one project's — never ordinary prose about a concept.
+ */
+const FORBIDDEN = [
+	[/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/,
+		"a corpus document uuid; bind it under project.context and resolve it"],
+	[/github\.com\/[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*/,
+		"a repository or discussion URL; bind project.repository or project.retrospectives"],
+	[/\borigin\/[A-Za-z0-9]/, "a base ref; bind project.baseRef and resolve it"],
+	// Prose only: `@param` and its kin are documentation tags, not mentions.
+	[/(?:^|[\s(])@[A-Za-z0-9][\w-]*/, "an account handle; bind project.owner", ".md"],
+	[/\b(?:mise|fnox|pnpm|npm|yarn|cargo|bazel|gradle|docker)\b/,
+		"a build or validation command; bind it under project.commands"],
+	// An adopting project's roles work in their own worktree; an absolute host
+	// path would send one into the checkout this workflow was copied from.
+	[/(?:^|[\s"'(])\/(?:home|Users|mnt|opt|srv|var)\//,
+		"an absolute host path; a role works in its own project's worktree"],
+];
+
+/** Every file of the portable source this repository ships. */
+function portableFiles() {
+	const found = [];
+	const walk = (relative) => {
+		for (const entry of readdirSync(join(root, relative), { withFileTypes: true })) {
+			const child = `${relative}/${entry.name}`;
+			if (PROJECT_OWN.some((own) => child === own || child.startsWith(own))) continue;
+			if (entry.isDirectory()) walk(child);
+			else if (entry.isFile()) found.push(child);
+		}
+	};
+	walk(".agents");
+	for (const [directory, extension] of [[CLAUDE, ".md"], [CODEX, ".toml"]]) {
+		if (!existsSync(join(root, directory))) continue;
+		found.push(...listFiles(directory).filter((name) => name.endsWith(extension)).map((name) => `${directory}/${name}`));
+	}
+	return found;
+}
+
+/** Resolve one dotted binding path in the launch data, or null. */
+function binding(launch, path) {
+	let value = launch;
+	for (const key of path.split(".")) {
+		const container = object(value);
+		if (container === null || !Object.hasOwn(container, key)) return null;
+		value = container[key];
+	}
+	if (object(value) !== null || Array.isArray(value)) return null;
+	return value === "" || value === null || value === undefined ? null : value;
+}
+
+/** The declared bindings resolve, the declared resources exist, and neither side drifts. */
+function checkPortableSource() {
+	let requires = null;
+	try {
+		requires = object(JSON.parse(read(REQUIRES)));
+	} catch {
+		fail(`${REQUIRES}: missing or invalid JSON`);
+		return;
+	}
+	if (!requires || !exactKeys(requires, ["version", "bindings", "resources", "projectResources"]) || requires.version !== 1) {
+		fail(`${REQUIRES}: expected only version 1, bindings, resources and projectResources`);
+		return;
+	}
+	const lists = {};
+	for (const name of ["bindings", "resources", "projectResources"]) {
+		const value = requires[name];
+		if (!Array.isArray(value) || value.length === 0 || !value.every((item) => typeof item === "string" && item !== "")) {
+			fail(`${REQUIRES}: ${name} must list non-empty strings`);
+			return;
+		}
+		if (JSON.stringify(value) !== JSON.stringify([...new Set(value)].sort())) {
+			fail(`${REQUIRES}: ${name} must be sorted and free of duplicates`);
+		}
+		lists[name] = value;
+	}
+
+	let launch = null;
+	try {
+		launch = object(JSON.parse(read(LAUNCH)));
+	} catch {
+		launch = null;
+	}
+	if (launch === null) fail(`${LAUNCH}: cannot read this project's own bindings`);
+	else {
+		for (const path of lists.bindings) {
+			if (binding(launch, path) === null)
+				fail(`${LAUNCH}: declares no "${path}", which ${REQUIRES} requires of every project`);
+		}
+	}
+
+	for (const relative of [...lists.resources, ...lists.projectResources]) {
+		if (!existsSync(join(root, relative))) fail(`${REQUIRES}: names a file this repository does not have: ${relative}`);
+	}
+	const declared = new Set([...lists.resources, ...lists.projectResources]);
+	for (const relative of portableFiles()) {
+		if (!lists.resources.includes(relative))
+			fail(`${REQUIRES}: resources omits the portable file ${relative}`);
+	}
+
+	// Both directions of the parity that keeps an adoption complete: what an
+	// instruction tells an agent to run must travel with the instruction.
+	for (const relative of lists.resources) {
+		let text;
+		try {
+			text = read(relative);
+		} catch {
+			continue;
+		}
+		const named = new Set();
+		for (const match of text.match(NAMED_PATH) ?? []) named.add(match.replace(/[.,;:)`'"]+$/, ""));
+		for (const match of text.match(NAMED_FILE) ?? []) {
+			for (const candidate of [`${dirname(relative)}/${match}`, match]) {
+				if (existsSync(join(root, candidate))) {
+					named.add(candidate.replace(/^\.\//, ""));
+					break;
+				}
+			}
+		}
+		for (const path of named) {
+			if (declared.has(path)) continue;
+			let file = false;
+			try {
+				file = statSync(join(root, path)).isFile();
+			} catch {}
+			if (file) fail(`${relative}: names ${path}, which ${REQUIRES} does not declare`);
+		}
+		for (const [pattern, instead, only] of FORBIDDEN) {
+			if (only !== undefined && !relative.endsWith(only)) continue;
+			const found = text.match(pattern);
+			if (found) fail(`${relative}: carries ${JSON.stringify(found[0].trim())} — ${instead}`);
+		}
+	}
+}
+
 const claudePresent = existsSync(join(root, CLAUDE));
 if (!claudePresent)
 	console.log(`skipped: ${CLAUDE} is absent from this checkout, so the Claude adapters cannot be checked here`);
@@ -210,8 +366,8 @@ else {
 		fail(`${LAUNCH}: invalid JSON`);
 	}
 	const entries = object(launch?.entryRoles);
-	if (launch && (!exactKeys(launch, ["version", "entryRoles"]) || launch.version !== 1))
-		fail(`${LAUNCH}: expected only version 1 and entryRoles`);
+	if (launch && (!exactKeys(launch, ["version", "project", "entryRoles"]) || launch.version !== 1))
+		fail(`${LAUNCH}: expected only version 1, project and entryRoles`);
 	if (!entries) fail(`${LAUNCH}: entryRoles must be an object`);
 	else {
 		const names = Object.keys(entries).sort();
@@ -264,6 +420,8 @@ for (const relative of [ISSUE_SHAPING, ...ISSUE_PREPARATION]) {
 	if (!existsSync(join(root, relative))) fail(`${relative}: missing provider-neutral issue-authoring file`);
 }
 
+checkPortableSource();
+
 for (const relative of [
 	...SHAPING_ADAPTERS,
 	...(claudeSkillsPresent ? [CLAUDE_SHAPING_ADAPTER] : []),
@@ -281,4 +439,7 @@ if (failures.length > 0) {
 	process.exit(1);
 }
 
-console.log(`check-agent-roles: ${SLUGS.length} roles, ${ENTRY_SLUGS.length} launch entries and issue-authoring wiring, structure only.`);
+console.log(
+	`check-agent-roles: ${SLUGS.length} roles, ${ENTRY_SLUGS.length} launch entries, issue-authoring wiring ` +
+		"and the portable source against its declared bindings and resources.",
+);

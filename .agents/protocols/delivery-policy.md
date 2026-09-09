@@ -16,19 +16,19 @@ in `review-rounds.mjs` beside it.
 2. **Branch + implementer agents.** Implementation happens on a feature branch
    (`feat/<slug>`, `fix/<slug>`), written by isolated implementer agents that
    claim their own issue in `.github/ISSUE_SPEC.md`'s grammar under
-   `.agents/roles/implementer.md`. Never commit feature work directly to
-   `main`.
-3. **PR.** Open a PR against `main` linked to the issue (`Closes #N`), with a
-   body stating what changed and how it was verified.
+   `.agents/roles/implementer.md`. Never commit feature work directly to the
+   project's base branch (`project.baseRef`).
+3. **PR.** Open a PR against that base branch, linked to the issue
+   (`Closes #N`), with a body stating what changed and how it was verified.
 4. **Gates — all of them, before merge.** Effort follows semantic risk. Paths
    and line counts are inspection signals, not automatic extra rounds; link
    exact-head evidence instead of repeating it:
-   - immutable review green at the exact merge head. The Docker review
-     (`mise run review <head-sha>`, from a trusted checkout of `origin/main`)
-     is required when the diff touches persistence, synchronization,
-     concurrency, process lifecycle or auth, when a challenge round is owed,
-     when `main` moved under the PR, or when CI is not green at that head;
-     otherwise, for tier 1, CI's `gates` check run at `headRefOid` is the
+   - immutable review green at the exact merge head. The isolated review (the
+     project's `review` command with the head SHA, from a trusted checkout of
+     its base ref) is required when the diff touches persistence,
+     synchronization, concurrency, process lifecycle or auth, when a challenge
+     round is owed, when the base moved under the PR, or when CI is not green
+     at that head; otherwise, for tier 1, CI's `gates` check run at `headRefOid` is the
      immutable review — verify its conclusion at that SHA and link it, since
      nothing enforces it (owner decision, 2026-09-02). Worktree tests are
      useful during implementation but are never merge evidence, because a
@@ -71,20 +71,21 @@ in `review-rounds.mjs` beside it.
    GitHub Copilot is optional additional evidence, not a gate. When requested,
    record a platform refusal or outage once and continue; every review remark it
    actually posts still falls under the zero-remark gate above.
-   Reviewing a commit is one command, `mise run review <head-sha>`,
-   run from a checkout at freshly fetched `origin/main` with `mise.toml`,
-   `Dockerfile.review` and `.dockerignore` unmodified — the task refuses
-   otherwise, because main is what supplies the build recipe. The reviewed
-   commit contributes file contents, via `git archive`; its manifests still
-   install in the networked build stage, so pass the SHA rather than checking
-   the branch out, and never pass secrets, host mounts, privileged mode, or
-   the Docker socket. For persistence,
-   startup/shutdown, networking, concurrency, and other stateful boundaries,
+   Reviewing a commit is one command — the project's declared `review`
+   command with the head SHA — run from a checkout at its freshly fetched base
+   ref with that command's own recipe unmodified; it refuses otherwise, because
+   the base is what supplies the recipe. The reviewed commit contributes file
+   contents, via `git archive`; its manifests still install in the networked
+   build stage, so pass the SHA rather than checking the branch out, and never
+   pass secrets, host mounts, privileged mode, or the container socket. For
+   persistence, startup/shutdown, networking, concurrency, and other stateful
+   boundaries,
    passing happy-path tests is not enough: run focused failure-path probes in
-   the retained review image and post reproducible findings inline. README's
-   "Review isolation" states the full boundary.
+   the retained review image and post reproducible findings inline. The
+   project's own documentation of that command states the full boundary.
 5. **Merge, then docs.** After the gates pass, merge per the merge policy
-   below; then update the product docs (through the Uberblick MCP tools) to the new status quo.
+   below; then update the product docs (through the corpus MCP tools) to the
+   new status quo.
 
 ### Reviews owed
 
@@ -126,7 +127,7 @@ diff is waived out of a boundary it crosses.
   Paths identify what to inspect; they never trigger tier 3 by themselves.
 - **Owner approval — one decision, not a late ceremony.** `human-approved` may
   be recorded as soon as a PR's intended shape and known findings are visible.
-  It covers conforming fix-ups and non-rewriting synchronization with `main`.
+  It covers conforming fix-ups and non-rewriting synchronization with the base.
   If later work materially expands the design or scope, replace it with
   `needs-human` and name the delta.
   **An owner decision on the issue is that approval** (owner decision,
@@ -144,11 +145,11 @@ diff is waived out of a boundary it crosses.
   simpler established primitive or dependency with bespoke correctness
   machinery merely to avoid tier 3. Make the intended shape visible early and
   obtain the owner decision once; the approval can precede final gates.
-- **`packages/cli` — tiered from the diff, not the package name** (owner
-  decision, 2026-08-24). A diff that adds or changes the user-facing command
-  surface — new subcommands, a changed user↔uberblick interaction, anything
-  relevant to distribution or to new users — is tier 3; a logical extension or
-  a bugfix of already-shipped CLI behavior is tier 2.
+- **The user-facing command surface — tiered from the diff, not the package
+  name** (owner decision, 2026-08-24). A diff that adds or changes that surface
+  — new subcommands, a changed interaction between a person and the product,
+  anything relevant to distribution or to new users — is tier 3; a logical
+  extension or a bugfix of already-shipped command behavior is tier 2.
 
 The tier-3 trigger list is the owner-controlled autonomy boundary. Verify gates
 at the candidate SHA rather than relying on a session’s assertion.

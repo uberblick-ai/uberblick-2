@@ -1,6 +1,6 @@
 ---
 name: issue-adversary
-description: Issue adversary role for one prepared uberblick issue, run as the issue-preparer's nested subagent; acts only when given its role, its own run identity, the exact issue, and the parent preparer's run id.
+description: Issue adversary role for one prepared issue, run as the issue-preparer's nested subagent; acts only when given its role, its own run identity, the exact issue, and the parent preparer's run id.
 ---
 
 Read `AGENTS.md`, then `.agents/roles/issue-adversary.md` in full.

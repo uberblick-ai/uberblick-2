@@ -73,8 +73,9 @@ function rig(options: {
     dataLoads: [] as Array<string | undefined>,
     preflight: [] as Array<{ runtime: string; adapter: string }>,
     refreshes: 0,
+    baseRefs: [] as string[],
     probes: [] as Array<readonly string[]>,
-    sessions: [] as Array<{ role: string; runtime: string }>,
+    sessions: [] as Array<{ role: string; runtime: string; base: string }>,
     waits: [] as number[],
     terminations: [] as NodeJS.Signals[],
   };
@@ -89,7 +90,8 @@ function rig(options: {
       seen.preflight.push({ runtime, adapter });
       return options.preflight ?? null;
     },
-    refreshMain() {
+    refreshMain(baseRef) {
+      seen.baseRefs.push(`${baseRef.remote}/${baseRef.branch}`);
       seen.refreshes++;
       if (refreshes.length > 0) return refreshes.shift()!;
       return options.refresh ?? null;
@@ -98,8 +100,8 @@ function rig(options: {
       seen.probes.push(command);
       return { status: probes.shift() ?? 0, output: options.probeOutput ?? "" };
     },
-    async runSession(role, runtime) {
-      seen.sessions.push({ role, runtime });
+    async runSession(role, runtime, _entry, project) {
+      seen.sessions.push({ role, runtime, base: `${project.baseRef.remote}/${project.baseRef.branch}` });
       return sessions.shift() ?? result({ interrupted: "SIGINT" });
     },
     async wait(milliseconds) {
@@ -129,7 +131,6 @@ function rig(options: {
   };
 }
 
-
 /** One entry-role declaration, with every path the project's own to choose. */
 function role(
   overrides: {
@@ -158,9 +159,17 @@ function role(
   };
 }
 
+/** The bindings every project must declare, as this suite's projects declare them. */
+function projectBindings(overrides: Record<string, unknown> = {}) {
+  return { baseRef: { remote: "origin", branch: "main" }, ...overrides };
+}
+
 /** The whole launch file for one declared role, without writing its files. */
-function launchData(declared: ReturnType<typeof role>) {
-  return { version: 1, entryRoles: { implementer: declared } };
+function launchData(
+  declared: ReturnType<typeof role>,
+  project: Record<string, unknown> = projectBindings(),
+) {
+  return { version: 1, project, entryRoles: { implementer: declared } };
 }
 
 function git(root: string, args: string[]) {
@@ -201,10 +210,14 @@ process.stdout.write("No eligible shipper work: test fixture.\\n");
 }
 
 /** A project on disk whose launch data is exactly what it declares. */
-function writeProject(root: string, roles: Record<string, ReturnType<typeof role>>): void {
+function writeProject(
+  root: string,
+  roles: Record<string, ReturnType<typeof role>>,
+  project: Record<string, unknown> = projectBindings(),
+): void {
   const launch = join(root, ".agents/launch.json");
   mkdirSync(dirname(launch), { recursive: true });
-  writeFileSync(launch, `${JSON.stringify({ version: 1, entryRoles: roles }, null, 2)}\n`);
+  writeFileSync(launch, `${JSON.stringify({ version: 1, project, entryRoles: roles }, null, 2)}\n`);
   for (const entry of Object.values(roles)) {
     for (const relative of [entry.contract, entry.runtimes.codex.adapter]) {
       if (relative.startsWith("..") || relative.startsWith("/")) continue;
@@ -224,6 +237,23 @@ describe("ub agents launch", () => {
     // The contract path is the project's, not a shape the CLI knows.
     expect(assignment).toContain("contracts/roles/implementer.md");
     expect(assignment).toContain("launched by `ub agents launch`");
+  });
+
+  it("hands a session the project's own briefing and none of its own", () => {
+    const runId = makeRunId("claude", "implementer");
+    const briefed = launchAssignment(
+      "implementer",
+      runId,
+      "contracts/implementer.md",
+      "MCP route: use the registered atlas server.",
+    );
+    expect(briefed).toContain("MCP route: use the registered atlas server.");
+    // Identity, the project's words, and the one shape every role's final line
+    // has — nothing here names a server, a tool or a command of the CLI's own.
+    const bare = launchAssignment("implementer", runId, "contracts/implementer.md");
+    expect(bare).not.toMatch(/uberblick|mise|mcp/i);
+    expect(bare).toContain("End with the role contract's final line.");
+    expect(launchAssignment("implementer", runId, "contracts/implementer.md", "   ")).toBe(bare);
   });
 
   it("builds argv-only Codex sessions from the declared sandbox", () => {
@@ -295,6 +325,27 @@ describe("ub agents launch", () => {
     expect(() => claudeSessionArgs("integrator", "one prompt", undefined)).toThrow(
       /invalid Claude permission mode/,
     );
+  });
+
+  it("passes the tool approvals the project declared, and invents none", () => {
+    // A project's checked-in runtime settings are ignored where the runtime has
+    // not trusted the project, so a declared approval only reaches the session
+    // as an argument. What the project did not declare is not supplied.
+    expect(claudeSessionArgs("integrator", "one prompt", "auto", ["Bash(git log:*)", "Read"])).toEqual([
+      "-p",
+      "--agent",
+      "integrator",
+      "--permission-mode",
+      "auto",
+      "--allowedTools",
+      "Bash(git log:*),Read",
+      "one prompt",
+    ]);
+    for (const declared of [undefined, []]) {
+      expect(claudeSessionArgs("integrator", "one prompt", "auto", declared)).not.toContain(
+        "--allowedTools",
+      );
+    }
   });
 
   it("streams a direct child, forwards a terminal signal once, and reaps it", async () => {
@@ -592,7 +643,9 @@ process.exit(0);
     ] as const) {
       const current = rig();
       expect(await launchCommand([...argv], current.io, current.services)).toBe(130);
-      expect(current.seen.sessions).toEqual([{ role: expected[0], runtime: expected[1] }]);
+      expect(current.seen.sessions).toEqual([
+        { role: expected[0], runtime: expected[1], base: "origin/main" },
+      ]);
       expect(current.seen.preflight).toEqual([
         {
           runtime: expected[1],
@@ -852,13 +905,13 @@ esac
       );
 
       writeFileSync(join(root, "marker"), "dirty\n");
-      expect(services.refreshMain()).toEqual({
+      expect(services.refreshMain({ remote: "origin", branch: "main" })).toEqual({
         detail: "fatal: test fast-forward collision",
         retry: true,
       });
 
       expect(runGit(["switch", "-c", "topic"]).status).toBe(0);
-      expect(services.refreshMain()).toEqual({
+      expect(services.refreshMain({ remote: "origin", branch: "main" })).toEqual({
         detail: "run `ub agents launch` from the project's `main` checkout",
         retry: false,
       });
@@ -996,7 +1049,12 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
       );
       const entry = readLaunchData(REPO_ROOT).entryRoles["issue-preparer"];
       expect(entry).toBeDefined();
-      const outcome = await services.runSession("issue-preparer", "claude", entry!);
+      const outcome = await services.runSession(
+        "issue-preparer",
+        "claude",
+        entry!,
+        readLaunchData(REPO_ROOT).project,
+      );
       const observed = JSON.parse(readFileSync(evidence, "utf8"));
 
       expect(outcome).toMatchObject({
@@ -1030,9 +1088,19 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
 
       writeFileSync(failure, "fail\n");
       processLookupFails = true;
-      const firstFailure = await services.runSession("issue-preparer", "claude", entry!);
+      const firstFailure = await services.runSession(
+        "issue-preparer",
+        "claude",
+        entry!,
+        readLaunchData(REPO_ROOT).project,
+      );
       processLookupFails = false;
-      const secondFailure = await services.runSession("issue-preparer", "claude", entry!);
+      const secondFailure = await services.runSession(
+        "issue-preparer",
+        "claude",
+        entry!,
+        readLaunchData(REPO_ROOT).project,
+      );
       expect(firstFailure).toMatchObject({
         started: true,
         code: 23,
@@ -1109,7 +1177,12 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
       const maskedEntry = readLaunchData(masked, "claude").entryRoles.shipper;
       expect(maskedEntry).toBeDefined();
 
-      const maskedOutcome = await services(masked).runSession("shipper", "claude", maskedEntry!);
+      const maskedOutcome = await services(masked).runSession(
+        "shipper",
+        "claude",
+        maskedEntry!,
+        readLaunchData(masked).project,
+      );
       expect(maskedOutcome).toMatchObject({ started: false, code: 1, malformed: true });
       expect(maskedOutcome.detail).toBe(
         "role contract .agents/roles/shipper.md is not a readable file inside the session's " +
@@ -1133,7 +1206,12 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
       const uncommittedEntry = readLaunchData(uncommitted, "claude").entryRoles.shipper;
       expect(uncommittedEntry).toBeDefined();
 
-      const absent = await services(uncommitted).runSession("shipper", "claude", uncommittedEntry!);
+      const absent = await services(uncommitted).runSession(
+        "shipper",
+        "claude",
+        uncommittedEntry!,
+        readLaunchData(uncommitted).project,
+      );
       expect(absent).toMatchObject({ started: false, code: 1, malformed: true });
       expect(absent.detail).toContain(
         "claude adapter .claude/agents/shipper.md is not a readable file inside the session's",
@@ -1204,6 +1282,139 @@ describe("launch data", () => {
       writeFileSync(join(root, ".agents/roles/implementer.md"), "# Implementer\n");
       writeFileSync(join(root, ".codex/agents/implementer.toml"), 'name = "implementer"\n');
       expect(readLaunchData(root).entryRoles.implementer).toBeDefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses launch data that leaves the project's own bindings unsaid", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-bindings-"));
+    try {
+      const launch = join(root, ".agents/launch.json");
+      const declared = role({ role: "shipper" });
+      writeProject(root, { shipper: declared });
+      const write = (project: unknown) =>
+        writeFileSync(
+          launch,
+          `${JSON.stringify({ version: 1, project, entryRoles: { shipper: declared } })}\n`,
+        );
+
+      // No bindings at all is not "use the values some other project uses":
+      // the launcher would otherwise ground, fetch and branch every session
+      // against a tree nobody named.
+      writeFileSync(launch, `${JSON.stringify({ version: 1, entryRoles: { shipper: declared } })}\n`);
+      expect(() => readLaunchData(root)).toThrow(/must contain only version 1, a project object/);
+      write({});
+      expect(() => readLaunchData(root)).toThrow(/"project" must declare the bindings/);
+
+      // The base ref is the one binding this launcher reads itself.
+      for (const broken of [
+        null,
+        "origin/main",
+        { remote: "origin" },
+        { remote: "origin", branch: "main", extra: "no" },
+        { remote: "or igin", branch: "main" },
+        { remote: "origin/x", branch: "main" },
+        { remote: "origin", branch: "-delete" },
+        { remote: "origin", branch: "release/../etc" },
+      ]) {
+        write({ baseRef: broken });
+        expect(() => readLaunchData(root), JSON.stringify(broken)).toThrow(
+          /"project\.baseRef" must name a git "remote" and a "branch"/,
+        );
+      }
+
+      // Everything else is shape-checked and passed through unread, so a
+      // workflow may declare bindings this CLI has never heard of.
+      write({ baseRef: { remote: "upstream", branch: "release/2.x" }, repository: {} });
+      expect(() => readLaunchData(root)).toThrow(
+        /"project\.repository" must be one value or a group of named values/,
+      );
+      write({ baseRef: { remote: "upstream", branch: "release/2.x" }, sessionBriefing: 7 });
+      expect(() => readLaunchData(root)).toThrow(/"project\.sessionBriefing" must be text/);
+
+      write({
+        baseRef: { remote: "upstream", branch: "release/2.x" },
+        repository: "atlas-ai/atlas",
+        retrospectives: { implementation: 12 },
+      });
+      expect(readLaunchData(root).project).toEqual({
+        baseRef: { remote: "upstream", branch: "release/2.x" },
+        repository: "atlas-ai/atlas",
+        retrospectives: { implementation: 12 },
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a tool approval that is not a list of tools the project grants", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-grants-"));
+    try {
+      const launch = join(root, ".agents/launch.json");
+      const declared = role({ role: "shipper" });
+      writeProject(root, { shipper: declared });
+      for (const broken of ["Read", [], [""], ["Read", 7]]) {
+        const granted = {
+          ...declared,
+          runtimes: {
+            ...declared.runtimes,
+            claude: { ...declared.runtimes.claude, allowedTools: broken },
+          },
+        };
+        writeFileSync(
+          launch,
+          `${JSON.stringify({ version: 1, project: projectBindings(), entryRoles: { shipper: granted } })}\n`,
+        );
+        expect(() => readLaunchData(root), JSON.stringify(broken)).toThrow(
+          /"allowedTools" must list the tools this project grants/,
+        );
+      }
+
+      const granted = {
+        ...declared,
+        runtimes: {
+          ...declared.runtimes,
+          claude: { ...declared.runtimes.claude, allowedTools: ["Read", "Bash(git log:*)"] },
+        },
+      };
+      writeFileSync(
+        launch,
+        `${JSON.stringify({ version: 1, project: projectBindings(), entryRoles: { shipper: granted } })}\n`,
+      );
+      expect(readLaunchData(root).entryRoles.shipper?.runtimes.claude.allowedTools).toEqual([
+        "Read",
+        "Bash(git log:*)",
+      ]);
+      // Declaring none stays declaring none.
+      writeProject(root, { shipper: declared });
+      expect(readLaunchData(root).entryRoles.shipper?.runtimes.claude.allowedTools).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fetches and branches from the base ref the project declared", () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-launch-baseref-"));
+    try {
+      writeProject(
+        root,
+        { shipper: role({ role: "shipper" }) },
+        projectBindings({ baseRef: { remote: "upstream", branch: "trunk" } }),
+      );
+      commitAsOriginMain(root);
+      const services = createLaunchServices(root, process.env, { out: () => {}, err: () => {} });
+      // The checkout is on `main`, which is nothing to this project: what the
+      // launcher refuses is a checkout that is not on the declared branch.
+      expect(services.refreshMain({ remote: "upstream", branch: "trunk" })).toEqual({
+        detail: "run `ub agents launch` from the project's `trunk` checkout",
+        retry: false,
+      });
+      git(root, ["checkout", "-b", "trunk"]);
+      expect(services.refreshMain({ remote: "upstream", branch: "trunk" })).toMatchObject({
+        detail: expect.stringContaining("could not fetch upstream/trunk"),
+        retry: true,
+      });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -175,8 +175,8 @@ When the human explicitly declares the requirement planned, set its status to
 `planned` and ask them to group the product outcomes into the intakes they want.
 This is their product grouping, not technical PR decomposition. Before creating
 anything, enumerate open and closed issues with
-`gh api --paginate "repos/uberblick-ai/uberblick-2/issues?state=all&per_page=100"`,
-exclude pull requests, and inspect their bodies locally for an exact requirement
+`gh api --paginate "repos/<project.repository>/issues?state=all&per_page=100"`
+against the project's declared repository, exclude pull requests, and inspect their bodies locally for an exact requirement
 uuid in `Implements:` lines; do not depend on GitHub's full-text search index
 for retry safety. Compare the exact outcome grouping the human confirmed. A
 prior line covers a retry only when it names the same outcome block ids; a
@@ -202,9 +202,9 @@ Follow those lines with the confirmed intake sections below. Add only
 or `ready`. The issue-preparer later completes the machine-readable header and
 grounds the contract. If the repository's `scripts/create-issue.mjs` helper is
 available, use it with Request Source `Human`. Otherwise create with `gh`, leave
-Request Source unset as the issue contract permits, and tell the human; use
-`--repo uberblick-ai/uberblick-2` so no checkout is required, and promise no
-additional failure record.
+Request Source unset as the issue contract permits, and tell the human; pass
+the project's declared repository as `--repo` so no checkout is required, and
+promise no additional failure record.
 
 ### Create a small intake
 
@@ -233,8 +233,8 @@ The GitHub form may render the section headings with empty values.
 When the human chooses this exit, create the intake with
 `needs-preparation` through `.github/ISSUE_SPEC.md`'s **Request source** path,
 recording `Human` for the person's request. If its helper is unavailable, use
-`gh issue create --repo uberblick-ai/uberblick-2`, leave Request Source unset,
-and tell the human. Set Priority to the value the human stated in this
+`gh issue create --repo` with the project's declared repository, leave Request
+Source unset, and tell the human. Set Priority to the value the human stated in this
 conversation, with a comment on the issue recording that decision; leave the
 field unset when they gave none, and never infer it. Never infer or write
 `Depends-on`, `Touches`, `Parent`, architecture, implementation detail,
