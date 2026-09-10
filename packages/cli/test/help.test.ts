@@ -300,6 +300,16 @@ describe("every human-facing command path", () => {
   });
 
   it("uses the same semantic operand name at every help level and in usage errors", async () => {
+    expect(AGENTS_HELP).toContain("install <workflow@version|package-path>");
+    expect(AGENTS_HELP).toContain("update <workflow@version|package-path>");
+    expect(AGENTS_INSTALL_HELP).toMatch(/usage: ub agents install <workflow@version\|package-path>/);
+    expect(AGENTS_UPDATE_HELP).toMatch(/usage: ub agents update <workflow@version\|package-path>/);
+    for (const command of ["install", "update"]) {
+      const missingSource = await dispatch(["agents", command]);
+      expect(missingSource.status).toBe(2);
+      expect(missingSource.stderr).toContain("expected exactly one <workflow@version|package-path>");
+    }
+
     expect(MCP_HELP).toContain("install [client]");
     expect(INSTALL_HELP).toMatch(/usage: ub mcp install \[client\]/);
     expect(INSTALL_HELP).toMatch(/\noperands:\n {2}client\s/);

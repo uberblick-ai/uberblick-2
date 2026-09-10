@@ -21,9 +21,10 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { type Io, processIo } from "./io.js";
+import { readLaunchData } from "./launch.js";
 import { resolveProjectRoot } from "./project.js";
 import {
   checkedPayloadPath,
@@ -46,6 +47,8 @@ export const AGENTS_INSTALL_HELP = `usage: ub agents install <workflow@version|p
 Adopt one validated workflow in the selected Git project. A local source is an
 extracted package directory or a .tar.gz package; a published source is an exact
 workflow@MAJOR.MINOR.PATCH name. The command starts no agent and commits nothing.
+Published packages are downloaded without authentication from the GitHub release
+for that exact version in uberblick-ai/homebrew-tap.
 
 options:
   --project <dir>        select the Git project; defaults to the current project
@@ -56,6 +59,8 @@ export const AGENTS_UPDATE_HELP = `usage: ub agents update <workflow@version|pac
 
 Replace the selected project's adopted workflow with one validated version.
 Locally edited managed files are refused rather than overwritten.
+Published packages are downloaded without authentication from the GitHub release
+for that exact version in uberblick-ai/homebrew-tap.
 
 options:
   --project <dir>        select the Git project; defaults to the current project
@@ -147,10 +152,6 @@ function exactKeys(value: object, keys: string[]): boolean {
   return own.length === keys.length && keys.every((key) => own.includes(key));
 }
 
-function contains(root: string, path: string): boolean {
-  return path === root || path.startsWith(`${root}${sep}`);
-}
-
 function missing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === "ENOENT";
 }
@@ -182,14 +183,17 @@ function safeParent(root: string, relative: string, create: boolean): { path: st
     if (stat.isSymbolicLink() || !stat.isDirectory()) {
       fail(`refusing ${relative}: ancestor ${current} is not an ordinary directory`);
     }
-    const resolved = resolve(current);
-    if (!contains(root, resolved)) fail(`refusing ${relative}: ancestor resolves outside ${root}`);
   }
   return { path: dirname(join(root, relative)), missing: false };
 }
 
 function stateOf(root: string, relative: string): PathState {
-  const parent = safeParent(root, relative, false);
+  let parent: ReturnType<typeof safeParent>;
+  try {
+    parent = safeParent(root, relative, false);
+  } catch (error) {
+    return { kind: "refused", reason: error instanceof Error ? error.message : String(error) };
+  }
   if (parent.missing) return { kind: "absent" };
   const path = join(root, relative);
   let before: ReturnType<typeof lstatSync>;
@@ -460,6 +464,9 @@ function writeRecord(root: string, record: WorkflowRecord, previous: string | nu
 function assertInstallable(root: string, record: WorkflowRecord): void {
   const ownership = stateOf(root, WORKFLOW_RECORD);
   if (ownership.kind !== "absent") {
+    if (ownership.kind === "refused") {
+      fail(`refusing to install: ${WORKFLOW_RECORD} ${ownership.reason}`);
+    }
     fail(`this project already has a workflow ownership record; run \`ub agents update\` or \`ub agents uninstall\``);
   }
   for (const resource of record.resources) {
@@ -646,10 +653,12 @@ export function uninstallWorkflow(root: string, hooks: AdoptionHooks = {}): { re
   return { remaining: [] };
 }
 
-function rolesOf(record: WorkflowRecord): string[] {
-  return record.resources
-    .flatMap((resource) => resource.path.match(/^\.agents\/roles\/([a-z0-9-]+)\.md$/)?.[1] ?? [])
-    .sort();
+function rolesOf(root: string): string[] | null {
+  try {
+    return Object.keys(readLaunchData(root).entryRoles).sort();
+  } catch {
+    return null;
+  }
 }
 
 function driftOf(root: string, record: WorkflowRecord): string[] {
@@ -723,12 +732,14 @@ export async function workflowCommand(
         return 0;
       }
       const drift = driftOf(root, current.record);
-      const roles = rolesOf(current.record);
+      const roles = rolesOf(root);
       io.out(`${current.record.workflow} ${current.record.version}\n`);
       io.out(
         `source: ${current.record.source.kind} ${current.record.source.repository}@${current.record.source.commit}\n`,
       );
-      io.out(`roles: ${roles.length === 0 ? "none" : roles.join(", ")}\n`);
+      io.out(
+        `roles: ${roles === null ? "unavailable; repair .agents/launch.json or its declared role files before launching" : roles.join(", ")}\n`,
+      );
       const status =
         current.record.status.state === "complete"
           ? "installed"

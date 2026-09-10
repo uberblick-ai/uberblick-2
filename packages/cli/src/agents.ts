@@ -18,11 +18,11 @@ import { workflowCommand } from "./workflow-adoption.js";
 export const AGENTS_HELP = `usage: ub agents <command>
 
 commands:
-  install <source>       adopt a published or local workflow package
-  list                   report the workflow and roles this project adopted
-  update <source>        move the adopted workflow to another version
-  uninstall              remove unchanged resources the workflow still owns
-  launch <role>          keep one entry role of a project running in this terminal
+  install <workflow@version|package-path>  adopt a published or local workflow package
+  list                                     report the workflow and roles this project adopted
+  update <workflow@version|package-path>   move the adopted workflow to another version
+  uninstall                                remove unchanged resources the workflow still owns
+  launch <role>                            keep one entry role of a project running in this terminal
 
 options:
   -h, --help             show this help; after a command, that command's help

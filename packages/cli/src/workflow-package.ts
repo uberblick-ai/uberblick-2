@@ -18,9 +18,10 @@ export const DIGEST_FRAMING = "uberblick-workflow-payload-v1";
 const DIGEST_ALGORITHM = "sha256";
 const MANIFEST_NAME = "manifest.json";
 const PAYLOAD_DIRECTORY = "payload";
-const REQUIRES_PATH = ".agents/requires.json";
 const REGULAR_MODE = "100644";
 const EXECUTABLE_MODE = "100755";
+const PUBLISHED_DOWNLOAD_TIMEOUT_MS = 30_000;
+const MAX_EXPANDED_ARCHIVE_BYTES = 16 * 1024 * 1024;
 const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const WORKFLOW = /^[a-z0-9][a-z0-9-]*$/;
 const COMMIT = /^[0-9a-f]{40}$/;
@@ -242,61 +243,7 @@ function verifyEntries(
   if (actual !== manifest.digest.payload) {
     fail(`damaged package: payload digest is ${actual}, but the manifest records ${manifest.digest.payload}`);
   }
-  verifyDeclaration(entries);
   return entries;
-}
-
-function stringList(value: unknown, label: string, paths: boolean): string[] {
-  if (!Array.isArray(value) || value.length === 0 || value.some((entry) => typeof entry !== "string" || entry === "")) {
-    fail(`${REQUIRES_PATH} declares no valid ${label}`);
-  }
-  const result = value as string[];
-  if (paths) {
-    const aliases = new Set<string>();
-    for (const entry of result) {
-      checkedPayloadPath(entry);
-      const alias = entry.toLowerCase();
-      if (aliases.has(alias)) fail(`${REQUIRES_PATH} ${label} duplicate or alias ${entry}`);
-      aliases.add(alias);
-    }
-  }
-  return result;
-}
-
-/** The package declaration separates workflow-owned and project-owned files. */
-function verifyDeclaration(entries: WorkflowPackageEntry[]): void {
-  const declaration = entries.find((entry) => entry.path === REQUIRES_PATH);
-  if (declaration === undefined) fail(`damaged package: payload is missing ${REQUIRES_PATH}`);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(declaration.content.toString("utf8"));
-  } catch {
-    fail(`${REQUIRES_PATH} is not valid JSON`);
-  }
-  if (
-    parsed === null ||
-    typeof parsed !== "object" ||
-    Array.isArray(parsed) ||
-    !exactKeys(parsed, ["version", "bindings", "resources", "projectResources"]) ||
-    (parsed as Record<string, unknown>).version !== 1
-  ) {
-    fail(`${REQUIRES_PATH} must declare exactly version 1, bindings, resources and projectResources`);
-  }
-  const value = parsed as Record<string, unknown>;
-  stringList(value.bindings, "bindings", false);
-  const resources = stringList(value.resources, "resources", true);
-  const projectResources = stringList(value.projectResources, "projectResources", true);
-  const manifestPaths = entries.map((entry) => entry.path);
-  const declared = [...resources].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
-  if (declared.length !== manifestPaths.length || declared.some((path, index) => path !== manifestPaths[index])) {
-    fail(`${REQUIRES_PATH} resources do not match the package payload inventory`);
-  }
-  const ownedAliases = new Set(resources.map((path) => path.toLowerCase()));
-  for (const path of projectResources) {
-    if (ownedAliases.has(path.toLowerCase())) {
-      fail(`${REQUIRES_PATH} declares project resource ${path} as workflow-owned too`);
-    }
-  }
 }
 
 function ordinaryFile(path: string): { content: Buffer; mode: WorkflowMode } {
@@ -379,8 +326,11 @@ interface TarEntry {
 function readTar(archive: Buffer): TarEntry[] {
   let tar: Buffer;
   try {
-    tar = gunzipSync(archive);
-  } catch {
+    tar = gunzipSync(archive, { maxOutputLength: MAX_EXPANDED_ARCHIVE_BYTES });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ERR_BUFFER_TOO_LARGE") {
+      fail(`archive expands beyond ${MAX_EXPANDED_ARCHIVE_BYTES} bytes`);
+    }
     fail("archive is not a valid gzip stream");
   }
   const entries: TarEntry[] = [];
@@ -464,14 +414,17 @@ export function workflowAssetUrl(workflow: string, version: string): string {
 export type Download = (url: string) => Promise<Buffer>;
 
 async function defaultDownload(url: string): Promise<Buffer> {
-  let response: Response;
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), PUBLISHED_DOWNLOAD_TIMEOUT_MS);
   try {
-    response = await fetch(url);
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return Buffer.from(await response.arrayBuffer());
   } catch (error) {
     fail(`could not fetch ${url}: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    clearTimeout(deadline);
   }
-  if (!response.ok) fail(`could not fetch ${url}: HTTP ${response.status}`);
-  return Buffer.from(await response.arrayBuffer());
 }
 
 /** Resolve a published name/version or an explicit local directory/archive. */

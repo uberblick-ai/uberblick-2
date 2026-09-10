@@ -11,8 +11,9 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { gzipSync } from "node:zlib";
 import { dirname, join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   installWorkflow,
   updateWorkflow,
@@ -22,11 +23,12 @@ import {
   DIGEST_FRAMING,
   loadWorkflowPackage,
   payloadDigest,
+  readArchivedWorkflowPackage,
   readExtractedWorkflowPackage,
   type WorkflowMode,
   type WorkflowPackageEntry,
 } from "../src/workflow-package.js";
-import { removeTempDirs, runUb, sandbox, type Sandbox } from "./helpers.js";
+import { removeTempDirs, REPO_ROOT, runUb, sandbox, type Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -38,9 +40,30 @@ function write(path: string, content: string | Buffer, mode = 0o644): void {
   chmodSync(path, mode);
 }
 
-function gitProject(box: Sandbox): void {
+function gitProject(
+  box: Sandbox,
+  launch = `${JSON.stringify({
+    version: 2,
+    project: { baseRef: { remote: "origin", branch: "main" } },
+    entryRoles: {
+      shipper: {
+        contract: ".agents/roles/shipper.md",
+        defaultRuntime: "codex",
+        probe: ["true"],
+        runtimes: {
+          claude: {
+            adapter: ".claude/agents/shipper.md",
+            sandbox: "runtime",
+            permissionMode: "auto",
+          },
+          codex: { adapter: ".codex/agents/shipper.toml", sandbox: "workspace-write" },
+        },
+      },
+    },
+  })}\n`,
+): void {
   expect(spawnSync("git", ["init", "-q", "-b", "main"], { cwd: box.cwd }).status).toBe(0);
-  write(join(box.cwd, ".agents/launch.json"), '{"version":2,"entryRoles":{}}\n');
+  write(join(box.cwd, ".agents/launch.json"), launch);
   write(join(box.cwd, ".claude/settings.json"), '{"permissions":{"allow":[]}}\n');
   write(join(box.cwd, ".codex/config.toml"), 'approval_policy = "never"\n');
   expect(spawnSync("git", ["add", "-A"], { cwd: box.cwd }).status).toBe(0);
@@ -115,12 +138,14 @@ const V1 = {
   // as a package hook.
   ".agents/adapters/run.sh": { content: "#!/bin/sh\nexit 99\n", mode: "100755" as const },
   ".agents/roles/shipper.md": { content: "# Shipper v1\n" },
+  ".codex/agents/shipper.toml": { content: 'name = "shipper"\n' },
   "AGENTS.md": { content: "# Adopted workflow\n" },
 };
 
 const V2 = {
   ".agents/roles/reviewer.md": { content: "# Reviewer v2\n" },
   ".agents/roles/shipper.md": { content: "# Shipper v2\n" },
+  ".codex/agents/shipper.toml": { content: 'name = "shipper"\n' },
   "AGENTS.md": { content: "# Adopted workflow\n" },
 };
 
@@ -146,14 +171,14 @@ describe("ub agents workflow lifecycle", () => {
     expect(listed.stdout).toContain("uberblick-workflow 1.0.0");
     expect(listed.stdout).toContain(`source: local fixture/workflow-source@${COMMIT}`);
     expect(listed.stdout).toContain("roles: shipper");
-    expect(listed.stdout).toContain("state: installed; 4 managed resources");
+    expect(listed.stdout).toContain("state: installed; 5 managed resources");
 
     const updated = runUb(["agents", "update", second], box);
     expect(updated.status, updated.output).toBe(0);
     expect(readFileSync(join(box.cwd, ".agents/roles/shipper.md"), "utf8")).toBe("# Shipper v2\n");
     expect(readFileSync(join(box.cwd, ".agents/roles/reviewer.md"), "utf8")).toBe("# Reviewer v2\n");
     expect(existsSync(join(box.cwd, ".agents/adapters/run.sh"))).toBe(false);
-    expect(runUb(["agents", "list"], box).stdout).toContain("roles: reviewer, shipper");
+    expect(runUb(["agents", "list"], box).stdout).toContain("roles: shipper");
 
     const uninstalled = runUb(["agents", "uninstall"], box);
     expect(uninstalled.status, uninstalled.output).toBe(0);
@@ -197,7 +222,7 @@ describe("ub agents workflow lifecycle", () => {
     });
     const refusedPolicy = runUb(["agents", "install", policyPackage], policy);
     expect(refusedPolicy.status).toBe(1);
-    expect(refusedPolicy.stderr).toContain("declares project resource .agents/launch.json as workflow-owned too");
+    expect(refusedPolicy.stderr).toContain("refusing to install .agents/launch.json: a file already exists there");
     expect(readFileSync(join(policy.cwd, ".agents/launch.json"), "utf8")).toContain('"version":2');
 
     const hook = sandbox();
@@ -348,6 +373,88 @@ describe("ub agents workflow lifecycle", () => {
     updateWorkflow(removing.cwd, target);
     expect(existsSync(join(removing.cwd, ".agents/obsolete-b.md"))).toBe(false);
     expect(JSON.parse(readFileSync(join(removing.cwd, WORKFLOW_RECORD), "utf8")).version).toBe("2.0.0");
+
+    const inaccessible = sandbox();
+    gitProject(inaccessible);
+    const inaccessiblePackages = join(dirname(inaccessible.cwd), "packages");
+    const withInaccessible = packageAt(inaccessiblePackages, "1.0.0", {
+      ...V1,
+      "locked/inner/obsolete.md": { content: "old\n" },
+    });
+    const withoutInaccessible = packageAt(inaccessiblePackages, "2.0.0", V2);
+    installWorkflow(inaccessible.cwd, {
+      ...readExtractedWorkflowPackage(withInaccessible),
+      sourceKind: "local" as const,
+    });
+    expect(() =>
+      updateWorkflow(
+        inaccessible.cwd,
+        { ...readExtractedWorkflowPackage(withoutInaccessible), sourceKind: "local" as const },
+        {
+          beforeMutation: (operation, path) => {
+            if (operation === "remove" && path === "locked/inner/obsolete.md") {
+              chmodSync(join(inaccessible.cwd, "locked"), 0);
+            }
+          },
+        },
+      ),
+    ).toThrow(/partial update is recorded/);
+    const inaccessibleRecord = JSON.parse(readFileSync(join(inaccessible.cwd, WORKFLOW_RECORD), "utf8"));
+    expect(inaccessibleRecord.status).toEqual({
+      state: "partial",
+      operation: "update",
+      targetVersion: "2.0.0",
+    });
+    const inaccessibleList = runUb(["agents", "list"], inaccessible);
+    expect(inaccessibleList.status, inaccessibleList.output).toBe(0);
+    expect(inaccessibleList.stdout).toContain("changed or missing: locked/inner/obsolete.md");
+    chmodSync(join(inaccessible.cwd, "locked"), 0o755);
+  });
+
+  it("adopts the real producer's package without a second declaration schema", () => {
+    const box = sandbox();
+    gitProject(box, readFileSync(join(REPO_ROOT, ".agents/launch.json"), "utf8"));
+    const output = join(dirname(box.cwd), "built-workflow");
+    const built = spawnSync(process.execPath, [join(REPO_ROOT, "scripts/build-workflow-package.mjs"), "9.8.7"], {
+      cwd: REPO_ROOT,
+      env: { ...process.env, HOMEBREW_TAP_TOKEN: "", UBERBLICK_WORKFLOW_PACKAGE_OUTPUT_DIR: output },
+      encoding: "utf8",
+    });
+    expect(built.status, built.stderr).toBe(0);
+
+    const installed = runUb(
+      ["agents", "install", join(output, "uberblick-workflow-9.8.7.tar.gz")],
+      box,
+    );
+    expect(installed.status, installed.output).toBe(0);
+    const listed = runUb(["agents", "list"], box);
+    expect(listed.status, listed.output).toBe(0);
+    expect(listed.stdout).toContain("roles: implementation-reviewer, implementer, integrator, issue-preparer");
+  });
+
+  it("bounds a published download and the expanded archive", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: unknown, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        }),
+      ),
+    );
+    try {
+      const pending = loadWorkflowPackage("uberblick-workflow@1.0.0", process.cwd()).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(30_000);
+      const failure = await pending;
+      expect(failure).toBeInstanceOf(Error);
+      expect(String(failure)).toMatch(/could not fetch .*aborted/i);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+
+    const compressed = gzipSync(Buffer.alloc(16 * 1024 * 1024 + 1));
+    expect(() => readArchivedWorkflowPackage(compressed)).toThrow(/archive expands beyond 16777216 bytes/);
   });
 
   it("resolves a published version to its one archive and keeps projects independent", async () => {
@@ -374,7 +481,7 @@ describe("ub agents workflow lifecycle", () => {
       },
     );
     expect(loaded.sourceKind).toBe("published");
-    expect(loaded.entries).toHaveLength(4);
+    expect(loaded.entries).toHaveLength(5);
 
     const hostile = packageAt(packages, "3.0.0", V1);
     rmSync(join(hostile, "payload/AGENTS.md"));
