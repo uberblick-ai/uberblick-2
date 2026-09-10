@@ -199,6 +199,17 @@ describe("ub agents workflow lifecycle", () => {
     expect(refusedPolicy.status).toBe(1);
     expect(refusedPolicy.stderr).toContain("declares project resource .agents/launch.json as workflow-owned too");
     expect(readFileSync(join(policy.cwd, ".agents/launch.json"), "utf8")).toContain('"version":2');
+
+    const hook = sandbox();
+    gitProject(hook);
+    const hookPackage = packageAt(join(dirname(hook.cwd), "packages"), "1.0.0", {
+      ".git/hooks/pre-commit": { content: "#!/bin/sh\nexit 99\n", mode: "100755" },
+    });
+    const refusedHook = runUb(["agents", "install", hookPackage], hook);
+    expect(refusedHook.status).toBe(1);
+    expect(refusedHook.stderr).toContain("may not enter Git administrative data");
+    expect(existsSync(join(hook.cwd, ".git/hooks/pre-commit"))).toBe(false);
+    expect(existsSync(join(hook.cwd, WORKFLOW_RECORD))).toBe(false);
   });
 
   it("refuses a symlink ancestor and a malformed escaping ownership path", () => {

@@ -86,6 +86,9 @@ export function checkedPayloadPath(raw: unknown): string {
     if (segment === "" || segment === "." || segment === "..") {
       fail(`payload path ${JSON.stringify(raw)} is not canonical and repository-relative`);
     }
+    if (segment.toLowerCase() === ".git") {
+      fail(`payload path ${JSON.stringify(raw)} may not enter Git administrative data`);
+    }
   }
   return raw;
 }
