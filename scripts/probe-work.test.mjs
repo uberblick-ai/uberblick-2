@@ -132,11 +132,13 @@ test("a new PR fix-up remains visible without indexed search or ready issues", (
 	assert.equal(probe(t, "implementer", 0, null).status, 2);
 });
 
-test("the implementer PR read carries draft and label discrimination", (t) => {
+test("the implementer PR read carries the exact draft exclusion", (t) => {
 	// The fake does not evaluate gh's --jq program. This protects the command
-	// contract that keeps both discriminators available to gh's own evaluator.
+	// contract that keeps the one exact exclusion available to gh's evaluator.
 	const filtered = probe(t, "implementer", 0, 0);
-	assert.match(filtered.calls, /^pr list .*--json isDraft,labels/m);
-	assert.match(filtered.calls, /isDraft \| not/);
-	assert.match(filtered.calls, /index\("needs-human"\)/);
+	const prCall = filtered.calls.split("\n").find((call) => call.startsWith("pr list "));
+	assert.ok(prCall);
+	assert.match(prCall, /--json isDraft(?![,\w])/);
+	assert.match(prCall, /isDraft \| not/);
+	assert.doesNotMatch(prCall, /labels|needs-human/);
 });
