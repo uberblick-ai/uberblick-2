@@ -344,6 +344,27 @@ ub mcp install     # register uberblick with an MCP client
 ub mcp serve       # the stdio entry point for an MCP client
 ```
 
+For this repository's delivery workflow, run both reviewer loops in separate
+terminals alongside the implementer and integrator:
+
+```sh
+ub agents launch implementation-reviewer --model claude
+ub agents launch implementation-reviewer --model codex
+```
+
+Each loop serves only its selected runtime. A request naming Codex cannot be
+answered by the Claude loop, even when that loop is idle. The reviewer still
+checks that its session did not author the candidate.
+
+If an existing loop reports that `.agents/launch.json` must contain only
+version 1 while the project has version 2, stop that loop with Ctrl-C. Run
+`type -a ub` to identify the executable your shell selects, update that
+installation or source checkout, and start a fresh loop. Check
+`ub agents launch --help` from the same shell: it must describe launch data
+version 2. Updating files does not reload code already running in an old
+process. Preserve valid version 2 launch data; restoring or downgrading the
+configuration cannot update the old executable.
+
 **`ub agents launch <role>` runs *your project's* roles, not uberblick's.** The
 project is the Git root at or above the working directory, or the one
 `--project <dir>` names, and everything the loop needs comes out of that
