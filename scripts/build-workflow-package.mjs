@@ -36,7 +36,6 @@ import {
 	lstatSync,
 	mkdirSync,
 	mkdtempSync,
-	readFileSync,
 	renameSync,
 	rmSync,
 	writeFileSync,
@@ -86,10 +85,10 @@ function git(root, args) {
 	return gitBytes(root, args).toString("utf8");
 }
 
-function readJson(root, relative) {
+function readJson(root, relative, commit) {
 	let text;
 	try {
-		text = readFileSync(join(root, relative), "utf8");
+		text = git(root, ["show", `${commit}:${relative}`]);
 	} catch {
 		fail(`cannot read ${relative}`);
 	}
@@ -113,8 +112,8 @@ function binding(launch, path) {
 }
 
 /** The declared resources, checked for the shape a payload path may take. */
-function declaredResources(root) {
-	const requires = readJson(root, REQUIRES);
+function declaredResources(root, commit) {
+	const requires = readJson(root, REQUIRES, commit);
 	const resources = requires?.resources;
 	if (!Array.isArray(resources) || resources.length === 0) {
 		fail(`${REQUIRES} declares no resources`);
@@ -239,9 +238,11 @@ export function buildWorkflowPackage({ root, version, outputDir, env = process.e
 			`the payload is assembled without a publication credential; ${PUBLICATION_CREDENTIAL} must not be in this step's environment`,
 		);
 	}
-	const { resources, bindings } = declaredResources(root);
-	const launch = readJson(root, LAUNCH);
 	const commit = git(root, ["rev-parse", "HEAD"]).trim();
+	// Control files must match the source even when the declaration omits itself.
+	payloadEntries(root, commit, [REQUIRES, LAUNCH]);
+	const { resources, bindings } = declaredResources(root, commit);
+	const launch = readJson(root, LAUNCH, commit);
 	const entries = payloadEntries(root, commit, resources);
 	assertNoDeclaredBinding(entries, launch, bindings);
 

@@ -29,6 +29,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	WORKFLOW_NAME,
+	TAP_REPOSITORY,
 	verifyExtractedPackage,
 	versionForWorkflowTag,
 	workflowAssetName,
@@ -37,7 +38,6 @@ import {
 
 const REPOSITORY_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SOURCE_REPOSITORY = "uberblick-ai/uberblick-2";
-const TAP_REPOSITORY = "uberblick-ai/homebrew-tap";
 
 function fail(message) {
 	throw new Error(`publish-workflow-package: ${message}`);
@@ -93,6 +93,9 @@ function assertManifest(manifest, version, headSha) {
 	if (manifest.version !== version) {
 		fail(`package declares version ${JSON.stringify(manifest.version)}, expected ${version}`);
 	}
+	if (manifest.source.repository !== SOURCE_REPOSITORY) {
+		fail(`package source repository must be ${SOURCE_REPOSITORY}`);
+	}
 	if (manifest.source.commit !== headSha) {
 		fail(`package was built from source commit ${manifest.source.commit}, not ${headSha}`);
 	}
@@ -105,7 +108,7 @@ function assertManifest(manifest, version, headSha) {
 export async function publishWorkflowPackage(input, services) {
 	const version = versionForWorkflowTag(input.tag);
 	const name = workflowAssetName(version);
-	const url = workflowAssetUrl(TAP_REPOSITORY, input.tag, version);
+	const url = workflowAssetUrl(version);
 	assertTagContext(input);
 
 	const destination = await services.getTapRepository();

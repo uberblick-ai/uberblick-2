@@ -146,7 +146,7 @@ test("a version resolves to one tag, one asset name and one address", () => {
 	assert.equal(versionForWorkflowTag("workflow-v1.2.3"), VERSION);
 	assert.equal(workflowAssetName(VERSION), "uberblick-workflow-1.2.3.tar.gz");
 	assert.equal(
-		workflowAssetUrl("uberblick-ai/homebrew-tap", "workflow-v1.2.3", VERSION),
+		workflowAssetUrl(VERSION),
 		"https://github.com/uberblick-ai/homebrew-tap/releases/download/workflow-v1.2.3/uberblick-workflow-1.2.3.tar.gz",
 	);
 	for (const tag of ["1.2.3", "workflow-1.2.3", "workflow-v1.2", "workflow-v01.2.3", "workflow-v1.2.3-rc1", "workflow-v1.2.3 "]) {
@@ -336,7 +336,7 @@ test("a payload entry carrying a declared binding fails, naming the entry and th
 	assert.equal(message.includes(OWNER), false);
 });
 
-test("this repository's own declaration builds a package a consumer accepts", () => {
+test("this repository's own declaration builds a package a consumer accepts", (t) => {
 	const requires = JSON.parse(readFileSync(join(ROOT, ".agents", "requires.json"), "utf8"));
 	const dirty = spawnSync("git", ["diff", "--name-only", "HEAD", "--", ...requires.resources], {
 		cwd: ROOT,
@@ -345,6 +345,7 @@ test("this repository's own declaration builds a package a consumer accepts", ()
 	if (dirty.status !== 0 || dirty.stdout.trim() !== "") {
 		// The portable source is edited but not committed, which is exactly what
 		// the builder refuses; there is nothing to prove here until it is.
+		t.skip("git source is unavailable or declared resources have uncommitted changes");
 		return;
 	}
 	const { manifest } = build(ROOT);
@@ -363,4 +364,25 @@ test("this repository's own declaration builds a package a consumer accepts", ()
 		);
 	}
 	assert.equal(verifyExtractedPackage(extract(build(ROOT).archive)).version, VERSION);
+});
+
+
+test("control-file drift is refused even outside the declared payload", () => {
+	for (const path of [".agents/requires.json", ".agents/launch.json"]) {
+		const root = fixture();
+		const file = join(root, path);
+		const control = JSON.parse(readFileSync(file, "utf8"));
+		if (path.endsWith("requires.json")) {
+			control.resources = control.resources.filter((entry) => !entry.startsWith(".agents/"));
+		} else {
+			control.project.repository = "someone-else/not-this-source";
+		}
+		writeFileSync(file, JSON.stringify(control));
+		assert.match(refusal(() => build(root)), /differs from source commit/);
+	}
+});
+
+test("asset resolution validates the version and derives the destination", () => {
+	assert.equal(workflowAssetUrl("2.0.4"), "https://github.com/uberblick-ai/homebrew-tap/releases/download/workflow-v2.0.4/uberblick-workflow-2.0.4.tar.gz");
+	assert.throws(() => workflowAssetUrl("elsewhere/public", "workflow-v9.9.9", VERSION), /must be exactly/);
 });

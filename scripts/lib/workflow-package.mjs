@@ -22,6 +22,7 @@ import { join } from "node:path";
  * a role name, a role count or a file list: those are the declaration's.
  */
 export const WORKFLOW_NAME = "uberblick-workflow";
+export const TAP_REPOSITORY = "uberblick-ai/homebrew-tap";
 const MANIFEST_VERSION = 1;
 const DIGEST_ALGORITHM = "sha256";
 /**
@@ -87,8 +88,8 @@ export function workflowAssetName(version) {
 }
 
 /** The one address a version resolves to. */
-export function workflowAssetUrl(repository, tag, version) {
-	return `https://github.com/${repository}/releases/download/${tag}/${workflowAssetName(version)}`;
+export function workflowAssetUrl(version) {
+	return `https://github.com/${TAP_REPOSITORY}/releases/download/${workflowTagFor(version)}/${workflowAssetName(version)}`;
 }
 
 /** The directory the archive unpacks into. */

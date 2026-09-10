@@ -285,3 +285,11 @@ test("the credential reaches the upload boundary and not the build", { skip: wor
 	assert.match(steps[publish], /workflow-v\*\)\s+mise run publish-workflow-package/);
 	assert.match(steps[publish], /mise run publish-homebrew-release/);
 });
+
+
+test("a package attributed to another repository is refused before publication", async () => {
+	const fake = services({ packageManifest: async () => manifest({ source: { repository: "someone-else/not-this-source", commit: HEAD_SHA } }) });
+	await assert.rejects(() => publishWorkflowPackage(input(), fake), /source repository must be/);
+	assert.equal(fake.calls.includes("create release"), false);
+	assert.equal(fake.calls.some((call) => call.startsWith("upload ")), false);
+});
