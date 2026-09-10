@@ -122,7 +122,6 @@ test("an unknown role is a usage error, not an idle", (t) => {
 	assert.match(unknown.stderr, /usage: probe-work\.sh/);
 });
 
-
 test("a new PR fix-up remains visible without indexed search or ready issues", (t) => {
 	const fixup = probe(t, "implementer", 0, 1);
 	assert.equal(fixup.status, 0);
@@ -131,4 +130,14 @@ test("a new PR fix-up remains visible without indexed search or ready issues", (
 	assert.doesNotMatch(fixup.calls, /search|--match comments/);
 	assert.equal(probe(t, "implementer", 0, 0).status, 1);
 	assert.equal(probe(t, "implementer", 0, null).status, 2);
+});
+
+test("a needs-human PR cannot keep the implementer probe hot", (t) => {
+	// The fake reports the count after gh applies the requested projection and
+	// filter to a repository containing one needs-human PR and no ready issues.
+	const parked = probe(t, "implementer", 0, 0);
+	assert.equal(parked.status, 1);
+	assert.equal(parked.stdout.trim(), "probe-work: implementer: 0 candidates");
+	assert.match(parked.calls, /^pr list .*--json isDraft,labels/m);
+	assert.match(parked.calls, /index\("needs-human"\)/);
 });

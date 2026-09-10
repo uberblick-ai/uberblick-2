@@ -78,8 +78,9 @@ waits about 30 minutes. Ctrl-C stops the loop and its active session.
 
 The roles, their contracts, adapters, default runtime and sandbox come from the
 selected project's own .agents/launch.json — never from wherever this
-executable was installed. Runtime selection stays fixed for this loop; a workflow
-that requests reviews on both runtimes needs a separate loop for each runtime.
+executable was installed. Runtime selection stays fixed for this loop; a
+workflow that requests reviews on both runtimes needs a separate loop for each
+runtime.
 
 Launch data version 2 requires a project object declaring that project's
 bindings and grants. To migrate a version 1 file, add that object if absent and
