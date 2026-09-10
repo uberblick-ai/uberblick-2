@@ -24,7 +24,8 @@ case "$role" in
     # in-progress claims). Any open PR may carry a just-posted fix-up ruling;
     # comment search is indexed asynchronously and can hide that work.
     # The role checks findings, labels and claims itself, so count possible PRs
-    # over-inclusively except for drafts, which can never carry a ruling.
+    # over-inclusively except for drafts: a ruling needs an implementer `Done:`,
+    # which the implementer posts only after marking the PR ready.
     n=$(gh issue list -R "$REPO" --state open --limit 200 --label ready --json number --jq length) || exit 2
     m=$(gh pr list -R "$REPO" --state open --limit 200 --json isDraft --jq \
       '[.[] | select(.isDraft | not)] | length') || exit 2

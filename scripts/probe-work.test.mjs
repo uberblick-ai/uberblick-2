@@ -136,7 +136,9 @@ test("the implementer PR read carries the exact draft exclusion", (t) => {
 	// The fake does not evaluate gh's --jq program. This protects the command
 	// contract that keeps the one exact exclusion available to gh's evaluator.
 	const filtered = probe(t, "implementer", 0, 0);
-	assert.match(filtered.calls, /^pr list .*--json isDraft /m);
-	assert.match(filtered.calls, /isDraft \| not/);
-	assert.doesNotMatch(filtered.calls, /labels|needs-human/);
+	const prCall = filtered.calls.split("\n").find((call) => call.startsWith("pr list "));
+	assert.ok(prCall);
+	assert.match(prCall, /--json isDraft(?![,\w])/);
+	assert.match(prCall, /isDraft \| not/);
+	assert.doesNotMatch(prCall, /labels|needs-human/);
 });
