@@ -107,8 +107,15 @@ type WorkflowStatus =
   | { state: "complete" }
   | {
       state: "partial";
-      operation: "install" | "update" | "uninstall";
-      targetVersion?: string;
+      operation: "install" | "uninstall";
+      targetVersion?: undefined;
+      previousResources?: undefined;
+    }
+  | {
+      state: "partial";
+      operation: "update";
+      targetVersion: string;
+      previousResources: ManagedResource[];
     };
 
 interface WorkflowRecord {
@@ -160,45 +167,89 @@ function missing(error: unknown): boolean {
  * Check each existing ancestor without following a symlink. Missing ancestors
  * are either reported as an absent target or created one segment at a time.
  */
-function safeParent(root: string, relative: string, create: boolean): { path: string; missing: boolean } {
-  const segments = checkedPayloadPath(relative).split("/");
-  let current = root;
-  for (const segment of segments.slice(0, -1)) {
-    current = join(current, segment);
-    let stat: ReturnType<typeof lstatSync>;
-    try {
-      stat = lstatSync(current);
-    } catch (error) {
-      if (!missing(error)) fail(`cannot inspect ${current}${errno(error)}`);
-      if (!create) return { path: dirname(join(root, relative)), missing: true };
-      try {
-        mkdirSync(current, { mode: 0o755 });
-      } catch (mkdirError) {
-        if ((mkdirError as NodeJS.ErrnoException).code !== "EEXIST") {
-          fail(`cannot create ${current}${errno(mkdirError)}`);
-        }
-      }
-      stat = lstatSync(current);
-    }
-    if (stat.isSymbolicLink() || !stat.isDirectory()) {
-      fail(`refusing ${relative}: ancestor ${current} is not an ordinary directory`);
-    }
-  }
-  return { path: dirname(join(root, relative)), missing: false };
+interface StableParent {
+  path: string;
+  missing: boolean;
+  dev?: number;
+  ino?: number;
 }
 
-function stateOf(root: string, relative: string): PathState {
-  let parent: ReturnType<typeof safeParent>;
+function safeParent(root: string, relative: string, create: boolean): StableParent {
+  const segments = checkedPayloadPath(relative).split("/");
+  let current = root;
+  let parentStat: ReturnType<typeof lstatSync>;
   try {
-    parent = safeParent(root, relative, false);
+    parentStat = lstatSync(current);
   } catch (error) {
-    return { kind: "refused", reason: error instanceof Error ? error.message : String(error) };
+    fail(`cannot inspect ${current}${errno(error)}`);
   }
-  if (parent.missing) return { kind: "absent" };
-  const path = join(root, relative);
+  if (parentStat.isSymbolicLink() || !parentStat.isDirectory()) {
+    fail(`refusing ${relative}: ancestor ${current} is not an ordinary directory`);
+  }
+  for (const segment of segments.slice(0, -1)) {
+    const child = join(current, segment);
+    const parent: StableParent = {
+      path: current,
+      missing: false,
+      dev: parentStat.dev,
+      ino: parentStat.ino,
+    };
+    const stat = inStableDirectory(parent, relative, () => {
+      try {
+        return lstatSync(segment);
+      } catch (error) {
+        if (!missing(error)) fail(`cannot inspect ${child}${errno(error)}`);
+        if (!create) return null;
+        try {
+          mkdirSync(segment, { mode: 0o755 });
+        } catch (mkdirError) {
+          if ((mkdirError as NodeJS.ErrnoException).code !== "EEXIST") {
+            fail(`cannot create ${child}${errno(mkdirError)}`);
+          }
+        }
+        return lstatSync(segment);
+      }
+    });
+    if (stat === null) return { path: dirname(join(root, relative)), missing: true };
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      fail(`refusing ${relative}: ancestor ${child} is not an ordinary directory`);
+    }
+    current = child;
+    parentStat = stat;
+  }
+  return { path: dirname(join(root, relative)), missing: false, dev: parentStat.dev, ino: parentStat.ino };
+}
+
+/**
+ * Hold the inspected parent as the process working directory for one
+ * synchronous mutation. Replacing its pathname afterwards cannot redirect a
+ * relative open, link, rename or unlink through a new ancestor.
+ */
+function inStableDirectory<T>(parent: StableParent, relative: string, action: () => T): T {
+  if (parent.missing || parent.dev === undefined || parent.ino === undefined) {
+    fail(`cannot enter the missing parent of ${relative}`);
+  }
+  const previous = process.cwd();
+  try {
+    process.chdir(parent.path);
+    const held = lstatSync(".");
+    if (!held.isDirectory() || held.dev !== parent.dev || held.ino !== parent.ino) {
+      fail(`refusing ${relative}: its parent changed before the filesystem operation`);
+    }
+    return action();
+  } finally {
+    process.chdir(previous);
+  }
+}
+
+function inStableParent<T>(parent: StableParent, relative: string, action: (name: string) => T): T {
+  return inStableDirectory(parent, relative, () => action(basename(relative)));
+}
+
+function stateAt(name: string): PathState {
   let before: ReturnType<typeof lstatSync>;
   try {
-    before = lstatSync(path);
+    before = lstatSync(name);
   } catch (error) {
     if (missing(error)) return { kind: "absent" };
     return { kind: "refused", reason: `it could not be inspected${errno(error)}` };
@@ -207,7 +258,7 @@ function stateOf(root: string, relative: string): PathState {
   if (!before.isFile()) return { kind: "refused", reason: "it is not a regular file" };
   let fd: number;
   try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    fd = openSync(name, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch (error) {
     return { kind: "refused", reason: `it could not be opened${errno(error)}` };
   }
@@ -220,6 +271,21 @@ function stateOf(root: string, relative: string): PathState {
     return { kind: "file", content: readFileSync(fd), mode: stat.mode & 0o777 };
   } finally {
     closeSync(fd);
+  }
+}
+
+function stateOf(root: string, relative: string): PathState {
+  let parent: StableParent;
+  try {
+    parent = safeParent(root, relative, false);
+  } catch (error) {
+    return { kind: "refused", reason: error instanceof Error ? error.message : String(error) };
+  }
+  if (parent.missing) return { kind: "absent" };
+  try {
+    return inStableParent(parent, relative, stateAt);
+  } catch (error) {
+    return { kind: "refused", reason: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -249,59 +315,95 @@ type ReplaceExpectation =
 
 /** Publish bytes beside their target, at the package's exact recorded mode. */
 function writeManaged(root: string, entry: WorkflowPackageEntry, expectation: ReplaceExpectation): void {
-  const parent = safeParent(root, entry.path, true).path;
-  const target = join(root, entry.path);
-  const temporary = join(
-    parent,
-    `.${basename(entry.path)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
-  );
-  let fd: number | null = null;
-  let closeAttempted = false;
-  try {
-    fd = openSync(temporary, "wx", 0o600);
-    fchmodSync(fd, fileMode(entry.mode));
-    writeAll(fd, entry.content);
-    closeAttempted = true;
-    closeSync(fd);
-    fd = null;
-    if (expectation.kind === "absent") {
-      linkSync(temporary, target);
-    } else {
-      const current = stateOf(root, entry.path);
-      const expectedCurrent =
-        expectation.kind === "resource"
-          ? matches(current, expectation.resource)
-          : current.kind === "file" && current.content.equals(expectation.content);
-      if (!expectedCurrent) {
-        fail(`refusing to replace ${entry.path}: it changed before publication`);
-      }
-      renameSync(temporary, target);
-      return;
-    }
-  } finally {
-    if (fd !== null && !closeAttempted) {
-      try {
-        closeSync(fd);
-      } catch {
-        // The unlink below is the important cleanup after a failed close.
-      }
-    }
+  const parent = safeParent(root, entry.path, true);
+  inStableParent(parent, entry.path, (target) => {
+    const temporary = `.${target}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+    let fd: number | null = null;
+    let closeAttempted = false;
     try {
-      unlinkSync(temporary);
-    } catch (error) {
-      if (!missing(error)) process.stderr.write(`ub: warning: could not remove ${temporary}${errno(error)}\n`);
+      fd = openSync(temporary, "wx", 0o600);
+      fchmodSync(fd, fileMode(entry.mode));
+      writeAll(fd, entry.content);
+      closeAttempted = true;
+      closeSync(fd);
+      fd = null;
+      if (expectation.kind === "absent") {
+        linkSync(temporary, target);
+      } else {
+        const current = stateAt(target);
+        const expectedCurrent =
+          expectation.kind === "resource"
+            ? matches(current, expectation.resource)
+            : current.kind === "file" && current.content.equals(expectation.content);
+        if (!expectedCurrent) {
+          fail(`refusing to replace ${entry.path}: it changed before publication`);
+        }
+        renameSync(temporary, target);
+        return;
+      }
+    } finally {
+      if (fd !== null && !closeAttempted) {
+        try {
+          closeSync(fd);
+        } catch {
+          // The unlink below is the important cleanup after a failed close.
+        }
+      }
+      try {
+        unlinkSync(temporary);
+      } catch (error) {
+        if (!missing(error)) {
+          process.stderr.write(`ub: warning: could not remove ${join(parent.path, temporary)}${errno(error)}\n`);
+        }
+      }
     }
-  }
+  });
 }
 
 function removeManaged(root: string, resource: ManagedResource): void {
-  const state = stateOf(root, resource.path);
-  if (!matches(state, resource)) fail(`refusing to remove changed managed file ${resource.path}`);
-  unlinkSync(join(root, resource.path));
+  const parent = safeParent(root, resource.path, false);
+  if (parent.missing) fail(`refusing to remove changed managed file ${resource.path}`);
+  inStableParent(parent, resource.path, (target) => {
+    const state = stateAt(target);
+    if (!matches(state, resource)) fail(`refusing to remove changed managed file ${resource.path}`);
+    unlinkSync(target);
+  });
 }
 
 function recordText(record: WorkflowRecord): string {
   return `${JSON.stringify(record, null, 2)}\n`;
+}
+
+function checkedResources(rawResources: unknown): ManagedResource[] {
+  if (!Array.isArray(rawResources)) fail(`${WORKFLOW_RECORD} is not a valid version 1 ownership record`);
+  const resources: ManagedResource[] = [];
+  const aliases = new Set<string>();
+  let previous: string | null = null;
+  for (const raw of rawResources) {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw) || !exactKeys(raw, ["path", "mode", "sha256"])) {
+      fail(`${WORKFLOW_RECORD} has an invalid resource record`);
+    }
+    const item = raw as Record<string, unknown>;
+    const path = checkedPayloadPath(item.path);
+    if (path.toLowerCase() === WORKFLOW_RECORD.toLowerCase()) {
+      fail(`${WORKFLOW_RECORD} cannot own itself`);
+    }
+    if (
+      (item.mode !== "100644" && item.mode !== "100755") ||
+      typeof item.sha256 !== "string" ||
+      !SHA256.test(item.sha256)
+    ) {
+      fail(`${WORKFLOW_RECORD} has an invalid resource record for ${path}`);
+    }
+    const alias = path.toLowerCase();
+    if (aliases.has(alias) || (previous !== null && Buffer.compare(Buffer.from(previous), Buffer.from(path)) >= 0)) {
+      fail(`${WORKFLOW_RECORD} resources are not sorted and unique at ${path}`);
+    }
+    aliases.add(alias);
+    previous = path;
+    resources.push({ path, mode: item.mode, sha256: item.sha256 });
+  }
+  return resources;
 }
 
 function readRecord(root: string): ReadRecord | null {
@@ -321,8 +423,7 @@ function readRecord(root: string): ReadRecord | null {
   const value = parsed as Record<string, unknown>;
   if (
     !exactKeys(value, ["recordVersion", "workflow", "version", "source", "digest", "resources", "status"]) ||
-    value.recordVersion !== 1 ||
-    !Array.isArray(value.resources)
+    value.recordVersion !== 1
   ) {
     fail(`${WORKFLOW_RECORD} is not a valid version 1 ownership record`);
   }
@@ -355,33 +456,7 @@ function readRecord(root: string): ReadRecord | null {
   ) {
     fail(`${WORKFLOW_RECORD} has an invalid digest record`);
   }
-  const resources: ManagedResource[] = [];
-  const aliases = new Set<string>();
-  let previous: string | null = null;
-  for (const raw of value.resources) {
-    if (raw === null || typeof raw !== "object" || Array.isArray(raw) || !exactKeys(raw, ["path", "mode", "sha256"])) {
-      fail(`${WORKFLOW_RECORD} has an invalid resource record`);
-    }
-    const item = raw as Record<string, unknown>;
-    const path = checkedPayloadPath(item.path);
-    if (path.toLowerCase() === WORKFLOW_RECORD.toLowerCase()) {
-      fail(`${WORKFLOW_RECORD} cannot own itself`);
-    }
-    if (
-      (item.mode !== "100644" && item.mode !== "100755") ||
-      typeof item.sha256 !== "string" ||
-      !SHA256.test(item.sha256)
-    ) {
-      fail(`${WORKFLOW_RECORD} has an invalid resource record for ${path}`);
-    }
-    const alias = path.toLowerCase();
-    if (aliases.has(alias) || (previous !== null && Buffer.compare(Buffer.from(previous), Buffer.from(path)) >= 0)) {
-      fail(`${WORKFLOW_RECORD} resources are not sorted and unique at ${path}`);
-    }
-    aliases.add(alias);
-    previous = path;
-    resources.push({ path, mode: item.mode, sha256: item.sha256 });
-  }
+  const resources = checkedResources(value.resources);
   const status = value.status;
   if (status === null || typeof status !== "object" || Array.isArray(status)) {
     fail(`${WORKFLOW_RECORD} has an invalid status`);
@@ -394,15 +469,21 @@ function readRecord(root: string): ReadRecord | null {
   } else if (
     statusValue.state === "partial" &&
     (statusValue.operation === "install" || statusValue.operation === "update" || statusValue.operation === "uninstall") &&
-    ((statusValue.operation === "update" && exactKeys(statusValue, ["state", "operation", "targetVersion"])) ||
+    ((statusValue.operation === "update" &&
+      exactKeys(statusValue, ["state", "operation", "targetVersion", "previousResources"])) ||
       (statusValue.operation !== "update" && exactKeys(statusValue, ["state", "operation"])))
   ) {
-    if (statusValue.operation === "update") checkedVersion(statusValue.targetVersion);
-    checkedStatus = {
-      state: "partial",
-      operation: statusValue.operation,
-      ...(statusValue.targetVersion === undefined ? {} : { targetVersion: statusValue.targetVersion as string }),
-    };
+    if (statusValue.operation === "update") {
+      checkedVersion(statusValue.targetVersion);
+      checkedStatus = {
+        state: "partial",
+        operation: "update",
+        targetVersion: statusValue.targetVersion as string,
+        previousResources: checkedResources(statusValue.previousResources),
+      };
+    } else {
+      checkedStatus = { state: "partial", operation: statusValue.operation };
+    }
   } else {
     fail(`${WORKFLOW_RECORD} has an invalid status`);
   }
@@ -495,41 +576,56 @@ function assertUpdatable(root: string, current: WorkflowRecord, next: WorkflowRe
   }
 }
 
-function partialAfter(
-  root: string,
-  base: WorkflowRecord | null,
-  target: WorkflowRecord,
-  operation: "install" | "update",
-): WorkflowRecord | null {
-  const old = new Map((base?.resources ?? []).map((entry) => [entry.path, entry]));
-  const next = new Map(target.resources.map((entry) => [entry.path, entry]));
-  const paths = [...new Set([...old.keys(), ...next.keys()])].sort((left, right) =>
-    Buffer.compare(Buffer.from(left), Buffer.from(right)),
+function sameResource(left: ManagedResource, right: ManagedResource): boolean {
+  return left.path === right.path && left.mode === right.mode && left.sha256 === right.sha256;
+}
+
+function sameTarget(current: WorkflowRecord, next: WorkflowRecord): boolean {
+  return (
+    current.workflow === next.workflow &&
+    current.version === next.version &&
+    current.source.kind === next.source.kind &&
+    current.source.repository === next.source.repository &&
+    current.source.commit === next.source.commit &&
+    current.digest.algorithm === next.digest.algorithm &&
+    current.digest.framing === next.digest.framing &&
+    current.digest.payload === next.digest.payload &&
+    current.resources.length === next.resources.length &&
+    current.resources.every((resource, index) => sameResource(resource, next.resources[index] as ManagedResource))
   );
-  const resources: ManagedResource[] = [];
+}
+
+function assertRecoverableUpdate(
+  root: string,
+  previousResources: ManagedResource[],
+  next: WorkflowRecord,
+  allowMissingTarget: boolean,
+): void {
+  const previous = new Map(previousResources.map((resource) => [resource.path, resource]));
+  const target = new Map(next.resources.map((resource) => [resource.path, resource]));
+  const paths = [...new Set([...previous.keys(), ...target.keys()])];
   for (const path of paths) {
     const state = stateOf(root, path);
-    const newResource = next.get(path);
-    const oldResource = old.get(path);
-    if (newResource !== undefined && matches(state, newResource)) resources.push(newResource);
-    else if (oldResource !== undefined && state.kind !== "absent") resources.push(oldResource);
+    const oldResource = previous.get(path);
+    const nextResource = target.get(path);
+    if (nextResource !== undefined && matches(state, nextResource)) continue;
+    if (oldResource !== undefined && matches(state, oldResource)) continue;
+    if (
+      state.kind === "absent" &&
+      (allowMissingTarget || oldResource === undefined || nextResource === undefined)
+    ) {
+      continue;
+    }
+    fail(`refusing to recover the partial update because ${path} changed; restore it or uninstall first`);
   }
-  if (base === null && resources.length === 0) return null;
-  const identity = base ?? target;
-  return {
-    ...identity,
-    resources,
-    status: {
-      state: "partial",
-      operation,
-      ...(operation === "update" ? { targetVersion: target.version } : {}),
-    },
-  };
 }
 
 export function installWorkflow(root: string, pkg: LoadedWorkflowPackage, hooks: AdoptionHooks = {}): void {
   const record = packageRecord(pkg);
   assertInstallable(root, record);
+  const pending: WorkflowRecord = { ...record, status: { state: "partial", operation: "install" } };
+  const pendingText = recordText(pending);
+  writeRecord(root, pending, null);
   let mutations = 0;
   try {
     for (const entry of pkg.entries) {
@@ -539,22 +635,11 @@ export function installWorkflow(root: string, pkg: LoadedWorkflowPackage, hooks:
       }
       writeManaged(root, entry, { kind: "absent" });
     }
-    writeRecord(root, record, null);
+    writeRecord(root, record, pendingText);
   } catch (error) {
-    const partial = partialAfter(root, null, record, "install");
-    if (partial !== null) {
-      try {
-        writeRecord(root, partial, null);
-      } catch (recordError) {
-        fail(
-          `${error instanceof Error ? error.message : String(error)}; ${WORKFLOW_RECORD} could not record the partial install: ${recordError instanceof Error ? recordError.message : String(recordError)}`,
-        );
-      }
-      fail(
-        `${error instanceof Error ? error.message : String(error)}; the partial install is recorded — run \`ub agents update <source>\` to finish or \`ub agents uninstall\` to undo it`,
-      );
-    }
-    throw error;
+    fail(
+      `${error instanceof Error ? error.message : String(error)}; the partial install is recorded — run \`ub agents update <source>\` to finish or \`ub agents uninstall\` to undo it`,
+    );
   }
 }
 
@@ -562,68 +647,120 @@ export function updateWorkflow(root: string, pkg: LoadedWorkflowPackage, hooks: 
   const current = readRecord(root);
   if (current === null) fail("this project has adopted no workflow; run `ub agents install <source>` first");
   const next = packageRecord(pkg);
-  assertUpdatable(root, current.record, next);
-  const old = new Map(current.record.resources.map((entry) => [entry.path, entry]));
+  let previousResources: ManagedResource[];
+  if (current.record.status.state === "complete") {
+    assertUpdatable(root, current.record, next);
+    previousResources = current.record.resources;
+  } else if (current.record.status.operation === "install") {
+    if (!sameTarget(current.record, next)) {
+      fail("finish the recorded partial install with its original source, or run `ub agents uninstall`");
+    }
+    previousResources = [];
+    assertRecoverableUpdate(root, previousResources, next, true);
+  } else if (current.record.status.operation === "update") {
+    if (!sameTarget(current.record, next)) {
+      fail(
+        `finish the recorded partial update to ${current.record.status.targetVersion} with its original source, or run \`ub agents uninstall\``,
+      );
+    }
+    previousResources = current.record.status.previousResources;
+    assertRecoverableUpdate(root, previousResources, next, false);
+  } else {
+    fail("this workflow is partially uninstalled; run `ub agents uninstall` again before updating it");
+  }
+  const pending: WorkflowRecord = {
+    ...next,
+    status: {
+      state: "partial",
+      operation: "update",
+      targetVersion: next.version,
+      previousResources,
+    },
+  };
+  const pendingText = recordText(pending);
+  if (current.text !== pendingText) writeRecord(root, pending, current.text);
+  const old = new Map(previousResources.map((entry) => [entry.path, entry]));
   const nextEntries = new Map(pkg.entries.map((entry) => [entry.path, entry]));
   let mutations = 0;
-  let changed = false;
   try {
     for (const entry of pkg.entries) {
       const previous = old.get(entry.path);
       const intended = expected(entry);
-      if (
-        previous !== undefined &&
-        previous.mode === intended.mode &&
-        previous.sha256 === intended.sha256 &&
-        matches(stateOf(root, entry.path), previous)
-      ) {
-        continue;
-      }
-      hooks.beforeMutation?.("write", entry.path, mutations++);
       const state = stateOf(root, entry.path);
+      if (matches(state, intended)) continue;
       if (previous === undefined ? state.kind !== "absent" : !matches(state, previous)) {
         fail(`${entry.path} changed while the workflow was being updated`);
       }
+      hooks.beforeMutation?.("write", entry.path, mutations++);
       writeManaged(
         root,
         entry,
         previous === undefined ? { kind: "absent" } : { kind: "resource", resource: previous },
       );
-      changed = true;
     }
-    for (const resource of current.record.resources) {
+    for (const resource of previousResources) {
       if (nextEntries.has(resource.path)) continue;
+      const state = stateOf(root, resource.path);
+      if (state.kind === "absent") continue;
+      if (!matches(state, resource)) fail(`${resource.path} changed while the workflow was being updated`);
       hooks.beforeMutation?.("remove", resource.path, mutations++);
       removeManaged(root, resource);
-      changed = true;
     }
-    writeRecord(root, next, current.text);
+    writeRecord(root, next, pendingText);
   } catch (error) {
-    if (changed) {
-      const partial = partialAfter(root, current.record, next, "update");
-      if (partial !== null) {
-        try {
-          writeRecord(root, partial, current.text);
-        } catch (recordError) {
-          fail(
-            `${error instanceof Error ? error.message : String(error)}; ${WORKFLOW_RECORD} could not record the partial update: ${recordError instanceof Error ? recordError.message : String(recordError)}`,
-          );
-        }
-      }
-      fail(
-        `${error instanceof Error ? error.message : String(error)}; the partial update is recorded — rerun \`ub agents update <source>\` or uninstall it`,
-      );
-    }
-    throw error;
+    fail(
+      `${error instanceof Error ? error.message : String(error)}; the partial update is recorded — rerun \`ub agents update <source>\` or uninstall it`,
+    );
   }
+}
+
+function resourcesForUninstall(root: string, record: WorkflowRecord): ManagedResource[] {
+  const target = new Map(record.resources.map((resource) => [resource.path, resource]));
+  const previous =
+    record.status.state === "partial" && record.status.operation === "update"
+      ? new Map(record.status.previousResources.map((resource) => [resource.path, resource]))
+      : new Map<string, ManagedResource>();
+  const paths = [...new Set([...target.keys(), ...previous.keys()])].sort((left, right) =>
+    Buffer.compare(Buffer.from(left), Buffer.from(right)),
+  );
+  const resources: ManagedResource[] = [];
+  for (const path of paths) {
+    const state = stateOf(root, path);
+    if (state.kind === "absent") continue;
+    const targetResource = target.get(path);
+    const previousResource = previous.get(path);
+    if (targetResource !== undefined && matches(state, targetResource)) resources.push(targetResource);
+    else if (previousResource !== undefined && matches(state, previousResource)) resources.push(previousResource);
+    else resources.push(targetResource ?? (previousResource as ManagedResource));
+  }
+  return resources;
+}
+
+function removeRecord(root: string, expectedText: string): void {
+  const parent = safeParent(root, WORKFLOW_RECORD, false);
+  if (parent.missing) fail(`${WORKFLOW_RECORD} changed while the workflow was being uninstalled`);
+  inStableParent(parent, WORKFLOW_RECORD, (target) => {
+    const state = stateAt(target);
+    if (state.kind !== "file" || state.content.toString("utf8") !== expectedText) {
+      fail(`${WORKFLOW_RECORD} changed while the workflow was being uninstalled`);
+    }
+    unlinkSync(target);
+  });
 }
 
 export function uninstallWorkflow(root: string, hooks: AdoptionHooks = {}): { remaining: string[] } {
   const current = readRecord(root);
   if (current === null) fail("this project has adopted no workflow");
+  const pending: WorkflowRecord = {
+    ...current.record,
+    resources: resourcesForUninstall(root, current.record),
+    status: { state: "partial", operation: "uninstall" },
+  };
+  const pendingText = recordText(pending);
+  writeRecord(root, pending, current.text);
   const remaining: ManagedResource[] = [];
   let mutations = 0;
-  for (const resource of current.record.resources) {
+  for (const resource of pending.resources) {
     const state = stateOf(root, resource.path);
     if (state.kind === "absent") continue;
     if (!matches(state, resource)) {
@@ -638,18 +775,15 @@ export function uninstallWorkflow(root: string, hooks: AdoptionHooks = {}): { re
     }
   }
   if (remaining.length > 0) {
+    const remainingRecord: WorkflowRecord = { ...pending, resources: remaining };
     writeRecord(
       root,
-      { ...current.record, resources: remaining, status: { state: "partial", operation: "uninstall" } },
-      current.text,
+      remainingRecord,
+      pendingText,
     );
     return { remaining: remaining.map((entry) => entry.path) };
   }
-  const recordState = stateOf(root, WORKFLOW_RECORD);
-  if (recordState.kind !== "file" || recordState.content.toString("utf8") !== current.text) {
-    fail(`${WORKFLOW_RECORD} changed while the workflow was being uninstalled`);
-  }
-  unlinkSync(join(root, WORKFLOW_RECORD));
+  removeRecord(root, pendingText);
   return { remaining: [] };
 }
 
@@ -667,8 +801,31 @@ function rolesOf(root: string): string[] | "missing" | null {
 }
 
 function driftOf(root: string, record: WorkflowRecord): string[] {
-  return record.resources
+  const drift = record.resources
     .filter((resource) => !matches(stateOf(root, resource.path), resource))
+    .map((resource) => resource.path);
+  if (record.status.state === "partial" && record.status.operation === "update") {
+    const targetPaths = new Set(record.resources.map((resource) => resource.path));
+    for (const resource of record.status.previousResources) {
+      if (!targetPaths.has(resource.path) && stateOf(root, resource.path).kind !== "absent") {
+        drift.push(resource.path);
+      }
+    }
+  }
+  return [...new Set(drift)].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+}
+
+function previousVersionResources(root: string, record: WorkflowRecord): string[] {
+  if (record.status.state !== "partial" || record.status.operation !== "update") return [];
+  const target = new Map(record.resources.map((resource) => [resource.path, resource]));
+  return record.status.previousResources
+    .filter((resource) => {
+      const targetResource = target.get(resource.path);
+      return (
+        matches(stateOf(root, resource.path), resource) &&
+        (targetResource === undefined || !sameResource(resource, targetResource))
+      );
+    })
     .map((resource) => resource.path);
 }
 
@@ -737,6 +894,7 @@ export async function workflowCommand(
         return 0;
       }
       const drift = driftOf(root, current.record);
+      const previousResources = previousVersionResources(root, current.record);
       const roles = rolesOf(root);
       const roleSummary =
         roles === "missing"
@@ -757,6 +915,16 @@ export async function workflowCommand(
           : `partial ${current.record.status.operation}${current.record.status.targetVersion === undefined ? "" : ` to ${current.record.status.targetVersion}`}`;
       io.out(`state: ${status}; ${current.record.resources.length} managed resources\n`);
       if (drift.length > 0) io.out(`changed or missing: ${drift.join(", ")}\n`);
+      if (previousResources.length > 0) {
+        io.out(`still at the previous version: ${previousResources.join(", ")}\n`);
+      }
+      if (current.record.status.state === "partial") {
+        const nextAction =
+          current.record.status.operation === "uninstall"
+            ? "restore or move any changed resources, then run `ub agents uninstall` again"
+            : "rerun `ub agents update <source>` with the recorded source to finish, or run `ub agents uninstall` to undo it";
+        io.out(`next action: ${nextAction}\n`);
+      }
       return 0;
     }
     if (command === "uninstall") {

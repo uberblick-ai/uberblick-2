@@ -1,23 +1,26 @@
 /** The project-local lifecycle for validated agent-workflow packages. */
 
 import { spawnSync } from "node:child_process";
-import {
+import fs, {
   chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { gzipSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   installWorkflow,
+  uninstallWorkflow,
   updateWorkflow,
   WORKFLOW_RECORD,
 } from "../src/workflow-adoption.js";
@@ -30,7 +33,7 @@ import {
   type WorkflowMode,
   type WorkflowPackageEntry,
 } from "../src/workflow-package.js";
-import { removeTempDirs, REPO_ROOT, runUb, sandbox, type Sandbox } from "./helpers.js";
+import { PACKAGE_ROOT, removeTempDirs, REPO_ROOT, runUb, sandbox, type Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -133,6 +136,35 @@ function packageAt(
     )}\n`,
   );
   return directory;
+}
+
+function interruptWorkflow(
+  operation: "install" | "update" | "uninstall",
+  root: string,
+  packageDirectory: string,
+): ReturnType<typeof spawnSync> {
+  const script = join(dirname(root), `interrupt-${operation}.ts`);
+  const adoptionModule = pathToFileURL(join(PACKAGE_ROOT, "src/workflow-adoption.ts")).href;
+  const packageModule = pathToFileURL(join(PACKAGE_ROOT, "src/workflow-package.ts")).href;
+  write(
+    script,
+    `import { installWorkflow, uninstallWorkflow, updateWorkflow } from ${JSON.stringify(adoptionModule)};
+import { readExtractedWorkflowPackage } from ${JSON.stringify(packageModule)};
+const operation = process.argv[2];
+const root = process.argv[3];
+const pkg = { ...readExtractedWorkflowPackage(process.argv[4]), sourceKind: "local" };
+const hooks = { beforeMutation: (_operation, _path, index) => {
+  if (index === 1) process.kill(process.pid, "SIGKILL");
+} };
+if (operation === "install") installWorkflow(root, pkg, hooks);
+else if (operation === "update") updateWorkflow(root, pkg, hooks);
+else uninstallWorkflow(root, hooks);
+`,
+  );
+  return spawnSync(process.execPath, ["--import", "tsx", script, operation, root, packageDirectory], {
+    cwd: PACKAGE_ROOT,
+    encoding: "utf8",
+  });
 }
 
 const V1 = {
@@ -274,6 +306,81 @@ describe("ub agents workflow lifecycle", () => {
     expect(readFileSync(protectedFile, "utf8")).toBe("safe\n");
   });
 
+  it("anchors writes and removals before an inspected ancestor is replaced", () => {
+    const writing = sandbox();
+    gitProject(writing);
+    const writingPackage = packageAt(join(dirname(writing.cwd), "packages"), "1.0.0", {
+      "payload/a.txt": { content: "a\n" },
+      "payload/b.txt": { content: "b\n" },
+    });
+    const loaded = { ...readExtractedWorkflowPackage(writingPackage), sourceKind: "local" as const };
+    const outsideWrite = join(dirname(writing.cwd), "outside-write");
+    mkdirSync(outsideWrite);
+    const originalOpen = fs.openSync;
+    let writeSwapped = false;
+    fs.openSync = ((path, ...args) => {
+      if (
+        !writeSwapped &&
+        typeof path === "string" &&
+        path.startsWith(".a.txt.") &&
+        process.cwd() === join(writing.cwd, "payload")
+      ) {
+        renameSync(join(writing.cwd, "payload"), join(writing.cwd, "original-payload"));
+        symlinkSync(outsideWrite, join(writing.cwd, "payload"));
+        writeSwapped = true;
+      }
+      return (originalOpen as (...openArgs: unknown[]) => number)(path, ...args);
+    }) as typeof fs.openSync;
+    syncBuiltinESMExports();
+    try {
+      expect(() => installWorkflow(writing.cwd, loaded)).toThrow(/partial install is recorded/);
+    } finally {
+      fs.openSync = originalOpen;
+      syncBuiltinESMExports();
+    }
+    expect(writeSwapped).toBe(true);
+    expect(existsSync(join(outsideWrite, "a.txt"))).toBe(false);
+    expect(readFileSync(join(writing.cwd, "original-payload/a.txt"), "utf8")).toBe("a\n");
+
+    const removing = sandbox();
+    gitProject(removing);
+    const removingPackage = packageAt(join(dirname(removing.cwd), "packages"), "1.0.0", {
+      "payload/a.txt": { content: "a\n" },
+      "payload/b.txt": { content: "b\n" },
+    });
+    installWorkflow(removing.cwd, {
+      ...readExtractedWorkflowPackage(removingPackage),
+      sourceKind: "local" as const,
+    });
+    const outsideRemove = join(dirname(removing.cwd), "outside-remove");
+    mkdirSync(outsideRemove);
+    write(join(outsideRemove, "a.txt"), "outside\n");
+    const originalUnlink = fs.unlinkSync;
+    let removeSwapped = false;
+    fs.unlinkSync = ((path) => {
+      if (
+        !removeSwapped &&
+        path === "a.txt" &&
+        process.cwd() === join(removing.cwd, "payload")
+      ) {
+        renameSync(join(removing.cwd, "payload"), join(removing.cwd, "original-payload"));
+        symlinkSync(outsideRemove, join(removing.cwd, "payload"));
+        removeSwapped = true;
+      }
+      return originalUnlink(path);
+    }) as typeof fs.unlinkSync;
+    syncBuiltinESMExports();
+    try {
+      expect(uninstallWorkflow(removing.cwd).remaining).toContain("payload/b.txt");
+    } finally {
+      fs.unlinkSync = originalUnlink;
+      syncBuiltinESMExports();
+    }
+    expect(removeSwapped).toBe(true);
+    expect(readFileSync(join(outsideRemove, "a.txt"), "utf8")).toBe("outside\n");
+    expect(existsSync(join(removing.cwd, "original-payload/a.txt"))).toBe(false);
+  });
+
   it("refuses an edited update and retains an honest partial uninstall record", () => {
     const box = sandbox();
     gitProject(box);
@@ -336,7 +443,7 @@ describe("ub agents workflow lifecycle", () => {
         },
       }),
     ).toThrow(/partial update is recorded/);
-    expect(JSON.parse(readFileSync(join(box.cwd, WORKFLOW_RECORD), "utf8")).status).toEqual({
+    expect(JSON.parse(readFileSync(join(box.cwd, WORKFLOW_RECORD), "utf8")).status).toMatchObject({
       state: "partial",
       operation: "update",
       targetVersion: "2.0.0",
@@ -402,15 +509,53 @@ describe("ub agents workflow lifecycle", () => {
       ),
     ).toThrow(/partial update is recorded/);
     const inaccessibleRecord = JSON.parse(readFileSync(join(inaccessible.cwd, WORKFLOW_RECORD), "utf8"));
-    expect(inaccessibleRecord.status).toEqual({
+    expect(inaccessibleRecord.status).toMatchObject({
       state: "partial",
       operation: "update",
       targetVersion: "2.0.0",
     });
-    const inaccessibleList = runUb(["agents", "list"], inaccessible);
-    expect(inaccessibleList.status, inaccessibleList.output).toBe(0);
-    expect(inaccessibleList.stdout).toContain("changed or missing: locked/inner/obsolete.md");
-    chmodSync(join(inaccessible.cwd, "locked"), 0o755);
+    try {
+      const inaccessibleList = runUb(["agents", "list"], inaccessible);
+      expect(inaccessibleList.status, inaccessibleList.output).toBe(0);
+      expect(inaccessibleList.stdout).toContain("changed or missing: locked/inner/obsolete.md");
+    } finally {
+      chmodSync(join(inaccessible.cwd, "locked"), 0o755);
+    }
+  });
+
+  it("records intent before process termination and recovers every lifecycle operation", () => {
+    const box = sandbox();
+    gitProject(box);
+    const packages = join(dirname(box.cwd), "packages");
+    const first = packageAt(packages, "1.0.0", V1);
+    const second = packageAt(packages, "2.0.0", V2);
+
+    const install = interruptWorkflow("install", box.cwd, first);
+    expect(install.signal, String(install.stderr)).toBe("SIGKILL");
+    expect(existsSync(join(box.cwd, ".agents/adapters/run.sh"))).toBe(true);
+    expect(JSON.parse(readFileSync(join(box.cwd, WORKFLOW_RECORD), "utf8")).status).toEqual({
+      state: "partial",
+      operation: "install",
+    });
+    const partialInstall = runUb(["agents", "list"], box);
+    expect(partialInstall.stdout).toContain("state: partial install");
+    expect(partialInstall.stdout).toContain("next action: rerun `ub agents update <source>`");
+    expect(runUb(["agents", "update", first], box).status).toBe(0);
+
+    const update = interruptWorkflow("update", box.cwd, second);
+    expect(update.signal, String(update.stderr)).toBe("SIGKILL");
+    const partialUpdate = runUb(["agents", "list"], box);
+    expect(partialUpdate.stdout).toContain("state: partial update to 2.0.0");
+    expect(partialUpdate.stdout).toContain("next action: rerun `ub agents update <source>`");
+    expect(runUb(["agents", "update", second], box).status).toBe(0);
+
+    const uninstall = interruptWorkflow("uninstall", box.cwd, second);
+    expect(uninstall.signal, String(uninstall.stderr)).toBe("SIGKILL");
+    const partialUninstall = runUb(["agents", "list"], box);
+    expect(partialUninstall.stdout).toContain("state: partial uninstall");
+    expect(partialUninstall.stdout).toContain("next action: restore or move any changed resources");
+    expect(runUb(["agents", "uninstall"], box).status).toBe(0);
+    expect(existsSync(join(box.cwd, WORKFLOW_RECORD))).toBe(false);
   });
 
   it("adopts the real producer's package without a second declaration schema", () => {
