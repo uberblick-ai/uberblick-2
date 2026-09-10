@@ -186,6 +186,9 @@ describe("the versioned install payload", () => {
     const agents = runPayload(box, ["agents", "--help"]);
     expect(agents.status, agents.stderr).toBe(0);
     expect(agents.stdout).toContain("launch <role>");
+    for (const command of ["install <source>", "list", "update <source>", "uninstall"]) {
+      expect(agents.stdout).toContain(command);
+    }
 
     // With only Node on PATH there is no Git to resolve a project with, and
     // the refusal says so before anything starts.

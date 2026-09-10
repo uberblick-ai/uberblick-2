@@ -1,10 +1,10 @@
 /**
- * `ub agents` — the group that runs the agent roles of a project you select.
+ * `ub agents` — adopt and run the agent workflow of a project you select.
  *
  * A group rather than a top-level verb because the surface is plural by
  * intent: adopting, listing and updating a project's workflow are the siblings
- * this one is named for, and a group is what lets each of them arrive without
- * moving `launch` again. Only `launch` exists today.
+ * this one is named for. The group keeps that lifecycle beside launch without
+ * moving launch again.
  *
  * The CLI transports; it owns no role, no queue and no workflow. Everything it
  * knows about a project comes out of that project's own launch data — see
@@ -13,10 +13,15 @@
 
 import { type Io, processIo } from "./io.js";
 import { launchCommand } from "./launch.js";
+import { workflowCommand } from "./workflow-adoption.js";
 
 export const AGENTS_HELP = `usage: ub agents <command>
 
 commands:
+  install <source>       adopt a published or local workflow package
+  list                   report the workflow and roles this project adopted
+  update <source>        move the adopted workflow to another version
+  uninstall              remove unchanged resources the workflow still owns
   launch <role>          keep one entry role of a project running in this terminal
 
 options:
@@ -35,11 +40,16 @@ export async function agentsCommand(
   if (sub === "launch") {
     return await launchCommand(rest, io);
   }
+  if (sub === "install" || sub === "list" || sub === "update" || sub === "uninstall") {
+    return await workflowCommand(sub, rest, io);
+  }
   if (sub === "help" || sub === "--help" || sub === "-h") {
     io.out(AGENTS_HELP);
     return 0;
   }
   const named = sub === undefined ? " nothing" : ` ${JSON.stringify(sub)}`;
-  io.err(`ub agents: expected "launch", got${named}\n\n${AGENTS_HELP}`);
+  io.err(
+    `ub agents: expected "install", "list", "update", "uninstall" or "launch", got${named}\n\n${AGENTS_HELP}`,
+  );
   return 2;
 }
