@@ -9,10 +9,12 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   installWorkflow,
@@ -412,14 +414,73 @@ describe("ub agents workflow lifecycle", () => {
   });
 
   it("adopts the real producer's package without a second declaration schema", () => {
+    const producer = sandbox();
+    const producerLaunch = `${JSON.stringify({
+      version: 2,
+      project: {
+        repository: "fixture/workflow-source",
+        baseRef: { remote: "origin", branch: "main" },
+      },
+      entryRoles: {
+        shipper: {
+          contract: ".agents/roles/shipper.md",
+          defaultRuntime: "codex",
+          probe: ["true"],
+          runtimes: {
+            claude: {
+              adapter: ".claude/agents/shipper.md",
+              sandbox: "runtime",
+              permissionMode: "auto",
+            },
+            codex: { adapter: ".codex/agents/shipper.toml", sandbox: "workspace-write" },
+          },
+        },
+      },
+    })}\n`;
+    gitProject(producer, producerLaunch);
+    write(join(producer.cwd, ".agents/roles/shipper.md"), "# Shipper\n");
+    write(join(producer.cwd, ".codex/agents/shipper.toml"), 'name = "shipper"\n');
+    write(
+      join(producer.cwd, ".agents/requires.json"),
+      `${JSON.stringify(
+        {
+          version: 1,
+          bindings: ["project.repository"],
+          resources: [
+            ".agents/requires.json",
+            ".agents/roles/shipper.md",
+            ".codex/agents/shipper.toml",
+          ],
+          projectResources: [".agents/launch.json"],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    expect(spawnSync("git", ["add", "-A"], { cwd: producer.cwd }).status).toBe(0);
+    expect(
+      spawnSync(
+        "git",
+        ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "workflow"],
+        { cwd: producer.cwd },
+      ).status,
+    ).toBe(0);
+
     const box = sandbox();
-    gitProject(box, readFileSync(join(REPO_ROOT, ".agents/launch.json"), "utf8"));
+    gitProject(box);
     const output = join(dirname(box.cwd), "built-workflow");
-    const built = spawnSync(process.execPath, [join(REPO_ROOT, "scripts/build-workflow-package.mjs"), "9.8.7"], {
-      cwd: REPO_ROOT,
-      env: { ...process.env, HOMEBREW_TAP_TOKEN: "", UBERBLICK_WORKFLOW_PACKAGE_OUTPUT_DIR: output },
-      encoding: "utf8",
-    });
+    const producerModule = pathToFileURL(join(REPO_ROOT, "scripts/build-workflow-package.mjs")).href;
+    const built = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `import { buildWorkflowPackage } from ${JSON.stringify(producerModule)}; buildWorkflowPackage({ root: process.argv[1], version: "9.8.7", outputDir: process.argv[2], env: {} });`,
+        producer.cwd,
+        output,
+      ],
+      { cwd: producer.cwd, encoding: "utf8" },
+    );
     expect(built.status, built.stderr).toBe(0);
 
     const installed = runUb(
@@ -429,7 +490,14 @@ describe("ub agents workflow lifecycle", () => {
     expect(installed.status, installed.output).toBe(0);
     const listed = runUb(["agents", "list"], box);
     expect(listed.status, listed.output).toBe(0);
-    expect(listed.stdout).toContain("roles: implementation-reviewer, implementer, integrator, issue-preparer");
+    expect(listed.stdout).toContain("roles: shipper");
+
+    unlinkSync(join(box.cwd, ".agents/launch.json"));
+    const missingDeclaration = runUb(["agents", "list"], box);
+    expect(missingDeclaration.status, missingDeclaration.output).toBe(0);
+    expect(missingDeclaration.stdout).toContain(
+      "roles: unavailable; .agents/launch.json is missing; add the project's launch declaration before launching",
+    );
   });
 
   it("bounds a published download and the expanded archive", async () => {

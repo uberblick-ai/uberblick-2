@@ -653,10 +653,15 @@ export function uninstallWorkflow(root: string, hooks: AdoptionHooks = {}): { re
   return { remaining: [] };
 }
 
-function rolesOf(root: string): string[] | null {
+function rolesOf(root: string): string[] | "missing" | null {
   try {
     return Object.keys(readLaunchData(root).entryRoles).sort();
   } catch {
+    try {
+      lstatSync(join(root, ".agents/launch.json"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
+    }
     return null;
   }
 }
@@ -733,12 +738,18 @@ export async function workflowCommand(
       }
       const drift = driftOf(root, current.record);
       const roles = rolesOf(root);
+      const roleSummary =
+        roles === "missing"
+          ? "unavailable; .agents/launch.json is missing; add the project's launch declaration before launching"
+          : roles === null
+            ? "unavailable; repair .agents/launch.json or its declared role files before launching"
+            : roles.join(", ");
       io.out(`${current.record.workflow} ${current.record.version}\n`);
       io.out(
         `source: ${current.record.source.kind} ${current.record.source.repository}@${current.record.source.commit}\n`,
       );
       io.out(
-        `roles: ${roles === null ? "unavailable; repair .agents/launch.json or its declared role files before launching" : roles.join(", ")}\n`,
+        `roles: ${roleSummary}\n`,
       );
       const status =
         current.record.status.state === "complete"
