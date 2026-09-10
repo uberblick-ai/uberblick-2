@@ -132,12 +132,11 @@ test("a new PR fix-up remains visible without indexed search or ready issues", (
 	assert.equal(probe(t, "implementer", 0, null).status, 2);
 });
 
-test("a needs-human PR cannot keep the implementer probe hot", (t) => {
-	// The fake reports the count after gh applies the requested projection and
-	// filter to a repository containing one needs-human PR and no ready issues.
-	const parked = probe(t, "implementer", 0, 0);
-	assert.equal(parked.status, 1);
-	assert.equal(parked.stdout.trim(), "probe-work: implementer: 0 candidates");
-	assert.match(parked.calls, /^pr list .*--json isDraft,labels/m);
-	assert.match(parked.calls, /index\("needs-human"\)/);
+test("the implementer PR read carries draft and label discrimination", (t) => {
+	// The fake does not evaluate gh's --jq program. This protects the command
+	// contract that keeps both discriminators available to gh's own evaluator.
+	const filtered = probe(t, "implementer", 0, 0);
+	assert.match(filtered.calls, /^pr list .*--json isDraft,labels/m);
+	assert.match(filtered.calls, /isDraft \| not/);
+	assert.match(filtered.calls, /index\("needs-human"\)/);
 });
