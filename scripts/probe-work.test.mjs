@@ -35,7 +35,7 @@ const script = join(root, "scripts/probe-work.sh");
  * read returns, an array is the lines a projecting read returns, and null is a
  * `gh` that fails.
  */
-function probe(t, role, answer) {
+function probe(t, role, answer, prAnswer = answer) {
 	const base = mkdtempSync(join(tmpdir(), "probe-work-"));
 	t.after(() => rmSync(base, { recursive: true, force: true }));
 	const bin = join(base, "bin");
@@ -49,6 +49,12 @@ function probe(t, role, answer) {
 	else if (Array.isArray(answer)) {
 		writeFileSync(answers, answer.map((line) => `${line}\n`).join(""));
 		reply = `cat ${answers}`;
+	} else if (role === "implementer") {
+		reply = `case "$1 $2" in
+  "issue list") echo ${answer} ;;
+  "pr list") ${prAnswer === null ? "exit 1" : `echo ${prAnswer}`} ;;
+  *) exit 1 ;;
+esac`;
 	} else reply = `echo ${answer}`;
 	writeFileSync(gh, `#!/bin/sh\n${record}\n${reply}\n`);
 	chmodSync(gh, 0o755);
@@ -114,4 +120,23 @@ test("an unknown role is a usage error, not an idle", (t) => {
 	const unknown = probe(t, "reviewer", 3);
 	assert.equal(unknown.status, 2);
 	assert.match(unknown.stderr, /usage: probe-work\.sh/);
+});
+
+test("a new PR fix-up remains visible without indexed search or ready issues", (t) => {
+	const fixup = probe(t, "implementer", 0, 1);
+	assert.equal(fixup.status, 0);
+	assert.equal(fixup.stdout.trim(), "probe-work: implementer: 1 candidate");
+	assert.match(fixup.calls, /^pr list /m);
+	assert.doesNotMatch(fixup.calls, /search|--match comments/);
+	assert.equal(probe(t, "implementer", 0, 0).status, 1);
+	assert.equal(probe(t, "implementer", 0, null).status, 2);
+});
+
+test("the implementer PR read carries draft and label discrimination", (t) => {
+	// The fake does not evaluate gh's --jq program. This protects the command
+	// contract that keeps both discriminators available to gh's own evaluator.
+	const filtered = probe(t, "implementer", 0, 0);
+	assert.match(filtered.calls, /^pr list .*--json isDraft,labels/m);
+	assert.match(filtered.calls, /isDraft \| not/);
+	assert.match(filtered.calls, /index\("needs-human"\)/);
 });

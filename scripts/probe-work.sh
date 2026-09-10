@@ -21,9 +21,13 @@ case "$role" in
       '[.[] | .labels | map(.name) | select(index("needs-preparation") or length == 0)] | length') || exit 2 ;;
   implementer)
     # `ready` covers new issues (dependencies unchecked) and recoveries (stale
-    # in-progress claims); a PR whose thread names fix-now findings is a fix-up
+    # in-progress claims). Any open PR may carry a just-posted fix-up ruling;
+    # comment search is indexed asynchronously and can hide that work.
+    # The role checks findings and claims itself, so count possible PRs
+    # over-inclusively except for drafts and needs-human PRs.
     n=$(gh issue list -R "$REPO" --state open --limit 200 --label ready --json number --jq length) || exit 2
-    m=$(gh search prs -R "$REPO" --state open --match comments fix-now --json number --jq length) || exit 2
+    m=$(gh pr list -R "$REPO" --state open --limit 200 --json isDraft,labels --jq \
+      '[.[] | select(.isDraft | not) | select(.labels | map(.name) | index("needs-human") | not)] | length') || exit 2
     n=$((n + m)) ;;
   implementation-reviewer)
     # a review request lives in a PR comment, and a request seconds old is
