@@ -33,7 +33,7 @@ import {
   type WorkflowMode,
   type WorkflowPackageEntry,
 } from "../src/workflow-package.js";
-import { PACKAGE_ROOT, removeTempDirs, REPO_ROOT, runUb, sandbox, type Sandbox } from "./helpers.js";
+import { PACKAGE_ROOT, removeTempDirs, runUb, sandbox, type Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -666,79 +666,10 @@ describe("ub agents workflow lifecycle", () => {
   });
 
   it("adopts the real producer's package without a second declaration schema", () => {
-    const producer = sandbox();
-    const producerLaunch = `${JSON.stringify({
-      version: 2,
-      project: {
-        repository: "fixture/workflow-source",
-        baseRef: { remote: "origin", branch: "main" },
-      },
-      entryRoles: {
-        shipper: {
-          contract: ".agents/roles/shipper.md",
-          defaultRuntime: "codex",
-          probe: ["true"],
-          runtimes: {
-            claude: {
-              adapter: ".claude/agents/shipper.md",
-              sandbox: "runtime",
-              permissionMode: "auto",
-            },
-            codex: { adapter: ".codex/agents/shipper.toml", sandbox: "workspace-write" },
-          },
-        },
-      },
-    })}\n`;
-    gitProject(producer, producerLaunch);
-    write(join(producer.cwd, ".agents/roles/shipper.md"), "# Shipper\n");
-    write(join(producer.cwd, ".codex/agents/shipper.toml"), 'name = "shipper"\n');
-    write(
-      join(producer.cwd, ".agents/requires.json"),
-      `${JSON.stringify(
-        {
-          version: 1,
-          bindings: ["project.repository"],
-          resources: [
-            ".agents/requires.json",
-            ".agents/roles/shipper.md",
-            ".codex/agents/shipper.toml",
-          ],
-          projectResources: [".agents/launch.json"],
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    expect(spawnSync("git", ["add", "-A"], { cwd: producer.cwd }).status).toBe(0);
-    expect(
-      spawnSync(
-        "git",
-        ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "workflow"],
-        { cwd: producer.cwd },
-      ).status,
-    ).toBe(0);
-
     const box = sandbox();
     gitProject(box);
-    const output = join(dirname(box.cwd), "built-workflow");
-    const producerModule = pathToFileURL(join(REPO_ROOT, "scripts/build-workflow-package.mjs")).href;
-    const built = spawnSync(
-      process.execPath,
-      [
-        "--input-type=module",
-        "--eval",
-        `import { buildWorkflowPackage } from ${JSON.stringify(producerModule)}; buildWorkflowPackage({ root: process.argv[1], version: "9.8.7", outputDir: process.argv[2], env: {} });`,
-        producer.cwd,
-        output,
-      ],
-      { cwd: producer.cwd, encoding: "utf8" },
-    );
-    expect(built.status, built.stderr).toBe(0);
-
-    const installed = runUb(
-      ["agents", "install", join(output, "uberblick-workflow-9.8.7.tar.gz")],
-      box,
-    );
+    const archive = join(PACKAGE_ROOT, "test/fixtures/workflow-source/uberblick-workflow-9.8.7.tar.gz");
+    const installed = runUb(["agents", "install", archive], box);
     expect(installed.status, installed.output).toBe(0);
     const listed = runUb(["agents", "list"], box);
     expect(listed.status, listed.output).toBe(0);
