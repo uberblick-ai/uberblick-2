@@ -853,6 +853,52 @@ process.exit(0);
     expect(transient.seen.sessions).toHaveLength(1);
   });
 
+  it("stops on Codex's terminal policy refusal without echoing its bypass guidance", async () => {
+    const refusal =
+      "ERROR: This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request. To get authorized for security work, join the Trusted Access for Cyber program: https://chatgpt.com/cyber";
+    for (const tail of [
+      `${refusal}\n${refusal}\ntokens used\n201,923\n`,
+      `${refusal}\ntokens used\n160,145\n`,
+    ]) {
+      const refused = rig({
+        sessions: [
+          result({ code: 1, tail, transcript: "/tmp/refused-session.log" }),
+        ],
+      });
+
+      expect(await launchCommand(["implementer"], refused.io, refused.services)).toBe(1);
+      expect(refused.seen.waits).toEqual([]);
+      expect(refused.seen.sessions).toHaveLength(1);
+      expect(refused.stderr()).toContain(
+        "codex runtime refused the session for policy or safety reasons; transcript at /tmp/refused-session.log; stopped",
+      );
+      expect(refused.stderr()).not.toMatch(
+        /cybersecurity|rephras|Trusted Access|tokens used|201,923|auth|login|restore access/i,
+      );
+    }
+
+    for (const tail of [
+      `${refusal}\nA diff quoted the diagnostic above while discussing security work.\n`,
+      `  ${refusal}\n  ${refusal}\n  tokens used\n  201,923\n`,
+      "This report discusses cybersecurity and security work without a runtime refusal.\n",
+    ]) {
+      const benign = rig({
+        sessions: [
+          result({ code: 1, tail, transcript: "/tmp/ordinary-failure.log" }),
+          result({ interrupted: "SIGTERM" }),
+        ],
+        waits: [null],
+      });
+      expect(await launchCommand(["implementer"], benign.io, benign.services)).toBe(143);
+      expect(benign.seen.waits).toEqual([5_000]);
+      expect(benign.seen.sessions).toHaveLength(2);
+      expect(benign.stderr()).toContain(
+        "session exited with status 1; transcript at /tmp/ordinary-failure.log; retrying in 5s",
+      );
+      expect(benign.stderr()).not.toContain("runtime refused");
+    }
+  });
+
   it("backs off after transient failures and refuses a permanent refresh failure", async () => {
     const crashed = rig({
       sessions: [result({ code: 23, transcript: "/tmp/session.log" })],
