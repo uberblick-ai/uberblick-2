@@ -116,7 +116,10 @@ test("adapter syntax remains checked at the project launch boundary", (t) => {
   );
   fails(dir, /value is not one quoted string/);
 });
-test("role roster, default runtime and valid project launch policy are data", (t) => {
+const customRoleSkip = existsSync(join(root, ".claude/agents"))
+  ? false
+  : ".claude/agents is absent from this checkout, so a complete custom role cannot be built";
+test("role roster, default runtime and valid project launch policy are data", { skip: customRoleSkip }, (t) => {
   const dir = fixture(t);
   edit(dir, ".agents/launch.json", (x) => {
     delete x.entryRoles.integrator;
