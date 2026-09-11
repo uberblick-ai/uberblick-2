@@ -124,9 +124,30 @@ exists and its claim comment's `updated_at` is more than 60 minutes old; the
 window is twice the renewal interval so that a healthy foreground run is never
 reclaimed in the gap between two renewals.
 An implementation claim is stale when no matching later implementer Done
-exists and the claim's updated_at is more than 30 minutes old. A later valid
-claim takes over a stale one and continues the current
-remote branch head; the superseded holder stops if it resumes.
+exists and the claim's updated_at is more than 30 minutes old.
+
+A top-level claim with no matching completion is also stale immediately,
+regardless of age or renewal, when the observing session positively identifies
+its run on the same machine and establishes that the run is no longer running.
+For a candidate GitHub has
+already shown is claimed, pickup permits one bounded local liveness check:
+use retained runtime evidence to attribute the exact run to this machine and
+verify its termination or establish its process absence on the same attribution
+channel, one known to observe that run while it is alive. A missing worktree,
+missing attribution evidence, an unreadable process listing, or a channel that
+cannot establish whether the run is alive is inconclusive, not proof of death;
+keep the clocks above whenever attribution or absence cannot be established.
+This permits no other local pickup read, wider scan, or narration to prove an
+empty queue.
+
+A later valid claim takes over a stale one and continues the current remote
+branch head; the superseded holder stops if it resumes. An evidence-based
+takeover records in that new claim the superseded run id and claim link, how
+it was attributed to this machine, and the termination or process-absence
+evidence observed, with its observation time. Record enough of the observation
+for a reader of GitHub alone to assess the takeover; a private log path alone
+is not evidence. Do not edit or withdraw the superseded run's claim on its
+behalf. Claim ordering, the race rule and renewal cadence are unchanged.
 
 A nested adversary assignment expires when its record remains
 `pending` for 10 minutes, when a `running` record's `updated_at` is more than 30

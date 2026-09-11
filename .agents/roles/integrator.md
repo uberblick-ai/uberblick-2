@@ -24,7 +24,14 @@ The owner makes a parked tier-3 PR eligible by replacing `needs-human` with
 `human-approved`; that label changes order and tier. Order:
 `human-approved` first, then ascending PR number. Inspect earlier candidates
 only enough to exclude them; their state is derived, so do not narrate the queue
-or skipped PRs. Claim on the PR with the head SHA, under the README's claim
+or skipped PRs.
+
+For a candidate GitHub has already shown is claimed, the shared role README
+permits one bounded local liveness check before deciding whether that claim is
+live. Its evidence and inconclusive-result rules apply; no other local pickup
+read, wider scan, or empty-queue narration is permitted by this exception.
+
+Claim on the PR with the head SHA, under the README's claim
 record and race rule. One PR — merged with its post-merge pass, or parked with
 the ruling — then stop. With nothing eligible, end with exactly
 `No eligible integrator work: <one reason>.` and stop; the launcher reads that

@@ -33,6 +33,12 @@ then claim under the README's record and race rule **before** reading the full
 body, thread, dependency graph, corpus or code. A losing claimer moves to the
 next candidate before doing that deeper intake. Prepare one. An unlabelled
 issue enters the queue only through that triage, never as an implicit pickup.
+
+For a candidate GitHub has already shown is claimed, the shared role README
+permits one bounded local liveness check before deciding whether that claim is
+live. Its evidence and inconclusive-result rules apply; no other local pickup
+read, wider scan, or empty-queue narration is permitted by this exception.
+
 With nothing eligible, end with exactly
 `No eligible issue-preparer work: <one reason>.` and stop; the launcher reads
 that line to idle.

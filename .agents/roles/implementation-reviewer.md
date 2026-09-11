@@ -30,6 +30,11 @@ in `.agents/protocols/review-protocol.md`'s grammar. A request is eligible when
    answers it;
 4. this session did not author the head it names.
 
+For a candidate GitHub has already shown is claimed, the shared role README
+permits one bounded local liveness check before deciding whether that claim is
+live. Its evidence and inconclusive-result rules apply; no other local pickup
+read, wider scan, or empty-queue narration is permitted by this exception.
+
 Oldest request first, by the request comment's `createdAt`. With nothing
 eligible, end with exactly `No eligible implementation-reviewer work: <one
 reason>.` and stop; the launcher reads that line to idle. Do not read product
