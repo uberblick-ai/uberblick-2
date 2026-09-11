@@ -296,8 +296,8 @@ const ACCESS_SIGNATURES = [
 const TEMPORARY_ACCESS_SIGNATURES = [/rate limit/i, /\bquota\b/i];
 
 // The one policy refusal observed from Codex. Matching the whole terminal
-// quartet keeps a copy of this diagnostic in a diff or report from becoming a
-// launcher stop of its own.
+// sequence keeps a copy of this diagnostic in a diff or report from becoming
+// a launcher stop of its own.
 const CODEX_POLICY_REFUSAL =
   "ERROR: This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request. To get authorized for security work, join the Trusted Access for Cyber program: https://chatgpt.com/cyber";
 
@@ -712,14 +712,12 @@ function accessReason(text: string): string | null {
 function codexPolicyRefused(text: string): boolean {
   const lines = text
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line !== "")
-    .slice(-4);
+    .filter((line) => line.trim() !== "")
+    .slice(-3);
   return (
     lines[0] === CODEX_POLICY_REFUSAL &&
-    lines[1] === CODEX_POLICY_REFUSAL &&
-    lines[2] === "tokens used" &&
-    /^\d[\d,]*$/.test(lines[3] ?? "")
+    lines[1] === "tokens used" &&
+    /^\d[\d,]*$/.test(lines[2] ?? "")
   );
 }
 
