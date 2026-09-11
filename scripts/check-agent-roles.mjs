@@ -172,6 +172,16 @@ if (
       for (const argument of entry.probe)
         if (argument.includes("/") && !projectResources.has(argument))
           fail(`${LAUNCH}: ${slug} probe path ${argument} is not a declared project resource`);
+    // Our probe's first argument chooses its queue; alternative project probes
+    // remain free to use their own argv rather than inheriting this convention.
+    const projectProbe = Array.isArray(entry.probe)
+      ? entry.probe.indexOf("scripts/probe-work.sh")
+      : -1;
+    if (projectProbe !== -1 && entry.probe[projectProbe + 1] !== slug)
+      fail(`${LAUNCH}: ${slug} project probe must name its own role`);
+    // Deliberately plain Node: this standalone integration gate also runs in
+    // minimal mutation fixtures without the CLI's TypeScript runtime/dependencies.
+    // Keep this supported-launch vocabulary aligned with packages/cli/src/launch.ts.
     const runtimes = object(entry.runtimes);
     if (
       !runtimes ||
@@ -238,8 +248,9 @@ if (
       }
     }
   }
-// These two skills remain this project's responsibility; their protocol is adopted.
+// Project shaping entry points must still reach their adopted protocol.
 for (const relative of [
+  ".agents/adapters/chatgpt-voice.md",
   ".agents/skills/shape-issue/SKILL.md",
   ".claude/skills/shape-issue/SKILL.md",
 ]) {

@@ -15,7 +15,8 @@ launch declaration case.
 - Archive SHA-256:
   `1116eea142a55f4aefdbe6b20ee43deb37b13cafce7ad9b69b1723b62cedb82d`.
 
-To refresh, use the reviewed source repository's `buildWorkflowPackage` export
+Refresh this fixture when an explicit workflow update changes its package format,
+and rerun the consumer test. To refresh, use the reviewed source repository's `buildWorkflowPackage` export
 on a disposable Git repository containing the three payload files in this
 archive and this project-owned `.agents/launch.json` (one compact JSON line
 followed by a newline):

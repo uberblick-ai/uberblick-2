@@ -77,6 +77,9 @@ test("missing adopted protocols and stale project shaping adapters fail", (t) =>
   const stale = fixture(t);
   writeFileSync(join(stale, ".agents/skills/shape-issue/SKILL.md"), "Read an old protocol.");
   fails(stale, /does not point to \.agents\/protocols\/issue-shaping.md/);
+  const voice = fixture(t);
+  writeFileSync(join(voice, ".agents/adapters/chatgpt-voice.md"), "Read an old protocol.");
+  fails(voice, /does not point to \.agents\/protocols\/issue-shaping.md/);
 });
 test("launch entries bind their own adapter and declare their probe and default runtime", (t) => {
   const wrong = fixture(t);
@@ -94,6 +97,16 @@ test("launch entries bind their own adapter and declare their probe and default 
     x.entryRoles.implementer.probe = ["sh", "scripts/undeclared.sh"];
   });
   fails(probe, /not a declared project resource/);
+  for (const argv of [
+    ["sh", "scripts/probe-work.sh", "implementer"],
+    ["sh", "scripts/probe-work.sh"],
+  ]) {
+    const wrongQueue = fixture(t);
+    edit(wrongQueue, ".agents/launch.json", (x) => {
+      x.entryRoles.integrator.probe = argv;
+    });
+    fails(wrongQueue, /project probe must name its own role/);
+  }
 });
 test("adapter syntax remains checked at the project launch boundary", (t) => {
   const dir = fixture(t);
