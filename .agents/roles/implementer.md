@@ -30,6 +30,11 @@ One GitHub-only shallow pass, in this order.
    `.github/ISSUE_SPEC.md`'s order and under its cap of 6 work units. `ready` is the preparation verdict; do not
    prepare again.
 
+For a candidate GitHub has already shown is claimed, the shared role README
+permits one bounded local liveness check before deciding whether that claim is
+live. Its evidence and inconclusive-result rules apply; no other local pickup
+read, wider scan, or empty-queue narration is permitted by this exception.
+
 With nothing eligible, or at the cap, end with exactly
 `No eligible implementer work: <one reason>.` and stop. The launcher reads
 that line to idle. Do not read product documents or code, create a worktree,

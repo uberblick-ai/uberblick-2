@@ -30,6 +30,11 @@ the ruling — then stop. With nothing eligible, end with exactly
 `No eligible integrator work: <one reason>.` and stop; the launcher reads that
 line to idle.
 
+For a candidate GitHub has already shown is claimed, the shared role README
+permits one bounded local liveness check before deciding whether that claim is
+live. Its evidence and inconclusive-result rules apply; no other local pickup
+read, wider scan, or empty-queue narration is permitted by this exception.
+
 Prove the authorship condition before claiming: compare every commit's
 `Claude-Session` trailer and the linked implementer claim/delegation lineage
 with this run's launching session. A Claude Agent child shares the launcher's
