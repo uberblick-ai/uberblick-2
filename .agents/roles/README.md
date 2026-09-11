@@ -126,16 +126,19 @@ reclaimed in the gap between two renewals.
 An implementation claim is stale when no matching later implementer Done
 exists and the claim's updated_at is more than 30 minutes old.
 
-A top-level claim is also stale immediately, regardless of age or renewal,
-when the observing session positively identifies its run on the same machine
-and establishes that the run is no longer running. For a candidate GitHub has
+A top-level claim with no matching completion is also stale immediately,
+regardless of age or renewal, when the observing session positively identifies
+its run on the same machine and establishes that the run is no longer running.
+For a candidate GitHub has
 already shown is claimed, pickup permits one bounded local liveness check:
 use retained runtime evidence to attribute the exact run to this machine and
-verify its termination or establish its process absence. A missing worktree,
-a missing search result, an unreadable process listing, or inability to place
-the run on this machine is inconclusive, not proof of death; keep the clocks
-above whenever attribution or absence cannot be established. This permits no
-other local pickup read, wider scan, or narration to prove an empty queue.
+verify its termination or establish its process absence on the same attribution
+channel, one known to observe that run while it is alive. A missing worktree,
+missing attribution evidence, an unreadable process listing, or a channel that
+cannot establish whether the run is alive is inconclusive, not proof of death;
+keep the clocks above whenever attribution or absence cannot be established.
+This permits no other local pickup read, wider scan, or narration to prove an
+empty queue.
 
 A later valid claim takes over a stale one and continues the current remote
 branch head; the superseded holder stops if it resumes. An evidence-based
