@@ -302,6 +302,7 @@ describe("ub agents workflow lifecycle", () => {
     expect(installed.status, installed.output).toBe(0);
     expect(installed.stdout).toContain("Installed uberblick-workflow@1.0.0 from local source");
     expect(readFileSync(join(box.cwd, ".agents/roles/shipper.md"), "utf8")).toBe("# Shipper v1\n");
+    expect(statSync(join(box.cwd, ".agents/roles/shipper.md")).mode & 0o777).toBe(0o644);
     expect(statSync(join(box.cwd, ".agents/adapters/run.sh")).mode & 0o777).toBe(0o755);
     expect(readFileSync(join(box.cwd, ".agents/launch.json"), "utf8")).toContain('"version":2');
     expect(readFileSync(join(box.cwd, ".claude/settings.json"), "utf8")).toContain("permissions");
