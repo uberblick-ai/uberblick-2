@@ -229,6 +229,68 @@ const V2 = {
 };
 
 describe("ub agents workflow lifecycle", () => {
+  it.each([
+    [0o664, 0o775],
+    [0o654, 0o744],
+    [0o645, 0o700],
+  ])("preserves Git-equivalent checkout modes %o/%o through the lifecycle", (regular, executable) => {
+    const box = sandbox();
+    gitProject(box);
+    const packages = join(dirname(box.cwd), "packages");
+    const first = packageAt(packages, "1.0.0", V1);
+    const second = packageAt(packages, "2.0.0", V2);
+    expect(runUb(["agents", "install", first], box).status).toBe(0);
+    const paths = [join(box.cwd, "AGENTS.md"), join(box.cwd, ".agents/adapters/run.sh")] as const;
+    chmodSync(paths[0], regular);
+    chmodSync(paths[1], executable);
+    const record = readFileSync(join(box.cwd, WORKFLOW_RECORD), "utf8");
+
+    const listed = runUb(["agents", "list"], box);
+    expect(listed.status, listed.output).toBe(0);
+    expect(listed.stdout).not.toContain("changed or missing:");
+    expect(readFileSync(join(box.cwd, WORKFLOW_RECORD), "utf8")).toBe(record);
+    expect(paths.map((path) => statSync(path).mode & 0o777)).toEqual([regular, executable]);
+
+    const unchanged = runUb(["agents", "update", first], box);
+    expect(unchanged.status, unchanged.output).toBe(0);
+    expect(paths.map((path) => statSync(path).mode & 0o777)).toEqual([regular, executable]);
+    expect(readFileSync(join(box.cwd, WORKFLOW_RECORD), "utf8")).toBe(record);
+
+    const updated = runUb(["agents", "update", second], box);
+    expect(updated.status, updated.output).toBe(0);
+    expect(existsSync(paths[1])).toBe(false);
+    expect(statSync(paths[0]).mode & 0o777).toBe(regular);
+    const removed = runUb(["agents", "uninstall"], box);
+    expect(removed.status, removed.output).toBe(0);
+    expect(existsSync(paths[0])).toBe(false);
+    expect(existsSync(join(box.cwd, WORKFLOW_RECORD))).toBe(false);
+  });
+
+  it.each([
+    [".agents/adapters/run.sh", 0o655],
+    ["AGENTS.md", 0o744],
+  ] as const)("preserves a changed owner-execute bit on %s", (path, mode) => {
+    const box = sandbox();
+    gitProject(box);
+    const first = packageAt(join(dirname(box.cwd), "packages"), "1.0.0", V1);
+    expect(runUb(["agents", "install", first], box).status).toBe(0);
+    const changed = join(box.cwd, path);
+    chmodSync(changed, mode);
+    const content = readFileSync(changed);
+    const record = readFileSync(join(box.cwd, WORKFLOW_RECORD), "utf8");
+
+    expect(runUb(["agents", "list"], box).stdout).toContain(`changed or missing: ${path}`);
+    const update = runUb(["agents", "update", first], box);
+    expect(update.status).not.toBe(0);
+    expect(update.stderr).toContain(`locally edited or missing managed file ${path}`);
+    expect(readFileSync(join(box.cwd, WORKFLOW_RECORD), "utf8")).toBe(record);
+    const uninstall = runUb(["agents", "uninstall"], box);
+    expect(uninstall.status).not.toBe(0);
+    expect(uninstall.stderr).toContain(`kept changed or unremovable resources: ${path}`);
+    expect(readFileSync(changed)).toEqual(content);
+    expect(statSync(changed).mode & 0o777).toBe(mode);
+  });
+
   it("installs, lists, updates and uninstalls one project-owned workflow", () => {
     const box = sandbox();
     gitProject(box);
@@ -640,6 +702,7 @@ describe("ub agents workflow lifecycle", () => {
     const install = interruptWorkflow("install", box.cwd, first);
     expect(install.signal, String(install.stderr)).toBe("SIGKILL");
     expect(existsSync(join(box.cwd, ".agents/adapters/run.sh"))).toBe(true);
+    chmodSync(join(box.cwd, ".agents/adapters/run.sh"), 0o775);
     expect(JSON.parse(readFileSync(join(box.cwd, WORKFLOW_RECORD), "utf8")).status).toEqual({
       state: "partial",
       operation: "install",
@@ -651,6 +714,7 @@ describe("ub agents workflow lifecycle", () => {
 
     const update = interruptWorkflow("update", box.cwd, second);
     expect(update.signal, String(update.stderr)).toBe("SIGKILL");
+    chmodSync(join(box.cwd, ".agents/requires.json"), 0o664);
     const partialUpdate = runUb(["agents", "list"], box);
     expect(partialUpdate.stdout).toContain("state: partial update to 2.0.0");
     expect(partialUpdate.stdout).toContain("next action: rerun `ub agents update <source>`");
@@ -658,6 +722,7 @@ describe("ub agents workflow lifecycle", () => {
 
     const uninstall = interruptWorkflow("uninstall", box.cwd, second);
     expect(uninstall.signal, String(uninstall.stderr)).toBe("SIGKILL");
+    chmodSync(join(box.cwd, "AGENTS.md"), 0o664);
     const partialUninstall = runUb(["agents", "list"], box);
     expect(partialUninstall.stdout).toContain("state: partial uninstall");
     expect(partialUninstall.stdout).toContain("next action: restore or move any changed resources");
