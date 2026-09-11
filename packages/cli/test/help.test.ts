@@ -30,6 +30,13 @@ import { ENV_HELP } from "../src/env.js";
 import { INIT_HELP, INIT_OPTIONS } from "../src/init.js";
 import { INSTALL_HELP, INSTALL_OPTIONS } from "../src/install.js";
 import { LAUNCH_HELP, LAUNCH_OPTIONS } from "../src/launch.js";
+import {
+  AGENTS_INSTALL_HELP,
+  AGENTS_LIST_HELP,
+  AGENTS_UNINSTALL_HELP,
+  AGENTS_UPDATE_HELP,
+  WORKFLOW_OPTIONS,
+} from "../src/workflow-adoption.js";
 import { OPEN_HELP, OPEN_OPTIONS } from "../src/open.js";
 import {
   REMOTE_INIT_HELP,
@@ -110,8 +117,12 @@ const PATHS: Path[] = [
     argv: ["agents"],
     help: AGENTS_HELP,
     options: {},
-    children: ["launch"],
+    children: ["install", "list", "update", "uninstall", "launch"],
   },
+  { argv: ["agents", "install"], help: AGENTS_INSTALL_HELP, options: WORKFLOW_OPTIONS },
+  { argv: ["agents", "list"], help: AGENTS_LIST_HELP, options: WORKFLOW_OPTIONS },
+  { argv: ["agents", "update"], help: AGENTS_UPDATE_HELP, options: WORKFLOW_OPTIONS },
+  { argv: ["agents", "uninstall"], help: AGENTS_UNINSTALL_HELP, options: WORKFLOW_OPTIONS },
   { argv: ["agents", "launch"], help: LAUNCH_HELP, options: LAUNCH_OPTIONS },
   // The compatibility alias is one of the paths this manifest is for: it is
   // typed by people, so it owes the same help as the command it aliases.
@@ -289,6 +300,16 @@ describe("every human-facing command path", () => {
   });
 
   it("uses the same semantic operand name at every help level and in usage errors", async () => {
+    expect(AGENTS_HELP).toContain("install <workflow@version|package-path>");
+    expect(AGENTS_HELP).toContain("update <workflow@version|package-path>");
+    expect(AGENTS_INSTALL_HELP).toMatch(/usage: ub agents install <workflow@version\|package-path>/);
+    expect(AGENTS_UPDATE_HELP).toMatch(/usage: ub agents update <workflow@version\|package-path>/);
+    for (const command of ["install", "update"]) {
+      const missingSource = await dispatch(["agents", command]);
+      expect(missingSource.status).toBe(2);
+      expect(missingSource.stderr).toContain("expected exactly one <workflow@version|package-path>");
+    }
+
     expect(MCP_HELP).toContain("install [client]");
     expect(INSTALL_HELP).toMatch(/usage: ub mcp install \[client\]/);
     expect(INSTALL_HELP).toMatch(/\noperands:\n {2}client\s/);
@@ -313,6 +334,12 @@ describe("every human-facing command path", () => {
     const missingUrl = await dispatch(["remote", "join"]);
     expect(missingUrl.status).toBe(2);
     expect(missingUrl.stderr).toContain("expected exactly one <url-with-workspace-id>");
+  });
+
+  it("states the workflow mutation confinement boundary", () => {
+    for (const help of [AGENTS_INSTALL_HELP, AGENTS_UPDATE_HELP, AGENTS_UNINSTALL_HELP]) {
+      expect(help).toContain("do not sandbox another same-user process");
+    }
   });
 
   it("describes init's MCP option as print-only", () => {

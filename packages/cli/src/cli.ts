@@ -34,7 +34,8 @@ commands:
                          given, the new workspace is created on that hub
   update                 update the copy of uberblick you are running — a
                          Homebrew installation, or a checkout on main
-  agents <command>       run the agent roles of a project you select
+  agents <command>       adopt and run an agent workflow for a project you
+                         select
   launch <role>          compatibility alias for \`ub agents launch\`
   open [options]         serve the web app and a hub in the foreground, and
                          open the browser
