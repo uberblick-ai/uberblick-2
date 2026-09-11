@@ -295,6 +295,12 @@ const ACCESS_SIGNATURES = [
 /** A refusal that waiting can repair, even when it carries an HTTP 403. */
 const TEMPORARY_ACCESS_SIGNATURES = [/rate limit/i, /\bquota\b/i];
 
+// The one policy refusal observed from Codex. Matching the whole terminal
+// quartet keeps a copy of this diagnostic in a diff or report from becoming a
+// launcher stop of its own.
+const CODEX_POLICY_REFUSAL =
+  "ERROR: This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request. To get authorized for security work, join the Trusted Access for Cyber program: https://chatgpt.com/cyber";
+
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -700,6 +706,21 @@ function accessReason(text: string): string | null {
     );
   if (found === undefined) return null;
   return found.length > 160 ? `${found.slice(0, 159)}…` : found;
+}
+
+/** Whether Codex ended with its observed policy-refusal diagnostic and trailer. */
+function codexPolicyRefused(text: string): boolean {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .slice(-4);
+  return (
+    lines[0] === CODEX_POLICY_REFUSAL &&
+    lines[1] === CODEX_POLICY_REFUSAL &&
+    lines[2] === "tokens used" &&
+    /^\d[\d,]*$/.test(lines[3] ?? "")
+  );
 }
 
 /** How to repair the access this reason names. */
@@ -1484,6 +1505,12 @@ export async function launchCommand(
           : `session ended from ${session.signal}`);
       if (session.malformed === true) {
         io.err(`ub agents launch: ${detail}\n`);
+        return 1;
+      }
+      if (runtime === "codex" && codexPolicyRefused(session.tail ?? session.lastLine)) {
+        io.err(
+          `launch: ${parsed.role} codex runtime refused the session for policy or safety reasons${transcriptSuffix(session)}; stopped\n`,
+        );
         return 1;
       }
       // The runtime's own dying words are usually on stderr, so the end of
