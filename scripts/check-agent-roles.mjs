@@ -150,7 +150,8 @@ if (
   !exactKeys(launch, ["version", "project", "entryRoles"]) ||
   launch.version !== 2 ||
   !object(launch.project) ||
-  !entries
+  !entries ||
+  Object.keys(entries).length === 0
 ) {
   fail(`${LAUNCH}: expected version 2 with project and entryRoles objects`);
 } else
@@ -174,7 +175,7 @@ if (
     const runtimes = object(entry.runtimes);
     if (
       !runtimes ||
-      Object.keys(runtimes).length === 0 ||
+      !exactKeys(runtimes, ["claude", "codex"]) ||
       !Object.hasOwn(runtimes, entry.defaultRuntime)
     ) {
       fail(`${LAUNCH}: ${slug} must declare its default runtime`);
@@ -193,21 +194,19 @@ if (
         continue;
       }
       if (
-        !(
-          runtime === "claude" ? ["runtime"] : ["read-only", "workspace-write", "unsandboxed"]
-        ).includes(config.sandbox)
-      )
-        fail(`${LAUNCH}: ${slug} ${runtime} has an invalid sandbox`);
-      if (
-        runtime === "claude" &&
-        !["auto", "default", "acceptEdits", "dontAsk", "bypassPermissions", "plan"].includes(
-          config.permissionMode,
+        !(runtime === "claude" ? ["runtime"] : ["workspace-write", "unsandboxed"]).includes(
+          config.sandbox,
         )
       )
+        fail(`${LAUNCH}: ${slug} ${runtime} has an invalid sandbox`);
+      if (runtime === "claude" && config.permissionMode !== "auto")
         fail(`${LAUNCH}: ${slug} claude has an invalid permission mode`);
       if (config.allowedTools !== undefined && !strings(config.allowedTools))
         fail(`${LAUNCH}: ${slug} allowedTools must list non-empty tool names`);
-      if (typeof config.adapter !== "string" || !resources.has(config.adapter)) {
+      if (
+        config.adapter !== `.${runtime}/agents/${slug}.${runtime === "claude" ? "md" : "toml"}` ||
+        !resources.has(config.adapter)
+      ) {
         fail(`${LAUNCH}: ${slug} ${runtime} adapter is not a declared workflow resource`);
         continue;
       }

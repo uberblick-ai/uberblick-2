@@ -83,7 +83,7 @@ test("launch entries bind their own adapter and declare their probe and default 
   edit(wrong, ".agents/launch.json", (x) => {
     x.entryRoles.implementer.runtimes.codex.adapter = ".codex/agents/integrator.toml";
   });
-  fails(wrong, /expected "implementer"/);
+  fails(wrong, /adapter is not a declared workflow resource/);
   const missing = fixture(t);
   edit(missing, ".agents/launch.json", (x) => {
     x.entryRoles.implementer.defaultRuntime = "unknown";
@@ -109,16 +109,24 @@ test("role roster, default runtime and valid project launch policy are data", (t
     delete x.entryRoles.integrator;
     x.entryRoles.implementer.defaultRuntime = "claude";
     x.entryRoles.implementer.runtimes.codex.sandbox = "workspace-write";
-    x.entryRoles.implementer.runtimes.claude.permissionMode = "default";
   });
   passes(dir);
   // A new workflow-provided role can be launched without editing the checker.
   const slug = "custom-role";
-  const paths = [`.agents/roles/${slug}.md`, `.codex/agents/${slug}.toml`];
+  const paths = [
+    `.agents/roles/${slug}.md`,
+    `.codex/agents/${slug}.toml`,
+    `.claude/agents/${slug}.md`,
+  ];
   writeFileSync(join(dir, paths[0]), "# Custom role\n");
   writeFileSync(
     join(dir, paths[1]),
     `name = "${slug}"\ndescription = "Custom"\ndeveloper_instructions = "Read ${paths[0]}"\n`,
+  );
+  mkdirSync(join(dir, ".claude/agents"), { recursive: true });
+  writeFileSync(
+    join(dir, paths[2]),
+    `---\nname: ${slug}\ndescription: Custom\n---\nRead ${paths[0]}\n`,
   );
   edit(dir, ".agents/requires.json", (x) => x.resources.push(...paths));
   edit(dir, ".agents/launch.json", (x) => {
@@ -126,7 +134,10 @@ test("role roster, default runtime and valid project launch policy are data", (t
       contract: paths[0],
       defaultRuntime: "codex",
       probe: ["true"],
-      runtimes: { codex: { adapter: paths[1], sandbox: "read-only" } },
+      runtimes: {
+        codex: { adapter: paths[1], sandbox: "workspace-write" },
+        claude: { adapter: paths[2], sandbox: "runtime", permissionMode: "auto" },
+      },
     };
   });
   passes(dir);
