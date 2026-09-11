@@ -1,352 +1,160 @@
-/**
- * A validator that cannot fail is worse than none, so one broken tree proves it
- * does. The fixture is a temp directory with the script copied into it, because
- * the script anchors itself to its own parent directory.
- */
-
+/** Project-owned integration checks; portable source coverage lives upstream. */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
-	cpSync,
-	copyFileSync,
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-
-const here = dirname(fileURLToPath(import.meta.url));
-const root = dirname(here);
-
-/**
- * A whole adopting project: this repository's own declared workflow, copied.
- *
- * The resource list is `.agents/requires.json`'s, so a file the workflow starts
- * requiring arrives here without anyone remembering to add it — and a fixture
- * that stopped being complete would be the checker's own failure to report.
- */
-function completeFixture() {
-	const fixture = mkdtempSync(join(tmpdir(), "agent-roles-"));
-	mkdirSync(join(fixture, "scripts"));
-	copyFileSync(join(here, "check-agent-roles.mjs"), join(fixture, "scripts/check-agent-roles.mjs"));
-	const requires = JSON.parse(readFileSync(join(root, ".agents/requires.json"), "utf8"));
-	for (const relative of [...requires.resources, ...requires.projectResources]) {
-		mkdirSync(dirname(join(fixture, relative)), { recursive: true });
-		copyFileSync(join(root, relative), join(fixture, relative));
-	}
-	// Not portable, and this project's own: the shaping skill adapters the
-	// checker requires of itself, and the role triplets it validates.
-	for (const relative of [
-		".agents/roles",
-		".claude/agents",
-		".codex/agents",
-		".agents/skills/shape-issue",
-		".claude/skills/shape-issue",
-	]) cpSync(join(root, relative), join(fixture, relative), { recursive: true });
-	return fixture;
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+function fixture(t) {
+  const dir = mkdtempSync(join(tmpdir(), "agent-integration-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const requires = JSON.parse(readFileSync(join(root, ".agents/requires.json"), "utf8"));
+  for (const relative of [
+    "scripts/check-agent-roles.mjs",
+    ...requires.resources,
+    ...requires.projectResources,
+    ".agents/skills/shape-issue/SKILL.md",
+    ".claude/skills/shape-issue/SKILL.md",
+  ]) {
+    if (!existsSync(join(root, relative))) continue;
+    mkdirSync(dirname(join(dir, relative)), { recursive: true });
+    cpSync(join(root, relative), join(dir, relative));
+  }
+  return dir;
 }
-
-function setClaudeKey(fixture, slug, key, value) {
-	const path = join(fixture, ".claude/agents", `${slug}.md`);
-	const lines = readFileSync(path, "utf8").split("\n");
-	// Only the frontmatter block: a body line opening `effort:` is prose, not a pin.
-	const existing = lines.slice(1, lines.indexOf("---", 1)).findIndex((line) => line.startsWith(`${key}:`));
-	if (existing !== -1) lines.splice(existing + 1, 1);
-	if (value !== null) lines.splice(lines.indexOf("---", 1), 0, `${key}: ${value}`);
-	writeFileSync(path, lines.join("\n"));
+function run(dir) {
+  return spawnSync(process.execPath, [join(dir, "scripts/check-agent-roles.mjs")], {
+    encoding: "utf8",
+  });
 }
-
-function run(fixture) {
-	return spawnSync(process.execPath, [join(fixture, "scripts/check-agent-roles.mjs")], {
-		encoding: "utf8",
-	});
+function edit(dir, path, fn) {
+  const value = JSON.parse(readFileSync(join(dir, path), "utf8"));
+  fn(value);
+  writeFileSync(join(dir, path), JSON.stringify(value));
 }
-
-test("an incomplete role tree fails, and the absent Claude third says so", () => {
-	const fixture = mkdtempSync(join(tmpdir(), "agent-roles-"));
-	for (const dir of ["scripts", ".agents/roles", ".codex/agents"])
-		mkdirSync(join(fixture, dir), { recursive: true });
-	const script = join(fixture, "scripts/check-agent-roles.mjs");
-	copyFileSync(join(here, "check-agent-roles.mjs"), script);
-	writeFileSync(join(fixture, ".agents/roles/README.md"), "# Role contracts\n");
-	writeFileSync(join(fixture, ".agents/roles/implementer.md"), "# Implementer\n");
-	// A value the parser must not accept as `"ok"` with the rest ignored.
-	writeFileSync(
-		join(fixture, ".codex/agents/implementer.toml"),
-		'name = "implementer"\ndescription = "ok" trailing\n',
-	);
-
-	const run = spawnSync(process.execPath, [script], { encoding: "utf8" });
-
-	assert.equal(run.status, 1);
-	assert.match(run.stdout, /^skipped: \.claude\/agents is absent/m);
-	assert.match(run.stderr, /expected exactly \[/);
-	assert.match(run.stderr, /value is not one quoted string: description = "ok" trailing/);
+function passes(dir) {
+  const result = run(dir);
+  assert.equal(result.status, 0, result.stderr);
+}
+function fails(dir, pattern) {
+  const result = run(dir);
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, pattern);
+}
+test("current adopted workflow integrates, including the review image exclusions", (t) => {
+  const dir = fixture(t);
+  passes(dir);
+  for (const path of [".claude/agents", ".claude/settings.json", ".github"])
+    rmSync(join(dir, path), { recursive: true, force: true });
+  const result = run(dir);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /skipped: \.github/);
 });
-
-// `.claude/agents` is absent from the immutable review image, which the script
-// itself skips loudly; this test needs it as a fixture, so it skips loudly too.
-const claudeSkip = existsSync(join(root, ".claude/agents"))
-	? false
-	: ".claude/agents is absent from this checkout, so the complete role fixture cannot be built here";
-
-test("only the two owner-approved high effort pins are permitted", { skip: claudeSkip }, () => {
-	const fixture = completeFixture();
-	assert.equal(run(fixture).status, 0);
-
-	for (const slug of ["issue-preparer", "implementer"]) {
-		setClaudeKey(fixture, slug, "effort", "max");
-		const result = run(fixture);
-		assert.equal(result.status, 1);
-		assert.match(result.stderr, new RegExp(`${slug}\\.md: effort is "max", expected owner-approved "high"`));
-		setClaudeKey(fixture, slug, "effort", "high");
-	}
-
-	for (const slug of ["issue-adversary", "implementation-reviewer", "integrator"]) {
-		setClaudeKey(fixture, slug, "effort", "high");
-		const result = run(fixture);
-		assert.equal(result.status, 1);
-		assert.match(result.stderr, new RegExp(`${slug}\\.md: key "effort" pins runtime policy`));
-		setClaudeKey(fixture, slug, "effort", null);
-	}
+test("every declared binding and project resource is independently required", (t) => {
+  const binding = fixture(t);
+  edit(binding, ".agents/requires.json", (x) => x.bindings.push("project.context.additional"));
+  fails(binding, /missing required binding project.context.additional/);
+  const missing = fixture(t);
+  edit(missing, ".agents/requires.json", (x) =>
+    x.projectResources.push("scripts/missing-project-tool.sh"),
+  );
+  fails(missing, /missing declared resource: scripts\/missing-project-tool.sh/);
 });
-
-test("issue-authoring adapters point to the neutral protocol and its files exist", { skip: claudeSkip }, () => {
-	const missingProtocol = completeFixture();
-	rmSync(join(missingProtocol, ".agents/protocols/issue-shaping.md"));
-	let result = run(missingProtocol);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /issue-shaping\.md: missing provider-neutral issue-authoring file/);
-
-	const staleAdapter = completeFixture();
-	writeFileSync(
-		join(staleAdapter, ".agents/skills/shape-issue/SKILL.md"),
-		"Read .claude/skills/shape-issue/protocol.md\n",
-	);
-	result = run(staleAdapter);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /does not point to \.agents\/protocols\/issue-shaping\.md/);
-
-	const missingPreparationTest = completeFixture();
-	rmSync(join(missingPreparationTest, ".agents/protocols/issue-preparation.test.mjs"));
-	result = run(missingPreparationTest);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /issue-preparation\.test\.mjs: missing provider-neutral issue-authoring file/);
+test("missing adopted protocols and stale project shaping adapters fail", (t) => {
+  const missing = fixture(t);
+  rmSync(join(missing, ".agents/protocols/issue-preparation.test.mjs"));
+  fails(missing, /missing declared resource: \.agents\/protocols\/issue-preparation.test.mjs/);
+  const stale = fixture(t);
+  writeFileSync(join(stale, ".agents/skills/shape-issue/SKILL.md"), "Read an old protocol.");
+  fails(stale, /does not point to \.agents\/protocols\/issue-shaping.md/);
+  const voice = fixture(t);
+  writeFileSync(join(voice, ".agents/adapters/chatgpt-voice.md"), "Read an old protocol.");
+  fails(voice, /does not point to \.agents\/protocols\/issue-shaping.md/);
 });
-
-test("launch data is complete and stays aligned with the role triplets", { skip: claudeSkip }, () => {
-	const missing = completeFixture();
-	rmSync(join(missing, ".agents/launch.json"));
-	let result = run(missing);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /launch\.json: missing repository launch data/);
-
-	const stale = completeFixture();
-	const path = join(stale, ".agents/launch.json");
-	const data = JSON.parse(readFileSync(path, "utf8"));
-	data.entryRoles.implementer.runtimes.codex.adapter = ".codex/agents/integrator.toml";
-	writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
-	result = run(stale);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /implementer codex adapter.*implementer\.toml/);
-
-	const missingAdapter = completeFixture();
-	rmSync(join(missingAdapter, ".claude/agents/implementer.md"));
-	result = run(missingAdapter);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /\.claude\/agents\/implementer\.md: missing/);
-
-	const wrongDefault = completeFixture();
-	const wrongPath = join(wrongDefault, ".agents/launch.json");
-	const wrongData = JSON.parse(readFileSync(wrongPath, "utf8"));
-	wrongData.entryRoles.implementer.defaultRuntime = "claude";
-	writeFileSync(wrongPath, `${JSON.stringify(wrongData, null, 2)}\n`);
-	result = run(wrongDefault);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /implementer defaultRuntime.*expected codex/);
-
-	const wrongPermission = completeFixture();
-	const permissionPath = join(wrongPermission, ".agents/launch.json");
-	const permissionData = JSON.parse(readFileSync(permissionPath, "utf8"));
-	permissionData.entryRoles.integrator.runtimes.claude.permissionMode = "manual";
-	writeFileSync(permissionPath, `${JSON.stringify(permissionData, null, 2)}\n`);
-	result = run(wrongPermission);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /integrator claude permissionMode.*expected auto/);
-
-	const declaredGrant = completeFixture();
-	const grantPath = join(declaredGrant, ".agents/launch.json");
-	const grantData = JSON.parse(readFileSync(grantPath, "utf8"));
-	grantData.entryRoles.integrator.runtimes.claude.allowedTools = ["Bash(gh pr list:*)"];
-	writeFileSync(grantPath, `${JSON.stringify(grantData, null, 2)}\n`);
-	result = run(declaredGrant);
-	assert.equal(result.status, 0, result.stderr);
-	grantData.entryRoles.integrator.runtimes.claude.allowedTools = [];
-	writeFileSync(grantPath, `${JSON.stringify(grantData, null, 2)}\n`);
-	result = run(declaredGrant);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /integrator claude allowedTools must list non-empty tool names/);
+test("launch entries bind their own adapter and declare their probe and default runtime", (t) => {
+  const wrong = fixture(t);
+  edit(wrong, ".agents/launch.json", (x) => {
+    x.entryRoles.implementer.runtimes.codex.adapter = ".codex/agents/integrator.toml";
+  });
+  fails(wrong, /adapter is not a declared workflow resource/);
+  const missing = fixture(t);
+  edit(missing, ".agents/launch.json", (x) => {
+    x.entryRoles.implementer.defaultRuntime = "unknown";
+  });
+  fails(missing, /must declare its default runtime/);
+  const probe = fixture(t);
+  edit(probe, ".agents/launch.json", (x) => {
+    x.entryRoles.implementer.probe = ["sh", "scripts/undeclared.sh"];
+  });
+  fails(probe, /not a declared project resource/);
+  for (const argv of [
+    ["sh", "scripts/probe-work.sh", "implementer"],
+    ["sh", "scripts/probe-work.sh"],
+  ]) {
+    const wrongQueue = fixture(t);
+    edit(wrongQueue, ".agents/launch.json", (x) => {
+      x.entryRoles.integrator.probe = argv;
+    });
+    fails(wrongQueue, /project probe must name its own role/);
+  }
 });
-
-test("the portable source keeps no value of this project's own", { skip: claudeSkip }, () => {
-	// Each of these is a value a second project would have to be able to
-	// change, written where nobody could change it: the check exists so the
-	// portability cleanup cannot quietly rot back.
-	for (const [added, expected] of [
-		["Ground at `origin/main` first.\n", /carries "origin\/m" — a base ref/],
-		["Ask @bk-one about it.\n", /carries "@bk-one" — an account handle/],
-		["Ask `@bk-one` about it.\n", /carries "@bk-one" — an account handle/],
-		["Fetch with `git fetch origin main`.\n", /carries "git fetch origin main" — a base ref/],
-		["Read Editorial contract first.\n", /carries "Editorial contract" — a product-document title/],
-		["Build the Docker review image.\n", /carries "Docker" — a build or validation command/],
-		["Run `mise run test` before handoff.\n", /carries "mise" — a build or validation command/],
-		[
-			"Role context: Uberblick project agent workflow (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`).\n",
-			/carries "c0bb016d-3d4c-4316-9b4e-da8a7b322e55" — a corpus document uuid/,
-		],
-		[
-			"Post to https://github.com/uberblick-ai/uberblick-2/discussions/522.\n",
-			/carries "github\.com\/uberblick-ai\/uberblick-2" — a repository or discussion URL/,
-		],
-		[
-			"Read /home/someone/uberblick/.agents/roles/implementer.md first.\n",
-			/carries "\/home\/" — an absolute host path/,
-		],
-		// The bare slug is the form the probe and the shaping protocol actually
-		// carried before this workflow was made portable, so the guard has to
-		// fail it and not only the URL form.
-		[
-			"Run `gh issue list -R uberblick-ai/uberblick-2 --state open`.\n",
-			/carries "-R uberblick-ai\/uberblick-2" — a repository operand/,
-		],
-		[
-			"Use `--repo uberblick-ai/uberblick-2` so no checkout is required.\n",
-			/carries "--repo uberblick-ai\/uberblick-2" — a repository operand/,
-		],
-		[
-			"Enumerate `gh api repos/uberblick-ai/uberblick-2/issues`.\n",
-			/carries "repos\/uberblick-ai\/uberblick-2" — a repository in an API path/,
-		],
-		[
-			"The durable record stays in uberblick-ai/uberblick-2.\n",
-			/carries "uberblick-ai\/uberblick-2" — this project's repository/,
-		],
-	]) {
-		const fixture = completeFixture();
-		const contract = join(fixture, ".agents/roles/implementer.md");
-		writeFileSync(contract, `${readFileSync(contract, "utf8")}${added}`);
-		const result = run(fixture);
-		assert.equal(result.status, 1, added);
-		assert.match(result.stderr, expected);
-	}
-
-	// And the shapes that read like a slug but are not one, so the guard stays
-	// usable: a severity pair, a placeholder API path, and a shell variable.
-	const legal = completeFixture();
-	const contract = join(legal, ".agents/roles/implementer.md");
-	writeFileSync(
-		contract,
-		`${readFileSync(contract, "utf8")}\nRule P2/P3 and/or park; read \`repos/{owner}/{repo}/commits\`; run \`gh issue list -R "$REPO"\`.\n`,
-	);
-	assert.equal(run(legal).status, 0, run(legal).stderr);
+test("adapter syntax remains checked at the project launch boundary", (t) => {
+  const dir = fixture(t);
+  writeFileSync(
+    join(dir, ".codex/agents/implementer.toml"),
+    'name = "implementer"\ndescription = "valid" trailing\n',
+  );
+  fails(dir, /value is not one quoted string/);
 });
-
-test("the required-resource declaration stays honest in both directions", { skip: claudeSkip }, () => {
-	const requires = ".agents/requires.json";
-	const read = (fixture) => JSON.parse(readFileSync(join(fixture, requires), "utf8"));
-	const write = (fixture, data) =>
-		writeFileSync(join(fixture, requires), `${JSON.stringify(data, null, 2)}\n`);
-	const complete = completeFixture();
-	const projectResources = read(complete).projectResources;
-	for (const runtimeConfiguration of [
-		".mcp.json",
-		".claude/settings.json",
-		".codex/config.toml",
-		".codex/rules/workflow.rules",
-	]) assert.ok(projectResources.includes(runtimeConfiguration), runtimeConfiguration);
-
-	// A helper an instruction tells an agent to run, that the declaration
-	// omits: the adopting project would receive the instruction without the
-	// helper, so it fails here instead.
-	const undeclaredHelper = completeFixture();
-	const contract = join(undeclaredHelper, ".agents/roles/implementer.md");
-	writeFileSync(
-		contract,
-		`${readFileSync(contract, "utf8")}\nRun \`sh scripts/undeclared-helper.sh\` last.\n`,
-	);
-	writeFileSync(join(undeclaredHelper, "scripts/undeclared-helper.sh"), "#!/bin/sh\n");
-	let result = run(undeclaredHelper);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /names scripts\/undeclared-helper\.sh, which .* does not declare/);
-
-	// The other direction: a portable file nobody declared, and a declared
-	// file nobody shipped.
-	const undeclaredFile = completeFixture();
-	writeFileSync(join(undeclaredFile, ".agents/protocols/new-protocol.md"), "# New\n");
-	result = run(undeclaredFile);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /resources omits the portable file \.agents\/protocols\/new-protocol\.md/);
-
-	const absentResource = completeFixture();
-	const declared = read(absentResource);
-	declared.resources = [...declared.resources, "scripts/absent-helper.sh"].sort();
-	write(absentResource, declared);
-	result = run(absentResource);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /names a file this repository does not have: scripts\/absent-helper\.sh/);
-
-	const misclassifiedProbe = completeFixture();
-	const misclassified = read(misclassifiedProbe);
-	misclassified.projectResources = misclassified.projectResources.filter(
-		(resource) => resource !== "scripts/probe-work.sh",
-	);
-	misclassified.resources = [...misclassified.resources, "scripts/probe-work.sh"].sort();
-	write(misclassifiedProbe, misclassified);
-	result = run(misclassifiedProbe);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /projectResources omits implementer project probe scripts\/probe-work\.sh/);
-
-	const incompleteReviewImage = completeFixture();
-	rmSync(join(incompleteReviewImage, ".github/ISSUE_SPEC.md"));
-	result = run(incompleteReviewImage);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /names a file this repository does not have: \.github\/ISSUE_SPEC\.md/);
-
-	// The immutable review image deliberately excludes these two trees. Their
-	// absence skips only resources beneath the absent roots; every present part
-	// of the declaration and both parity directions are still checked.
-	const reviewImage = completeFixture();
-	rmSync(join(reviewImage, ".claude/agents"), { recursive: true });
-	rmSync(join(reviewImage, ".claude/settings.json"));
-	rmSync(join(reviewImage, ".github"), { recursive: true });
-	result = run(reviewImage);
-	assert.equal(result.status, 0, result.stderr);
-	assert.match(result.stdout, /skipped: \.claude\/agents is absent/);
-	assert.match(result.stdout, /skipped: \.claude\/settings\.json is absent/);
-	assert.match(result.stdout, /skipped: \.github is absent/);
-
-	// And the bindings half: this project must declare what the workflow needs.
-	const missingBinding = completeFixture();
-	const launch = join(missingBinding, ".agents/launch.json");
-	const data = JSON.parse(readFileSync(launch, "utf8"));
-	delete data.project.retrospectives.implementation;
-	writeFileSync(launch, `${JSON.stringify(data, null, 2)}\n`);
-	result = run(missingBinding);
-	assert.equal(result.status, 1);
-	assert.match(
-		result.stderr,
-		/declares no "project\.retrospectives\.implementation", which .* requires of every project/,
-	);
-
-	const malformed = completeFixture();
-	write(malformed, { version: 2, bindings: [], resources: [], projectResources: [] });
-	result = run(malformed);
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /expected only version 1, bindings, resources and projectResources/);
+const customRoleSkip = existsSync(join(root, ".claude/agents"))
+  ? false
+  : ".claude/agents is absent from this checkout, so a complete custom role cannot be built";
+test("role roster, default runtime and valid project launch policy are data", { skip: customRoleSkip }, (t) => {
+  const dir = fixture(t);
+  edit(dir, ".agents/launch.json", (x) => {
+    delete x.entryRoles.integrator;
+    x.entryRoles.implementer.defaultRuntime = "claude";
+    x.entryRoles.implementer.runtimes.codex.sandbox = "workspace-write";
+  });
+  passes(dir);
+  // A new workflow-provided role can be launched without editing the checker.
+  const slug = "custom-role";
+  const paths = [
+    `.agents/roles/${slug}.md`,
+    `.codex/agents/${slug}.toml`,
+    `.claude/agents/${slug}.md`,
+  ];
+  writeFileSync(join(dir, paths[0]), "# Custom role\n");
+  writeFileSync(
+    join(dir, paths[1]),
+    `name = "${slug}"\ndescription = "Custom"\ndeveloper_instructions = "Read ${paths[0]}"\n`,
+  );
+  mkdirSync(join(dir, ".claude/agents"), { recursive: true });
+  writeFileSync(
+    join(dir, paths[2]),
+    `---\nname: ${slug}\ndescription: Custom\n---\nRead ${paths[0]}\n`,
+  );
+  edit(dir, ".agents/requires.json", (x) => x.resources.push(...paths));
+  edit(dir, ".agents/launch.json", (x) => {
+    x.entryRoles[slug] = {
+      contract: paths[0],
+      defaultRuntime: "codex",
+      probe: ["true"],
+      runtimes: {
+        codex: { adapter: paths[1], sandbox: "workspace-write" },
+        claude: { adapter: paths[2], sandbox: "runtime", permissionMode: "auto" },
+      },
+    };
+  });
+  passes(dir);
 });

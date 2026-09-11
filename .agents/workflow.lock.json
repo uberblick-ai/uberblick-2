@@ -1,0 +1,185 @@
+{
+  "recordVersion": 1,
+  "workflow": "uberblick-workflow",
+  "version": "0.1.0",
+  "source": {
+    "kind": "local",
+    "repository": "uberblick-ai/agent-workflows",
+    "commit": "b2ccfe08719d890c5e1c26d31ef8cf7aaf522812"
+  },
+  "digest": {
+    "algorithm": "sha256",
+    "framing": "uberblick-workflow-payload-v1",
+    "payload": "d75a2cf4e556e10e4bd39142b4d74c63206fd323273cb40f6eb43429cba3426c"
+  },
+  "resources": [
+    {
+      "path": ".agents/adapters/chatgpt-voice.md",
+      "mode": "100644",
+      "sha256": "77f6df606064d56def8c67d2468a4394e631e7e7931f9d03a8f574750a7b26fe"
+    },
+    {
+      "path": ".agents/adapters/runtime-dispatch.md",
+      "mode": "100644",
+      "sha256": "08182e43092dbd0a149209e07523bce0277220c86f09bb3fcc506dcdabfd3277"
+    },
+    {
+      "path": ".agents/development.md",
+      "mode": "100644",
+      "sha256": "70c1ed9fdd769e6d94037180c6cd263a822de4c426b1be29a6270fcc99413c47"
+    },
+    {
+      "path": ".agents/protocols/delivery-policy.md",
+      "mode": "100644",
+      "sha256": "cd5d39b220ed09640a07d0b60d55bda9104b5ae4af4df7d08ed46b63010738ce"
+    },
+    {
+      "path": ".agents/protocols/integration.md",
+      "mode": "100644",
+      "sha256": "2c77eb9d40c558c32893f8b497ae89c6043bb4638f8465b6555a3a266ddcd807"
+    },
+    {
+      "path": ".agents/protocols/issue-preparation.md",
+      "mode": "100644",
+      "sha256": "18831cfa4302ac4f7eca7acdb108831c5659d9d7d59b3a5ec871cef7c384501c"
+    },
+    {
+      "path": ".agents/protocols/issue-preparation.mjs",
+      "mode": "100644",
+      "sha256": "35d28ddfa4a2685d709ca14b1cb7d26b209dd7d23cdbec5845af6b0bb3c6f80e"
+    },
+    {
+      "path": ".agents/protocols/issue-preparation.test.mjs",
+      "mode": "100644",
+      "sha256": "c529881b540d8cb64e23859ff8a592d3053c41358fe1ff061c3a45bfa09b2503"
+    },
+    {
+      "path": ".agents/protocols/issue-shaping.md",
+      "mode": "100644",
+      "sha256": "43ec9187ebb8ec072d6aa67adb0aa508db03afffe73abbded16d2d2ddda9f804"
+    },
+    {
+      "path": ".agents/protocols/review-protocol.md",
+      "mode": "100644",
+      "sha256": "9795ebc4d4a9bf235db14af225a86aefe3a0b28378b5cfd183056032f1c7c662"
+    },
+    {
+      "path": ".agents/protocols/review-rounds.mjs",
+      "mode": "100644",
+      "sha256": "ae477817983d4110e7c2e2b28dfdb0cf8ab6191b46951c7d4b9014937c652192"
+    },
+    {
+      "path": ".agents/protocols/review-rounds.test.mjs",
+      "mode": "100644",
+      "sha256": "13382f4a8f33fe743e5eb3def767702981298aba16caa297a244a322e8c0c574"
+    },
+    {
+      "path": ".agents/requires.json",
+      "mode": "100644",
+      "sha256": "219db357438c45e88aa68266576be00e6ed0b29f95753f9f92cdf5de672f4160"
+    },
+    {
+      "path": ".agents/roles/README.md",
+      "mode": "100644",
+      "sha256": "483b0bb8b3e874c903883ee6762fc21efb42aac18d87de2c1c164ac7a607a74b"
+    },
+    {
+      "path": ".agents/roles/implementation-reviewer.md",
+      "mode": "100644",
+      "sha256": "77b7ca31963afc393b25b8640b79f7d0544405c8d51fe62f67ee4a20fbde62e0"
+    },
+    {
+      "path": ".agents/roles/implementer.md",
+      "mode": "100644",
+      "sha256": "d007ae4dc27caa72afbdb4eb587f3a95e11919afde7c5bfbc48f5da8b0e0a176"
+    },
+    {
+      "path": ".agents/roles/integrator.md",
+      "mode": "100644",
+      "sha256": "a179f60bdba791bf79428817e84466120c0223cde2b8ac90474903feecdb76dc"
+    },
+    {
+      "path": ".agents/roles/issue-adversary.md",
+      "mode": "100644",
+      "sha256": "01aebc3e953488fa103eb5a19833124728d8b528ecadba90684ccba34cbd95dd"
+    },
+    {
+      "path": ".agents/roles/issue-preparer.md",
+      "mode": "100644",
+      "sha256": "10957d4271f55cfe6756cc028f03a9b1b746159ea1ff7e211031ffdb2abd49fa"
+    },
+    {
+      "path": ".claude/agents/implementation-reviewer.md",
+      "mode": "100644",
+      "sha256": "cc58ded84c8a38e2319c9bba071aef575b9b996f0f4e72caa2c9acecb5b9b9b9"
+    },
+    {
+      "path": ".claude/agents/implementer.md",
+      "mode": "100644",
+      "sha256": "eb12e9cf27bf9c634f84f07439622da59c3054cf9397e42644b107f9eb89cce4"
+    },
+    {
+      "path": ".claude/agents/integrator.md",
+      "mode": "100644",
+      "sha256": "e3527e2df15e02ac8ed1926b089d003a826214f4963bfa6372a7ec828750089b"
+    },
+    {
+      "path": ".claude/agents/issue-adversary.md",
+      "mode": "100644",
+      "sha256": "4e4e273ce6d67e6bd788962b11cfad39be08df062b8ca7fd22bfd65f1868ad4c"
+    },
+    {
+      "path": ".claude/agents/issue-preparer.md",
+      "mode": "100644",
+      "sha256": "a4986cfbb914bcdb5b8d5184f6f809421de1e3c8dad6675d2b468deccef97a4d"
+    },
+    {
+      "path": ".codex/agents/implementation-reviewer.toml",
+      "mode": "100644",
+      "sha256": "2e1a556fd62767ef47771129db2e8957fc3de91e4744d97656e361282afebe83"
+    },
+    {
+      "path": ".codex/agents/implementer.toml",
+      "mode": "100644",
+      "sha256": "89c65237e1df62411dae2f684e348167b9f90984272c01cf7402c13bd179f98f"
+    },
+    {
+      "path": ".codex/agents/integrator.toml",
+      "mode": "100644",
+      "sha256": "0674d7cc5097a8fe6ffaf4f470c6268250152fb6d556ad08beafec5acba769b7"
+    },
+    {
+      "path": ".codex/agents/issue-adversary.toml",
+      "mode": "100644",
+      "sha256": "7cc4f91717fa081d56dfb9e027ccc6c788c0679e99d431f06f41c1f1c7f57ed1"
+    },
+    {
+      "path": ".codex/agents/issue-preparer.toml",
+      "mode": "100644",
+      "sha256": "905a93f3b94f4f5019fe8cffadf568e52021abfcd5bd961614ee38e88e65192f"
+    },
+    {
+      "path": "AGENTS.md",
+      "mode": "100644",
+      "sha256": "b1626ca2b6551a310723e9f61e340bd366f99adf69d2978162864c504bf7d557"
+    },
+    {
+      "path": "scripts/agent-binding.mjs",
+      "mode": "100644",
+      "sha256": "ee150a721a1e4c53a6625a8f658ff79d607991bfec2476f7b2edab8b9acd7354"
+    },
+    {
+      "path": "scripts/create-issue.mjs",
+      "mode": "100644",
+      "sha256": "73d004856afd74fcda8b3043f8b2e7b53e44e847e9f19213356efedb15f94249"
+    },
+    {
+      "path": "scripts/post-retrospective.sh",
+      "mode": "100755",
+      "sha256": "20b4d357aad8e86daaee88e6fffd6f8e567b9f04ec9a6e0b34f2a1f56763d91b"
+    }
+  ],
+  "status": {
+    "state": "complete"
+  }
+}
