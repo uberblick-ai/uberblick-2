@@ -336,6 +336,12 @@ describe("every human-facing command path", () => {
     expect(missingUrl.stderr).toContain("expected exactly one <url-with-workspace-id>");
   });
 
+  it("states the workflow mutation confinement boundary", () => {
+    for (const help of [AGENTS_INSTALL_HELP, AGENTS_UPDATE_HELP, AGENTS_UNINSTALL_HELP]) {
+      expect(help).toContain("do not sandbox another same-user process");
+    }
+  });
+
   it("describes init's MCP option as print-only", () => {
     expect(INIT_HELP).toMatch(
       /--mcp, --no-mcp.*printing the MCP client snippet.*It prints;.*registering a client is `ub mcp install`/s,

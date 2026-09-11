@@ -167,6 +167,51 @@ else uninstallWorkflow(root, hooks);
   });
 }
 
+function relocatePayloadDuring(
+  operation: "write" | "remove",
+  box: Sandbox,
+  destination: string,
+  replacement: Record<string, string>,
+  action: () => void,
+): void {
+  const originalOpen = fs.openSync;
+  const originalUnlink = fs.unlinkSync;
+  let relocated = false;
+  const relocate = (): void => {
+    renameSync(join(box.cwd, "payload"), destination);
+    mkdirSync(join(box.cwd, "payload"));
+    for (const [path, content] of Object.entries(replacement)) write(join(box.cwd, "payload", path), content);
+    relocated = true;
+  };
+  if (operation === "write") {
+    fs.openSync = ((path, ...args) => {
+      if (
+        !relocated &&
+        typeof path === "string" &&
+        path.startsWith(".a.txt.") &&
+        process.cwd() === join(box.cwd, "payload")
+      ) {
+        relocate();
+      }
+      return (originalOpen as (...openArgs: unknown[]) => number)(path, ...args);
+    }) as typeof fs.openSync;
+  } else {
+    fs.unlinkSync = ((path) => {
+      if (!relocated && path === "a.txt" && process.cwd() === join(box.cwd, "payload")) relocate();
+      return originalUnlink(path);
+    }) as typeof fs.unlinkSync;
+  }
+  syncBuiltinESMExports();
+  try {
+    action();
+  } finally {
+    fs.openSync = originalOpen;
+    fs.unlinkSync = originalUnlink;
+    syncBuiltinESMExports();
+  }
+  expect(relocated).toBe(true);
+}
+
 const V1 = {
   // Installation succeeds, so this executable payload certainly was not run
   // as a package hook.
@@ -333,7 +378,9 @@ describe("ub agents workflow lifecycle", () => {
     }) as typeof fs.openSync;
     syncBuiltinESMExports();
     try {
-      expect(() => installWorkflow(writing.cwd, loaded)).toThrow(/partial install is recorded/);
+      expect(() => installWorkflow(writing.cwd, loaded)).toThrow(
+        /ancestor .*payload is not an ordinary directory.*partial install is recorded/,
+      );
     } finally {
       fs.openSync = originalOpen;
       syncBuiltinESMExports();
@@ -379,6 +426,66 @@ describe("ub agents workflow lifecycle", () => {
     expect(removeSwapped).toBe(true);
     expect(readFileSync(join(outsideRemove, "a.txt"), "utf8")).toBe("outside\n");
     expect(existsSync(join(removing.cwd, "original-payload/a.txt"))).toBe(false);
+  });
+
+  it("keeps every lifecycle partial when a mutation directory is relocated", () => {
+    const box = sandbox();
+    gitProject(box);
+    const packages = join(dirname(box.cwd), "packages");
+    const installPackage = packageAt(packages, "1.0.0", {
+      "payload/a.txt": { content: "a\n" },
+      "payload/b.txt": { content: "b\n" },
+    });
+    const installTarget = {
+      ...readExtractedWorkflowPackage(installPackage),
+      sourceKind: "local" as const,
+    };
+    const relocatedInstall = join(dirname(box.cwd), "relocated-install");
+    relocatePayloadDuring("write", box, relocatedInstall, { "a.txt": "a\n" }, () => {
+      expect(() => installWorkflow(box.cwd, installTarget)).toThrow(
+        /mutation directory .* is no longer reachable.*partial install is recorded/,
+      );
+    });
+    expect(readFileSync(join(relocatedInstall, "a.txt"), "utf8")).toBe("a\n");
+    expect(JSON.parse(readFileSync(join(box.cwd, WORKFLOW_RECORD), "utf8")).status).toEqual({
+      state: "partial",
+      operation: "install",
+    });
+    updateWorkflow(box.cwd, installTarget);
+
+    const updatePackage = packageAt(packages, "2.0.0", {
+      "payload/a.txt": { content: "new a\n" },
+      "payload/b.txt": { content: "new b\n" },
+    });
+    const updateTarget = {
+      ...readExtractedWorkflowPackage(updatePackage),
+      sourceKind: "local" as const,
+    };
+    const relocatedUpdate = join(dirname(box.cwd), "relocated-update");
+    relocatePayloadDuring("write", box, relocatedUpdate, { "a.txt": "new a\n", "b.txt": "b\n" }, () => {
+      expect(() => updateWorkflow(box.cwd, updateTarget)).toThrow(
+        /mutation directory .* is no longer reachable.*partial update is recorded/,
+      );
+    });
+    expect(JSON.parse(readFileSync(join(box.cwd, WORKFLOW_RECORD), "utf8")).status).toMatchObject({
+      state: "partial",
+      operation: "update",
+      targetVersion: "2.0.0",
+    });
+    updateWorkflow(box.cwd, updateTarget);
+
+    const relocatedUninstall = join(dirname(box.cwd), "relocated-uninstall");
+    relocatePayloadDuring("remove", box, relocatedUninstall, {}, () => {
+      expect(() => uninstallWorkflow(box.cwd)).toThrow(
+        /mutation directory .* is no longer reachable.*partial uninstall is recorded/,
+      );
+    });
+    expect(JSON.parse(readFileSync(join(box.cwd, WORKFLOW_RECORD), "utf8")).status).toEqual({
+      state: "partial",
+      operation: "uninstall",
+    });
+    expect(readFileSync(join(relocatedUninstall, "b.txt"), "utf8")).toBe("new b\n");
+    expect(uninstallWorkflow(box.cwd)).toEqual({ remaining: [] });
   });
 
   it("refuses an edited update and retains an honest partial uninstall record", () => {

@@ -41,6 +41,8 @@ import {
 } from "./workflow-package.js";
 
 export const WORKFLOW_RECORD = ".agents/workflow.lock.json";
+const CONCURRENT_RELOCATION_LIMIT =
+  "Path checks stop symlink redirection, but do not sandbox another same-user process that deliberately relocates an already-open directory during the operation.";
 
 export const AGENTS_INSTALL_HELP = `usage: ub agents install <workflow@version|package-path> [--project <dir>]
 
@@ -49,6 +51,7 @@ extracted package directory or a .tar.gz package; a published source is an exact
 workflow@MAJOR.MINOR.PATCH name. The command starts no agent and commits nothing.
 Published packages are downloaded without authentication from the GitHub release
 for that exact version in uberblick-ai/homebrew-tap.
+${CONCURRENT_RELOCATION_LIMIT}
 
 options:
   --project <dir>        select the Git project; defaults to the current project
@@ -61,6 +64,7 @@ Replace the selected project's adopted workflow with one validated version.
 Locally edited managed files are refused rather than overwritten.
 Published packages are downloaded without authentication from the GitHub release
 for that exact version in uberblick-ai/homebrew-tap.
+${CONCURRENT_RELOCATION_LIMIT}
 
 options:
   --project <dir>        select the Git project; defaults to the current project
@@ -71,6 +75,7 @@ export const AGENTS_UNINSTALL_HELP = `usage: ub agents uninstall [--project <dir
 
 Remove unchanged resources owned by the selected project's adopted workflow.
 Edited resources are left in place and reported with a recovery action.
+${CONCURRENT_RELOCATION_LIMIT}
 
 options:
   --project <dir>        select the Git project; defaults to the current project
@@ -314,7 +319,7 @@ type ReplaceExpectation =
   | { kind: "content"; content: Buffer };
 
 /** Publish bytes beside their target, at the package's exact recorded mode. */
-function writeManaged(root: string, entry: WorkflowPackageEntry, expectation: ReplaceExpectation): void {
+function writeManaged(root: string, entry: WorkflowPackageEntry, expectation: ReplaceExpectation): StableParent {
   const parent = safeParent(root, entry.path, true);
   inStableParent(parent, entry.path, (target) => {
     const temporary = `.${target}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
@@ -358,9 +363,10 @@ function writeManaged(root: string, entry: WorkflowPackageEntry, expectation: Re
       }
     }
   });
+  return parent;
 }
 
-function removeManaged(root: string, resource: ManagedResource): void {
+function removeManaged(root: string, resource: ManagedResource): StableParent {
   const parent = safeParent(root, resource.path, false);
   if (parent.missing) fail(`refusing to remove changed managed file ${resource.path}`);
   inStableParent(parent, resource.path, (target) => {
@@ -368,6 +374,48 @@ function removeManaged(root: string, resource: ManagedResource): void {
     if (!matches(state, resource)) fail(`refusing to remove changed managed file ${resource.path}`);
     unlinkSync(target);
   });
+  return parent;
+}
+
+function assertCompletionState(
+  root: string,
+  resources: ManagedResource[],
+  absentPaths: string[],
+  mutatedParents: StableParent[],
+): void {
+  for (const resource of resources) {
+    const state = stateOf(root, resource.path);
+    if (!matches(state, resource)) {
+      fail(`refusing to complete the workflow operation: ${resource.path} is not intact at its project path`);
+    }
+  }
+  for (const path of absentPaths) {
+    if (stateOf(root, path).kind !== "absent") {
+      fail(`refusing to complete the workflow operation: removed resource ${path} is present at its project path`);
+    }
+  }
+  const checked = new Set<string>();
+  for (const parent of mutatedParents) {
+    const identity = `${parent.path}\0${parent.dev}\0${parent.ino}`;
+    if (checked.has(identity)) continue;
+    checked.add(identity);
+    try {
+      const current = lstatSync(parent.path);
+      if (
+        parent.missing ||
+        parent.dev === undefined ||
+        parent.ino === undefined ||
+        !current.isDirectory() ||
+        current.dev !== parent.dev ||
+        current.ino !== parent.ino
+      ) {
+        fail(`mutation directory ${parent.path} is no longer reachable at its inspected project path`);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("mutation directory ")) throw error;
+      fail(`mutation directory ${parent.path} is no longer reachable at its inspected project path${errno(error)}`);
+    }
+  }
 }
 
 function recordText(record: WorkflowRecord): string {
@@ -521,21 +569,20 @@ function packageRecord(pkg: LoadedWorkflowPackage, status: WorkflowStatus = { st
   };
 }
 
-function writeRecord(root: string, record: WorkflowRecord, previous: string | null): void {
+function writeRecord(root: string, record: WorkflowRecord, previous: string | null): StableParent {
   const current = stateOf(root, WORKFLOW_RECORD);
   if (previous === null) {
     if (current.kind !== "absent") fail(`${WORKFLOW_RECORD} appeared while the workflow was being installed`);
-    writeManaged(
+    return writeManaged(
       root,
       { path: WORKFLOW_RECORD, mode: "100644", content: Buffer.from(recordText(record), "utf8") },
       { kind: "absent" },
     );
-    return;
   }
   if (current.kind !== "file" || current.content.toString("utf8") !== previous) {
     fail(`${WORKFLOW_RECORD} changed while the workflow operation was running`);
   }
-  writeManaged(
+  return writeManaged(
     root,
     { path: WORKFLOW_RECORD, mode: "100644", content: Buffer.from(recordText(record), "utf8") },
     { kind: "content", content: Buffer.from(previous, "utf8") },
@@ -625,16 +672,25 @@ export function installWorkflow(root: string, pkg: LoadedWorkflowPackage, hooks:
   assertInstallable(root, record);
   const pending: WorkflowRecord = { ...record, status: { state: "partial", operation: "install" } };
   const pendingText = recordText(pending);
-  writeRecord(root, pending, null);
+  const mutatedParents = [writeRecord(root, pending, null)];
   let mutations = 0;
   try {
     for (const entry of pkg.entries) {
       hooks.beforeMutation?.("write", entry.path, mutations++);
-      if (stateOf(root, entry.path).kind !== "absent") {
+      const state = stateOf(root, entry.path);
+      if (state.kind === "refused") {
+        fail(
+          state.reason.startsWith("refusing ")
+            ? state.reason
+            : `refusing to install ${entry.path}: ${state.reason}`,
+        );
+      }
+      if (state.kind !== "absent") {
         fail(`${entry.path} appeared while the workflow was being installed`);
       }
-      writeManaged(root, entry, { kind: "absent" });
+      mutatedParents.push(writeManaged(root, entry, { kind: "absent" }));
     }
+    assertCompletionState(root, record.resources, [], mutatedParents);
     writeRecord(root, record, pendingText);
   } catch (error) {
     fail(
@@ -678,7 +734,8 @@ export function updateWorkflow(root: string, pkg: LoadedWorkflowPackage, hooks: 
     },
   };
   const pendingText = recordText(pending);
-  if (current.text !== pendingText) writeRecord(root, pending, current.text);
+  const mutatedParents: StableParent[] = [];
+  if (current.text !== pendingText) mutatedParents.push(writeRecord(root, pending, current.text));
   const old = new Map(previousResources.map((entry) => [entry.path, entry]));
   const nextEntries = new Map(pkg.entries.map((entry) => [entry.path, entry]));
   let mutations = 0;
@@ -692,10 +749,12 @@ export function updateWorkflow(root: string, pkg: LoadedWorkflowPackage, hooks: 
         fail(`${entry.path} changed while the workflow was being updated`);
       }
       hooks.beforeMutation?.("write", entry.path, mutations++);
-      writeManaged(
-        root,
-        entry,
-        previous === undefined ? { kind: "absent" } : { kind: "resource", resource: previous },
+      mutatedParents.push(
+        writeManaged(
+          root,
+          entry,
+          previous === undefined ? { kind: "absent" } : { kind: "resource", resource: previous },
+        ),
       );
     }
     for (const resource of previousResources) {
@@ -704,8 +763,14 @@ export function updateWorkflow(root: string, pkg: LoadedWorkflowPackage, hooks: 
       if (state.kind === "absent") continue;
       if (!matches(state, resource)) fail(`${resource.path} changed while the workflow was being updated`);
       hooks.beforeMutation?.("remove", resource.path, mutations++);
-      removeManaged(root, resource);
+      mutatedParents.push(removeManaged(root, resource));
     }
+    assertCompletionState(
+      root,
+      next.resources,
+      previousResources.filter((resource) => !nextEntries.has(resource.path)).map((resource) => resource.path),
+      mutatedParents,
+    );
     writeRecord(root, next, pendingText);
   } catch (error) {
     fail(
@@ -757,7 +822,7 @@ export function uninstallWorkflow(root: string, hooks: AdoptionHooks = {}): { re
     status: { state: "partial", operation: "uninstall" },
   };
   const pendingText = recordText(pending);
-  writeRecord(root, pending, current.text);
+  const mutatedParents = [writeRecord(root, pending, current.text)];
   const remaining: ManagedResource[] = [];
   let mutations = 0;
   for (const resource of pending.resources) {
@@ -769,7 +834,7 @@ export function uninstallWorkflow(root: string, hooks: AdoptionHooks = {}): { re
     }
     try {
       hooks.beforeMutation?.("remove", resource.path, mutations++);
-      removeManaged(root, resource);
+      mutatedParents.push(removeManaged(root, resource));
     } catch {
       remaining.push(resource);
     }
@@ -782,6 +847,18 @@ export function uninstallWorkflow(root: string, hooks: AdoptionHooks = {}): { re
       pendingText,
     );
     return { remaining: remaining.map((entry) => entry.path) };
+  }
+  try {
+    assertCompletionState(
+      root,
+      [],
+      pending.resources.map((resource) => resource.path),
+      mutatedParents,
+    );
+  } catch (error) {
+    fail(
+      `${error instanceof Error ? error.message : String(error)}; the partial uninstall is recorded — restore or move any changed resources, then run \`ub agents uninstall\` again`,
+    );
   }
   removeRecord(root, pendingText);
   return { remaining: [] };
