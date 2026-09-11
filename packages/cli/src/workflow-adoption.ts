@@ -301,7 +301,8 @@ function expected(entry: WorkflowPackageEntry): ManagedResource {
 function matches(state: PathState, resource: ManagedResource): boolean {
   return (
     state.kind === "file" &&
-    state.mode === fileMode(resource.mode) &&
+    // Git records only the owner's executable bit, not checkout/umask permissions.
+    (state.mode & 0o100) === (fileMode(resource.mode) & 0o100) &&
     contentDigest(state.content) === resource.sha256
   );
 }
