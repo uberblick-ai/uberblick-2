@@ -1,13 +1,14 @@
 /**
- * `ub agents` — adopt and run the agent workflow of a project you select.
+ * `ub agents` — select and run the agent workflow of a project folder.
  *
  * A group rather than a top-level verb because the surface is plural by
- * intent: adopting, listing and updating a project's workflow are the siblings
- * this one is named for. The group keeps that lifecycle beside launch without
- * moving launch again.
+ * intent: installing, listing and removing a project's workflow selection are
+ * the siblings this one is named for. The group keeps that lifecycle beside
+ * launch without moving launch again.
  *
  * The CLI transports; it owns no role, no queue and no workflow. Everything it
- * knows about a project comes out of that project's own launch data — see
+ * knows about grants and bindings comes from project launch data; workflow
+ * bytes come from the verified installation the project selects — see
  * `launch.ts`.
  */
 
@@ -18,10 +19,10 @@ import { workflowCommand } from "./workflow-adoption.js";
 export const AGENTS_HELP = `usage: ub agents <command>
 
 commands:
-  install <workflow@version|package-path>  adopt a published or local workflow package
-  list                                     report the workflow and roles this project adopted
-  update <workflow@version|package-path>   move the adopted workflow to another version
-  uninstall                                remove unchanged resources the workflow still owns
+  install <workflow@version|package-path>  store and select a published or local workflow
+  list                                     report this project's selected workflow and roles
+  update <workflow@version|package-path>   retired; use install to change the selection
+  uninstall                                remove this project's workflow selection
   launch <role>                            keep one entry role of a project running in this terminal
 
 options:

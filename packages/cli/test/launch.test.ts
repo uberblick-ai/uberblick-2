@@ -60,18 +60,36 @@ function rig(options: {
   refreshes?: Array<{ detail: string; retry: boolean } | null>;
   probes?: number[];
   probeOutput?: string;
+  probeUnresolvable?: boolean;
   linkBase?: string | null;
   sessions?: SessionResult[];
   waits?: Array<NodeJS.Signals | null>;
   /** What the launch data says from the second read on, as an edit would. */
   reloadedBaseRef?: { remote: string; branch: string };
+  /** What the selected workflow resolves to from the second read on. */
+  reloadedWorkflowRoot?: string;
 } = {}) {
   const loaded = readLaunchData(REPO_ROOT);
   const data = loaded;
-  const reloaded =
+  const rebound =
     options.reloadedBaseRef === undefined
       ? loaded
       : { ...loaded, project: { ...loaded.project, baseRef: options.reloadedBaseRef } };
+  const reloaded = options.reloadedWorkflowRoot === undefined
+    ? rebound
+    : {
+      ...rebound,
+      entryRoles: Object.fromEntries(
+        Object.entries(rebound.entryRoles).map(([name, entry]) => {
+          const next = { ...entry };
+          Object.defineProperties(next, {
+            workflowRoot: { value: options.reloadedWorkflowRoot, enumerable: false },
+            externalWorkflow: { value: true, enumerable: false },
+          });
+          return [name, next];
+        }),
+      ),
+    };
   const probes = [...(options.probes ?? [0])];
   const sessions = [...(options.sessions ?? [result({ interrupted: "SIGINT" })])];
   const waits = [...(options.waits ?? [])];
@@ -82,7 +100,9 @@ function rig(options: {
     refreshes: 0,
     baseRefs: [] as string[],
     probes: [] as Array<readonly string[]>,
+    probeRoots: [] as string[],
     sessions: [] as Array<{ role: string; runtime: string; base: string }>,
+    sessionRoots: [] as string[],
     waits: [] as number[],
     terminations: [] as NodeJS.Signals[],
   };
@@ -103,12 +123,18 @@ function rig(options: {
       if (refreshes.length > 0) return refreshes.shift()!;
       return options.refresh ?? null;
     },
-    async runProbe(command) {
+    async runProbe(command, workflowRoot) {
       seen.probes.push(command);
-      return { status: probes.shift() ?? 0, output: options.probeOutput ?? "" };
+      seen.probeRoots.push(workflowRoot ?? REPO_ROOT);
+      return {
+        status: probes.shift() ?? 0,
+        output: options.probeOutput ?? "",
+        ...(options.probeUnresolvable === true ? { unresolvable: true as const } : {}),
+      };
     },
-    async runSession(role, runtime, _entry, project) {
+    async runSession(role, runtime, entry, project) {
       seen.sessions.push({ role, runtime, base: `${project.baseRef.remote}/${project.baseRef.branch}` });
+      seen.sessionRoots.push(entry.workflowRoot);
       return sessions.shift() ?? result({ interrupted: "SIGINT" });
     },
     async wait(milliseconds) {
@@ -664,7 +690,7 @@ process.exit(0);
       ]);
       expect(current.seen.dataLoads).toEqual([undefined, expected[1]]);
       expect(current.stdout()).toBe(
-        `ub agents launch: ${expected[0]} on ${expected[1]} in ${REPO_ROOT}\n`,
+        `ub agents launch: ${expected[0]} on ${expected[1]} in ${REPO_ROOT}; workflow project-tree fallback\n`,
       );
     }
   });
@@ -742,14 +768,32 @@ process.exit(0);
   });
 
   it("uses the over-inclusive probe without turning it into queue policy", async () => {
-    for (const probe of [1, 2]) {
-      const current = rig({ probes: [probe], waits: ["SIGINT"] });
-      expect(await launchCommand(["integrator"], current.io, current.services)).toBe(130);
-      expect(current.seen.sessions).toEqual([]);
-      expect(current.seen.waits).toEqual([30 * 60 * 1_000]);
-      expect(current.seen.probes[0]).toEqual(["sh", "scripts/probe-work.sh", "integrator"]);
-      expect(current.stdout()).toMatch(/will idle for 30min/);
-    }
+    const empty = rig({ probes: [1], waits: ["SIGINT"] });
+    expect(await launchCommand(["integrator"], empty.io, empty.services)).toBe(130);
+    expect(empty.seen.sessions).toEqual([]);
+    expect(empty.seen.waits).toEqual([30 * 60 * 1_000]);
+    expect(empty.seen.probes[0]).toEqual(["sh", "scripts/probe-work.sh", "integrator"]);
+    expect(empty.stdout()).toMatch(/will idle for 30min/);
+
+    const failedRead = rig({
+      probes: [2],
+      probeOutput: "gh: Could not resolve host: api.github.com",
+      waits: ["SIGINT"],
+    });
+    expect(await launchCommand(["integrator"], failedRead.io, failedRead.services)).toBe(130);
+    expect(failedRead.seen.sessions).toEqual([]);
+    expect(failedRead.seen.waits).toEqual([30 * 60 * 1_000]);
+    expect(failedRead.stdout()).toContain("probe failed: gh: Could not resolve host");
+
+    const unresolvable = rig({
+      probes: [127],
+      probeOutput: "spawnSync ./missing-probe.sh ENOENT",
+      probeUnresolvable: true,
+    });
+    expect(await launchCommand(["integrator"], unresolvable.io, unresolvable.services)).toBe(1);
+    expect(unresolvable.seen.sessions).toEqual([]);
+    expect(unresolvable.seen.waits).toEqual([]);
+    expect(unresolvable.stderr()).toContain("declared probe failed");
   });
 
   it("stops on a persistent access failure at every stage, and only on one", async () => {
@@ -1300,6 +1344,18 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
       { role: "implementer", runtime: "codex", base: "upstream/trunk" },
     ]);
     expect(current.stderr()).toContain("base ref changed from origin/main to upstream/trunk");
+  });
+
+  it("reports a reloaded workflow root before the next probe and session use it", async () => {
+    const workflowRoot = "/installations/v2/payload";
+    const current = rig({ reloadedWorkflowRoot: workflowRoot });
+
+    expect(await launchCommand(["implementer"], current.io, current.services)).toBe(130);
+    expect(current.seen.probeRoots).toEqual([workflowRoot]);
+    expect(current.seen.sessionRoots).toEqual([workflowRoot]);
+    expect(current.stdout()).toContain(
+      `launch: workflow changed to ${workflowRoot}; next session uses this path\n`,
+    );
   });
 
   it("stops the loop instead of retrying launch data the session tree cannot supply", async () => {

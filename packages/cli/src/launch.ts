@@ -19,14 +19,13 @@
  * transcript — which no longer streams to stdout — is named on disk.
  *
  * The project is whatever `--project` or the working directory resolves to
- * (`project.ts`), never where this executable happens to live: an installed
- * `ub` carries no roles, no contracts and no workspace of its own, so two
- * projects that declare the same role name with different contracts each get
- * their own. Every path the loop reads, copies or writes comes out of that
- * project's launch data or the worktree it makes for the session, which is
- * resolution isolation and deliberately not an operating-system or credential
- * boundary — a runtime the project declares unsandboxed can still read the
- * machine it runs on.
+ * (`project.ts`), never where this executable happens to live. The project
+ * supplies launch data and selects one verified machine-owned workflow; no
+ * executable installation contributes a workflow implicitly. Every path the
+ * loop reads, copies or writes comes out of that pinned pair or the worktree it
+ * makes for the session, which is resolution isolation and deliberately not an
+ * operating-system or credential boundary — a runtime the project declares
+ * unsandboxed can still read the machine it runs on.
  *
  * Grants stay where they were. `ub` writes no trust entry and copies no
  * credential: the human authenticates each runtime once, and each runtime
@@ -42,7 +41,9 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
+  accessSync,
   closeSync,
+  constants,
   existsSync,
   mkdtempSync,
   openSync,
@@ -52,7 +53,7 @@ import {
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, normalize, sep } from "node:path";
+import { isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import {
   FORWARDED,
@@ -64,6 +65,7 @@ import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { resolveProjectRoot, withoutRepositorySelectors } from "./project.js";
+import { resolveSelectedWorkflow } from "./workflow-storage.js";
 
 export const LAUNCH_OPTIONS = {
   model: { type: "string" },
@@ -76,11 +78,12 @@ Keep one entry role of one project running in this terminal. One fresh session
 runs at a time; completed work is followed immediately, while an empty queue
 waits about 30 minutes. Ctrl-C stops the loop and its active session.
 
-The roles, their contracts, adapters, default runtime and sandbox come from the
-selected project's own .agents/launch.json — never from wherever this
-executable was installed. Runtime selection stays fixed for this loop; a
-workflow that requests reviews on both runtimes needs a separate loop for each
-runtime.
+The project folder's .agents/launch.json supplies roles, bindings and grants;
+contracts and adapters come from the verified workflow installation selected by
+\`ub agents install\`. With no external selection, the project's tracked workflow
+files remain a temporary compatibility path. Runtime selection stays fixed for
+this loop; a workflow that requests reviews on both runtimes needs a separate
+loop for each runtime.
 
 Launch data version 2 requires a project object declaring that project's
 bindings and grants. To migrate a version 1 file, add that object if absent and
@@ -117,6 +120,10 @@ interface RoleLaunch {
   defaultRuntime: Runtime;
   probe: string[];
   runtimes: Record<Runtime, RuntimeLaunch>;
+  /** Root against which every workflow-owned relative path resolves. */
+  workflowRoot: string;
+  /** False only for the temporary in-project compatibility path. */
+  externalWorkflow: boolean;
 }
 
 /** The remote and branch a project grounds, fetches and branches sessions from. */
@@ -173,6 +180,8 @@ export interface ProbeResult {
   status: number;
   /** Whatever the probe said about a failure; empty when it succeeded. */
   output: string;
+  /** The declared command could not be executed, rather than reporting a failed read. */
+  unresolvable?: true;
 }
 
 export interface LaunchServices {
@@ -185,9 +194,13 @@ export interface LaunchServices {
    */
   linkBase: string | null;
   loadData(activeRuntime?: Runtime): LaunchData;
-  preflight(runtime: Runtime, adapter: string): string | null;
+  preflight(runtime: Runtime, adapter: string, workflowRoot?: string): string | null;
   refreshMain(baseRef: BaseRef): { detail: string; retry: boolean } | null;
-  runProbe(command: readonly string[]): Promise<ProbeResult>;
+  runProbe(
+    command: readonly string[],
+    workflowRoot?: string,
+    project?: ProjectBindings,
+  ): Promise<ProbeResult>;
   runSession(
     role: string,
     runtime: Runtime,
@@ -376,7 +389,7 @@ function pathIsFile(root: string, relative: string): boolean {
 }
 
 /**
- * The same confinement, applied to the tree the session actually reads.
+ * The same confinement, applied to the workflow tree the session actually reads.
  *
  * `readLaunchData` and `preflight` canonicalize files in the control checkout,
  * and a session runs a fresh detached worktree of the project's base ref. Those
@@ -385,10 +398,11 @@ function pathIsFile(root: string, relative: string): boolean {
  * a committed escaping symlink at the same path, a fast-forward that never
  * touches those paths keeps the mask, and an adapter that exists only in the
  * control checkout is simply absent where `--agent <role>` resolves it. So the
- * files that govern a session are canonicalized where they govern it, once the
- * worktree exists and before any runtime child reads them. The control checks
- * stay: they are what fails a launch early, with a message about the tree the
- * operator is looking at.
+ * files that govern a legacy session are canonicalized where they govern it,
+ * once the worktree exists and before any runtime child reads them. An external
+ * session instead re-verifies its pinned immutable installation. The control
+ * checks stay: they are what fails a launch early, with a message about the
+ * tree the operator is looking at.
  */
 function outsideSessionTree(
   worktree: string,
@@ -396,11 +410,18 @@ function outsideSessionTree(
   entry: RoleLaunch,
   base: string,
 ): string | null {
+  const governingRoot = entry.externalWorkflow ? entry.workflowRoot : worktree;
   for (const [named, relative] of [
     ["role contract", entry.contract],
     [`${runtime} adapter`, entry.runtimes[runtime].adapter],
   ] as const) {
-    if (!pathIsFile(worktree, relative)) {
+    if (!pathIsFile(governingRoot, relative)) {
+      if (entry.externalWorkflow) {
+        return (
+          `${named} ${relative} is not a readable file inside the selected workflow installation ` +
+          `${entry.workflowRoot}; run \`ub agents install <source>\` to repair it before retrying`
+        );
+      }
       return (
         `${named} ${relative} is not a readable file inside the session's worktree of ${base}; ` +
         "commit it inside the selected project before retrying"
@@ -506,7 +527,11 @@ function readProjectBindings(path: string, value: unknown): ProjectBindings {
   return { ...project, baseRef: { remote, branch } };
 }
 
-export function readLaunchData(root: string, activeRuntime?: Runtime): LaunchData {
+export function readLaunchData(
+  root: string,
+  activeRuntime?: Runtime,
+  workflowRoot: string = root,
+): LaunchData {
   const path = launchDataPath(root);
   let parsed: unknown;
   try {
@@ -559,8 +584,8 @@ export function readLaunchData(root: string, activeRuntime?: Runtime): LaunchDat
     if (contract === null) {
       throw new Error(`${named} names no "contract" path inside ${root}`);
     }
-    if (!pathIsFile(root, contract)) {
-      throw new Error(`${named} names a role contract that is not a readable file: ${join(root, contract)}`);
+    if (!pathIsFile(workflowRoot, contract)) {
+      throw new Error(`${named} names a role contract that is not a readable file: ${join(workflowRoot, contract)}`);
     }
     if (entry.defaultRuntime !== "claude" && entry.defaultRuntime !== "codex") {
       throw new Error(`${named} has an invalid "defaultRuntime"; choose ${RUNTIMES.join(" or ")}`);
@@ -611,12 +636,11 @@ export function readLaunchData(root: string, activeRuntime?: Runtime): LaunchDat
       ) {
         throw new Error(`${named} ${runtime} "allowedTools" must list the tools this project grants`);
       }
-      // The adapter path is *not* free, and saying so is the honest thing: a
-      // Claude session is started with `--agent <role>`, so the runtime — not
-      // this CLI — resolves `.claude/agents/<role>.md` inside the project's own
-      // worktree. Data that named a file the runtime will never open would be a
-      // binding that can lie. What is the project's here is the file: two
-      // projects declaring the same role each supply their own.
+      // The adapter path is *not* free. Legacy Claude resolves this conventional
+      // path in the worktree; an external session reads the same conventional
+      // path from its installation and injects those verified bytes explicitly.
+      // Accepting a path the chosen runtime will never use would let launch data
+      // lie about which instructions govern the child.
       const adapter = `.${runtime}/agents/${role}.${runtime === "claude" ? "md" : "toml"}`;
       if (rawRuntime.adapter !== adapter) {
         throw new Error(
@@ -627,9 +651,9 @@ export function readLaunchData(root: string, activeRuntime?: Runtime): LaunchDat
       // Claude's can be absent from build contexts that never select Claude,
       // so require it only once that runtime is active. The loop passes that
       // choice again after every refresh, before a probe or session can start.
-      if ((runtime === "codex" || runtime === activeRuntime) && !pathIsFile(root, adapter)) {
+      if ((runtime === "codex" || runtime === activeRuntime) && !pathIsFile(workflowRoot, adapter)) {
         throw new Error(
-          `${named} names a ${runtime} adapter that is not a readable file: ${join(root, adapter)}`,
+          `${named} names a ${runtime} adapter that is not a readable file: ${join(workflowRoot, adapter)}`,
         );
       }
       parsedRuntimes[runtime] = {
@@ -639,12 +663,20 @@ export function readLaunchData(root: string, activeRuntime?: Runtime): LaunchDat
         ...(allowedTools === undefined ? {} : { allowedTools: [...(allowedTools as string[])] }),
       } as RuntimeLaunch;
     }
-    entryRoles[role] = {
+    const parsedRole = {
       contract,
       defaultRuntime: entry.defaultRuntime,
       probe: [...entry.probe],
       runtimes: parsedRuntimes,
     } as RoleLaunch;
+    // Resolution context belongs to this parsed snapshot, not to the public
+    // launch declaration shape. Keep it non-enumerable so consumers comparing
+    // that shape do not mistake machine paths for project-owned data.
+    Object.defineProperties(parsedRole, {
+      workflowRoot: { value: workflowRoot, enumerable: false },
+      externalWorkflow: { value: workflowRoot !== root, enumerable: false },
+    });
+    entryRoles[role] = parsedRole;
   }
   return { version: 2, project, entryRoles };
 }
@@ -660,6 +692,22 @@ function runSync(command: string, args: readonly string[], root: string, env: No
 
 function lastLine(text: string): string {
   return text.trimEnd().split(/\r?\n/).at(-1) ?? "";
+}
+
+function workflowLocation(entry: RoleLaunch): string {
+  return entry.externalWorkflow ? entry.workflowRoot : "project-tree fallback";
+}
+
+function probeDeclarationFailure(root: string, command: readonly string[]): string | null {
+  const [executable] = command;
+  if (executable === undefined) return "declares an empty probe command";
+  if (!isAbsolute(executable) && !executable.includes("/")) return null;
+  try {
+    accessSync(isAbsolute(executable) ? executable : resolve(root, executable), constants.X_OK);
+  } catch {
+    return `declares a probe executable that is not executable from ${root}: ${executable}`;
+  }
+  return null;
 }
 
 /**
@@ -993,6 +1041,7 @@ export function codexSessionArgs(
   lastPath: string,
   prompt: string,
   sandbox: Sandbox,
+  adapterInstructions?: string,
 ): string[] {
   const args = ["exec", "-C", worktree];
   if (sandbox === "unsandboxed") {
@@ -1001,6 +1050,9 @@ export function codexSessionArgs(
     args.push("-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true");
   } else {
     throw new Error(`invalid Codex sandbox ${JSON.stringify(sandbox)}`);
+  }
+  if (adapterInstructions !== undefined) {
+    args.push("-c", `developer_instructions=${JSON.stringify(adapterInstructions)}`);
   }
   args.push("-o", lastPath, prompt);
   return args;
@@ -1012,12 +1064,14 @@ export function claudeSessionArgs(
   prompt: string,
   permissionMode: RuntimeLaunch["permissionMode"],
   allowedTools?: readonly string[],
+  agentDefinition?: string,
 ): string[] {
   if (permissionMode !== "auto") {
     throw new Error(`invalid Claude permission mode ${JSON.stringify(permissionMode)}`);
   }
   return [
     "-p",
+    ...(agentDefinition === undefined ? [] : ["--agents", agentDefinition]),
     "--agent",
     role,
     // `--allowedTools` is variadic. Keep each declaration as its own argv
@@ -1032,6 +1086,32 @@ export function claudeSessionArgs(
   ];
 }
 
+function claudeAgentDefinition(role: string, path: string): string {
+  const source = readFileSync(path, "utf8");
+  const matched = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/.exec(source);
+  const description = (matched?.[1] ?? "").match(/^description:\s*(.+)$/m)?.[1]?.trim();
+  const prompt = matched?.[2]?.trim();
+  if (description === undefined || prompt === undefined || prompt === "") {
+    // A project may use a recording adapter with no frontmatter; its complete
+    // verified bytes still govern the custom agent rather than a project file.
+    return JSON.stringify({ [role]: { description: `Adapter loaded from ${path}`, prompt: source } });
+  }
+  return JSON.stringify({ [role]: { description, prompt } });
+}
+
+function codexAdapterInstructions(path: string): string {
+  const source = readFileSync(path, "utf8");
+  return /(?:^|\n)developer_instructions\s*=\s*"""([\s\S]*?)"""/.exec(source)?.[1]?.trim() ?? source.trim();
+}
+
+function sessionContext(root: string, workflowRoot: string, project: ProjectBindings): string {
+  // This versioned value is the product half of the source/CLI interface: it
+  // is inherited by the runtime, its native children and workflow helpers.
+  // The workflow never rediscovers either root from cwd, and a later project
+  // selection cannot retarget a session that already received this snapshot.
+  return JSON.stringify({ version: 1, projectRoot: root, workflowRoot, bindings: project });
+}
+
 export function createLaunchServices(
   root: string,
   env: NodeJS.ProcessEnv,
@@ -1044,6 +1124,10 @@ export function createLaunchServices(
   // project Git operations and their descendants independent of ambient
   // repository selectors even when the caller did not use launchEnvironment.
   const projectEnv = withoutRepositorySelectors(env);
+  const load = (activeRuntime?: Runtime): LaunchData => {
+    const selected = resolveSelectedWorkflow(root, projectEnv);
+    return readLaunchData(root, activeRuntime, selected?.root ?? root);
+  };
   // Which repository a `#123` links into is the project's own answer, not
   // `origin`'s: a fork's remote names a different repository than the one every
   // role, probe and durable record uses, so an operator following the link
@@ -1054,7 +1138,7 @@ export function createLaunchServices(
   // moment later.
   let bindings: ProjectBindings | null = null;
   try {
-    bindings = readLaunchData(root).project;
+    bindings = load().project;
   } catch {
     bindings = null;
   }
@@ -1070,10 +1154,12 @@ export function createLaunchServices(
       process.stdout.isTTY === true && remote.status === 0
         ? repositoryLink(gitHubBase(remote.stdout), declaredRepository)
         : null,
-    loadData: (activeRuntime) => readLaunchData(root, activeRuntime),
-    preflight(runtime, adapter) {
-      if (!pathIsFile(root, adapter)) {
-        return `${runtime} adapter ${adapter} is missing; restore it from the project's base ref before retrying`;
+    loadData: load,
+    preflight(runtime, adapter, workflowRoot = root) {
+      if (!pathIsFile(workflowRoot, adapter)) {
+        return workflowRoot === root
+          ? `${runtime} adapter ${adapter} is missing; restore it from the project's base ref before retrying`
+          : `${runtime} adapter ${join(workflowRoot, adapter)} is missing; run \`ub agents install <source>\` to repair it before retrying`;
       }
       const version = runSync(runtime, ["--version"], root, projectEnv);
       if ((version.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
@@ -1132,23 +1218,36 @@ export function createLaunchServices(
       }
       return null;
     },
-    async runProbe(command) {
+    async runProbe(command, workflowRoot = root, project) {
       const [executable, ...args] = command;
       if (executable === undefined) return { status: 2, output: "probe command is empty" };
-      const result = runSync(executable, args, root, projectEnv);
+      const probeEnv = project === undefined
+        ? projectEnv
+        : { ...projectEnv, UB_AGENT_SESSION_CONTEXT: sessionContext(root, workflowRoot, project) };
+      // The project declares the probe in its launch data, so its relative
+      // operands keep resolving from that project even when the workflow's
+      // contracts and adapters come from a machine-stored installation.
+      const result = runSync(executable, args, root, probeEnv);
       if (result.stdout) io.out(result.stdout);
+      const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
       return {
         status: result.status ?? 2,
         output: `${result.stderr ?? ""}${result.error === undefined ? "" : `\n${result.error.message}`}`,
+        ...(errorCode === "EACCES" || errorCode === "ENOENT" || result.status === 126 || result.status === 127
+          ? { unresolvable: true as const }
+          : {}),
       };
     },
     async runSession(role, runtime, entry, project) {
       const runId = makeRunId(runtime, role);
       const briefing = project.sessionBriefing;
+      const contract = entry.externalWorkflow
+        ? join(entry.workflowRoot, entry.contract)
+        : entry.contract;
       const prompt = launchAssignment(
         role,
         runId,
-        entry.contract,
+        contract,
         typeof briefing === "string" ? briefing : undefined,
       );
       scratch ??= mkdtempSync(join(tmpdir(), "ub-launch-"));
@@ -1193,6 +1292,11 @@ export function createLaunchServices(
         out: (text) => void writeSync(handle, text),
         err: (text) => void writeSync(handle, text),
       };
+      const adapterPath = join(entry.workflowRoot, entry.runtimes[runtime].adapter);
+      const runtimeEnv = {
+        ...projectEnv,
+        UB_AGENT_SESSION_CONTEXT: sessionContext(root, entry.workflowRoot, project),
+      };
       let result: SessionResult;
       try {
         result = runtime === "claude"
@@ -1203,10 +1307,11 @@ export function createLaunchServices(
                 prompt,
                 entry.runtimes.claude.permissionMode,
                 entry.runtimes.claude.allowedTools,
+                entry.externalWorkflow ? claudeAgentDefinition(role, adapterPath) : undefined,
               ),
               worktree,
               {
-                ...projectEnv,
+                ...runtimeEnv,
                 // Claude print mode otherwise kills background work after 600s.
                 // Role-owned deadlines and claim renewal govern delegated work;
                 // preserve an operator's explicit ceiling if one was supplied.
@@ -1219,9 +1324,15 @@ export function createLaunchServices(
             )
           : await runForeground(
               "codex",
-              codexSessionArgs(worktree, lastPath, prompt, entry.runtimes.codex.sandbox),
+              codexSessionArgs(
+                worktree,
+                lastPath,
+                prompt,
+                entry.runtimes.codex.sandbox,
+                entry.externalWorkflow ? codexAdapterInstructions(adapterPath) : undefined,
+              ),
               worktree,
-              projectEnv,
+              runtimeEnv,
               capture,
               process,
               processes,
@@ -1423,14 +1534,29 @@ export async function launchCommand(
     return 2;
   }
   const runtime = parsed.selected ?? entry.defaultRuntime;
-  const runtimeFailure = services.preflight(runtime, entry.runtimes[runtime].adapter);
+  const probeDeclaration = probeDeclarationFailure(services.root, entry.probe);
+  if (probeDeclaration !== null) {
+    io.err(
+      `ub agents launch: ${probeDeclaration}; repair ${launchDataPath(services.root)} or its probe before retrying\n`,
+    );
+    return 1;
+  }
+  const runtimeFailure = services.preflight(
+    runtime,
+    entry.runtimes[runtime].adapter,
+    entry.workflowRoot,
+  );
   if (runtimeFailure !== null) {
     io.err(`ub agents launch: ${runtimeFailure}\n`);
     return 1;
   }
   // The project is named once, on the startup line: a run's own evidence that
   // the caller's selection — and not an installation directory — is in force.
-  io.out(`ub agents launch: ${parsed.role} on ${runtime} in ${services.root}\n`);
+  io.out(
+    `ub agents launch: ${parsed.role} on ${runtime} in ${services.root}; workflow ` +
+      `${workflowLocation(entry)}\n`,
+  );
+  let reportedWorkflow = workflowLocation(entry);
   let project = data.project;
   for (;;) {
     const refreshed = baseRefName(project.baseRef);
@@ -1469,9 +1595,29 @@ export async function launchCommand(
       );
       continue;
     }
-    const probe = await services.runProbe(entry.probe);
+    const reloadedProbeFailure = probeDeclarationFailure(services.root, entry.probe);
+    if (reloadedProbeFailure !== null) {
+      io.err(
+        `ub agents launch: ${reloadedProbeFailure}; repair ${launchDataPath(services.root)} or its probe before retrying\n`,
+      );
+      return 1;
+    }
+    const effectiveWorkflow = workflowLocation(entry);
+    if (effectiveWorkflow !== reportedWorkflow) {
+      io.out(`launch: workflow changed to ${effectiveWorkflow}; next session uses this path\n`);
+      reportedWorkflow = effectiveWorkflow;
+    }
+    const probe = await services.runProbe(entry.probe, entry.workflowRoot, project);
     if (probe.status !== 0) {
       if (blocked(io, probe.output)) return 1;
+      if (probe.unresolvable === true) {
+        const detail = probe.output.trim() === "" ? `status ${probe.status}` : lastLine(probe.output);
+        io.err(
+          `ub agents launch: declared probe failed in ${services.root}: ${detail}; ` +
+            `repair ${launchDataPath(services.root)} or its probe before retrying\n`,
+        );
+        return 1;
+      }
       const reason = probe.status === 1
         ? `no eligible ${parsed.role} work`
         : `probe failed${probe.output.trim() === "" ? "" : `: ${lastLine(probe.output)}`}`;
