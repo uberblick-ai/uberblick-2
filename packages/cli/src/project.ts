@@ -5,8 +5,9 @@
  * Homebrew cellar, an install payload or a checkout, and none of those three
  * locations may decide whose roles run. So the project is resolved from what
  * the caller pointed at — `--project <dir>`, or the working directory — and the
- * answer is that directory's Git root, because a project's launch data, role
- * contracts, runtime adapters and worktrees all hang off that one root.
+ * answer is that directory's Git root, because a project's launch data,
+ * workflow selection and worktrees all hang off that one identity. Contracts
+ * and adapters may live in the machine-owned installation selected for it.
  *
  * Git is asked rather than walked by hand: `git rev-parse --show-toplevel`
  * already knows about worktrees and `.git` files, and a second implementation
@@ -26,6 +27,19 @@ export interface ProjectResolution {
   root: string;
   /** What the caller pointed at, for a message that can be acted on. */
   from: string;
+}
+
+function selectedDirectory(
+  selected: string | undefined,
+  cwd: string,
+): { path: string; from: string } | { error: string } {
+  const from = resolve(cwd, selected ?? ".");
+  try {
+    if (!statSync(from).isDirectory()) return { error: `${from} is not a directory` };
+    return { path: realpathSync(from), from };
+  } catch {
+    return { error: `${from} does not exist` };
+  }
 }
 
 /**
@@ -73,16 +87,9 @@ export function resolveProjectRoot(
   cwd: string,
   env: NodeJS.ProcessEnv,
 ): { project: ProjectResolution; error?: undefined } | { error: string; project?: undefined } {
-  const from = resolve(cwd, selected ?? ".");
-  let selectedPath: string;
-  try {
-    if (!statSync(from).isDirectory()) {
-      return { error: `${from} is not a directory` };
-    }
-    selectedPath = realpathSync(from);
-  } catch {
-    return { error: `${from} does not exist` };
-  }
+  const directory = selectedDirectory(selected, cwd);
+  if ("error" in directory) return directory;
+  const { path: selectedPath, from } = directory;
   const top = spawnSync("git", ["rev-parse", "--show-toplevel"], {
     cwd: selectedPath,
     env: withoutRepositorySelectors(env),
@@ -106,4 +113,40 @@ export function resolveProjectRoot(
     return { error: `Git resolved ${root} outside the selected directory ${from}` };
   }
   return { project: { root, from } };
+}
+
+/**
+ * The folder whose workflow selection a command reads or changes.
+ *
+ * A Git checkout retains the familiar project-root identity even when the
+ * command starts below it. An ordinary folder is its own project identity:
+ * selecting a workflow is useful before (or without) choosing Git, while the
+ * launcher separately refuses later when a role genuinely needs worktrees.
+ */
+export function resolveProjectDirectory(
+  selected: string | undefined,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): { project: ProjectResolution; error?: undefined } | { error: string; project?: undefined } {
+  const directory = selectedDirectory(selected, cwd);
+  if ("error" in directory) return directory;
+  const top = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+    cwd: directory.path,
+    env: withoutRepositorySelectors(env),
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+  const reported = top.stdout.trim();
+  if (top.status !== 0 || reported === "") {
+    return { project: { root: directory.path, from: directory.from } };
+  }
+  try {
+    const root = realpathSync(reported);
+    if (!contains(root, directory.path)) {
+      return { error: `Git resolved ${root} outside the selected directory ${directory.from}` };
+    }
+    return { project: { root, from: directory.from } };
+  } catch {
+    return { error: `Git reported an unusable project root for ${directory.from}` };
+  }
 }

@@ -304,11 +304,13 @@ describe("every human-facing command path", () => {
     expect(AGENTS_HELP).toContain("update <workflow@version|package-path>");
     expect(AGENTS_INSTALL_HELP).toMatch(/usage: ub agents install <workflow@version\|package-path>/);
     expect(AGENTS_UPDATE_HELP).toMatch(/usage: ub agents update <workflow@version\|package-path>/);
-    for (const command of ["install", "update"]) {
-      const missingSource = await dispatch(["agents", command]);
-      expect(missingSource.status).toBe(2);
-      expect(missingSource.stderr).toContain("expected exactly one <workflow@version|package-path>");
-    }
+    const missingSource = await dispatch(["agents", "install"]);
+    expect(missingSource.status).toBe(2);
+    expect(missingSource.stderr).toContain("expected exactly one <workflow@version|package-path>");
+    const retiredUpdate = await dispatch(["agents", "update"]);
+    expect(retiredUpdate.status).toBe(2);
+    expect(retiredUpdate.stderr).toContain("retired");
+    expect(retiredUpdate.stderr).toContain("ub agents install <source>");
 
     expect(MCP_HELP).toContain("install [client]");
     expect(INSTALL_HELP).toMatch(/usage: ub mcp install \[client\]/);
@@ -336,10 +338,10 @@ describe("every human-facing command path", () => {
     expect(missingUrl.stderr).toContain("expected exactly one <url-with-workspace-id>");
   });
 
-  it("states the workflow mutation confinement boundary", () => {
-    for (const help of [AGENTS_INSTALL_HELP, AGENTS_UPDATE_HELP, AGENTS_UNINSTALL_HELP]) {
-      expect(help).toContain("do not sandbox another same-user process");
-    }
+  it("states the workflow selection boundary", () => {
+    expect(AGENTS_INSTALL_HELP).toContain("selected project is not modified");
+    expect(AGENTS_UNINSTALL_HELP).toContain("Stored installations");
+    expect(AGENTS_UPDATE_HELP).toContain("retired");
   });
 
   it("describes init's MCP option as print-only", () => {

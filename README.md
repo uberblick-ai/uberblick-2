@@ -339,6 +339,9 @@ ub workspace       # the workspace in force, and which layer chose it
 ub workspace list  # workspaces this machine has a database for
 ub workspace use   # make a workspace this machine's default
 ub remote          # the endpoint in force, and what sharing it buys
+ub agents install  # store a workflow and select it for this project folder
+ub agents list     # inspect this project's selection and available roles
+ub agents uninstall  # remove this project's selection, keeping stored packages
 ub agents launch   # keep one entry role of a project you select running
 ub mcp install     # register uberblick with an MCP client
 ub mcp serve       # the stdio entry point for an MCP client
@@ -365,17 +368,27 @@ version 2. Updating files does not reload code already running in an old
 process. Preserve valid version 2 launch data; restoring or downgrading the
 configuration cannot update the old executable.
 
-**`ub agents launch <role>` runs *your project's* roles, not uberblick's.** The
-project is the Git root at or above the working directory, or the one
-`--project <dir>` names, and everything the loop needs comes out of that
-project's own `.agents/launch.json`: which entry roles exist, each role's
-contract, its per-runtime adapter, its default runtime, its sandbox or
-permission mode, the cheap probe that says whether starting a session is worth
-it, and — under `project` — the bindings its own workflow reads, starting with
-the `baseRef` every session's worktree is cut from. Where this executable was installed contributes none of that, so two
-projects that give the same role name different contracts each get their own —
-and a project that has adopted no workflow is refused, by name and by the path
-that was searched, before any child process starts. The command still selects,
+**`ub agents launch <role>` runs *your project's* selected workflow, not
+uberblick's.** `ub agents install <workflow@version|package-path>` validates and
+stores a package in this machine's Uberblick data, then selects that immutable
+installation for the project folder; running install again changes that one
+selection, `ub agents list` reports it and `ub agents uninstall` removes only
+the association. None of those commands writes a workflow file, symlink,
+setting or lock into the project. Separate folders can select separate versions,
+including folders that are not Git repositories. Launch itself still requires
+Git when it creates a role's worktree and names that requirement if the selected
+folder is not a checkout. `ub agents update` is retired; install is the one
+selection-changing command.
+
+The project's own `.agents/launch.json` continues to declare which entry roles
+exist, their default runtime, sandbox or permission mode, and — under `project`
+— the bindings its workflow reads, starting with the `baseRef` every session's
+worktree is cut from. Contracts, runtime adapters and workflow helpers resolve
+from the selected stored installation. A running session retains the project,
+installation and binding snapshot with which it started; the standing loop
+re-reads the selection before its next session. Temporarily, a project with no
+external selection still launches from its tracked workflow files so an
+existing loop is not stranded during the cutover. The command still selects,
 claims and transitions nothing; the role does all of that.
 
 Grants stay yours. You authenticate `claude` and `codex` once, and `ub` writes
@@ -468,8 +481,8 @@ is a file named after it.
 
 | Where | What |
 | --- | --- |
-| `$XDG_CONFIG_HOME/uberblick/` — or `~/.config/uberblick/` | `config.json` and `credentials.json` |
-| `$XDG_DATA_HOME/uberblick/` — or `~/.local/share/uberblick/` | `hub.sqlite` and `<uuid>.sqlite`, one per workspace |
+| `$XDG_CONFIG_HOME/uberblick/` — or `~/.config/uberblick/` | `config.json`, `credentials.json` and project workflow selections under `agent-projects/` |
+| `$XDG_DATA_HOME/uberblick/` — or `~/.local/share/uberblick/` | `hub.sqlite`, `<uuid>.sqlite` per workspace, and verified packages under `agent-workflows/` |
 
 The two variables are independent: each moves its own root and only that one,
 so setting `XDG_CONFIG_HOME` alone leaves the databases under

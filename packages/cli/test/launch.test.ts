@@ -664,7 +664,7 @@ process.exit(0);
       ]);
       expect(current.seen.dataLoads).toEqual([undefined, expected[1]]);
       expect(current.stdout()).toBe(
-        `ub agents launch: ${expected[0]} on ${expected[1]} in ${REPO_ROOT}\n`,
+        `ub agents launch: ${expected[0]} on ${expected[1]} in ${REPO_ROOT}; workflow project-tree fallback\n`,
       );
     }
   });

@@ -16,11 +16,12 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { removeTempDirs, runUbAsync, sandbox } from "./helpers.js";
+import { DIGEST_FRAMING, payloadDigest, type WorkflowPackageEntry } from "../src/workflow-package.js";
+import { removeTempDirs, runUb, runUbAsync, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -89,6 +90,48 @@ function project(root: string, name: string, contractPath: string): string {
   return top.stdout.trim();
 }
 
+function workflowPackage(root: string, marker: string, version = "1.2.3"): string {
+  const directory = join(root, `workflow-${version}`);
+  const files = {
+    ".agents/roles/shipper.md": `# Stored contract ${marker}\n`,
+    ".claude/agents/shipper.md":
+      `---\nname: shipper\ndescription: Stored adapter ${marker}\n---\n\nFollow stored adapter ${marker}.\n`,
+    ".codex/agents/shipper.toml":
+      `name = "shipper"\ndeveloper_instructions = """Follow stored adapter ${marker}."""\n`,
+    "probe.sh": `#!/bin/sh\nprintf '%s\\n' "stored probe ${marker}" > "$PROBE_EVIDENCE"\n`,
+  };
+  const entries: WorkflowPackageEntry[] = Object.entries(files)
+    .map(([path, content]) => ({
+      path,
+      mode: path === "probe.sh" ? "100755" as const : "100644" as const,
+      content: Buffer.from(content),
+    }))
+    .sort((left, right) => Buffer.compare(Buffer.from(left.path), Buffer.from(right.path)));
+  for (const entry of entries) {
+    write(join(directory, "payload", entry.path), entry.content.toString("utf8"), entry.mode === "100755" ? 0o755 : 0o644);
+  }
+  write(
+    join(directory, "manifest.json"),
+    `${JSON.stringify({
+      manifestVersion: 1,
+      workflow: "uberblick-workflow",
+      version,
+      source: { repository: "fixture/workflow", commit: "1".repeat(40) },
+      digest: { algorithm: "sha256", framing: DIGEST_FRAMING, payload: payloadDigest(entries) },
+      payload: entries.map(({ path, mode }) => ({ path, mode })),
+    }, null, 2)}\n`,
+  );
+  return directory;
+}
+
+async function waitForFile(path: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (!existsSync(path)) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${path}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 /**
  * A `claude` that answers preflight and then records its session.
  *
@@ -98,18 +141,42 @@ function project(root: string, name: string, contractPath: string): string {
  */
 const FAKE_CLAUDE = `#!/usr/bin/env node
 const fs = require("node:fs");
+const path = require("node:path");
 if (process.argv[2] === "--version") { process.stdout.write("fake 0.0.0\\n"); process.exit(0); }
 if (process.argv[2] === "auth") { process.stdout.write(JSON.stringify({ loggedIn: true })); process.exit(0); }
 const argv = process.argv.slice(2);
+const context = JSON.parse(process.env.UB_AGENT_SESSION_CONTEXT);
+const custom = argv.indexOf("--agents");
+const contractRef = /per \`([^\`]+)\`/.exec(argv.at(-1))[1];
 fs.writeFileSync(process.env.LAUNCH_EVIDENCE, JSON.stringify({
   argv,
   prompt: argv.at(-1),
   cwd: process.cwd(),
   marker: fs.readFileSync("marker", "utf8").trim(),
-  adapter: fs.readFileSync(".claude/agents/shipper.md", "utf8"),
+  context,
+  adapter: custom === -1
+    ? fs.readFileSync(".claude/agents/shipper.md", "utf8")
+    : JSON.parse(argv[custom + 1]).shipper.prompt,
+  contract: fs.readFileSync(path.isAbsolute(contractRef) ? contractRef : path.join(process.cwd(), contractRef), "utf8"),
   visible: fs.readdirSync(".").sort(),
 }));
+if (process.env.SESSION_READY) {
+  fs.writeFileSync(process.env.SESSION_READY, "ready\\n");
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  while (!fs.existsSync(process.env.SESSION_CONTINUE)) Atomics.wait(wait, 0, 0, 25);
+}
 process.stdout.write("Blocked shipper: fixture stop.\\n");
+`;
+
+const FAKE_CODEX = `#!/usr/bin/env node
+const fs = require("node:fs");
+if (process.argv[2] === "--version") { process.stdout.write("fake 0.0.0\\n"); process.exit(0); }
+if (process.argv[2] === "login") process.exit(0);
+const argv = process.argv.slice(2);
+const context = JSON.parse(process.env.UB_AGENT_SESSION_CONTEXT);
+fs.writeFileSync(process.env.CODEX_EVIDENCE, JSON.stringify({ argv, context }));
+const output = argv[argv.indexOf("-o") + 1];
+fs.writeFileSync(output, "Blocked shipper: fixture stop.\\n");
 `;
 
 describe("ub agents launch, against real projects", () => {
@@ -155,7 +222,9 @@ describe("ub agents launch, against real projects", () => {
         const name = control.endsWith("alpha") ? "alpha" : "beta";
         // The sentinel stop, so exactly one session ran.
         expect(run.status, run.output).toBe(1);
-        expect(run.stdout).toContain(`ub agents launch: shipper on claude in ${control}\n`);
+        expect(run.stdout).toContain(
+          `ub agents launch: shipper on claude in ${control}; workflow project-tree fallback\n`,
+        );
 
         const session = JSON.parse(readFileSync(join(root, `${name}.session.json`), "utf8"));
         // The assignment names this project's declared contract, at the path
@@ -204,6 +273,95 @@ describe("ub agents launch, against real projects", () => {
     }
   });
 
+  it("loads the contract, adapter and probe from the selected stored installation", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ub-agents-external-"));
+    try {
+      const control = project(root, "external", ".agents/roles/shipper.md");
+      const pkg = workflowPackage(root, "outside-project");
+      for (const path of [
+        ".agents/roles/shipper.md",
+        ".claude/agents/shipper.md",
+        ".codex/agents/shipper.toml",
+        "probe.sh",
+      ]) {
+        rmSync(join(control, path));
+      }
+      git(["add", "-A"], control);
+      git([...IDENTITY, "commit", "-m", "keep workflow outside project"], control);
+      git(["push", "origin", "main"], control);
+
+      const box = sandbox();
+      const installed = runUb(["agents", "install", pkg, "--project", control], box);
+      expect(installed.status, installed.output).toBe(0);
+      for (const path of [
+        ".agents/roles/shipper.md",
+        ".claude/agents/shipper.md",
+        ".codex/agents/shipper.toml",
+        "probe.sh",
+      ]) {
+        expect(() => readFileSync(join(control, path))).toThrow();
+      }
+
+      const bin = join(root, "bin");
+      mkdirSync(bin);
+      write(join(bin, "claude"), FAKE_CLAUDE, 0o755);
+      write(join(bin, "codex"), FAKE_CODEX, 0o755);
+      write(join(bin, "lsof"), "#!/bin/sh\nexit 0\n", 0o755);
+      const evidence = join(root, "external.session.json");
+      const probe = join(root, "external.probe.txt");
+      const ready = join(root, "external.ready");
+      const proceed = join(root, "external.continue");
+      const launching = runUbAsync(
+        ["agents", "launch", "shipper", "--project", control],
+        box,
+        {
+          LAUNCH_EVIDENCE: evidence,
+          PROBE_EVIDENCE: probe,
+          SESSION_READY: ready,
+          SESSION_CONTINUE: proceed,
+          PATH: `${bin}:${box.env.PATH ?? ""}`,
+        },
+        60_000,
+      );
+      await waitForFile(ready);
+      const replacement = workflowPackage(root, "replacement", "2.0.0");
+      expect(runUb(["agents", "install", replacement, "--project", control], box).status).toBe(0);
+      write(proceed, "continue\n");
+      const launched = await launching;
+      expect(launched.status, launched.output).toBe(1);
+      const session = JSON.parse(readFileSync(evidence, "utf8"));
+      expect(session.adapter).toContain("Follow stored adapter outside-project");
+      expect(session.contract).toContain("Stored contract outside-project");
+      expect(readFileSync(probe, "utf8")).toContain("stored probe outside-project");
+      expect(session.prompt).toContain(join(session.context.workflowRoot, ".agents/roles/shipper.md"));
+      expect(session.context.projectRoot).toBe(control);
+      expect(session.context.workflowRoot).not.toBe(control);
+      expect(session.context.bindings.baseRef).toEqual({ remote: "origin", branch: "main" });
+      expect(session.argv.slice(0, 5)).toEqual(["-p", "--agents", session.argv[2], "--agent", "shipper"]);
+
+      const codexEvidence = join(root, "external.codex.json");
+      const codex = await runUbAsync(
+        ["agents", "launch", "shipper", "--model", "codex", "--project", control],
+        box,
+        {
+          CODEX_EVIDENCE: codexEvidence,
+          PROBE_EVIDENCE: probe,
+          PATH: `${bin}:${box.env.PATH ?? ""}`,
+        },
+        60_000,
+      );
+      expect(codex.status, codex.output).toBe(1);
+      const codexSession = JSON.parse(readFileSync(codexEvidence, "utf8"));
+      expect(codexSession.argv).toContain(
+        'developer_instructions="Follow stored adapter replacement."',
+      );
+      expect(codexSession.context.projectRoot).toBe(session.context.projectRoot);
+      expect(codexSession.context.workflowRoot).not.toBe(session.context.workflowRoot);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("resolves the project from the working directory when --project is absent", async () => {
     const root = mkdtempSync(join(tmpdir(), "ub-agents-cwd-"));
     try {
@@ -229,7 +387,9 @@ describe("ub agents launch, against real projects", () => {
       );
 
       expect(run.status, run.output).toBe(1);
-      expect(run.stdout).toContain(`ub agents launch: shipper on claude in ${control}\n`);
+      expect(run.stdout).toContain(
+        `ub agents launch: shipper on claude in ${control}; workflow project-tree fallback\n`,
+      );
       const session = JSON.parse(readFileSync(join(root, "gamma.session.json"), "utf8"));
       expect(session.marker).toBe("gamma");
       expect(session.prompt).toContain("per `.agents/roles/shipper.md`");
