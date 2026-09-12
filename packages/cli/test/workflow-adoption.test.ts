@@ -278,6 +278,16 @@ describe("ub agents workflow selection", () => {
       selected: { version: "2.0.0" },
       pending: null,
     });
+    expect(() =>
+      selectWorkflow(project, pkg, box.env, {
+        beforeMutation(operation, path) {
+          if (operation === "sync" && path === dirname(recordPath)) {
+            throw new Error("fixture retry selection sync failure");
+          }
+        },
+      }),
+    ).toThrow(/retry selection sync failure/);
+    expect(selectWorkflow(project, pkg, box.env)).toMatchObject({ changed: false });
 
     expect(() =>
       unselectWorkflow(project, box.env, {
@@ -312,14 +322,25 @@ describe("ub agents workflow selection", () => {
     expect(() =>
       unselectWorkflow(project, box.env, {
         beforeMutation(operation, path) {
-          if (operation === "remove" && path === pendingStage) {
-            throw new Error("fixture pending cleanup failure");
+          if (operation === "sync" && path === dirname(pendingStage)) {
+            throw new Error("fixture pending cleanup sync failure");
           }
         },
       }),
     ).toThrow(/selection record.*was kept/);
     expect(inspectWorkflowSelection(project, box.env).record?.pending?.stage).toBe(pendingStage);
-    expect(statSync(pendingStage).isDirectory()).toBe(true);
+    expect(() => statSync(pendingStage)).toThrow();
+
+    expect(() =>
+      unselectWorkflow(project, box.env, {
+        beforeMutation(operation, path) {
+          if (operation === "sync" && path === dirname(pendingStage)) {
+            throw new Error("fixture retry cleanup sync failure");
+          }
+        },
+      }),
+    ).toThrow(/selection record.*was kept/);
+    expect(inspectWorkflowSelection(project, box.env).record?.pending?.stage).toBe(pendingStage);
 
     unselectWorkflow(project, box.env);
     expect(inspectWorkflowSelection(project, box.env).record).toBeNull();

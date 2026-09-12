@@ -446,7 +446,11 @@ export function selectWorkflow(
     );
   }
   if (current?.pending === null && current.selected !== null && sameRef(current.selected, target)) {
-    if (installationProblem(target) === null) return { changed: false, selection: target };
+    if (installationProblem(target) === null) {
+      hooks.beforeMutation?.("sync", dirname(path));
+      syncDirectory(dirname(path));
+      return { changed: false, selection: target };
+    }
   }
 
   const pending: WorkflowSelectionRecord = {
@@ -544,8 +548,18 @@ export function unselectWorkflow(
       if (exists) {
         hooks.beforeMutation?.("remove", pendingStage);
         rmSync(pendingStage, { recursive: true, force: true });
-        hooks.beforeMutation?.("sync", dirname(pendingStage));
-        syncDirectory(dirname(pendingStage));
+      }
+      const stageParent = dirname(pendingStage);
+      let parentExists = true;
+      try {
+        lstatSync(stageParent);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        parentExists = false;
+      }
+      if (parentExists) {
+        hooks.beforeMutation?.("sync", stageParent);
+        syncDirectory(stageParent);
       }
     } catch (error) {
       fail(
