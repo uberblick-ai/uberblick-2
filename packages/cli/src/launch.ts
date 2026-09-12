@@ -51,7 +51,7 @@ import {
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, normalize, sep } from "node:path";
+import { isAbsolute, join, normalize, sep } from "node:path";
 import { parseArgs } from "node:util";
 import {
   FORWARDED,
@@ -697,18 +697,10 @@ function workflowLocation(entry: RoleLaunch): string {
 }
 
 function probeDeclarationFailure(root: string, command: readonly string[]): string | null {
-  const [executable, operand] = command;
+  const [executable] = command;
   if (executable === undefined) return "declares an empty probe command";
   if (!isAbsolute(executable) && executable.includes("/") && !pathIsFile(root, executable)) {
     return `declares a probe executable that is not a readable file in ${root}: ${executable}`;
-  }
-  if (
-    operand !== undefined &&
-    !operand.startsWith("-") &&
-    ["bash", "node", "sh"].includes(basename(executable)) &&
-    !pathIsFile(root, operand)
-  ) {
-    return `declares a probe path that is not a readable file in ${root}: ${operand}`;
   }
   return null;
 }

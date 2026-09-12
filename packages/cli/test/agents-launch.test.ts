@@ -277,6 +277,10 @@ describe("ub agents launch, against real projects", () => {
     const root = mkdtempSync(join(tmpdir(), "ub-agents-external-"));
     try {
       const control = project(root, "external", ".agents/roles/shipper.md");
+      const launchPath = join(control, ".agents/launch.json");
+      const launchData = JSON.parse(readFileSync(launchPath, "utf8"));
+      launchData.entryRoles.shipper.probe = ["sh", join(control, "probe.sh")];
+      write(launchPath, `${JSON.stringify(launchData, null, 2)}\n`);
       const pkg = workflowPackage(root, "outside-project");
       for (const path of [
         ".agents/roles/shipper.md",
@@ -357,6 +361,8 @@ describe("ub agents launch, against real projects", () => {
       expect(codexSession.context.workflowRoot).not.toBe(session.context.workflowRoot);
 
       rmSync(join(control, "probe.sh"));
+      launchData.entryRoles.shipper.probe = ["./probe.sh"];
+      write(launchPath, `${JSON.stringify(launchData, null, 2)}\n`);
       const missingProbeEvidence = join(root, "missing-probe.codex.json");
       const missingProbe = await runUbAsync(
         ["agents", "launch", "shipper", "--model", "codex", "--project", control],
@@ -369,7 +375,7 @@ describe("ub agents launch, against real projects", () => {
         60_000,
       );
       expect(missingProbe.status, missingProbe.output).toBe(1);
-      expect(missingProbe.stderr).toContain(`declares a probe path that is not a readable file in ${control}`);
+      expect(missingProbe.stderr).toContain(`declares a probe executable that is not a readable file in ${control}`);
       expect(missingProbe.stderr).toContain("probe.sh");
       expect(existsSync(missingProbeEvidence)).toBe(false);
     } finally {

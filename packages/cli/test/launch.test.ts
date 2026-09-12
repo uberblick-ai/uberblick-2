@@ -60,6 +60,7 @@ function rig(options: {
   refreshes?: Array<{ detail: string; retry: boolean } | null>;
   probes?: number[];
   probeOutput?: string;
+  probeUnresolvable?: boolean;
   linkBase?: string | null;
   sessions?: SessionResult[];
   waits?: Array<NodeJS.Signals | null>;
@@ -125,7 +126,11 @@ function rig(options: {
     async runProbe(command, workflowRoot) {
       seen.probes.push(command);
       seen.probeRoots.push(workflowRoot ?? REPO_ROOT);
-      return { status: probes.shift() ?? 0, output: options.probeOutput ?? "" };
+      return {
+        status: probes.shift() ?? 0,
+        output: options.probeOutput ?? "",
+        ...(options.probeUnresolvable === true ? { unresolvable: true as const } : {}),
+      };
     },
     async runSession(role, runtime, entry, project) {
       seen.sessions.push({ role, runtime, base: `${project.baseRef.remote}/${project.baseRef.branch}` });
@@ -779,6 +784,16 @@ process.exit(0);
     expect(failedRead.seen.sessions).toEqual([]);
     expect(failedRead.seen.waits).toEqual([30 * 60 * 1_000]);
     expect(failedRead.stdout()).toContain("probe failed: gh: Could not resolve host");
+
+    const unresolvable = rig({
+      probes: [127],
+      probeOutput: "spawnSync ./missing-probe.sh ENOENT",
+      probeUnresolvable: true,
+    });
+    expect(await launchCommand(["integrator"], unresolvable.io, unresolvable.services)).toBe(1);
+    expect(unresolvable.seen.sessions).toEqual([]);
+    expect(unresolvable.seen.waits).toEqual([]);
+    expect(unresolvable.stderr()).toContain("declared probe failed");
   });
 
   it("stops on a persistent access failure at every stage, and only on one", async () => {
