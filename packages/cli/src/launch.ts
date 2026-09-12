@@ -41,7 +41,9 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
+  accessSync,
   closeSync,
+  constants,
   existsSync,
   mkdtempSync,
   openSync,
@@ -51,7 +53,7 @@ import {
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, normalize, sep } from "node:path";
+import { isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import {
   FORWARDED,
@@ -699,8 +701,11 @@ function workflowLocation(entry: RoleLaunch): string {
 function probeDeclarationFailure(root: string, command: readonly string[]): string | null {
   const [executable] = command;
   if (executable === undefined) return "declares an empty probe command";
-  if (!isAbsolute(executable) && executable.includes("/") && !pathIsFile(root, executable)) {
-    return `declares a probe executable that is not a readable file in ${root}: ${executable}`;
+  if (!isAbsolute(executable) && !executable.includes("/")) return null;
+  try {
+    accessSync(isAbsolute(executable) ? executable : resolve(root, executable), constants.X_OK);
+  } catch {
+    return `declares a probe executable that is not executable from ${root}: ${executable}`;
   }
   return null;
 }
