@@ -278,9 +278,6 @@ describe("ub agents launch, against real projects", () => {
     try {
       const control = project(root, "external", ".agents/roles/shipper.md");
       const launchPath = join(control, ".agents/launch.json");
-      const launchData = JSON.parse(readFileSync(launchPath, "utf8"));
-      launchData.entryRoles.shipper.probe = ["sh", join(control, "probe.sh")];
-      write(launchPath, `${JSON.stringify(launchData, null, 2)}\n`);
       const pkg = workflowPackage(root, "outside-project");
       for (const path of [
         ".agents/roles/shipper.md",
@@ -359,6 +356,23 @@ describe("ub agents launch, against real projects", () => {
       );
       expect(codexSession.context.projectRoot).toBe(session.context.projectRoot);
       expect(codexSession.context.workflowRoot).not.toBe(session.context.workflowRoot);
+
+      const launchData = JSON.parse(readFileSync(launchPath, "utf8"));
+      launchData.entryRoles.shipper.probe = ["sh", join(control, "probe.sh")];
+      write(launchPath, `${JSON.stringify(launchData, null, 2)}\n`);
+      const absoluteProbeEvidence = join(root, "absolute-probe.codex.json");
+      const absoluteProbe = await runUbAsync(
+        ["agents", "launch", "shipper", "--model", "codex", "--project", control],
+        box,
+        {
+          CODEX_EVIDENCE: absoluteProbeEvidence,
+          PROBE_EVIDENCE: probe,
+          PATH: `${bin}:${box.env.PATH ?? ""}`,
+        },
+        60_000,
+      );
+      expect(absoluteProbe.status, absoluteProbe.output).toBe(1);
+      expect(existsSync(absoluteProbeEvidence)).toBe(true);
 
       rmSync(join(control, "probe.sh"));
       launchData.entryRoles.shipper.probe = ["./probe.sh"];
