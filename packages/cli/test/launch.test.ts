@@ -770,11 +770,15 @@ process.exit(0);
     expect(empty.seen.probes[0]).toEqual(["sh", "scripts/probe-work.sh", "integrator"]);
     expect(empty.stdout()).toMatch(/will idle for 30min/);
 
-    const broken = rig({ probes: [2], probeOutput: "sh: cannot open scripts/probe-work.sh" });
-    expect(await launchCommand(["integrator"], broken.io, broken.services)).toBe(1);
-    expect(broken.seen.sessions).toEqual([]);
-    expect(broken.seen.waits).toEqual([]);
-    expect(broken.stderr()).toContain("declared probe failed");
+    const failedRead = rig({
+      probes: [2],
+      probeOutput: "gh: Could not resolve host: api.github.com",
+      waits: ["SIGINT"],
+    });
+    expect(await launchCommand(["integrator"], failedRead.io, failedRead.services)).toBe(130);
+    expect(failedRead.seen.sessions).toEqual([]);
+    expect(failedRead.seen.waits).toEqual([30 * 60 * 1_000]);
+    expect(failedRead.stdout()).toContain("probe failed: gh: Could not resolve host");
   });
 
   it("stops on a persistent access failure at every stage, and only on one", async () => {

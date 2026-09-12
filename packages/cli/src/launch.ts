@@ -51,7 +51,7 @@ import {
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, normalize, sep } from "node:path";
+import { basename, isAbsolute, join, normalize, sep } from "node:path";
 import { parseArgs } from "node:util";
 import {
   FORWARDED,
@@ -178,6 +178,8 @@ export interface ProbeResult {
   status: number;
   /** Whatever the probe said about a failure; empty when it succeeded. */
   output: string;
+  /** The declared command could not be executed, rather than reporting a failed read. */
+  unresolvable?: true;
 }
 
 export interface LaunchServices {
@@ -692,6 +694,23 @@ function lastLine(text: string): string {
 
 function workflowLocation(entry: RoleLaunch): string {
   return entry.externalWorkflow ? entry.workflowRoot : "project-tree fallback";
+}
+
+function probeDeclarationFailure(root: string, command: readonly string[]): string | null {
+  const [executable, operand] = command;
+  if (executable === undefined) return "declares an empty probe command";
+  if (!isAbsolute(executable) && executable.includes("/") && !pathIsFile(root, executable)) {
+    return `declares a probe executable that is not a readable file in ${root}: ${executable}`;
+  }
+  if (
+    operand !== undefined &&
+    !operand.startsWith("-") &&
+    ["bash", "node", "sh"].includes(basename(executable)) &&
+    !pathIsFile(root, operand)
+  ) {
+    return `declares a probe path that is not a readable file in ${root}: ${operand}`;
+  }
+  return null;
 }
 
 /**
@@ -1213,9 +1232,13 @@ export function createLaunchServices(
       // contracts and adapters come from a machine-stored installation.
       const result = runSync(executable, args, root, probeEnv);
       if (result.stdout) io.out(result.stdout);
+      const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
       return {
         status: result.status ?? 2,
         output: `${result.stderr ?? ""}${result.error === undefined ? "" : `\n${result.error.message}`}`,
+        ...(errorCode === "EACCES" || errorCode === "ENOENT" || result.status === 126 || result.status === 127
+          ? { unresolvable: true as const }
+          : {}),
       };
     },
     async runSession(role, runtime, entry, project) {
@@ -1451,10 +1474,6 @@ function blocked(io: Io, text: string): boolean {
   return true;
 }
 
-function temporaryAccessFailure(text: string): boolean {
-  return TEMPORARY_ACCESS_SIGNATURES.some((pattern) => pattern.test(text));
-}
-
 function transcriptSuffix(session: SessionResult): string {
   return session.transcript === undefined ? "" : `; transcript at ${session.transcript}`;
 }
@@ -1518,6 +1537,13 @@ export async function launchCommand(
     return 2;
   }
   const runtime = parsed.selected ?? entry.defaultRuntime;
+  const probeDeclaration = probeDeclarationFailure(services.root, entry.probe);
+  if (probeDeclaration !== null) {
+    io.err(
+      `ub agents launch: ${probeDeclaration}; repair ${launchDataPath(services.root)} or its probe before retrying\n`,
+    );
+    return 1;
+  }
   const runtimeFailure = services.preflight(
     runtime,
     entry.runtimes[runtime].adapter,
@@ -1572,6 +1598,13 @@ export async function launchCommand(
       );
       continue;
     }
+    const reloadedProbeFailure = probeDeclarationFailure(services.root, entry.probe);
+    if (reloadedProbeFailure !== null) {
+      io.err(
+        `ub agents launch: ${reloadedProbeFailure}; repair ${launchDataPath(services.root)} or its probe before retrying\n`,
+      );
+      return 1;
+    }
     const effectiveWorkflow = workflowLocation(entry);
     if (effectiveWorkflow !== reportedWorkflow) {
       io.out(`launch: workflow changed to ${effectiveWorkflow}; next session uses this path\n`);
@@ -1580,7 +1613,7 @@ export async function launchCommand(
     const probe = await services.runProbe(entry.probe, entry.workflowRoot, project);
     if (probe.status !== 0) {
       if (blocked(io, probe.output)) return 1;
-      if (probe.status !== 1 && !temporaryAccessFailure(probe.output)) {
+      if (probe.unresolvable === true) {
         const detail = probe.output.trim() === "" ? `status ${probe.status}` : lastLine(probe.output);
         io.err(
           `ub agents launch: declared probe failed in ${services.root}: ${detail}; ` +

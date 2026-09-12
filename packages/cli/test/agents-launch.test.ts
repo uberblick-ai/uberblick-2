@@ -369,7 +369,7 @@ describe("ub agents launch, against real projects", () => {
         60_000,
       );
       expect(missingProbe.status, missingProbe.output).toBe(1);
-      expect(missingProbe.stderr).toContain(`declared probe failed in ${control}`);
+      expect(missingProbe.stderr).toContain(`declares a probe path that is not a readable file in ${control}`);
       expect(missingProbe.stderr).toContain("probe.sh");
       expect(existsSync(missingProbeEvidence)).toBe(false);
     } finally {
