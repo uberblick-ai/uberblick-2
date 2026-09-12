@@ -273,7 +273,7 @@ describe("ub agents launch, against real projects", () => {
     }
   });
 
-  it("loads the contract, adapter and probe from the selected stored installation", async () => {
+  it("loads the stored contract and adapter while keeping the project-declared probe", async () => {
     const root = mkdtempSync(join(tmpdir(), "ub-agents-external-"));
     try {
       const control = project(root, "external", ".agents/roles/shipper.md");
@@ -282,7 +282,6 @@ describe("ub agents launch, against real projects", () => {
         ".agents/roles/shipper.md",
         ".claude/agents/shipper.md",
         ".codex/agents/shipper.toml",
-        "probe.sh",
       ]) {
         rmSync(join(control, path));
       }
@@ -297,7 +296,6 @@ describe("ub agents launch, against real projects", () => {
         ".agents/roles/shipper.md",
         ".claude/agents/shipper.md",
         ".codex/agents/shipper.toml",
-        "probe.sh",
       ]) {
         expect(() => readFileSync(join(control, path))).toThrow();
       }
@@ -332,7 +330,7 @@ describe("ub agents launch, against real projects", () => {
       const session = JSON.parse(readFileSync(evidence, "utf8"));
       expect(session.adapter).toContain("Follow stored adapter outside-project");
       expect(session.contract).toContain("Stored contract outside-project");
-      expect(readFileSync(probe, "utf8")).toContain("stored probe outside-project");
+      expect(readFileSync(probe, "utf8")).toContain("probe of external");
       expect(session.prompt).toContain(join(session.context.workflowRoot, ".agents/roles/shipper.md"));
       expect(session.context.projectRoot).toBe(control);
       expect(session.context.workflowRoot).not.toBe(control);
@@ -357,6 +355,23 @@ describe("ub agents launch, against real projects", () => {
       );
       expect(codexSession.context.projectRoot).toBe(session.context.projectRoot);
       expect(codexSession.context.workflowRoot).not.toBe(session.context.workflowRoot);
+
+      rmSync(join(control, "probe.sh"));
+      const missingProbeEvidence = join(root, "missing-probe.codex.json");
+      const missingProbe = await runUbAsync(
+        ["agents", "launch", "shipper", "--model", "codex", "--project", control],
+        box,
+        {
+          CODEX_EVIDENCE: missingProbeEvidence,
+          PROBE_EVIDENCE: probe,
+          PATH: `${bin}:${box.env.PATH ?? ""}`,
+        },
+        60_000,
+      );
+      expect(missingProbe.status, missingProbe.output).toBe(1);
+      expect(missingProbe.stderr).toContain(`declared probe failed in ${control}`);
+      expect(missingProbe.stderr).toContain("probe.sh");
+      expect(existsSync(missingProbeEvidence)).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

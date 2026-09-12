@@ -1,12 +1,12 @@
 /** `ub agents install|list|uninstall` — select a machine-stored workflow. */
 
 import { parseArgs } from "node:util";
+import { join } from "node:path";
 import { type Io, processIo } from "./io.js";
 import { readLaunchData } from "./launch.js";
 import { resolveProjectDirectory } from "./project.js";
 import {
   inspectWorkflowSelection,
-  resolveSelectedWorkflow,
   selectWorkflow,
   unselectWorkflow,
 } from "./workflow-storage.js";
@@ -154,8 +154,8 @@ export async function workflowCommand(
       }
       const selected = inspected.record.selected;
       if (selected === null) {
-        io.out("selection: none\n");
-        printRoles(io, null);
+        io.out("selection: none; launch uses the temporary workflow files in the project tree while selection is pending\n");
+        printRoles(io, rolesOf(project, project));
       } else {
         io.out(`workflow: ${selected.workflow}\n`);
         io.out(`version: ${selected.version}\n`);
@@ -163,7 +163,7 @@ export async function workflowCommand(
         io.out(`installation: ${selected.installation}\n`);
         if (inspected.selectedProblem === null) {
           io.out("state: verified\n");
-          printRoles(io, rolesOf(project, resolveSelectedWorkflow(project)?.root ?? project));
+          printRoles(io, rolesOf(project, join(selected.installation, "payload")));
         } else {
           io.out(`state: unusable — ${inspected.selectedProblem}\n`);
           printRoles(io, null);

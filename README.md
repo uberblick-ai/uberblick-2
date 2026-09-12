@@ -384,9 +384,11 @@ The project's own `.agents/launch.json` continues to declare which entry roles
 exist, their default runtime, sandbox or permission mode, and — under `project`
 — the bindings its workflow reads, starting with the `baseRef` every session's
 worktree is cut from. Contracts, runtime adapters and workflow helpers resolve
-from the selected stored installation. A running session retains the project,
-installation and binding snapshot with which it started; the standing loop
-re-reads the selection before its next session. Temporarily, a project with no
+from the selected stored installation; the project-declared work probe keeps
+running from the selected project with that installation in its session context.
+A running session retains the project, installation and binding snapshot with
+which it started; the standing loop re-reads the selection before its next
+session. Temporarily, a project with no
 external selection still launches from its tracked workflow files so an
 existing loop is not stranded during the cutover. The command still selects,
 claims and transitions nothing; the role does all of that.

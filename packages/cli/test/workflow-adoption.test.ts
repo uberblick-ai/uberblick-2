@@ -15,7 +15,9 @@ import { afterAll, describe, expect, it } from "vitest";
 import { resolveProjectDirectory } from "../src/project.js";
 import {
   inspectWorkflowSelection,
+  resolveSelectedWorkflow,
   selectWorkflow,
+  unselectWorkflow,
   workflowSelectionPath,
 } from "../src/workflow-storage.js";
 import {
@@ -62,6 +64,9 @@ function launchData(): string {
 function projectAt(path: string, git = true): string {
   mkdirSync(path, { recursive: true });
   write(join(path, ".agents/launch.json"), launchData());
+  write(join(path, ".agents/roles/shipper.md"), "# Project-tree shipper\n");
+  write(join(path, ".claude/agents/shipper.md"), "Project-tree Claude adapter\n");
+  write(join(path, ".codex/agents/shipper.toml"), "name = \"shipper\"\n");
   write(join(path, "kept.txt"), "project-owned\n");
   if (git) {
     expect(spawnSync("git", ["init", "-q", "-b", "main"], { cwd: path }).status).toBe(0);
@@ -221,6 +226,104 @@ describe("ub agents workflow selection", () => {
     const recovered = inspectWorkflowSelection(project, box.env);
     expect(recovered.record?.selected?.version).toBe("2.0.0");
     expect(recovered.record?.pending).toBeNull();
+  });
+
+  it("keeps the project-tree fallback effective while a first selection is pending", () => {
+    const box = sandbox();
+    const project = projectAt(box.cwd);
+    const packagePath = packageAt(join(dirname(project), "packages"), "1.0.0", "first");
+    const pkg = { ...readExtractedWorkflowPackage(packagePath), sourceKind: "local" as const };
+
+    expect(() =>
+      selectWorkflow(project, pkg, box.env, {
+        beforeMutation(operation, path) {
+          if (operation === "write" && path.endsWith("shipper.md")) {
+            throw new Error("fixture first-install failure");
+          }
+        },
+      }),
+    ).toThrow(/project-tree fallback remains effective/);
+
+    expect(resolveSelectedWorkflow(project, box.env)).toBeNull();
+    const partial = inspectWorkflowSelection(project, box.env);
+    expect(partial.record?.selected).toBeNull();
+    expect(partial.record?.pending?.target.version).toBe("1.0.0");
+    const listed = runUb(["agents", "list"], box);
+    expect(listed.stdout).toContain(
+      "selection: none; launch uses the temporary workflow files in the project tree while selection is pending",
+    );
+    expect(listed.stdout).toContain("roles: shipper");
+    expect(listed.stdout).not.toContain("repair .agents/launch.json");
+  });
+
+  it("reports the state reached when a selection or removal directory sync fails", () => {
+    const box = sandbox();
+    const project = projectAt(box.cwd);
+    const packagePath = packageAt(join(dirname(project), "packages"), "2.0.0", "durability");
+    const pkg = { ...readExtractedWorkflowPackage(packagePath), sourceKind: "local" as const };
+    const recordPath = workflowSelectionPath(project, box.env);
+
+    expect(() =>
+      selectWorkflow(project, pkg, box.env, {
+        beforeMutation(operation, path) {
+          if (operation !== "sync" || path !== dirname(recordPath)) return;
+          const visible = JSON.parse(readFileSync(recordPath, "utf8"));
+          if (visible.selected?.version === "2.0.0" && visible.pending === null) {
+            throw new Error("fixture final selection sync failure");
+          }
+        },
+      }),
+    ).toThrow(/2\.0\.0 is now the effective selection.*durability could not be confirmed/);
+    expect(inspectWorkflowSelection(project, box.env).record).toMatchObject({
+      selected: { version: "2.0.0" },
+      pending: null,
+    });
+
+    expect(() =>
+      unselectWorkflow(project, box.env, {
+        beforeMutation(operation, path) {
+          if (operation === "sync" && path === dirname(recordPath)) {
+            throw new Error("fixture removal sync failure");
+          }
+        },
+      }),
+    ).toThrow(/selection record is no longer visible.*removal durability could not be confirmed/);
+    expect(inspectWorkflowSelection(project, box.env).record).toBeNull();
+  });
+
+  it("removes a pending stage on uninstall and keeps its record if cleanup fails", () => {
+    const box = sandbox();
+    const project = projectAt(box.cwd);
+    const packagePath = packageAt(join(dirname(project), "packages"), "1.0.0", "pending-cleanup");
+    const pkg = { ...readExtractedWorkflowPackage(packagePath), sourceKind: "local" as const };
+
+    expect(() =>
+      selectWorkflow(project, pkg, box.env, {
+        beforeMutation(operation, path) {
+          if (operation === "write" && path.endsWith("shipper.md")) {
+            throw new Error("fixture interrupted storage");
+          }
+        },
+      }),
+    ).toThrow(/partial selection is recorded/);
+    const pendingStage = inspectWorkflowSelection(project, box.env).record?.pending?.stage as string;
+    expect(statSync(pendingStage).isDirectory()).toBe(true);
+
+    expect(() =>
+      unselectWorkflow(project, box.env, {
+        beforeMutation(operation, path) {
+          if (operation === "remove" && path === pendingStage) {
+            throw new Error("fixture pending cleanup failure");
+          }
+        },
+      }),
+    ).toThrow(/selection record.*was kept/);
+    expect(inspectWorkflowSelection(project, box.env).record?.pending?.stage).toBe(pendingStage);
+    expect(statSync(pendingStage).isDirectory()).toBe(true);
+
+    unselectWorkflow(project, box.env);
+    expect(inspectWorkflowSelection(project, box.env).record).toBeNull();
+    expect(() => statSync(pendingStage)).toThrow();
   });
 
   it("reports changed stored bytes and launch refuses them before a runtime child", () => {

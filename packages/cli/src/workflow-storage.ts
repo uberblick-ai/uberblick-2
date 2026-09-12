@@ -73,11 +73,7 @@ export interface SelectionInspection {
 
 export interface WorkflowStorageHooks {
   /** Test seam for interruption between durable mutations. */
-  beforeMutation?: (operation: "write" | "rename" | "remove", path: string, index: number) => void;
-}
-
-interface MutationCounter {
-  value: number;
+  beforeMutation?: (operation: "write" | "rename" | "remove" | "sync", path: string) => void;
 }
 
 function fail(message: string): never {
@@ -281,11 +277,10 @@ function atomicRecordWrite(
   path: string,
   value: WorkflowSelectionRecord,
   hooks: WorkflowStorageHooks,
-  counter: MutationCounter,
 ): void {
   const parent = dirname(path);
   createDataDirectory(parent);
-  hooks.beforeMutation?.("write", path, counter.value++);
+  hooks.beforeMutation?.("write", path);
   const temporary = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   let handle: number | null = null;
   try {
@@ -299,6 +294,7 @@ function atomicRecordWrite(
     closeSync(handle);
     handle = null;
     renameSync(temporary, path);
+    hooks.beforeMutation?.("sync", parent);
     syncDirectory(parent);
   } catch (error) {
     if (handle !== null) closeSync(handle);
@@ -371,12 +367,6 @@ export function resolveSelectedWorkflow(
   const inspected = inspectWorkflowSelection(project, env);
   const selected = inspected.record?.selected;
   if (selected === undefined || selected === null) {
-    if (inspected.record?.pending !== null && inspected.record?.pending !== undefined) {
-      fail(
-        `${inspected.path} has no effective workflow while a selection is pending; ` +
-          "rerun `ub agents install <source>` or run `ub agents uninstall`",
-      );
-    }
     return null;
   }
   if (inspected.selectedProblem !== null) {
@@ -393,17 +383,16 @@ function writeStage(
   stage: string,
   pkg: LoadedWorkflowPackage,
   hooks: WorkflowStorageHooks,
-  counter: MutationCounter,
 ): void {
   rmSync(stage, { recursive: true, force: true });
   mkdirSync(join(stage, "payload"), { recursive: true, mode: 0o700 });
   const manifest = join(stage, "manifest.json");
-  hooks.beforeMutation?.("write", manifest, counter.value++);
+  hooks.beforeMutation?.("write", manifest);
   durableFile(manifest, `${JSON.stringify(pkg.manifest, null, 2)}\n`, 0o600);
   for (const entry of pkg.entries) {
     const path = join(stage, "payload", entry.path);
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    hooks.beforeMutation?.("write", path, counter.value++);
+    hooks.beforeMutation?.("write", path);
     durableFile(path, entry.content, fileMode(entry.mode));
   }
   readExtractedWorkflowPackage(stage);
@@ -414,7 +403,6 @@ function publishStage(
   stage: string,
   target: StoredWorkflow,
   hooks: WorkflowStorageHooks,
-  counter: MutationCounter,
 ): void {
   const parent = dirname(target.installation);
   createDataDirectory(parent);
@@ -426,12 +414,12 @@ function publishStage(
   try {
     lstatSync(target.installation);
     const quarantined = `${target.installation}.damaged-${randomBytes(6).toString("hex")}`;
-    hooks.beforeMutation?.("rename", target.installation, counter.value++);
+    hooks.beforeMutation?.("rename", target.installation);
     renameSync(target.installation, quarantined);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
-  hooks.beforeMutation?.("rename", stage, counter.value++);
+  hooks.beforeMutation?.("rename", stage);
   try {
     renameSync(stage, target.installation);
   } catch (error) {
@@ -461,7 +449,6 @@ export function selectWorkflow(
     if (installationProblem(target) === null) return { changed: false, selection: target };
   }
 
-  const counter = { value: 0 };
   const pending: WorkflowSelectionRecord = {
     recordVersion: 1,
     project,
@@ -469,7 +456,7 @@ export function selectWorkflow(
     pending: { operation: "select", target, stage: stagePath(project, target, env) },
   };
   try {
-    if (current?.pending === null || current === null) atomicRecordWrite(path, pending, hooks, counter);
+    if (current?.pending === null || current === null) atomicRecordWrite(path, pending, hooks);
   } catch (error) {
     // A rename can succeed even if the following directory sync reports a
     // failure. Re-read rather than guessing whether the pending operation is
@@ -485,7 +472,7 @@ export function selectWorkflow(
       // diagnose any independently unreadable record by its exact path.
     }
     const previous = pending.selected === null
-      ? "no workflow is effective"
+      ? "the project-tree fallback remains effective"
       : `${pending.selected.workflow}@${pending.selected.version} remains effective`;
     fail(
       `${error instanceof Error ? error.message : String(error)}; ${previous}; ` +
@@ -495,22 +482,41 @@ export function selectWorkflow(
     );
   }
   try {
-    writeStage(pending.pending?.stage as string, pkg, hooks, counter);
-    publishStage(pending.pending?.stage as string, target, hooks, counter);
+    writeStage(pending.pending?.stage as string, pkg, hooks);
+    publishStage(pending.pending?.stage as string, target, hooks);
     atomicRecordWrite(
       path,
       { recordVersion: 1, project, selected: target, pending: null },
       hooks,
-      counter,
     );
   } catch (error) {
-    const previous = pending.selected === null
-      ? "no workflow is effective"
-      : `${pending.selected.workflow}@${pending.selected.version} remains effective`;
+    const detail = error instanceof Error ? error.message : String(error);
+    let after: WorkflowSelectionRecord | null;
+    try {
+      after = readSelection(project, env);
+    } catch (readError) {
+      fail(
+        `${detail}; the selection state in ${path} could not be reread ` +
+          `(${readError instanceof Error ? readError.message : String(readError)}); ` +
+          "run `ub agents list` before retrying",
+      );
+    }
+    if (after?.selected !== null && after?.selected !== undefined &&
+      sameRef(after.selected, target) && after.pending === null) {
+      fail(
+        `${detail}; ${target.workflow}@${target.version} is now the effective selection in ${path}, ` +
+          "but its durability could not be confirmed; run `ub agents list` before retrying",
+      );
+    }
+    const previous = after?.selected === null || after?.selected === undefined
+      ? "the project-tree fallback remains effective"
+      : `${after.selected.workflow}@${after.selected.version} remains effective`;
+    const partial = after?.pending !== null && after?.pending !== undefined
+      ? `the partial selection is recorded in ${path} — rerun \`ub agents install <source>\` ` +
+        "with the same package, or run `ub agents uninstall` to undo it"
+      : `no pending selection is visible in ${path}; run \`ub agents list\` before retrying`;
     fail(
-      `${error instanceof Error ? error.message : String(error)}; ${previous}; ` +
-        `the partial selection is recorded in ${path} — rerun \`ub agents install <source>\` ` +
-        "with the same package, or run `ub agents uninstall` to undo it",
+      `${detail}; ${previous}; ${partial}`,
     );
   }
   return { changed: current?.selected === null || current?.selected === undefined || !sameRef(current.selected, target), selection: target };
@@ -522,8 +528,63 @@ export function unselectWorkflow(
   hooks: WorkflowStorageHooks = {},
 ): void {
   const path = workflowSelectionPath(project, env);
-  if (readSelection(project, env) === null) fail(`no external workflow is selected for ${project}`);
-  hooks.beforeMutation?.("remove", path, 0);
-  unlinkSync(path);
-  syncDirectory(dirname(path));
+  const current = readSelection(project, env);
+  if (current === null) fail(`no external workflow is selected for ${project}`);
+
+  const pendingStage = current.pending?.stage;
+  if (pendingStage !== undefined) {
+    try {
+      let exists = true;
+      try {
+        lstatSync(pendingStage);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        exists = false;
+      }
+      if (exists) {
+        hooks.beforeMutation?.("remove", pendingStage);
+        rmSync(pendingStage, { recursive: true, force: true });
+        hooks.beforeMutation?.("sync", dirname(pendingStage));
+        syncDirectory(dirname(pendingStage));
+      }
+    } catch (error) {
+      fail(
+        `${error instanceof Error ? error.message : String(error)}; pending storage ${pendingStage} ` +
+          `could not be fully removed, so the recoverable selection record in ${path} was kept; ` +
+          "fix the storage error and rerun `ub agents uninstall`",
+      );
+    }
+  }
+
+  try {
+    hooks.beforeMutation?.("remove", path);
+    unlinkSync(path);
+    hooks.beforeMutation?.("sync", dirname(path));
+    syncDirectory(dirname(path));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    let after: WorkflowSelectionRecord | null;
+    try {
+      after = readSelection(project, env);
+    } catch (readError) {
+      fail(
+        `${detail}; the selection state in ${path} could not be reread ` +
+          `(${readError instanceof Error ? readError.message : String(readError)}); ` +
+          "run `ub agents list` before retrying",
+      );
+    }
+    if (after === null) {
+      fail(
+        `${detail}; the selection record is no longer visible, but its removal durability could not ` +
+          "be confirmed; run `ub agents list` and rerun `ub agents uninstall` if it returns",
+      );
+    }
+    const effective = after.selected === null
+      ? "the project-tree fallback remains effective"
+      : `${after.selected.workflow}@${after.selected.version} remains effective`;
+    fail(
+      `${detail}; ${effective}; the recoverable selection record remains in ${path}; ` +
+        "fix the storage error and rerun `ub agents uninstall`",
+    );
+  }
 }

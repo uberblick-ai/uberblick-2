@@ -65,13 +65,30 @@ function rig(options: {
   waits?: Array<NodeJS.Signals | null>;
   /** What the launch data says from the second read on, as an edit would. */
   reloadedBaseRef?: { remote: string; branch: string };
+  /** What the selected workflow resolves to from the second read on. */
+  reloadedWorkflowRoot?: string;
 } = {}) {
   const loaded = readLaunchData(REPO_ROOT);
   const data = loaded;
-  const reloaded =
+  const rebound =
     options.reloadedBaseRef === undefined
       ? loaded
       : { ...loaded, project: { ...loaded.project, baseRef: options.reloadedBaseRef } };
+  const reloaded = options.reloadedWorkflowRoot === undefined
+    ? rebound
+    : {
+      ...rebound,
+      entryRoles: Object.fromEntries(
+        Object.entries(rebound.entryRoles).map(([name, entry]) => {
+          const next = { ...entry };
+          Object.defineProperties(next, {
+            workflowRoot: { value: options.reloadedWorkflowRoot, enumerable: false },
+            externalWorkflow: { value: true, enumerable: false },
+          });
+          return [name, next];
+        }),
+      ),
+    };
   const probes = [...(options.probes ?? [0])];
   const sessions = [...(options.sessions ?? [result({ interrupted: "SIGINT" })])];
   const waits = [...(options.waits ?? [])];
@@ -82,7 +99,9 @@ function rig(options: {
     refreshes: 0,
     baseRefs: [] as string[],
     probes: [] as Array<readonly string[]>,
+    probeRoots: [] as string[],
     sessions: [] as Array<{ role: string; runtime: string; base: string }>,
+    sessionRoots: [] as string[],
     waits: [] as number[],
     terminations: [] as NodeJS.Signals[],
   };
@@ -103,12 +122,14 @@ function rig(options: {
       if (refreshes.length > 0) return refreshes.shift()!;
       return options.refresh ?? null;
     },
-    async runProbe(command) {
+    async runProbe(command, workflowRoot) {
       seen.probes.push(command);
+      seen.probeRoots.push(workflowRoot ?? REPO_ROOT);
       return { status: probes.shift() ?? 0, output: options.probeOutput ?? "" };
     },
-    async runSession(role, runtime, _entry, project) {
+    async runSession(role, runtime, entry, project) {
       seen.sessions.push({ role, runtime, base: `${project.baseRef.remote}/${project.baseRef.branch}` });
+      seen.sessionRoots.push(entry.workflowRoot);
       return sessions.shift() ?? result({ interrupted: "SIGINT" });
     },
     async wait(milliseconds) {
@@ -742,14 +763,18 @@ process.exit(0);
   });
 
   it("uses the over-inclusive probe without turning it into queue policy", async () => {
-    for (const probe of [1, 2]) {
-      const current = rig({ probes: [probe], waits: ["SIGINT"] });
-      expect(await launchCommand(["integrator"], current.io, current.services)).toBe(130);
-      expect(current.seen.sessions).toEqual([]);
-      expect(current.seen.waits).toEqual([30 * 60 * 1_000]);
-      expect(current.seen.probes[0]).toEqual(["sh", "scripts/probe-work.sh", "integrator"]);
-      expect(current.stdout()).toMatch(/will idle for 30min/);
-    }
+    const empty = rig({ probes: [1], waits: ["SIGINT"] });
+    expect(await launchCommand(["integrator"], empty.io, empty.services)).toBe(130);
+    expect(empty.seen.sessions).toEqual([]);
+    expect(empty.seen.waits).toEqual([30 * 60 * 1_000]);
+    expect(empty.seen.probes[0]).toEqual(["sh", "scripts/probe-work.sh", "integrator"]);
+    expect(empty.stdout()).toMatch(/will idle for 30min/);
+
+    const broken = rig({ probes: [2], probeOutput: "sh: cannot open scripts/probe-work.sh" });
+    expect(await launchCommand(["integrator"], broken.io, broken.services)).toBe(1);
+    expect(broken.seen.sessions).toEqual([]);
+    expect(broken.seen.waits).toEqual([]);
+    expect(broken.stderr()).toContain("declared probe failed");
   });
 
   it("stops on a persistent access failure at every stage, and only on one", async () => {
@@ -1300,6 +1325,18 @@ process.stdout.write("No eligible issue-preparer work: test fixture.\\n");
       { role: "implementer", runtime: "codex", base: "upstream/trunk" },
     ]);
     expect(current.stderr()).toContain("base ref changed from origin/main to upstream/trunk");
+  });
+
+  it("reports a reloaded workflow root before the next probe and session use it", async () => {
+    const workflowRoot = "/installations/v2/payload";
+    const current = rig({ reloadedWorkflowRoot: workflowRoot });
+
+    expect(await launchCommand(["implementer"], current.io, current.services)).toBe(130);
+    expect(current.seen.probeRoots).toEqual([workflowRoot]);
+    expect(current.seen.sessionRoots).toEqual([workflowRoot]);
+    expect(current.stdout()).toContain(
+      `launch: workflow changed to ${workflowRoot}; next session uses this path\n`,
+    );
   });
 
   it("stops the loop instead of retrying launch data the session tree cannot supply", async () => {

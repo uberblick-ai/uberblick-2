@@ -690,6 +690,10 @@ function lastLine(text: string): string {
   return text.trimEnd().split(/\r?\n/).at(-1) ?? "";
 }
 
+function workflowLocation(entry: RoleLaunch): string {
+  return entry.externalWorkflow ? entry.workflowRoot : "project-tree fallback";
+}
+
 /**
  * Where `#123` points: the project's declared repository, on the host its base
  * remote proves is GitHub. Without a declared repository the remote's own
@@ -1204,7 +1208,10 @@ export function createLaunchServices(
       const probeEnv = project === undefined
         ? projectEnv
         : { ...projectEnv, UB_AGENT_SESSION_CONTEXT: sessionContext(root, workflowRoot, project) };
-      const result = runSync(executable, args, workflowRoot, probeEnv);
+      // The project declares the probe in its launch data, so its relative
+      // operands keep resolving from that project even when the workflow's
+      // contracts and adapters come from a machine-stored installation.
+      const result = runSync(executable, args, root, probeEnv);
       if (result.stdout) io.out(result.stdout);
       return {
         status: result.status ?? 2,
@@ -1444,6 +1451,10 @@ function blocked(io: Io, text: string): boolean {
   return true;
 }
 
+function temporaryAccessFailure(text: string): boolean {
+  return TEMPORARY_ACCESS_SIGNATURES.some((pattern) => pattern.test(text));
+}
+
 function transcriptSuffix(session: SessionResult): string {
   return session.transcript === undefined ? "" : `; transcript at ${session.transcript}`;
 }
@@ -1520,8 +1531,9 @@ export async function launchCommand(
   // the caller's selection — and not an installation directory — is in force.
   io.out(
     `ub agents launch: ${parsed.role} on ${runtime} in ${services.root}; workflow ` +
-      `${entry.externalWorkflow ? entry.workflowRoot : "project-tree fallback"}\n`,
+      `${workflowLocation(entry)}\n`,
   );
+  let reportedWorkflow = workflowLocation(entry);
   let project = data.project;
   for (;;) {
     const refreshed = baseRefName(project.baseRef);
@@ -1560,9 +1572,22 @@ export async function launchCommand(
       );
       continue;
     }
+    const effectiveWorkflow = workflowLocation(entry);
+    if (effectiveWorkflow !== reportedWorkflow) {
+      io.out(`launch: workflow changed to ${effectiveWorkflow}; next session uses this path\n`);
+      reportedWorkflow = effectiveWorkflow;
+    }
     const probe = await services.runProbe(entry.probe, entry.workflowRoot, project);
     if (probe.status !== 0) {
       if (blocked(io, probe.output)) return 1;
+      if (probe.status !== 1 && !temporaryAccessFailure(probe.output)) {
+        const detail = probe.output.trim() === "" ? `status ${probe.status}` : lastLine(probe.output);
+        io.err(
+          `ub agents launch: declared probe failed in ${services.root}: ${detail}; ` +
+            `repair ${launchDataPath(services.root)} or its probe before retrying\n`,
+        );
+        return 1;
+      }
       const reason = probe.status === 1
         ? `no eligible ${parsed.role} work`
         : `probe failed${probe.output.trim() === "" ? "" : `: ${lastLine(probe.output)}`}`;
