@@ -601,9 +601,14 @@ export function readLaunchData(
       const argv = (value: unknown): value is string[] => Array.isArray(value) && value.length > 0 &&
         value.every(part => typeof part === "string" && part.length > 0 && !part.includes("\0"));
       const contract = insideProject(entry.contract);
-      if (!keysWithin(entry, ["contract", "command", "probe"], ["idleSeconds"]) ||
-          !argv(entry.command) || !argv(entry.probe) || contract === null || !pathIsFile(workflowRoot, contract)) {
-        throw new Error(`${named} has invalid command launch data`);
+      if (!keysWithin(entry, ["contract", "command", "probe"], ["idleSeconds"])) {
+        throw new Error(`${named} must contain contract, command and probe, with optional idleSeconds`);
+      }
+      for (const field of ["command", "probe"] as const) {
+        if (!argv(entry[field])) throw new Error(`${named} has an invalid "${field}" argv`);
+      }
+      if (contract === null || !pathIsFile(workflowRoot, contract)) {
+        throw new Error(`${named} contract must name a readable file inside ${workflowRoot}`);
       }
       const parsedRole = { ...entry, contract, defaultRuntime: "command" } as CommandRoleLaunch;
       Object.defineProperties(parsedRole, {
@@ -1388,6 +1393,7 @@ export function createLaunchServices(
       }
       const withLastLine = {
         ...result,
+        ...(entry.command !== undefined && !result.started ? { malformed: true as const } : {}),
         transcript,
         lastLine: runtime === "codex" && existsSync(lastPath)
           ? lastLine(readFileSync(lastPath, "utf8"))
@@ -1704,7 +1710,7 @@ export async function launchCommand(
           ? `session exited with status ${session.code}`
           : `session ended from ${session.signal}`);
       if (session.malformed === true) {
-        io.err(`ub agents launch: ${detail}\n`);
+        io.err(`ub agents launch: ${detail}${transcriptSuffix(session)}\n`);
         return 1;
       }
       if (runtime === "codex" && codexPolicyRefused(session.tail ?? session.lastLine)) {

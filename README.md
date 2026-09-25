@@ -400,8 +400,8 @@ session. For example, this entry in `entryRoles` starts with
 ```json
 "worker": {
   "contract": ".agents/roles/worker.md",
-  "command": ["python3", "-B", "workflow/experiment/ub_worker.py", "--once"],
-  "probe": ["python3", "-B", "workflow/experiment/ub_worker.py", "--probe"],
+  "command": ["python3", "-u", "-B", "workflow/experiment/ub_worker.py", "--once"],
+  "probe": ["python3", "-u", "-B", "workflow/experiment/ub_worker.py", "--probe"],
   "idleSeconds": 60
 }
 ```
@@ -416,7 +416,8 @@ probe runs in the control project and returns 0 for potential work, 1 for idle.
 The command's last nonempty stdout line uses the existing outcome contract:
 `Worked worker: <result>`, `No eligible worker work: <reason>`, or
 `Blocked worker: <reason>`. Diagnostics stay in the transcript. Missing outcomes
-and abnormal exits receive the existing five-second retry; interruption stops
+and abnormal exits receive the existing five-second retry; an unspawnable command
+stops immediately so its declaration can be repaired. Interruption stops
 the active session. Runtime authentication inside a command is its workflow's
 responsibility. This is supervision, not a security sandbox.
 

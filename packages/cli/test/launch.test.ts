@@ -1883,7 +1883,14 @@ describe("project command workers", () => {
       const missing = { ...entry, command: ["ub-no-such-command-test"] as [string], workflowRoot: fixture.root, externalWorkflow: false, defaultRuntime: "command" as const };
       const failed = await services.runSession("worker", "command", missing, data.project);
       expect(failed.started).toBe(false);
+      expect(failed.malformed).toBe(true);
       expect(failed.transcript).toBeDefined();
+      const loop = rig({ sessions: [failed], waits: ["SIGINT"] });
+      loop.services.loadData = () => data;
+      expect(await launchCommand(["worker"], loop.io, loop.services)).toBe(1);
+      expect(loop.seen.sessions).toHaveLength(1);
+      expect(loop.seen.waits).toEqual([]);
+      expect(loop.stderr()).not.toContain("retrying");
     } finally { rmSync(fixture.root, { recursive: true, force: true }); }
   });
 });
