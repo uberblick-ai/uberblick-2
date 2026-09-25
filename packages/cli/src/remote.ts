@@ -563,9 +563,22 @@ function remoteConfig(bridge: Bridge): McpConfig {
  * `hub.status`, and {@link corpusProblem} is what prints it when `join` refuses.
  */
 async function openRemote(bridge: Bridge, secretFileGiven: boolean): Promise<Corpus> {
-  const first = await inspectRemote(remoteConfig(bridge), {
-    silent: true,
-  });
+  // Only preflight may retry: hydration and verification can follow writes.
+  // Share the allowance across the existing-credential and prompted paths.
+  let retried = false;
+  const inspect = async (silent: boolean): Promise<Corpus> => {
+    const result = await inspectRemote(remoteConfig(bridge), { silent });
+    if (
+      retried ||
+      (result.hub.status !== "hub-down" && result.hub.status !== "connecting")
+    ) {
+      return result;
+    }
+    retried = true;
+    bridge.io.err("ub remote join: initial connection did not finish; retrying once…\n");
+    return await inspectRemote(remoteConfig(bridge), { silent });
+  };
+  const first = await inspect(true);
   if (!credentialCouldFix(first.hub) || secretFileGiven) {
     return first;
   }
@@ -574,7 +587,7 @@ async function openRemote(bridge: Bridge, secretFileGiven: boolean): Promise<Cor
     return first;
   }
   bridge.credential = { secret: typed, persist: true };
-  return await inspectRemote(remoteConfig(bridge));
+  return await inspect(false);
 }
 
 function listDocs(docs: readonly { uuid: string; title: string }[], limit = 10): string {
