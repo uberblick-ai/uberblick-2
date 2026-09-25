@@ -23,6 +23,73 @@ resolution path.
 
 ## Getting it running
 
+### Install on an Apple Silicon Mac
+
+With [Homebrew](https://brew.sh) installed:
+
+```sh
+brew install uberblick-ai/tap/uberblick
+ub --version
+```
+
+The first published release reports `0.1.0`. Homebrew installs Node and its
+dependencies; you do not need the Uberblick source checkout or mise.
+If a new terminal cannot find `brew`, run
+`eval "$(/opt/homebrew/bin/brew shellenv)"` and follow Homebrew's shell setup instructions.
+
+### Connect an existing workspace to your project
+
+Clone your own project's repository and enter its directory. With access to
+your hub's network (for example, through Tailscale), join the workspace using
+the URL supplied by its owner:
+
+```sh
+ub remote join wss://YOUR-HUB/ws/YOUR-WORKSPACE-ID
+ub status
+```
+
+Replace the URL with the real hub and workspace ID. Enter the signing secret
+in the hidden terminal prompt, never as a command argument. You do not need
+`ub init` first. Joining stores this machine's remote connection and hydrates
+the workspace's documents locally.
+
+If another Mac is already connected to the same hub, its credential is in
+`~/.config/uberblick/credentials.json` (or under `$XDG_CONFIG_HOME`). Copy it
+over SSH without displaying it:
+
+```sh
+# On the connected Mac; replace USER@NEW-MAC with your SSH destination.
+scp -p ~/.config/uberblick/credentials.json USER@NEW-MAC:~/ub-join-secret.json
+
+# On the new Mac, using your real workspace URL.
+chmod 600 ~/ub-join-secret.json
+ub remote join wss://YOUR-HUB/ws/YOUR-WORKSPACE-ID --secret-file ~/ub-join-secret.json
+# After a successful join, remove the temporary copy.
+rm ~/ub-join-secret.json
+```
+
+For Claude Code, installed and authenticated separately, register MCP from
+your project's directory:
+
+```sh
+ub mcp install claude --project --workspace YOUR-WORKSPACE-ID
+```
+
+This pins the project's MCP entry to that workspace. Start a new Claude session
+and ask it to list the workspace's documents through Uberblick MCP. Registration
+does not install an agent workflow or start a delivery loop.
+
+### Create a new local workspace
+
+If you are starting a workspace rather than joining an existing one:
+
+```sh
+ub init
+ub open
+```
+
+### Contribute to Uberblick
+
 From a fresh clone, with only `git` and [mise](https://mise.jdx.dev) installed:
 
 ```
@@ -325,8 +392,8 @@ there is no corpus import command and no snapshot to keep in step.
 
 `ub` is what a *user* of uberblick runs. The contributor verbs — dev, lint,
 typecheck, test, e2e, review — stay mise tasks and are deliberately not
-duplicated there. Distribution comes later; until then `ub` lives exactly where
-the checkout does:
+duplicated there. Homebrew provides `ub` outside a checkout; contributors can
+also run it from this repository:
 
 ```
 ub init            # identity, workspace, signing secret
