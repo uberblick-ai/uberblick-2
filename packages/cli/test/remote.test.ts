@@ -23,6 +23,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { createConnection, createServer, type Socket } from "node:net";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -1115,7 +1116,53 @@ describe("ub remote join", () => {
     );
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("did not answer");
+    expect(run.stderr.match(/retrying once/g)).toHaveLength(1);
     expect(persistedHubUrl(box)).toBe("ws://127.0.0.1:2");
+  });
+
+  it.each([true, false])("retries a stalled initial handshake once (recovery: %s)", async (recover) => {
+    const remote = await startHub();
+    const sockets = new Set<Socket>();
+    let connections = 0;
+    const proxy = createServer((socket) => {
+      sockets.add(socket);
+      socket.on("error", () => {});
+      socket.on("close", () => sockets.delete(socket));
+      connections += 1;
+      // Keep TCP open without answering the WebSocket upgrade. The client
+      // must exhaust its connection budget and dispose that attempt itself.
+      if (!recover || connections === 1) return;
+      const upstream = createConnection({ host: "127.0.0.1", port: remote.port });
+      sockets.add(upstream);
+      upstream.on("error", () => socket.destroy());
+      upstream.on("close", () => sockets.delete(upstream));
+      socket.on("close", () => upstream.destroy());
+      socket.pipe(upstream).pipe(socket);
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = proxy.address();
+      if (address === null || typeof address === "string") throw new Error("missing proxy port");
+      const box = sandbox({ credentials: { signingSecret: SECRET } });
+      const target = `ws://127.0.0.1:${address.port}`;
+      const run = await runUbAsync(["remote", "join", `${target}/${WORKSPACE}`], box);
+      expect(run.stderr.match(/retrying once/g)).toHaveLength(1);
+      expect(run.output).not.toContain(SECRET);
+      expect(run.output).not.toMatch(TOKEN_SHAPE);
+      if (recover) {
+        expect(run.status, run.output).toBe(0);
+        expect(persistedHubUrl(box)).toBe(target);
+      } else {
+        expect(run.status).toBe(1);
+        // The provider has its own bounded reconnect activity inside each
+        // preflight; raw socket count is not the CLI retry allowance.
+        expect(run.stderr).toContain("Nothing was written");
+        expect(existsSync(join(box.configHome, "uberblick", "config.json"))).toBe(false);
+      }
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
   });
 
   it("persists nothing when the remote speaks another sync protocol", async () => {
@@ -1134,6 +1181,7 @@ describe("ub remote join", () => {
 
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("different sync protocol");
+    expect(run.stderr).not.toContain("retrying once");
     expect(run.stderr).toContain("update this client");
     expect(run.stderr).toContain("Nothing was written");
     expect(run.stderr).not.toContain("did not answer");
@@ -1158,6 +1206,7 @@ describe("ub remote join", () => {
     const run = await runUbAsync(["remote", "join", joinUrl(remote)], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("rejected the credential");
+    expect(run.stderr).not.toContain("retrying once");
     expect(run.stderr).toContain("--secret-file");
     expect(persistedHubUrl(box)).toBe(DEAD_HUB_URL);
     expect(run.output).not.toContain(SECRET);
