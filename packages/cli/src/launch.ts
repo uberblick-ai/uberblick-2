@@ -76,7 +76,8 @@ export const LAUNCH_HELP = `usage: ub agents launch <role> [--model claude|codex
 
 Keep one entry role of one project running in this terminal. One fresh session
 runs at a time; completed work is followed immediately, while an empty queue
-waits about 30 minutes. Ctrl-C stops the loop and its active session.
+waits 30 minutes unless the entry declares idleSeconds (1–86400). Ctrl-C stops
+the loop and its active session.
 
 The project folder's .agents/launch.json supplies roles, bindings and grants;
 contracts and adapters come from the verified workflow installation selected by
@@ -88,6 +89,12 @@ loop for each runtime.
 Launch data version 2 requires a project object declaring that project's
 bindings and grants. To migrate a version 1 file, add that object if absent and
 set version to 2; see https://github.com/uberblick-ai/uberblick-2/issues/948.
+
+A command entry declares contract, command (argv), probe (argv), and optionally
+idleSeconds, instead of defaultRuntime and runtimes. It runs directly in the
+fresh project worktree, with no outer model session; --model is rejected. Its
+workflow owns preparation, model selection, review and merge policy. Commands
+use the same final outcome lines and retained transcripts as model sessions.
 
 options:
   --model <name>   run the role with claude or codex; the role's own default
@@ -115,7 +122,9 @@ interface RuntimeLaunch {
   allowedTools?: string[];
 }
 
-interface RoleLaunch {
+interface ModelRoleLaunch {
+  command?: never;
+  idleSeconds?: number;
   contract: string;
   defaultRuntime: Runtime;
   probe: string[];
@@ -125,6 +134,19 @@ interface RoleLaunch {
   /** False only for the temporary in-project compatibility path. */
   externalWorkflow: boolean;
 }
+
+interface CommandRoleLaunch {
+  runtimes?: never;
+  command: [string, ...string[]];
+  contract: string;
+  probe: string[];
+  idleSeconds?: number;
+  defaultRuntime: "command";
+  workflowRoot: string;
+  externalWorkflow: boolean;
+}
+type RoleLaunch = ModelRoleLaunch | CommandRoleLaunch;
+type Executor = Runtime | "command";
 
 /** The remote and branch a project grounds, fetches and branches sessions from. */
 interface BaseRef {
@@ -203,7 +225,7 @@ export interface LaunchServices {
   ): Promise<ProbeResult>;
   runSession(
     role: string,
-    runtime: Runtime,
+    runtime: Executor,
     entry: RoleLaunch,
     project: ProjectBindings,
   ): Promise<SessionResult>;
@@ -406,14 +428,14 @@ function pathIsFile(root: string, relative: string): boolean {
  */
 function outsideSessionTree(
   worktree: string,
-  runtime: Runtime,
+  runtime: Executor,
   entry: RoleLaunch,
   base: string,
 ): string | null {
   const governingRoot = entry.externalWorkflow ? entry.workflowRoot : worktree;
   for (const [named, relative] of [
     ["role contract", entry.contract],
-    [`${runtime} adapter`, entry.runtimes[runtime].adapter],
+    ...(entry.command === undefined ? [[`${runtime} adapter`, entry.runtimes[runtime as Runtime].adapter]] : []),
   ] as const) {
     if (!pathIsFile(governingRoot, relative)) {
       if (entry.externalWorkflow) {
@@ -571,10 +593,30 @@ export function readLaunchData(
   for (const [role, rawEntry] of Object.entries(entries)) {
     const named = `${path} entry ${JSON.stringify(role)}`;
     const entry = record(rawEntry);
+    if (entry?.idleSeconds !== undefined &&
+        (!Number.isInteger(entry.idleSeconds) || (entry.idleSeconds as number) < 1 || (entry.idleSeconds as number) > 86400)) {
+      throw new Error(`${named} idleSeconds must be an integer from 1 to 86400`);
+    }
+    if (entry && "command" in entry) {
+      const argv = (value: unknown): value is string[] => Array.isArray(value) && value.length > 0 &&
+        value.every(part => typeof part === "string" && part.length > 0 && !part.includes("\0"));
+      const contract = insideProject(entry.contract);
+      if (!keysWithin(entry, ["contract", "command", "probe"], ["idleSeconds"]) ||
+          !argv(entry.command) || !argv(entry.probe) || contract === null || !pathIsFile(workflowRoot, contract)) {
+        throw new Error(`${named} has invalid command launch data`);
+      }
+      const parsedRole = { ...entry, contract, defaultRuntime: "command" } as CommandRoleLaunch;
+      Object.defineProperties(parsedRole, {
+        workflowRoot: { value: workflowRoot, enumerable: false },
+        externalWorkflow: { value: workflowRoot !== root, enumerable: false },
+      });
+      entryRoles[role] = parsedRole;
+      continue;
+    }
     const runtimes = record(entry?.runtimes);
     if (
       entry === null ||
-      !exactKeys(entry, ["contract", "defaultRuntime", "probe", "runtimes"]) ||
+      !keysWithin(entry, ["contract", "defaultRuntime", "probe", "runtimes"], ["idleSeconds"]) ||
       runtimes === null ||
       !exactKeys(runtimes, ["claude", "codex"])
     ) {
@@ -668,6 +710,7 @@ export function readLaunchData(
       defaultRuntime: entry.defaultRuntime,
       probe: [...entry.probe],
       runtimes: parsedRuntimes,
+      ...(entry.idleSeconds === undefined ? {} : { idleSeconds: entry.idleSeconds }),
     } as RoleLaunch;
     // Resolution context belongs to this parsed snapshot, not to the public
     // launch declaration shape. Keep it non-enumerable so consumers comparing
@@ -1005,7 +1048,7 @@ function waitForSignal(milliseconds: number): Promise<NodeJS.Signals | null> {
   });
 }
 
-export function makeRunId(runtime: Runtime, role: string): string {
+export function makeRunId(runtime: Executor, role: string): string {
   const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
   return `${runtime}-${role}-${timestamp}-${randomBytes(3).toString("hex")}`;
 }
@@ -1292,14 +1335,17 @@ export function createLaunchServices(
         out: (text) => void writeSync(handle, text),
         err: (text) => void writeSync(handle, text),
       };
-      const adapterPath = join(entry.workflowRoot, entry.runtimes[runtime].adapter);
+      const adapterPath = entry.command === undefined
+        ? join(entry.workflowRoot, entry.runtimes[runtime as Runtime].adapter) : "";
       const runtimeEnv = {
         ...projectEnv,
         UB_AGENT_SESSION_CONTEXT: sessionContext(root, entry.workflowRoot, project),
       };
       let result: SessionResult;
       try {
-        result = runtime === "claude"
+        result = entry.command !== undefined
+          ? await runForeground(entry.command[0], entry.command.slice(1), worktree, runtimeEnv, capture, process, processes)
+          : runtime === "claude"
           ? await runForeground(
               "claude",
               claudeSessionArgs(
@@ -1533,6 +1579,10 @@ export async function launchCommand(
     );
     return 2;
   }
+  if (entry.command !== undefined && parsed.selected !== null) {
+    io.err("ub agents launch: --model is not applicable to a command worker; its workflow selects models\n");
+    return 2;
+  }
   const runtime = parsed.selected ?? entry.defaultRuntime;
   const probeDeclaration = probeDeclarationFailure(services.root, entry.probe);
   if (probeDeclaration !== null) {
@@ -1541,9 +1591,9 @@ export async function launchCommand(
     );
     return 1;
   }
-  const runtimeFailure = services.preflight(
-    runtime,
-    entry.runtimes[runtime].adapter,
+  const runtimeFailure = entry.command !== undefined ? null : services.preflight(
+    runtime as Runtime,
+    entry.runtimes[runtime as Runtime].adapter,
     entry.workflowRoot,
   );
   if (runtimeFailure !== null) {
@@ -1573,7 +1623,7 @@ export async function launchCommand(
       continue;
     }
     try {
-      const reloaded = services.loadData(runtime);
+      const reloaded = services.loadData(runtime === "command" ? undefined : runtime);
       project = reloaded.project;
       entry = reloaded.entryRoles[parsed.role];
     } catch (error) {
@@ -1584,6 +1634,12 @@ export async function launchCommand(
       io.err(`ub agents launch: ${JSON.stringify(parsed.role)} is no longer an entry role; restart the launcher\n`);
       return 1;
     }
+    if ((entry.command !== undefined) !== (runtime === "command")) {
+      io.err("launch: entry execution kind changed; restart the launcher\n");
+      return 1;
+    }
+    const idleMs = entry.idleSeconds === undefined ? IDLE_MS : entry.idleSeconds * 1000;
+    const idleLabel = entry.idleSeconds === undefined ? IDLE_LABEL : `${entry.idleSeconds}s`;
     // The reload can move the base ref itself — that is what a project
     // migrating from one remote or branch to another looks like from here. The
     // ref just refreshed is then not the ref this session would be cut from, so
@@ -1621,8 +1677,8 @@ export async function launchCommand(
       const reason = probe.status === 1
         ? `no eligible ${parsed.role} work`
         : `probe failed${probe.output.trim() === "" ? "" : `: ${lastLine(probe.output)}`}`;
-      io.out(`work: ${reason}; will idle for ${IDLE_LABEL}\n`);
-      const stopped = await pause(services, IDLE_MS);
+      io.out(`work: ${reason}; will idle for ${idleLabel}\n`);
+      const stopped = await pause(services, idleMs);
       if (stopped !== null) return stopped;
       continue;
     }
@@ -1691,8 +1747,8 @@ export async function launchCommand(
     }
     // An empty queue is a reason, not a verdict on access.
     if (blocked(io, idle)) return 1;
-    io.out(`work: ${idle}; will idle for ${IDLE_LABEL}\n`);
-    const stopped = await pause(services, IDLE_MS);
+    io.out(`work: ${idle}; will idle for ${idleLabel}\n`);
+    const stopped = await pause(services, idleMs);
     if (stopped !== null) return stopped;
   }
 }

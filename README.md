@@ -393,6 +393,33 @@ external selection still launches from its tracked workflow files so an
 existing loop is not stranded during the cutover. The command still selects,
 claims and transitions nothing; the role does all of that.
 
+A project-owned dispatcher can run directly without wrapping it in a model
+session. For example, this entry in `entryRoles` starts with
+`ub launch worker --project /path/to/project`:
+
+```json
+"worker": {
+  "contract": ".agents/roles/worker.md",
+  "command": ["python3", "-B", "workflow/experiment/ub_worker.py", "--once"],
+  "probe": ["python3", "-B", "workflow/experiment/ub_worker.py", "--probe"],
+  "idleSeconds": 60
+}
+```
+
+Command entries omit `defaultRuntime` and `runtimes`; `--model` is rejected.
+The workflow selects its models and owns preparation, review and merge policy.
+Uberblick executes argv directly, with the operator's permissions, never through
+an added shell or model. The command runs in a fresh detached project worktree;
+its relative script paths must be committed on the configured base ref. The
+probe runs in the control project and returns 0 for potential work, 1 for idle.
+`idleSeconds` accepts an integer from 1 to 86400; omitted, it remains 30 minutes.
+The command's last nonempty stdout line uses the existing outcome contract:
+`Worked worker: <result>`, `No eligible worker work: <reason>`, or
+`Blocked worker: <reason>`. Diagnostics stay in the transcript. Missing outcomes
+and abnormal exits receive the existing five-second retry; interruption stops
+the active session. Runtime authentication inside a command is its workflow's
+responsibility. This is supervision, not a security sandbox.
+
 Grants stay yours. You authenticate `claude` and `codex` once, and `ub` writes
 no trust entry, copies no credential and passes a session exactly the sandbox,
 permission mode and tool approvals its project declared. Each runtime does keep its own record

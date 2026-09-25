@@ -1565,13 +1565,13 @@ describe("launch data", () => {
         launch,
         `${JSON.stringify({ version: 2, project: projectBindings(), entryRoles: { shipper: granted } })}\n`,
       );
-      expect(readLaunchData(root).entryRoles.shipper?.runtimes.claude.allowedTools).toEqual([
+      expect(readLaunchData(root).entryRoles.shipper?.runtimes?.claude.allowedTools).toEqual([
         "Read",
         "Bash(git log:*)",
       ]);
       // Declaring none stays declaring none.
       writeProject(root, { shipper: declared });
-      expect(readLaunchData(root).entryRoles.shipper?.runtimes.claude.allowedTools).toBeUndefined();
+      expect(readLaunchData(root).entryRoles.shipper?.runtimes?.claude.allowedTools).toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -1801,5 +1801,89 @@ describe("the selected project", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("project command workers", () => {
+  function commandData() {
+    const root = mkdtempSync(join(tmpdir(), "ub-command-data-"));
+    mkdirSync(join(root, ".agents"));
+    writeFileSync(join(root, "contract.md"), "Project dispatcher owns delivery policy.\n");
+    const entry = { contract: "contract.md", command: [process.execPath, "worker.js"], probe: [process.execPath, "worker.js", "--probe"], idleSeconds: 60 };
+    const write = (value: unknown) => writeFileSync(join(root, ".agents/launch.json"), JSON.stringify({ version: 2, project: projectBindings(), entryRoles: { worker: value } }));
+    write(entry);
+    return { root, entry, write };
+  }
+
+  it("validates argv and idle bounds without requiring model adapters", () => {
+    const fixture = commandData();
+    try {
+      expect(readLaunchData(fixture.root).entryRoles.worker?.defaultRuntime).toBe("command");
+      for (const override of [{ command: [] }, { command: ["node", "bad\0arg"] }, { idleSeconds: 0 }, { idleSeconds: 0.5 }, { idleSeconds: 86401 }, { runtimes: {} }]) {
+        fixture.write({ ...fixture.entry, ...override });
+        expect(() => readLaunchData(fixture.root)).toThrow();
+      }
+    } finally { rmSync(fixture.root, { recursive: true, force: true }); }
+  });
+
+  it("polls without runtime preflight and rejects --model before starting", async () => {
+    const fixture = commandData();
+    try {
+      const test = rig({ probes: [1], waits: ["SIGINT"] });
+      test.services.loadData = () => readLaunchData(fixture.root);
+      expect(await launchCommand(["worker"], test.io, test.services)).toBe(130);
+      expect(test.seen.waits).toEqual([60000]);
+      expect(test.seen.preflight).toEqual([]);
+      expect(test.seen.sessions).toEqual([]);
+      const model = rig();
+      model.services.loadData = test.services.loadData;
+      expect(await launchCommand(["worker", "--model", "claude"], model.io, model.services)).toBe(2);
+      expect(model.seen.preflight).toEqual([]);
+    } finally { rmSync(fixture.root, { recursive: true, force: true }); }
+  });
+
+  it("preserves interruption and missing-outcome behavior for command workers", async () => {
+    const fixture = commandData();
+    try {
+      const interrupted = rig({ sessions: [result({ interrupted: "SIGTERM" })] });
+      interrupted.services.loadData = () => readLaunchData(fixture.root);
+      expect(await launchCommand(["worker"], interrupted.io, interrupted.services)).toBe(143);
+      expect(interrupted.seen.sessions[0]?.runtime).toBe("command");
+      const missing = rig({ sessions: [result({ lastLine: "", transcript: "/tmp/command.log" })], waits: ["SIGINT"] });
+      missing.services.loadData = interrupted.services.loadData;
+      expect(await launchCommand(["worker"], missing.io, missing.services)).toBe(130);
+      expect(missing.stdout()).toContain("reported no outcome; transcript at /tmp/command.log");
+      expect(missing.seen.waits).toEqual([5000]);
+    } finally { rmSync(fixture.root, { recursive: true, force: true }); }
+  });
+
+  it("executes argv in a fresh project tree, retaining diagnostics for failed spawn", async () => {
+    const fixture = commandData();
+    try {
+      writeFileSync(join(fixture.root, "worker.js"), 'console.log("No eligible worker work: fixture");\n');
+      const git = (args: string[]) => {
+        const result = spawnSync("git", args, { cwd: fixture.root, encoding: "utf8" });
+        expect(result.status, result.stderr).toBe(0);
+        return result.stdout.trim();
+      };
+      git(["init", "-b", "main"]);
+      git(["add", "."]);
+      git(["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "fixture"]);
+      git(["update-ref", "refs/remotes/origin/main", git(["rev-parse", "HEAD"])]);
+      // An uncommitted script must not become the executed project snapshot.
+      writeFileSync(join(fixture.root, "worker.js"), 'process.exit(99);\n');
+      const services = createLaunchServices(fixture.root, launchEnvironment(process.env), { out: () => {}, err: () => {} }, noWorktreeProcesses);
+      const data = readLaunchData(fixture.root);
+      const entry = data.entryRoles.worker!;
+      if (entry.command === undefined) throw new Error("expected command");
+      const outcome = await services.runSession("worker", "command", entry, data.project);
+      expect(outcome.code).toBe(0);
+      expect(outcome.lastLine).toBe("No eligible worker work: fixture");
+      expect(readFileSync(outcome.transcript!, "utf8")).toContain("fixture");
+      const missing = { ...entry, command: ["ub-no-such-command-test"] as [string], workflowRoot: fixture.root, externalWorkflow: false, defaultRuntime: "command" as const };
+      const failed = await services.runSession("worker", "command", missing, data.project);
+      expect(failed.started).toBe(false);
+      expect(failed.transcript).toBeDefined();
+    } finally { rmSync(fixture.root, { recursive: true, force: true }); }
   });
 });
