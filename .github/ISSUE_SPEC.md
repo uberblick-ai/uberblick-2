@@ -19,13 +19,14 @@ Dependencies and splits are GitHub issue relationships, not body text:
   overlap in Pointers and let the file-overlap rule queue it instead of
   inventing a dependency. Set it with `gh issue create --blocked-by` or
   `gh issue edit --add-blocked-by`.
-- **Sub-issue** — the split relation and nothing else: this issue is one piece
-  of that parent. Set it with `gh issue create --parent` or
-  `gh issue edit --parent`. Being a sub-issue never affects eligibility, and
-  order only through the priority rule below (owner decision, 2026-09-04,
+- **Sub-issue** — the split relation: this issue is one piece of that parent.
+  Set it with `gh issue create --parent` or `gh issue edit --parent`. The
+  parent is also blocked by each piece, which is true because it closes after
+  them, and which lets the priority rule below carry its priority to them.
+  Being a sub-issue never affects eligibility (owner decision, 2026-09-04,
   after reserved children sat `ready` for days with nobody able to dispatch
   them). A parent's list of its pieces is reading order for a person; the
-  relationship is the authority.
+  relationships are the authority.
 
 ## Machine-readable header
 
@@ -82,19 +83,19 @@ Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
   packages.
 - Order among eligible issues: **effective priority** first — the
   `priority:urgent`, `priority:high`, `priority:medium` and `priority:low`
-  labels — then oldest first (ascending issue number). An issue's effective
-  priority is the highest among its own, its parent's and every open issue it
-  blocks, followed transitively: a medium that blocks a high is picked as a
-  high, a sub-issue of an urgent parent as urgent, and the oldest urgent goes
-  before any high (owner direction, 2026-09-01). An unset label sorts as
-  medium — a person sets one to move an issue, not to admit it — and does not
-  make prepared work ineligible. Dependencies otherwise gate eligibility and
-  earn no other place in line. ub-agents computes this order; no one writes an
-  inherited value onto an issue. A person owns every priority label. Agents may
-  report evidence that the order looks wrong, but never set a label on their
-  own judgement. The one agent write is a shaping session recording the value
-  the person stated in that conversation, with a provenance comment on the
-  issue (`.agents/protocols/issue-shaping.md`; owner decision, 2026-09-07).
+  labels, an unset label sorting as medium — then oldest first. An issue's
+  effective priority is the highest among its own and every open issue it
+  blocks, followed transitively, so a prerequisite of urgent work and a
+  sub-issue of an urgent parent are both picked as urgent (owner direction,
+  2026-09-01). With no priority labels at all, the order is simply oldest
+  first. ub-agents computes it from its queue configuration and never writes
+  a label.
+- A person owns every priority label and sets one to move an issue, not to
+  admit it. Agents may report evidence that the order looks wrong, but never
+  set a label on their own judgement. The one agent write is a shaping
+  session recording the value the person stated in that conversation, with a
+  provenance comment on the issue (`.agents/protocols/issue-shaping.md`; owner
+  decision, 2026-09-07).
 
 ### Gate check
 
@@ -148,7 +149,7 @@ unresolved owner boundaries are escalated. An issue gets one review pass.
 A split follows Sizing below. The source becomes the parent: it leaves the
 queues and is never `ready`. Each piece is a sub-issue with
 `needs-preparation`, the parent's milestone, and blocked-by relationships only
-for real ordering dependencies. Technical decomposition is preparer judgment;
+for real ordering dependencies; the parent is blocked by every piece. Technical decomposition is preparer judgment;
 choosing product behavior beyond delegated authority is a person's decision.
 
 `needs-human` on an issue: the run's summary asks one focused question, with
