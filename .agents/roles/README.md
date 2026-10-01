@@ -130,5 +130,6 @@ inspection, validation and GitHub bookkeeping continue on their own inputs.
 Work in the directory and on the branch the run was given; ub-agents creates
 and removes them. Push only that branch, and never rebase or force-push a pull
 request's head. Leave other runs' worktrees and processes alone. Until
-ub-agents runs here, start a fresh worktree at `origin/main` on the branch
-`ub-agents/<issue number>`.
+ub-agents runs here, a new implementation starts a fresh worktree at
+`origin/main` on the branch `ub-agents/<issue number>`, and a revision starts
+one at the pull request's head.

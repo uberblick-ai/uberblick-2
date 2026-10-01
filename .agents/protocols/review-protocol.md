@@ -67,15 +67,19 @@ correction carries risk of its own. P3s never require a round.
 The second round approves when every listed P1 and P2 is resolved or its
 explanation accepted, and the corrections introduced no new P1 or P2.
 Otherwise it escalates, naming the mechanism that keeps the change from
-converging; there is no third round. A review the integrator requests with
-`more-review` is a full review, and its findings follow the same two-round
-rule.
+converging; there is no third round.
+
+The count starts again in two cases. A review the integrator requests with
+`more-review` is a full review, the first round of a new count. A person's
+answer to an escalation makes the next corrections review a fresh second
+round; the implementer names it when the answer asks for verification or the
+rule above still requires one.
 
 An issue gets one review pass (`issue-preparation.md`).
 
 ## Completion
 
-The integrator checks the record rather than the code again: every finding id
+The integrator checks the record rather than the code again: every P1 and P2 id
 has a correction or an accepted answer, and a second round ran where this
-protocol requires one. Merge requires `delivery-policy.md`'s gates and no open
-P1 or P2.
+protocol requires one. A P3 left untouched is accepted debt. Merge requires
+`delivery-policy.md`'s gates and no open P1 or P2.

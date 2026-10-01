@@ -19,11 +19,12 @@ declared `Touches` footprint and no unanswered remarks. Run independent
 mechanical gates concurrently where the runtime allows.
 
 Check the review record rather than redo it: the reviews this diff owes ran,
-every finding id has a correction or an accepted answer, and a second round
-ran where `.agents/protocols/review-protocol.md` requires one. When any of
-that is missing, finish `more-review`, naming the reviews. Answer each Copilot
-remark still open in one line — accepted as P3 debt, or rejected with the
-reason — or finish `changes` when one needs a fix.
+every P1 and P2 id has a correction or an accepted answer, and a second round
+ran where `.agents/protocols/review-protocol.md` requires one. A P3 left
+untouched is accepted debt, not a gap. When any of that is missing, finish
+`more-review`, naming the reviews. Answer each Copilot remark still open in one
+line — accepted as P3 debt, or rejected with the reason — or finish `changes`
+when one needs a fix.
 
 Classify the tier from the full diff. Tier 3 without a person's answer that
 covers this diff is an escalation naming the trigger. Otherwise merge as the
@@ -53,13 +54,13 @@ documents that issue's Pointers cite before validating acceptance criteria.
 ## Records
 
 On the PR: gate evidence against the SHA each gate ran at, the tier call, the
-merge report the policy requires, and the documentation pass result. Link gate
-and reviewer evidence instead of restating it. A tier-1 record is the merge
-SHA, the gate links and one line per acceptance criterion; its documentation
-pass is one sentence, and no fresh corpus search is owed unless the issue says
-existing docs are stale. A `changes` record says only what failed and where. Do
-not add a wrapper comment for a Copilot review that already exists or for a
-no-comment result.
+P3s accepted as debt (one line each), the merge report the policy requires, and
+the documentation pass result. Link gate and reviewer evidence instead of
+restating it. A tier-1 record is the merge SHA, the gate links and one line per
+acceptance criterion; its documentation pass is one sentence, and no fresh
+corpus search is owed unless the issue says existing docs are stale. A
+`changes` record says only what failed and where. Do not add a wrapper comment
+for a Copilot review that already exists or for a no-comment result.
 
 ## Outcomes
 
