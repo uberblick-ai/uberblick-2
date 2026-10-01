@@ -1,6 +1,9 @@
 name: Publish Homebrew release
 
-# Product release only. Workflow packages are authored in agent-workflows.
+# Release step: push an exact vMAJOR.MINOR.PATCH tag. The tag-only environment
+# policy is the authority that admits this job to HOMEBREW_TAP_TOKEN, which is
+# the only credential the publisher needs: the asset and the formula both land
+# on the public tap. The script verifies the tag again before it publishes.
 on:
   push:
     tags:
@@ -35,7 +38,7 @@ jobs:
         env:
           PNPM_STORE_DIR: ~/.pnpm-store
 
-      - name: Publish the immutable release for this tag
+      - name: Publish the immutable release and generated formula
         run: mise run publish-homebrew-release -- "$GITHUB_REF_NAME"
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

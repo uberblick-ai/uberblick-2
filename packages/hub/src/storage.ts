@@ -4,9 +4,8 @@
  *
  * **One layout.** `XDG_CONFIG_HOME` and `XDG_DATA_HOME` when they name absolute
  * directories, and `~/.config` / `~/.local/share` otherwise:
- * `<config home>/uberblick/{config,credentials}.json`, project workflow
- * selections under `agent-projects/`, and `<data home>/uberblick/` holding the
- * databases plus verified `agent-workflows/`. macOS included — there is no
+ * `<config home>/uberblick/{config,credentials}.json` and
+ * `<data home>/uberblick/{hub,<uuid>}.sqlite`. macOS included — there is no
  * platform branch, so a resolution has no `platform` to be told, cannot depend
  * on where the tests run, and cannot fail.
  *
@@ -21,7 +20,7 @@
  * **Why this module is in `@uberblick/hub`.** The cli, the MCP server and the
  * hub must agree on one layout, and the hub is the lowest of the three in the
  * dependency graph (cli → mcp-server → hub → schema). A package of its own for
- * these path functions buys nothing but a manifest; `@uberblick/hub/storage`
+ * four path functions buys nothing but a manifest; `@uberblick/hub/storage`
  * costs a line in the exports map. It imports node builtins and nothing else.
  *
  * `HUB_DB_PATH` and `UBERBLICK_DB` are unchanged and untouched by any of this:
@@ -46,10 +45,6 @@ export interface StoragePaths {
   hubDatabase: string;
   /** Holds `<workspaceUuid>.sqlite`, absent `UBERBLICK_DB`. */
   workspaceDir: string;
-  /** Content-addressed, verified agent-workflow installations. */
-  workflowInstallationsDir: string;
-  /** One project-folder selection record per canonical project path. */
-  workflowSelectionsDir: string;
 }
 
 /** The directory name both roots end in. */
@@ -122,7 +117,5 @@ export function resolveStorage(options: StorageOptions = {}): StoragePaths {
     dataDir,
     hubDatabase: join(dataDir, HUB_DATABASE),
     workspaceDir: dataDir,
-    workflowInstallationsDir: join(dataDir, "agent-workflows"),
-    workflowSelectionsDir: join(configHome, XDG_DIR, "agent-projects"),
   };
 }

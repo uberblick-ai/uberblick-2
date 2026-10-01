@@ -46,8 +46,6 @@ interface Case {
     dataDir: string;
     hubDatabase: string;
     workspaceDir: string;
-    workflowInstallationsDir: string;
-    workflowSelectionsDir: string;
   };
 }
 
@@ -58,8 +56,6 @@ function xdgUnder(configHome: string, dataHome: string) {
     dataDir,
     hubDatabase: join(dataDir, "hub.sqlite"),
     workspaceDir: dataDir,
-    workflowInstallationsDir: join(dataDir, "agent-workflows"),
-    workflowSelectionsDir: join(configHome, "uberblick", "agent-projects"),
   };
 }
 

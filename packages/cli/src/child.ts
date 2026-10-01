@@ -26,12 +26,10 @@ import { constants } from "node:os";
  * SIGHUP is what a vanished terminal sends and nothing else; SIGQUIT is what
  * Ctrl-\ and a supervisor escalating past SIGTERM send.
  */
-export const FORWARDED: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"];
-
-export const SIGNAL_DELIVERY_GRACE_MS = 200;
+const FORWARDED: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"];
 
 /** What a shell reports for a process killed by a signal. */
-export function signalExitCode(signal: NodeJS.Signals): number {
+function signalExitCode(signal: NodeJS.Signals): number {
   const numbers = constants.signals as unknown as Record<string, number>;
   return 128 + (numbers[signal] ?? 0);
 }
@@ -47,7 +45,7 @@ export function signalExitCode(signal: NodeJS.Signals): number {
  * false when the signal cannot be raised at all (an unknown name on this
  * platform), and the caller falls back to the number.
  */
-export function reraise(signal: NodeJS.Signals): boolean {
+function reraise(signal: NodeJS.Signals): boolean {
   try {
     process.kill(process.pid, signal);
     return true;
@@ -90,7 +88,7 @@ export function runChild(
       if (reraise(signal)) {
         // The raise is delivered by the event loop, so stay alive long enough
         // to receive it; the resolve is only reached if it never arrives.
-        setTimeout(() => resolve(signalExitCode(signal)), SIGNAL_DELIVERY_GRACE_MS);
+        setTimeout(() => resolve(signalExitCode(signal)), 200);
         return;
       }
       resolve(signalExitCode(signal));
