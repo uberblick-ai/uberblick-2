@@ -74,7 +74,8 @@ rationale. The final ruling links to the ledger and gate results without
 repeating them.
 
 If a confirmation review finds a new P1, or a correction wave does not reduce the
-open P1 set, park for an owner decision. The integrator settles P2/P3
+open P1 set, park for an owner decision; the corrections review that observes it
+finishes `needs-human`. The integrator settles P2/P3
 disagreements after one implementer response; escalate only a specific
 unresolved decision.
 

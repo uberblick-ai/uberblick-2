@@ -39,8 +39,8 @@ When the request does not fit one independently reviewable PR, finish with
 `split`. Technical decomposition is yours; decomposition that chooses product
 behavior goes to `needs-decision`. Leave the source as a coordination parent
 whose `Depends-on` names its children, and create substantial children with
-`needs-preparation`, `Parent: #N`, the parent's milestone, its `priority:*`
-label if it has one, and only real ordering dependencies. The header is a
+`needs-preparation`, `Parent: #N`, the parent's milestone, and only real
+ordering dependencies. The header is a
 relation, never a reservation.
 
 A pass that resumes after a review verdict, the first implementer return, or an

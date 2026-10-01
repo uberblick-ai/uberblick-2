@@ -8,8 +8,8 @@ workflow (`AGENTS.md`, Project facts).
 
 ## Given
 
-A pull request whose required reviews approved its current head, or one the
-owner returned from `needs-human` by adding `human-approved`.
+A pull request whose required reviews' latest verdicts are approvals, or one
+the owner returned from `needs-human` by adding `human-approved`.
 
 ## Task
 

@@ -93,15 +93,21 @@ Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
 - This includes `schema`: its keystone risk is paid by exact-head review and
   gates after upstream reconciliation, not by locking unrelated files or
   packages.
-- Order among eligible issues: **priority** first — the `priority:urgent`,
-  `priority:high`, `priority:medium` and `priority:low` labels, unset sorting as
-  medium — then oldest first (ascending issue number). Dependencies gate
-  eligibility and earn no other place in line. A human owns every priority
-  value; agents may report evidence that the order looks wrong, but never set a
-  value on their own judgement. The agent writes are a preparer copying an
-  umbrella's label onto its children, and a shaping session recording the value
-  the human stated in that conversation, with a provenance comment on the issue
-  (`.agents/protocols/issue-shaping.md`; owner decision, 2026-09-07).
+- Order among eligible issues: **effective priority** first — the
+  `priority:urgent`, `priority:high`, `priority:medium` and `priority:low`
+  labels — then oldest first (ascending issue number). An issue's effective
+  priority is the highest of its own and of every open issue whose `Depends-on`
+  chain reaches it: a medium that blocks a high is picked as a high, and the
+  oldest urgent goes before any high (owner direction, 2026-09-01). An unset
+  label sorts as medium — a human sets one to move an issue, not to admit it —
+  and does not make prepared work ineligible. Dependencies otherwise gate
+  eligibility and earn no other place in line. Whoever selects work computes
+  this order; no one writes an inherited value onto an issue. A human owns every
+  priority label. Agents may report evidence that the order looks wrong, but
+  never set a label on their own judgement. The one agent write is a shaping
+  session recording the value the human stated in that conversation, with a
+  provenance comment on the issue (`.agents/protocols/issue-shaping.md`; owner
+  decision, 2026-09-07).
 
 ### Gate check
 
@@ -155,8 +161,7 @@ explicit owner request.
 
 A split follows Sizing below. The source becomes an `umbrella`, never `ready`,
 with its `Depends-on` set to its children. Give each child `needs-preparation`,
-`Parent: #N`, the parent's milestone and `priority:*` label, and only real
-ordering dependencies. Technical decomposition is preparer judgment;
+`Parent: #N`, the parent's milestone, and only real ordering dependencies. Technical decomposition is preparer judgment;
 choosing product behavior beyond delegated authority is an owner decision.
 
 `needs-decision` exit path: the preparer asks one focused question as an issue
@@ -253,8 +258,8 @@ reviewable PR; each PR closes its child, and the parent closes after its require
 children. Parents carry `umbrella`, live outside the preparation and
 implementation queues — only their children carry `needs-preparation` or
 `ready` — and name their children in `Depends-on`: the edge is true, because
-the parent closes after them, and the preparer copies the parent's priority
-label onto each child.
+the parent closes after them, and the effective-priority rule above then
+carries the parent's priority to every child without anyone writing a label.
 A program is a milestone plus its umbrellas; nothing dispatches it but the
 ordinary queues, and its owner decisions live on the umbrella's thread.
 

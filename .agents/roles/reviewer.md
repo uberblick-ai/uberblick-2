@@ -10,9 +10,10 @@ ub-agents runs it on a different runtime from the work's author.
 ## Given
 
 Either an issue a preparer finished `ready` on a challenged route, or a pull
-request and the head to review. On a pull request that already carries this
-review's findings, the implementer's latest handoff names the finding ids it
-corrected or answered: that is a corrections review.
+request and the head to review. The latest request on the item sets the scope:
+a review the integrator asked for with `more-review` is always full; after an
+implementer revision that names the finding ids it corrected or answered, it is
+a corrections review of those ids; otherwise it is full.
 
 ## Reviewing an issue contract
 
@@ -57,6 +58,15 @@ evidence a sufficient answer? Record each as `resolved`, `explanation accepted`,
 or `unresolved — <why>`, examining the delta first and the wider diff only where
 a correction's risk reaches it. That record settles the finding; an unresolved
 disagreement stands for the integrator and is never argued into a further round.
+A corrections review whose revision named no ids has nothing to verify and
+approves at once; the findings it left standing go to the integrator.
+
+Apply `.agents/protocols/review-protocol.md`'s convergence stops before sending
+work back: when a corrections review finds a new P1, when the correction wave
+did not reduce the open P1 set, or when another round would make a third
+correction head since opening or the latest owner decision, finish
+`needs-human` with one question naming the mechanism that prevents convergence,
+@-mentioning `@bk-one`.
 
 Read the PR's current finding ledger before reporting. A settled finding stays
 settled unless this head changed the affected behavior or the review has new
@@ -80,6 +90,7 @@ reset does not create independence.
   new P1 or P2. P3s and unresolved disagreements stand for the integrator.
 - `changes` — an issue with correctable or owner-boundary findings; a pull
   request with a P1 or P2.
+- `needs-human` — a convergence stop above.
 
 Post the verdict on the item as one comment — naming the head for a pull
 request, then `Verdict: <no findings | P1 <n>, P2 <n>, P3 <n>>` or the

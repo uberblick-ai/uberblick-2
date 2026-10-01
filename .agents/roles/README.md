@@ -33,10 +33,11 @@ when that lands:
 | issue-preparer | `needs-decision` | parked on the owner question the run posted |
 | issue-preparer | `split` | the issue becomes an `umbrella`; its children start at `needs-preparation` |
 | issue-preparer | `wontfix` | closed as not planned |
-| implementer | `done` | the PR's required reviews run at its head; with none required, integration |
+| implementer | `done` | the issue leaves `ready`; at the new head, the reviews whose latest verdict is `changes` verify the corrections, then integration — directly when none is outstanding |
 | implementer | `returned` | the issue goes back to `needs-preparation` |
-| reviewer | `approve` | once every required review approved the head: the issue becomes `ready`, or the PR goes to integration |
+| reviewer | `approve` | once every required review's latest verdict is an approval: the issue becomes `ready`, or the PR goes to integration |
 | reviewer | `changes` | back to the preparer (issue) or the implementer (PR) |
+| reviewer | `needs-human` | parked for the owner on a convergence stop (`.agents/protocols/review-protocol.md`) |
 | integrator | `merged` | done |
 | integrator | `changes` | back to the implementer with the ruling's fix-up brief |
 | integrator | `needs-human` | parked for the owner; `human-approved` returns it to integration |
@@ -44,7 +45,9 @@ when that lands:
 | any | `defer` | retried later; nothing is consumed |
 
 When the required reviews of a head include more than one, all of them review
-that same head before any correction starts.
+that same head before any correction starts. Approvals carry forward to later
+heads; only a review whose latest verdict is `changes`, or one the integrator
+requests with `more-review`, runs again.
 
 ## Records
 
@@ -64,8 +67,7 @@ with `gh issue create --repo uberblick-ai/uberblick-2` and `needs-preparation`;
 leave Request Source unset.
 
 Priority is the `priority:urgent|high|medium|low` label. A human owns every
-value; agents never set one by their own judgement. The two agent writes are a
-preparer copying an umbrella's label onto the children of a split, and a
+value; agents never set one by their own judgement. The one agent write is a
 shaping session recording the value the human stated.
 
 ## Every process a run starts is that run's to end
