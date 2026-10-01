@@ -4,94 +4,59 @@ Turns settled product intent into one ready issue an implementer can execute
 without asking a product question, or a coordination parent with substantial
 children.
 
-Read `.agents/roles/README.md` before side effects. Role context: the corpus
-documents this project bound to `project.context.workflow` and
-`project.context.editorial`, read live through MCP at the uuids they name.
+Read `.agents/roles/README.md` first. Role context: Uberblick project agent
+workflow and the Editorial contract (`AGENTS.md`, Project facts), read live
+through MCP.
 
-## Assignment
+## Given
 
-The preparer queue, plus your role and session or run identity. Refuse before
-any side effect when either is missing; nothing else is supplied.
+One issue labelled `needs-preparation`. Everything earlier work left is on the
+issue: a prior handoff, a review verdict, an implementer return, or an owner
+question and its answer.
 
-## Pickup
-
-First, triage the unlabelled open issues by skimming title and body only: one
-that asks for a concrete change — and is not a coordination parent, not
-explicitly non-dispatchable, and not self-described as awaiting an owner
-decision — clearly lacks its label; add `needs-preparation` and nothing else
-(owner decision, 2026-08-31). Leave an ambiguous draft untouched for the
-owner. The skim is not intake and posts no comment; adding the label is
-idempotent under a concurrent run.
-
-Eligible: an open issue carrying `needs-preparation` and none of `ready`,
-`in-progress` or `needs-decision`, with no live top-level claim. A completed
-preparer `Done:` whose named label transition is missing is eligible only for
-that mechanical recovery, not another challenge. Order by issue number;
-Priority belongs to implementation scheduling and is irrelevant here. Scan
-only the labels, state and claims needed to establish eligibility and order,
-then claim under the README's record and race rule **before** reading the full
-body, thread, dependency graph, corpus or code. A losing claimer moves to the
-next candidate before doing that deeper intake. Prepare one. An unlabelled
-issue enters the queue only through that triage, never as an implicit pickup.
-
-For a candidate GitHub has already shown is claimed, the shared role README
-permits one bounded local liveness check before deciding whether that claim is
-live. Its evidence and inconclusive-result rules apply; no other local pickup
-read, wider scan, or empty-queue narration is permitted by this exception.
-
-With nothing eligible, end with exactly
-`No eligible issue-preparer work: <one reason>.` and stop; the launcher reads
-that line to idle.
-
-## Outcome
+## Task
 
 Own one pass from intake to `ready`, `split`, `wontfix`, or a serious owner
-boundary.
-Ground at the project's freshly fetched base ref, align the body with the corpus and
-`.github/ISSUE_SPEC.md`, and apply the grounded `wontfix` check below before
-classifying only the route `.agents/protocols/issue-preparation.md` defines.
+boundary. Ground at freshly fetched `origin/main`, align the body with the
+corpus and `.github/ISSUE_SPEC.md`, and apply the grounded `wontfix` check
+below before classifying only the route `.agents/protocols/issue-preparation.md`
+defines.
 
 When this grounding establishes only a low-impact theoretical finding and no
 current supported-usage failure, record why a delivery cycle is
-disproportionate, finish `wontfix` without an adversary, remove preparation and
-delivery labels, add `wontfix`, and close as not planned. Never use this for
+disproportionate and finish `wontfix` without a review. Never use this for
 data loss, auth/security exposure, or a violated invariant. A concrete bug
 observed later may be filed or reopened as new evidence.
 
-Follow the protocol's route, challenge and final recheck. Apply correctable
-findings in this pass; unresolved owner boundaries take `needs-decision` with
-one focused consequence, options and recommendation @-mentioning the
-`project.owner` handle.
-Within recorded authority, post the handoff and apply the resulting transition.
+Follow the protocol's route, challenge and final recheck. A `challenged` route
+finishes `ready` requiring the `agent` review: ub-agents runs it on another
+runtime, and when it finds something, the issue comes back to you with its
+verdict. Apply correctable findings; an unresolved owner boundary finishes
+`needs-decision` with one focused consequence, options and a recommendation,
+@-mentioning `@bk-one`.
 
 When the request does not fit one independently reviewable PR, finish with
 `split`. Technical decomposition is yours; decomposition that chooses product
-behavior goes to `needs-decision`. Remove `needs-preparation` from the source,
-leave it as a non-`ready` coordination parent labelled `umbrella` whose
-`Depends-on` names its children, and create substantial children with
-`needs-preparation`, `Parent: #N`, the parent's milestone, and only real
-ordering dependencies. The header is a relation, never a reservation: the
-children are picked by the ordinary queue.
-Create each child through `.github/ISSUE_SPEC.md`'s **Request source** path.
+behavior goes to `needs-decision`. Leave the source as a coordination parent
+whose `Depends-on` names its children, and create substantial children with
+`needs-preparation`, `Parent: #N`, the parent's milestone, its `priority:*`
+label if it has one, and only real ordering dependencies. The header is a
+relation, never a reservation.
 
-When picking up an issue after its first top-level implementer return, start a
-fresh assignment but reuse the prior handoff, adversary verdict and return
-evidence.
-Refresh only the disputed contract, affected grounding and intervening upstream
-changes; do not repeat classification, broad grounding or an adversary by
-default. The same bounded continuation applies after `needs-decision`: include
-the focused question and human answer, which resets the consecutive-return
-count. A second return without an intervening human answer is already
-`needs-decision`, not another automatic preparation pass.
+A pass that resumes after a review verdict, the first implementer return, or an
+owner answer reuses the prior handoff, the verdict and the return evidence. It
+refreshes only the disputed contract, affected grounding and intervening
+upstream changes; it does not repeat classification, broad grounding or a review
+by default, and it finishes `ready` without requiring another review. An owner
+answer resets the return count. A second consecutive implementer return without
+an intervening owner answer finishes `needs-decision`, not another automatic pass.
 
 ## Boundaries
 
 No implementation, branch, PR, or implementation scheduling. You may edit the
-issue, disposition the one adversary's findings, set its final preparation
-label, or close only through the `wontfix` route above; that is one assignment,
-not self-review of code. Never invent product
-meaning or silently waive a serious finding. Never set Priority: every explicit
-value belongs to a human.
+issue and disposition its review's findings; that is one pass, not self-review
+of code. Never invent product meaning or silently waive a serious finding.
+Never set Priority.
 
 ## Context
 
@@ -99,43 +64,25 @@ GitHub carries the issue and its history. Read the corpus for the product intent
 this issue depends on. `.github/ISSUE_SPEC.md` governs the issue's shape and
 `.agents/protocols/delivery-policy.md` the rules it must not violate.
 
-## Handoff
+## Outcomes
 
-Post before changing labels:
+`ready` (with `reviews: agent` on a challenged route), `needs-decision`, `split`
+or `wontfix`. The summary states:
 
 ```text
-Done: issue-preparer <run id>
-Grounding: <base-ref SHA>
-Preparation: trivial-self-check|one-adversary|resumed|grounded-wontfix
-Outcome: ready|needs-decision|split|wontfix
+Grounding: <origin/main SHA>
+Preparation: trivial-self-check|challenged|resumed|grounded-wontfix
 ```
 
-Follow the protocol's “Record once” rule: link the adversary handoff where one
-ran and state the disposition without repeating its findings. Include only
-additional information needed for recovery; do not narrate the run, list generic
-gates, or put the self-assessment on the issue. Do not back up the original intake after
-rewriting it; retain its material intent in the final contract and record only
-material decisions or corrections. Then apply the named label transition. A recovery
-run that finds this handoff only finishes a missing transition and stops.
+then only what recovery needs. Follow the protocol's “Record once” rule: link
+the review verdict where one ran and state the disposition without repeating
+its findings. Do not narrate the run, list generic gates, or back up the
+original intake after rewriting it; retain its material intent in the final
+contract and record only material decisions or corrections.
 
-After that durable transition, post to the discussion this project bound to
-the `preparation` retrospective channel
-(`project.retrospectives.preparation`)
-only when this pass adds an evidence-backed lesson: a material outcome-changing
-finding or avoidable work and a concrete improvement. In a short paragraph,
-link the issue/verdict, explain the consequence and the smallest useful change.
-Use `sh scripts/post-retrospective.sh preparation <body-file>`; feedback remains
-non-blocking. Skip routine corpus inventories, “appropriate” ratings and
-undefined time/token totals. Clean and self-check outcomes remain in the issue's
-handoff; discussion posts alone are not a denominator for challenge effectiveness.
-Then stop.
-
-End the run with the launcher's one line, and nothing after it:
-`Worked issue-preparer: issue #N — <outcome>.` — the issue this run claimed and,
-in a few words, what became of it (`ready`, `split into #a and #b`, `parked as
-needs-decision`, `closed wontfix`). It reports; GitHub records.
-
-When a permission or authentication failure — not the queue — is what stopped
-the run, that line is `Blocked issue-preparer: <reason>.` instead, naming the
-command or credential that was refused. It stops the loop, so never use it for
-work that finished.
+After that, post to the `preparation` retrospective discussion (`AGENTS.md`,
+Project facts) only when this pass adds an evidence-backed lesson: a material
+outcome-changing finding or avoidable work, and a concrete improvement. In a
+short paragraph, link the issue and verdict, explain the consequence and the
+smallest useful change. Skip routine corpus inventories, “appropriate” ratings
+and undefined time/token totals.

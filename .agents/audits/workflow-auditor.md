@@ -2,18 +2,17 @@
 
 Independently checks whether issue preparation and implementation remain
 autonomous, economical, recoverable, and aligned with current product intent.
-This is a periodic portfolio audit, not one of the six delivery roles. It claims
+This is a periodic portfolio audit, not one of the four delivery roles. It takes
 no work, reviews no diff authoritatively, and gates no issue, PR, or merge.
 
 ## Assignment and cadence
 
-Use the launcher's run identity verbatim. If none was supplied, create one as
+Use a supplied run identity verbatim. If none was supplied, create one as
 `workflow-audit-<UTC timestamp>-<short random suffix>` before any external side
 effect and keep it unchanged. Reports live only in [Workflow audit
 reports](https://github.com/uberblick-ai/uberblick-2/discussions/540), posted
-with `sh scripts/post-retrospective.sh workflow-audit <body-file>` — never with
-a hand-written `addDiscussionComment` call, because a guessed discussion id
-posts to a stranger's repository.
+with the `workflow-audit` recipe in `AGENTS.md`'s Project facts — never with a
+guessed discussion id, because a wrong one posts to a stranger's repository.
 
 A valid prior report is a top-level reply there that begins `Workflow audit` or
 the legacy `Weekly workflow audit`, carries `Run: workflow-auditor`, and has a
@@ -58,8 +57,8 @@ The sample is deterministic:
   any claimed anomaly, cost or avoided rework;
 - shallow-index the same fields for every top-level implementation
   retrospective in Discussion #522 whose creation time falls in the window;
-- fully read a retrospective and reconstruct its linked issue, adversary
-  handoff, return, PR, review and gate records only when that index or another
+- fully read a retrospective and reconstruct its linked issue, issue
+  review, return, PR, review and gate records only when that index or another
   sample signal indicates an anomaly, a convergence concern, or evidence for a
   claimed trend;
 - every implementer return or `needs-decision` transition in the window, even
@@ -73,7 +72,7 @@ The sample is deterministic:
   thread when that scan indicates repeated correction, diminishing finding
   value, or review effort disproportionate to the change;
 - a shallow machine-state scan of every open issue and PR, followed by full
-  thread reads only for detected lifecycle, claim, dependency, or handoff
+  thread reads only for detected lifecycle, ownership, dependency, or handoff
   anomalies; and
 - current Uberblick product documents when a finding depends on product intent
   or corpus availability.
@@ -97,16 +96,16 @@ choices and triggers. Duplicated or stale truth is itself a possible finding.
 ## Audit method
 
 1. Reconstruct each run selected for full reading from durable records. Check
-   eligibility, claims, delegation, recovery, owner boundaries, final labels,
-   PR handoffs, review independence, and whether linked evidence supports the
+   eligibility, the outcome and its handoff, recovery, owner boundaries, final
+   labels, review independence, and whether linked evidence supports the
    outcome.
 2. Compare retrospective claims with those records. Correlate preparation
    choices with downstream returns, clarification, scope growth, review
    findings, and avoidable rework. Calm wording is neither success nor a defect.
-3. Inspect the live queues for work no role can select, conflicting lifecycle
-   labels, stale claims under the documented clocks, dependencies represented
-   as actionability, and inconsistent parent or child state.
-4. Look for repeated grounding, redundant adversaries or review rounds,
+3. Inspect the live queues for work no role can be given, conflicting lifecycle
+   labels, items held without a live run, dependencies represented as
+   actionability, and inconsistent parent or child state.
+4. Look for repeated grounding, redundant reviews or review rounds,
    repeated repairs, ceremony with no consumer, excessive issue bodies, and
    missing context that causes downstream rediscovery. Use every active PR's
    shallow convergence scan to identify cases worth a full thread read; do not
@@ -121,13 +120,12 @@ choices and triggers. Duplicated or stale truth is itself a possible finding.
    later substantial findings are a strong churn signal, but the auditor must
    establish the actual value and risk from durable evidence. Treat recurrence
    inside the same unit as a possible representation or workflow defect rather
-   than automatically as evidence that one more round is valuable. For a
-   dual-challenge PR, verify the required pair targeted one frozen candidate
-   head before an ordinary correction wave. Count coordination records too:
-   each delegated adversary should occupy one mutable delegation comment, each
-   answered review request one reviewer claim and one verdict,
-   each PR one mutable finding ledger, and repeated claim/completion wrappers or
-   copied gate tables are churn unless a recovery boundary required them.
+   than automatically as evidence that one more round is valuable. For a PR
+   owing two reviews, verify both targeted one head before an ordinary
+   correction wave. Count coordination records too: each review should leave
+   one verdict per head, each PR one mutable finding ledger, and repeated
+   handoff wrappers or copied gate tables are churn unless a recovery boundary
+   required them.
 5. Challenge every suspected finding. Record the exact rule, durable evidence,
    reachable consequence, and smallest correction. Put plausible but unproven
    risks under `Watch` and record important false alarms rejected.

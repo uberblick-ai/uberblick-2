@@ -15,4 +15,4 @@ not produce an issue. Preserve effort context only with the authorization the
 protocol requires. After confirmation, offer its coworker-review and small-
 intake exits and follow only the human's choice; resume an existing requirement
 only by uuid. Stop after publishing the draft or creating the intake;
-`ub agents launch issue-preparer` is a separate assignment.
+preparing it is the issue-preparer's separate run.

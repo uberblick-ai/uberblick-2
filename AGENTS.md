@@ -1,7 +1,6 @@
 # Agent entry point
 
 These instructions apply to interactive sessions and delivery roles alike.
-Runtime-specific files supply metadata and invocation only.
 
 ## Find the right authority
 
@@ -12,27 +11,53 @@ Runtime-specific files supply metadata and invocation only.
 - **Local protocols:** exact steps, permissions, records and operational gates.
 - **Code and tests:** implemented behavior. Comments explain nearby non-obvious
   constraints; they do not authorize product or process changes.
-- **GitHub:** authorized work scope, owner decisions, claims, reviews and evidence.
+- **GitHub:** authorized work scope, owner decisions, reviews and evidence.
 
 A discrepancy is a gap to resolve, not permission to silently override another
 source. Distinguish implemented behavior from agreed future direction. Apply
 settled owner authorization without asking for it again; escalate only the
 unresolved choice beyond that authorization.
 
-## Read the project's bindings
+## Project facts
 
-These instructions are a workflow a project adopts, so they name no repository,
-base ref, discussion, owner, corpus document or validation command of their own.
-Every such value is the adopting project's, declared once in its
-`.agents/launch.json` under `project` and read with
-`node scripts/agent-binding.mjs <binding>` — for example
-`node scripts/agent-binding.mjs project.repository`. The helper prints the
-value alone, or exits non-zero naming the binding and the file and key it
-searched. Resolve a binding immediately before the operation that needs it, so
-a missing one costs a message rather than a claim, a comment or a push against
-the wrong repository; nothing here falls back to another project's values.
-`.agents/requires.json` declares the bindings and resources this workflow needs,
-and `.agents/audits/` and `.agents/skills/` sit outside it as this project's own.
+- **Repository:** `uberblick-ai/uberblick-2`, base branch `main` (fetch
+  `origin/main` before grounding). **Owner:** `@bk-one`, mentioned on every
+  question only the owner can answer.
+- **Corpus context:** Uberblick project agent workflow
+  (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`) for the delivery model; Editorial
+  contract (`5e0e25d8-c71f-44c3-9bf3-93662712c1fc`) before any corpus edit.
+- **MCP route:** use the registered `uberblick` server. If it cannot start
+  outside mise, run `mise x -- ub mcp serve` from scratch outside the committed
+  worktree.
+- **Commands:** `.agents/development.md`.
+- **Retrospectives** go to these discussions, posted with the node id below and
+  never a guessed one, because a wrong id posts to a stranger's repository:
+
+  | Channel | Discussion | Node id |
+  | --- | --- | --- |
+  | preparation | #506 | `D_kwDOT-Zo0s4Ao3uN` |
+  | implementation | #522 | `D_kwDOT-Zo0s4Ao32f` |
+  | workflow-audit | #540 | `D_kwDOT-Zo0s4Ao4BT` |
+  | technical-audit | #541 | `D_kwDOT-Zo0s4Ao4BU` |
+
+  ```sh
+  gh api graphql -f discussionId=<node id> -F body=@<body-file> \
+    -f query='mutation($discussionId:ID!,$body:String!){addDiscussionComment(input:{discussionId:$discussionId,body:$body}){comment{url}}}' \
+    --jq '.data.addDiscussionComment.comment.url'
+  ```
+
+  A retrospective is non-blocking telemetry: a failed post blocks nothing.
+
+## How roles run
+
+Delivery runs four roles: issue-preparer, implementer, reviewer and integrator.
+A run is given one issue or pull request and ends with one named outcome from
+its role file. The loop that starts runs and turns outcomes into labels, review
+requests and handoff records is [ub-agents](https://github.com/uberblick-ai/ub-agents),
+a separate tool; roles never move workflow labels, claim work or request
+reviews themselves. Until this repository carries its ub-agents configuration,
+a person starts each run, names its item, and applies the outcome with the table
+in `.agents/roles/README.md`.
 
 ## Read for the action
 
@@ -55,21 +80,18 @@ A pointer is a route to the source, not a substitute for reading it.
 - **Discuss or shape:** `.agents/protocols/issue-shaping.md` plus relevant corpus;
   it governs the human’s choice of draft requirement or confirmed intake, and
   resuming a requirement by UUID. A draft grants no queue authority.
-- **Assigned role:** `.agents/roles/<role>.md`; follow its pickup order. Empty
-  queue checks do not require a corpus sweep or implementation worktree.
-- **Before role side effects:** `.agents/roles/README.md` for shared ownership.
+- **Run a role:** `.agents/roles/README.md`, then `.agents/roles/<role>.md`.
 - **Prepare an issue:** `.agents/protocols/issue-preparation.md` and
   `.github/ISSUE_SPEC.md` for the issue contract.
 - **Build or validate:** `.agents/development.md` and
   `.agents/protocols/delivery-policy.md` before editing.
-- **Review or integrate:** `.agents/protocols/delivery-policy.md`, then the
-  review or integration procedure relevant to the current action.
-- **Edit corpus:** resolve and read `project.context.editorial`; update the
-  owning document rather than copying its content into repository instructions.
-  Corpus edits must stay
-  within recorded authorization: update descriptions of delivered behavior,
-  but do not weaken a guarantee or expand agent authority through a doc edit.
-  An unsettled change to those commitments requires an owner decision.
+- **Review or integrate:** `.agents/protocols/delivery-policy.md`, then
+  `.agents/protocols/review-protocol.md` or `.agents/protocols/integration.md`.
+- **Edit corpus:** read the Editorial contract above; update the owning document
+  rather than copying its content into repository instructions. Corpus edits
+  must stay within recorded authorization: update descriptions of delivered
+  behavior, but do not weaken a guarantee or expand agent authority through a
+  doc edit. An unsettled change to those commitments requires an owner decision.
 
 When instructions come from a different checkout than the code being examined,
 identify both sources and revisions. Verify code and path claims at the stated

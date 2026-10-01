@@ -2,18 +2,18 @@
 
 The mechanics of the `integrator` role, for one PR at one head SHA. delivery-policy.md's
 "Development workflow" owns *which* gates exist and when each applies,
-including the dual challenge; drive them in the order it lists.
+including the reviews owed; drive them in the order it lists.
 This file owns only their mechanics, and `review-protocol.md` beside it owns the
 findings-conditional protocol.
 
 ## Gate mechanics
 
 - Resolve and record the PR's immutable `headRefOid`. Where delivery-policy.md's gate
-  list requires the isolated review, fetch that commit and run the project's
-  `review` command with `<headRefOid>` — never check the PR branch out to
+  list requires the isolated review, fetch that commit and run
+  `mise run review <headRefOid>` — never check the PR branch out to
   review it, and never treat tests from a mutable shared checkout as review
-  evidence; delivery-policy.md's review paragraph and the project's own
-  documentation of that command state what it refuses and why. Otherwise the
+  evidence; delivery-policy.md's review paragraph and README's "Review
+  isolation" section state what it refuses and why. Otherwise the
   immutable review is CI at that exact head: `gh api repos/{owner}/{repo}/commits/<headRefOid>/check-runs
   --jq '.check_runs[]|select(.name|test("gates"))|.conclusion'` must print
   `success`, and the ruling links that check run. A missing or non-green run
@@ -28,27 +28,26 @@ findings-conditional protocol.
   against the base: green at the base and red at the head is a fix-now branch
   regression even when the stale code is a test fixture rather than production.
 - Record every gate outcome against the commit SHA it ran at — container
-  review, CI, the acceptance validation, both adversarial verdicts where the
-  dual-challenge gate applied, and any Copilot result when one was requested.
+  review, CI, the acceptance validation, and every review verdict.
   Record the exact base-ref SHA that the exact-head gate set began from as
   its base-freshness point too.
   Link the check, review record or failure evidence; do not paste full logs,
   test counts or timings into each ruling. A Copilot review is already its own
-  record and gets no wrapper comment; a platform refusal is recorded once and
-  does not block merge. Any new commit on the branch (fix-ups included)
+  record and gets no wrapper comment; a platform refusal follows
+  delivery-policy.md. Any new commit on the branch (fix-ups included)
   invalidates test/typecheck and immutable review evidence: re-run those gates
-  at the new `headRefOid`. For either earlier adversarial verdict, follow
-  `review-protocol.md`'s risk-scoped re-review rule; either request a fresh round or
-  record exactly which reasoning still applies and why. The integrator's own
-  gate work does not fill a missing challenger slot.
+  at the new `headRefOid`. For an earlier review verdict, follow
+  `review-protocol.md`'s re-review rule: finish `more-review`, or record exactly
+  which reasoning still applies and why. The integrator's own gate work does not
+  fill a missing review.
 - An advance of the base ref after those exact-head gates fires a separate
   merged-tree gate, regardless of whether the two diffs appear to touch the
   same files. Fetch the current base and PR head, use `git merge-tree
   --write-tree <base-sha> <head-sha>` and `git commit-tree <tree> -p
   <base-sha> -p <head-sha>` to make the prospective two-parent merge commit,
   and hold that throwaway commit on a private ref for the gate's lifetime.
-  From the required checkout at that base, run the `review` command with
-  `<merge-commit>`; when the PR warrants browser e2e, run it from a detached
+  From the required checkout at that base, run
+  `mise run review <merge-commit>`; when the PR warrants browser e2e, run it from a detached
   temporary worktree at the same merge commit. Record both the merge commit
   and the exact base-ref SHA in the evidence, then remove the temporary
   ref and worktree. Never push either. Exact-head gates are insufficient once
@@ -68,16 +67,15 @@ session memory can contradict one that was written down while you were
 elsewhere.
 
 **Findings.** `review-protocol.md` is the whole findings-conditional protocol —
-the durable review request and the wait for its verdict, finding triage, the one batched fix-up
-wave per review head, risk-scoped re-review with the round-count rule, and the
-exit condition. Read it whenever a PR has a round to request or a finding to
-disposition.
+finding triage, the one batched fix-up wave per review head, risk-scoped
+re-review with the round-count rule, and the exit condition. Read it whenever a
+PR has a finding to disposition.
 
 ## Run the required checks
 
-Determine the required review and gates from the diff and delivery policy.
-Request an owed independent review early; perform mechanical checks concurrently
-when their inputs and workspaces are independent. Ordinary commands suffice:
+Determine the required gates from the diff and delivery policy. A review the
+diff owes but did not get is a `more-review` outcome before any ruling; perform
+mechanical checks concurrently when their inputs and workspaces are independent. Ordinary commands suffice:
 do not create an agent per mechanical check. The integrator owns acceptance
 judgment, tier classification and durable results.
 
@@ -97,7 +95,7 @@ Re-fetch the PR's reviews and comment threads (`gh pr view <n> --comments` plus
 review threads via `gh api graphql` — inline review comments don't show in the
 former) and confirm zero unaddressed remarks, human or bot, including any that
 arrived after the earlier gates passed; anything open is triaged first. Confirm
-the PR's base is the project's base branch (`gh pr view <n> --json baseRefName`)
+the PR's base is `main` (`gh pr view <n> --json baseRefName`)
 — a stacked PR merges into its parent feature branch and can orphan the reviewed
 work; retarget the PR to that branch (or merge the parent first) before merging.
 
@@ -110,9 +108,8 @@ compatibility rather than an additive optional schema field; authority or merge
 rules rather than routine process clarification; a runtime dependency rather
 than a dev dependency; auth/token semantics; a decided-architecture or
 invariants edit; or overruling a major reviewer finding. A tier-3 trigger
-means you do not merge: label the PR `needs-human`, comment which trigger fired,
-fire a PushNotification naming the PR and the trigger so the owner learns a
-merge decision awaits them, then park it and report.
+means you do not merge: finish `needs-human`, the ruling naming which trigger
+fired.
 
 **Exception — `human-approved`.** A PR carrying the owner-set `human-approved`
 label is merge-authorized: execute the merge as tier 2 (merge report first),
@@ -123,8 +120,8 @@ session to set it for named PRs; that session posts the direction as provenance.
 owner decision 2026-09-05): when the issue carries the owner's dated decision
 fixing the PR's intended shape — the shaping confirmation, an `Owner decision`
 comment, or the answer that lifted `needs-decision` — verify the diff conforms
-to it and that no finding expands it, set `human-approved` yourself with a
-comment citing that decision, and merge as tier 2. Park `needs-human` only for
+to it and that no finding expands it, cite that decision in the merge report,
+and merge as tier 2. Park `needs-human` only for
 a delta the decision did not cover, and name it; a tier-3 trigger that fired
 only in implementation is such a delta unless the decision named it. Never
 infer approval from `ready` alone or from an owner comment unrelated to the
@@ -164,7 +161,7 @@ processes.
 
 **Housekeeping, last** (owner direction, 2026-09-01). On every durable outcome —
 merge or parked ruling — once the probes on the retained review image are done,
-run the project's `housekeeping` command with every review SHA this run built —
+run `sh scripts/housekeeping.sh` with every review SHA this run built —
 each exact head it gated and each merged-tree commit from an observed base
 advance — from the same freshly fetched base-ref checkout used for the container
 review, and record a concise summary on the PR. Besides the named review images,

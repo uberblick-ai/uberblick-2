@@ -89,9 +89,9 @@ When the material meaning is clear, reflect it back compactly for correction:
 - the decision principles, trade-offs, and must-not-change behavior that
   constrain it;
 - the proposed scope boundary;
-- a suggested Priority (Urgent, High, Medium or Low) when one seems clear,
+- a suggested priority (urgent, high, medium or low) when one seems clear,
   otherwise the plain question — always ask, since the human owns every
-  explicit Priority value and an unasked field silently sorts as Medium; and
+  priority value and an unasked one silently sorts as medium; and
 - any unresolved human choice, explicitly marked unresolved.
 
 Ask the user to correct the meaning. Do not treat silence, a topic change, or a
@@ -119,9 +119,9 @@ it does not authorize preparation, `ready`, Priority, or implementation.
 ### Publish a draft requirement
 
 Use the installed MCP server's discovered tool schemas, so this path works from
-a machine with only `ub`, its MCP server, and the shaping skill. Resolve
-`project.context.editorial`, read that live document and the active tag catalog
-through MCP, then create one document
+a machine with only `ub`, its MCP server, and the shaping skill. Read the
+Editorial contract (`5e0e25d8-c71f-44c3-9bf3-93662712c1fc`) and the active tag
+catalog through MCP, then create one document
 with `kind: requirement`, `status: draft`, a concise description, applicable
 catalog tags under that live contract, and blocks carrying the confirmed
 problem, intended outcome, success evidence, constraints, trade-offs, and scope
@@ -176,8 +176,8 @@ When the human explicitly declares the requirement planned, set its status to
 `planned` and ask them to group the product outcomes into the intakes they want.
 This is their product grouping, not technical PR decomposition. Before creating
 anything, enumerate open and closed issues with
-`gh api --paginate "repos/<project.repository>/issues?state=all&per_page=100"`
-against the project's declared repository, exclude pull requests, and inspect their bodies locally for an exact requirement
+`gh api --paginate "repos/uberblick-ai/uberblick-2/issues?state=all&per_page=100"`,
+exclude pull requests, and inspect their bodies locally for an exact requirement
 uuid in `Implements:` lines; do not depend on GitHub's full-text search index
 for retry safety. Compare the exact outcome grouping the human confirmed. A
 prior line covers a retry only when it names the same outcome block ids; a
@@ -201,11 +201,9 @@ Owner decision, <YYYY-MM-DD>: <the human's planned decision and its provenance>
 Follow those lines with the confirmed intake sections below. Add only
 `needs-preparation`: do not write `Depends-on`, `Touches`, `Parent`, Priority,
 or `ready`. The issue-preparer later completes the machine-readable header and
-grounds the contract. If the repository's `scripts/create-issue.mjs` helper is
-available, use it with Request Source `Human`. Otherwise create with `gh`, leave
-Request Source unset as the issue contract permits, and tell the human; pass
-the project's declared repository as `--repo` so no checkout is required, and
-promise no additional failure record.
+grounds the contract. Create it with `gh issue create --repo
+uberblick-ai/uberblick-2`, so no checkout is required, and tell the human to set
+Request Source `Human` in the issue sidebar.
 
 ### Create a small intake
 
@@ -232,12 +230,11 @@ when handing text to another coordinator; omit `Chosen exit` from an issue body.
 The GitHub form may render the section headings with empty values.
 
 When the human chooses this exit, create the intake with
-`needs-preparation` through `.github/ISSUE_SPEC.md`'s **Request source** path,
-recording `Human` for the person's request. If its helper is unavailable, use
-`gh issue create --repo` with the project's declared repository, leave Request
-Source unset, and tell the human. Set Priority to the value the human stated in this
-conversation, with a comment on the issue recording that decision; leave the
-field unset when they gave none, and never infer it. Never infer or write
+`gh issue create --repo uberblick-ai/uberblick-2 --label needs-preparation`, and
+tell the human to set Request Source `Human` in the issue sidebar. Add the
+`priority:<value>` label the human stated in this conversation, with a comment on
+the issue recording that decision; leave it unset when they gave none, and never
+infer it. Never infer or write
 `Depends-on`, `Touches`, `Parent`, architecture, implementation detail,
 acceptance criteria, Pointers, or `ready`. The
 issue-preparer derives the technical contract from the current repository and
@@ -253,6 +250,6 @@ preparation complete.
 - This file: conversation → draft requirement and resumption, or confirmed
   intake.
 - `.github/ISSUE_SPEC.md`: final issue schema and lifecycle.
-- `.agents/roles/issue-preparer.md`: queue ownership, authority, and side
-  effects for one preparation pass.
+- `.agents/roles/issue-preparer.md`: the run and outcome of one preparation
+  pass.
 - `.agents/protocols/issue-preparation.md`: grounding, challenge, and recheck.

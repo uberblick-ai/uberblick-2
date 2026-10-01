@@ -3,8 +3,7 @@
 This provider-neutral procedure owns grounding, challenge, and recheck after a
 GitHub intake enters the preparation queue. `.agents/protocols/issue-shaping.md`
 owns the earlier conversation; `.github/ISSUE_SPEC.md` owns the final body and
-lifecycle; `.agents/roles/issue-preparer.md` owns queue authority and side
-effects.
+lifecycle; `.agents/roles/issue-preparer.md` owns the run and its outcome.
 
 The preparer owns one grounded pass, applying correctable findings before its
 final recheck. Independent challenge protects the contract before implementation;
@@ -12,7 +11,7 @@ it does not replace implementation correctness review.
 
 ## Ground it at a commit
 
-After pickup, scan the corpus catalog with `list_docs` and use descriptions,
+Scan the corpus catalog with `list_docs` and use descriptions,
 issue context and targeted search to select relevant product, architecture,
 principle and decision documents. Read those documents, following links where
 they govern the outcome; a catalog scan is not a read of every document body.
@@ -22,7 +21,7 @@ constraints through those citations rather than copying the documents into the
 issue. Mark a missing source as a gap; do not invent its intended content.
 For a resumed pass, refresh only the affected discovery and links.
 
-Fetch the project's base ref and record the exact SHA you ground
+Fetch `origin/main` and record the exact SHA you ground
 against — every later statement in the preflight is a claim about that commit,
 not about your memory of the repo. Against it, read what the issue targets: the
 current behavior, the modules, interfaces, invariants and tests it lives in,
@@ -72,12 +71,12 @@ stale workflow rules is not a valid recheck.
 
 ## Classify the route
 
-First check for a valid top-level implementer `Returned:` record after the latest
-preparer handoff. On the first consecutive return since a human answer, use
-route `resumed`: read the prior preparation and adversary evidence, refresh the
-reported conflict and affected upstream grounding, and correct only that part
-of the issue. Do not reclassify, repeat broad grounding, or launch another
-adversary by default. A second consecutive return is already parked on
+First check for an implementer `returned` outcome, or a review verdict, after
+the latest preparer handoff. On a review verdict, or the first consecutive
+return since a human answer, use route `resumed`: read the prior preparation and
+review evidence, refresh the reported conflict and affected upstream grounding,
+and correct only that part of the issue. Do not reclassify, repeat broad
+grounding, or require another review by default. A second consecutive return is already parked on
 `needs-decision`; after a human answers, resume the same way and treat that
 answer as resetting the count. A return that exposes a new owner boundary goes
 to `needs-decision` rather than back to `ready`.
@@ -85,26 +84,25 @@ to `needs-decision` rather than back to `ready`.
 Classify from current evidence, not paths, labels or keywords. Self-check only
 when the change is mechanical (no behavior or contract choice), understood,
 local and easily reversed. Every other new preparation gets one independent
-adversary. A spike has no automatic exemption.
+review. A spike has no automatic exemption.
 
-| Route | Grounded condition | Adversaries |
+| Route | Grounded condition | Reviews |
 |---|---|---|
-| `trivial` | mechanical, low uncertainty, local blast radius, easy reversal | 0 |
-| `challenged` | any other combination | 1 |
+| `trivial` | mechanical, low uncertainty, local blast radius, easy reversal | none |
+| `challenged` | any other combination | `agent` |
 
-`issue-preparation.mjs` expresses these grounded signals and the existing final
-recheck in executable form. State the concrete route reason briefly in the
-existing handoff; the signals are not an additional report.
+State the concrete route reason briefly in the handoff; the signals are not an
+additional report.
 
 ## Challenge
 
-For `trivial`, verify the grounded contract directly without an adversary.
-For `challenged`, delegate one fresh issue-adversary scoped to this parent run,
-preferably on the other runtime/model. It reconstructs from GitHub and tests the
-assumptions that could change the outcome, violate an invariant or waste
+For `trivial`, verify the grounded contract directly without a review.
+For `challenged`, finish `ready` requiring the `agent` review: ub-agents runs
+`.agents/roles/reviewer.md` on another runtime before `ready` lands. The
+reviewer reconstructs from GitHub and tests the assumptions that could change the outcome, violate an invariant or waste
 substantial work: missing failure boundaries, simpler approaches, real conflicts
 with current work, and a coherent, independently useful work shape. Apply
-ISSUE_SPEC's intent and sizing rules. Both preparer and adversary distinguish
+ISSUE_SPEC's intent and sizing rules. Both preparer and reviewer distinguish
 missing outcomes or invariants from optional engineering approaches; correct the
 former without making the latter requirements or enumerating every edge case.
 They also separate an empirical uncertainty from a human choice and from
@@ -112,36 +110,20 @@ ordinary engineering judgment, as `.agents/protocols/issue-shaping.md` defines
 those three: answer the first from repository and corpus evidence, send only the
 second to a human, and leave the third to implementation.
 
-The adversary classifies each material finding as `correctable-findings` when
-settled intent or repository evidence is enough, or `owner-boundary` for product
-or agent authority, safety, or a fundamentally unsafe work shape. The preparer
-applies correctable findings in this same run and repeats the affected grounding
-and final recheck. It does not call a second adversary to review those edits.
-Another adversary is exceptional and requires an explicit owner request.
-
-Use `.agents/adapters/runtime-dispatch.md` for invocation. Keep the assignment
-open and renew ownership until the child's durable record completes or the
-transport fails. Record a failed dispatch by updating that delegation, not by
-claiming a verdict exists; name the runtime that actually performed a challenge.
-Inspect private logs only to diagnose missing results.
-
-Wait inside this active session with blocking tool waits or bounded foreground
-polls, rechecking the durable verdict, transport status and renewal deadlines
-between waits. A detached child or background waiter does not keep the parent
-session alive. Do not send a terminal response promising to report later while
-a delegation is unfinished. On child expiry, record failure and follow the
-shared role README's replacement rule; on a permission/authentication stop,
-record the failure and emit the role's Blocked outcome. On success, apply the
-verdict and complete the recheck, durable handoff and label transition before
-the final Worked line. Each child and waiter still needs its own finite deadline
-and cleanup; disabling a runtime's background-wait ceiling does not waive them.
+The reviewer classifies each material finding as `correctable` when settled
+intent or repository evidence is enough, or `owner-boundary` for product or
+agent authority, safety, or a fundamentally unsafe work shape. A clean review
+lets `ready` land. Otherwise the issue comes back, and the resumed pass applies
+correctable findings, repeats the affected grounding and final recheck, and
+finishes `ready` without requiring a second review of those edits; an
+owner-boundary finding finishes `needs-decision`. Another review is exceptional
+and requires an explicit owner request.
 
 ## Recheck, then decide
 
-Last thing before posting the outcome, resolve the project's base-ref binding
-and fetch that remote and branch again. Refresh only grounding affected by an
-upstream change, then re-read the issue, parent claim, nested adversary handoff
-and labels.
+Last thing before finishing, fetch `origin/main` again. Refresh only grounding
+affected by an upstream change, then re-read the issue, its thread and any
+review verdict.
 
 Check the final body against ISSUE_SPEC, including distinct observable outcomes.
 Keep What to the outcome, acceptance criteria to the guarantees, and Pointers to
@@ -153,36 +135,30 @@ overlap and its consequence, not a snapshot of every changed file. Length follow
 the contract's complexity; neither a word target nor an exhaustive inventory is
 required.
 
-| Parent still owns the issue | Final finding state | Outcome | Labels | Comment |
-|---|---|---|---|---|
-| yes | none (`none`) | ready | remove `needs-preparation`, add `ready` | yes |
-| yes | all correctable findings applied (`correctable-applied`) | ready | remove `needs-preparation`, add `ready` | yes |
-| yes | unresolved product, authority, safety or unsafe-shape boundary (`owner-boundary`) | park-needs-decision | remove `needs-preparation`, remove `ready`, add `needs-decision` | yes |
-| yes | request was split into a coordination parent and child intakes (`split`) | split | add `umbrella`, remove `needs-preparation`, remove `ready` | yes |
-| no | anything (`any`) | requeue | none | no |
+| Final finding state | Outcome |
+|---|---|
+| none, or all correctable findings applied | `ready` |
+| unresolved product, authority, safety or unsafe-shape boundary | `needs-decision` |
+| request split into a coordination parent and child intakes | `split` |
 
-The recheck outranks findings: if the parent no longer owns the issue, do not
-change labels or comment. Otherwise `ready` is the preparer's final verdict,
-within recorded owner-approved authority; there is no later approval ceremony.
+`ready` is the preparer's final verdict, within recorded owner-approved
+authority; there is no later approval ceremony.
 An owner boundary is the only normal preparation stop. It carries concrete
-options and a recommendation, not another automatic adversary round.
+options and a recommendation, not another automatic review.
 
 ## Record once
 
 Give each durable record one job: the issue body carries the final contract,
-the adversary record carries the challenge and its evidence, and the preparer
-handoff links that record and states the disposition. When all findings were
+the review verdict carries the challenge and its evidence, and the preparer
+handoff links that verdict and states the disposition. When all findings were
 applied, say so once; do not explain each finding again. Explain an individual
 disposition only when it is not evident from the final body and linked verdict,
 such as a rejected finding or an unresolved owner choice. Retain the required
-handoff fields and route reason, then follow the role's label sequence.
-
-Follow the README's expiry rules, reusing a completed adversary for the same
-pass. A human answer or first implementer return resumes from durable work,
-refreshing only affected evidence.
+handoff fields and route reason. A review verdict, a human answer or the first
+implementer return resumes from durable work, refreshing only affected evidence.
 
 Preparer-authored prose names an issue by a descriptive title alongside its
 `#N`: the prepared body's What, Why and Out of scope, a `needs-decision`
 question, and this handoff. Machine-read records and reference lists keep bare
 identifiers and their own grammar — `Depends-on`, `Parent:`, `Implements:`,
-claim, delegation and `Done:` records, `Closes`, and the Pointers list.
+`Outcome:` summaries, `Closes`, and the Pointers list.

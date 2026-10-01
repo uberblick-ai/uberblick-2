@@ -1,10 +1,9 @@
-# Issue spec — loop-ready issues
+# Issue spec — ready issues
 
-The contract for issues the implementation loop may pick up. The loop's triage
-step lints against this spec: an issue labeled `ready` that fails any check
-below gets a comment listing exactly what's missing, loses the `ready` label,
-and is skipped. Bad input is bounced, never interpreted — the loop must not
-fill gaps by guessing.
+The contract for issues an implementer may be given. An issue labelled `ready`
+that fails any check below is not implementable: the implementer finishes
+`returned`, naming exactly what is missing. Bad input is bounced, never
+interpreted — no run fills gaps by guessing.
 
 Design principle (same as the repo's data invariants): anything **derivable**
 (blocked state, execution order) is computed, never stored; anything **not
@@ -45,10 +44,8 @@ Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
 
   A malformed header is still a defect: more than one `Parent` line, one naming
   an issue that does not exist or cannot be read, a self-reference, or a cycle
-  through parents fails the lint below — say so in a comment and move to the
-  next candidate; never guess which parent was meant. (A delegated subagent's
-  `Parent: <role> <run id>` claim comment is a different record in a different
-  place, and is not this header.)
+  through parents fails the lint below — return the issue naming the defect;
+  never guess which parent was meant.
 - **`Implements`** — optional, and the only header line that may repeat: one
   line per requirement document, the repeated lines contiguous, after `Parent`
   — or directly after `Touches` where there is no `Parent` line. Grammar:
@@ -83,62 +80,28 @@ Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
 
 ### Scheduling semantics
 
-- **Eligible** = labeled `ready` AND every `Depends-on` issue is closed AND
-  not claimed.
-- **Work in flight** is counted in **distinct work units**, reconstructed from
-  GitHub: one unit per item, whether that item is a live claim, an unmerged PR,
-  or both at once — an unmerged PR and the claim that produced it are one piece
-  of work in flight, not two. The cap is 6: when the count is 6, no new issue is
-  dispatched until one leaves it. Unmerged PRs occupy their slots first, because
-  a PR cannot withdraw and a claim can.
-- **A claim is tentative until it is recounted.** Observing the count before
-  claiming does not admit you, because a concurrent claimer observed the same
-  number. After posting the claim, re-read GitHub and count the units again with
-  your own now among them. A successful claimant posts exactly
-  `Admitted: N/6 work units.` and no constituent-unit narration. Over the cap,
-  the earliest units by the claim order
-  `.agents/roles/README.md` defines keep their slots, and every later claimer
-  posts a one-line withdrawal and stops — before creating a branch or worktree,
-  and before editing anything in the repository. Two claimers that admitted
-  themselves on the same reading therefore resolve deterministically instead of
-  both proceeding. A fix-up PR already occupies its unit and needs no admission
-  recount.
+- **Eligible** = labelled `ready` AND every `Depends-on` issue is closed. An
+  implementer given an issue with an open dependency finishes `defer`.
 - Parallelism is judged at **file** level, not `Touches`-set level: overlapping
-  `Touches` sets do not by themselves queue. From the issues' scope and
-  Pointers the loop forms an expectation of which files each will edit.
-  Dispatch in parallel when substantive implementation files are expected to
-  be disjoint. A bounded predicted overlap is also allowed in purely additive
-  aggregation surfaces, such as barrel exports or files collecting independent
-  error types, when reconciling it is mechanical; after the earlier merge, the
-  later branch synchronizes through a non-rewriting merge only if mergeability
-  requires it, and every exact-head gate runs again. Semantic overlap, or files
-  that cannot be foreseen with confidence, queue. An expectation that proves
-  wrong has the same reconciliation and fresh-gate consequence.
+  `Touches` sets do not by themselves serialize work. When an open pull request
+  is expected to edit the same substantive files semantically, the later
+  implementer finishes `defer` until it merges. A bounded predicted overlap in
+  purely additive aggregation surfaces, such as barrel exports or files
+  collecting independent error types, is reconciled mechanically: after the
+  earlier merge, the later branch synchronizes through a non-rewriting merge
+  only if mergeability requires it, and every exact-head gate runs again.
 - This includes `schema`: its keystone risk is paid by exact-head review and
   gates after upstream reconciliation, not by locking unrelated files or
   packages.
-- Order among eligible issues: **effective `Priority`** first — the
-  organization issue field, Urgent → High → Medium → Low — then oldest first
-  (ascending issue number). An issue's effective Priority is the highest of its
-  own and of every open issue whose `Depends-on` chain reaches it: a Medium
-  that blocks a High is picked as a High, and the oldest Urgent goes before any
-  High (owner direction, 2026-09-01). An unset value sorts as Medium — a human
-  sets a value to move an issue, not to admit it — and does not make prepared
-  work ineligible. Dependencies otherwise gate eligibility —
-  every `Depends-on` closed — and earn no other place in line. A human owns
-  every explicit Priority value. Agents may report evidence that
-  the order looks wrong, but never write the field on their own judgement. The
-  one agent write is a shaping session recording the value the human stated in
-  that conversation, with a provenance comment on the issue
+- Order among eligible issues: **priority** first — the `priority:urgent`,
+  `priority:high`, `priority:medium` and `priority:low` labels, unset sorting as
+  medium — then oldest first (ascending issue number). Dependencies gate
+  eligibility and earn no other place in line. A human owns every priority
+  value; agents may report evidence that the order looks wrong, but never set a
+  value on their own judgement. The agent writes are a preparer copying an
+  umbrella's label onto its children, and a shaping session recording the value
+  the human stated in that conversation, with a provenance comment on the issue
   (`.agents/protocols/issue-shaping.md`; owner decision, 2026-09-07).
-
-`Priority` is that field, read through the API — never a line in the issue body:
-
-```sh
-gh api graphql -f query='query{repository(owner:"uberblick-ai",name:"uberblick-2"){issue(number:N){issueFieldValues(first:10){nodes{... on IssueFieldSingleSelectValue{name field{... on IssueFieldSingleSelect{name}}}}}}}}'
-```
-
-Take the node whose `field.name` is `Priority`; its `name` is the value.
 
 ### Gate check
 
@@ -155,26 +118,24 @@ it — and `Agent` for an agent-discovered follow-up, review finding, audit item
 split or program child. Do not infer historical values from the GitHub author;
 backfill only where durable evidence states the origin.
 
-Create an issue with `node scripts/create-issue.mjs --source Human|Agent
---title <title> --body-file <path> [--label <label>]`. The helper discovers the
-organization field by name, requires the single-select options to be exactly
-`Human` and `Agent`, sets the value in the create request, and reads it back. A
-missing, malformed or mismatched value is reported as `Request Source: failed`
-but does not block the created issue or any later preparation, claim, handoff or
-merge. Copy that failure into the durable outcome the creating run already
-posts; do not add a new lifecycle record or enforcement check.
+Agents create issues with `gh issue create` and leave the field unset; a human
+may set it in the issue sidebar. A missing value never blocks preparation,
+implementation or merge.
 
 ## Labels — lifecycle
 
 | Label | Meaning | Set by |
 |---|---|---|
-| *(none)* | Draft — invisible to the loop | — |
+| *(none)* | Draft — no role runs on it | — |
 | `needs-preparation` | Queued for one issue-preparer pass | Human or intake template |
-| `ready` | Spec-complete; the loop may claim it | Human, or issue-preparer after one-pass clearance |
-| `in-progress` | Claimed; branch named in a comment | Loop |
-| `needs-decision` | Parked on a question only a human can answer | Loop |
-| `wontfix` | Low-impact theoretical work closed as not planned | Human or issue-preparer after grounding |
-| `umbrella` | Coordination-only parent of a split; outside both queues; closes after its children | Issue-preparer on `split`, or human |
+| `ready` | Spec-complete; an implementer may be given it | Human, or the issue-preparer's `ready` outcome |
+| `needs-decision` | Parked on a question only a human can answer | The issue-preparer's `needs-decision` outcome |
+| `wontfix` | Low-impact theoretical work closed as not planned | Human, or the issue-preparer's `wontfix` outcome |
+| `umbrella` | Coordination-only parent of a split; no role runs on it; closes after its children | Human, or the issue-preparer's `split` outcome |
+| `priority:*` | Order among eligible issues (Scheduling semantics) | Human |
+
+Outcomes move these labels through ub-agents; pull-request labels are ub-agents'
+too (`.agents/roles/README.md`).
 
 There is deliberately **no `blocked` label**: blocked is derived from
 `Depends-on` plus issue closed-state, and stored copies of derivable state
@@ -182,94 +143,59 @@ rot.
 
 An issue-preparer may close a low-impact theoretical finding as not planned
 with `wontfix` when no current supported-usage failure is established and a
-delivery cycle is disproportionate. Record the consequence and that rationale;
-remove preparation and delivery labels. Never use this route for data loss,
+delivery cycle is disproportionate. Record the consequence and that rationale.
+Never use this route for data loss,
 auth or security exposure, or a violated invariant. A concrete bug observed
 later is new evidence and may be filed or reopened then.
 
 Preparation follows `.agents/protocols/issue-preparation.md`; the issue-preparer
-owns its final verdict and transitions. Correctable findings stay in that pass;
-unresolved owner boundaries take `needs-decision`. Another adversary requires
+owns its final verdict. Correctable findings are applied in preparation;
+unresolved owner boundaries take `needs-decision`. Another review requires an
 explicit owner request.
 
-A split follows Sizing below. Remove `needs-preparation` from the source, add
-`umbrella`, never add `ready`, and set its `Depends-on` to its children. Give
-each child `needs-preparation`, `Parent: #N`, the parent's milestone, and only
-real ordering dependencies. Technical decomposition is preparer judgment;
+A split follows Sizing below. The source becomes an `umbrella`, never `ready`,
+with its `Depends-on` set to its children. Give each child `needs-preparation`,
+`Parent: #N`, the parent's milestone and `priority:*` label, and only real
+ordering dependencies. Technical decomposition is preparer judgment;
 choosing product behavior beyond delegated authority is an owner decision.
 
 `needs-decision` exit path: the preparer asks one focused question as an issue
-comment, with concrete options and its recommendation, and replaces
-`needs-preparation` or `ready` with `needs-decision`. A direct answer from a
+comment, with concrete options and its recommendation, and finishes
+`needs-decision`. A direct answer from a
 human to that question is authority. An agent's comment is evidence unless a
 human explicitly adopts it; an off-GitHub human answer may be recorded only
-with clear provenance. Once the answer is durable, replace
-`needs-decision` with `needs-preparation`. A fresh preparer assignment reuses
-the previous handoff, adversary verdict, question and answer, and rechecks only
-the affected grounding and intervening upstream changes. It does not repeat
-classification or run another adversary by default.
+with clear provenance. Once the answer is durable, the human replaces
+`needs-decision` with `needs-preparation`. The next preparer pass reuses the
+previous handoff, review verdict, question and answer, and rechecks only the
+affected grounding and intervening upstream changes. It does not repeat
+classification or require another review by default.
 
-A top-level implementer returns a stale, unsafe, unnecessarily complex, or
-owner-bound contract with this issue comment:
+An implementer returns a stale, unsafe, unnecessarily complex, or owner-bound
+contract with the `returned` outcome, whose summary reads:
 
 ```text
-Returned: implementer <claude|codex> <session-or-agent id>
 Grounding: <origin/main SHA>
 Reason: <stale-contract|unsafe|unnecessary-complexity|owner-decision> — <one sentence>
 Evidence: <URL or concise pointer>
 ```
 
-The first consecutive return since the latest human answer to a return
-question removes `ready` and `in-progress` and adds `needs-preparation`. Its
-preparer reuses the prior pass and refreshes only the affected contract and
-grounding; another adversary is not the default. A second consecutive return
-removes `ready`, `in-progress` and `needs-preparation`, adds `needs-decision`,
-and appends one focused question with concrete options and a recommendation. A
-return already at an owner boundary may take that path immediately. The answer
-to that question resets the return count. Thus an issue gets at most one
-automatic `ready` → `needs-preparation` → `ready` repair cycle before human
-escalation.
-
-### Claim protocol
-
-The cross-agent workflow lives in [`AGENTS.md`](../AGENTS.md). Its minimum
-durable records use this issue grammar. On claim, add `in-progress` and post:
-
-```text
-Claimed: feat/mcp-server
-Implementer: opus a12a538d
-```
-
-`Implementer` is `<claude|codex> <session-or-agent id>`. Completion is a PR body
-recording the outcome, verification, material findings, and KISS/overtesting
-self-review. A fix-up claim is posted on the PR:
-
-```text
-Claimed: <existing branch>
-Implementer: <claude|codex> <session-or-agent id>
-Ruling: <integrator comment URL>
-```
-
-After opening or updating the PR, post only:
-
-```text
-Done: implementer <claude|codex> <session-or-agent id>
-Grounding: <origin/main SHA>
-```
-
-The PR supplies the branch, head SHA, diff and check state; do not copy them
-into the handoff or add a second completion comment to the issue. Recovery and
-independent-review rules live in the shared role README and delivery policy.
+The first consecutive return since the latest human answer to a return question
+sends the issue back to preparation, and that pass reuses the prior one and
+refreshes only the affected contract and grounding; another review is not the
+default. On a second consecutive return the preparer finishes `needs-decision`
+with one focused question, concrete options and a recommendation. A return
+already at an owner boundary may take that path immediately. The answer to that
+question resets the return count. Thus an issue gets at most one automatic
+`ready` → `needs-preparation` → `ready` repair cycle before human escalation.
 
 The human's shaping choice between a draft requirement for coworker review and
 a confirmed `needs-preparation` intake, plus later requirement resumption by
 uuid, lives in `.agents/protocols/issue-shaping.md`; neither exit grants
-`ready`. The shared
-preparation detail lives in `.agents/protocols/issue-preparation.md`: it owns
-the grounded trivial-vs-challenged classification, challenge questions,
-recheck, and focused parity test. The issue-preparer role owns queue authority
-and side effects. This spec owns only the final schema and lifecycle above; do
-not grow a second copy of either procedure here or in `AGENTS.md`.
+`ready`. The shared preparation detail lives in
+`.agents/protocols/issue-preparation.md`: the grounded trivial-vs-challenged
+classification, challenge questions and recheck. The issue-preparer role owns
+the run and its outcome. This spec owns only the final schema and lifecycle
+above; do not grow a second copy of either procedure here or in `AGENTS.md`.
 
 ## Body sections
 
@@ -327,8 +253,8 @@ reviewable PR; each PR closes its child, and the parent closes after its require
 children. Parents carry `umbrella`, live outside the preparation and
 implementation queues — only their children carry `needs-preparation` or
 `ready` — and name their children in `Depends-on`: the edge is true, because
-the parent closes after them, and the effective-Priority rule above then
-carries the parent's Priority to every child without anyone writing the field.
+the parent closes after them, and the preparer copies the parent's priority
+label onto each child.
 A program is a milestone plus its umbrellas; nothing dispatches it but the
 ordinary queues, and its owner decisions live on the umbrella's thread.
 
@@ -388,5 +314,5 @@ An issue labeled `ready` must pass all of:
 8. A body carrying `Implements` also carries the owner decision line above.
 
 Sizing and decision-completeness are judgment calls, not lintable — the
-issue-preparer applies them when granting `ready`, and any role that finds a
-`ready` issue failing them says so and skips it.
+issue-preparer applies them when granting `ready`, and an implementer given a
+`ready` issue failing them returns it.
