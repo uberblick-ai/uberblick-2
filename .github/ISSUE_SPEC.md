@@ -68,7 +68,9 @@ Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
 ### Scheduling semantics
 
 - **Eligible** = labelled `ready` AND not blocked by an open issue. ub-agents
-  skips every other issue.
+  skips every other issue, and a blocked issue waits at every step: no
+  preparation, review or implementation starts on it until its blockers
+  close.
 - Parallelism is judged at **file** level, not `Touches`-set level: overlapping
   `Touches` sets do not by themselves serialize work. When an open pull request
   is expected to edit the same substantive files semantically, the later
