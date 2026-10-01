@@ -52,10 +52,12 @@ complexity, or needs a person's decision, do not deviate. On an issue, finish
 — <one sentence>` and the evidence. On a pull request, escalate
 (`.agents/roles/README.md`).
 
-Read `.agents/protocols/delivery-policy.md`'s "Reviews owed" table for this diff
-and name the reviews it owes in the outcome: none for an exempt diff, with the
-reason; `agent`; or `agent` and `copilot`. Require more when you can name a
-concrete unresolved risk that warrants them.
+Read `.agents/protocols/delivery-policy.md`'s "Reviews owed" table for this diff.
+When it owes the `agent` review, finish `review`; when it also owes `copilot`,
+first request that review at the same head (`gh pr edit <N> --add-reviewer
+@copilot`). When it owes none, finish `integrate` and state `none owed
+(<reason>)`. Owe more when you can name a concrete unresolved risk that
+warrants them.
 
 ## Revising a pull request
 
@@ -65,14 +67,15 @@ Continue the pull request's remote head; never rebase or force-push it.
   one batch, plus P3s only when local and inexpensive, and answer the rest with
   evidence (`.agents/protocols/review-protocol.md`, Settling a finding). Answer
   Copilot's remarks in their own threads. The summary lists every finding id
-  once, as `corrected in <sha>` or `answered: <evidence>`. Name the review that
-  raised them when the protocol's Rounds rule requires a second round, or when
-  a correction carries risk of its own; otherwise name none.
-- **An integrator's `changes`:** fix what it names.
-- **A person's answer:** act on it. When it leaves nothing to change, finish
-  `done` without a commit.
+  once, as `corrected in <sha>` or `answered: <evidence>`. Finish `review` when
+  the protocol's Rounds rule requires a second round, or when a correction
+  carries risk of its own; otherwise finish `integrate`.
+- **An integrator's `changes`:** fix what it names and finish `integrate`.
+- **A person's answer:** act on it, and finish `review` when the answer asks
+  for verification, otherwise `integrate`. When it leaves nothing to change,
+  finish without a commit.
 
-Run the final validation again on any new head, then finish `done`.
+Run the final validation again on any new head before you finish.
 
 ## Boundaries
 
@@ -90,11 +93,12 @@ and its handoff says why no product context could affect it.
 
 ## Outcomes
 
-`done` (naming the reviews owed), `returned` (issue runs only), `needs-human`,
-or `defer`.
+`review`, `integrate`, `returned` (issue runs only), `needs-human`, or
+`defer`.
 
-For `done` on an issue, push the branch you were given and open its pull
-request against `main` with this body, as short as complete:
+On an issue, push the branch you were given and open its pull request against
+`main` with this body, as short as complete, before finishing `review` or
+`integrate`:
 
 ```text
 Closes #N
@@ -115,7 +119,8 @@ Corpus: not used — <why no product choice needed it> | <title> (<uuid>) — <o
 ```
 
 Link logs instead of pasting counts. The summary links the pull request, names
-the grounding SHA and the reviews owed, and nothing else.
+the grounding SHA and the reviews owed (and whether Copilot was requested), and
+nothing else.
 
 Retrospectives go to the implementer board, under the rule in
 `.agents/roles/README.md`.

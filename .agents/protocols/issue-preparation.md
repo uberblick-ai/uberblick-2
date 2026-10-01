@@ -97,9 +97,9 @@ additional report.
 
 ## Challenge
 
-For `trivial`, verify the grounded contract directly without a review.
-For `challenged`, finish `ready` requiring the `agent` review: ub-agents runs
-`.agents/roles/reviewer.md` on another runtime before `ready` lands. The
+For `trivial`, verify the grounded contract directly without a review and
+finish `ready`. For `challenged`, finish `review`: `.agents/roles/reviewer.md`
+runs on another runtime before `ready` lands. The
 reviewer reconstructs from GitHub and tests the assumptions that could change the outcome, violate an invariant or waste
 substantial work: missing failure boundaries, simpler approaches, real conflicts
 with current work, and a coherent, independently useful work shape. Apply
@@ -126,7 +126,10 @@ Last thing before finishing, fetch `origin/main` again. Refresh only grounding
 affected by an upstream change, then re-read the issue, its thread and any
 review verdict.
 
-Check the final body against ISSUE_SPEC, including distinct observable outcomes.
+Read the thread as well as the body. Where a comment amends or contradicts the
+body, fold it into the body and delete what it replaces, linking the comment
+only where traceability matters. Check the final body against ISSUE_SPEC,
+including distinct observable outcomes.
 Keep What to the outcome, acceptance criteria to the guarantees, and Pointers to
 useful source locations and non-obvious traps. Remove discovery narration and
 repeated rationale; preserve constraints and failure boundaries that change what
@@ -138,6 +141,7 @@ required.
 
 | Final finding state | Outcome |
 |---|---|
+| `challenged`, before its review | `review` |
 | none, or all correctable findings applied | `ready` |
 | unresolved product, authority, safety or unsafe-shape boundary | `needs-human` |
 | request split into a parent and its sub-issues | `split` |

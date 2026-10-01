@@ -50,14 +50,14 @@ considered, so no diff is waived out of a boundary it crosses.
 | `exempt` — a test-only, docs-only or narrowly mechanical diff that preserves production behavior, where focused validation directly proves the contract and it is not an agent-authored process change | none |
 | `otherwise` — every other diff, including an agent-authored process change that would otherwise be exempt | `agent` |
 
-The implementer names the reviews owed in its outcome, or `none owed
-(<reason>)`; the integrator may require more with `more-review`. A review is
-never run by the role that owes it: ub-agents runs the `agent` review on a
-different runtime from the author and requests the `copilot` review from
-GitHub, both at the exact head. Where two are owed, both review the same head
-before any correction. The `agent` review hunts for counterexamples, missing
-failure paths, incorrect assumptions, overengineering and overtesting; gate
-work never substitutes for it.
+The implementer routes by the reviews owed: it finishes `review` when the
+`agent` review is owed, first requesting the Copilot review at the same head
+when that is owed too, or `integrate` with `none owed (<reason>)`. The
+integrator may require more with `review`. The `agent` review always runs on a
+different runtime from the author and is never started by the role that owes
+it. It hunts for counterexamples, missing failure paths, incorrect
+assumptions, overengineering and overtesting; gate work never substitutes for
+it.
 
 A Copilot review is required where the table owes it and optional evidence
 otherwise; every remark it posts falls under the no-unanswered-remarks gate. A

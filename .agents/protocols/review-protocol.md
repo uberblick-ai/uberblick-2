@@ -37,9 +37,10 @@ ledger is kept:
 3. The corrections review marks every listed id `resolved`, `explanation
    accepted` or `unresolved — <why>`.
 
-When two reviews are owed, both review the same head first, and one revision
-answers both. Copilot's remarks carry no ids: they are corrected or answered in
-their own threads.
+When Copilot is owed too, it is requested at the head the `agent` review
+sees, and one revision answers whatever both have posted. Copilot's remarks
+carry no ids: they are corrected or answered in their own threads, and any
+still open at integration are the integrator's to answer.
 
 ## Settling a finding
 
@@ -62,7 +63,8 @@ A pull request gets at most two review rounds. The second is a corrections
 review by the review that asked for changes. It is required when the first
 round found a P1 or two or more P2s, or when the implementer answers a P1 or
 P2 instead of correcting it. Otherwise the implementer asks for one only when a
-correction carries risk of its own. P3s never require a round.
+correction carries risk of its own. It asks by finishing `review`, and
+otherwise finishes `integrate`. P3s never require a round.
 
 The second round approves when every listed P1 and P2 is resolved or its
 explanation accepted, and the corrections introduced no new P1 or P2.
@@ -70,7 +72,7 @@ Otherwise it escalates, naming the mechanism that keeps the change from
 converging; there is no third round.
 
 The count starts again in two cases. A review the integrator requests with
-`more-review` is a full review, the first round of a new count. A person's
+`review` is a full review, the first round of a new count. A person's
 answer to an escalation makes the next corrections review a fresh second
 round; the implementer names it when the answer asks for verification or the
 rule above still requires one.

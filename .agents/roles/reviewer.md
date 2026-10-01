@@ -9,11 +9,10 @@ ub-agents runs it on a different runtime from the work's author.
 
 ## Given
 
-Either an issue a preparer finished `ready` on a challenged route, or a pull
-request and the head to review. On a pull request the latest request sets the
-scope: after an implementer revision that names this review, it is a
-corrections review of the finding ids that revision lists; otherwise,
-including an integrator's `more-review`, it is full.
+Either an issue a preparer sent to review, or a pull request and the head to
+review. On a pull request the latest handoff sets the scope: after an
+implementer revision that lists finding ids, it is a corrections review of
+those ids; otherwise, including an integrator's `review`, it is full.
 
 ## Reviewing an issue contract
 
@@ -82,9 +81,11 @@ authored; a context reset does not create independence.
 - `needs-human` — an owner-boundary finding on an issue, or a corrections
   review that leaves a P1 or P2 unresolved or finds a new one.
 
-Post the verdict on the item as one comment — naming the head for a pull
-request, then `Verdict: <no findings | P1 <n>, P2 <n>, P3 <n>>` or the
-corrections resolutions, then the findings — and let the summary link it.
+Post the verdict once — on a pull request as a review on the head you were
+given (`gh pr review <N> --comment --body-file <file>`, which records that
+commit), on an issue as a comment. It opens with `Verdict: <no findings | P1
+<n>, P2 <n>, P3 <n>>` or the corrections resolutions, then the findings; the
+summary links it.
 
 Retrospectives go to the reviewer board, under the rule in
 `.agents/roles/README.md`.
