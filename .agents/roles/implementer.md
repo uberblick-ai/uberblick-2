@@ -52,12 +52,19 @@ complexity, or needs a person's decision, do not deviate. On an issue, finish
 — <one sentence>` and the evidence. On a pull request, escalate
 (`.agents/roles/README.md`).
 
-Read `.agents/protocols/delivery-policy.md`'s "Reviews owed" table for this diff.
-When it owes the `agent` review, finish `review`; when it also owes `copilot`,
-first request that review at the same head (`gh pr edit <N> --add-reviewer
-@copilot`). When it owes none, finish `integrate` and state `none owed
-(<reason>)`. Owe more when you can name a concrete unresolved risk that
-warrants them.
+Read `.agents/protocols/delivery-policy.md`'s "Reviews owed" table for this
+diff. When it owes the `agent` review, finish `review`; when it also owes
+`copilot`, first request that review at the same head (`gh pr edit <N>
+--add-reviewer @copilot`). When it owes none, finish `integrate` and state
+`none owed (<reason>)`. Owe more when you can name a concrete unresolved risk
+that warrants them.
+
+When the change makes a corpus claim wrong, or adds behavior a corpus
+document should describe, draft the rewrite under the pull request's
+`Corpus update`: each document by title and UUID, the block, and its new text,
+following the Editorial contract — rewrite, never append, and no PR or issue
+numbers. The integrator applies it after the merge, so the corpus never
+describes unmerged code. Keep it current with every revision.
 
 ## Revising a pull request
 
@@ -84,12 +91,12 @@ nothing outside the issue's footprint — scope found mid-flight becomes a findi
 or a new issue. The merge tier and the final gates belong to the integrator.
 
 Read the preparer-selected corpus documents and relevant linked decisions.
-Expand discovery if the code or findings expose missing context.
-A corpus document the issue cites is a required live read whenever the
-change may affect its product meaning. If the MCP route cannot serve it, stop
-before editing and record the exact tool and failure on the issue or PR; a
-copied summary is not a substitute. A strictly mechanical change may continue,
-and its handoff says why no product context could affect it.
+Expand discovery if the code or findings expose missing context. A corpus
+document the issue cites is a required live read whenever the change may affect
+its product meaning. If the MCP route cannot serve it, stop before editing and
+finish `defer`, recording the exact tool and failure; a copied summary is not a
+substitute. A strictly mechanical change may continue, and its handoff says why
+no product context could affect it.
 
 ## Outcomes
 
@@ -111,6 +118,9 @@ Closes #N
 
 ## Findings
 None. | <material facts or links; no merge-tier ruling>
+
+## Corpus update
+None — <why no documented claim changes> | <title> (<uuid>), block <id>: <new text>
 
 ## Self-review
 KISS: <why this is the least defensible change>

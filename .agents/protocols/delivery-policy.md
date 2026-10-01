@@ -34,8 +34,9 @@ owns operational authority only. `integration.md` holds how the gates run, and
    - **No unanswered remarks.** Immediately before merging, every review
      comment — human or bot, including any that arrived after the other gates
      passed — is fixed or answered.
-4. **Merge, then docs.** Merge under the merge policy below, then update the
-   product docs through the corpus MCP tools to the new state.
+4. **Merge, then docs.** Merge under the merge policy below, then apply the
+   pull request's `Corpus update` through the corpus MCP tools, so the
+   product docs describe the new state.
 
 ## Reviews owed
 
