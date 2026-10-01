@@ -123,7 +123,6 @@ implementation or merge.
 | `needs-preparation` | Queued for one issue-preparer pass | A person, the intake template, or a run creating an issue |
 | `ready` | Spec-complete; an implementer may be given it | A person, or the issue-preparer's `ready` outcome |
 | `needs-human` | Parked on a question for a person | Any run's `needs-human` outcome |
-| `wontfix` | Low-impact theoretical work closed as not planned | A person, or the issue-preparer's `wontfix` outcome |
 | `priority:*` | Order among eligible issues (Scheduling semantics) | A person |
 
 Outcomes move these labels through ub-agents; pull-request labels are ub-agents'
@@ -131,11 +130,12 @@ too (`.agents/roles/README.md`).
 
 There is deliberately **no `blocked` label**: blocked is derived from
 blocked-by relationships plus issue closed-state, and stored copies of
-derivable state rot.
+derivable state rot. Nor is there a label for what GitHub's close reasons
+already record: not planned, duplicate.
 
 An issue-preparer may close a low-impact theoretical finding as not planned
-with `wontfix` when no current supported-usage failure is established and a
-delivery cycle is disproportionate. Record the consequence and that rationale.
+(its `wontfix` outcome) when no current supported-usage failure is established
+and a delivery cycle is disproportionate. Record the consequence and that rationale.
 Never use this route for data loss,
 auth or security exposure, or a violated invariant. A concrete bug observed
 later is new evidence and may be filed or reopened then.
