@@ -72,8 +72,8 @@ Continue the pull request's remote head; never rebase or force-push it.
   carries risk of its own; otherwise finish `integrate`.
 - **An integrator's `changes`:** fix what it names and finish `integrate`.
 - **A person's answer:** act on it, and finish `review` when the answer asks
-  for verification, otherwise `integrate`. When it leaves nothing to change,
-  finish without a commit.
+  for verification or the Rounds rule still requires a second round, otherwise
+  `integrate`. When it leaves nothing to change, finish without a commit.
 
 Run the final validation again on any new head before you finish.
 

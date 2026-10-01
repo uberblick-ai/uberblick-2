@@ -21,12 +21,14 @@ mechanical gates concurrently where the runtime allows.
 Check the review record rather than redo it: the reviews this diff owes ran,
 every P1 and P2 id has a correction or an accepted answer, and a second round
 ran where `.agents/protocols/review-protocol.md` requires one. A P3 left
-untouched is accepted debt, not a gap. When the `agent` review or its second
-round is missing, finish `review`, naming what it must cover. When a required
-Copilot review was never requested, request it (`gh pr edit <N> --add-reviewer
-@copilot`) and finish `defer`, so the next run finds its remarks. Answer each
-Copilot remark still open in one line — accepted as P3 debt, or rejected with
-the reason — or finish `changes` when one needs a fix.
+untouched is accepted debt, not a gap. When the `agent` review is missing,
+finish `review`; when its required second round is missing, finish `review`
+listing the finding ids it must verify, which makes it that corrections review.
+When a required Copilot review was never requested, request it (`gh pr edit <N>
+--add-reviewer @copilot`) and finish `defer`, so the next run finds its
+remarks; if that run still finds no Copilot review on the head, escalate.
+Answer each Copilot remark still open in one line — accepted as P3 debt, or
+rejected with the reason — or finish `changes` when one needs a fix.
 
 Classify the tier from the full diff. Tier 3 without a person's answer that
 covers this diff is an escalation naming the trigger. Otherwise merge as the
@@ -67,8 +69,8 @@ for a Copilot review that already exists or for a no-comment result.
 ## Outcomes
 
 `merged`, `changes` (naming the failed gate or the remark that needs a fix),
-`review` (naming what the review must cover), or `needs-human` (naming the
-tier-3 trigger or the question).
+`review` (naming what the review must cover), `needs-human` (naming the tier-3
+trigger or the question), or `defer` (waiting for a requested Copilot review).
 
 Last, run the host housekeeping `integration.md` names for isolated-review
 artifacts. Retrospectives go to the integrator board, under the rule in

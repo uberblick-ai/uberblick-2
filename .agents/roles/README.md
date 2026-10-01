@@ -26,7 +26,7 @@ findings, the merge, corpus updates and new issues.
 Each role starts on its label: the preparer on `needs-preparation`, the
 implementer on `ready` (an issue) or `needs-changes` (a pull request), the
 reviewer on `needs-review`, the integrator on `ready-to-merge`. Every outcome
-replaces that label as follows:
+except `defer` removes that label and adds the next one:
 
 | Role | Outcome | Label changes |
 | --- | --- | --- |
@@ -37,16 +37,21 @@ replaces that label as follows:
 | implementer | `review` | its pull request gets `needs-review`; the issue loses `ready`, or the pull request `needs-changes` |
 | implementer | `integrate` | its pull request gets `ready-to-merge`; the issue loses `ready`, or the pull request `needs-changes` |
 | implementer | `returned` | issue runs only: `ready` → `needs-preparation` |
-| reviewer | `approve` | issue: `needs-review` → `ready`; pull request: `needs-review` → `ready-to-merge` |
-| reviewer | `changes` | issue: `needs-review` → `needs-preparation`; pull request: `needs-review` → `needs-changes` |
+| reviewer (issue) | `approve` | `needs-review` → `ready` |
+| reviewer (issue) | `changes` | `needs-review` → `needs-preparation` |
+| reviewer (pull request) | `approve` | `needs-review` → `ready-to-merge` |
+| reviewer (pull request) | `changes` | `needs-review` → `needs-changes` |
 | integrator | `merged` | pull request merged; `ready-to-merge` removed |
 | integrator | `changes` | `ready-to-merge` → `needs-changes` |
 | integrator | `review` | `ready-to-merge` → `needs-review` |
-| any | `needs-human` | the role's label → `needs-human` plus the resume label: `needs-preparation` on an issue, `needs-changes` on a pull request |
-| any | `defer` | nothing changes; the item is retried later |
+| any | `needs-human` | the role's label → `needs-human` |
+| any | `defer` | reported as a retry, not an outcome: no label changes, and the item runs again later |
 
-`needs-human` pauses the item: no run picks it up while the label is there.
-Once a person answers and removes it, the resume label starts the next run.
+The reviewer runs as two configured agents, one per item kind, sharing
+`reviewer.md`. `needs-human` pauses the item: no run picks it up while the label
+is there. The person who answers replaces it with the label that should run
+next — `needs-preparation` on an issue, `needs-changes` on a pull request —
+unless the answer calls for another.
 
 Until ub-agents runs this repository, a person starts each run and applies its
 outcome from the table, and the run posts its own summary as a comment on the
@@ -67,7 +72,8 @@ Finish `needs-human`. The summary is the question, ready to answer:
 - the answers to pick from, and your recommendation;
 - an @-mention of who can answer: the person who opened the issue (for a pull
   request, its issue), otherwise `@bk-one`;
-- the closing line `Answer here, then remove needs-human.`
+- the closing line `Answer here, then replace needs-human with <label>.`,
+  naming `needs-preparation` on an issue or `needs-changes` on a pull request.
 
 Any person with write access may answer. A comment from a person's account is
 the answer; one from `uberblick-agent` or a bot never is. The next run works

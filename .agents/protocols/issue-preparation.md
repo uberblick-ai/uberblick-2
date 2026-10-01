@@ -126,10 +126,9 @@ Last thing before finishing, fetch `origin/main` again. Refresh only grounding
 affected by an upstream change, then re-read the issue, its thread and any
 review verdict.
 
-Read the thread as well as the body. Where a comment amends or contradicts the
-body, fold it into the body and delete what it replaces, linking the comment
-only where traceability matters. Check the final body against ISSUE_SPEC,
-including distinct observable outcomes.
+Where a comment amends or contradicts the body, fold it into the body and
+delete what it replaces, linking the comment only where traceability matters.
+Check the final body against ISSUE_SPEC, including distinct observable outcomes.
 Keep What to the outcome, acceptance criteria to the guarantees, and Pointers to
 useful source locations and non-obvious traps. Remove discovery narration and
 repeated rationale; preserve constraints and failure boundaries that change what

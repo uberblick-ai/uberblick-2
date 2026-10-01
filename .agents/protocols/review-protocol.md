@@ -71,11 +71,11 @@ explanation accepted, and the corrections introduced no new P1 or P2.
 Otherwise it escalates, naming the mechanism that keeps the change from
 converging; there is no third round.
 
-The count starts again in two cases. A review the integrator requests with
-`review` is a full review, the first round of a new count. A person's
-answer to an escalation makes the next corrections review a fresh second
-round; the implementer names it when the answer asks for verification or the
-rule above still requires one.
+The count starts again in two cases. A full review the integrator requests
+with `review` is the first round of a new count; one that lists finding ids is
+the missing second round itself. A person's answer to an escalation makes the
+next corrections review a fresh second round; the implementer asks for it when
+the answer asks for verification or the rule above still requires one.
 
 An issue gets one review pass (`issue-preparation.md`).
 

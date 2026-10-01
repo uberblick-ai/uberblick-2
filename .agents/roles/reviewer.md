@@ -10,9 +10,10 @@ ub-agents runs it on a different runtime from the work's author.
 ## Given
 
 Either an issue a preparer sent to review, or a pull request and the head to
-review. On a pull request the latest handoff sets the scope: after an
-implementer revision that lists finding ids, it is a corrections review of
-those ids; otherwise, including an integrator's `review`, it is full.
+review. On a pull request the latest handoff sets the scope: one that lists
+finding ids to verify — an implementer revision, or an integrator asking for a
+missing second round — asks for a corrections review of those ids; any other is
+full.
 
 ## Reviewing an issue contract
 
@@ -80,6 +81,7 @@ authored; a context reset does not create independence.
   request that finds a P1 or P2.
 - `needs-human` — an owner-boundary finding on an issue, or a corrections
   review that leaves a P1 or P2 unresolved or finds a new one.
+- `defer` — the head moved while you reviewed.
 
 Post the verdict once — on a pull request as a review on the head you were
 given (`gh pr review <N> --comment --body-file <file>`, which records that
