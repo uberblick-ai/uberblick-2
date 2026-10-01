@@ -339,69 +339,12 @@ ub workspace       # the workspace in force, and which layer chose it
 ub workspace list  # workspaces this machine has a database for
 ub workspace use   # make a workspace this machine's default
 ub remote          # the endpoint in force, and what sharing it buys
-ub agents install  # store a workflow and select it for this project folder
-ub agents list     # inspect this project's selection and available roles
-ub agents uninstall  # remove this project's selection, keeping stored packages
-ub agents launch   # keep one entry role of a project you select running
 ub mcp install     # register uberblick with an MCP client
 ub mcp serve       # the stdio entry point for an MCP client
 ```
 
-For this repository's delivery workflow, run both reviewer loops in separate
-terminals alongside the implementer and integrator:
-
-```sh
-ub agents launch implementation-reviewer --model claude
-ub agents launch implementation-reviewer --model codex
-```
-
-Each loop serves only its selected runtime. A request naming Codex cannot be
-answered by the Claude loop, even when that loop is idle. The reviewer still
-checks that its session did not author the candidate.
-
-If an existing loop reports that `.agents/launch.json` must contain only
-version 1 while the project has version 2, stop that loop with Ctrl-C. Run
-`type -a ub` to identify the executable your shell selects, update that
-installation or source checkout, and start a fresh loop. Check
-`ub agents launch --help` from the same shell: it must describe launch data
-version 2. Updating files does not reload code already running in an old
-process. Preserve valid version 2 launch data; restoring or downgrading the
-configuration cannot update the old executable.
-
-**`ub agents launch <role>` runs *your project's* selected workflow, not
-uberblick's.** `ub agents install <workflow@version|package-path>` validates and
-stores a package in this machine's Uberblick data, then selects that immutable
-installation for the project folder; running install again changes that one
-selection, `ub agents list` reports it and `ub agents uninstall` removes only
-the association. None of those commands writes a workflow file, symlink,
-setting or lock into the project. Separate folders can select separate versions,
-including folders that are not Git repositories. Launch itself still requires
-Git when it creates a role's worktree and names that requirement if the selected
-folder is not a checkout. `ub agents update` is retired; install is the one
-selection-changing command.
-
-The project's own `.agents/launch.json` continues to declare which entry roles
-exist, their default runtime, sandbox or permission mode, and — under `project`
-— the bindings its workflow reads, starting with the `baseRef` every session's
-worktree is cut from. Contracts, runtime adapters and workflow helpers resolve
-from the selected stored installation; the project-declared work probe keeps
-running from the selected project with that installation in its session context.
-A running session retains the project, installation and binding snapshot with
-which it started; the standing loop re-reads the selection before its next
-session. Temporarily, a project with no
-external selection still launches from its tracked workflow files so an
-existing loop is not stranded during the cutover. The command still selects,
-claims and transitions nothing; the role does all of that.
-
-Grants stay yours. You authenticate `claude` and `codex` once, and `ub` writes
-no trust entry, copies no credential and passes a session exactly the sandbox,
-permission mode and tool approvals its project declared. Each runtime does keep its own record
-of the project paths it has seen, in its own user-level configuration — a first
-launch for a path a runtime has not seen before completes without an
-interactive dialog and leaves such a record behind, and a runtime may rewrite
-it again later in the same session. That is the supported setup rather than a
-fault to suppress (owner decision, 2026-09-08). A runtime that is missing or
-logged out stops the launch before any session starts, naming what to do.
+`ub` ships no agent launcher. This repository's own delivery loops run with
+[ub-agents](https://github.com/uberblick-ai/ub-agents), a separate tool.
 
 Both declared names work — `ub` and `uberblick`. What puts them on PATH is mise:
 `mise.toml` adds the checkout's `node_modules/.bin` to `[env] _.path`, and
@@ -483,8 +426,11 @@ is a file named after it.
 
 | Where | What |
 | --- | --- |
-| `$XDG_CONFIG_HOME/uberblick/` — or `~/.config/uberblick/` | `config.json`, `credentials.json` and project workflow selections under `agent-projects/` |
-| `$XDG_DATA_HOME/uberblick/` — or `~/.local/share/uberblick/` | `hub.sqlite`, `<uuid>.sqlite` per workspace, and verified packages under `agent-workflows/` |
+| `$XDG_CONFIG_HOME/uberblick/` — or `~/.config/uberblick/` | `config.json` and `credentials.json` |
+| `$XDG_DATA_HOME/uberblick/` — or `~/.local/share/uberblick/` | `hub.sqlite` and `<uuid>.sqlite`, one per workspace |
+
+Earlier builds stored agent workflows in `agent-projects/` and `agent-workflows/`
+under those roots. Nothing reads them any more, and they are safe to delete.
 
 The two variables are independent: each moves its own root and only that one,
 so setting `XDG_CONFIG_HOME` alone leaves the databases under

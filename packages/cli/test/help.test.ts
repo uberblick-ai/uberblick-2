@@ -23,20 +23,11 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { AGENTS_HELP } from "../src/agents.js";
 import { HELP, MCP_HELP, runCli } from "../src/cli.js";
 import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
 import { ENV_HELP } from "../src/env.js";
 import { INIT_HELP, INIT_OPTIONS } from "../src/init.js";
 import { INSTALL_HELP, INSTALL_OPTIONS } from "../src/install.js";
-import { LAUNCH_HELP, LAUNCH_OPTIONS } from "../src/launch.js";
-import {
-  AGENTS_INSTALL_HELP,
-  AGENTS_LIST_HELP,
-  AGENTS_UNINSTALL_HELP,
-  AGENTS_UPDATE_HELP,
-  WORKFLOW_OPTIONS,
-} from "../src/workflow-adoption.js";
 import { OPEN_HELP, OPEN_OPTIONS } from "../src/open.js";
 import {
   REMOTE_INIT_HELP,
@@ -113,20 +104,6 @@ const PATHS: Path[] = [
   ROOT_PATH,
   { argv: ["init"], help: INIT_HELP, options: INIT_OPTIONS },
   { argv: ["update"], help: UPDATE_HELP, options: {} },
-  {
-    argv: ["agents"],
-    help: AGENTS_HELP,
-    options: {},
-    children: ["install", "list", "update", "uninstall", "launch"],
-  },
-  { argv: ["agents", "install"], help: AGENTS_INSTALL_HELP, options: WORKFLOW_OPTIONS },
-  { argv: ["agents", "list"], help: AGENTS_LIST_HELP, options: WORKFLOW_OPTIONS },
-  { argv: ["agents", "update"], help: AGENTS_UPDATE_HELP, options: WORKFLOW_OPTIONS },
-  { argv: ["agents", "uninstall"], help: AGENTS_UNINSTALL_HELP, options: WORKFLOW_OPTIONS },
-  { argv: ["agents", "launch"], help: LAUNCH_HELP, options: LAUNCH_OPTIONS },
-  // The compatibility alias is one of the paths this manifest is for: it is
-  // typed by people, so it owes the same help as the command it aliases.
-  { argv: ["launch"], help: LAUNCH_HELP, options: LAUNCH_OPTIONS },
   { argv: ["open"], help: OPEN_HELP, options: OPEN_OPTIONS },
   { argv: ["status"], help: STATUS_HELP, options: STATUS_OPTIONS },
   { argv: ["doctor"], help: DOCTOR_HELP, options: DOCTOR_OPTIONS },
@@ -161,7 +138,6 @@ ROOT_PATH.children = PATHS.flatMap(({ argv }) => (argv.length === 1 ? argv : [])
 const DISPATCHERS = [
   { file: "cli.ts", group: [], variable: "command" },
   { file: "cli.ts", group: ["mcp"], variable: "subcommand" },
-  { file: "agents.ts", group: ["agents"], variable: "sub" },
   { file: "workspace.ts", group: ["workspace"], variable: "sub" },
   { file: "remote.ts", group: ["remote"], variable: "sub" },
 ];
@@ -300,18 +276,6 @@ describe("every human-facing command path", () => {
   });
 
   it("uses the same semantic operand name at every help level and in usage errors", async () => {
-    expect(AGENTS_HELP).toContain("install <workflow@version|package-path>");
-    expect(AGENTS_HELP).toContain("update <workflow@version|package-path>");
-    expect(AGENTS_INSTALL_HELP).toMatch(/usage: ub agents install <workflow@version\|package-path>/);
-    expect(AGENTS_UPDATE_HELP).toMatch(/usage: ub agents update <workflow@version\|package-path>/);
-    const missingSource = await dispatch(["agents", "install"]);
-    expect(missingSource.status).toBe(2);
-    expect(missingSource.stderr).toContain("expected exactly one <workflow@version|package-path>");
-    const retiredUpdate = await dispatch(["agents", "update"]);
-    expect(retiredUpdate.status).toBe(2);
-    expect(retiredUpdate.stderr).toContain("retired");
-    expect(retiredUpdate.stderr).toContain("ub agents install <source>");
-
     expect(MCP_HELP).toContain("install [client]");
     expect(INSTALL_HELP).toMatch(/usage: ub mcp install \[client\]/);
     expect(INSTALL_HELP).toMatch(/\noperands:\n {2}client\s/);
@@ -336,12 +300,6 @@ describe("every human-facing command path", () => {
     const missingUrl = await dispatch(["remote", "join"]);
     expect(missingUrl.status).toBe(2);
     expect(missingUrl.stderr).toContain("expected exactly one <url-with-workspace-id>");
-  });
-
-  it("states the workflow selection boundary", () => {
-    expect(AGENTS_INSTALL_HELP).toContain("selected project is not modified");
-    expect(AGENTS_UNINSTALL_HELP).toContain("Stored installations");
-    expect(AGENTS_UPDATE_HELP).toContain("retired");
   });
 
   it("describes init's MCP option as print-only", () => {
@@ -378,7 +336,6 @@ describe("help before the work", () => {
   const inert: string[][] = [
     ["init", "--yes", "--help"],
     ["init", "--mcp", "--no-mcp", "--help"],
-    ["agents", "launch", "issue-adversary", "--help"],
     ["open", "--port", "0", "-h"],
     ["status", "--help"],
     ["doctor", "-h"],
@@ -426,31 +383,13 @@ describe("what is not a request for help", () => {
     // A group answers for itself only when its own one argument is the
     // question. `ub workspace bogus --help` is a typo, not a request, and every
     // level says so the same way — the top level always has.
-    for (const group of [[], ["workspace"], ["remote"], ["mcp"], ["agents"]]) {
+    for (const group of [[], ["workspace"], ["remote"], ["mcp"]]) {
       const argv = [...group, "bogus", "--help"];
       const run = await dispatch(argv);
       expect(run.status, argv.join(" ")).toBe(2);
       expect(run.stdout, argv.join(" ")).toBe("");
       expect(run.stderr, argv.join(" ")).toMatch(/bogus/);
     }
-  });
-
-  it("takes `ub launch` down the route `ub agents launch` names", async () => {
-    // `ub launch` is the spelling this surface shipped under and stays a
-    // compatibility alias (owner decision, 2026-09-08). What that promises is
-    // one route, not one wording: the same argv reaches the same behaviour and
-    // the same exit status either way. Here that is the usage errors, which the
-    // dispatcher answers before anything is resolved or started; the launch
-    // path itself is the same equivalence in `agents-launch.test.ts`.
-    for (const rest of [[], ["implementer", "--model", "gpt"], ["a", "b"]]) {
-      const canonical = await dispatch(["agents", "launch", ...rest]);
-      const alias = await dispatch(["launch", ...rest]);
-      expect(canonical.status, rest.join(" ")).toBe(2);
-      expect(alias, `ub launch ${rest.join(" ")}`).toEqual(canonical);
-    }
-    // And the root help says the alias is one, so a reader of the catalog is
-    // not left with two commands to choose between.
-    expect(HELP).toContain("compatibility alias for `ub agents launch`");
   });
 
   it("still refuses an unknown option, on stderr, with exit 2", async () => {
