@@ -21,8 +21,9 @@ unresolved choice beyond that authorization.
 ## Project facts
 
 - **Repository:** `uberblick-ai/uberblick-2`, base branch `main` (fetch
-  `origin/main` before grounding). **Owner:** `@bk-one`, mentioned on every
-  question only the owner can answer.
+  `origin/main` before grounding). **Owner:** `@bk-one`, mentioned on a
+  question when no other person is better placed to answer it. **Agents'
+  account:** `uberblick-agent`; a comment from it is never a person's answer.
 - **Corpus context:** Uberblick project agent workflow
   (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`) for the delivery model; Editorial
   contract (`5e0e25d8-c71f-44c3-9bf3-93662712c1fc`) before any corpus edit.
@@ -30,13 +31,16 @@ unresolved choice beyond that authorization.
   outside mise, run `mise x -- ub mcp serve` from scratch outside the committed
   worktree.
 - **Commands:** `.agents/development.md`.
-- **Retrospectives** go to these discussions, posted with the node id below and
-  never a guessed one, because a wrong id posts to a stranger's repository:
+- **Retrospectives and audit reports** go to one discussion per agent, posted
+  with the node id below and never a guessed one, because a wrong id posts to a
+  stranger's repository:
 
-  | Channel | Discussion | Node id |
+  | Agent | Discussion | Node id |
   | --- | --- | --- |
-  | preparation | #506 | `D_kwDOT-Zo0s4Ao3uN` |
-  | implementation | #522 | `D_kwDOT-Zo0s4Ao32f` |
+  | issue-preparer | #1014 | `D_kwDOT-Zo0s4ApsUK` |
+  | implementer | #1015 | `D_kwDOT-Zo0s4ApsUL` |
+  | reviewer | #1016 | `D_kwDOT-Zo0s4ApsUM` |
+  | integrator | #1017 | `D_kwDOT-Zo0s4ApsUN` |
   | workflow-audit | #540 | `D_kwDOT-Zo0s4Ao4BT` |
   | technical-audit | #541 | `D_kwDOT-Zo0s4Ao4BU` |
 
