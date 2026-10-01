@@ -14,37 +14,49 @@ file lists, plus a short summary: what was decided or changed, the grounding
 commit, and links to evidence. That summary is the handoff, so it carries what
 the next run needs and nothing it can read from GitHub itself.
 
-Workflow state is not the run's to write. ub-agents applies the outcome: it
-moves the labels, posts the handoff, runs the reviews an outcome names,
-records which runtime did the work, and ensures only one run holds an item at a
-time. A role never changes a workflow label on an existing item, posts a claim,
-or starts or requests a reviewer itself. What the task produces is the run's to
-write: issue bodies and relationships, commits and pull requests, findings, the
-merge, corpus updates and new issues.
+Workflow state is not the run's to write. The table below is this
+repository's workflow, and ub-agents applies it: it moves the labels, posts the
+handoff, records which runtime did the work, and ensures only one run holds an
+item at a time. A role never changes a workflow label on an existing item,
+posts a claim, or starts the `agent` review itself; it may request the Copilot
+review (`.agents/protocols/delivery-policy.md`). What the task produces is the
+run's to write: issue bodies and relationships, commits and pull requests,
+findings, the merge, corpus updates and new issues.
+
+Each role starts on its label: the preparer on `needs-preparation`, the
+implementer on `ready` (an issue) or `needs-changes` (a pull request), the
+reviewer on `needs-review`, the integrator on `ready-to-merge`. Every outcome
+except `defer` removes that label and adds the next one:
+
+| Role | Outcome | Label changes |
+| --- | --- | --- |
+| issue-preparer | `ready` | issue: `needs-preparation` → `ready` |
+| issue-preparer | `review` | issue: `needs-preparation` → `needs-review` |
+| issue-preparer | `split` | issue: `needs-preparation` removed; its sub-issues carry `needs-preparation` |
+| issue-preparer | `wontfix` | issue closed as not planned |
+| implementer | `review` | its pull request gets `needs-review`; the issue loses `ready`, or the pull request `needs-changes` |
+| implementer | `integrate` | its pull request gets `ready-to-merge`; the issue loses `ready`, or the pull request `needs-changes` |
+| implementer | `returned` | issue runs only: `ready` → `needs-preparation` |
+| reviewer (issue) | `approve` | `needs-review` → `ready` |
+| reviewer (issue) | `changes` | `needs-review` → `needs-preparation` |
+| reviewer (pull request) | `approve` | `needs-review` → `ready-to-merge` |
+| reviewer (pull request) | `changes` | `needs-review` → `needs-changes` |
+| integrator | `merged` | pull request merged; `ready-to-merge` removed |
+| integrator | `changes` | `ready-to-merge` → `needs-changes` |
+| integrator | `review` | `ready-to-merge` → `needs-review` |
+| any | `needs-human` | the role's label → `needs-human` |
+| any | `defer` | reported as a retry, not an outcome: no label changes, and the item runs again later |
+
+The reviewer runs as two configured agents, one per item kind, sharing
+`reviewer.md`. `needs-human` pauses the item: no run picks it up while the label
+is there. The person who answers replaces it with the label that should run
+next — `needs-preparation` on an issue, `needs-changes` on a pull request —
+unless the answer calls for another.
 
 Until ub-agents runs this repository, a person starts each run and applies its
-outcome, and the run posts its own summary as a comment on the item, headed
-`Outcome: <role> <outcome>`. This table moves into the ub-agents configuration
-when that lands:
-
-| Role | Outcome | Next |
-| --- | --- | --- |
-| issue-preparer | `ready` | the issue becomes `ready`; when the outcome names the `agent` review, that review runs first |
-| issue-preparer | `split` | the issue leaves the queue as a parent; its sub-issues start at `needs-preparation` |
-| issue-preparer | `wontfix` | closed as not planned |
-| implementer | `done` | the reviews the outcome names run at the pull request's head, then integration |
-| implementer | `returned` | issue runs only: the issue goes back to `needs-preparation` |
-| reviewer | `approve` | the issue becomes `ready`, or, once no review is pending, the PR goes to integration |
-| reviewer | `changes` | back to the preparer (issue), or to the implementer once every review of that head has reported (PR) |
-| integrator | `merged` | done |
-| integrator | `changes` | back to the implementer |
-| integrator | `more-review` | the named reviews run at the current head, then integration again |
-| any | `needs-human` | parked until a person answers and removes `needs-human`; then an issue goes to the preparer, a PR to the implementer |
-| any | `defer` | retried later; nothing is consumed |
-
-A review that asked for changes runs again only when the next outcome names it
-(`.agents/protocols/review-protocol.md`, Rounds). A `changes` verdict the next
-outcome does not name is settled.
+outcome from the table, and the run posts its own summary as a comment on the
+item, headed `Outcome: <role> <outcome>`. At the switch, the table becomes the
+label transitions of the ub-agents configuration.
 
 ## Escalate what is not yours to decide
 
@@ -60,12 +72,21 @@ Finish `needs-human`. The summary is the question, ready to answer:
 - the answers to pick from, and your recommendation;
 - an @-mention of who can answer: the person who opened the issue (for a pull
   request, its issue), otherwise `@bk-one`;
-- the closing line `Answer here, then remove needs-human.`
+- the closing line `Answer here, then replace needs-human with <label>.`,
+  naming `needs-preparation` on an issue or `needs-changes` on a pull request.
 
 Any person with write access may answer. A comment from a person's account is
 the answer; one from `uberblick-agent` or a bot never is. The next run works
 within it. An answer covers what it names, plus fix-ups that conform to it;
 anything beyond that is a new question.
+
+## Limits for every run
+
+Only the integrator merges. No run enables auto-merge, approves its own pull
+request, changes branch protection or repository settings, pushes a tag or
+publishes a release. A blocked operation is never worked around by copying
+credentials, changing global settings or disabling commit signing: escalate or
+defer with the evidence.
 
 ## Authorship
 
@@ -129,7 +150,8 @@ inspection, validation and GitHub bookkeeping continue on their own inputs.
 
 Work in the directory and on the branch the run was given; ub-agents creates
 and removes them. Push only that branch, and never rebase or force-push a pull
-request's head. Leave other runs' worktrees and processes alone. Until
-ub-agents runs here, a new implementation starts a fresh worktree at
-`origin/main` on the branch `ub-agents/<issue number>`, and a revision starts
-one at the pull request's head.
+request's head. A revision's checkout is detached, so push it with
+`git push origin HEAD:refs/heads/<branch>`. Leave other runs' worktrees and
+processes alone. Until ub-agents runs here, a new implementation starts a fresh
+worktree at `origin/main` on a new branch, and a revision one at the pull
+request's head.

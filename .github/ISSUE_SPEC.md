@@ -121,12 +121,13 @@ implementation or merge.
 |---|---|---|
 | *(none)* | Draft, or a parent after a split — no role runs on it | — |
 | `needs-preparation` | Queued for one issue-preparer pass | A person, the intake template, or a run creating an issue |
-| `ready` | Spec-complete; an implementer may be given it | A person, or the issue-preparer's `ready` outcome |
+| `needs-review` | Prepared, awaiting its one review | The issue-preparer's `review` outcome |
+| `ready` | Spec-complete; an implementer may be given it | A person, the issue-preparer's `ready` outcome, or the reviewer's `approve` |
 | `needs-human` | Parked on a question for a person | Any run's `needs-human` outcome |
 | `priority:*` | Order among eligible issues (Scheduling semantics) | A person |
 
-Outcomes move these labels through ub-agents; pull-request labels are ub-agents'
-too (`.agents/roles/README.md`).
+Outcomes move these labels, and the pull-request labels, through the table in
+`.agents/roles/README.md`.
 
 There is deliberately **no `blocked` label**: blocked is derived from
 blocked-by relationships plus issue closed-state, and stored copies of
@@ -153,8 +154,8 @@ choosing product behavior beyond delegated authority is a person's decision.
 `needs-human` on an issue: the run's summary asks one focused question, with
 concrete options and its recommendation (`.agents/roles/README.md`). A
 person's comment answers it; an agent's comment is evidence unless a person
-explicitly adopts it. The person then removes `needs-human`, and the issue
-returns to the preparer. That pass reuses the previous handoff, review verdict,
+explicitly adopts it. The person then replaces `needs-human` with
+`needs-preparation`, and the issue returns to the preparer. That pass reuses the previous handoff, review verdict,
 question and answer, and rechecks only the affected grounding and intervening
 upstream changes. It does not repeat classification or the review.
 
@@ -262,7 +263,10 @@ preparation; preserve its material intent in the final contract and rely on the
 issue's edit history for the raw draft. Keep every body as short as complete. A
 complex or security-sensitive issue may carry more context when it changes a
 decision; a parent carries only the shared outcome and the routing to its
-sub-issues. Length alone never decides whether to split.
+sub-issues. Length alone never decides whether to split. Keep a rule in the
+issue only when this change introduces it, changes it, or the code must
+enforce it; link to the role file, protocol or guide that already owns it
+otherwise.
 
 Preserve the owner's requirements, reasoning, constraints and expressly delegated
 engineering choices. Distinguish owner decisions from inferences and cite settled

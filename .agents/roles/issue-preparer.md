@@ -15,7 +15,8 @@ answer to a question.
 
 ## Task
 
-Own one pass from intake to `ready`, `split`, `wontfix` or `needs-human`.
+Own one pass from intake to `ready`, `review`, `split`, `wontfix` or
+`needs-human`.
 Ground at freshly fetched `origin/main`, align the body with the corpus and
 `.github/ISSUE_SPEC.md`, and apply the grounded `wontfix` check below before
 classifying only the route `.agents/protocols/issue-preparation.md` defines.
@@ -26,10 +27,10 @@ disproportionate and finish `wontfix` without a review. Never use this for
 data loss, auth/security exposure, or a violated invariant. A concrete bug
 observed later may be filed or reopened as new evidence.
 
-Follow the protocol's route, challenge and final recheck. A `challenged` route
-finishes `ready` naming the `agent` review: ub-agents runs it on another
-runtime, and when it asks for changes the issue comes back to you with its
-verdict.
+Follow the protocol's route, challenge and final recheck. A `trivial` route
+finishes `ready`. A `challenged` route finishes `review`: the reviewer
+challenges the issue on another runtime, and when it asks for changes the issue
+comes back to you with its verdict.
 
 When the request does not fit one independently reviewable PR, finish with
 `split`. Technical decomposition is yours; decomposition that chooses product
@@ -68,8 +69,8 @@ this issue depends on. `.github/ISSUE_SPEC.md` governs the issue's shape and
 
 ## Outcomes
 
-`ready` (naming the `agent` review on a challenged route), `split`, `wontfix`
-or `needs-human`. The summary states:
+`ready`, `review` (a challenged route's first pass), `split`, `wontfix` or
+`needs-human`. The summary states:
 
 ```text
 Grounding: <origin/main SHA>
