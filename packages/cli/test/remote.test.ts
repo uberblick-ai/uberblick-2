@@ -1235,6 +1235,7 @@ describe("ub remote join", () => {
     expect(run.stderr).toContain("no signing secret is configured");
     expect(run.stderr).toContain("--secret-file");
     expect(run.stderr).toContain("run this from a terminal");
+    expect(run.stderr).not.toContain("remote signing secret (");
     expect(run.stderr).toContain("Nothing was written");
     expect(existsSync(join(box.configHome, "uberblick", "config.json"))).toBe(false);
     expect(existsSync(join(box.configHome, "uberblick", "credentials.json"))).toBe(

@@ -526,7 +526,8 @@ so they stay archived until restored on the destination.
 
 The remote's signing secret comes from `--secret-file <path>` (a file only you
 can read, mode 0600 — a `credentials.json` works, or the bare secret) or from a
-hidden prompt when the configured one is refused and there is a terminal to ask.
+masked prompt when the configured one is refused and there is a terminal to ask.
+The prompt shows one `*` per character entered, without displaying the secret.
 Never as an argument: a command line is in every `ps` listing and every shell
 history. Neither the secret nor a token signed with it is printed by any of
 these commands.

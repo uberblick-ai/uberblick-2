@@ -588,7 +588,8 @@ of them.
 The `--secret-file` argument is a path, never the secret: it must be a file only
 you can read (mode 0600), holding either the bare value from the host's `.env`
 or a `credentials.json` carrying it. Without the flag, the secret already
-configured is tried first and a terminal is prompted with the input hidden.
+configured is tried first and a terminal is prompted with one `*` per character
+entered, without displaying the secret.
 Nothing here prints the secret or a token signed with it.
 
 Archived documents move with their content and stay archived until restored.
