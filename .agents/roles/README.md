@@ -33,7 +33,7 @@ except `defer` removes that label and adds the next one:
 | issue-preparer | `ready` | issue: `needs-preparation` → `ready` |
 | issue-preparer | `review` | issue: `needs-preparation` → `needs-review` |
 | issue-preparer | `split` | issue: `needs-preparation` removed; its sub-issues carry `needs-preparation` |
-| issue-preparer | `wontfix` | issue closed as not planned |
+| issue-preparer | `wontfix` | `needs-preparation` removed; the run has closed the issue as not planned |
 | implementer | `review` | its pull request gets `needs-review`; the issue loses `ready`, or the pull request `needs-changes` |
 | implementer | `integrate` | its pull request gets `ready-to-merge`; the issue loses `ready`, or the pull request `needs-changes` |
 | implementer | `returned` | issue runs only: `ready` → `needs-preparation` |

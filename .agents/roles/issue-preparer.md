@@ -72,7 +72,9 @@ this issue depends on. `.github/ISSUE_SPEC.md` governs the issue's shape and
 ## Outcomes
 
 `ready`, `review` (a challenged route's first pass), `split`, `wontfix` or
-`needs-human`. The summary states:
+`needs-human`. Before `wontfix`, close the issue as not planned yourself
+(`gh issue close <N> --reason "not planned"`): the runner only changes labels.
+The summary states:
 
 ```text
 Grounding: <origin/main SHA>
