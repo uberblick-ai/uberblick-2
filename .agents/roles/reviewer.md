@@ -50,6 +50,15 @@ settle the risk. Hunt explicitly for overengineering and overtesting. Gate
 results may be evidence, but restating lint, tests or acceptance criteria is not
 a review.
 
+Product intent is read, not inferred from the issue text: read the corpus
+documents the issue's Pointers cite, live through MCP, wherever the change
+touches their product meaning, and follow their links where they govern the
+outcome. If MCP cannot serve a document the judgment needs, finish
+`defer`, naming the document and the failure, rather than judging intent
+without it. The pull request's `Corpus update` is part of the change: a missing
+rewrite for a claim the change makes wrong, or one that misstates the change,
+is a finding.
+
 A corrections review asks a narrower question: for each finding id the
 revision lists, does the corrected head resolve it, or is the implementer's
 evidence a sufficient answer? Record each as `resolved`, `explanation
@@ -81,7 +90,8 @@ authored; a context reset does not create independence.
   request that finds a P1 or P2.
 - `needs-human` — an owner-boundary finding on an issue, or a corrections
   review that leaves a P1 or P2 unresolved or finds a new one.
-- `defer` — the head moved while you reviewed.
+- `defer` — the head moved while you reviewed, or a document the judgment
+  needs could not be read.
 
 Post the verdict once — on a pull request as a review on the head you were
 given (`gh pr review <N> --comment --body-file <file>`, which records that

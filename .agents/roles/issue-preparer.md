@@ -37,7 +37,9 @@ When the request does not fit one independently reviewable PR, finish with
 behavior is an escalation. Create each substantial piece as a sub-issue of the
 source (`gh issue create --parent <N> --label needs-preparation`), with the
 source's milestone and `--blocked-by` only for a real ordering dependency. The
-source stays open as their parent.
+source stays open as their parent, blocked by each of them
+(`gh issue edit <N> --add-blocked-by <pieces>`), which carries its priority to
+them.
 
 ## Resuming
 

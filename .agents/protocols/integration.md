@@ -112,10 +112,10 @@ move or a head mismatch returns to the applicable gates.
 ## After the merge
 
 Confirm every issue the PR closes auto-closed, and close a parent whose last
-open sub-issue it closed. Then update the affected product docs through MCP to
-the new state. If MCP fails, record the concrete failure and outstanding update
-on the PR for recovery. A fresh integrator does not own or restart another
-session's development processes.
+open sub-issue it closed. Then apply the pull request's `Corpus update` through
+MCP, checked against the merged code. If MCP fails, record the concrete failure
+and outstanding update on the PR for recovery. A fresh integrator does not own
+or restart another session's development processes.
 
 **Housekeeping, last** (owner direction, 2026-09-01). On every durable outcome —
 merge or escalation — once the probes on the retained review image are done,
