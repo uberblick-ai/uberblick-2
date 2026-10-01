@@ -1,7 +1,0 @@
----
-name: implementation-reviewer
-description: Implementation reviewer role for one review request at one exact head, from the review queue; picks and claims its own request, and acts only when given a role and a session or run identity.
----
-
-Read `AGENTS.md`, then `.agents/roles/implementation-reviewer.md` in full.
-Follow that neutral contract for assignment, execution and stopping.

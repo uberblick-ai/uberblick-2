@@ -14,13 +14,13 @@ Find a few consequential, evidence-backed risks without turning broad static
 analysis into hypothetical work. Write no code, corpus document, issue, label,
 branch, or PR. The only permitted external write is one report to [Technical
 audit reports](https://github.com/uberblick-ai/uberblick-2/discussions/541),
-posted with `sh scripts/post-retrospective.sh technical-audit <body-file>` —
-never with a hand-written `addDiscussionComment` call, because a guessed
-discussion id posts to a stranger's repository.
+posted with the `technical-audit` recipe in `AGENTS.md`'s Project facts —
+never with a guessed discussion id, because a wrong one posts to a stranger's
+repository.
 
 ## Assignment and mode
 
-Use the launcher's run identity verbatim. If none was supplied, create one as
+Use a supplied run identity verbatim. If none was supplied, create one as
 `technical-audit-<UTC timestamp>-<short random suffix>` before any external side
 effect and keep it unchanged. A valid prior report is a top-level reply in
 Discussion #541 that begins `Technical audit`, carries `Run: technical-audit`,

@@ -1,162 +1,74 @@
 # Role contracts
 
-Shared identity, ownership and recovery for delivery roles. Read the assigned
-role for pickup and action order; the issue schema lives in
-`.github/ISSUE_SPEC.md`, and executable gates in
+Shared rules for the four delivery roles. Each role file says what its run is
+given, what it does and which outcomes it may end with. The issue schema lives
+in `.github/ISSUE_SPEC.md`, executable gates in
 `.agents/protocols/delivery-policy.md`. Product intent and workflow reasoning
 live in the MCP corpus. These are distinct authorities, not duplicate policies.
 
-## One bounded assignment
+## One run, one item, one outcome
 
-An entry role receives its role and session or run identity, then self-picks one
-eligible queue item under its `Pickup` section. Missing either is a refusal
-before side effects.
+A run is given one issue or pull request — for a pull request, also the head it
+works at — and works only that item. It ends with exactly one outcome its role
+file lists, plus a short summary: what was decided or changed, the grounding
+commit, and links to evidence. That summary is the handoff, so it carries what
+the next run needs and nothing it can read from GitHub itself.
 
-**An internal subagent is the one exception** — the issue-preparer starting an
-issue-adversary, and nothing else. Implementation review is not delegated: the
-role that owes a round posts the durable request
-`.agents/protocols/review-protocol.md` defines and an independently launched
-`implementation-reviewer` claims it. The
-parent supplies the child's role and run identity, the exact GitHub issue key,
-and its own run identity as parent; nothing else. The child reconstructs
-from GitHub, never searches a queue and never acts on another item, and writes
-its durable result there before the parent acts on it. It does not consume or
-release the parent's claim, and a private transcript is never a handoff.
+Workflow state is not the run's to write. ub-agents applies the outcome: it
+moves the labels, posts the handoff, requests the reviews an outcome names,
+records which runtime did the work, and ensures only one run holds an item at a
+time. A role never adds or removes a workflow label, posts a claim, or starts
+or requests a reviewer itself. What the task produces is the run's to write:
+issue bodies, commits and pull requests, findings, rulings, the merge, corpus
+updates and follow-up issues.
 
-Before starting an internal child, the parent writes this assignment on the
-item it holds:
+Until ub-agents runs this repository, a person starts each run and applies its
+outcome, and the run posts its own summary as a comment on the item, headed
+`Outcome: <role> <outcome>`. This table moves into the ub-agents configuration
+when that lands:
 
-```text
-Delegated: <child role> <child run id>
-Status: pending
-Target: issue #N
-Parent: <parent role> <parent run id>
-```
+| Role | Outcome | Next |
+| --- | --- | --- |
+| issue-preparer | `ready` | the issue becomes `ready`; first the `agent` review when the outcome requires one |
+| issue-preparer | `needs-decision` | parked on the owner question the run posted |
+| issue-preparer | `split` | the issue becomes an `umbrella`; its children start at `needs-preparation` |
+| issue-preparer | `wontfix` | closed as not planned |
+| implementer | `done` | the issue leaves `ready`; at the new head, the reviews whose latest verdict is `changes` verify the corrections, then integration — directly when none is outstanding |
+| implementer | `returned` | the issue goes back to `needs-preparation` |
+| reviewer | `approve` | once every required review's latest verdict is an approval: the issue becomes `ready`, or the PR goes to integration |
+| reviewer | `changes` | back to the preparer (issue) or the implementer (PR) |
+| reviewer | `needs-human` | parked for the owner on a convergence stop (`.agents/protocols/review-protocol.md`) |
+| integrator | `merged` | done |
+| integrator | `changes` | back to the implementer with the ruling's fix-up brief |
+| integrator | `needs-human` | parked for the owner; `human-approved` returns it to integration |
+| integrator | `more-review` | the named reviews run at the current head, then integration again |
+| any | `defer` | retried later; nothing is consumed |
 
-The parent must hold the
-live claim named by `Parent`. The child validates that claim, that
-the latest `Delegated:` record for its role and target names its run id, and
-every supplied value before its first side effect. A missing or mismatched
-record is a refusal, not permission to fall back to the queue.
+When the required reviews of a head include more than one, all of them review
+that same head before any correction starts. Approvals carry forward to later
+heads; only a review whose latest verdict is `changes`, or one the integrator
+requests with `more-review`, runs again.
 
-The internal child is the `issue-adversary`; no role delegates an
-implementation or a review. The delegation
-comment is the child's one mutable lifecycle record: the child edits `Status: pending`
-to `Status: running` before substantive work and to `Status: complete` when it
-appends its grounded verdict. It posts no separate nested claim or `Done:`
-comment. The parent edits the same record to `Status: failed — <reason>` when
-the transport never starts or returns no verdict. This keeps assignment,
-liveness, authorship lineage and outcome recoverable from GitHub without three
-timeline comments for one read. The record's `created_at` orders competing
-assignments; its `updated_at` is liveness; its final body is the handoff.
+## Records
+
+Post comment bodies from files (`gh ... --body-file`), and update a mutable
+record by its immutable comment id (`gh api ... -F body=@<file>`), never "edit
+last". Preserve literal text and newlines. Confirm scratch-file writes
+succeeded before posting; noclobber can leave stale content.
 
 Each run uses fresh private scratch outside the worktree, namespaced by its run
-id; never share it or treat it as durable state.
+id; never share it or treat it as durable state. A private transcript is never a
+handoff: GitHub must be sufficient for a fresh run to continue.
 
-The normal order is draft → one issue-preparer run (route chosen by
-`.agents/protocols/issue-preparation.md`) → `ready` or an owner boundary → implementation. Bounded
-means one outcome and stopping condition, not one attempt: the preparer owns
-correctable findings through its final handoff rather than opening another role
-loop. A stopped process is never resumed: recovery starts a fresh assignment
-from GitHub's durable state. The preparation-specific reuse is an issue
-returning once from implementation or returning from `needs-decision`: the fresh
-assignment reuses the previous handoff, adversary verdict, return evidence,
-question and human answer as applicable, and rechecks only what those records or
-intervening upstream changes affected. A second consecutive implementer return
-without a human answer goes to `needs-decision`, not a new automatic
-preparation pass.
+Before creating a follow-up issue discovered during a run, fetch `origin/main`
+and check the observation against that commit and existing open issues. Do not
+queue work that the current base already resolved or already tracks. Create it
+with `gh issue create --repo uberblick-ai/uberblick-2` and `needs-preparation`;
+leave Request Source unset.
 
-Before creating a follow-up issue discovered during a run, fetch
-the project's base ref and check the observation against that commit and existing open
-issues. Do not queue work that the current base already resolved or already tracks.
-Create it through `.github/ISSUE_SPEC.md`'s **Request source** path so its
-provenance is set and read back without becoming a gate.
-
-`Priority` means the organization issue field: Urgent → High → Medium → Low.
-A human owns every explicit value; agents never write it. Unset is
-ignored by preparation and sorts as Medium for implementation pickup.
-
-**The claim record.** The implementer claims in `.github/ISSUE_SPEC.md`'s
-grammar: `Claimed: <branch>` / `Implementer: <claude|codex> <id>`. Every
-top-level role other than the implementer posts `Claim: <role> <session-or-run
-id>`, plus the grounding SHA when its outcome is tied to one; an
-`implementation-reviewer` claims one review request that way, naming the head
-and request `.agents/protocols/review-protocol.md` requires. (The `Parent:`
-line of a delegation record names a role and run id; the `Parent: #N` split
-header `.github/ISSUE_SPEC.md` defines for an issue body is a different record
-in a different place.) A top-level handoff opens `Done: <role>
-<session-or-run id>` with that grounding. Internal children use the single
-mutable delegation record above instead. Handoffs stay proportional: link evidence
-instead of narrating transcripts. GitHub must be sufficient for recovery.
-
-**Durable records.** Post comment bodies from files (`gh ... --body-file`),
-and update a mutable record by its immutable comment id (`gh api ... -F
-body=@<file>`), never "edit last". Preserve literal text and newlines. Confirm
-scratch-file writes succeeded before posting; noclobber can leave stale content.
-
-**The race rule.** A live top-level claim makes the item ineligible for every
-other queue pickup. An internal child's mutable assignment record is its
-ownership record; it neither releases the parent claim nor admits another
-role. Re-read immediately before and after a claim;
-the earliest valid claim wins, and a loser posts a one-line withdrawal and
-tries the next candidate.
-
-Before that race, do only the grounding and safety checks the selected role
-explicitly requires. Run no delivery gate and write no explanation of derived
-queue state or skipped candidates. A claim records ownership and the minimum
-proof another role needs; evidence and decisions follow only after the claim
-wins.
-
-**Claims are ordered, and a live one is renewed.** Every claim, withdrawal and
-takeover is ordered by its comment `createdAt`, and by the immutable comment id
-where two share a timestamp. Ownership follows that order,
-so a holder superseded by a valid takeover does not recover the item by writing
-again: its own claim keeps the older position, and the later write is
-recognisably stale rather than authoritative.
-
-A live run renews by **editing its own claim comment**, never by posting another
-one: touch the body so the comment's `updated_at` moves, appending or replacing a
-single `Renewed: <UTC timestamp>` line. Do not renew before that `updated_at` is
-25 minutes old; renew before it reaches 30 minutes.
-
-A top-level claim other than an implementation claim is stale when no completion
-exists and its claim comment's `updated_at` is more than 60 minutes old; the
-window is twice the renewal interval so that a healthy foreground run is never
-reclaimed in the gap between two renewals.
-An implementation claim is stale when no matching later implementer Done
-exists and the claim's updated_at is more than 30 minutes old.
-
-A top-level claim with no matching completion is also stale immediately,
-regardless of age or renewal, when the observing session positively identifies
-its run on the same machine and establishes that the run is no longer running.
-For a candidate GitHub has
-already shown is claimed, pickup permits one bounded local liveness check:
-use retained runtime evidence to attribute the exact run to this machine and
-verify its termination or establish its process absence on the same attribution
-channel, one known to observe that run while it is alive. A missing worktree,
-missing attribution evidence, an unreadable process listing, or a channel that
-cannot establish whether the run is alive is inconclusive, not proof of death;
-keep the clocks above whenever attribution or absence cannot be established.
-This permits no other local pickup read, wider scan, or narration to prove an
-empty queue.
-
-A later valid claim takes over a stale one and continues the current remote
-branch head; the superseded holder stops if it resumes. An evidence-based
-takeover records in that new claim the superseded run id and claim link, how
-it was attributed to this machine, and the termination or process-absence
-evidence observed, with its observation time. Record enough of the observation
-for a reader of GitHub alone to assess the takeover; a private log path alone
-is not evidence. Do not edit or withdraw the superseded run's claim on its
-behalf. Claim ordering, the race rule and renewal cadence are unchanged.
-
-A nested adversary assignment expires when its record remains
-`pending` for 10 minutes, when a `running` record's `updated_at` is more than 30
-minutes old, or immediately when the runtime confirms it stopped without a
-verdict. The same live parent marks that record failed and may then delegate
-one replacement; the latest-record check makes a late child refuse. A live
-child may renew by editing its record under the same 25/30-minute cadence as a
-claim. An unfinished attempt produced no verdict, so replacement is not a
-second adversary round.
+Priority is the `priority:urgent|high|medium|low` label. A human owns every
+value; agents never set one by their own judgement. The one agent write is a
+shaping session recording the value the human stated.
 
 ## Every process a run starts is that run's to end
 
@@ -169,14 +81,6 @@ never return. Never disown a process to make it someone else's problem.
 A trap only runs between commands, so a loop that blocks in a foreground
 `sleep` will not honour `SIGTERM` until that sleep ends: background the wait
 and `wait` on it, or signal the process group, or the trap is decoration.
-
-Where a helper must outlive a single foreground call — the claim renewer is the
-standing example, because a foreground call is capped well below the renewal
-interval — detaching it is correct, and two obligations come with it: the run
-stops it by exact pid before it finishes, and the helper carries a deadline of
-its own so that a run which dies without stopping it cannot leave it running
-indefinitely. A renewer that outlives its run is worse than none, because it
-keeps an abandoned claim looking alive instead of letting it age into recovery.
 
 ## Product context, proportional to the action
 
@@ -194,21 +98,14 @@ guarantees or resources, or agent authority. For preparation, an unresolved
 product, authority, safety, or fundamentally unsafe-shape finding is that stop;
 correctable specification findings are not.
 
-Delegating a bounded subtask is allowed and stays bounded; the delegating role
+Delegating a bounded subtask is allowed and stays bounded; the delegating run
 still owns the outcome and the durable record. A context reset never erases
 authorship — the author of a diff is never its independent reviewer.
 
-## Worktrees and completion
+## Worktrees
 
-New implementation starts from the project's freshly fetched base ref in this run's own
-isolated worktree. Recovery continues the current remote head without rebase or
-force-push. Never share, delete or repurpose another run's worktree. Re-read
-ownership before pushing and stop if a valid takeover superseded it. A pickup
-that stops before editing must release any implementation claim it posted.
-A stopped process resumes only as a fresh assignment from durable records.
-
-Entry-role outcomes use their exact Worked, No eligible, or Blocked final line.
-The launcher immediately relaunches after work, waits about 30 minutes after an
-empty queue, and stops on permission/authentication blockage. An unrecognized
-line is an unconfirmed outcome. GitHub remains the durable coordination record;
-the launcher does not interpret claims or findings to choose work.
+New implementation starts from freshly fetched `origin/main` in this run's own
+isolated worktree. A revision continues the pull request's current remote head
+without rebase or force-push. Never share, delete or repurpose another run's
+worktree. A stopped run is never resumed: a fresh run continues from GitHub's
+durable records.

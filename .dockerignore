@@ -1,11 +1,6 @@
 .git
 .github
 .claude
-# …except runtime skill entry points. Provider-neutral issue
-# shaping and preparation live under `.agents`, which remains in the image.
-# Everything else under `.claude` (worktrees, local settings) stays out.
-!.claude/skills
-!.claude/skills/**
 node_modules
 **/node_modules
 dist

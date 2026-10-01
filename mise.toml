@@ -165,22 +165,10 @@ run = "pnpm -r typecheck"
 description = "Run all test suites"
 # `pnpm test` rather than `pnpm -r test`, for the same reason as lint above: the
 # root script is the one command, so the Docker review runs it identically. It
-# chains the workspace fan-out with the issue-preparation protocol, agent-role
-# and housekeeping suites outside `packages/*`, which `pnpm -r` cannot reach —
+# chains the workspace fan-out with the e2e-runner, housekeeping and Homebrew
+# release suites outside `packages/*`, which `pnpm -r` cannot reach —
 # `pnpm-workspace.yaml` globs `packages/*` only.
 run = "pnpm test"
-
-[tasks.check-agents]
-description = "Check role triplets and provider-neutral issue-authoring wiring"
-# Portability invariants only, never the contracts' prose — see the script's
-# header for what a green run does not claim. It is chained into `mise run test`
-# as well, so the gates enforce it without anyone remembering this task; run it
-# directly while editing a role.
-#
-# `.claude/agents` is absent from the immutable review image (`.dockerignore`
-# re-admits only `.claude/skills/**`), so the script skips that third loudly
-# there and CI is what enforces it.
-run = "node scripts/check-agent-roles.mjs"
 
 [tasks.e2e]
 description = "Run the browser end-to-end proof points (Playwright, Chromium only)"

@@ -1,6 +1,6 @@
 name: CI
 
-# The merge policy in .agents/protocols/delivery-policy.md lets the implementation loop self-merge on
+# The merge policy in .agents/protocols/delivery-policy.md lets the integrator merge on
 # "gates green". This workflow is what makes green verified rather than
 # self-reported: it runs the same mise tasks a human would run locally.
 #
