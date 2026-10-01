@@ -23,9 +23,10 @@ inspect the code and Pointers it depends on.
   semantically (`.github/ISSUE_SPEC.md`, Scheduling semantics), mark this issue
   blocked by the issue that PR closes (`gh issue edit <N> --add-blocked-by
   <M>`) and finish `defer`, naming it. When that PR closes no issue, finish
-  `defer` alone. An overlap the issue's Pointers already settle, such as text
-  to reconcile with whichever lands second, is not a block: follow the
-  Pointers and build.
+  `defer` alone. An overlap the issue's Pointers classify as a mechanical
+  reconciliation is not a block when the open PR's current diff confirms it:
+  text either change can update after the other lands, with no semantic
+  conflict and no prerequisite. Follow the Pointers and build.
 - A contract prepared more than six days ago is checked before it is built: the
   `ready` label or the preparer's handoff dates it. Check that its Pointers
   still resolve at that base, that the code it targets still behaves as the body
