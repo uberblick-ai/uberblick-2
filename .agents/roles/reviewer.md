@@ -50,6 +50,12 @@ settle the risk. Hunt explicitly for overengineering and overtesting. Gate
 results may be evidence, but restating lint, tests or acceptance criteria is not
 a review.
 
+Product intent is read, not inferred from the issue text: read the corpus
+documents the issue's Pointers cite, live through MCP, wherever the change
+touches their product meaning, and follow their links where they govern the
+outcome. If MCP cannot serve a document the judgment needs, say so in the
+verdict rather than judging intent without it.
+
 A corrections review asks a narrower question: for each finding id the
 revision lists, does the corrected head resolve it, or is the implementer's
 evidence a sufficient answer? Record each as `resolved`, `explanation
