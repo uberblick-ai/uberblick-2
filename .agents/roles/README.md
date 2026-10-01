@@ -15,12 +15,12 @@ commit, and links to evidence. That summary is the handoff, so it carries what
 the next run needs and nothing it can read from GitHub itself.
 
 Workflow state is not the run's to write. ub-agents applies the outcome: it
-moves the labels, posts the handoff, requests the reviews an outcome names,
+moves the labels, posts the handoff, runs the reviews an outcome names,
 records which runtime did the work, and ensures only one run holds an item at a
-time. A role never adds or removes a workflow label, posts a claim, or starts
-or requests a reviewer itself. What the task produces is the run's to write:
-issue bodies, commits and pull requests, findings, rulings, the merge, corpus
-updates and follow-up issues.
+time. A role never changes a workflow label on an existing item, posts a claim,
+or starts or requests a reviewer itself. What the task produces is the run's to
+write: issue bodies and relationships, commits and pull requests, findings, the
+merge, corpus updates and new issues.
 
 Until ub-agents runs this repository, a person starts each run and applies its
 outcome, and the run posts its own summary as a comment on the item, headed
@@ -29,25 +29,49 @@ when that lands:
 
 | Role | Outcome | Next |
 | --- | --- | --- |
-| issue-preparer | `ready` | the issue becomes `ready`; first the `agent` review when the outcome requires one |
-| issue-preparer | `needs-decision` | parked on the owner question the run posted |
-| issue-preparer | `split` | the issue becomes an `umbrella`; its children start at `needs-preparation` |
+| issue-preparer | `ready` | the issue becomes `ready`; when the outcome names the `agent` review, that review runs first |
+| issue-preparer | `split` | the issue leaves the queue as a parent; its sub-issues start at `needs-preparation` |
 | issue-preparer | `wontfix` | closed as not planned |
-| implementer | `done` | the issue leaves `ready`; at the new head, the reviews whose latest verdict is `changes` verify the corrections, then integration — directly when none is outstanding |
-| implementer | `returned` | the issue goes back to `needs-preparation` |
-| reviewer | `approve` | once every required review's latest verdict is an approval: the issue becomes `ready`, or the PR goes to integration |
-| reviewer | `changes` | back to the preparer (issue) or the implementer (PR) |
-| reviewer | `needs-human` | parked for the owner on a convergence stop (`.agents/protocols/review-protocol.md`) |
+| implementer | `done` | the reviews the outcome names run at the pull request's head, then integration |
+| implementer | `returned` | issue runs only: the issue goes back to `needs-preparation` |
+| reviewer | `approve` | the issue becomes `ready`, or, once no review is pending, the PR goes to integration |
+| reviewer | `changes` | back to the preparer (issue), or to the implementer once every review of that head has reported (PR) |
 | integrator | `merged` | done |
-| integrator | `changes` | back to the implementer with the ruling's fix-up brief |
-| integrator | `needs-human` | parked for the owner; `human-approved` returns it to integration |
+| integrator | `changes` | back to the implementer |
 | integrator | `more-review` | the named reviews run at the current head, then integration again |
+| any | `needs-human` | parked until a person answers and removes `needs-human`; then an issue goes to the preparer, a PR to the implementer |
 | any | `defer` | retried later; nothing is consumed |
 
-When the required reviews of a head include more than one, all of them review
-that same head before any correction starts. Approvals carry forward to later
-heads; only a review whose latest verdict is `changes`, or one the integrator
-requests with `more-review`, runs again.
+A review that asked for changes runs again only when the next outcome names it
+(`.agents/protocols/review-protocol.md`, Rounds). A `changes` verdict the next
+outcome does not name is settled.
+
+## Escalate what is not yours to decide
+
+Decide what the issue, settled decisions, adopted principles and repository
+policy already cover. Ask a person when the next step would change product
+direction, an adopted principle or guarantee, external resources or agent
+authority; when the merge policy says tier 3; or when review stops converging.
+A correctable gap in a specification is not such a stop: correct it.
+
+Finish `needs-human`. The summary is the question, ready to answer:
+
+- what is blocked, and the one decision needed;
+- the answers to pick from, and your recommendation;
+- an @-mention of who can answer: the person who opened the issue (for a pull
+  request, its issue), otherwise `@bk-one`;
+- the closing line `Answer here, then remove needs-human.`
+
+Any person with write access may answer. A comment from a person's account is
+the answer; one from `uberblick-agent` or a bot never is. The next run works
+within it. An answer covers what it names, plus fix-ups that conform to it;
+anything beyond that is a new question.
+
+## Authorship
+
+Delegating a bounded subtask is allowed; the delegating run still owns the
+outcome and the record. A context reset never erases authorship: the author of
+a change is never its independent reviewer.
 
 ## Records
 
@@ -63,12 +87,24 @@ handoff: GitHub must be sufficient for a fresh run to continue.
 Before creating a follow-up issue discovered during a run, fetch `origin/main`
 and check the observation against that commit and existing open issues. Do not
 queue work that the current base already resolved or already tracks. Create it
-with `gh issue create --repo uberblick-ai/uberblick-2` and `needs-preparation`;
-leave Request Source unset.
+with `gh issue create --repo uberblick-ai/uberblick-2 --label
+needs-preparation`, adding `--blocked-by` or `--parent` only for a real
+relationship, and leave Request Source unset. This is the one label a run sets,
+and only on an issue it creates.
 
-Priority is the `priority:urgent|high|medium|low` label. A human owns every
+Priority is the `priority:urgent|high|medium|low` label. A person owns every
 value; agents never set one by their own judgement. The one agent write is a
-shaping session recording the value the human stated.
+shaping session recording the value the person stated.
+
+## Retrospectives
+
+Post one to your role's board (`AGENTS.md`, Project facts) only when the run
+lost something — a session, a review round, rework, a long discovery, tokens
+burned for nothing — or missed something it needed, such as a corpus document,
+a pointer or a check, and only when you can say why and name the change that
+would have prevented it. Otherwise post nothing. In a short paragraph, link the
+item, state the cost and its cause, and the smallest useful change. A
+retrospective is telemetry, never a gate.
 
 ## Every process a run starts is that run's to end
 
@@ -89,23 +125,11 @@ judgment against product intent. If it is unavailable and proceeding could chang
 product meaning, stop and report what was needed and observed. Mechanical
 inspection, validation and GitHub bookkeeping continue on their own inputs.
 
-## Decide inside your authority, escalate beyond it
-
-Make and record decisions already covered by the issue, program authorization,
-adopted principles and repository policy. Escalate when work would materially
-change direction, consequential product behavior, adopted principles, external
-guarantees or resources, or agent authority. For preparation, an unresolved
-product, authority, safety, or fundamentally unsafe-shape finding is that stop;
-correctable specification findings are not.
-
-Delegating a bounded subtask is allowed and stays bounded; the delegating run
-still owns the outcome and the durable record. A context reset never erases
-authorship — the author of a diff is never its independent reviewer.
-
 ## Worktrees
 
-New implementation starts from freshly fetched `origin/main` in this run's own
-isolated worktree. A revision continues the pull request's current remote head
-without rebase or force-push. Never share, delete or repurpose another run's
-worktree. A stopped run is never resumed: a fresh run continues from GitHub's
-durable records.
+Work in the directory and on the branch the run was given; ub-agents creates
+and removes them. Push only that branch, and never rebase or force-push a pull
+request's head. Leave other runs' worktrees and processes alone. Until
+ub-agents runs here, a new implementation starts a fresh worktree at
+`origin/main` on the branch `ub-agents/<issue number>`, and a revision starts
+one at the pull request's head.

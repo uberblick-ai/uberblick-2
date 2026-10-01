@@ -8,12 +8,12 @@
 #   but a review build regenerates the cache on every run, so almost nothing is
 #   ever that old and the time filter alone reclaims nothing (#785). A space
 #   floor prunes the cache only once free space actually falls below it.
-# Worktrees — an agent run removes its own, so abandoned ones accumulate. Old
+# Worktrees — a run that ends abnormally leaves its own behind, so abandoned ones accumulate. Old
 #   ones go here, never with `--force`: a locked worktree, or one holding
 #   modified or untracked files, is reported and left for a human. So is one
 #   whose age cannot be read under either the GNU or BSD `stat` dialect.
 #   Clean detached worktrees are removable: durable recovery is a remote commit
-#   or PR, never an unreferenced local commit (`.agents/roles/README.md`, ownership and recovery).
+#   or PR, never an unreferenced local commit (`.agents/roles/README.md`, Records).
 # On Docker Desktop for macOS, headroom is the host volume containing its default
 #   sparse disk image, not the image's configured VM capacity. A moved image is
 #   reported as unresolved rather than measuring a different filesystem.

@@ -27,9 +27,9 @@ not about your memory of the repo. Against it, read what the issue targets: the
 current behavior, the modules, interfaces, invariants and tests it lives in,
 related open issues and PRs, and the files the change is likely to touch. Read
 the intended outcome of the effort this issue belongs to, and the human
-decisions already recorded for it, from the records that exist: the `Parent:`
-header and its umbrella thread, the milestone, an `Implements:` requirement
-document, and the Pointers citations — draft inside those decisions instead of
+decisions already recorded for it, from the records that exist: the parent
+issue and its thread, the milestone, an `Implements:` requirement document, and
+the Pointers citations — draft inside those decisions instead of
 reopening them. Where none of those records exists that read is a no-op; an
 ordinary issue needs no parent, planning map or overview. Verify each
 load-bearing noun and promised outcome has a current substrate: shipped concepts
@@ -54,8 +54,9 @@ file searches (`git ls-files`, `rg`) and exclude `.claude/worktrees/` and
 `.worktrees/`; copied agent worktrees are not additional grounding evidence. The
 same question runs one step wider before `ready`: where this outcome affects
 related planned work, record the affected contract or dependency in the prepared
-issue itself — its Pointers, or `Depends-on` for a real prerequisite. The other
-issue is not edited.
+issue itself — its Pointers, or a blocked-by relationship for a real
+prerequisite (`gh issue edit <N> --add-blocked-by <M>`). The other issue is not
+edited.
 
 Grounding is proportional, not exhaustive — enough to establish the outcome,
 approach and material risks. A proven mechanical, local correction may stop after the catalog scan
@@ -76,10 +77,10 @@ the latest preparer handoff. On a review verdict, or the first consecutive
 return since a human answer, use route `resumed`: read the prior preparation and
 review evidence, refresh the reported conflict and affected upstream grounding,
 and correct only that part of the issue. Do not reclassify, repeat broad
-grounding, or require another review by default. A second consecutive return is already parked on
-`needs-decision`; after a human answers, resume the same way and treat that
-answer as resetting the count. A return that exposes a new owner boundary goes
-to `needs-decision` rather than back to `ready`.
+grounding, or require another review. A second consecutive return is already
+parked on `needs-human`; after a person answers, resume the same way and treat
+that answer as resetting the count. A return that exposes a new owner boundary
+is an escalation rather than a way back to `ready`.
 
 Classify from current evidence, not paths, labels or keywords. Self-check only
 when the change is mechanical (no behavior or contract choice), understood,
@@ -112,12 +113,12 @@ second to a human, and leave the third to implementation.
 
 The reviewer classifies each material finding as `correctable` when settled
 intent or repository evidence is enough, or `owner-boundary` for product or
-agent authority, safety, or a fundamentally unsafe work shape. A clean review
-lets `ready` land. Otherwise the issue comes back, and the resumed pass applies
-correctable findings, repeats the affected grounding and final recheck, and
-finishes `ready` without requiring a second review of those edits; an
-owner-boundary finding finishes `needs-decision`. Another review is exceptional
-and requires an explicit owner request.
+agent authority, safety, or a fundamentally unsafe work shape, and escalates an
+owner-boundary finding itself. A clean review lets `ready` land. Otherwise the
+issue comes back with correctable findings, and the resumed pass applies them,
+repeats the affected grounding and final recheck, and finishes `ready`. An
+issue gets one review pass: a finding the preparer cannot settle without
+another review or a person's choice is escalated.
 
 ## Recheck, then decide
 
@@ -138,8 +139,8 @@ required.
 | Final finding state | Outcome |
 |---|---|
 | none, or all correctable findings applied | `ready` |
-| unresolved product, authority, safety or unsafe-shape boundary | `needs-decision` |
-| request split into a coordination parent and child intakes | `split` |
+| unresolved product, authority, safety or unsafe-shape boundary | `needs-human` |
+| request split into a parent and its sub-issues | `split` |
 
 `ready` is the preparer's final verdict, within recorded owner-approved
 authority; there is no later approval ceremony.
@@ -158,7 +159,7 @@ handoff fields and route reason. A review verdict, a human answer or the first
 implementer return resumes from durable work, refreshing only affected evidence.
 
 Preparer-authored prose names an issue by a descriptive title alongside its
-`#N`: the prepared body's What, Why and Out of scope, a `needs-decision`
+`#N`: the prepared body's What, Why and Out of scope, a `needs-human`
 question, and this handoff. Machine-read records and reference lists keep bare
-identifiers and their own grammar — `Depends-on`, `Parent:`, `Implements:`,
-`Outcome:` summaries, `Closes`, and the Pointers list.
+identifiers and their own grammar — `Implements:`, `Outcome:` summaries,
+`Closes`, and the Pointers list.

@@ -1,11 +1,9 @@
-# Review protocol — findings, corrections and convergence
+# Review protocol — findings, corrections and rounds
 
 Read this whenever a PR has a review to give, a finding to handle or a
-correction to verify. delivery-policy.md's "Reviews owed" table decides which
-reviews a candidate owes; ub-agents runs them at the candidate head, and
-`integration.md` beside this file owns the gates' order and mechanics. These are
-real adversarial reads, not gate checks. The integrator owns authoritative
-dispositions.
+correction to verify. `delivery-policy.md`'s "Reviews owed" table decides which
+reviews a change owes; ub-agents runs them at the head under review, and
+`integration.md` beside this file owns the gates' mechanics.
 
 Every review is critical: try to falsify the implementation with focused
 failure-path or mutation probes, and hunt specifically for overtesting and
@@ -14,71 +12,74 @@ defend contracts and invariants rather than implementation trivia).
 
 ## Findings
 
-Reviewers record findings using stable IDs (`R<round>-F<number>`). Each finding
-names the affected code, supported-usage consequence, proposed severity, and
-reproducible evidence. Separate observations from assumptions. Record successful
-probes only when they resolve a finding or establish a material limitation.
-
-The integrator maintains one finding ledger: ID, disposition, evidence link, and
-verification result. Evidence stays in the reviewer's verdict; later records
-link to it. Existing findings retain their IDs across heads. Reopen settled
-findings only when changed code or new evidence invalidates the disposition.
-
-Severity follows impact:
+A finding has a stable id (`R<round>-F<number>`) and names the affected code,
+the supported-usage consequence, a proposed severity and the reproducible
+evidence that would settle it. Separate observations from assumptions. Record a
+successful probe only when it resolves a finding or establishes a material
+limitation.
 
 - **P1:** data loss, secret exposure, violated invariant, or materially unusable
   supported behavior.
 - **P2:** another concrete defect in supported usage.
 - **P3:** minor or theoretical impact.
 
-## Corrections
+A finding keeps its id across heads. Reopen a settled one only when changed
+code or new evidence invalidates how it was settled.
 
-The implementer may correct a finding on its branch or answer it with evidence,
-but it cannot settle one alone. Its revision names every finding it corrected or
-answered, and the review that raised them verifies them at the corrected head,
-recording each id as `resolved`, `explanation accepted`, or `unresolved — <why>`.
-An unresolved material disagreement stands for the integrator; no round is
-opened to argue severity. A finding the implementer neither corrects nor answers
-needs no corrections review: it stands as written, for the integrator to
-disposition.
+## Handing findings over
 
-When two reviews are owed, both review the same head before any correction.
-Then one batched revision carries the finding IDs, required outcomes and
-verification. Include P3 corrections only when local and inexpensive; they must
-not drive a redesign or another round.
+Three records carry findings between implementer and reviewer, so no separate
+ledger is kept:
 
-The integrator chooses the disposition. Fix P1s and contained supported-usage
-P2s. A branch-caused failure of a required check must be fixed. A non-blocking P2
-may be deferred to a linked issue with its accepted consequence recorded; never
-defer data loss, security exposure, or violated invariants. Accept P3s without
-creating issues by default. Reject unsupported findings with a brief
-evidence-based reason. A finding the integrator raises after the initial review
-goes back to the implementer as a focused fix-up brief in its ruling.
+1. The verdict lists every finding.
+2. The implementer's revision summary lists every id once, as `corrected in
+   <sha>` or `answered: <evidence>`.
+3. The corrections review marks every listed id `resolved`, `explanation
+   accepted` or `unresolved — <why>`.
 
-## Verification and completion
+When two reviews are owed, both review the same head first, and one revision
+answers both. Copilot's remarks carry no ids: they are corrected or answered in
+their own threads.
 
-The integrator verifies corrections through focused diff inspection and
-relevant tests or failure-path probes. Tests defend the affected contract, not
-the implementation mechanism.
+## Settling a finding
 
-Repeat a full review only when a correction introduces a concrete unresolved
-risk or invalidates that review's earlier reasoning: the integrator records the
-risk, the affected verdict and the review scope, and finishes `more-review`. A
-new head, severity disagreement, or P3-only verdict is insufficient. A
-corrections review is not a repeated challenge: it verifies the named findings
-at the corrected head and nothing else.
+Correct P1s, contained supported-usage P2s and any branch-caused failure of a
+required check. Correct a P3 only when local and inexpensive; it must not drive
+a redesign or another round. Instead of correcting, the implementer may answer
+with evidence: the finding is wrong; its impact is theoretical because no
+current supported-usage failure is established; it lies outside the supported
+usage model; or, for a non-blocking P2, it is deferred to a linked issue with
+the accepted risk stated. Never defer or accept data loss, security exposure or
+a violated invariant.
 
-Merge requires delivery-policy.md's gates, no open P1, and an explicit disposition for
-every finding. Record carried-forward review evidence with a brief scope and
-rationale. The final ruling links to the ledger and gate results without
-repeating them.
+The author cannot settle a finding alone; the corrections review does. A P3
+that is neither corrected nor answered is accepted debt. A concrete bug
+observed later is new evidence and may be filed or reopened then.
 
-If a confirmation review finds a new P1, or a correction wave does not reduce the
-open P1 set, park for an owner decision; the corrections review that observes it
-finishes `needs-human`. The integrator settles P2/P3
-disagreements after one implementer response; escalate only a specific
-unresolved decision.
+## Rounds
 
-Before a third correction head since opening or the latest owner decision, park
-with one question identifying the mechanism preventing convergence. An owner
-instruction to continue resets the count.
+A pull request gets at most two review rounds. The second is a corrections
+review by the review that asked for changes. It is required when the first
+round found a P1 or two or more P2s, or when the implementer answers a P1 or
+P2 instead of correcting it. Otherwise the implementer asks for one only when a
+correction carries risk of its own. P3s never require a round.
+
+The second round approves when every listed P1 and P2 is resolved or its
+explanation accepted, and the corrections introduced no new P1 or P2.
+Otherwise it escalates, naming the mechanism that keeps the change from
+converging; there is no third round.
+
+The count starts again in two cases. A review the integrator requests with
+`more-review` is a full review, the first round of a new count. A person's
+answer to an escalation makes the next corrections review a fresh second
+round; the implementer names it when the answer asks for verification or the
+rule above still requires one.
+
+An issue gets one review pass (`issue-preparation.md`).
+
+## Completion
+
+The integrator checks the record rather than the code again: every P1 and P2 id
+has a correction or an accepted answer, and a second round ran where this
+protocol requires one. A P3 left untouched is accepted debt. Merge requires
+`delivery-policy.md`'s gates and no open P1 or P2.

@@ -7,48 +7,43 @@ interpreted — no run fills gaps by guessing.
 
 Design principle (same as the repo's data invariants): anything **derivable**
 (blocked state, execution order) is computed, never stored; anything **not
-derivable** (dependencies, footprint, scope) must be declared.
+derivable** (dependencies, footprint, scope) must be declared, once.
+
+## Relationships
+
+Dependencies and splits are GitHub issue relationships, not body text:
+
+- **Blocked by** — a real ordering prerequisite: this issue cannot be built
+  until that one closes. When ordering depends on an open PR, the issue is
+  blocked by the issue that PR closes. If the PR closes no issue, record the
+  overlap in Pointers and let the file-overlap rule queue it instead of
+  inventing a dependency. Set it with `gh issue create --blocked-by` or
+  `gh issue edit --add-blocked-by`.
+- **Sub-issue** — the split relation and nothing else: this issue is one piece
+  of that parent. Set it with `gh issue create --parent` or
+  `gh issue edit --parent`. Being a sub-issue never affects eligibility, and
+  order only through the priority rule below (owner decision, 2026-09-04,
+  after reserved children sat `ready` for days with nobody able to dispatch
+  them). A parent's list of its pieces is reading order for a person; the
+  relationship is the authority.
 
 ## Machine-readable header
 
 The first lines of the issue body, before any heading:
 
 ```
-Depends-on: #2, #3
 Touches: mcp-server, schema
-Parent: #486
 Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
 ```
 
-- **`Depends-on`** — mandatory, even when empty. `none` or a comma-separated
-  list of issue refs. Grammar: `^Depends-on: (none|#[0-9]+(, #[0-9]+)*)$`.
-  A missing line means *untriaged*, which is different from `none`
-  (*consciously independent*); untriaged issues are never eligible.
-  When ordering depends on an open PR, name the issue that PR closes; PR refs do
-  not belong in this header. If the PR closes no issue, record the overlap in
-  Pointers and let the file-overlap rule queue it instead of inventing a
-  dependency.
 - **`Touches`** — mandatory. Comma-separated footprint names, lowercase: the
   short names of directories under `packages/` (currently `cli`, `hub`,
   `mcp-server`, `schema`, `web` — the live directory listing is authoritative,
   this sentence is not), plus `repo` (root config, CI, top-level docs).
   Grammar: `^Touches: [a-z0-9-]+(, [a-z0-9-]+)*$`, every name from that list.
-- **`Parent`** — optional, at most one line, directly after `Touches`. Grammar:
-  `^Parent: #[0-9]+$`. It records the split relation and nothing else: this
-  issue is one child of that coordination parent. A well-formed header never
-  affects eligibility or order — a child is picked exactly like any other issue
-  (owner decision, 2026-09-04, after reserved children sat `ready` for days
-  with nobody able to dispatch them). A parent body's list of children is
-  reading order for a human; the headers on the children are the relation's
-  authority.
-
-  A malformed header is still a defect: more than one `Parent` line, one naming
-  an issue that does not exist or cannot be read, a self-reference, or a cycle
-  through parents fails the lint below — return the issue naming the defect;
-  never guess which parent was meant.
 - **`Implements`** — optional, and the only header line that may repeat: one
-  line per requirement document, the repeated lines contiguous, after `Parent`
-  — or directly after `Touches` where there is no `Parent` line. Grammar:
+  line per requirement document, the repeated lines contiguous, directly after
+  `Touches`. Grammar:
   `^Implements: <uuid>( \[<block-id>(, <block-id>)*\])?$`, the requirement
   document's uuid and optionally the ids of the outcome blocks this issue
   covers. Both are read from the live workspace; the repository holds no uuid
@@ -63,51 +58,43 @@ Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
   gates nothing.
 
   **`Implements:` narrows who may hold `ready`.** An issue carrying it holds
-  `ready` only while its body also carries a human's own dated
-  decision covering the outcomes it names. That line identifies the human and
-  gives clear provenance for how their decision reached the issue, and reads
-  `Owner decision, <YYYY-MM-DD>: <what was decided>`. Markdown emphasis around
-  that line is permitted — `**Owner decision, 2026-08-26: …**`, the form #272
-  uses, is the shape. The lowercase parenthetical `(owner decision, <date>)`
-  that runs through `.agents/protocols/delivery-policy.md` and the role contracts is a citation of a
-  decision recorded elsewhere, not this line. The decision line may name the
-  umbrella thread it came from, but it stands in the implementing issue's own
-  body: approval lives in GitHub, never in a document field any client can
-  write, so a requirement's `status` authorizes nothing. The lint can check
-  only that the line is present and well formed — never who wrote it, nor
-  whether the decision it quotes really covers the outcomes named. That
-  judgment stays with whoever grants `ready`.
+  `ready` only while a person has approved the outcomes it names, in a comment
+  from their own account on the issue or its parent — never `uberblick-agent`
+  or a bot. Approval lives in GitHub, never in a document field any client can
+  write, so a requirement's `status` authorizes nothing. Whether the approval
+  really covers the outcomes named is a judgment for whoever grants `ready`.
 
 ### Scheduling semantics
 
-- **Eligible** = labelled `ready` AND every `Depends-on` issue is closed. An
-  implementer given an issue with an open dependency finishes `defer`.
+- **Eligible** = labelled `ready` AND not blocked by an open issue. ub-agents
+  skips every other issue.
 - Parallelism is judged at **file** level, not `Touches`-set level: overlapping
   `Touches` sets do not by themselves serialize work. When an open pull request
   is expected to edit the same substantive files semantically, the later
-  implementer finishes `defer` until it merges. A bounded predicted overlap in
-  purely additive aggregation surfaces, such as barrel exports or files
-  collecting independent error types, is reconciled mechanically: after the
-  earlier merge, the later branch synchronizes through a non-rewriting merge
-  only if mergeability requires it, and every exact-head gate runs again.
+  implementer marks its issue blocked by the issue that PR closes and finishes
+  `defer`. A bounded predicted overlap in purely additive aggregation surfaces,
+  such as barrel exports or files collecting independent error types, is
+  reconciled mechanically: after the earlier merge, the later branch
+  synchronizes through a non-rewriting merge only if mergeability requires it,
+  and every exact-head gate runs again.
 - This includes `schema`: its keystone risk is paid by exact-head review and
   gates after upstream reconciliation, not by locking unrelated files or
   packages.
 - Order among eligible issues: **effective priority** first — the
   `priority:urgent`, `priority:high`, `priority:medium` and `priority:low`
   labels — then oldest first (ascending issue number). An issue's effective
-  priority is the highest of its own and of every open issue whose `Depends-on`
-  chain reaches it: a medium that blocks a high is picked as a high, and the
-  oldest urgent goes before any high (owner direction, 2026-09-01). An unset
-  label sorts as medium — a human sets one to move an issue, not to admit it —
-  and does not make prepared work ineligible. Dependencies otherwise gate
-  eligibility and earn no other place in line. Whoever selects work computes
-  this order; no one writes an inherited value onto an issue. A human owns every
-  priority label. Agents may report evidence that the order looks wrong, but
-  never set a label on their own judgement. The one agent write is a shaping
-  session recording the value the human stated in that conversation, with a
-  provenance comment on the issue (`.agents/protocols/issue-shaping.md`; owner
-  decision, 2026-09-07).
+  priority is the highest among its own, its parent's and every open issue it
+  blocks, followed transitively: a medium that blocks a high is picked as a
+  high, a sub-issue of an urgent parent as urgent, and the oldest urgent goes
+  before any high (owner direction, 2026-09-01). An unset label sorts as
+  medium — a person sets one to move an issue, not to admit it — and does not
+  make prepared work ineligible. Dependencies otherwise gate eligibility and
+  earn no other place in line. ub-agents computes this order; no one writes an
+  inherited value onto an issue. A person owns every priority label. Agents may
+  report evidence that the order looks wrong, but never set a label on their
+  own judgement. The one agent write is a shaping session recording the value
+  the person stated in that conversation, with a provenance comment on the
+  issue (`.agents/protocols/issue-shaping.md`; owner decision, 2026-09-07).
 
 ### Gate check
 
@@ -132,48 +119,44 @@ implementation or merge.
 
 | Label | Meaning | Set by |
 |---|---|---|
-| *(none)* | Draft — no role runs on it | — |
-| `needs-preparation` | Queued for one issue-preparer pass | Human or intake template |
-| `ready` | Spec-complete; an implementer may be given it | Human, or the issue-preparer's `ready` outcome |
-| `needs-decision` | Parked on a question only a human can answer | The issue-preparer's `needs-decision` outcome |
-| `wontfix` | Low-impact theoretical work closed as not planned | Human, or the issue-preparer's `wontfix` outcome |
-| `umbrella` | Coordination-only parent of a split; no role runs on it; closes after its children | Human, or the issue-preparer's `split` outcome |
-| `priority:*` | Order among eligible issues (Scheduling semantics) | Human |
+| *(none)* | Draft, or a parent after a split — no role runs on it | — |
+| `needs-preparation` | Queued for one issue-preparer pass | A person, the intake template, or a run creating an issue |
+| `ready` | Spec-complete; an implementer may be given it | A person, or the issue-preparer's `ready` outcome |
+| `needs-human` | Parked on a question for a person | Any run's `needs-human` outcome |
+| `priority:*` | Order among eligible issues (Scheduling semantics) | A person |
 
 Outcomes move these labels through ub-agents; pull-request labels are ub-agents'
 too (`.agents/roles/README.md`).
 
 There is deliberately **no `blocked` label**: blocked is derived from
-`Depends-on` plus issue closed-state, and stored copies of derivable state
-rot.
+blocked-by relationships plus issue closed-state, and stored copies of
+derivable state rot. Nor is there a label for what GitHub's close reasons
+already record: not planned, duplicate.
 
 An issue-preparer may close a low-impact theoretical finding as not planned
-with `wontfix` when no current supported-usage failure is established and a
-delivery cycle is disproportionate. Record the consequence and that rationale.
+(its `wontfix` outcome) when no current supported-usage failure is established
+and a delivery cycle is disproportionate. Record the consequence and that rationale.
 Never use this route for data loss,
 auth or security exposure, or a violated invariant. A concrete bug observed
 later is new evidence and may be filed or reopened then.
 
 Preparation follows `.agents/protocols/issue-preparation.md`; the issue-preparer
-owns its final verdict. Correctable findings are applied in preparation;
-unresolved owner boundaries take `needs-decision`. Another review requires an
-explicit owner request.
+owns its final verdict. Correctable findings are applied in preparation, and
+unresolved owner boundaries are escalated. An issue gets one review pass.
 
-A split follows Sizing below. The source becomes an `umbrella`, never `ready`,
-with its `Depends-on` set to its children. Give each child `needs-preparation`,
-`Parent: #N`, the parent's milestone, and only real ordering dependencies. Technical decomposition is preparer judgment;
-choosing product behavior beyond delegated authority is an owner decision.
+A split follows Sizing below. The source becomes the parent: it leaves the
+queues and is never `ready`. Each piece is a sub-issue with
+`needs-preparation`, the parent's milestone, and blocked-by relationships only
+for real ordering dependencies. Technical decomposition is preparer judgment;
+choosing product behavior beyond delegated authority is a person's decision.
 
-`needs-decision` exit path: the preparer asks one focused question as an issue
-comment, with concrete options and its recommendation, and finishes
-`needs-decision`. A direct answer from a
-human to that question is authority. An agent's comment is evidence unless a
-human explicitly adopts it; an off-GitHub human answer may be recorded only
-with clear provenance. Once the answer is durable, the human replaces
-`needs-decision` with `needs-preparation`. The next preparer pass reuses the
-previous handoff, review verdict, question and answer, and rechecks only the
-affected grounding and intervening upstream changes. It does not repeat
-classification or require another review by default.
+`needs-human` on an issue: the run's summary asks one focused question, with
+concrete options and its recommendation (`.agents/roles/README.md`). A
+person's comment answers it; an agent's comment is evidence unless a person
+explicitly adopts it. The person then removes `needs-human`, and the issue
+returns to the preparer. That pass reuses the previous handoff, review verdict,
+question and answer, and rechecks only the affected grounding and intervening
+upstream changes. It does not repeat classification or the review.
 
 An implementer returns a stale, unsafe, unnecessarily complex, or owner-bound
 contract with the `returned` outcome, whose summary reads:
@@ -184,12 +167,12 @@ Reason: <stale-contract|unsafe|unnecessary-complexity|owner-decision> — <one s
 Evidence: <URL or concise pointer>
 ```
 
-The first consecutive return since the latest human answer to a return question
+The first consecutive return since the latest answer to a return question
 sends the issue back to preparation, and that pass reuses the prior one and
-refreshes only the affected contract and grounding; another review is not the
-default. On a second consecutive return the preparer finishes `needs-decision`
-with one focused question, concrete options and a recommendation. A return
-already at an owner boundary may take that path immediately. The answer to that
+refreshes only the affected contract and grounding; another review is not
+owed. On a second consecutive return the preparer finishes `needs-human` with
+one focused question, concrete options and a recommendation. A return already
+at an owner boundary may take that path immediately. The answer to that
 question resets the return count. Thus an issue gets at most one automatic
 `ready` → `needs-preparation` → `ready` repair cycle before human escalation.
 
@@ -252,16 +235,14 @@ must resolve; a previous spike's report-only PR, separate branch, comparison
 matrix or estimates are not automatic deliverables. Needed prototype evidence
 must remain reproducible.
 
-A human request may become a coordination-only parent with several substantial
-children. One `ready` implementation child describes at most one independently
-reviewable PR; each PR closes its child, and the parent closes after its required
-children. Parents carry `umbrella`, live outside the preparation and
-implementation queues — only their children carry `needs-preparation` or
-`ready` — and name their children in `Depends-on`: the edge is true, because
-the parent closes after them, and the effective-priority rule above then
-carries the parent's priority to every child without anyone writing a label.
-A program is a milestone plus its umbrellas; nothing dispatches it but the
-ordinary queues, and its owner decisions live on the umbrella's thread.
+A human request may become a parent with several substantial sub-issues. One
+`ready` implementation sub-issue describes at most one independently reviewable
+PR; each PR closes its sub-issue, and the parent closes after its sub-issues.
+Parents live outside the preparation and implementation queues — only their
+sub-issues carry `needs-preparation` or `ready` — and the effective-priority
+rule above carries the parent's priority to every sub-issue without anyone
+writing a label. A program is a milestone plus its parents; nothing dispatches
+it but the ordinary queues, and its decisions live on the parent's thread.
 
 The exception runs the other way: individually-trivial issues declaring the
 same `Touches` set may be implemented by one agent as one PR closing several
@@ -280,8 +261,8 @@ implementing. Do not copy the original intake verbatim into a new comment after
 preparation; preserve its material intent in the final contract and rely on the
 issue's edit history for the raw draft. Keep every body as short as complete. A
 complex or security-sensitive issue may carry more context when it changes a
-decision; a coordination parent carries only the shared outcome and child
-routing. Length alone never decides whether to split.
+decision; a parent carries only the shared outcome and the routing to its
+sub-issues. Length alone never decides whether to split.
 
 Preserve the owner's requirements, reasoning, constraints and expressly delegated
 engineering choices. Distinguish owner decisions from inferences and cite settled
@@ -298,25 +279,23 @@ tier routes approval, not design.
   unreachable and a design lands in an issue body instead, that is a recorded
   debt to repay, not a precedent — see the corpus Editorial contract and AGENTS.md’s authority routing.
 
-Close a parent when its final child closes — the integrator whose merge closes
-that child does it in the post-merge pass.
+Close a parent when its last open sub-issue closes — the integrator whose merge
+closes that sub-issue does it in the post-merge pass.
 
 ## Lint — the exact checks
 
 An issue labeled `ready` must pass all of:
 
-1. `Depends-on` line present, first-section, matching the grammar above.
-2. `Touches` line present, matching the grammar, every name valid.
-3. `Parent`, where present, occurs once, matches the grammar, and names a
-   readable issue that is neither this one nor a cycle through parents.
-4. All five `##` sections present: What, Why, Acceptance criteria,
+1. `Touches` line present as the first line, matching the grammar, every name
+   valid.
+2. `Implements`, where present, occupies one contiguous run of lines directly
+   after `Touches`, each matching the grammar above.
+3. All five `##` sections present: What, Why, Acceptance criteria,
    Out of scope, Pointers.
-5. At least one `- [ ]` checkbox under Acceptance criteria.
-6. Out of scope and Pointers are non-empty (explicit `None.` is acceptable).
-7. `Implements`, where present, occupies one contiguous run of lines after
-   `Parent` — or directly after `Touches` where there is no `Parent` line —
-   each matching the grammar above.
-8. A body carrying `Implements` also carries the owner decision line above.
+4. At least one `- [ ]` checkbox under Acceptance criteria.
+5. Out of scope and Pointers are non-empty (explicit `None.` is acceptable).
+6. An issue carrying `Implements` has a person's approval of its outcomes, as
+   above.
 
 Sizing and decision-completeness are judgment calls, not lintable — the
 issue-preparer applies them when granting `ready`, and an implementer given a

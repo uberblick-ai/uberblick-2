@@ -23,7 +23,8 @@ due` with that report's URL and stops without posting.
 The first run covers the preceding three days. A later run resumes after the
 cursor in the newest valid report; it never rereads older history merely to
 produce activity. Expand farther back only to establish a claimed trend or to
-recover from a missing or invalid cursor.
+recover from a missing or invalid cursor. A role board the newest report's cursor does not
+name is read from the start of the window.
 
 ## Authority
 
@@ -40,7 +41,7 @@ claims to verify, not ground truth.
 ## Grounding and sample
 
 Record fresh `origin/main` and read the current versions of `AGENTS.md`,
-`.agents/protocols/delivery-policy.md`, `.github/ISSUE_SPEC.md`, the five role contracts, and only the
+`.agents/protocols/delivery-policy.md`, `.github/ISSUE_SPEC.md`, the four role contracts, and only the
 procedures implicated by the audit window.
 
 Record workflow-rule commits since the prior report's grounding. Judge a
@@ -52,16 +53,14 @@ way.
 
 The sample is deterministic:
 
-- shallow-index every top-level issue-preparation retrospective in Discussion
-  #506 whose creation time falls in the window: item, outcome, run, links, and
-  any claimed anomaly, cost or avoided rework;
-- shallow-index the same fields for every top-level implementation
-  retrospective in Discussion #522 whose creation time falls in the window;
+- shallow-index every top-level retrospective on the four role boards
+  (`AGENTS.md`, Project facts) whose creation time falls in the window: item,
+  role, run, links, and the claimed cost, cause and fix;
 - fully read a retrospective and reconstruct its linked issue, issue
   review, return, PR, review and gate records only when that index or another
   sample signal indicates an anomaly, a convergence concern, or evidence for a
   claimed trend;
-- every implementer return or `needs-decision` transition in the window, even
+- every implementer return or `needs-human` transition in the window, even
   when no retrospective links it;
 - every PR active in the window, meaning its `createdAt`, `updatedAt`,
   `mergedAt`, or `closedAt`, or a durable commit, review, or comment record,
@@ -122,10 +121,11 @@ choices and triggers. Duplicated or stale truth is itself a possible finding.
    inside the same unit as a possible representation or workflow defect rather
    than automatically as evidence that one more round is valuable. For a PR
    owing two reviews, verify both targeted one head before an ordinary
-   correction wave. Count coordination records too: each review should leave
-   one verdict per head, each PR one mutable finding ledger, and repeated
-   handoff wrappers or copied gate tables are churn unless a recovery boundary
-   required them.
+   correction wave, and that the two-round rule in `review-protocol.md` was
+   followed. Count coordination records too: each review should leave one
+   verdict per head, each revision one summary listing its finding ids, and
+   repeated handoff wrappers or copied gate tables are churn unless a recovery
+   boundary required them.
 5. Challenge every suspected finding. Record the exact rule, durable evidence,
    reachable consequence, and smallest correction. Put plausible but unproven
    risks under `Watch` and record important false alarms rejected.
@@ -144,8 +144,8 @@ gate. The independent runs may be lifecycle runs on different items or distinct
 role or review runs on one item, but not repeated comments from the same run;
 the evidence must identify the same underlying workflow mechanism. When that
 mechanism is repeated interpretation of procedural prose, prefer deleting or
-shrinking the prose, or moving the mechanical step into one executable local
-helper, over adding more prose or another review round. Never convert
+shrinking the prose, or moving the mechanical step into the ub-agents
+configuration, over adding more prose or another review round. Never convert
 retrospective completeness into a gate.
 
 Classify workflow impact independently from code-review severity:
@@ -196,8 +196,7 @@ Recommended actions
 - <at most three, ordered by expected value> | None.
 
 Cursor
-- Preparation discussion: <last included comment URL or none>
-- Implementation discussion: <last included comment URL or none>
+- <role> board: <last included comment URL or none>, one line per role board
 - GitHub observed through: <UTC timestamp>
 
 Audit self-assessment

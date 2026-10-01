@@ -9,18 +9,21 @@ same text binds a Codex session and a Claude session.
 
 ## Given
 
-Either a `ready` issue to implement, or a pull request to revise: its required
-reviews' findings, or an integrator ruling with a fix-up brief, at its current
-head. `ready` is the preparation verdict; do not prepare again.
+Either a `ready` issue and the branch to push, or a pull request to revise at
+its current head: its reviews' findings, an integrator's `changes`, or a
+person's answer after `needs-human`. `ready` is the preparation verdict; do
+not prepare again.
 
 ## Before starting an issue
 
 Fetch `origin/main` and record its SHA, read the final issue and thread, and
 inspect the code and Pointers it depends on.
 
-- If a `Depends-on` issue is still open, or an open pull request is expected to
-  edit the same substantive files semantically (`.github/ISSUE_SPEC.md`,
-  Scheduling semantics), finish `defer` and name it.
+- If an open pull request is expected to edit the same substantive files
+  semantically (`.github/ISSUE_SPEC.md`, Scheduling semantics), mark this issue
+  blocked by the issue that PR closes (`gh issue edit <N> --add-blocked-by
+  <M>`) and finish `defer`, naming it. When that PR closes no issue, finish
+  `defer` alone.
 - A contract prepared more than six days ago is checked before it is built: the
   `ready` label or the preparer's handoff dates it. Check that its Pointers
   still resolve at that base, that the code it targets still behaves as the body
@@ -43,10 +46,11 @@ focused checks while editing; before handoff run `mise run lint`,
 a real environmental limitation rather than replacing a failed command with a
 claim. Browser or e2e coverage is owed only for a browser-observable outcome.
 
-Where the issue conflicts with the code, is unsafe, forces unnecessary
-complexity, or needs an owner decision, do not deviate: finish `returned` with
-`Reason: <stale-contract|unsafe|unnecessary-complexity|owner-decision> — <one
-sentence>` and the evidence.
+Where the contract conflicts with the code, is unsafe, forces unnecessary
+complexity, or needs a person's decision, do not deviate. On an issue, finish
+`returned` with `Reason: <stale-contract|unsafe|unnecessary-complexity|owner-decision>
+— <one sentence>` and the evidence. On a pull request, escalate
+(`.agents/roles/README.md`).
 
 Read `.agents/protocols/delivery-policy.md`'s "Reviews owed" table for this diff
 and name the reviews it owes in the outcome: none for an exempt diff, with the
@@ -55,22 +59,26 @@ concrete unresolved risk that warrants them.
 
 ## Revising a pull request
 
-Continue the pull request's remote head in this run's own worktree; never
-rebase or force-push it. For review findings, correct clearly correct, in-scope
-P1 and P2 findings in one batch, plus P3s only when local and inexpensive, and
-answer the rest with evidence; an answer is not a disposition, and a finding is
-not settled by the author alone. For an integrator ruling, implement its fix-up
-brief. Then run the final validation again and finish `done`, naming the finding
-ids you corrected and those you answered; the review that raised them verifies
-them at the new head. Leave anything you neither correct nor answer standing
-for the integrator.
+Continue the pull request's remote head; never rebase or force-push it.
+
+- **Review findings:** correct clearly correct, in-scope P1 and P2 findings in
+  one batch, plus P3s only when local and inexpensive, and answer the rest with
+  evidence (`.agents/protocols/review-protocol.md`, Settling a finding). Answer
+  Copilot's remarks in their own threads. The summary lists every finding id
+  once, as `corrected in <sha>` or `answered: <evidence>`. Name the review that
+  raised them when the protocol's Rounds rule requires a second round, or when
+  a correction carries risk of its own; otherwise name none.
+- **An integrator's `changes`:** fix what it names.
+- **A person's answer:** act on it. When it leaves nothing to change, finish
+  `done` without a commit.
+
+Run the final validation again on any new head, then finish `done`.
 
 ## Boundaries
 
 No commits to `main`, no merging, no authoritative review of your own diff, and
 nothing outside the issue's footprint — scope found mid-flight becomes a finding
-or a new issue. Immutable review, merge tier and final review routing belong to
-the integrator.
+or a new issue. The merge tier and the final gates belong to the integrator.
 
 Read the preparer-selected corpus documents and relevant linked decisions.
 Expand discovery if the code or findings expose missing context.
@@ -82,10 +90,11 @@ and its handoff says why no product context could affect it.
 
 ## Outcomes
 
-`done` (with the reviews owed), `returned`, or `defer`.
+`done` (naming the reviews owed), `returned` (issue runs only), `needs-human`,
+or `defer`.
 
-For `done` on an issue, push the branch, open its pull request against `main`,
-and use this body, as short as complete:
+For `done` on an issue, push the branch you were given and open its pull
+request against `main` with this body, as short as complete:
 
 ```text
 Closes #N
@@ -108,14 +117,5 @@ Corpus: not used — <why no product choice needed it> | <title> (<uuid>) — <o
 Link logs instead of pasting counts. The summary links the pull request, names
 the grounding SHA and the reviews owed, and nothing else.
 
-Then post one retrospective to the `implementation` discussion (`AGENTS.md`,
-Project facts) in this shape. It is telemetry for the workflow audit, never a
-gate:
-
-```text
-Retrospective: implementer <run id> — PR #N
-Effort: <issue estimate> → <actual S|M|L>, <one clause if they differ>
-Rounds: <review rounds>, <fix-up waves>; findings <new class|recurrence in the same area|none>
-Cost: <the one thing that consumed time for no value, or none>
-Fix: <the smallest workflow or repository change that would remove it, or none>
-```
+Retrospectives go to the implementer board, under the rule in
+`.agents/roles/README.md`.

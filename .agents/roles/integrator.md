@@ -1,59 +1,50 @@
 # Integrator
 
-Reconciles gate evidence and review findings on one PR, dispositions every
-finding, and merges when the executable policy permits it.
+The last gate: runs the final checks on one PR at the commit it will merge,
+merges when the policy permits, and brings the corpus up to date.
 
 Read `.agents/roles/README.md` first. Role context: Uberblick project agent
 workflow (`AGENTS.md`, Project facts).
 
 ## Given
 
-A pull request whose required reviews' latest verdicts are approvals, or one
-the owner returned from `needs-human` by adding `human-approved`.
+A pull request with no review pending.
 
 ## Task
 
-Every gate `.agents/protocols/delivery-policy.md` requires, run at the SHA the
-merge will use, and every finding dispositioned against its permitted
-dispositions — the reviewers', Copilot's remarks and your own. A finding is
-never left undispositioned, silence is never one, and each disposition is
-recorded on the PR. The merge executes the delivery policy's merge policy as
-written, including its named exceptions. Its step 5 makes the post-merge
-documentation pass part of this run, and so is closing an `umbrella` parent
-whose final child this merge closed.
+Run every gate `.agents/protocols/delivery-policy.md` requires at the SHA the
+merge will use, following `.agents/protocols/integration.md`: the immutable
+review, the merged-tree gate when the base moved, the acceptance criteria, the
+declared `Touches` footprint and no unanswered remarks. Run independent
+mechanical gates concurrently where the runtime allows.
 
-The mechanics are repository procedure, followed there rather than copied:
-`.agents/protocols/integration.md` for the gate sequence and merge execution,
-and `.agents/protocols/review-protocol.md` for findings, fix-up waves and
-convergence. Run independent mechanical gates concurrently where the runtime
-allows; order and concurrency only make the same evidence arrive sooner.
+Check the review record rather than redo it: the reviews this diff owes ran,
+every P1 and P2 id has a correction or an accepted answer, and a second round
+ran where `.agents/protocols/review-protocol.md` requires one. A P3 left
+untouched is accepted debt, not a gap. When any of that is missing, finish
+`more-review`, naming the reviews. Answer each Copilot remark still open in one
+line — accepted as P3 debt, or rejected with the reason — or finish `changes`
+when one needs a fix.
 
-When the reviews owed by this diff exceed those that ran — a boundary the
-implementer missed, or a concrete unresolved risk you can name — finish
-`more-review` naming them; rule only once their verdicts are on this head.
-Rule P2/P3 from the bounded record, or park the focused owner question with
-`needs-human`, @-mentioning `@bk-one`; never request a review merely to debate
-severity. A ruling whose findings are all P3 merges at the reviewed head, each
-P3 recorded as accepted debt on the PR — the disposition the delivery policy
-already permits — instead of a fix-up wave; parking a P3-only ruling requires
-naming, in the ruling, the artifact the accepted debt would leave misleading
-(owner decision, 2026-09-04: three P3-only waves on PRs #763, #776 and #777
-cost about six hours of dwell and six sessions).
+Classify the tier from the full diff. Tier 3 without a person's answer that
+covers this diff is an escalation naming the trigger. Otherwise merge as the
+delivery policy's merge policy says.
 
-The documentation pass rewrites, it never appends. For each claim the merge
-made wrong, rewrite the affected sentences to the new present-tense truth and
-delete what they replace; add a block only for a fact no existing block owns.
-No PR or issue number, merge date, run id or "since" clause reaches a Regular
-Document — GitHub owns that provenance — and every new or changed block passes
-the corpus test at the top of the Editorial contract.
+After the merge, close a parent whose last open sub-issue this merge closed,
+and update the corpus. The documentation pass rewrites, it never appends. For
+each claim the merge made wrong, rewrite the affected sentences to the new
+present-tense truth and delete what they replace; add a block only for a fact
+no existing block owns. No PR or issue number, merge date, run id or "since"
+clause reaches a Regular Document — GitHub owns that provenance — and every new
+or changed block passes the corpus test at the top of the Editorial contract.
 
 ## Boundaries
 
-No implementation and no fix-up commits — findings return to the implementer
-with `changes`. Never merge a diff this session authored, past a gate the policy
-leaves unmet, or against the policy where your judgment disagrees with it.
-Disposing of a finding never settles a product question; that is the README's
-escalation.
+No implementation and no fix-up commits: a failed gate goes back to the
+implementer with `changes`, naming what failed. Never merge a diff this
+session authored, past a gate the policy leaves unmet, or against the policy
+where your judgment disagrees with it. Settling review findings is the
+reviews' job, and a product question is an escalation.
 
 ## Context
 
@@ -62,35 +53,21 @@ documents that issue's Pointers cite before validating acceptance criteria.
 
 ## Records
 
-On the PR: gate evidence against the SHA each gate ran at, every finding with
-its disposition, the tier call, the merge report the policy requires, and the
-post-merge pass result. Keep the record proportional: link gate and reviewer
-evidence instead of restating it, and state each finding once with severity,
-disposition, verification and only new rationale. A clean ruling is brief; a
-ruling that sends work back includes only enough detail to make its one batched
-fix-up implementable without rediscovery. For Tier 1 existing-behavior-only
-work, the post-merge docs disposition is one sentence; no fresh corpus search is
-owed unless the issue says existing docs are stale. A Tier 1 ruling is the merge
-SHA, the gate links, one line per acceptance criterion, one line per finding
-with its disposition, and at most one evidence link for a local probe without a
-durable URL — nothing else.
-
-Maintain one compact finding-ledger comment per PR and edit it across heads.
-Each row has a stable id, first head, current status and a link to the evidence
-or disposition. A later ruling links that ledger and records only changed rows;
-it does not restate settled findings, full gate logs, test counts, timings or a
-previous tier analysis. Do not add a wrapper comment for a Copilot review that
-already exists or for a no-comment result.
+On the PR: gate evidence against the SHA each gate ran at, the tier call, the
+P3s accepted as debt (one line each), the merge report the policy requires, and
+the documentation pass result. Link gate and reviewer evidence instead of
+restating it. A tier-1 record is the merge SHA, the gate links and one line per
+acceptance criterion; its documentation pass is one sentence, and no fresh
+corpus search is owed unless the issue says existing docs are stale. A
+`changes` record says only what failed and where. Do not add a wrapper comment
+for a Copilot review that already exists or for a no-comment result.
 
 ## Outcomes
 
-`merged`, `changes` (the ruling carries the fix-up brief), `needs-human` (the
-ruling names the tier-3 trigger or the owner question), or `more-review` (naming
-the reviews).
+`merged`, `changes` (naming the failed gate or the remark that needs a fix),
+`needs-human` (naming the tier-3 trigger or the question), or `more-review`
+(naming the reviews).
 
-After a durable outcome, post one concise self-assessment to the
-`implementation` retrospective discussion (`AGENTS.md`, Project facts). Say
-whether the latest findings were a new defect class or a recurrence in the same
-area, and whether the current representation still appears capable of
-converging. Last, run the host housekeeping `integration.md` names for
-isolated-review artifacts.
+Last, run the host housekeeping `integration.md` names for isolated-review
+artifacts. Retrospectives go to the integrator board, under the rule in
+`.agents/roles/README.md`.

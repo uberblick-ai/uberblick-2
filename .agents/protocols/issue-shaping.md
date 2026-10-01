@@ -76,7 +76,7 @@ relevant effort issue. Once the human authorizes that write, record a concise
 comment linking authoritative decisions and relevant issues rather than copying
 their contracts. On resumption, read that context and subsequent decisions;
 an overview is an index, not a competing authority. This permission to record
-context does not grant queue transitions, dependency edits, a new umbrella, or
+context does not grant queue transitions, relationship edits, a new parent, or
 new decision tickets. If no effort issue exists, retain the overview in the
 conversation until a confirmed intake is appropriate.
 
@@ -191,17 +191,19 @@ ask for the same lifecycle decision again. Confirm only the outcome grouping
 needed for the missing intakes, then perform the same open-and-closed issue
 search before creating them.
 
-Each planned-outcome intake starts with contiguous lines in this order:
+Each planned-outcome intake starts with this line:
 
 ```text
 Implements: <requirement uuid> [<outcome block ids, when used>]
-Owner decision, <YYYY-MM-DD>: <the human's planned decision and its provenance>
 ```
 
-Follow those lines with the confirmed intake sections below. Add only
-`needs-preparation`: do not write `Depends-on`, `Touches`, `Parent`, Priority,
-or `ready`. The issue-preparer later completes the machine-readable header and
-grounds the contract. Create it with `gh issue create --repo
+Follow it with the confirmed intake sections below. Add only
+`needs-preparation`: do not write `Touches`, relationships, Priority, or
+`ready`. The issue-preparer later completes the machine-readable header and
+grounds the contract. Record the human's planned decision as a comment on the
+intake; it is their approval only when it comes from their own account
+(`.github/ISSUE_SPEC.md`), so when this session posts as `uberblick-agent`, ask
+them to confirm it there. Create it with `gh issue create --repo
 uberblick-ai/uberblick-2`, so no checkout is required, and tell the human to set
 Request Source `Human` in the issue sidebar.
 
@@ -235,11 +237,11 @@ tell the human to set Request Source `Human` in the issue sidebar. Add the
 `priority:<value>` label the human stated in this conversation, with a comment on
 the issue recording that decision; leave it unset when they gave none, and never
 infer it. Never infer or write
-`Depends-on`, `Touches`, `Parent`, architecture, implementation detail,
+`Touches`, relationships, architecture, implementation detail,
 acceptance criteria, Pointers, or `ready`. The
 issue-preparer derives the technical contract from the current repository and
 corpus under `.agents/protocols/issue-preparation.md`; a human choice that
-remains unresolved may later take the existing `needs-decision` path.
+remains unresolved is later escalated with `needs-human`.
 
 If creation is not available, return the confirmed handoff to the coordinator.
 Do not present a handoff as a created issue, a requirement document, or
