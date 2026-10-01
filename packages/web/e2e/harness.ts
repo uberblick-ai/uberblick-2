@@ -293,7 +293,7 @@ export async function startHarness(): Promise<Harness> {
   const workspace = `uberblick-${workspaceUuid}`;
   // Nothing creates the second workspace: its rooms begin existing when the
   // switcher proof opens them, which is the real light-multi-workspace model.
-  const secondWorkspace = `ablauf-${randomUUID()}`;
+  const secondWorkspace = `research-${randomUUID()}`;
   const config: HubConfig = {
     authSecret: SECRET,
     port: 0,

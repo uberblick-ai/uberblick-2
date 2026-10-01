@@ -20,7 +20,6 @@
     "@radix-ui/react-popover": "1.1.23",
     "@tiptap/core": "^3.30.5",
     "@tiptap/pm": "^3.30.5",
-    "@uberblick/ablauf": "0.1.0",
     "@uberblick/hub": "workspace:*",
     "@uberblick/schema": "workspace:*",
     "lowlight": "^3.3.0",

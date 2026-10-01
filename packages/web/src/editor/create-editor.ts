@@ -15,7 +15,6 @@ import { DocLinks } from "./doc-links.js";
 import type { DocLinkContext } from "./doc-links.js";
 import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
-import { MermaidBlocks } from "./mermaid.js";
 import { paletteExtensions } from "./nodes.js";
 import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TableBlocks } from "./table.js";
@@ -73,11 +72,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // …and the table block's own two: the class that opens a table's source
     // under the caret, and the typed and pasted doors a table comes in through.
     TableBlocks,
-    // …and the mermaid block's one: the same class, opening a diagram's source
-    // under the caret. Nothing else — a diagram has no typed or pasted door,
-    // because a mermaid block is one the reader asks for by name.
-    MermaidBlocks,
-    // …and the terminal block's one: the same class again, opening a
+    // …and the terminal block's one: the same class, opening a
     // demonstration's transcript under the caret — which is also what stops the
     // demonstration playing while it is being written.
     TerminalBlocks,

@@ -42,8 +42,7 @@
  *   panel for the source. Coming back is a fresh run from the top, because the
  *   text the reader just edited is the text the demonstration is of.
  * - **the block carries a `comment` anchor.** A picture over the text hides the
- *   range an annotation is anchored in, so an annotated block stays source —
- *   the same rule mermaid.ts states.
+ *   range an annotation is anchored in, so an annotated block stays source.
  *
  * Exactly one timer is outstanding at any moment, whatever the transcript's
  * length: {@link play} schedules the next step from the current one and every
@@ -165,9 +164,9 @@ export const terminalBlockView: NodeViewRenderer = ({
   const dom = terminalChrome.root();
   const contentDOM = terminalChrome.content();
 
-  // The panel is the control that opens the source — mermaid.ts's hand-off,
-  // for the same reason: the drawn representation hides the text, so reaching
-  // the text has to be a named, keyboard-reachable thing to do.
+  // The panel is the control that opens the source: the drawn representation
+  // hides the text, so reaching the text has to be a named, keyboard-reachable
+  // thing to do.
   const screen = document.createElement("div");
   screen.className = "ub-terminal-screen";
   screen.setAttribute("contenteditable", "false");
@@ -332,8 +331,8 @@ export const terminalBlockView: NodeViewRenderer = ({
   /**
    * The boundary. Every entry point runs on the update ProseMirror is in the
    * middle of, and one throw from any of it bricks the editor for every client
-   * of the document — the same total catch mermaid.ts documents. Nothing but
-   * DOM primitives runs in the catch, so the degraded state cannot fail too.
+   * of the document, so the catch is total. Nothing but DOM primitives runs
+   * in the catch, so the degraded state cannot fail too.
    */
   const guarded = (run: () => void): void => {
     try {
@@ -365,7 +364,7 @@ export const terminalBlockView: NodeViewRenderer = ({
   toggle.addEventListener("click", onToggle);
 
   // Clicking the panel is how a reader opens the source, and the caret has to
-  // be put there explicitly — see the same comment in mermaid.ts.
+  // be put there explicitly — see the same comment in table.ts.
   const open = (event: Event): void => {
     event.preventDefault();
     const pos = typeof getPos === "function" ? getPos() : undefined;

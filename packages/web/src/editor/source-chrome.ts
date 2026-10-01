@@ -20,9 +20,9 @@
  * nothing, newlines intact. Not markdown, not a fence — the source.
  *
  * {@link sourceEditingPlugin} at the foot is the other half a source block that
- * draws itself needs, and it is here for the same reason: `table`, `mermaid`
- * and `terminal` decide which representation to show by exactly the same rule,
- * and one copy of that rule is one place for it to be wrong.
+ * draws itself needs, and it is here for the same reason: `table` and
+ * `terminal` decide which representation to show by exactly the same rule, and
+ * one copy of that rule is one place for it to be wrong.
  */
 
 import type { NodeViewRenderer, NodeViewRendererProps } from "@tiptap/core";
@@ -239,7 +239,7 @@ export const terminalChrome: SourceBlockChrome = {
  * Exported because {@link sourceEditingPlugin} is not the only thing that has
  * to answer this question: a block that decides whether to *do* the expensive
  * drawing has to agree with the stylesheet about which block is open, and two
- * spellings of that rule would eventually disagree (mermaid.ts).
+ * spellings of that rule would eventually disagree (terminal.ts).
  */
 export function selectedBlock(
   state: EditorState,
@@ -261,10 +261,10 @@ export function selectedBlock(
  * Put `className` on the `typeName` block the selection sits in, so the
  * stylesheet can show that block's source and hide its rendering.
  *
- * The blocks that draw themselves — `table`, `mermaid` and `terminal` — share
- * this, and they share the reason: which representation a reader sees is
- * derived from the selection on every draw rather than remembered, because a
- * mode nobody stores cannot get out of step with the document.
+ * The blocks that draw themselves — `table` and `terminal` — share this, and
+ * they share the reason: which representation a reader sees is derived from
+ * the selection on every draw rather than remembered, because a mode nobody
+ * stores cannot get out of step with the document.
  */
 export function sourceEditingPlugin(typeName: string, className: string): Plugin {
   return new Plugin({

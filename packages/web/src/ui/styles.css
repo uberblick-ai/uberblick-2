@@ -3168,14 +3168,7 @@ h3.ub-heading {
   color: var(--syntax-number);
 }
 
-/* ---- the mermaid block (#495) ----
-
-   The table block's rule, applied to a diagram: the drawing is what a reader
-   sees and the source is what they get with their caret in the block. The
-   difference is what decides whether there is a drawing at all — ablauf reads a
-   subset of mermaid, so `data-rendered="false"` (a sequence diagram, a
-   subgraph, half-typed text) keeps the block exactly as it was before diagrams
-   existed, label and all. */
+/* ---- the mermaid block ---- */
 .ub-mermaid {
   position: relative;
   margin: 0.7em 0;
@@ -3194,70 +3187,9 @@ h3.ub-heading {
   margin-bottom: 0.2rem;
 }
 
-/* The label is a statement of fact, so it follows the fact. A block that draws
-   says nothing at all while it is drawing; opened for editing it says what the
-   reader is now looking at, without the parenthesis that is no longer true. */
-.ub-mermaid[data-rendered="true"]::before {
-  content: "mermaid source";
-}
-
-.ub-mermaid[data-rendered="true"]:not(.ub-mermaid-editing)::before {
-  content: none;
-}
-
-/* Why this block is not a picture, when there is a reason worth a reader's
-   time. Absent for source ablauf simply does not read — a `sequenceDiagram` is
-   not a failure and the label above already says "not rendered" — and present
-   for the three that are: past the size budget, carrying a comment, or a
-   renderer that failed. No `display` here on purpose, so the element's own
-   `hidden` is what decides whether it shows. */
-.ub-mermaid-note {
-  margin: 0 0 0.3rem;
-  font-size: 0.8rem;
-  line-height: 1.45;
-  color: var(--muted-foreground);
-  border-left: 3px solid var(--border);
-  padding-left: 0.6rem;
-}
-
-.ub-mermaid-render {
-  display: none;
-  overflow-x: auto;
-  cursor: text;
-}
-
-/* The picture is the control that opens the source, so it looks like one when
-   the keyboard is on it — the same ring the annotation highlights use. */
-.ub-mermaid-render:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 2px;
-}
-
-/* ablauf paints its own opaque ground and its own text colours — so the picture
-   needs a box and a size, and no colour of ours. Those colours are its two
-   palettes written as `light-dark()` into the SVG's presentation attributes
-   (editor/mermaid.ts), which are CSS like any other declaration: `color-scheme`
-   at the top of this file picks the half, so the picture follows the reader's
-   appearance without being drawn again. */
-.ub-mermaid-render svg {
-  display: block;
-  max-width: 100%;
-  height: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.ub-mermaid[data-rendered="true"]:not(.ub-mermaid-editing) .ub-mermaid-render {
-  display: block;
-}
-
-.ub-mermaid[data-rendered="true"]:not(.ub-mermaid-editing) > pre {
-  display: none;
-}
-
 /* ---- the terminal block (#843) ----
 
-   The mermaid block's rule again: the panel is what a reader sees and the
+   The table block's rule again: the panel is what a reader sees and the
    transcript is what they get with their caret in the block. `data-rendered`
    is `false` for the one thing that keeps the transcript on screen — a block
    carrying an annotation anchor, whose highlighted range a panel would hide.
