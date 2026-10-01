@@ -39,14 +39,15 @@
  *
  * **The secret never travels through argv.** A hub credential given on a
  * command line is in every `ps` listing and every shell history file, so it
- * comes from a mode-restricted file (`--secret-file`) or from a hidden prompt,
+ * comes from a mode-restricted file (`--secret-file`) or from a masked prompt,
  * and neither the secret nor a token minted from it is ever printed.
  */
 
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname } from "node:path";
+import type { Key } from "node:readline";
 import { createInterface } from "node:readline/promises";
-import { Writable } from "node:stream";
+import { type Readable, Writable } from "node:stream";
 import { parseArgs } from "node:util";
 import {
   compareCorpus,
@@ -453,12 +454,18 @@ function readSecretFile(path: string): string {
 /**
  * Ask for the remote's signing secret without echoing it.
  *
- * Readline echoes what it reads to its `output`, so the output is a sink that
- * discards; the prompt itself goes to stderr, keeping stdout clean. Returns
- * null when there is nobody to ask — a pipe gets `--secret-file`, not a hang.
+ * Readline owns editing and cancellation, but its output is always discarded.
+ * After each keypress, mirror only the public line length and cursor as masks
+ * on stderr. Never route readline's output to a real stream: overriding its
+ * private echo methods does not suppress plaintext on Node 26.
+ * Returns null when there is nobody to ask — a pipe gets `--secret-file`.
  */
-async function promptForSecret(io: Io): Promise<string | null> {
-  if (process.stdin.isTTY !== true) {
+export async function promptForSecret(
+  io: Io,
+  input: Readable & { isTTY?: boolean } = process.stdin,
+  columns = process.stderr.columns ?? Number.POSITIVE_INFINITY,
+): Promise<string | null> {
+  if (input.isTTY !== true) {
     return null;
   }
   const sink = new Writable({
@@ -466,16 +473,66 @@ async function promptForSecret(io: Io): Promise<string | null> {
       done();
     },
   });
-  io.err("remote signing secret (input hidden): ");
+  const label = "remote signing secret (input masked): ";
+  const width = columns > 0 ? columns : Number.POSITIVE_INFINITY;
+  // Complete a terminal's pending wrap before moving its cursor. Otherwise
+  // backspace at a wrapped line's start cannot reach the preceding mask.
+  const wrap = (offset: number): string =>
+    (label.length + offset) % width === 0 ? "\r\n" : "";
+  const move = (from: number, to: number): string => {
+    const rows = Math.floor((label.length + to) / width) -
+      Math.floor((label.length + from) / width);
+    if (rows !== 0) {
+      return `\x1b[${Math.abs(rows)}${rows < 0 ? "A" : "B"}` +
+        `\x1b[${(label.length + to) % width + 1}G`;
+    }
+    return to < from ? "\b".repeat(from - to) : "\x1b[C".repeat(to - from);
+  };
+  io.err(label + wrap(0));
   const rl = createInterface({
-    input: process.stdin,
+    input,
     output: sink,
     terminal: true,
   });
+  let length = 0;
+  let cursor = 0;
+  let finished = false;
+  // createInterface registers its keypress handler first, so these public
+  // values already reflect the edit. Count code points, not UTF-8 bytes or
+  // UTF-16 code units: a pasted non-ASCII character gets one mask too.
+  const mask = (_text: string, key: Key): void => {
+    if (finished || key.name === "return" || key.name === "enter") {
+      finished = true;
+      input.off("keypress", mask);
+      return;
+    }
+    const nextLength = Array.from(rl.line).length;
+    const nextCursor = Array.from(rl.line.slice(0, rl.cursor)).length;
+    if (nextLength === length) {
+      io.err(move(cursor, nextCursor));
+    } else {
+      const start = Math.min(cursor, nextCursor);
+      const end = Math.max(length, nextLength);
+      io.err(
+        move(cursor, start) +
+        "*".repeat(nextLength - start) +
+        " ".repeat(Math.max(0, length - nextLength)) +
+        wrap(end) + move(end, nextCursor),
+      );
+    }
+    length = nextLength;
+    cursor = nextCursor;
+  };
+  rl.once("close", () => {
+    finished = true;
+    input.off("keypress", mask);
+  });
+  input.on("keypress", mask);
   try {
     const answer = await rl.question("");
     return answer.trim() === "" ? null : answer.trim();
   } finally {
+    input.off("keypress", mask);
     rl.close();
     io.err("\n");
   }
@@ -660,7 +717,7 @@ export const REMOTE_BRIDGE_OPTIONS = {
 const SECRET_FILE_NOTE = `  --secret-file <path>  read the remote's signing secret from a file only you
                         can read (mode 0600). Without it the secret already
                         configured is tried first, and a terminal is prompted
-                        with the input hidden.
+                        with one * per character entered.
   -h, --help            show this help
 
 Never pass a secret as an argument: it would be in the shell history and in
