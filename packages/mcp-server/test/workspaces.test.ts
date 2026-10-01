@@ -39,9 +39,9 @@ import type { PeerClient, Rig } from "./helpers.js";
 
 /** Two workspaces, spelled the way a person would configure each of them. */
 const UBERBLICK_UUID = "1a5e7c30-9d64-4b12-8f7a-2c0b6e9d4a11";
-const ABLAUF_UUID = "b2d9e4c7-5a13-4f80-8e6b-71c0a9d35f2e";
+const RESEARCH_UUID = "b2d9e4c7-5a13-4f80-8e6b-71c0a9d35f2e";
 const UBERBLICK = `uberblick-${UBERBLICK_UUID}`;
-const ABLAUF = `ablauf-${ABLAUF_UUID}`;
+const RESEARCH = `research-${RESEARCH_UUID}`;
 
 const hubs: Hub[] = [];
 const rigs: Rig[] = [];
@@ -99,27 +99,27 @@ describe("two workspaces on one hub", () => {
     hubs.push(running);
     const dataHome = tempDir();
     const uberblick = await serverFor(UBERBLICK, running.port, dataHome);
-    const ablauf = await serverFor(ABLAUF, running.port, dataHome);
+    const research = await serverFor(RESEARCH, running.port, dataHome);
 
     const roadmap = await uberblick.ok("create_doc", {
       title: "Uberblick roadmap",
       description: "A test document.",
       blocks: [{ type: "paragraph", text: "a shared word: corpus" }],
     });
-    const kickoff = await ablauf.ok("create_doc", {
-      title: "Ablauf kickoff",
+    const kickoff = await research.ok("create_doc", {
+      title: "Research kickoff",
       description: "A test document.",
       blocks: [{ type: "paragraph", text: "a shared word: corpus" }],
     });
-    const backlog = await ablauf.ok("create_doc", {
-      title: "Ablauf backlog",
+    const backlog = await research.ok("create_doc", {
+      title: "Research backlog",
       description: "A test document.",
       blocks: [{ type: "paragraph", text: "everything after the kickoff" }],
     });
-    await ablauf.ok("set_links", { uuid: backlog.uuid, links: [kickoff.uuid] });
+    await research.ok("set_links", { uuid: backlog.uuid, links: [kickoff.uuid] });
 
     await waitForQuiet(uberblick);
-    await waitForQuiet(ablauf);
+    await waitForQuiet(research);
 
     // The hub holds *both* corpora — read by a client that is neither server,
     // once per workspace. So what follows is a corpus this hub could have
@@ -128,7 +128,7 @@ describe("two workspaces on one hub", () => {
     // other side pass as isolation.
     for (const [workspaceUuid, expected] of [
       [UBERBLICK_UUID, [roadmap.uuid]],
-      [ABLAUF_UUID, [kickoff.uuid, backlog.uuid]],
+      [RESEARCH_UUID, [kickoff.uuid, backlog.uuid]],
     ] as const) {
       const onTheHub = await peerClient(running.port, directoryRoom(workspaceUuid));
       peers.push(onTheHub);
@@ -145,8 +145,8 @@ describe("two workspaces on one hub", () => {
       roadmap.uuid,
     ]);
 
-    const there = await ablauf.ok("list_docs", {});
-    expect(there.workspace).toBe(ABLAUF_UUID);
+    const there = await research.ok("list_docs", {});
+    expect(there.workspace).toBe(RESEARCH_UUID);
     expect(
       there.docs.map((doc: { uuid: string }) => doc.uuid).sort(),
     ).toEqual([kickoff.uuid, backlog.uuid].sort());
@@ -162,7 +162,7 @@ describe("two workspaces on one hub", () => {
     // ---- search ----
     // The same words in both corpora, so a hit could only come from the index
     // having seen the other workspace's blocks.
-    const found = await ablauf.ok("search", { query: "corpus" });
+    const found = await research.ok("search", { query: "corpus" });
     expect(found.hits.map((hit: { uuid: string }) => hit.uuid)).toEqual([
       kickoff.uuid,
     ]);
@@ -173,7 +173,7 @@ describe("two workspaces on one hub", () => {
 
     // ---- backlinks ----
     expect(
-      (await ablauf.ok("backlinks", { uuid: kickoff.uuid })).backlinks.map(
+      (await research.ok("backlinks", { uuid: kickoff.uuid })).backlinks.map(
         (link: { uuid: string }) => link.uuid,
       ),
     ).toEqual([backlog.uuid]);
@@ -191,11 +191,11 @@ describe("two workspaces on one hub", () => {
       rooms.every((room: string) => room.startsWith(`${UBERBLICK_UUID}/`)),
     ).toBe(true);
 
-    const databases = [uberblick.config.databasePath, ablauf.config.databasePath];
+    const databases = [uberblick.config.databasePath, research.config.databasePath];
     expect(databases[0]).not.toBe(databases[1]);
     expect(databases.map((path) => basename(path))).toEqual([
       `${UBERBLICK_UUID}.sqlite`,
-      `${ABLAUF_UUID}.sqlite`,
+      `${RESEARCH_UUID}.sqlite`,
     ]);
     // One data home, two files: the workspace is the whole difference.
     expect(dirname(databases[0] as string)).toBe(dirname(databases[1] as string));

@@ -56,8 +56,11 @@ import { Node, Mark, mergeAttributes } from "@tiptap/core";
 import { COMMENT_MARK, MAX_LIST_INDENT } from "@uberblick/schema";
 import type { HeadingLevel, ListIndent } from "@uberblick/schema";
 import { PROSE_MARKS, inlineMarkExtensions } from "./marks.js";
-import { mermaidBlockView } from "./mermaid.js";
-import { codeBlockChrome, sourceBlockView } from "./source-chrome.js";
+import {
+  codeBlockChrome,
+  mermaidChrome,
+  sourceBlockView,
+} from "./source-chrome.js";
 import { tableBlockView } from "./table.js";
 import { terminalBlockView } from "./terminal.js";
 
@@ -285,15 +288,8 @@ export const CodeBlock = Node.create({
 });
 
 /**
- * Mermaid source, drawn as a diagram where ablauf can read it (#495).
- *
- * The node spec is a source block's, unchanged: the Y.XmlText is still the only
- * representation of the diagram's meaning, because the SVG is derived on every
- * paint and never stored. Everything that makes it a picture lives in the
- * NodeView (mermaid.ts), and anything outside ablauf's mermaid subset stays the
- * source block it has always been — as does anything too large to lay out, and
- * anything carrying a `comment` mark, since constraint 3 above lets an
- * annotation anchor in this block's text and a picture would hide it.
+ * Mermaid source, rendered as plain text in a styled block. The diagram is not
+ * drawn: the block shows its source, labelled as such.
  */
 export const Mermaid = Node.create({
   name: "mermaid",
@@ -319,8 +315,9 @@ export const Mermaid = Node.create({
       ["pre", {}, 0],
     ];
   },
+  // Mermaid source is text people take away too — see CodeBlock's node view.
   addNodeView() {
-    return mermaidBlockView;
+    return sourceBlockView(mermaidChrome);
   },
   // See CodeBlock: Enter is handled by the core keymap, driven by `code: true`.
 });

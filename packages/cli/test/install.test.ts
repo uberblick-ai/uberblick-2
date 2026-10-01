@@ -277,13 +277,13 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     const box = sandbox();
     const stub = stubVendor(box, "claude");
     const run = runUb(
-      ["mcp", "install", "claude", "--project", "--workspace", WORKSPACE, "--label", "ablauf"],
+      ["mcp", "install", "claude", "--project", "--workspace", WORKSPACE, "--label", "research"],
       box,
       stub.env,
     );
 
     expect(run.status, run.output).toBe(0);
-    expect(read(stub.record)).toContain("uberblick-ablauf");
+    expect(read(stub.record)).toContain("uberblick-research");
     expect(run.stdout).toContain(`This entry is pinned to ${WORKSPACE}`);
     expect(run.stdout).toContain("does not follow `ub workspace use`");
   });
@@ -701,11 +701,11 @@ describe("ub mcp install --workspace", () => {
 
     // A name with nothing to pin would be a second entry running the same
     // unpinned command under a second name, which is not a thing to install.
-    const unpinned = install("--label", "ablauf");
+    const unpinned = install("--label", "research");
     expect(unpinned.status).toBe(2);
     expect(unpinned.stderr).toMatch(/needs a --workspace/);
 
-    const stale = install("--workspace", WORKSPACE, "--name", "ablauf");
+    const stale = install("--workspace", WORKSPACE, "--name", "research");
     expect(stale.status).toBe(2);
     expect(stale.stderr).toMatch(/Unknown option '--name'/);
 

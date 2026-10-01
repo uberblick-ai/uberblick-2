@@ -12,7 +12,7 @@
  * - **{@link tableBlockView}**, the NodeView, holds both representations at
  *   once: a `<table>` it draws from the source, and the editable source itself.
  *   Which one is shown is CSS, keyed off a class.
- * - **`sourceEditingPlugin`** (source-chrome.ts, shared with `mermaid`) puts
+ * - **`sourceEditingPlugin`** (source-chrome.ts, shared with `terminal`) puts
  *   that class on the table block the selection is in. So the rendering is what
  *   a reader sees, and the source is what they get the moment their caret is in
  *   the block — click to edit, the same gesture a code block has, with no mode

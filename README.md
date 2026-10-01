@@ -233,7 +233,7 @@ committable, so a secret has no business being in one. The **one** value an
 entry may carry is `WORKSPACE_ID`, and only when `--workspace` asks for it:
 
 ```
-ub mcp install claude --project --workspace ablauf-<uuid>
+ub mcp install claude --project --workspace research-<uuid>
 ```
 
 **A project MCP entry is this repository's workspace binding.** That is the
@@ -276,7 +276,7 @@ MCP config — committable, and never secrets. That is one command, run in the
 checkout:
 
 ```
-ub mcp install claude --project --workspace ablauf-$(uuidgen | tr A-Z a-z)
+ub mcp install claude --project --workspace research-$(uuidgen | tr A-Z a-z)
 ```
 
 That registers `WORKSPACE_ID` on the `uberblick` entry of this directory's
@@ -298,14 +298,14 @@ pin on a separately named `uberblick-<label>` entry instead of the primary one,
 so two processes serve two corpora under two tool prefixes.
 
 ```
-ub mcp install claude --project --workspace <other-uuid> --label ablauf
+ub mcp install claude --project --workspace <other-uuid> --label research
 ```
 
 Either way it is the same server, the same hub and a different corpus.
 
 The web client takes one more value, `WORKSPACES`: a comma-separated list of the
 workspaces to offer in the topbar switcher, e.g.
-`WORKSPACES="uberblick-<uuid>,ablauf-<uuid>"`. Plaintext config, exported for
+`WORKSPACES="uberblick-<uuid>,research-<uuid>"`. Plaintext config, exported for
 the run that needs it (`WORKSPACES=… mise run web`) since the ids are a uuid per
 machine, and it is a *menu*, not an authority: switching workspaces is
 navigating to `/<workspace>`, and a link into an unlisted workspace still opens

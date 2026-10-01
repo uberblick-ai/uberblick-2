@@ -32,23 +32,23 @@ import { parseRoute, useRoutePath, workspaceList } from "../src/ui/route.js";
 import type { Workspace } from "../src/ui/route.js";
 
 const UBERBLICK_UUID = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
-const ABLAUF_UUID = "b2d9e4c7-5a13-4f80-8e6b-71c0a9d35f2e";
+const RESEARCH_UUID = "b2d9e4c7-5a13-4f80-8e6b-71c0a9d35f2e";
 const UBERBLICK = `uberblick-${UBERBLICK_UUID}`;
-const ABLAUF = `ablauf-${ABLAUF_UUID}`;
+const RESEARCH = `research-${RESEARCH_UUID}`;
 
 /** What the client resolved: the served document's list, else the defines'. */
-const CONFIGURED = [UBERBLICK, ABLAUF];
+const CONFIGURED = [UBERBLICK, RESEARCH];
 
 const uberblick: Workspace = { uuid: UBERBLICK_UUID, segment: UBERBLICK };
-const ablauf: Workspace = { uuid: ABLAUF_UUID, segment: ABLAUF };
+const research: Workspace = { uuid: RESEARCH_UUID, segment: RESEARCH };
 
 describe("the configured list is a menu, and the address is still the authority", () => {
   it("lists every configured workspace, in the order configured", () => {
-    expect(workspaceList(CONFIGURED, uberblick)).toEqual([uberblick, ablauf]);
+    expect(workspaceList(CONFIGURED, uberblick)).toEqual([uberblick, research]);
     // Whitespace around an entry is somebody formatting their config file.
-    expect(workspaceList([` ${UBERBLICK} `, ` ${ABLAUF} `], null)).toEqual([
+    expect(workspaceList([` ${UBERBLICK} `, ` ${RESEARCH} `], null)).toEqual([
       uberblick,
-      ablauf,
+      research,
     ]);
   });
 
@@ -62,7 +62,7 @@ describe("the configured list is a menu, and the address is still the authority"
   it("drops an entry that is not a workspace id instead of offering it", () => {
     // A menu item that navigates to the invalid-link screen is worse than an
     // item that is not there: the reader would read it as a broken workspace.
-    expect(workspaceList(["main", "", ABLAUF, "not-a-uuid"], null)).toEqual([ablauf]);
+    expect(workspaceList(["main", "", RESEARCH, "not-a-uuid"], null)).toEqual([research]);
   });
 
   it("counts two spellings of one workspace once, keeping the address's own", () => {
@@ -71,9 +71,9 @@ describe("the configured list is a menu, and the address is still the authority"
     // sitting in a workspace they are not in.
     const bare: Workspace = { uuid: UBERBLICK_UUID, segment: UBERBLICK_UUID };
     expect(workspaceList([UBERBLICK, UBERBLICK_UUID], bare)).toEqual([bare]);
-    expect(workspaceList([UBERBLICK, UBERBLICK_UUID], ablauf)).toEqual([
+    expect(workspaceList([UBERBLICK, UBERBLICK_UUID], research)).toEqual([
       uberblick,
-      ablauf,
+      research,
     ]);
   });
 
@@ -81,7 +81,7 @@ describe("the configured list is a menu, and the address is still the authority"
     // Arriving by a link into an unlisted workspace is normal — a link carries
     // its workspace. Showing it is how the reader can tell where they are, and
     // the configured ones are then the way back.
-    expect(workspaceList([UBERBLICK], ablauf)).toEqual([uberblick, ablauf]);
+    expect(workspaceList([UBERBLICK], research)).toEqual([uberblick, research]);
   });
 });
 
@@ -162,20 +162,20 @@ describe("switching workspace is navigating to it", () => {
 
     expect(trigger(host).textContent).toContain(UBERBLICK);
     open(host);
-    expect(offered()).toEqual([`${UBERBLICK}0 docs`, ABLAUF]);
+    expect(offered()).toEqual([`${UBERBLICK}0 docs`, RESEARCH]);
 
     act(() => {
-      items().find((item) => item.textContent === ABLAUF)?.click();
+      items().find((item) => item.textContent === RESEARCH)?.click();
     });
 
     // The address moved, and it is the *list* of the other workspace — not the
     // open document under a new workspace, which would be a link to nowhere.
-    expect(window.location.pathname).toBe(`/${ABLAUF}`);
+    expect(window.location.pathname).toBe(`/${RESEARCH}`);
     expect(parseRoute(window.location.pathname, null)).toEqual({
       kind: "list",
-      workspace: ablauf,
+      workspace: research,
     });
-    expect(trigger(host).textContent).toContain(ABLAUF);
+    expect(trigger(host).textContent).toContain(RESEARCH);
 
     act(() => root.unmount());
     host.remove();
@@ -185,21 +185,21 @@ describe("switching workspace is navigating to it", () => {
     // The link is the authority. A build configured for two workspaces must not
     // rewrite an address into one of them.
     const uuid = "3231bff4-2f1c-4a49-9f0a-6f8b2c1d7e55";
-    window.history.replaceState(null, "", `/${ABLAUF}/${uuid}`);
+    window.history.replaceState(null, "", `/${RESEARCH}/${uuid}`);
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
     act(() => root.render(<Probe configured={[UBERBLICK]} />));
 
-    expect(window.location.pathname).toBe(`/${ABLAUF}/${uuid}`);
+    expect(window.location.pathname).toBe(`/${RESEARCH}/${uuid}`);
     expect(parseRoute(window.location.pathname, null)).toEqual({
       kind: "doc",
-      workspace: ablauf,
+      workspace: research,
       uuid,
     });
     // Unconfigured, and still on the menu — with the configured one beside it.
     open(host);
-    expect(offered()).toEqual([UBERBLICK, `${ABLAUF}0 docs`]);
+    expect(offered()).toEqual([UBERBLICK, `${RESEARCH}0 docs`]);
 
     act(() => root.unmount());
     host.remove();
