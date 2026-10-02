@@ -139,8 +139,9 @@ and `wait` on it, or signal the process group, or the trap is decoration.
 
 A run ends when its session ends, so a task your agent tool starts in the
 background never reports back. Wait in the foreground with a bounded command, such as `gh pr checks <N>
---watch` under the tool's timeout. When what you wait for is still pending
-after that, finish `defer` and name it.
+--watch` under the tool's timeout. A tool that returns while the command still
+runs leaves it yours: keep polling until it exits, or stop it. When what you
+wait for is still pending after that, finish `defer` and name it.
 
 ## Product context, proportional to the action
 
