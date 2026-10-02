@@ -887,7 +887,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   await page.getByRole("button", { name: "Show document list" }).click();
   await expect.poll(async () => (await page.locator(".ub-list").boundingBox())?.x).toBe(0);
   await page.setViewportSize({ width: 768, height: 720 });
-  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Close threads" }).click();
   await expect(page.locator(".ub-rail")).not.toBeVisible();
   const narrow = await layout();
   expect(narrow.column.width).toBeLessThan(firstPopulated.column.width);
