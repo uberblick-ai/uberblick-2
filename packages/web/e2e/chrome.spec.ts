@@ -1876,6 +1876,11 @@ for (const scheme of ["light", "dark"] as const) {
     // walk has to reach that state rather than proving its resting separator
     // twice. Dark had 1.46:1 here before the light-only repair and must keep it.
     const workspace = page.locator(".ub-workspace");
+    // The header reaches the pane's edge; the initial pointer at (0, 0) can
+    // already hover it. Put the pointer outside the sidebar before reading rest.
+    const viewport = page.viewportSize();
+    if (viewport === null) throw new Error("e2e: no viewport");
+    await page.mouse.move(viewport.width - 1, viewport.height - 1);
     const resting = await paintedIn(workspace, "background-color");
     await workspace.hover();
     const workspaceGround = await paintedIn(workspace, "background-color");
