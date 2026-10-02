@@ -10,7 +10,7 @@
  * `brew upgrade uberblick-ai/tap/uberblick` transcript belongs to the tap's
  * second publication; this is the repeatable half, and it needs no credential.
  *
- * Apple Silicon macOS only, because that is where the formula is supported.
+ * Apple Silicon macOS and Linux x86_64 are the supported Homebrew platforms.
  */
 
 import { spawnSync } from "node:child_process";
@@ -28,9 +28,12 @@ if (installedVersion === undefined || upgradedVersion === undefined) {
 		"usage: node scripts/homebrew-upgrade-proof.mjs <installed-version> <upgraded-version>",
 	);
 }
-if (process.platform !== "darwin" || process.arch !== "arm64") {
+if (
+	!(process.platform === "darwin" && process.arch === "arm64") &&
+	!(process.platform === "linux" && process.arch === "x64")
+) {
 	throw new Error(
-		`Homebrew proof needs Apple Silicon macOS, got ${process.platform}/${process.arch}`,
+		`Homebrew proof needs Apple Silicon macOS or Linux x86_64, got ${process.platform}/${process.arch}`,
 	);
 }
 

@@ -14,7 +14,7 @@
     "test": "pnpm -r test && pnpm run test:e2e-runner && pnpm run test:housekeeping && pnpm run test:homebrew-release",
     "test:e2e-runner": "node --test scripts/run-e2e.test.mjs",
     "test:housekeeping": "node --test scripts/housekeeping.test.mjs",
-    "test:homebrew-release": "node --test scripts/publish-homebrew-release.test.mjs"
+    "test:homebrew-release": "node --test scripts/publish-homebrew-release.test.mjs scripts/homebrew-proof.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.9",

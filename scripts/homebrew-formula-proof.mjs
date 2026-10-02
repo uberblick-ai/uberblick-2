@@ -21,8 +21,13 @@ if (formulaName === undefined || expectedVersion === undefined || formulaPath ==
     "usage: node scripts/homebrew-formula-proof.mjs <tap/formula> <version> <formula-path>",
   );
 }
-if (process.platform !== "darwin" || process.arch !== "arm64") {
-  throw new Error(`Homebrew proof needs Apple Silicon macOS, got ${process.platform}/${process.arch}`);
+if (
+  !(process.platform === "darwin" && process.arch === "arm64") &&
+  !(process.platform === "linux" && process.arch === "x64")
+) {
+  throw new Error(
+    `Homebrew proof needs Apple Silicon macOS or Linux x86_64, got ${process.platform}/${process.arch}`,
+  );
 }
 
 const scratch = mkdtempSync(join(tmpdir(), "uberblick-homebrew-proof-"));
