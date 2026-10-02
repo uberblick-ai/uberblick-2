@@ -348,3 +348,63 @@ for (const width of [390, 820, 1024]) {
     }
   });
 }
+
+test("touch reveals a low thread in the sheet while its close control stays in view", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ hasTouch: true });
+  const page = await context.newPage();
+  try {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1400, height: 800 });
+    await openDocument(page);
+    const anchors = Array.from({ length: 10 }, (_, index) =>
+      `anchor ${String(index + 1).padStart(2, "0")}`,
+    );
+    // All ranges exist before the first annotation, so typing cannot extend
+    // an existing highlight into the next fixture paragraph.
+    for (const [index, anchor] of anchors.entries()) {
+      if (index > 0) await page.keyboard.press("Enter");
+      await page.keyboard.insertText(anchor);
+    }
+    for (const [index] of anchors.entries()) {
+      await page.locator(".ub-editor .ub-paragraph").nth(index).click();
+      await page.keyboard.press("Home");
+      await page.keyboard.press("Shift+End");
+      await page.locator(".ub-composer-open").click();
+      await page.getByPlaceholder(/Comment as/).fill(`conversation ${index + 1}`);
+      await page.keyboard.press("Enter");
+    }
+    await expect(page.locator(".ub-thread")).toHaveCount(10);
+    await page
+      .locator(".ub-thread-card", { hasText: "conversation 10" })
+      .getByRole("button", { name: "Resolve", exact: true })
+      .tap();
+    await page.getByRole("button", { name: "Hide document list" }).tap();
+    await page.setViewportSize({ width: 820, height: 600 });
+
+    const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
+    const close = sheet.getByRole("button", { name: "Close threads" });
+    await expect(sheet).toBeVisible();
+    await close.tap();
+    await expect(sheet).toBeHidden();
+
+    for (const number of [9, 10]) {
+      const anchor = anchors[number - 1];
+      await page.locator("[data-comment-thread]", { hasText: anchor }).tap();
+      await expect(sheet).toBeVisible();
+      const selected = sheet.locator('.ub-thread[aria-current="true"]');
+      await expect(selected).toContainText(`conversation ${number}`);
+      if (number === 10) await expect(selected).toHaveAttribute("aria-expanded", "true");
+      await expect(selected).toBeInViewport({ ratio: 1 });
+      await expect(sheet.locator(".ub-thread").first()).not.toBeInViewport();
+      // Assert before tapping: Playwright's automatic scroll into view must
+      // not conceal a close control that scrolls away with the conversations.
+      await expect(close).toBeInViewport({ ratio: 1 });
+      await close.tap();
+      await expect(sheet).toBeHidden();
+    }
+  } finally {
+    await context.close();
+  }
+});

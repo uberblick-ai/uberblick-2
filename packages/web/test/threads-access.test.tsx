@@ -404,6 +404,7 @@ describe("the threads rail can be opened where the layout hides it", () => {
     await settle(() => button("Reply").click());
     const field = sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input");
     expect(field).not.toBeNull();
+    expect(document.activeElement).toBe(field);
     await settle(() => press(field!, "Escape"));
     expect(sheet().querySelector(".ub-comment-input")).toBeNull();
     expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
@@ -449,6 +450,46 @@ describe("the threads rail can be opened where the layout hides it", () => {
     expect(sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe(
       "Keep this unsent reply",
     );
+
+    // A retained draft is not another request to start replying. While the
+    // sheet is closed, resizing must leave the writer in the prose.
+    await settle(() => button("Close threads").click());
+    const prose = host.querySelector<HTMLElement>(".ub-editor .ProseMirror");
+    expect(prose).not.toBeNull();
+    await settle(() => prose!.focus());
+    await width.change(false);
+    expect(document.activeElement).toBe(prose);
+    expect(host.querySelector<HTMLTextAreaElement>(".ub-rail .ub-comment-input")?.value).toBe(
+      "Keep this unsent reply",
+    );
+    await width.change(true);
+    expect(document.querySelector("[data-slot=sheet-content]")).toBeNull();
+    expect(document.activeElement).toBe(prose);
+    await settle(() => toggle(host).click());
+    expect(sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe(
+      "Keep this unsent reply",
+    );
+  });
+
+  it("keeps focus in the prose when a closed keyboard-opened drawer crosses the breakpoint", async () => {
+    const width = threadsWidth(true);
+    const { host, threadId } = await openAnnotatedDoc();
+    const opener = highlight(host, threadId);
+    opener.focus();
+    await settle(() => press(opener, "Enter"));
+    const card = sheet().querySelector<HTMLButtonElement>(".ub-thread");
+    expect(document.activeElement).toBe(card);
+    await settle(() => press(card!, "Escape"));
+    expect(document.activeElement).toBe(opener);
+
+    const prose = host.querySelector<HTMLElement>(".ub-editor .ProseMirror");
+    expect(prose).not.toBeNull();
+    await settle(() => prose!.focus());
+    await width.change(false);
+    expect(document.activeElement).toBe(prose);
+    await width.change(true);
+    expect(document.querySelector("[data-slot=sheet-content]")).toBeNull();
+    expect(document.activeElement).toBe(prose);
   });
 
   it("returns to the Threads toggle when the opening highlight was removed", async () => {

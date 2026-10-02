@@ -36,7 +36,7 @@
  * settled the thread can reopen it a second later — from anywhere.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { addComment, getAnnotation, setAnnotationResolved } from "@uberblick/schema";
 import type { AnnotationComment } from "@uberblick/schema";
@@ -164,6 +164,7 @@ function ThreadCard({
             placeholder="Reply…"
             submitLabel="Reply"
             draft={draft}
+            autoFocus={false}
             onSubmit={onReply}
             onCancel={onReplyClose}
           />
@@ -225,6 +226,15 @@ export function ThreadsPane({
   // The pane stays mounted when the sheet closes or switches to a column.
   // The modal content can unmount without losing the form or its draft.
   const [replyText, setReplyText] = useState("");
+  // Only choosing Reply takes focus. A retained form remounting after closure
+  // or a breakpoint crossing is not another request to start writing in it.
+  useEffect(() => {
+    if (replyTo === null) return;
+    document
+      .getElementById(threadCardId(replyTo))
+      ?.querySelector<HTMLTextAreaElement>(".ub-comment-input")
+      ?.focus();
+  }, [replyTo]);
   const cancelReply = (): void => {
     setReplyTo(null);
     setReplyText("");
@@ -244,6 +254,7 @@ export function ThreadsPane({
   const [refusal, setRefusal] = useState<{ id: string; message: string } | null>(
     null,
   );
+  const handledSelection = useRef<ThreadFocus | null>(null);
 
   // A highlight click focuses a card that may be scrolled out of the rail. Keyed
   // on the whole focus and not its id, so clicking the same highlight again
@@ -254,7 +265,13 @@ export function ThreadsPane({
   // not at the key press, because the rail may be a drawer that this very
   // selection opened: the card is focusable once React has committed it.
   useEffect(() => {
-    if (focused === null || (narrow && !open)) return;
+    // A resize or a dismissal can rerun this effect, but neither repeats the
+    // last highlight's request to move focus out of the prose.
+    if (
+      focused === null ||
+      focused === handledSelection.current ||
+      (narrow && !open)
+    ) return;
     // The first committed frame still has the collapsed card to focus. Reveal
     // it, then let this effect's second pass scroll and focus the expanded card.
     // A card selection never sets this flag, so its own toggle remains intact.
@@ -262,6 +279,7 @@ export function ThreadsPane({
       setExpanded(focused.id);
       return;
     }
+    handledSelection.current = focused;
     scrollThreadCardIntoView(focused.id);
     if (focused.viaKeyboard) focusThreadCard(focused.id);
   }, [focused, expanded, narrow, open]);
@@ -269,13 +287,12 @@ export function ThreadsPane({
   // A pending reply outlives the conversation it belonged to unless it is let
   // go: hiding the form while a thread reads as resolved is not the same as
   // forgetting it, and a thread someone else resolves and then reopens would
-  // bring the form — and its focus grab — back with nobody having asked.
+  // bring the form back with nobody having asked.
   //
   // Read-only is the same hazard with a different cause: archiving a document
   // hides the form without forgetting it, and the restore would bring it back
-  // and take the focus with it (`CommentForm` autofocuses), on a gesture nobody
-  // made. Whoever archived it ended the conversation for now; the reply is let
-  // go with it.
+  // without another Reply gesture. Whoever archived it ended the conversation
+  // for now; the reply is let go with it.
   useEffect(() => {
     if (replyTo === null) return;
     if (readOnly) {
@@ -410,12 +427,13 @@ export function ThreadsPane({
         <Sheet open={open} onOpenChange={(shown) => onOpenChange?.(shown)}>
           <SheetContent
             id="ub-rail"
-            className="ub-rail ub-rail-open gap-5 overflow-y-auto p-3 text-[0.85rem]"
+            className="ub-rail ub-rail-open text-[0.85rem]"
             closeLabel="Close threads"
             aria-describedby={undefined}
             onOpenAutoFocus={(event) => {
-              // The portal mounts after the pane's selection effect. Override
-              // only our highlight-to-card keyboard path, once the card exists.
+              // The portal mounts after the pane's selection effect. Every
+              // anchor must reveal its card once it exists, including taps.
+              if (focused !== null) scrollThreadCardIntoView(focused.id);
               if (focused?.viaKeyboard) {
                 event.preventDefault();
                 focusThreadCard(focused.id);
@@ -437,7 +455,8 @@ export function ThreadsPane({
             }}
           >
             <SheetTitle className="sr-only">Threads</SheetTitle>
-            {content}
+            {/* Scroll the list inside the sheet so its close control stays put. */}
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">{content}</div>
           </SheetContent>
         </Sheet>
       </>
