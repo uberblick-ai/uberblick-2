@@ -12,10 +12,8 @@ permissions:
 
 # brew tap-new commits its scaffold; do not rely on a runner's Git identity.
 env:
-  GIT_AUTHOR_NAME: Homebrew proof
-  GIT_AUTHOR_EMAIL: homebrew-proof@example.invalid
-  GIT_COMMITTER_NAME: Homebrew proof
-  GIT_COMMITTER_EMAIL: homebrew-proof@example.invalid
+  HOMEBREW_GIT_NAME: Homebrew proof
+  HOMEBREW_GIT_EMAIL: homebrew-proof@example.invalid
 
 jobs:
   formula:
