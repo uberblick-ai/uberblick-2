@@ -392,11 +392,24 @@ export function App(): ReactElement {
    */
   const [focusedThread, setFocusedThread] = useState<ThreadFocus | null>(null);
   /**
-   * Whether the rail is open as an overlay drawer (#101). It only means anything
-   * below 1100px, where the stylesheet has hidden the rail: above that width the
-   * rail is a column and `.ub-rail-open` declares nothing.
+   * Whether the narrow rail is open. Retained across resizing; the wide rail
+   * always remains a non-modal column.
    */
   const [threadsOpen, setThreadsOpen] = useState(false);
+  // Keep this query identical to the threads layout query in styles.css.
+  const [narrowThreads, setNarrowThreads] = useState(
+    () => window.matchMedia?.("(max-width: 1100px)").matches ?? false,
+  );
+  useEffect(() => {
+    const query = window.matchMedia?.("(max-width: 1100px)");
+    if (query === undefined) return;
+    const update = (): void => setNarrowThreads(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  const threadsOpenNow = useRef(threadsOpen);
+  threadsOpenNow.current = threadsOpen;
   /** Whether the sync detail panel is open (#72) — the status reading's state. */
   const [syncOpen, setSyncOpen] = useState(false);
   useEffect(() => {
@@ -409,18 +422,16 @@ export function App(): ReactElement {
    */
   const threadsOpener = useRef<HTMLElement | null>(null);
 
-  /** Close the drawer, and give focus back to whatever opened it. */
-  const closeThreads = useCallback(() => {
-    setThreadsOpen(false);
+  const closeThreads = useCallback(() => setThreadsOpen(false), []);
+
+  // Run after the modal unmounts and releases its focus scope. A resize to the
+  // wide rail also unmounts it, but keeps the open state and must not return
+  // focus to the prose while the reader is still using the rail.
+  const restoreThreadsFocus = useCallback((event: Event) => {
+    event.preventDefault();
+    if (threadsOpenNow.current) return;
     const opener = threadsOpener.current;
     threadsOpener.current = null;
-    // Only when the focus is in the rail that is about to go. A reader whose
-    // focus is somewhere else did not ask to be moved, and Escape is a key they
-    // may well have meant for something on screen.
-    const inRail = document.activeElement?.closest(".ub-rail") ?? null;
-    if (inRail === null) return;
-    // The highlight the reader came from, if ProseMirror has not redrawn it
-    // since; the handle otherwise, which is always somewhere to stand.
     const back =
       opener?.isConnected === true
         ? opener
@@ -455,9 +466,8 @@ export function App(): ReactElement {
     ) {
       threadsOpener.current = document.activeElement;
     }
-    // Selecting a thread is asking to read it, so the drawer opens whether the
-    // reader got here from a highlight or from the toggle. On a wide window this
-    // is a state change nothing renders.
+    // Selecting a thread asks to read it. Keep that request across resizing,
+    // even while the wide rail is already visible as a non-modal column.
     setThreadsOpen(true);
   }, []);
 
@@ -470,20 +480,6 @@ export function App(): ReactElement {
     // should leave it.
     threadsOpener.current = null;
     setThreadsOpen(true);
-  }, [threadsOpen, closeThreads]);
-
-  /** Escape closes the drawer — the way out of an overlay. */
-  useEffect(() => {
-    if (!threadsOpen) return;
-    const close = (event: KeyboardEvent): void => {
-      // A control inside the rail may have handled this Escape already — a
-      // reply form cancelling, say, which preventDefaults it. Dismissing the
-      // form and closing the drawer out from under it are two gestures, and the
-      // reader made one.
-      if (event.key === "Escape" && !event.defaultPrevented) closeThreads();
-    };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
   }, [threadsOpen, closeThreads]);
 
   const directory = useRoom(
@@ -1006,23 +1002,22 @@ export function App(): ReactElement {
         <OutlinePane
           key={doc?.room ?? "no-document"}
           connection={doc}
-          obscured={threadsOpen}
+          obscured={narrowThreads && threadsOpen}
         />
-        {/* The comments rail renders nothing when there are no threads, so the
-            rail hides itself when empty instead of leaving a blank gutter. */}
-        <aside
-          id="ub-rail"
-          className={threadsOpen ? "ub-rail ub-rail-open" : "ub-rail"}
-        >
-          <ThreadsPane
-            connection={doc}
-            threads={threads}
-            focused={focusedThread}
-            author={identity.name}
-            readOnly={archived || !docStatus.writable}
-            onFocus={onFocusThread}
-          />
-        </aside>
+        {/* The pane owns draft state across the sheet's unmount and resize.
+            No threads means no rail or reserved gutter. */}
+        <ThreadsPane
+          connection={doc}
+          threads={threads}
+          focused={focusedThread}
+          author={identity.name}
+          readOnly={archived || !docStatus.writable}
+          onFocus={onFocusThread}
+          narrow={narrowThreads}
+          open={threadsOpen}
+          onOpenChange={setThreadsOpen}
+          onCloseAutoFocus={restoreThreadsFocus}
+        />
         {/* The sync detail panel (#72), over the panes rather than beside them:
             it is opened to answer a question and closed again. The room and
             sessions are the ones the document-local status line describes;

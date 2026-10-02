@@ -1497,28 +1497,6 @@ body {
   padding-inline-start: 1.25rem;
 }
 
-.ub-rail {
-  width: var(--outline-width);
-  flex: none;
-  border-left: 1px solid var(--border);
-  overflow-y: auto;
-  padding: 0.75rem;
-  font-size: 0.85rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-  /* A minimum breath follows the fixed-width rail. Any extra viewport width
-     follows it too because the document pane above does not grow. */
-  margin-inline-end: var(--pane-trailing-space);
-}
-
-/* The section renders nothing when it has no thread, which leaves the rail
-   childless — and a 15rem bordered gutter with nothing in it is worse than no
-   gutter. `:empty` is exact because React renders no whitespace text nodes. */
-.ub-rail:empty {
-  display: none;
-}
-
 /* Below this the three panes stop fitting; the rail is the one that goes — and
    with it the only way to read a thread, which is what the drawer is for (#101).
    The toggle appears, and opening it brings the rail back *over* the prose
@@ -1531,10 +1509,6 @@ body {
   .ub-document-pane {
     --pane-document-inset: 1rem;
     --document-rail-gap: 1rem;
-  }
-
-  .ub-rail {
-    display: none;
   }
 
   /* The drawer occupies this edge. Do not leave a covered trigger in the Tab
@@ -1553,20 +1527,6 @@ body {
     z-index: 4;
     align-self: flex-end;
     margin-bottom: 0.25rem;
-  }
-
-  .ub-rail.ub-rail-open {
-    display: flex;
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    right: 0;
-    z-index: 5;
-    width: min(20rem, 85vw);
-    background: var(--card);
-    color: var(--card-foreground);
-    box-shadow: -8px 0 24px rgb(0 0 0 / 0.18);
-    margin-inline-end: 0;
   }
 }
 
