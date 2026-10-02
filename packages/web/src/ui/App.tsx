@@ -11,7 +11,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -376,10 +375,11 @@ export function App(): ReactElement {
   const restoreSidebar = useRef<HTMLButtonElement | null>(null);
   const previousCollapsed = useRef(collapsed);
 
-  // Collapsing unmounts the control that received the gesture. Move focus to
+  // Collapsing retires the control that received the gesture. Move focus to
   // its visible counterpart after that commit, and do the inverse on restore.
-  // The initial stored preference is not a gesture, so it must not steal focus.
-  useLayoutEffect(() => {
+  // Run after retiring portalled menus release their focus scopes. The initial
+  // stored preference is not a gesture, so it must not steal focus.
+  useEffect(() => {
     if (previousCollapsed.current === collapsed) return;
     previousCollapsed.current = collapsed;
     (collapsed ? restoreSidebar : hideSidebar).current?.focus();
@@ -878,7 +878,7 @@ export function App(): ReactElement {
   return (
     <main className="ub-app">
       <ReboundNotice serving={serving} />
-      <div className="ub-body">
+      <div className="ub-body" data-sidebar-collapsed={collapsed}>
         {collapsed && (
           /* Pane-local and out of flow: restoring the sidebar costs no global
              row and leaves every route at the application's top edge. */
@@ -894,31 +894,30 @@ export function App(): ReactElement {
             »
           </button>
         )}
-        {!collapsed && (
-          <Sidebar
-            collapseButtonRef={hideSidebar}
-            collapseLabel={sidebarToggleLabel}
-            onCollapse={() => setCollapsed(true)}
-            connection={directory}
-            sidebar={sidebar}
-            groups={sidebarGroups}
-            entries={entries}
-            workspaces={workspaces}
-            workspace={workspace}
-            onSwitchWorkspace={onSwitchWorkspace}
-            identity={identity}
-            agentSessions={agentSessions}
-            selected={selected}
-            onSelect={onSelect}
-            onCreate={onCreate}
-            onOpenAll={onOpenAll}
-            onOpenSettings={onOpenSettings}
-            onBackToWorkspace={onBackToWorkspace}
-            allOpen={listing}
-            settingsOpen={settings}
-            settingsPage={route.kind === "settings" ? route.page : null}
-          />
-        )}
+        <Sidebar
+          collapsed={collapsed}
+          collapseButtonRef={hideSidebar}
+          collapseLabel={sidebarToggleLabel}
+          onCollapse={() => setCollapsed(true)}
+          connection={directory}
+          sidebar={sidebar}
+          groups={sidebarGroups}
+          entries={entries}
+          workspaces={workspaces}
+          workspace={workspace}
+          onSwitchWorkspace={onSwitchWorkspace}
+          identity={identity}
+          agentSessions={agentSessions}
+          selected={selected}
+          onSelect={onSelect}
+          onCreate={onCreate}
+          onOpenAll={onOpenAll}
+          onOpenSettings={onOpenSettings}
+          onBackToWorkspace={onBackToWorkspace}
+          allOpen={listing}
+          settingsOpen={settings}
+          settingsPage={route.kind === "settings" ? route.page : null}
+        />
         {/* Workspace modes own the content pane directly. The corpus journey
             (#406): both addresses that name the workspace
             rather than a document — `/<workspace>`, the first screen of a
