@@ -86,13 +86,25 @@ never from the issue's `Touches`. `--name-only` is just the pathname inventory:
 it identifies hunks to classify but never fires tier 3 by itself. The triggers
 live in the change — for example breaking persisted-data compatibility rather
 than an additive optional schema field; authority or merge rules rather than
-routine process clarification; a runtime dependency rather than a dev
-dependency; auth/token semantics; a decided-architecture or invariants edit; or
+routine process clarification; a new runtime dependency subject to the web UI
+exception below rather than a dev dependency; auth/token semantics; a
+decided-architecture or invariants edit; or
 overruling a major reviewer finding. A tier-3 trigger without a person's answer
 that covers it is an escalation naming the trigger. With one, verify the diff
 conforms to what the answer covers, cite the answer in the merge report, and
 merge as tier 2. Never infer approval from `ready` alone or from a comment
 unrelated to the PR's shape.
+
+For the new-runtime-dependency trigger, apply `delivery-policy.md`'s exception
+only to a dependency added only to `packages/web` for web UI whose PR records
+how it meets the live library selection criteria in **Web UI system**
+(`fd874b38-eea8-4754-a2e7-cffa5f4372b1`). Absent, unavailable or unmet criteria,
+missing PR evidence, a library touching sync, persistence, auth or CRDT
+semantics, or a runtime dependency outside `packages/web` still fires the
+trigger. The reviewed library-selection Corpus update accompanying the policy
+change must have been applied after merge; a draft is not sufficient. Check
+every other tier-3 trigger and the unchanged Reviews owed table even for a
+qualifying library.
 
 Every merge report ends with two machine-readable lines —
 `findings_p1_p2_p3: <n>/<n>/<n>` and `deferred_findings: <issue refs or none>`

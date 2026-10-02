@@ -18,6 +18,11 @@ review, the merged-tree gate when the base moved, the acceptance criteria, the
 declared `Touches` footprint and no unanswered remarks. Run independent
 mechanical gates concurrently where the runtime allows.
 
+During web UI acceptance, challenge a custom mechanism that the framework, an
+existing dependency or a qualifying library would cover. Check the record
+against **Web UI system** (`fd874b38-eea8-4754-a2e7-cffa5f4372b1`)'s library
+selection criteria and evidenced, owner-confirmed custom-mechanics exception.
+
 Check the review record rather than redo it: the reviews this diff owes ran,
 every P1 and P2 id has a correction or an accepted answer, and a second round
 ran where `.agents/protocols/review-protocol.md` requires one. A P3 left

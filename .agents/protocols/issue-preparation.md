@@ -97,6 +97,13 @@ additional report.
 
 ## Challenge
 
+During preparation, challenge a proposed custom web UI mechanism that the
+framework, an existing dependency or a qualifying library would cover. Use
+**Web UI system** (`fd874b38-eea8-4754-a2e7-cffa5f4372b1`) for library selection
+and the evidenced, owner-confirmed custom-mechanics exception; point to that
+source in the issue rather than copying its criteria. This applies on every
+route, before handing the contract off.
+
 For `trivial`, verify the grounded contract directly without a review and
 finish `ready`. For `challenged`, finish `review`: `.agents/roles/reviewer.md`
 runs on another runtime before `ready` lands. The

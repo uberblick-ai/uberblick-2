@@ -47,6 +47,12 @@ For choices left open, verify the proposed mechanism against the governing
 guarantees and concrete failure cases before adopting it; readiness is not proof
 that a suggested design works. Explicit constraints remain binding.
 
+Before building web UI, challenge a custom mechanism that the framework, an
+existing dependency or a qualifying library would cover. Apply **Web UI
+system** (`fd874b38-eea8-4754-a2e7-cffa5f4372b1`)'s library selection criteria
+and record new-library evidence in the PR; custom mechanics still require its
+evidenced, owner-confirmed exception.
+
 The least code that defends the issue's contract, inside its declared `Touches`
 footprint, with contract and invariant tests rather than tests of trivia. Run
 focused checks while editing; before handoff run `mise run lint`,
