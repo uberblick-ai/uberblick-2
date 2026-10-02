@@ -11,6 +11,10 @@ queue:
 
 stop-labels: [needs-human]
 
+cleanup:
+  command: [python3, scripts/cleanup-agent-worktree.py]
+  timeout-seconds: 60
+
 agents:
   issue-preparer:
     runtime: "claude:claude-opus-5-5:high"

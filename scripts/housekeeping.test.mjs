@@ -8,7 +8,6 @@ import {
 	readFileSync,
 	realpathSync,
 	rmSync,
-	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,7 +23,11 @@ function fixture(t) {
 	// into `/private/var`, and `git worktree list` reports the resolved path.
 	// Comparing the script's output against an unresolved path matches nothing
 	// there, which is why every worktree case failed on Darwin.
-	const base = realpathSync(mkdtempSync(join(tmpdir(), "housekeeping-")));
+	const base = realpathSync(
+		mkdtempSync(
+			join(tmpdir(), `housekeeping-${process.env.UB_AGENT_RUN ?? "local"}-`),
+		),
+	);
 	t.after(() => rmSync(base, { recursive: true, force: true }));
 	const bin = join(base, "bin");
 	mkdirSync(bin);
@@ -60,106 +63,16 @@ function successfulDocker(bin) {
 			'    case "$3" in\n' +
 			'      "{{.DockerRootDir}}") printf "%s\\n" "$HOUSEKEEPING_DOCKER_ROOT" ;;\n' +
 			'      "{{.OperatingSystem}}") printf "%s\\n" "$HOUSEKEEPING_DOCKER_OS" ;;\n' +
-			'    esac\n' +
-			'    ;;\n' +
+			"    esac\n" +
+			"    ;;\n" +
 			'  "image ls") ;;\n' +
 			'  *) printf "Total reclaimed space: 0B\\n" ;;\n' +
-			'esac\n' +
-			'exit 0',
+			"esac\n" +
+			"exit 0",
 	);
 }
 
-function runGit(cwd, args) {
-	const result = spawnSync("git", args, { cwd, encoding: "utf8" });
-	assert.equal(result.status, 0, result.stderr);
-	return result.stdout;
-}
-
-function worktreeScenario(t) {
-	const { base, bin, calls } = fixture(t);
-	runGit(base, ["init", "-q"]);
-	runGit(base, ["config", "user.email", "housekeeping@example.test"]);
-	runGit(base, ["config", "user.name", "Housekeeping Test"]);
-	writeFileSync(join(base, "tracked"), "tracked\n");
-	runGit(base, ["add", "tracked"]);
-	runGit(base, ["commit", "-q", "-m", "fixture"]);
-
-	const worktreeRoot = join(base, ".claude", "worktrees");
-	mkdirSync(worktreeRoot, { recursive: true });
-	const clean = join(worktreeRoot, "clean");
-	const dirty = join(worktreeRoot, "dirty");
-	const locked = join(worktreeRoot, "locked");
-	const current = join(worktreeRoot, "current");
-	const young = join(worktreeRoot, "young");
-	const outside = join(base, "outside-worktree");
-	for (const [branch, path] of [
-		["clean", clean],
-		["dirty", dirty],
-		["locked", locked],
-		["current", current],
-		["young", young],
-		["outside", outside],
-	]) {
-		runGit(base, ["worktree", "add", "-q", "-b", branch, path]);
-	}
-	writeFileSync(join(dirty, "untracked"), "keep me\n");
-	runGit(base, ["worktree", "lock", locked]);
-	const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
-	for (const path of [clean, dirty, locked, current, outside]) {
-		utimesSync(path, old, old);
-	}
-	successfulDocker(bin);
-	const env = environment(bin, calls, {
-		HOUSEKEEPING_DOCKER_ROOT: base,
-		HOUSEKEEPING_WARN_FREE_GB: "0",
-		HOUSEKEEPING_WORKTREE_MAX_AGE_H: "1",
-	});
-
-	return { bin, clean, current, dirty, env, locked, outside, young };
-}
-
-function proveWorktreeCleanup({ clean, current, dirty, env, locked, outside, young }) {
-	const dryRun = spawnSync("sh", [script, "test-sha", "--dry-run"], {
-		cwd: current,
-		encoding: "utf8",
-		env,
-	});
-	assert.equal(dryRun.status, 0, dryRun.stderr);
-	assert.match(
-		dryRun.stdout,
-		/would: docker builder prune -f --min-free-space 5GB/,
-	);
-	assert.ok(dryRun.stdout.includes(`would: git worktree remove ${clean} (2h old)`));
-	assert.ok(
-		dryRun.stdout.includes(`would keep (2h old): ${dirty} -- modified or untracked files`),
-	);
-	assert.ok(dryRun.stdout.includes(`would keep (2h old): ${locked} -- locked`));
-	assert.equal(dryRun.stdout.includes(current), false);
-	assert.equal(dryRun.stdout.includes(young), false);
-	assert.equal(dryRun.stdout.includes(outside), false);
-	assert.equal(existsSync(clean), true);
-
-	const realRun = spawnSync("sh", [script, "test-sha"], {
-		cwd: current,
-		encoding: "utf8",
-		env,
-	});
-	assert.equal(realRun.status, 0, realRun.stderr);
-	assert.ok(realRun.stdout.includes(`housekeeping: removed worktree (2h old): ${clean}`));
-	assert.ok(realRun.stdout.includes(`housekeeping: kept worktree (2h old): ${dirty}`));
-	assert.ok(realRun.stdout.includes(`housekeeping: kept worktree (2h old): ${locked}`));
-	assert.equal(realRun.stdout.includes(current), false);
-	assert.equal(realRun.stdout.includes(young), false);
-	assert.equal(realRun.stdout.includes(outside), false);
-	assert.equal(existsSync(clean), false);
-	assert.equal(existsSync(dirty), true);
-	assert.equal(existsSync(locked), true);
-	assert.equal(existsSync(current), true);
-	assert.equal(existsSync(young), true);
-	assert.equal(existsSync(outside), true);
-}
-
-test("cleans every named and expired review image plus stale Docker artifacts", (t) => {
+test("cleans every named and expired review image plus dangling images and bounded build cache", (t) => {
 	const { base, bin, calls } = fixture(t);
 	fakeDocker(
 		bin,
@@ -169,8 +82,8 @@ test("cleans every named and expired review image plus stale Docker artifacts", 
 			'  *"reference=uberblick-review"*) printf "expired-b\\nexpired-a\\nrecent-peer\\n" ;;\n' +
 			'  "image ls -q uberblick-review:test-sha") printf "current-image\\n" ;;\n' +
 			'  "image ls -q uberblick-review:merge-sha") printf "merged-image\\n" ;;\n' +
-			'esac\n' +
-			'exit 0',
+			"esac\n" +
+			"exit 0",
 	);
 
 	const result = spawnSync("sh", [script, "test-sha", "merge-sha"], {
@@ -187,11 +100,53 @@ test("cleans every named and expired review image plus stale Docker artifacts", 
 		commands,
 		/image rm -f uberblick-review:test-sha uberblick-review:merge-sha/,
 	);
-	assert.match(commands, /container prune -f --filter until=168h/);
+	assert.doesNotMatch(commands, /container prune|image prune -a|volume prune/);
 	assert.match(commands, /image prune -f/);
-	assert.match(commands, /image prune -a -f --filter until=168h/);
+	assert.match(commands, /builder prune -f --max-used-space 1GB/);
 	assert.match(commands, /builder prune -f --filter until=168h/);
 	assert.match(commands, /builder prune -f --min-free-space 5GB/);
+});
+
+test("keeps stopped containers, their tagged images, volumes and old worktrees", (t) => {
+	const { base, bin, calls } = fixture(t);
+	const stopped = join(base, "stopped-container");
+	const tagged = join(base, "tagged-hub-image");
+	const volume = join(base, "hub-volume");
+	const worktree = join(base, ".claude", "worktrees", "abandoned");
+	for (const path of [stopped, tagged, volume, worktree]) {
+		mkdirSync(path, { recursive: true });
+	}
+	fakeDocker(
+		bin,
+		`
+printf '%s\\n' "$*" >> "$HOUSEKEEPING_CALLS"
+case "$*" in
+  "container prune"*) rmdir "$HOUSEKEEPING_DOCKER_ROOT/stopped-container" ;;
+  "image prune -a"*) rmdir "$HOUSEKEEPING_DOCKER_ROOT/tagged-hub-image" ;;
+  "volume prune"*) rmdir "$HOUSEKEEPING_DOCKER_ROOT/hub-volume" ;;
+  info*) printf '%s\\n' "$HOUSEKEEPING_DOCKER_ROOT" ;;
+  *) printf 'Total reclaimed space: 0B\\n' ;;
+esac
+`,
+	);
+	fakeExecutable(
+		bin,
+		"git",
+		'printf "git %s\\n" "$*" >> "$HOUSEKEEPING_CALLS"',
+	);
+	const result = spawnSync("sh", [script, "test-sha"], {
+		cwd: base,
+		encoding: "utf8",
+		env: environment(bin, calls, { HOUSEKEEPING_DOCKER_ROOT: base }),
+	});
+	assert.equal(result.status, 0, result.stderr);
+	assert.doesNotMatch(
+		readFileSync(calls, "utf8"),
+		/container prune|image prune -a|volume prune|git /,
+	);
+	for (const path of [stopped, tagged, volume, worktree]) {
+		assert.equal(existsSync(path), true, path);
+	}
 });
 
 test("an absent named image does not suppress other named or expired images", (t) => {
@@ -204,8 +159,8 @@ test("an absent named image does not suppress other named or expired images", (t
 			'  "image ls -q uberblick-review:merge-sha") printf "merged-image\\n" ;;\n' +
 			'  *"reference=uberblick-review"*"until=24h"*) printf "expired-b\\nexpired-a\\n" ;;\n' +
 			'  *"reference=uberblick-review"*) printf "expired-b\\nexpired-a\\nrecent-peer\\n" ;;\n' +
-			'esac\n' +
-			'exit 0',
+			"esac\n" +
+			"exit 0",
 	);
 
 	const result = spawnSync("sh", [script, "absent-sha", "merge-sha"], {
@@ -232,8 +187,8 @@ test("dry-run lists every selected image and removes none", (t) => {
 			'  "image ls -q uberblick-review:merge-sha") printf "merged-image\\n" ;;\n' +
 			'  *"reference=uberblick-review"*"until=24h"*) printf "expired-image\\n" ;;\n' +
 			'  "info --format"*) printf "%s\\n" "$HOUSEKEEPING_DOCKER_ROOT" ;;\n' +
-			'esac\n' +
-			'exit 0',
+			"esac\n" +
+			"exit 0",
 	);
 
 	const result = spawnSync(
@@ -265,8 +220,8 @@ test("resolves every image selection before removing any", (t) => {
 			'  "image ls -q uberblick-review:second-sha") exit 17 ;;\n' +
 			'  "info --format"*) printf "%s\\n" "$HOUSEKEEPING_DOCKER_ROOT" ;;\n' +
 			'  *) printf "Total reclaimed space: 0B\\n" ;;\n' +
-			'esac\n' +
-			'exit 0',
+			"esac\n" +
+			"exit 0",
 	);
 
 	const result = spawnSync("sh", [script, "first-sha", "second-sha"], {
@@ -283,7 +238,7 @@ test("resolves every image selection before removing any", (t) => {
 	assert.doesNotMatch(readFileSync(calls, "utf8"), /image rm/);
 });
 
-test("reports each prune's reclaimed space and honors the configured cache floor", (t) => {
+test("reports each prune's reclaimed space and honors the configured cache floor and cap", (t) => {
 	const { base, bin, calls } = fixture(t);
 	fakeDocker(
 		bin,
@@ -291,13 +246,12 @@ test("reports each prune's reclaimed space and honors the configured cache floor
 			'case "$*" in\n' +
 			'  info*) printf "%s\\n" "$HOUSEKEEPING_DOCKER_ROOT" ;;\n' +
 			'  "image ls"*) ;;\n' +
-			'  "container prune"*) printf "Total reclaimed space: 12MB\\n" ;;\n' +
 			'  "image prune -f") printf "new Docker output format\\n" ;;\n' +
-			'  "image prune -a"*) printf "Total reclaimed space: 3.1GB\\n" ;;\n' +
 			'  "builder prune -f --filter"*) printf "Total:\\t2.5GB\\n" ;;\n' +
 			'  "builder prune -f --min-free-space 7GB") printf "Total:\\t0B\\n" ;;\n' +
-			'esac\n' +
-			'exit 0',
+			'  "builder prune -f --max-used-space 750MB") printf "Total:\\t12MB\\n" ;;\n' +
+			"esac\n" +
+			"exit 0",
 	);
 
 	const result = spawnSync("sh", [script, "test-sha"], {
@@ -306,18 +260,18 @@ test("reports each prune's reclaimed space and honors the configured cache floor
 		env: environment(bin, calls, {
 			HOUSEKEEPING_DOCKER_ROOT: base,
 			HOUSEKEEPING_MIN_FREE: "7GB",
+			HOUSEKEEPING_MAX_USED_SPACE: "750MB",
 		}),
 	});
 
 	assert.equal(result.status, 0, result.stderr);
 	assert.match(
 		result.stdout,
-		/housekeeping: reclaimed 12MB: docker container prune -f --filter until=168h/,
+		/housekeeping: reclaimed 12MB: docker builder prune -f --max-used-space 750MB/,
 	);
-	assert.match(result.stdout, /housekeeping: reclaimed unparsed: docker image prune -f/);
 	assert.match(
 		result.stdout,
-		/housekeeping: reclaimed 3\.1GB: docker image prune -a -f --filter until=168h/,
+		/housekeeping: reclaimed unparsed: docker image prune -f/,
 	);
 	assert.match(
 		result.stdout,
@@ -416,8 +370,8 @@ test("does not substitute another filesystem when Docker's root is unavailable",
 			'  "info --format") exit 17 ;;\n' +
 			'  "image ls") ;;\n' +
 			'  *) printf "Total reclaimed space: 0B\\n" ;;\n' +
-			'esac\n' +
-			'exit 0',
+			"esac\n" +
+			"exit 0",
 	);
 	fakeExecutable(bin, "df", 'printf "called\\n" >> "$HOUSEKEEPING_DF_CALLS"');
 	const dfCalls = join(base, "df-calls");
@@ -429,7 +383,10 @@ test("does not substitute another filesystem when Docker's root is unavailable",
 	});
 
 	assert.equal(result.status, 0, result.stderr);
-	assert.match(result.stderr, /housekeeping: WARNING could not determine Docker root/);
+	assert.match(
+		result.stderr,
+		/housekeeping: WARNING could not determine Docker root/,
+	);
 	assert.equal(existsSync(dfCalls), false);
 
 	successfulDocker(bin);
@@ -444,7 +401,10 @@ test("does not substitute another filesystem when Docker's root is unavailable",
 	});
 
 	assert.equal(invalidRoot.status, 0, invalidRoot.stderr);
-	assert.match(invalidRoot.stderr, /housekeeping: WARNING could not determine Docker root/);
+	assert.match(
+		invalidRoot.stderr,
+		/housekeeping: WARNING could not determine Docker root/,
+	);
 	assert.equal(existsSync(invalidDfCalls), false);
 
 	successfulDocker(bin);
@@ -487,54 +447,6 @@ test("does not substitute another filesystem when Docker's root is unavailable",
 	);
 });
 
-test("dry-run and real cleanup agree on removable, dirty, locked, and current worktrees", (t) => {
-	proveWorktreeCleanup(worktreeScenario(t));
-});
-
-test("uses BSD stat when GNU stat is unavailable", (t) => {
-	const scenario = worktreeScenario(t);
-	fakeExecutable(
-		scenario.bin,
-		"stat",
-		'case "$1 $2" in\n' +
-			'  "-c %Y") exit 1 ;;\n' +
-			'  "-f %m") exec date -r "$3" +%s ;;\n' +
-			'  *) exit 2 ;;\n' +
-			'esac',
-	);
-	proveWorktreeCleanup(scenario);
-});
-
-test("keeps and reports a worktree when neither stat dialect can read its age", (t) => {
-	const scenario = worktreeScenario(t);
-	fakeExecutable(scenario.bin, "stat", "exit 1");
-
-	const dryRun = spawnSync("sh", [script, "test-sha", "--dry-run"], {
-		cwd: scenario.current,
-		encoding: "utf8",
-		env: scenario.env,
-	});
-	assert.equal(dryRun.status, 0, dryRun.stderr);
-	assert.ok(
-		dryRun.stdout.includes(
-			`would keep (age unavailable): ${scenario.clean} -- could not read worktree age`,
-		),
-	);
-
-	const realRun = spawnSync("sh", [script, "test-sha"], {
-		cwd: scenario.current,
-		encoding: "utf8",
-		env: scenario.env,
-	});
-	assert.equal(realRun.status, 0, realRun.stderr);
-	assert.ok(
-		realRun.stdout.includes(
-			`housekeeping: kept worktree (age unavailable): ${scenario.clean} -- could not read worktree age`,
-		),
-	);
-	assert.equal(existsSync(scenario.clean), true);
-});
-
 test("rejects no arguments and --dry-run alone before invoking Docker", (t) => {
 	const { base, bin, calls } = fixture(t);
 	fakeDocker(bin, 'printf "%s\\n" "$*" >> "$HOUSEKEEPING_CALLS"');
@@ -563,9 +475,9 @@ test("reports a failing Docker cleanup and exits nonzero", (t) => {
 			'if [ "$1 $2" = "image ls" ]; then\n' +
 			'  case "$*" in *"uberblick-review:test-sha"*) exit 0 ;; esac\n' +
 			'  printf "old-image\\n"\n' +
-			'  exit 0\n' +
-			'fi\n' +
-			'exit 17',
+			"  exit 0\n" +
+			"fi\n" +
+			"exit 17",
 	);
 
 	const result = spawnSync("sh", [script, "test-sha"], {
@@ -575,9 +487,12 @@ test("reports a failing Docker cleanup and exits nonzero", (t) => {
 	});
 
 	assert.notEqual(result.status, 0);
-	assert.match(result.stderr, /housekeeping: failed \(17\): docker image rm -f old-image/);
 	assert.match(
 		result.stderr,
-		/housekeeping: failed \(17\): docker container prune -f --filter until=168h/,
+		/housekeeping: failed \(17\): docker image rm -f old-image/,
+	);
+	assert.match(
+		result.stderr,
+		/housekeeping: failed \(17\): docker builder prune -f --max-used-space 1GB/,
 	);
 });

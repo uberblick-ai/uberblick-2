@@ -1,19 +1,12 @@
 #!/bin/sh
 # Integrator housekeeping, run last (owner direction, 2026-09-01):
 #   sh scripts/housekeeping.sh <review sha>... [--dry-run]
-# Docker — every review image this run built goes at once; other review images
-#   go once they are 24 hours old.
-#   Stopped containers and dangling layers go too. Build cache and unused images
-#   are kept for a week (`until=168h`) so the next review still starts warm —
-#   but a review build regenerates the cache on every run, so almost nothing is
-#   ever that old and the time filter alone reclaims nothing (#785). A space
-#   floor prunes the cache only once free space actually falls below it.
-# Worktrees — a run that ends abnormally leaves its own behind, so abandoned ones accumulate. Old
-#   ones go here, never with `--force`: a locked worktree, or one holding
-#   modified or untracked files, is reported and left for a human. So is one
-#   whose age cannot be read under either the GNU or BSD `stat` dialect.
-#   Clean detached worktrees are removable: durable recovery is a remote commit
-#   or PR, never an unreferenced local commit (`.agents/roles/README.md`, Records).
+# Docker — this run's review images go at once; other review images go after
+#   24 hours. Dangling images go too, as does build cache older than a week. Cache is
+#   also pruned for a free-space floor and capped at 1 GB by default (tunable via
+#   HOUSEKEEPING_MIN_FREE and HOUSEKEEPING_MAX_USED_SPACE).
+#   Containers, tagged non-review images, volumes and worktrees are left alone:
+#   the production hub shares this host, including when it is stopped.
 # On Docker Desktop for macOS, headroom is the host volume containing its default
 #   sparse disk image, not the image's configured VM capacity. A moved image is
 #   reported as unresolved rather than measuring a different filesystem.
@@ -45,7 +38,7 @@ done
 # Tunable, so a host with a different disk budget needs no edit here.
 min_free=${HOUSEKEEPING_MIN_FREE:-5GB}
 warn_free_gb=${HOUSEKEEPING_WARN_FREE_GB:-3}
-worktree_max_age_h=${HOUSEKEEPING_WORKTREE_MAX_AGE_H:-24}
+max_used_space=${HOUSEKEEPING_MAX_USED_SPACE:-1GB}
 
 failed=0
 run() {
@@ -106,70 +99,6 @@ review_images() {
   return 0
 }
 
-# Why `git worktree remove` would refuse, so --dry-run predicts the same set the
-# real run acts on rather than over-promising. Empty output means removable.
-worktree_blocked() {
-  wt=$1
-  admin=$(git -C "$wt" rev-parse --git-dir 2>/dev/null) || {
-    echo "worktree status unavailable"
-    return 0
-  }
-  [ -e "$admin/locked" ] && {
-    echo "locked"
-    return 0
-  }
-  status_output=$(GIT_OPTIONAL_LOCKS=0 git -C "$wt" status --porcelain 2>/dev/null)
-  status=$?
-  if [ "$status" -ne 0 ]; then
-    echo "worktree status unavailable"
-  elif [ -n "$status_output" ]; then
-    echo "modified or untracked files"
-  fi
-}
-
-# Abandoned agent worktrees. `git worktree prune` cannot help: their directories
-# still exist, so they must be removed by path.
-stale_worktrees() {
-  now=$(date +%s)
-  current=$(pwd -P)
-  git worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | while IFS= read -r wt; do
-    case $wt in
-      */.claude/worktrees/*) ;;
-      *) continue ;;
-    esac
-    [ -d "$wt" ] || continue
-    # Never remove the worktree this run is executing from.
-    case $current in
-      "$wt"|"$wt"/*) continue ;;
-    esac
-    if ! mtime=$(stat -c %Y "$wt" 2>/dev/null) &&
-       ! mtime=$(stat -f %m "$wt" 2>/dev/null); then
-      if [ -n "$dry" ]; then
-        echo "would keep (age unavailable): $wt -- could not read worktree age"
-      else
-        echo "housekeeping: kept worktree (age unavailable): $wt -- could not read worktree age"
-      fi
-      continue
-    fi
-    age_h=$(( (now - mtime) / 3600 ))
-    [ "$age_h" -ge "$worktree_max_age_h" ] || continue
-    if [ -n "$dry" ]; then
-      blocked=$(worktree_blocked "$wt")
-      if [ -n "$blocked" ]; then
-        echo "would keep (${age_h}h old): $wt -- $blocked"
-      else
-        echo "would: git worktree remove $wt (${age_h}h old)"
-      fi
-      continue
-    fi
-    if out=$(git worktree remove "$wt" 2>&1); then
-      echo "housekeeping: removed worktree (${age_h}h old): $wt"
-    else
-      echo "housekeeping: kept worktree (${age_h}h old): $wt -- $(printf '%s' "$out" | head -1)"
-    fi
-  done
-}
-
 # Free space on the filesystem that actually holds the Docker root, which is not
 # necessarily the one holding this checkout.
 headroom() {
@@ -209,12 +138,10 @@ headroom() {
 }
 
 review_images || failed=1
-prune docker container prune -f --filter until=168h
 prune docker image prune -f
-prune docker image prune -a -f --filter until=168h
 prune docker builder prune -f --filter until=168h
 prune docker builder prune -f --min-free-space "$min_free"
-stale_worktrees
+prune docker builder prune -f --max-used-space "$max_used_space"
 headroom
 
 exit "$failed"
