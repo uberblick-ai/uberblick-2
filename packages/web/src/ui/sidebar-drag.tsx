@@ -5,16 +5,17 @@ import { DragDropProvider } from "@dnd-kit/react";
 import type { DragDropManager, DragStartEvent, DragOverEvent, DragEndEvent } from "@dnd-kit/react";
 import { isSortable } from "@dnd-kit/react/sortable";
 import { Accessibility } from "@dnd-kit/dom";
+import { OptimisticSortingPlugin } from "@dnd-kit/dom/sortable";
 import { moveDoc, moveGroup, readSidebar } from "@uberblick/schema";
 import type * as Y from "yjs";
 import type { RoomConnection } from "../collab/rooms.js";
 
-export type SidebarDrop =
+type SidebarDrop =
   | { kind: "group"; id: string; index: number }
   | { kind: "doc"; id: string; group: string; index: number };
 
 /** Final indices are after removal, exactly the schema move functions' contract. */
-export function commitSidebarDrop(doc: Y.Doc, drop: SidebarDrop): void {
+function commitSidebarDrop(doc: Y.Doc, drop: SidebarDrop): void {
   const groups = readSidebar(doc);
   if (drop.kind === "group") {
     const at = groups.findIndex((group) => group.id === drop.id);
@@ -30,6 +31,29 @@ export function commitSidebarDrop(doc: Y.Doc, drop: SidebarDrop): void {
 
 function order(doc: Y.Doc): string {
   return JSON.stringify(readSidebar(doc).map(({ id, docs }) => [id, docs]));
+}
+
+/** Keep optimistic sorting within a React-owned list, never between parents. */
+class SidebarSortingPlugin extends OptimisticSortingPlugin {
+  constructor(manager: DragDropManager) {
+    // Register before the upstream plugin: its cancellation listener must see
+    // targetless drops as canceled so it restores any optimistic in-list sort.
+    const stop = manager.monitor.addEventListener("dragend", (event) => {
+      if (event.operation.target === null) {
+        event.canceled = true;
+        manager.dragOperation.canceled = true;
+      }
+    });
+    const over = manager.monitor.addEventListener("dragover", (event) => {
+      const { source, target } = event.operation;
+      if (isSortable(source) && isSortable(target) && source.group !== target.group) {
+        event.preventDefault();
+      }
+    });
+    super(manager);
+    const destroy = this.destroy;
+    this.destroy = () => { stop(); over(); destroy(); };
+  }
 }
 
 export function SidebarDragProvider({
@@ -69,12 +93,20 @@ export function SidebarDragProvider({
   return (
     <DragDropProvider
       plugins={(defaults) => [
+        SidebarSortingPlugin,
         ...defaults,
         Accessibility.configure({
           announcements: {
             dragstart: ({ operation: { source } }: DragStartEvent) => `Moving ${source?.data.label ?? "item"}.`,
-            dragover: ({ operation: { target } }: DragOverEvent) => target ? `Over ${target.data.label ?? "item"}.` : undefined,
-            dragend: ({ canceled, operation: { source } }: DragEndEvent) => `${canceled ? "Cancelled moving" : "Moved"} ${source?.data.label ?? "item"}.`,
+            dragover: ({ operation: { target } }: DragOverEvent) => target ? `Over ${target.data.label ?? "item"}.` : "No drop target. Release to cancel.",
+            dragend: ({ canceled, operation: { source, target } }: DragEndEvent) => {
+              const label = source?.data.label ?? "item";
+              if (canceled || !target) return `Cancelled moving ${label}.`;
+              if (isSortable(source) && source.id === target.id && source.index === source.initialIndex) {
+                return `Kept ${label} in place.`;
+              }
+              return `Moved ${label}.`;
+            },
           },
         }),
       ]}
@@ -98,11 +130,12 @@ export function SidebarDragProvider({
         if (source.data.kind === "group") {
           commitSidebarDrop(connection.ydoc, { kind: "group", id, index: source.index });
         } else if (source.data.kind === "doc") {
-          const group = target.data.kind === "append" ? target.data.group : source.group;
+          const group = target.data.kind === "append" ? target.data.group
+            : isSortable(target) ? target.group : source.group;
           if (typeof group !== "string") return;
           const index = target.data.kind === "append"
             ? readSidebar(connection.ydoc).find((item) => item.id === group)?.docs.filter((uuid) => uuid !== id).length
-            : source.index;
+            : isSortable(target) && target.group !== source.group ? target.index : source.index;
           if (index === undefined) return;
           commitSidebarDrop(connection.ydoc, { kind: "doc", id, group, index });
         }

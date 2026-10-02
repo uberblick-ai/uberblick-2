@@ -12,11 +12,10 @@
  * harness): `acquireRoom` is mocked so a room is a plain Y.Doc, because the
  * transport is not what is under test — the write path is.
  *
- * jsdom proves the drop adapter and shared order. Real pointer, keyboard and
- * touch gestures, including cancellation during peer edits, live in the e2e suite.
+ * jsdom proves rendering and live schema updates. Event translation, pointer,
+ * keyboard and touch gestures, and cancellation are covered in browser tests.
  */
 
-import { commitSidebarDrop } from "../src/ui/sidebar-drag.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -29,6 +28,8 @@ import {
   initDoc,
   appendBlock,
   pinDoc,
+  moveDoc,
+  moveGroup,
   readSidebar,
   restoreDirectoryEntry,
   roomForDoc,
@@ -257,7 +258,7 @@ function navRows(host: HTMLElement): HTMLButtonElement[] {
 }
 
 describe("the sidebar is the _sidebar document", () => {
-  it("renders groups and pins in stored order, and committed drops update the peer replica", async () => {
+  it("renders stored order and live moves from another replica", async () => {
     seedDirectory();
     const sidebar = sidebarDoc();
     const reading = createGroup(sidebar, "Reading");
@@ -276,7 +277,7 @@ describe("the sidebar is the _sidebar document", () => {
     expect(host.querySelectorAll(".ub-group-count")).toHaveLength(0);
 
     // ---- within a group: "Editing" to the top ----
-    act(() => commitSidebarDrop(sidebar, { kind: "doc", id: TWO, group: reading, index: 0 }));
+    act(() => moveDoc(peer, TWO, reading, 0));
     expect(rowTitles(host, 0)).toEqual(["Editing", "Overview"]);
     expect(stored(peer)).toEqual([
       ["Reading", [TWO, ONE]],
@@ -284,7 +285,7 @@ describe("the sidebar is the _sidebar document", () => {
     ]);
 
     // ---- across groups: "Overview" to the head of Later ----
-    act(() => commitSidebarDrop(sidebar, { kind: "doc", id: ONE, group: later, index: 0 }));
+    act(() => moveDoc(peer, ONE, later, 0));
     expect(rowTitles(host, 0)).toEqual(["Editing"]);
     expect(rowTitles(host, 1)).toEqual(["Overview", "Sync"]);
     expect(stored(peer)).toEqual([
@@ -293,28 +294,15 @@ describe("the sidebar is the _sidebar document", () => {
     ]);
 
     // ---- and the groups themselves: Later above Reading ----
-    act(() => commitSidebarDrop(sidebar, { kind: "group", id: later, index: 0 }));
+    act(() => moveGroup(peer, later, 0));
     expect(groupNames(host)).toEqual(["Later", "Reading"]);
     expect(stored(peer)).toEqual([
       ["Later", [ONE, THREE]],
       ["Reading", [TWO]],
     ]);
-
-    // ---- a move *down*, which is where the arithmetic shows ----
-    // Yjs has no move: a drop is a delete and an insert, and the slots below
-    // the row being dragged are one place higher once it is gone. Counted
-    // naively, dragging a row down by one leaves it exactly where it was.
-    act(() => commitSidebarDrop(sidebar, { kind: "doc", id: TWO, group: later, index: 1 }));
-    expect(rowTitles(host, 0)).toEqual(["Overview", "Editing", "Sync"]);
-    act(() => commitSidebarDrop(sidebar, { kind: "doc", id: ONE, group: later, index: 1 }));
-    expect(rowTitles(host, 0)).toEqual(["Editing", "Overview", "Sync"]);
-    expect(stored(peer)).toEqual([
-      ["Later", [TWO, ONE, THREE]],
-      ["Reading", []],
-    ]);
   });
 
-  it("takes a second writer's pin live, and an empty group is somewhere to drop", async () => {
+  it("takes a second writer's pins and groups live", async () => {
     seedDirectory();
     const sidebar = sidebarDoc();
     const reading = createGroup(sidebar, "Reading");
@@ -337,12 +325,10 @@ describe("the sidebar is the _sidebar document", () => {
       empty = createGroup(peer, "Later");
     });
     expect(groupNames(host)).toEqual(["Reading", "Later"]);
-    // An empty group is drawn, with a header that remains a drop
-    // target — a group nobody could drop into could never be filled.
+    // Empty groups are rendered, and a peer can populate them without reloading.
     expect(rowTitles(host, 1)).toEqual([]);
-    expect(sections(host)[1]?.querySelector(".ub-group-head")).not.toBeNull();
 
-    act(() => commitSidebarDrop(sidebar, { kind: "doc", id: ONE, group: empty, index: 0 }));
+    act(() => moveDoc(peer, ONE, empty, 0));
     expect(rowTitles(host, 1)).toEqual(["Overview"]);
     expect(readSidebar(peer)).toEqual([
       { id: reading, name: "Reading", docs: [TWO] },
@@ -562,7 +548,7 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     // transition, but every one is beneath the inert boundary for its whole
     // duration — transform and opacity are never the interaction boundary.
     const reachable = offscreen.querySelectorAll(
-      "button, input, [draggable=true], .ub-drop-slot",
+      "button, input, .ub-drag-handle",
     );
     expect(reachable.length).toBeGreaterThan(0);
     for (const node of reachable) expect(node.closest("[inert]")).toBe(offscreen);
@@ -703,7 +689,7 @@ describe("the sidebar's fixed navigation", () => {
     // kind can land in it.
     const nav = host.querySelector(".ub-nav");
     expect(nav?.querySelectorAll("[draggable]")).toHaveLength(0);
-    expect(nav?.querySelectorAll(".ub-drop-slot")).toHaveLength(0);
+    expect(nav?.querySelectorAll(".ub-drag-handle")).toHaveLength(0);
   });
 
   it("shows the two destinations it does not have as unavailable, not as links", async () => {

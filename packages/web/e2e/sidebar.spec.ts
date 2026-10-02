@@ -2,15 +2,15 @@
  * The sidebar's browser-only claims: its real top-edge layout and collapse
  * focus hand-off (#611), plus a real drag seen by a *second* browser (#115).
  *
- * `test/sidebar.test.tsx` pins the data mechanics — stored order, where a drop
- * lands, an agent's pin arriving live, the keyboard path — over shared Y.Docs
- * and the drop adapter. The browser also proves continuous shell motion,
+ * `test/sidebar.test.tsx` checks rendering over shared Y.Docs.
+ * The browser proves continuous shell motion,
  * reduced motion, focus and isolation, and real drag gestures reaching a
  * second browser through the hub.
  */
 
 import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
+import { createPinnedDoc, dragOnto } from "./sidebar-helpers.js";
 import { startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 
@@ -106,6 +106,8 @@ test("the sidebar and pane share the top edge, and collapse transfers focus", as
   await page.getByRole("button", { name: "Hide document list" }).click();
   await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
   await expect(page.locator(".ub-list")).toHaveAttribute("aria-hidden", "true");
+  const shadow = await page.locator(".ub-list").evaluate((panel) => getComputedStyle(panel).boxShadow);
+  expect(shadow === "none" || shadow.match(/rgba?\([^)]+\)/g)?.every((color) => color === "rgba(0, 0, 0, 0)")).toBe(true);
   const restore = page.getByRole("button", { name: "Show document list" });
   await expect(restore).toBeFocused();
   await expect(restore).toHaveAttribute("aria-expanded", "false");
@@ -366,36 +368,6 @@ test("reduced motion toggles immediately on desktop and narrow screens", async (
     }
   }
 });
-
-/** Make a document and pin it — the sidebar lists what is pinned, and only that. */
-async function createPinnedDoc(page: Page, title: string): Promise<void> {
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
-  await page.locator(".ub-title").fill(title);
-  const actions = page.getByRole("button", { name: "Document actions" });
-  await actions.click();
-  await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
-  await actions.click();
-  await expect(
-    page.getByRole("menuitem", { name: "Unpin from sidebar" }),
-  ).toBeVisible();
-  await page.keyboard.press("Escape");
-}
-
-/** Drag from the dedicated handle with real pointer events. */
-async function dragOnto(page: Page, source: Locator, target: Locator): Promise<void> {
-  const from = await source.boundingBox();
-  const to = await target.boundingBox();
-  if (from === null || to === null) throw new Error("e2e: nothing to drag");
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2 - 5);
-  const x = to.x + to.width / 2;
-  const y = to.y + to.height / 2;
-  await page.mouse.move(x, y, { steps: 12 });
-  await page.mouse.move(x, y);
-  await page.mouse.up();
-}
 
 test("a drag reorders the sidebar, and the other browser sees the new order", async ({
   browser,

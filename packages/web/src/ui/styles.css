@@ -1235,7 +1235,8 @@ body {
 .ub-drag-handle:disabled { cursor: default; opacity: 0.5; }
 .ub-pin-row { display: flex; align-items: center; }
 .ub-pin-row > button:first-child { min-width: 0; flex: 1; }
-.ub-group-head[data-drop-target="true"] { background: var(--sidebar-accent); }
+.ub-group-head[data-drop-target="true"],
+.ub-pin-row[data-drop-target="true"] { background: var(--sidebar-accent); }
 
 /* ---- editor pane ---- */
 

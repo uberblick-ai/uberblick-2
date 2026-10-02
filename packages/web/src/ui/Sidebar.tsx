@@ -35,6 +35,7 @@ import { useDirectory, useRoomStatus, useStoredFlag } from "./hooks.js";
 import { rawSyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
 import { useSortable } from "@dnd-kit/react/sortable";
+import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { useDroppable } from "@dnd-kit/react";
 import { SidebarDragProvider } from "./sidebar-drag.js";
 import { Sidebar as SidebarFrame } from "./shadcn/sidebar.js";
@@ -678,16 +679,21 @@ function GroupSection({
     group: "groups",
     type: "group",
     accept: "group",
+    plugins: [SortableKeyboardPlugin],
     disabled: ydoc === null || editing,
     data: { kind: "group", id: group.id, label: `group ${group.name}` },
   });
+  const [collapsed, setCollapsed] = useStoredFlag(groupCollapsedKey(group.id), false);
   const append = useDroppable({
     id: `append:${group.id}`,
-    accept: "doc",
+    // Pointer drops on any header append. Keyboard navigation uses the visible
+    // rows, otherwise ArrowUp from row one would wrap to its own group's end.
+    accept: (source) => source.type === "doc" && (
+      source.manager?.dragOperation.activatorEvent?.type !== "keydown" || collapsed || group.docs.length === 0
+    ),
     disabled: ydoc === null,
     data: { kind: "append", group: group.id, label: `end of ${group.name}` },
   });
-  const [collapsed, setCollapsed] = useStoredFlag(groupCollapsedKey(group.id), false);
   /**
    * Focus and select the name, once — when the field appears.
    *
@@ -804,10 +810,11 @@ function PinnedRow({ uuid, index, group, entry, selected, onSelect, disabled }: 
 }): ReactElement {
   const sortable = useSortable({
     id: `doc:${uuid}`, index, group, type: "doc", accept: "doc", disabled,
+    plugins: [SortableKeyboardPlugin],
     data: { kind: "doc", id: uuid, label: pinTitle(uuid, entry) },
   });
   return (
-    <li className="ub-pin-row" ref={sortable.ref}>
+    <li className="ub-pin-row" ref={sortable.ref} data-drop-target={sortable.isDropTarget && !sortable.isDragSource}>
       <button type="button" aria-current={uuid === selected ? "page" : undefined}
         onClick={() => onSelect(uuid)} title={pinTitle(uuid, entry)}>
         <DocumentIcon />
