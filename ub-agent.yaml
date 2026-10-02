@@ -46,7 +46,7 @@ agents:
       - .mcp.json
 
   issue-reviewer:
-    runtime: "codex:gpt-6.1-sol:high"
+    runtime: "codex:gpt-6.1-sol:xhigh"
     kind: issue
     trigger: needs-review
     instructions: .agents/roles/reviewer.md
