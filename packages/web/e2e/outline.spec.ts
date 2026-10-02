@@ -391,6 +391,7 @@ test("touch reveals a low thread in the sheet while its close control stays in v
 
     for (const number of [9, 10]) {
       const anchor = anchors[number - 1];
+      if (anchor === undefined) throw new Error("e2e: missing thread anchor fixture");
       await page.locator("[data-comment-thread]", { hasText: anchor }).tap();
       await expect(sheet).toBeVisible();
       const selected = sheet.locator('.ub-thread[aria-current="true"]');
