@@ -102,8 +102,6 @@ agents:
     runtime-args: *claude-scoped
 
 limits:
-  lease-minutes: 60
-  renewal-minutes: 5
   max-attempts: 5
   retry-backoff-seconds: 60
   max-backoff-seconds: 3600

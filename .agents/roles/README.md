@@ -147,7 +147,8 @@ inspection, validation and GitHub bookkeeping continue on their own inputs.
 ## Worktrees
 
 Work in the directory and on the branch the run was given; ub-agents creates
-and removes them. Push only that branch, and never rebase or force-push a pull
-request's head. A revision's checkout is detached, so push it with
-`git push origin HEAD:refs/heads/<branch>`. Leave other runs' worktrees and
+and removes them. Push only that branch, or the branch of the earlier run's
+pull request you continue, and never rebase or force-push a pull request's
+head. A detached checkout is pushed with `git push origin
+HEAD:refs/heads/<branch>`. Leave other runs' worktrees and
 processes alone.

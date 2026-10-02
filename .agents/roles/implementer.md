@@ -19,6 +19,11 @@ not prepare again.
 Fetch `origin/main` and record its SHA, read the final issue and thread, and
 inspect the code and Pointers it depends on.
 
+- Never open a second pull request for an issue. Check each branch the
+  assignment lists as `earlier_branches` (`gh pr list --state open --head
+  <branch>`); an open pull request there is an earlier run's work: continue it
+  on its branch and hand it off. Any other open pull request that closes this
+  issue is not yours to replace: escalate, naming it.
 - If an open pull request is expected to edit the same substantive files
   semantically (`.github/ISSUE_SPEC.md`, Scheduling semantics), mark this issue
   blocked by the issue that PR closes (`gh issue edit <N> --add-blocked-by
