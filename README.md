@@ -23,6 +23,18 @@ resolution path.
 
 ## Getting it running
 
+For users on an Apple Silicon Mac, install with [Homebrew](https://brew.sh):
+
+```sh
+brew install uberblick-ai/tap/uberblick
+ub --version
+```
+
+`ub --version` prints the installed release version. Homebrew installs the CLI
+and web editor; no source checkout is needed.
+
+### Contributor setup
+
 From a fresh clone, with only `git` and [mise](https://mise.jdx.dev) installed:
 
 ```
@@ -324,8 +336,8 @@ there is no corpus import command and no snapshot to keep in step.
 
 `ub` is what a *user* of uberblick runs. The contributor verbs — dev, lint,
 typecheck, test, e2e, review — stay mise tasks and are deliberately not
-duplicated there. Distribution comes later; until then `ub` lives exactly where
-the checkout does:
+duplicated there. Homebrew installs `ub` on PATH; contributors run the checkout's
+copy through mise:
 
 ```
 ub init            # identity, workspace, signing secret
