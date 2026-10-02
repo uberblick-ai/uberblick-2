@@ -50,6 +50,11 @@ settle the risk. Hunt explicitly for overengineering and overtesting. Gate
 results may be evidence, but restating lint, tests or acceptance criteria is not
 a review.
 
+For web UI, check the PR's library-selection evidence against **Web UI
+system** (`fd874b38-eea8-4754-a2e7-cffa5f4372b1`). Challenge a custom mechanism
+that the framework, an existing dependency or a qualifying library would
+cover, including whether its evidenced, owner-confirmed exception is met.
+
 Product intent is read, not inferred from the issue text: read the corpus
 documents the issue's Pointers cite, live through MCP, wherever the change
 touches their product meaning, and follow their links where they govern the

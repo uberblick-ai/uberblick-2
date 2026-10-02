@@ -86,7 +86,8 @@ never from the issue's `Touches`. `--name-only` is just the pathname inventory:
 it identifies hunks to classify but never fires tier 3 by itself. The triggers
 live in the change — for example breaking persisted-data compatibility rather
 than an additive optional schema field; authority or merge rules rather than
-routine process clarification; a runtime dependency rather than a dev
+routine process clarification; a new runtime dependency subject to the web UI
+exception in [delivery-policy.md](delivery-policy.md) rather than a dev
 dependency; auth/token semantics; a decided-architecture or invariants edit; or
 overruling a major reviewer finding. A tier-3 trigger without a person's answer
 that covers it is an escalation naming the trigger. With one, verify the diff

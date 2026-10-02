@@ -88,8 +88,9 @@ merged past; an optional one's refusal is recorded once and blocks nothing.
   applies. Triggers: a breaking or destructive schema change, data migration,
   or break in persisted-data compatibility; a change to CRDT or concurrency
   semantics; a change to decided architecture or to guarantees defined by
-  their owning corpus documents; a new *runtime* dependency; auth or token
-  semantics; overruling a major reviewer finding; a process change that alters
+  their owning corpus documents; a new *runtime* dependency, subject to the
+  web UI exception below; auth or token semantics; overruling a major reviewer
+  finding; a process change that alters
   authority, eligibility, merge or approval rules, or destructive automation;
   and a diff that adds or changes the user-facing command surface — new
   subcommands, a changed interaction between a person and the product,
@@ -97,6 +98,18 @@ merged past; an optional one's refusal is recorded once and blocks nothing.
   2026-08-24). A logical extension or a bugfix of already-shipped command
   behavior is tier 2. Paths identify what to inspect; they never trigger tier 3
   by themselves.
+
+The new-runtime-dependency trigger does not apply to a dependency added only
+to `packages/web` for web UI when the PR records how it meets the live library
+selection criteria in **Web UI system**
+(`fd874b38-eea8-4754-a2e7-cffa5f4372b1`). It still applies when those criteria
+are absent, unavailable or unmet, or the PR lacks the evidence; when the
+library touches sync, persistence, auth or CRDT semantics; and to any runtime
+dependency outside `packages/web`. This exception requires the reviewed
+library-selection Corpus update in [PR #1094](https://github.com/uberblick-ai/uberblick-2/pull/1094)
+to be applied to the live corpus after merge; a draft in a PR is not sufficient.
+It removes only this trigger: every other tier-3 trigger and the Reviews owed
+table still apply.
 
 The answer may come early. A person's answer on the issue or the PR that fixes
 the PR's intended shape — while shaping, to a question, or unprompted — covers
@@ -107,7 +120,10 @@ or scope: escalate again, naming the difference.
 
 Tier routes authority; it does not choose the design. Never replace a simpler
 established primitive or dependency with bespoke correctness machinery merely
-to avoid tier 3: make the intended shape visible early and get the answer once.
+to avoid tier 3. For web UI, challenge custom mechanics against the framework,
+existing dependencies and libraries qualifying under Web UI system. Custom
+mechanics still require its evidenced, owner-confirmed exception. Make a shape
+that needs a person's answer visible early and get the answer once.
 
 The tier-3 trigger list is the owner-controlled autonomy boundary. Verify gates
 at the candidate SHA rather than relying on a session's assertion.
