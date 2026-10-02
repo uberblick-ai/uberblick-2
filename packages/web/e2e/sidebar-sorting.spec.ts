@@ -101,7 +101,14 @@ test("leaving an in-group target restores the optimistic order", async ({ peers:
   await expect(titles(b, "Pinned")).toHaveText(["alpha", "beta"]);
   await hover(a, handle(a, "beta"), titles(a, "Pinned").first());
   await expect(titles(a, "Pinned")).toHaveText(["beta", "alpha"]);
-  await a.mouse.move(900, 500, { steps: 16 });
+  const first = await titles(a, "Pinned").first().boundingBox();
+  if (!first) throw new Error("Missing preview row");
+  // Leave straight up: crossing alpha on the way out would undo the preview
+  // before release and let this test pass even without the cancellation fix.
+  await a.mouse.move(first.x + first.width / 2, 2, { steps: 16 });
+  await expect(a.locator('[aria-live="polite"]')).toContainText("No drop target");
+  await expect(titles(a, "Pinned")).toHaveText(["beta", "alpha"]);
+  await expect(titles(b, "Pinned")).toHaveText(["alpha", "beta"]);
   await a.mouse.up();
   for (const page of [a, b]) await expect(titles(page, "Pinned")).toHaveText(["alpha", "beta"]);
   await expect(a.locator('[aria-live="polite"]')).toContainText("Cancelled moving beta");
