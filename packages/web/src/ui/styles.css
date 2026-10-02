@@ -535,63 +535,6 @@ body {
   cursor: pointer;
 }
 
-/* Frame geometry and offcanvas motion live in shadcn/sidebar.tsx. Product
-   content keeps its own clipping and inset; the frame shares our tokens. */
-.ub-list {
-  overflow: clip;
-  overflow-clip-margin: 1.25rem;
-  padding: 0.5rem;
-}
-
-/* Both sidebar modes stay mounted so their transform can cross-fade, but only
-   the address-selected one is live (`inert` + `aria-hidden` in Sidebar.tsx).
-   Grid puts the panes in one cell without absolute positioning away their
-   height; each pane owns its own scroll and footer. */
-.ub-sidebar-stack {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-}
-
-.ub-sidebar-pane {
-  grid-area: 1 / 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  transition:
-    transform 180ms ease,
-    opacity 180ms ease;
-}
-
-.ub-sidebar-pane[inert],
-.ub-sidebar-pane[inert] * {
-  pointer-events: none;
-}
-
-.ub-document-sidebar {
-  transform: translateX(0);
-  opacity: 1;
-}
-
-.ub-settings-sidebar {
-  z-index: 1;
-  transform: translateX(100%);
-  opacity: 0;
-}
-
-.ub-list[data-mode="settings"] .ub-document-sidebar {
-  transform: translateX(-25%);
-  opacity: 0;
-}
-
-.ub-list[data-mode="settings"] .ub-settings-sidebar {
-  transform: translateX(0);
-  opacity: 1;
-}
-
 .ub-list-head {
   display: flex;
   align-items: center;
@@ -753,13 +696,7 @@ body {
 /* The sidebar's footer (#176). `margin-top: auto` in the column pushes it to
    the bottom while the list is short, and lets it follow the list down once
    there are more documents than fit — a footer pinned over scrolling content
-   would need a second scroll container for no gain. Nothing above it may
-   shrink: the groups animate their own height (see `.ub-group-body`), and a
-   flex column is otherwise free to squeeze them to make room. */
-.ub-sidebar-pane > * {
-  flex: none;
-}
-
+   would need a second scroll container for no gain. */
 .ub-list-foot {
   margin-top: auto;
   padding-top: 0.5rem;
@@ -3923,13 +3860,11 @@ h3.ub-heading {
 /* Every transition above is decoration on a state change that has already
    happened, so removing it changes nothing but the movement. */
 @media (prefers-reduced-motion: reduce) {
-  .ub-list,
   .ub-document-pane,
   .ub-body > .ub-pane > :not(.ub-pane-threads-toggle),
   .ub-group-caret,
   .ub-group-body,
   .ub-group-act,
-  .ub-sidebar-pane,
   .ub-copy,
   .ub-gutter-add {
     transition: none;
