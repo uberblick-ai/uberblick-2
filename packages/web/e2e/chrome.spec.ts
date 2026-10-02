@@ -2387,6 +2387,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   browser,
 }) => {
   const page = await openApp(browser, "dark");
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await ensureExampleCatalog(page);
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
