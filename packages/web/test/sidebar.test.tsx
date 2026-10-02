@@ -12,11 +12,11 @@
  * harness): `acquireRoom` is mocked so a room is a plain Y.Doc, because the
  * transport is not what is under test — the write path is.
  *
- * Drag and drop is dispatched as the native events the browser sends, in the
- * order it sends them. jsdom has no drag machinery, but there is none to test:
- * the feature is what the handlers do with the drop, and where the drop lands.
+ * jsdom proves the drop adapter and shared order. Real pointer, keyboard and
+ * touch gestures, including cancellation during peer edits, live in the e2e suite.
  */
 
+import { commitSidebarDrop } from "../src/ui/sidebar-drag.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -197,7 +197,7 @@ function groupNames(host: HTMLElement): string[] {
 /** The document rows of the `index`-th group, top to bottom. */
 function rows(host: HTMLElement, index: number): HTMLButtonElement[] {
   const section = sections(host)[index];
-  return [...(section?.querySelectorAll<HTMLButtonElement>(".ub-group-body li button") ?? [])];
+  return [...(section?.querySelectorAll<HTMLButtonElement>(".ub-group-body li > button:first-child") ?? [])];
 }
 
 function rowTitles(host: HTMLElement, index: number): string[] {
@@ -207,20 +207,6 @@ function rowTitles(host: HTMLElement, index: number): string[] {
 /** What each row offers on hover — the `title` attribute, top to bottom. */
 function rowTooltips(host: HTMLElement, index: number): Array<string | null> {
   return rows(host, index).map((row) => row.getAttribute("title"));
-}
-
-/** The `index`-th group's insertion points, top to bottom. */
-function docSlots(host: HTMLElement, index: number): HTMLElement[] {
-  const section = sections(host)[index];
-  return [...(section?.querySelectorAll<HTMLElement>(".ub-drop-slot") ?? [])];
-}
-
-/** The insertion points between groups — the ones a dragged group can land in. */
-function groupSlots(host: HTMLElement): HTMLElement[] {
-  const list = host.querySelector(".ub-document-sidebar");
-  return [...(list?.children ?? [])].filter((child): child is HTMLElement =>
-    child.classList.contains("ub-drop-slot"),
-  );
 }
 
 function groupToggle(host: HTMLElement, index: number): HTMLButtonElement | null {
@@ -247,24 +233,6 @@ function documentAction(label: string): HTMLElement | undefined {
   ].find((item) => item.textContent === label);
 }
 
-/** One native drag event, with the payload channel a browser would supply. */
-function dragEvent(type: string): Event {
-  const event = new MouseEvent(type, { bubbles: true, cancelable: true });
-  Object.defineProperty(event, "dataTransfer", {
-    value: { setData: () => {}, getData: () => "" },
-  });
-  return event;
-}
-
-/** Drag `from` and drop it on `to`, in the order the browser sequences it. */
-function drag(from: Element | null, to: Element | null): void {
-  if (from === null || to === null) throw new Error("test: nothing to drag");
-  act(() => void from.dispatchEvent(dragEvent("dragstart")));
-  act(() => void to.dispatchEvent(dragEvent("dragover")));
-  act(() => void to.dispatchEvent(dragEvent("drop")));
-  act(() => void from.dispatchEvent(dragEvent("dragend")));
-}
-
 function press(element: Element | null, key: string): void {
   element?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
 }
@@ -289,7 +257,7 @@ function navRows(host: HTMLElement): HTMLButtonElement[] {
 }
 
 describe("the sidebar is the _sidebar document", () => {
-  it("renders groups and pins in stored order, and a drag lands where it was dropped", async () => {
+  it("renders groups and pins in stored order, and committed drops update the peer replica", async () => {
     seedDirectory();
     const sidebar = sidebarDoc();
     const reading = createGroup(sidebar, "Reading");
@@ -308,7 +276,7 @@ describe("the sidebar is the _sidebar document", () => {
     expect(host.querySelectorAll(".ub-group-count")).toHaveLength(0);
 
     // ---- within a group: "Editing" to the top ----
-    drag(rows(host, 0)[1] ?? null, docSlots(host, 0)[0] ?? null);
+    act(() => commitSidebarDrop(sidebar, { kind: "doc", id: TWO, group: reading, index: 0 }));
     expect(rowTitles(host, 0)).toEqual(["Editing", "Overview"]);
     expect(stored(peer)).toEqual([
       ["Reading", [TWO, ONE]],
@@ -316,7 +284,7 @@ describe("the sidebar is the _sidebar document", () => {
     ]);
 
     // ---- across groups: "Overview" to the head of Later ----
-    drag(rows(host, 0)[1] ?? null, docSlots(host, 1)[0] ?? null);
+    act(() => commitSidebarDrop(sidebar, { kind: "doc", id: ONE, group: later, index: 0 }));
     expect(rowTitles(host, 0)).toEqual(["Editing"]);
     expect(rowTitles(host, 1)).toEqual(["Overview", "Sync"]);
     expect(stored(peer)).toEqual([
@@ -325,7 +293,7 @@ describe("the sidebar is the _sidebar document", () => {
     ]);
 
     // ---- and the groups themselves: Later above Reading ----
-    drag(groupToggle(host, 1), groupSlots(host)[0] ?? null);
+    act(() => commitSidebarDrop(sidebar, { kind: "group", id: later, index: 0 }));
     expect(groupNames(host)).toEqual(["Later", "Reading"]);
     expect(stored(peer)).toEqual([
       ["Later", [ONE, THREE]],
@@ -336,9 +304,9 @@ describe("the sidebar is the _sidebar document", () => {
     // Yjs has no move: a drop is a delete and an insert, and the slots below
     // the row being dragged are one place higher once it is gone. Counted
     // naively, dragging a row down by one leaves it exactly where it was.
-    drag(rows(host, 1)[0] ?? null, docSlots(host, 0)[1] ?? null);
+    act(() => commitSidebarDrop(sidebar, { kind: "doc", id: TWO, group: later, index: 1 }));
     expect(rowTitles(host, 0)).toEqual(["Overview", "Editing", "Sync"]);
-    drag(rows(host, 0)[0] ?? null, docSlots(host, 0)[2] ?? null);
+    act(() => commitSidebarDrop(sidebar, { kind: "doc", id: ONE, group: later, index: 1 }));
     expect(rowTitles(host, 0)).toEqual(["Editing", "Overview", "Sync"]);
     expect(stored(peer)).toEqual([
       ["Later", [TWO, ONE, THREE]],
@@ -369,12 +337,12 @@ describe("the sidebar is the _sidebar document", () => {
       empty = createGroup(peer, "Later");
     });
     expect(groupNames(host)).toEqual(["Reading", "Later"]);
-    // An empty group is drawn, with the one insertion point that makes it a
+    // An empty group is drawn, with a header that remains a drop
     // target — a group nobody could drop into could never be filled.
     expect(rowTitles(host, 1)).toEqual([]);
-    expect(docSlots(host, 1)).toHaveLength(1);
+    expect(sections(host)[1]?.querySelector(".ub-group-head")).not.toBeNull();
 
-    drag(rows(host, 0)[0] ?? null, docSlots(host, 1)[0] ?? null);
+    act(() => commitSidebarDrop(sidebar, { kind: "doc", id: ONE, group: empty, index: 0 }));
     expect(rowTitles(host, 1)).toEqual(["Overview"]);
     expect(readSidebar(peer)).toEqual([
       { id: reading, name: "Reading", docs: [TWO] },

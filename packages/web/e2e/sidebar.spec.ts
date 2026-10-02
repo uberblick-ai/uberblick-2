@@ -4,8 +4,9 @@
  *
  * `test/sidebar.test.tsx` pins the data mechanics — stored order, where a drop
  * lands, an agent's pin arriving live, the keyboard path — over shared Y.Docs
- * and dispatched drag events. The browser also proves continuous shell motion,
- * reduced motion, focus and isolation, which depend on real layout and input.
+ * and the drop adapter. The browser also proves continuous shell motion,
+ * reduced motion, focus and isolation, and real drag gestures reaching a
+ * second browser through the hub.
  */
 
 import { expect, test } from "@playwright/test";
@@ -56,7 +57,7 @@ function docTitle(label: string): string {
 
 /** The titles the sidebar lists, top to bottom. */
 function pinnedTitles(page: Page): Locator {
-  return page.locator(".ub-group-body li button");
+  return page.locator(".ub-group-body li > button:first-child");
 }
 
 test("the sidebar and pane share the top edge, and collapse transfers focus", async ({
@@ -115,6 +116,7 @@ test("the sidebar and pane share the top edge, and collapse transfers focus", as
 
   await restore.click();
   await expect(page.getByRole("button", { name: "Hide document list" })).toBeFocused();
+  await expect.poll(async () => (await page.locator(".ub-list").boundingBox())?.x).toBe(0);
   await expect(page.getByRole("button", { name: "You" })).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("uberblick.sidebar.collapsed"))).toBe("false");
   expect(await origins()).toEqual([0, 0]);
@@ -378,15 +380,7 @@ async function createPinnedDoc(page: Page, title: string): Promise<void> {
   await page.keyboard.press("Escape");
 }
 
-/**
- * Drag `source` onto `target` with the real mouse.
- *
- * Steps rather than `dragTo`, for one reason: the drop slots take the pointer
- * only while a drag is in flight, so an actionability check on the target
- * *before* the drag has started would find it unhittable. The nudge inside the
- * source is what makes Chromium synthesise a drag at all — a press followed by
- * a jump straight to the target is swallowed as a click.
- */
+/** Drag from the dedicated handle with real pointer events. */
 async function dragOnto(page: Page, source: Locator, target: Locator): Promise<void> {
   const from = await source.boundingBox();
   const to = await target.boundingBox();
@@ -416,11 +410,8 @@ test("a drag reorders the sidebar, and the other browser sees the new order", as
   // already looking at it — nobody told it anything.
   await expect(pinnedTitles(b)).toHaveText([first, second]);
 
-  // The pointer gesture: the second document, onto the insertion point above
-  // the first. The slots are the sidebar's first and last children of the
-  // group's list, one per position.
-  const slots = a.locator(".ub-group-body .ub-drop-slot");
-  await dragOnto(a, pinnedTitles(a).nth(1), slots.nth(0));
+  // dnd-kit starts from a separate handle; clicking the document still navigates.
+  await dragOnto(a, a.getByRole("button", { name: `Move document ${second}`, exact: true }), pinnedTitles(a).nth(0));
 
   await expect(pinnedTitles(a)).toHaveText([second, first]);
   await expect(pinnedTitles(b)).toHaveText([second, first]);

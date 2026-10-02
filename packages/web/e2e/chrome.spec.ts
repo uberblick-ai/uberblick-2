@@ -830,6 +830,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   expectFixedOrigins(collapsedEmpty, (reading) => reading.body.left);
 
   await page.getByRole("button", { name: "Show document list" }).click();
+  await expect.poll(async () => (await page.locator(".ub-list").boundingBox())?.x).toBe(0);
   await expect(page.locator(".ub-list")).toBeVisible();
   await page.setViewportSize({ width: 1400, height: 800 });
   await placeCaret(page);
@@ -865,6 +866,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   await expect(page.locator('.ub-thread[aria-current="true"]')).toBeVisible();
 
   await page.getByRole("button", { name: "Hide document list" }).click();
+  await expect(page.locator('[data-slot="sidebar-gap"]')).toHaveCSS("width", "0px");
   const collapsedPopulated = await atWidths([1400, 1600]);
   expectFixedOrigins(collapsedPopulated, (reading) => reading.body.left);
   for (let index = 0; index < collapsedPopulated.length; index += 1) {
@@ -880,6 +882,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   // overflow. The drawer overlays it, and a keyboard activation still opens
   // and targets the right card without changing document geometry.
   await page.getByRole("button", { name: "Show document list" }).click();
+  await expect.poll(async () => (await page.locator(".ub-list").boundingBox())?.x).toBe(0);
   await page.setViewportSize({ width: 768, height: 720 });
   await page.keyboard.press("Escape");
   await expect(page.locator(".ub-rail")).not.toBeVisible();
@@ -1031,6 +1034,7 @@ test("document actions stay reachable, close with the route, and archive into Re
   // The archive took the pin with it (#957), so the sidebar stops listing the
   // document altogether rather than carrying it with an archived marker.
   await page.getByRole("button", { name: "Show document list" }).click();
+  await expect.poll(async () => (await page.locator(".ub-list").boundingBox())?.x).toBe(0);
   await expect(page.locator(".ub-list")).toBeVisible();
   await expect(
     page.getByRole("button", { name: /Lifecycle notes/ }),

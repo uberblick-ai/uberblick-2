@@ -108,6 +108,7 @@ export default defineConfig({
     // jsdom everywhere: the golden round-trip test drives a real ProseMirror
     // EditorView, which needs a DOM.
     environment: "jsdom",
+    setupFiles: ["test/setup-dom.ts"],
     include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
     // The reconnect suite runs real hubs on real sockets, and its `afterEach`
     // stops two of them. Vitest's default 5s hook budget is what a shutdown

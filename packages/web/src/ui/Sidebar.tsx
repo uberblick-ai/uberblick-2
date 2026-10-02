@@ -12,33 +12,17 @@
  * operation with two front doors — and the re-render is an observer over the
  * same Y.Doc, so either writer's change is live in every client.
  *
- * ## Drag and drop
- *
- * Native HTML drag events, no dependency. The dragged item is held in React
- * state rather than in `dataTransfer` — a drag within one list never leaves the
- * page, and `dataTransfer.getData` is unreadable during `dragover`, which is
- * where the drop targets have to decide whether they want it. `setData` is
- * still called, because Firefox refuses to start a drag without it.
- *
- * Positions are explicit drop slots between the rows rather than a midpoint
- * test on the row under the pointer: an insertion point is what the reader is
- * choosing, so it is what the DOM holds. The slots only take the pointer while
- * a drag of the matching kind is in flight (see `[data-dragging]` in
- * styles.css), so they cost the ordinary pointer nothing.
- *
- * A collapsed group's body is `inert`, so it cannot receive a drop — its header
- * takes one instead, appending to the group. That is also the forgiving target
- * for a drag that lands near a header rather than in a slot.
+ * dnd-kit owns pointer/touch/keyboard gestures, sorting feedback and announcements.
+ * Separate handles leave navigation and disclosure controls unchanged. Shared
+ * order changes cancel a drag; only a successful drop commits through the schema.
  */
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent, ReactElement, ReactNode, Ref } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactElement, ReactNode, Ref } from "react";
 import type * as Y from "yjs";
 import {
   createGroup,
   deleteGroup,
-  moveDoc,
-  moveGroup,
   pinDoc,
   readSidebar,
   renameGroup,
@@ -50,6 +34,10 @@ import type { RoomConnection } from "../collab/rooms.js";
 import { useDirectory, useRoomStatus, useStoredFlag } from "./hooks.js";
 import { rawSyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
+import { useSortable } from "@dnd-kit/react/sortable";
+import { useDroppable } from "@dnd-kit/react";
+import { SidebarDragProvider } from "./sidebar-drag.js";
+import { Sidebar as SidebarFrame } from "./shadcn/sidebar.js";
 import { UserMenu } from "./UserMenu.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import type { SettingsPage, Workspace } from "./route.js";
@@ -86,41 +74,6 @@ export function togglePin(sidebarDoc: Y.Doc, uuid: string): void {
   }
   const target = groups[0]?.id ?? createGroup(sidebarDoc, FIRST_GROUP_NAME);
   pinDoc(sidebarDoc, target, uuid);
-}
-
-/**
- * Where an item dropped at rendered position `index` has to be inserted.
- *
- * Yjs has no move, so `moveDoc` and `moveGroup` delete and then insert — and
- * their `index` counts positions in the list the item has *already left*. Every
- * slot below the item it is being dragged from is therefore one place higher by
- * the time the insert happens. Without this, dragging a row down by one lands
- * it exactly where it started.
- */
-function landingIndex(
-  list: readonly string[],
-  item: string,
-  index: number,
-): number {
-  const at = list.indexOf(item);
-  return at !== -1 && at < index ? index - 1 : index;
-}
-
-/** What is being dragged. Held in state, not in `dataTransfer` — see the header. */
-type Drag = { kind: "doc"; uuid: string } | { kind: "group"; id: string };
-
-/** The drag, as the rows and slots need to see it. */
-interface Dnd {
-  /** What kind of thing is in flight, or null when nothing is. */
-  kind: Drag["kind"] | null;
-  /** The slot currently under the pointer — the one that draws the line. */
-  over: string | null;
-  start: (drag: Drag, event: DragEvent) => void;
-  end: () => void;
-  enter: (slot: string) => void;
-  leave: (slot: string) => void;
-  /** Move the dragged document into `groupId` at a rendered position. */
-  dropDoc: (groupId: string, index: number) => void;
 }
 
 export function Sidebar({
@@ -197,8 +150,6 @@ export function Sidebar({
   const sidebarWritable = sidebar !== null && sidebarStatus.writable;
   const ydoc = sidebarWritable ? sidebar.ydoc : null;
   const canWriteSidebar = (): boolean => sidebar?.status.writable === true;
-  const [drag, setDrag] = useState<Drag | null>(null);
-  const [over, setOver] = useState<string | null>(null);
   /**
    * The group whose name is being edited, and whether it exists only because
    * that field was opened — `+ group` makes the group first, so cancelling has
@@ -233,41 +184,6 @@ export function Sidebar({
       ?.focus();
   }, [settingsOpen]);
 
-  const end = useCallback(() => {
-    setDrag(null);
-    setOver(null);
-  }, []);
-
-  const dnd: Dnd = {
-    kind: drag?.kind ?? null,
-    over,
-    start: (next, event) => {
-      if (!canWriteSidebar()) return;
-      // Firefox starts no drag at all without a payload; nothing reads it.
-      event.dataTransfer.setData("text/plain", next.kind === "doc" ? next.uuid : next.id);
-      setDrag(next);
-    },
-    end,
-    // `dragover` repeats for as long as the pointer is over a slot, so the
-    // reading is compared before it is stored: React would otherwise re-render
-    // the whole sidebar a few times a second to draw the same line.
-    enter: (slot) => setOver((previous) => (previous === slot ? previous : slot)),
-    leave: (slot) => setOver((previous) => (previous === slot ? null : previous)),
-    dropDoc: (groupId, index) => {
-      if (ydoc === null || !canWriteSidebar() || drag?.kind !== "doc") return;
-      const target = groups.find((group) => group.id === groupId);
-      moveDoc(ydoc, drag.uuid, groupId, landingIndex(target?.docs ?? [], drag.uuid, index));
-      end();
-    },
-  };
-
-  const dropGroup = (index: number): void => {
-    if (ydoc === null || !canWriteSidebar() || drag?.kind !== "group") return;
-    const order = groups.map((group) => group.id);
-    moveGroup(ydoc, drag.id, landingIndex(order, drag.id, index));
-    end();
-  };
-
   const addGroup = (): void => {
     if (ydoc === null || !canWriteSidebar()) return;
     // Straight into its rename field: a group is named by the person making it,
@@ -299,18 +215,14 @@ export function Sidebar({
   useEffect(() => {
     if (sidebarWritable) return;
     setRenaming(null);
-    end();
-  }, [sidebarWritable, end]);
+  }, [sidebarWritable]);
 
   return (
-    <aside
+    <SidebarFrame
       ref={sidebarRoot}
       className="ub-list"
       aria-label="Sidebar"
-      aria-hidden={collapsed}
-      inert={collapsed}
       data-mode={settingsOpen ? "settings" : "documents"}
-      data-dragging={drag?.kind}
     >
       <button
         ref={collapseButtonRef}
@@ -323,6 +235,10 @@ export function Sidebar({
       >
         «
       </button>
+      <SidebarDragProvider
+        connection={sidebar}
+        active={!collapsed && !settingsOpen && sidebarWritable}
+      >
       <div className="ub-sidebar-stack">
         <nav
           className="ub-sidebar-pane ub-document-sidebar"
@@ -382,34 +298,21 @@ export function Sidebar({
             </p>
           )}
           {groups.map((group, index) => (
-            <Fragment key={group.id}>
-              <DropSlot
-                slot={`group-${index}`}
-                active={drag?.kind === "group"}
-                dnd={dnd}
-                onDrop={() => dropGroup(index)}
-              />
               <GroupSection
+                key={group.id}
+                index={index}
                 group={group}
                 ydoc={ydoc}
                 labels={labels}
                 selected={selected}
                 onSelect={onSelect}
-                dnd={dnd}
                 canWrite={canWriteSidebar}
                 editing={renaming?.id === group.id}
                 onEdit={() => setRenaming({ id: group.id, fresh: false })}
                 onCancel={cancelRename}
                 onCommit={(name) => commitRename(group.id, name)}
               />
-            </Fragment>
           ))}
-          <DropSlot
-            slot={`group-${groups.length}`}
-            active={drag?.kind === "group"}
-            dnd={dnd}
-            onDrop={() => dropGroup(groups.length)}
-          />
           <button
             type="button"
             className="ub-group-add"
@@ -450,7 +353,8 @@ export function Sidebar({
           onBack={onBackToWorkspace}
         />
       </div>
-    </aside>
+      </SidebarDragProvider>
+    </SidebarFrame>
   );
 }
 
@@ -732,49 +636,6 @@ function DocumentIcon(): ReactElement {
 }
 
 /**
- * One insertion point.
- *
- * `active` is what the drop needs, not the pointer: a slot between two
- * documents means nothing to a group being dragged, and a slot between two
- * groups means nothing to a document. An inactive slot declines the drag —
- * without `preventDefault` on `dragover` the browser shows "no drop" and never
- * fires `drop`, which is exactly the right answer.
- */
-function DropSlot({
-  slot,
-  active,
-  dnd,
-  onDrop,
-}: {
-  slot: string;
-  active: boolean;
-  dnd: Dnd;
-  onDrop: () => void;
-}): ReactElement {
-  return (
-    <div
-      className="ub-drop-slot"
-      // A pointer affordance and nothing else: it holds no content, and the
-      // keyboard path into the sidebar is the document actions menu, not a drag.
-      // Announcing an empty box between every pair of rows would be noise.
-      aria-hidden="true"
-      data-over={active && dnd.over === slot ? "true" : undefined}
-      onDragOver={(event) => {
-        if (!active) return;
-        event.preventDefault();
-        dnd.enter(slot);
-      }}
-      onDragLeave={() => dnd.leave(slot)}
-      onDrop={(event) => {
-        if (!active) return;
-        event.preventDefault();
-        onDrop();
-      }}
-    />
-  );
-}
-
-/**
  * One group: its header, and the documents pinned into it.
  *
  * A component rather than inline markup so each group owns its own
@@ -782,12 +643,12 @@ function DropSlot({
  * holds.
  */
 function GroupSection({
+  index,
   group,
   ydoc,
   labels,
   selected,
   onSelect,
-  dnd,
   canWrite,
   editing,
   onEdit,
@@ -795,13 +656,13 @@ function GroupSection({
   onCommit,
 }: {
   group: SidebarGroup;
+  index: number;
   /** The sidebar's Y.Doc, or null when there is no sidebar room to write to. */
   ydoc: Y.Doc | null;
   /** What each pinned uuid is called, and whether it is archived. */
   labels: ReadonlyMap<string, DirectoryEntry>;
   selected: string | null;
   onSelect: (uuid: string) => void;
-  dnd: Dnd;
   /** Recheck the live room at the write boundary, not only at render time. */
   canWrite: () => boolean;
   /** Whether this group's name is the one being edited — one field at a time. */
@@ -811,6 +672,21 @@ function GroupSection({
   onCancel: () => void;
   onCommit: (name: string) => void;
 }): ReactElement {
+  const sortable = useSortable({
+    id: `group:${group.id}`,
+    index,
+    group: "groups",
+    type: "group",
+    accept: "group",
+    disabled: ydoc === null || editing,
+    data: { kind: "group", id: group.id, label: `group ${group.name}` },
+  });
+  const append = useDroppable({
+    id: `append:${group.id}`,
+    accept: "doc",
+    disabled: ydoc === null,
+    data: { kind: "append", group: group.id, label: `end of ${group.name}` },
+  });
   const [collapsed, setCollapsed] = useStoredFlag(groupCollapsedKey(group.id), false);
   /**
    * Focus and select the name, once — when the field appears.
@@ -828,8 +704,8 @@ function GroupSection({
   }, []);
 
   return (
-    <section className="ub-group">
-      <div className="ub-group-head">
+    <section className="ub-group" ref={sortable.ref}>
+      <div className="ub-group-head" ref={append.ref} data-drop-target={append.isDropTarget}>
         {editing ? (
           <input
             className="ub-group-rename"
@@ -856,26 +732,20 @@ function GroupSection({
             type="button"
             className="ub-group-toggle"
             aria-expanded={!collapsed}
-            draggable={ydoc !== null}
             onClick={() => setCollapsed(!collapsed)}
-            onDragStart={(event) => dnd.start({ kind: "group", id: group.id }, event)}
-            onDragEnd={dnd.end}
-            // A collapsed group's list is inert and cannot be dropped into, so
-            // the header takes the document instead — at the end of the group.
-            onDragOver={(event) => {
-              if (dnd.kind === "doc") event.preventDefault();
-            }}
-            onDrop={(event) => {
-              if (dnd.kind !== "doc") return;
-              event.preventDefault();
-              dnd.dropDoc(group.id, group.docs.length);
-            }}
           >
             <Chevron />
             <span className="ub-group-label">{group.name}</span>
             <span className="ub-group-rule" aria-hidden="true" />
           </button>
         )}
+        {/* Keep the handle mounted during rename/read-only so dnd-kit never
+            applies inherited aria-disabled to the whole group container. */}
+        <button type="button" className="ub-drag-handle" ref={sortable.handleRef}
+          disabled={ydoc === null || editing}
+          aria-label={`Move group ${group.name}`} title="Move group">
+          <span aria-hidden="true">⠿</span>
+        </button>
         {!editing && ydoc !== null && (
           <>
             <button
@@ -912,58 +782,42 @@ function GroupSection({
       */}
       <div className="ub-group-body" data-collapsed={collapsed} inert={collapsed}>
         <ul>
-          {group.docs.map((uuid, index) => {
-            // Resolved once for the row: the drawn label and the tooltip are
-            // the same reading of the same stub, so a clipped row can never
-            // offer different words than it shows (#529).
-            const entry = labels.get(uuid);
-            return (
-              <Fragment key={uuid}>
-                <li className="ub-drop-row">
-                  <DropSlot
-                    slot={`${group.id}-${index}`}
-                    active={dnd.kind === "doc"}
-                    dnd={dnd}
-                    onDrop={() => dnd.dropDoc(group.id, index)}
-                  />
-                </li>
-                <li>
-                  <button
-                    type="button"
-                    // The open document, said once, to the styling and to a
-                    // screen reader alike — the `ub-selected` class this
-                    // replaces told only the first of them (#481). The All-docs
-                    // entry in the footer already marked itself this way, so the
-                    // two rows are now one state with one rule.
-                    aria-current={uuid === selected ? "page" : undefined}
-                    draggable={ydoc !== null}
-                    onClick={() => onSelect(uuid)}
-                    onDragStart={(event) => dnd.start({ kind: "doc", uuid }, event)}
-                    onDragEnd={dnd.end}
-                    title={pinTitle(uuid, entry)}
-                  >
-                    <DocumentIcon />
-                    <span className="ub-pin-label">
-                      <PinLabel uuid={uuid} entry={entry} />
-                    </span>
-                  </button>
-                </li>
-              </Fragment>
-            );
-          })}
-          {/* The last slot, and an empty group's only one — which is what lets
-              an empty group be a drop target at all. */}
-          <li className="ub-drop-row">
-            <DropSlot
-              slot={`${group.id}-${group.docs.length}`}
-              active={dnd.kind === "doc"}
-              dnd={dnd}
-              onDrop={() => dnd.dropDoc(group.id, group.docs.length)}
-            />
-          </li>
+          {group.docs.map((uuid, index) => (
+            <PinnedRow key={uuid} uuid={uuid} index={index} group={group.id}
+              entry={labels.get(uuid)} selected={selected} onSelect={onSelect}
+              disabled={ydoc === null || collapsed} />
+          ))}
         </ul>
       </div>
     </section>
+  );
+}
+
+function PinnedRow({ uuid, index, group, entry, selected, onSelect, disabled }: {
+  uuid: string;
+  index: number;
+  group: string;
+  entry: DirectoryEntry | undefined;
+  selected: string | null;
+  onSelect: (uuid: string) => void;
+  disabled: boolean;
+}): ReactElement {
+  const sortable = useSortable({
+    id: `doc:${uuid}`, index, group, type: "doc", accept: "doc", disabled,
+    data: { kind: "doc", id: uuid, label: pinTitle(uuid, entry) },
+  });
+  return (
+    <li className="ub-pin-row" ref={sortable.ref}>
+      <button type="button" aria-current={uuid === selected ? "page" : undefined}
+        onClick={() => onSelect(uuid)} title={pinTitle(uuid, entry)}>
+        <DocumentIcon />
+        <span className="ub-pin-label"><PinLabel uuid={uuid} entry={entry} /></span>
+      </button>
+      <button type="button" className="ub-drag-handle" ref={sortable.handleRef}
+        disabled={disabled} aria-label={`Move document ${pinTitle(uuid, entry)}`} title="Move document">
+        <span aria-hidden="true">⠿</span>
+      </button>
+    </li>
   );
 }
 
