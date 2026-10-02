@@ -137,6 +137,11 @@ A trap only runs between commands, so a loop that blocks in a foreground
 `sleep` will not honour `SIGTERM` until that sleep ends: background the wait
 and `wait` on it, or signal the process group, or the trap is decoration.
 
+A run ends when its session ends, so a task your agent tool starts in the
+background never reports back. Wait in the foreground with a bounded command, such as `gh pr checks <N>
+--watch` under the tool's timeout. When what you wait for is still pending
+after that, finish `defer` and name it.
+
 ## Product context, proportional to the action
 
 Current corpus context is required before a product-sensitive choice or a
