@@ -51,6 +51,7 @@ import {
   threadCardId,
 } from "./threads.js";
 import type { ThreadFocus, ThreadView } from "./threads.js";
+import { Sheet, SheetContent, SheetTitle } from "./shadcn/sheet.js";
 import { useTimestampClock } from "./timestamps.js";
 
 function Comment({
@@ -82,6 +83,7 @@ function ThreadCard({
   focused,
   collapsed,
   replying,
+  draft,
   readOnly,
   refusal,
   onSelect,
@@ -96,6 +98,7 @@ function ThreadCard({
   /** Resolved and not expanded: head and excerpt only. */
   collapsed: boolean;
   replying: boolean;
+  draft: { text: string; onChange: (text: string) => void };
   /** The conversation is readable, but nothing on the card writes. */
   readOnly: boolean;
   /**
@@ -160,6 +163,7 @@ function ThreadCard({
           <CommentForm
             placeholder="Reply…"
             submitLabel="Reply"
+            draft={draft}
             onSubmit={onReply}
             onCancel={onReplyClose}
           />
@@ -190,6 +194,10 @@ export function ThreadsPane({
   author,
   readOnly = false,
   onFocus,
+  narrow = false,
+  open = false,
+  onOpenChange,
+  onCloseAutoFocus,
 }: {
   connection: RoomConnection | null;
   /**
@@ -208,8 +216,19 @@ export function ThreadsPane({
    */
   readOnly?: boolean;
   onFocus: (threadId: string) => void;
+  narrow?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }): ReactElement | null {
   const [replyTo, setReplyTo] = useState<string | null>(null);
+  // The pane stays mounted when the sheet closes or switches to a column.
+  // The modal content can unmount without losing the form or its draft.
+  const [replyText, setReplyText] = useState("");
+  const cancelReply = (): void => {
+    setReplyTo(null);
+    setReplyText("");
+  };
   const now = useTimestampClock();
   /**
    * The one resolved thread the reader has opened back up. One at a time: the
@@ -235,7 +254,7 @@ export function ThreadsPane({
   // not at the key press, because the rail may be a drawer that this very
   // selection opened: the card is focusable once React has committed it.
   useEffect(() => {
-    if (focused === null) return;
+    if (focused === null || (narrow && !open)) return;
     // The first committed frame still has the collapsed card to focus. Reveal
     // it, then let this effect's second pass scroll and focus the expanded card.
     // A card selection never sets this flag, so its own toggle remains intact.
@@ -245,7 +264,7 @@ export function ThreadsPane({
     }
     scrollThreadCardIntoView(focused.id);
     if (focused.viaKeyboard) focusThreadCard(focused.id);
-  }, [focused, expanded]);
+  }, [focused, expanded, narrow, open]);
 
   // A pending reply outlives the conversation it belonged to unless it is let
   // go: hiding the form while a thread reads as resolved is not the same as
@@ -290,7 +309,7 @@ export function ThreadsPane({
 
   if (connection === null || threads.length === 0) return null;
   const { ydoc } = connection;
-  const open = threads.filter((thread) => !thread.resolved);
+  const unresolved = threads.filter((thread) => !thread.resolved);
   const resolved = threads.filter((thread) => thread.resolved);
 
   const card = (thread: ThreadView): ReactElement => (
@@ -304,6 +323,7 @@ export function ThreadsPane({
       // may name a thread someone else resolved a moment ago, and expanding
       // that card must not offer a reply nobody asked for.
       replying={replyTo === thread.id && !thread.resolved}
+      draft={{ text: replyText, onChange: setReplyText }}
       readOnly={readOnly}
       // Same guard as `replying` above, for the same reason: the message is
       // about a settled thread, so a card that reads as open must not show it —
@@ -321,8 +341,11 @@ export function ThreadsPane({
           setExpanded((current) => (current === thread.id ? null : thread.id));
         }
       }}
-      onReplyOpen={() => setReplyTo(thread.id)}
-      onReplyClose={() => setReplyTo(null)}
+      onReplyOpen={() => {
+        setReplyText("");
+        setReplyTo(thread.id);
+      }}
+      onReplyClose={cancelReply}
       onReply={(text) => {
         if (!connection.status.writable) return false;
         // Read the thread as the document has it *now*, not as this card was
@@ -355,27 +378,80 @@ export function ThreadsPane({
     />
   );
 
-  return (
+  const content = (
     <section className="ub-threads" aria-label="Threads">
       {/* The count is the open threads: a rail that keeps counting settled
           conversations stops telling you anything about the document. */}
       <p className="ub-rail-head">
-        Threads <span className="ub-muted">{open.length}</span>
+        Threads <span className="ub-muted">{unresolved.length}</span>
       </p>
-      <ul>{open.map(card)}</ul>
+      <ul>{unresolved.map(card)}</ul>
       {resolved.length > 0 && (
         <>
           <p className="ub-rail-head ub-rail-subhead">
             Resolved <span className="ub-muted">{resolved.length}</span>
           </p>
           <ul>{resolved.map(card)}</ul>
-          {/* Fades the resolved ranges in the prose. See `resolvedHighlightCss`
-              for why this is a stylesheet rather than a class on the span. */}
-          <style data-resolved-highlights="">
-            {resolvedHighlightCss(resolved.map((thread) => thread.id))}
-          </style>
         </>
       )}
     </section>
+  );
+  // The editor's resolved anchors keep their appearance even while the sheet
+  // content is unmounted. This derived stylesheet belongs to the stable pane.
+  const highlights = resolved.length > 0 ? (
+    <style data-resolved-highlights="">
+      {resolvedHighlightCss(resolved.map((thread) => thread.id))}
+    </style>
+  ) : null;
+  if (narrow) {
+    return (
+      <>
+        {highlights}
+        <Sheet open={open} onOpenChange={(shown) => onOpenChange?.(shown)}>
+          <SheetContent
+            id="ub-rail"
+            className="ub-rail ub-rail-open gap-5 overflow-y-auto p-3 text-[0.85rem]"
+            closeLabel="Close threads"
+            aria-describedby={undefined}
+            onOpenAutoFocus={(event) => {
+              // The portal mounts after the pane's selection effect. Override
+              // only our highlight-to-card keyboard path, once the card exists.
+              if (focused?.viaKeyboard) {
+                event.preventDefault();
+                focusThreadCard(focused.id);
+              }
+            }}
+            onCloseAutoFocus={onCloseAutoFocus}
+            onEscapeKeyDown={(event) => {
+              // Radix receives Escape in capture, before CommentForm's handler.
+              // Cancelling a visible reply is one gesture, leaving the sheet open.
+              if (
+                event.target instanceof Element &&
+                event.target.closest(".ub-comment-form textarea") !== null &&
+                !readOnly &&
+                threads.some((thread) => thread.id === replyTo && !thread.resolved)
+              ) {
+                event.preventDefault();
+                cancelReply();
+              }
+            }}
+          >
+            <SheetTitle className="sr-only">Threads</SheetTitle>
+            {content}
+          </SheetContent>
+        </Sheet>
+      </>
+    );
+  }
+  return (
+    <>
+      {highlights}
+      <aside
+        id="ub-rail"
+        className="ub-rail flex w-[var(--outline-width)] flex-none flex-col gap-5 overflow-y-auto border-l border-border p-3 text-[0.85rem] me-[var(--pane-trailing-space)]"
+      >
+        {content}
+      </aside>
+    </>
   );
 }

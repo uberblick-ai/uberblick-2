@@ -26,6 +26,7 @@ export function CommentForm({
   submitLabel,
   mentions = [],
   error,
+  draft,
   onSubmit,
   onCancel,
 }: {
@@ -35,6 +36,8 @@ export function CommentForm({
   mentions?: string[];
   /** A refusal from the last submit, shown above the buttons. */
   error?: string | null;
+  /** A reply draft owned outside a modal's mount lifetime. */
+  draft?: { text: string; onChange: (text: string) => void };
   /**
    * Called with the trimmed text; never with an empty string. Returns whether
    * the write went through — a refused comment keeps the text in the field,
@@ -44,7 +47,9 @@ export function CommentForm({
   onSubmit: (text: string) => boolean;
   onCancel: () => void;
 }): ReactElement {
-  const [text, setText] = useState("");
+  const [localText, setLocalText] = useState("");
+  const text = draft?.text ?? localText;
+  const setText = draft?.onChange ?? setLocalText;
   const field = useRef<HTMLTextAreaElement | null>(null);
   const body = text.trim();
   const submit = (): void => {
@@ -85,7 +90,7 @@ export function CommentForm({
               // Keep the caret in the field: a chip is a typing shortcut.
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
-                setText((current) => withMention(current, name));
+                setText(withMention(text, name));
                 field.current?.focus();
               }}
             >

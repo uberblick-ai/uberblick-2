@@ -253,6 +253,7 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     await page.locator(".ub-composer-open").click();
     await page.getByPlaceholder(/Comment as/).fill("a thread");
     await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
     const threads = page.locator(".ub-threads-toggle");
     await expect(threads).toBeVisible();
     await trigger.tap();
@@ -275,3 +276,75 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     await context.close();
   }
 });
+
+for (const width of [390, 820, 1024]) {
+  test(`the threads sheet closes by touch without selecting covered prose at ${width}px`, async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({ hasTouch: true });
+    const page = await context.newPage();
+    try {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.setViewportSize({ width: 1400, height: 800 });
+      await openDocument(page);
+      await page.keyboard.insertText("first");
+      await page.keyboard.press("Enter");
+      await page.keyboard.insertText("second");
+      // Prepare both unmarked ranges before annotating either: typing at an
+      // existing comment's edge would extend its mark into the new fixture.
+      await page.locator(".ub-editor .ub-paragraph").first().click();
+      await page.keyboard.press("Home");
+      await page.keyboard.press("Shift+End");
+      await page.locator(".ub-composer-open").click();
+      await page.getByPlaceholder(/Comment as/).fill("first conversation");
+      await page.keyboard.press("Enter");
+
+      await page.locator(".ub-editor .ub-paragraph").last().click();
+      await page.keyboard.press("Home");
+      await page.keyboard.press("Shift+End");
+      await page.locator(".ub-composer-open").click();
+      await page.getByPlaceholder(/Comment as/).fill("second conversation");
+      await page.keyboard.press("Enter");
+      await expect(page.locator(".ub-thread")).toHaveCount(2);
+      await page.locator('[data-comment-thread]', { hasText: "second" }).tap();
+      await page.getByRole("button", { name: "Hide document list" }).tap();
+      await page.setViewportSize({ width, height: 800 });
+
+      const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
+      const toggle = page.locator(".ub-threads-toggle");
+      // The thread selected while wide is retained when its column becomes a
+      // sheet. Its close control remains reachable on the touch viewport.
+      await expect(sheet).toBeVisible();
+      await sheet.getByRole("button", { name: "Close threads" }).tap();
+      await expect(sheet).toBeHidden();
+
+      const opener = page.locator('[data-comment-thread]', { hasText: "second" });
+      const other = page.locator('[data-comment-thread]', { hasText: "first" });
+      await opener.tap();
+      await expect(sheet).toBeVisible();
+      const selected = sheet.locator('.ub-thread[aria-current="true"]');
+      await expect(selected).toContainText("second conversation");
+
+      const [otherBox, sheetBox] = await Promise.all([
+        other.boundingBox(),
+        sheet.boundingBox(),
+      ]);
+      if (otherBox === null || sheetBox === null) {
+        throw new Error("e2e: the thread sheet and covered highlight need layout boxes");
+      }
+      const outside = { x: otherBox.x + 3, y: otherBox.y + otherBox.height / 2 };
+      expect(outside.x).toBeLessThan(sheetBox.x);
+      // A real tap at another highlight's coordinates hits the modal overlay.
+      // It closes the sheet without forwarding the gesture to that highlight.
+      await page.touchscreen.tap(outside.x, outside.y);
+      await expect(sheet).toBeHidden();
+      await toggle.tap();
+      await expect(sheet).toBeVisible();
+      await expect(selected).toContainText("second conversation");
+      await sheet.getByRole("button", { name: "Close threads" }).tap();
+      await expect(sheet).toBeHidden();
+    } finally {
+      await context.close();
+    }
+  });
+}

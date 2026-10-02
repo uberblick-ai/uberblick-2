@@ -865,6 +865,8 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   const highlight = page.locator("[data-comment-thread]").first();
   await highlight.click();
   await expect(page.locator('.ub-thread[aria-current="true"]')).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Threads", exact: true })).toHaveCount(0);
+  await expect(page.locator('[data-slot="sheet-overlay"]')).toHaveCount(0);
 
   await page.getByRole("button", { name: "Hide document list" }).click();
   await expect(page.locator('[data-slot="sidebar-gap"]')).toHaveCSS("width", "0px");
@@ -904,6 +906,8 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   expect(withDrawer.column.left).toBeCloseTo(narrow.column.left, 1);
   expect(withDrawer.column.right).toBeCloseTo(narrow.column.right, 1);
   expect(shownRail(withDrawer).right).toBeCloseTo(withDrawer.body.right, 1);
+  await page.getByRole("button", { name: "Close threads" }).click();
+  await expect(highlight).toBeFocused();
 });
 
 test("document actions stay reachable, close with the route, and archive into Restore", async ({
@@ -1648,9 +1652,11 @@ for (const scheme of ["light", "dark"] as const) {
     // become less distinct than the shared fill already is on `--card`.
     await thread.click();
     await page.getByRole("button", { name: "Reopen" }).click();
+    await page.getByRole("button", { name: "Close threads" }).click();
     await placeCaret(page);
     await page.keyboard.press("Shift+Home");
     await page.keyboard.press("Backspace");
+    await handle.click();
     await expect(page.locator(".ub-chip-orphaned")).toBeVisible();
 
     await page.reload();
