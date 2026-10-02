@@ -14,9 +14,11 @@
  */
 
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { createHash, randomUUID } from "node:crypto";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createTlsServer } from "node:tls";
+import { Worker } from "node:worker_threads";
 import {
   chmodSync,
   existsSync,
@@ -1357,6 +1359,62 @@ describe("preflight observation instrument", () => {
     } finally {
       for (const socket of sockets) socket.destroy();
       await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  });
+
+  it("leaves a connected first dial followed by a pending reconnect unattributable", async () => {
+    // Keep the listener alive but stop accepting after the first upgrade
+    // request. Filling its backlog makes the reconnect's TCP handshake wait.
+    // A worker blocks only this listener, leaving the observer's clock running.
+    const gate = new Int32Array(new SharedArrayBuffer(4));
+    const worker = new Worker(`
+      const { parentPort, workerData } = require("node:worker_threads");
+      const { createServer } = require("node:net");
+      const gate = new Int32Array(workerData);
+      const server = createServer(socket => {
+        socket.on("error", () => {});
+        socket.once("data", () => {
+          parentPort.postMessage("request");
+          Atomics.wait(gate, 0, 0, 10_000);
+          socket.destroy();
+          Atomics.wait(gate, 0, 1, 10_000);
+          server.close();
+        });
+      });
+      server.listen({ port: 0, host: "127.0.0.1", backlog: 1 }, () => {
+        parentPort.postMessage(server.address().port);
+      });
+      setTimeout(() => process.exit(1), 25_000);
+    `, { eval: true, workerData: gate.buffer });
+    const fillers: Socket[] = [];
+    let observation: ReturnType<typeof observePreflight> | undefined;
+    try {
+      const [port] = await once(worker, "message");
+      const request = once(worker, "message");
+      observation = observePreflight(config(`ws://127.0.0.1:${port}`));
+      await request;
+      for (let index = 0; index < 8; index += 1) {
+        const socket = createConnection({ host: "127.0.0.1", port });
+        socket.on("error", () => {});
+        fillers.push(socket);
+      }
+      await waitUntil("backlog filling connection", () => fillers.some(socket => !socket.connecting));
+      await sleep(100);
+      Atomics.store(gate, 0, 1);
+      Atomics.notify(gate, 0);
+      const result = await observation;
+      expect(result).toMatchObject({ complete: false, stage: "unattributable" });
+      expect(result.dials).toBeGreaterThan(1);
+      expect(result.events.some(event => event.kind === "upgrade-request-sent")).toBe(true);
+      expect(result.events.some(event => event.kind === "connect-error")).toBe(false);
+      const starts = result.events.filter(event => event.kind === "connect-start");
+      const connected = result.events.filter(event => event.kind === "transport-connected");
+      expect(connected.length).toBeGreaterThan(0);
+      expect(starts.length).toBeGreaterThan(connected.length);
+    } finally {
+      for (const socket of fillers) socket.destroy();
+      await worker.terminate();
+      await observation;
     }
   });
 

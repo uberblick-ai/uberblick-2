@@ -127,10 +127,15 @@ export async function observePreflight(config: McpConfig) {
       } else if (!evidence.some(event => event.kind === "websocket-open")) {
         const errors = evidence.filter(event => event.kind === "connect-error");
         const stages = new Set(errors.map(event => event.stage));
+        const starts = evidence.filter(event => event.kind === "connect-start").length;
+        const connected = evidence.filter(event => event.kind === "transport-connected").length;
         if (stages.size === 1 && !evidence.some(event => event.kind === "transport-connected")) {
           stage = errors[0]?.stage ?? "unattributable";
-        } else if (evidence.some(event => event.kind === "transport-connected") &&
+        } else if (starts > 0 && connected === starts &&
+          evidence.some(event => event.kind === "upgrade-request-sent") &&
           !evidence.some(event => event.kind === "connect-error")) {
+          // An earlier connection cannot place a later, still pending connect
+          // in the upgrade stage. These milestones have no dial identity.
           stage = "websocket-upgrade";
         }
       }

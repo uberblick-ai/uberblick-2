@@ -16,7 +16,8 @@
  * messages, remote close reasons, headers, document titles or tokens printed.
  * Connection milestones are attempt-level, not assigned to a guessed dial.
  * DNS/TCP/TLS attribution requires a known native error code. A connected
- * transport without a WebSocket open places a stall in the upgrade. Otherwise
+ * transport for every observed connection start, with an upgrade request sent
+ * and no WebSocket open or connect error, places a stall in the upgrade. Otherwise
  * the stage remains unattributable, including auth/settle on an open socket.
  */
 import { readFileSync } from "node:fs";
