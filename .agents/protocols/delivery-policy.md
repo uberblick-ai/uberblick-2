@@ -17,12 +17,15 @@ owns operational authority only. `integration.md` holds how the gates run, and
 3. **Gates, all before merge**, each at the exact head that merges. Effort
    follows semantic risk: paths and line counts are inspection signals, not
    extra rounds. Link exact-head evidence instead of repeating it.
-   - **Immutable review.** CI's `gates` check at that head is enough for a
+   - **CI.** Every tier requires a successful CI `gates` check at the merging
+     head. A missing or non-green check blocks agent merge; isolated review
+     cannot substitute for it. If an infrastructure outage keeps it non-green,
+     escalate to a maintainer, who may merge by hand.
+   - **Immutable review.** That successful CI check is enough for a
      tier-1 change that owes no review and touches none of persistence,
      synchronization, concurrency, process lifecycle or auth; verify its
-     conclusion and link it, since nothing enforces it (owner decision,
-     2026-09-02). Every other change, and any change where the base moved
-     under the PR or CI is not green at that head, runs the isolated review
+     conclusion and link it. Every other change, and any change where the base
+     moved under the PR, also runs the isolated review
      (`mise run review <sha>`, `integration.md`). At stateful boundaries —
      persistence, startup and shutdown, networking, concurrency — passing
      happy-path tests is not enough: run focused failure-path probes and post
