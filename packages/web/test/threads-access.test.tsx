@@ -12,11 +12,11 @@
  *    stop; Enter on a focused one selects its thread and DOM focus lands on the
  *    card's button. Enter with the *caret* in the prose is untouched — the
  *    editor's own key, not an activation.
- * 2. **The rail can be opened where it is hidden.** Below 1100px the stylesheet
- *    hides the rail; the pane's "Threads (N)" toggle opens it as a drawer, and
- *    Escape closes it again. The width itself is the stylesheet's business —
- *    jsdom computes no media queries — so what is pinned here is the mechanism
- *    the stylesheet keys off.
+ * 2. **The narrow drawer keeps application state.** The pane's Threads toggle
+ *    opens the modal sheet, reply-form Escape takes precedence over dismissal,
+ *    and a draft survives dismissing the sheet or switching to the wide rail.
+ *    jsdom supplies the media-query result; actual layout and touch input belong
+ *    to the browser suite.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -84,6 +84,37 @@ const { App } = await import("../src/ui/App.js");
 
 let mounted: { root: Root; host: HTMLElement } | null = null;
 
+function threadsWidth(narrow: boolean): { change: (next: boolean) => Promise<void> } {
+  let matches = narrow;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  const media = {
+    get matches() { return matches; },
+    media: "(max-width: 1100px)",
+    addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.add(listener);
+    },
+    removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.delete(listener);
+    },
+  };
+  vi.stubGlobal("matchMedia", (query: string) =>
+    query === media.media
+      ? media
+      : { matches: false, addEventListener: () => {}, removeEventListener: () => {} },
+  );
+  return {
+    change: async (next) => {
+      await act(async () => {
+        matches = next;
+        for (const listener of listeners) {
+          listener({ matches, media: media.media } as MediaQueryListEvent);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    },
+  };
+}
+
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
@@ -94,6 +125,7 @@ beforeEach(() => {
   Range.prototype.getClientRects = () =>
     [empty] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => empty;
+  threadsWidth(false);
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response("", { status: 404 }),
   );
@@ -108,6 +140,7 @@ afterEach(() => {
   }
   rooms.clear();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 /**
@@ -323,39 +356,157 @@ describe("the threads rail can be opened where the layout hides it", () => {
     return button;
   }
 
-  function rail(host: HTMLElement): HTMLElement {
-    const aside = host.querySelector<HTMLElement>(".ub-rail");
-    if (aside === null) throw new Error("no rail");
-    return aside;
+  function sheet(): HTMLElement {
+    const content = document.querySelector<HTMLElement>("[data-slot=sheet-content]");
+    if (content === null) throw new Error("no threads sheet");
+    return content;
   }
 
-  it("counts the open threads, opens the rail as a drawer, and closes on Escape", async () => {
+  function button(label: string): HTMLButtonElement {
+    const control = [...sheet().querySelectorAll<HTMLButtonElement>("button")].find(
+      (candidate) => candidate.textContent === label || candidate.getAttribute("aria-label") === label,
+    );
+    if (control === undefined) throw new Error(`no ${label} button`);
+    return control;
+  }
+
+  async function settle(action: () => void): Promise<void> {
+    await act(async () => action());
+    await act(async () => {
+      // Radix restores focus after unmounting its focus scope.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  function typeReply(text: string): void {
+    const field = sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input");
+    if (field === null) throw new Error("no reply field");
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(field, text);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  it("counts threads and lets reply-form Escape cancel only the form", async () => {
+    threadsWidth(true);
     const { host } = await openAnnotatedDoc();
 
     expect(toggle(host).closest(".ub-pane")).not.toBeNull();
     expect(toggle(host).textContent).toBe("Threads 1");
-    expect(toggle(host).getAttribute("aria-controls")).toBe(rail(host).id);
+    expect(toggle(host).getAttribute("aria-controls")).toBe("ub-rail");
     expect(toggle(host).getAttribute("aria-expanded")).toBe("false");
-    expect(rail(host).classList.contains("ub-rail-open")).toBe(false);
+    expect(document.querySelector("[data-slot=sheet-content]")).toBeNull();
 
-    act(() => toggle(host).click());
+    await settle(() => toggle(host).click());
     expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
-    expect(rail(host).classList.contains("ub-rail-open")).toBe(true);
+    expect(sheet().id).toBe("ub-rail");
 
-    // An Escape a control in the rail already handled — a reply form cancelling
-    // — is that form's dismissal, not the drawer's.
-    const consume = (event: Event): void => event.preventDefault();
-    rail(host).addEventListener("keydown", consume);
-    press(rail(host), "Escape");
-    rail(host).removeEventListener("keydown", consume);
-    expect(rail(host).classList.contains("ub-rail-open")).toBe(true);
+    await settle(() => button("Reply").click());
+    const field = sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input");
+    expect(field).not.toBeNull();
+    expect(document.activeElement).toBe(field);
+    await settle(() => press(field!, "Escape"));
+    expect(sheet().querySelector(".ub-comment-input")).toBeNull();
+    expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
 
-    const card = rail(host).querySelector<HTMLButtonElement>(".ub-thread");
+    const card = sheet().querySelector<HTMLButtonElement>(".ub-thread");
     card?.focus();
     expect(document.activeElement).toBe(card);
-    press(card!, "Escape");
+    await settle(() => press(card!, "Escape"));
     expect(toggle(host).getAttribute("aria-expanded")).toBe("false");
-    expect(rail(host).classList.contains("ub-rail-open")).toBe(false);
+    expect(document.querySelector("[data-slot=sheet-content]")).toBeNull();
+    expect(document.activeElement).toBe(toggle(host));
+  });
+
+  it("keeps an unsent reply through dismissal and crossing the rail breakpoint", async () => {
+    const width = threadsWidth(true);
+    const { host } = await openAnnotatedDoc();
+    await settle(() => toggle(host).click());
+    await settle(() => button("Reply").click());
+    typeReply("Keep this unsent reply");
+
+    for (const close of [
+      () => button("Close threads").click(),
+      () => {
+        const card = sheet().querySelector<HTMLButtonElement>(".ub-thread");
+        card!.focus();
+        press(card!, "Escape");
+      },
+    ]) {
+      await settle(close);
+      expect(document.querySelector("[data-slot=sheet-content]")).toBeNull();
+      await settle(() => toggle(host).click());
+      expect(sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe(
+        "Keep this unsent reply",
+      );
+    }
+
+    await width.change(false);
+    expect(document.querySelector("[data-slot=sheet-content]")).toBeNull();
+    expect(host.querySelector<HTMLTextAreaElement>(".ub-rail .ub-comment-input")?.value).toBe(
+      "Keep this unsent reply",
+    );
+    await width.change(true);
+    expect(sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe(
+      "Keep this unsent reply",
+    );
+
+    // A retained draft is not another request to start replying. While the
+    // sheet is closed, resizing must leave the writer in the prose.
+    await settle(() => button("Close threads").click());
+    const prose = host.querySelector<HTMLElement>(".ub-editor .ProseMirror");
+    expect(prose).not.toBeNull();
+    await settle(() => prose!.focus());
+    await width.change(false);
+    expect(document.activeElement).toBe(prose);
+    expect(host.querySelector<HTMLTextAreaElement>(".ub-rail .ub-comment-input")?.value).toBe(
+      "Keep this unsent reply",
+    );
+    await width.change(true);
+    expect(document.querySelector("[data-slot=sheet-content]")).toBeNull();
+    expect(document.activeElement).toBe(prose);
+    await settle(() => toggle(host).click());
+    expect(sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe(
+      "Keep this unsent reply",
+    );
+  });
+
+  it("keeps focus in the prose when a closed keyboard-opened drawer crosses the breakpoint", async () => {
+    const width = threadsWidth(true);
+    const { host, threadId } = await openAnnotatedDoc();
+    const opener = highlight(host, threadId);
+    opener.focus();
+    await settle(() => press(opener, "Enter"));
+    const card = sheet().querySelector<HTMLButtonElement>(".ub-thread");
+    expect(document.activeElement).toBe(card);
+    await settle(() => press(card!, "Escape"));
+    expect(document.activeElement).toBe(opener);
+
+    const prose = host.querySelector<HTMLElement>(".ub-editor .ProseMirror");
+    expect(prose).not.toBeNull();
+    await settle(() => prose!.focus());
+    await width.change(false);
+    expect(document.activeElement).toBe(prose);
+    await width.change(true);
+    expect(document.querySelector("[data-slot=sheet-content]")).toBeNull();
+    expect(document.activeElement).toBe(prose);
+  });
+
+  it("returns to the Threads toggle when the opening highlight was removed", async () => {
+    threadsWidth(true);
+    const { host, ydoc, threadId } = await openAnnotatedDoc();
+    const opener = highlight(host, threadId);
+    opener.focus();
+    await settle(() => press(opener, "Enter"));
+
+    // A concurrent edit removes the annotated range, while the conversation
+    // remains in the sheet as an orphaned thread.
+    const text = (getBlocksFragment(ydoc).get(0) as Y.XmlElement).firstChild as Y.XmlText;
+    await settle(() => text.delete(4, 11));
+    expect(opener.isConnected).toBe(false);
+    expect(sheet().querySelector(".ub-thread-orphaned")).not.toBeNull();
+
+    await settle(() => button("Close threads").click());
     expect(document.activeElement).toBe(toggle(host));
   });
 });

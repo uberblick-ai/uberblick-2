@@ -26,6 +26,8 @@ export function CommentForm({
   submitLabel,
   mentions = [],
   error,
+  draft,
+  autoFocus = true,
   onSubmit,
   onCancel,
 }: {
@@ -35,6 +37,10 @@ export function CommentForm({
   mentions?: string[];
   /** A refusal from the last submit, shown above the buttons. */
   error?: string | null;
+  /** A reply draft owned outside a modal's mount lifetime. */
+  draft?: { text: string; onChange: (text: string) => void };
+  /** Remounted reply forms let the pane focus only a new Reply gesture. */
+  autoFocus?: boolean;
   /**
    * Called with the trimmed text; never with an empty string. Returns whether
    * the write went through — a refused comment keeps the text in the field,
@@ -44,7 +50,9 @@ export function CommentForm({
   onSubmit: (text: string) => boolean;
   onCancel: () => void;
 }): ReactElement {
-  const [text, setText] = useState("");
+  const [localText, setLocalText] = useState("");
+  const text = draft?.text ?? localText;
+  const setText = draft?.onChange ?? setLocalText;
   const field = useRef<HTMLTextAreaElement | null>(null);
   const body = text.trim();
   const submit = (): void => {
@@ -58,10 +66,10 @@ export function CommentForm({
         ref={field}
         className="ub-comment-input"
         rows={2}
-        // The form mounts when it opens, so this focuses exactly once, on the
-        // gesture that asked for it.
-        // biome-ignore lint/a11y/noAutofocus: the form exists only while the writer is writing.
-        autoFocus
+        // New-comment composers focus on opening; reply forms can also remount
+        // on a resize, so their pane owns the initial focus gesture instead.
+        // biome-ignore lint/a11y/noAutofocus: the composer focuses on the gesture that opens it.
+        autoFocus={autoFocus}
         placeholder={placeholder}
         value={text}
         onChange={(event) => setText(event.target.value)}
@@ -85,7 +93,7 @@ export function CommentForm({
               // Keep the caret in the field: a chip is a typing shortcut.
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
-                setText((current) => withMention(current, name));
+                setText(withMention(text, name));
                 field.current?.focus();
               }}
             >
