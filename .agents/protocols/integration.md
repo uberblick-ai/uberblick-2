@@ -7,6 +7,13 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
 ## Gate mechanics
 
 - Resolve and record the PR's immutable `headRefOid`.
+- **CI, every tier.** `gh api
+  repos/{owner}/{repo}/commits/<headRefOid>/check-runs
+  --jq '.check_runs[]|select(.name=="gates")|.conclusion'` must print
+  `success`, and the record links that check run. A missing or non-green run
+  blocks agent merge; isolated review is not an alternative. If an
+  infrastructure outage keeps it non-green, escalate to a maintainer, who may
+  merge by hand.
 - **Isolated review.** Where `delivery-policy.md` requires it, run
   `mise run review <headRefOid>` from a checkout at freshly fetched
   `origin/main` with that task's recipe unmodified; it refuses otherwise,
@@ -19,11 +26,9 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   section states the full boundary. Keep the SHA-tagged image for the
   failure-path probes the policy requires at stateful boundaries, then remove
   it when the PR is settled.
-- **CI as the immutable review.** Otherwise `gh api
-  repos/{owner}/{repo}/commits/<headRefOid>/check-runs
-  --jq '.check_runs[]|select(.name|test("gates"))|.conclusion'` must print
-  `success`, and the record links that check run. A missing or non-green run is
-  not a fast path; it routes to the isolated review.
+- **CI as the immutable review.** Where `delivery-policy.md` permits it, the
+  successful CI check above also supplies the immutable review. Otherwise the
+  isolated review is required in addition to successful CI.
 - For a browser-observable outcome, run the relevant `e2e` proof early, in its
   own installed worktree at that head. A failure may be called environmental only after the same failing spec is run
   against the base: green at the base and red at the head is a branch

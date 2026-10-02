@@ -20,8 +20,16 @@ permissions:
   contents: read
 
 jobs:
+  # Every PR and main push covers every formula and payload input. Keeping the
+  # proofs in this workflow also cancels them when a newer head supersedes it.
+  homebrew:
+    uses: ./.github/workflows/homebrew-formula.yml
+
   gates:
     name: gates
+    needs: homebrew
+    # A failed or skipped proof must fail gates rather than skip this job.
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -43,6 +51,11 @@ jobs:
       - run: mise run lint
       - run: mise run typecheck
       - run: mise run test
+
+      - name: Require all Homebrew install and upgrade proofs
+        env:
+          HOMEBREW_RESULT: ${{ needs.homebrew.result }}
+        run: test "$HOMEBREW_RESULT" = success
 
   # Deliberately its own job, and deliberately NOT a required check yet (#46):
   # real-browser tests get one week of observed runs before anything is allowed

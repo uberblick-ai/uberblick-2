@@ -15,7 +15,7 @@
     "test:e2e-runner": "node --test scripts/run-e2e.test.mjs",
     "test:agent-cleanup": "node --test scripts/cleanup-agent-worktree.test.mjs",
     "test:housekeeping": "node --test scripts/housekeeping.test.mjs",
-    "test:homebrew-release": "node --test scripts/publish-homebrew-release.test.mjs"
+    "test:homebrew-release": "node --test scripts/publish-homebrew-release.test.mjs scripts/homebrew-proof.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.9",
