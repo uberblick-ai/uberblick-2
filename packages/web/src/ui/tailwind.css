@@ -1,7 +1,8 @@
 /* Tailwind v4, for app CHROME only (#27).
  *
- * The product's surfaces — editor, sidebar, reading layout — are plain CSS and
- * stay that way (`styles.css`). Tailwind is here for one job: to let us vendor
+ * Product content — editor, sidebar rows, reading layout — is plain CSS
+ * (`styles.css`). The app frame and standard chrome use vendored components.
+ * Tailwind lets us vendor
  * shadcn/ui components (`ui/shadcn/`) over Radix primitives, so the menus and
  * popovers the design needs are standard mature open source rather than
  * hand-built. Coexistence, not a rewrite.
@@ -61,6 +62,9 @@
 /* The bridge. Left side: what shadcn's markup asks for. Right side: what this
    product already is. No colour is defined here. */
 @theme inline {
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

@@ -46,6 +46,7 @@ import type { RoomConnection } from "../collab/rooms.js";
 import type { RemotePresence } from "./doc-chrome.js";
 import { CopyLink } from "./DocChrome.js";
 import { Sidebar, togglePin } from "./Sidebar.js";
+import { SidebarProvider } from "./shadcn/sidebar.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { SyncPanel } from "./SyncPanel.js";
@@ -375,7 +376,7 @@ export function App(): ReactElement {
   const restoreSidebar = useRef<HTMLButtonElement | null>(null);
   const previousCollapsed = useRef(collapsed);
 
-  // Collapsing retires the control that received the gesture. Move focus to
+  // Collapsing makes the control that received the gesture inert. Move focus to
   // its visible counterpart after that commit, and do the inverse on restore.
   // Run after retiring portalled menus release their focus scopes. The initial
   // stored preference is not a gesture, so it must not steal focus.
@@ -878,7 +879,11 @@ export function App(): ReactElement {
   return (
     <main className="ub-app">
       <ReboundNotice serving={serving} />
-      <div className="ub-body" data-sidebar-collapsed={collapsed}>
+      <SidebarProvider
+        open={!collapsed}
+        className="ub-body"
+        data-sidebar-collapsed={collapsed}
+      >
         {collapsed && (
           /* Pane-local and out of flow: restoring the sidebar costs no global
              row and leaves every route at the application's top edge. */
@@ -1031,7 +1036,7 @@ export function App(): ReactElement {
             onClose={closeSync}
           />
         )}
-      </div>
+      </SidebarProvider>
     </main>
   );
 }

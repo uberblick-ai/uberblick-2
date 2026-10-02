@@ -535,44 +535,12 @@ body {
   cursor: pointer;
 }
 
-.ub-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  /* The containing block for the threads drawer, which overlays the panes at
-     narrow widths rather than taking a column from them. */
-  position: relative;
-}
-
-/* ---- doc list ---- */
-
+/* Frame geometry and offcanvas motion live in shadcn/sidebar.tsx. Product
+   content keeps its own clipping and inset; the frame shares our tokens. */
 .ub-list {
-  position: relative;
-  width: var(--sidebar-width);
-  flex: none;
-  /* A column, so the pane stack fills it without changing the shell width. */
-  display: flex;
-  flex-direction: column;
-  background: var(--sidebar);
-  color: var(--sidebar-foreground);
-  border-right: 1px solid var(--sidebar-border);
   overflow: clip;
   overflow-clip-margin: 1.25rem;
   padding: 0.5rem;
-  margin-inline-start: 0;
-  transition:
-    margin-inline-start 180ms ease,
-    visibility 0s;
-}
-
-/* Keep the sidebar at its full width while its footprint slides closed. The
-   adjacent pane follows the same edge in normal flow, including on reversal.
-   Visibility retires the overhanging control once the movement finishes; inert
-   and aria-hidden retire all interactions as soon as collapse begins. */
-.ub-body[data-sidebar-collapsed="true"] .ub-list {
-  margin-inline-start: calc(-1 * var(--sidebar-width));
-  visibility: hidden;
-  transition-delay: 0s, 180ms;
 }
 
 /* Both sidebar modes stay mounted so their transform can cross-fade, but only
@@ -660,6 +628,7 @@ body {
    and reserving it here is what stops selection from nudging every row. */
 .ub-list-head button,
 .ub-list li button,
+.ub-drag-handle,
 .ub-settings-entry,
 .ub-settings-back,
 .ub-group-add {
@@ -1247,41 +1216,27 @@ body {
   opacity: 0.5;
 }
 
-/* ---- sidebar drop slots (#115) ---- */
-
-/* One insertion point. It has height so it can be aimed at, and negative
-   margins so having one between every pair of rows does not space the list out.
-   Out of the pointer's way entirely until a drag it could accept is in flight:
-   the list carries what kind that is, and only the matching slots take the
-   pointer — a document dragged over the space between two groups means nothing,
-   and must not light up there. */
-.ub-drop-slot {
-  height: 0.5rem;
-  margin: -0.25rem 0;
-  border-radius: 2px;
-  pointer-events: none;
-  /* Above the rows it overlaps. The negative margins put half of the slot
-     inside its neighbours' padding, and hit testing would otherwise hand that
-     half to whichever row was painted last — the strip the reader is aiming at
-     would take the drop only along its middle line. */
-  position: relative;
-  z-index: 1;
+/* dnd-kit handles are separate from navigation/disclosure. Touch gestures
+   belong to these targets; the rest of the list remains normally scrollable. */
+.ub-list .ub-drag-handle {
+  flex: none;
+  width: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+  color: var(--sidebar-muted-foreground);
 }
 
-/* The slots between documents live in list items of their own, which carry no
-   marker and none of the row padding. */
-.ub-drop-row {
-  list-style: none;
-}
-
-.ub-list[data-dragging="doc"] .ub-group-body .ub-drop-slot,
-.ub-list[data-dragging="group"] .ub-document-sidebar > .ub-drop-slot {
-  pointer-events: auto;
-}
-
-.ub-drop-slot[data-over="true"] {
-  background: var(--brand);
-}
+.ub-drag-handle:active { cursor: grabbing; }
+.ub-drag-handle:disabled { cursor: default; opacity: 0.5; }
+.ub-pin-row { display: flex; align-items: center; }
+.ub-pin-row > button:first-child { min-width: 0; flex: 1; }
+.ub-group-head[data-drop-target="true"],
+.ub-pin-row[data-drop-target="true"] { background: var(--sidebar-accent); }
 
 /* ---- editor pane ---- */
 
@@ -1678,32 +1633,9 @@ body {
   }
 }
 
-/* Below the iPad breakpoint the document list is a drawer, not a column. Its
-   open state still comes from the existing persisted sidebar preference; only
-   the way that state is laid out changes. Keeping the pane in normal flow
-   gives it the whole viewport behind the drawer, while the same hide/restore
-   controls make both states reachable across a resize. */
+/* SidebarProvider's controlled state is shared across viewport sizes. The
+   frame presents the panel as an overlay below 768px. */
 @media (max-width: 767px) {
-  .ub-list {
-    position: absolute;
-    inset: 0 auto 0 0;
-    z-index: 5;
-    width: min(var(--sidebar-width), 85vw);
-    box-shadow: 8px 0 24px rgb(0 0 0 / 0.18);
-  }
-
-  .ub-body[data-sidebar-collapsed="true"] .ub-list {
-    margin-inline-start: 0;
-    transform: translateX(-100%);
-  }
-
-  .ub-list {
-    transform: translateX(0);
-    transition:
-      transform 180ms ease,
-      visibility 0s;
-  }
-
   .ub-body > .ub-pane > :not(.ub-pane-threads-toggle) {
     transition: margin-block-start 180ms ease;
   }
@@ -1712,7 +1644,7 @@ body {
      A phone cannot afford that permanent gutter: move the pane's content below
      the button while its sticky edge controls keep their normal top position,
      and return the document to its compact edge inset. */
-  .ub-body[data-sidebar-collapsed="true"] > .ub-pane > :not(.ub-pane-threads-toggle) {
+  .ub-sidebar-restore ~ .ub-pane > :not(.ub-pane-threads-toggle) {
     margin-block-start: 2.75rem;
   }
 

@@ -2,14 +2,15 @@
  * The sidebar's browser-only claims: its real top-edge layout and collapse
  * focus hand-off (#611), plus a real drag seen by a *second* browser (#115).
  *
- * `test/sidebar.test.tsx` pins the data mechanics — stored order, where a drop
- * lands, an agent's pin arriving live, the keyboard path — over shared Y.Docs
- * and dispatched drag events. The browser also proves continuous shell motion,
- * reduced motion, focus and isolation, which depend on real layout and input.
+ * `test/sidebar.test.tsx` checks rendering over shared Y.Docs.
+ * The browser proves continuous shell motion,
+ * reduced motion, focus and isolation, and real drag gestures reaching a
+ * second browser through the hub.
  */
 
 import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
+import { createPinnedDoc, dragOnto } from "./sidebar-helpers.js";
 import { startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 
@@ -56,7 +57,7 @@ function docTitle(label: string): string {
 
 /** The titles the sidebar lists, top to bottom. */
 function pinnedTitles(page: Page): Locator {
-  return page.locator(".ub-group-body li button");
+  return page.locator(".ub-group-body li > button:first-child");
 }
 
 test("the sidebar and pane share the top edge, and collapse transfers focus", async ({
@@ -103,7 +104,10 @@ test("the sidebar and pane share the top edge, and collapse transfers focus", as
   expect(narrow.pane.width).toBeCloseTo(narrow.body.width, 1);
 
   await page.getByRole("button", { name: "Hide document list" }).click();
-  await expect(page.locator(".ub-list")).toBeHidden();
+  await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
+  await expect(page.locator(".ub-list")).toHaveAttribute("aria-hidden", "true");
+  const shadow = await page.locator(".ub-list").evaluate((panel) => getComputedStyle(panel).boxShadow);
+  expect(shadow === "none" || shadow.match(/rgba?\([^)]+\)/g)?.every((color) => color === "rgba(0, 0, 0, 0)")).toBe(true);
   const restore = page.getByRole("button", { name: "Show document list" });
   await expect(restore).toBeFocused();
   await expect(restore).toHaveAttribute("aria-expanded", "false");
@@ -115,6 +119,7 @@ test("the sidebar and pane share the top edge, and collapse transfers focus", as
 
   await restore.click();
   await expect(page.getByRole("button", { name: "Hide document list" })).toBeFocused();
+  await expect.poll(async () => (await page.locator(".ub-list").boundingBox())?.x).toBe(0);
   await expect(page.getByRole("button", { name: "You" })).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("uberblick.sidebar.collapsed"))).toBe("false");
   expect(await origins()).toEqual([0, 0]);
@@ -323,7 +328,8 @@ test("collapse isolates contents and portals immediately, and rapid reversal kee
     document.querySelector<HTMLButtonElement>(".ub-sidebar-hide")?.click();
   });
   await expect(restore).toBeFocused();
-  await expect(sidebar).toBeHidden();
+  await expect(sidebar).toHaveAttribute("inert", "");
+  await expect(sidebar).toHaveAttribute("aria-hidden", "true");
   await expect.poll(() =>
     page.locator(".ub-pane").evaluate((p) => p.getBoundingClientRect().left),
   ).toBe(0);
@@ -363,44 +369,6 @@ test("reduced motion toggles immediately on desktop and narrow screens", async (
   }
 });
 
-/** Make a document and pin it — the sidebar lists what is pinned, and only that. */
-async function createPinnedDoc(page: Page, title: string): Promise<void> {
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
-  await page.locator(".ub-title").fill(title);
-  const actions = page.getByRole("button", { name: "Document actions" });
-  await actions.click();
-  await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
-  await actions.click();
-  await expect(
-    page.getByRole("menuitem", { name: "Unpin from sidebar" }),
-  ).toBeVisible();
-  await page.keyboard.press("Escape");
-}
-
-/**
- * Drag `source` onto `target` with the real mouse.
- *
- * Steps rather than `dragTo`, for one reason: the drop slots take the pointer
- * only while a drag is in flight, so an actionability check on the target
- * *before* the drag has started would find it unhittable. The nudge inside the
- * source is what makes Chromium synthesise a drag at all — a press followed by
- * a jump straight to the target is swallowed as a click.
- */
-async function dragOnto(page: Page, source: Locator, target: Locator): Promise<void> {
-  const from = await source.boundingBox();
-  const to = await target.boundingBox();
-  if (from === null || to === null) throw new Error("e2e: nothing to drag");
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2 - 5);
-  const x = to.x + to.width / 2;
-  const y = to.y + to.height / 2;
-  await page.mouse.move(x, y, { steps: 12 });
-  await page.mouse.move(x, y);
-  await page.mouse.up();
-}
-
 test("a drag reorders the sidebar, and the other browser sees the new order", async ({
   browser,
 }) => {
@@ -416,11 +384,8 @@ test("a drag reorders the sidebar, and the other browser sees the new order", as
   // already looking at it — nobody told it anything.
   await expect(pinnedTitles(b)).toHaveText([first, second]);
 
-  // The pointer gesture: the second document, onto the insertion point above
-  // the first. The slots are the sidebar's first and last children of the
-  // group's list, one per position.
-  const slots = a.locator(".ub-group-body .ub-drop-slot");
-  await dragOnto(a, pinnedTitles(a).nth(1), slots.nth(0));
+  // dnd-kit starts from a separate handle; clicking the document still navigates.
+  await dragOnto(a, a.getByRole("button", { name: `Move document ${second}`, exact: true }), pinnedTitles(a).nth(0));
 
   await expect(pinnedTitles(a)).toHaveText([second, first]);
   await expect(pinnedTitles(b)).toHaveText([second, first]);

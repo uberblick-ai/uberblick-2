@@ -825,11 +825,13 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   expectFixedOrigins(expandedEmpty, (reading) => reading.sidebar?.right ?? 0);
 
   await page.getByRole("button", { name: "Hide document list" }).click();
-  await expect(page.locator(".ub-list")).toBeHidden();
+  await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
+  await expect(page.locator(".ub-list")).toHaveAttribute("aria-hidden", "true");
   const collapsedEmpty = await atWidths([1400, 1600]);
   expectFixedOrigins(collapsedEmpty, (reading) => reading.body.left);
 
   await page.getByRole("button", { name: "Show document list" }).click();
+  await expect.poll(async () => (await page.locator(".ub-list").boundingBox())?.x).toBe(0);
   await expect(page.locator(".ub-list")).toBeVisible();
   await page.setViewportSize({ width: 1400, height: 800 });
   await placeCaret(page);
@@ -865,6 +867,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   await expect(page.locator('.ub-thread[aria-current="true"]')).toBeVisible();
 
   await page.getByRole("button", { name: "Hide document list" }).click();
+  await expect(page.locator('[data-slot="sidebar-gap"]')).toHaveCSS("width", "0px");
   const collapsedPopulated = await atWidths([1400, 1600]);
   expectFixedOrigins(collapsedPopulated, (reading) => reading.body.left);
   for (let index = 0; index < collapsedPopulated.length; index += 1) {
@@ -880,6 +883,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   // overflow. The drawer overlays it, and a keyboard activation still opens
   // and targets the right card without changing document geometry.
   await page.getByRole("button", { name: "Show document list" }).click();
+  await expect.poll(async () => (await page.locator(".ub-list").boundingBox())?.x).toBe(0);
   await page.setViewportSize({ width: 768, height: 720 });
   await page.keyboard.press("Escape");
   await expect(page.locator(".ub-rail")).not.toBeVisible();
@@ -910,7 +914,8 @@ test("document actions stay reachable, close with the route, and archive into Re
   await page.locator(".ub-title").fill("Lifecycle notes");
   await page.setViewportSize({ width: 360, height: 720 });
   await page.getByRole("button", { name: "Hide document list" }).click();
-  await expect(page.locator(".ub-list")).toBeHidden();
+  await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
+  await expect(page.locator(".ub-list")).toHaveAttribute("aria-hidden", "true");
 
   const trigger = page.getByRole("button", { name: "Document actions" });
   const uuid = page.locator(".ub-copy-identity .ub-copy-link");
@@ -1031,6 +1036,7 @@ test("document actions stay reachable, close with the route, and archive into Re
   // The archive took the pin with it (#957), so the sidebar stops listing the
   // document altogether rather than carrying it with an archived marker.
   await page.getByRole("button", { name: "Show document list" }).click();
+  await expect.poll(async () => (await page.locator(".ub-list").boundingBox())?.x).toBe(0);
   await expect(page.locator(".ub-list")).toBeVisible();
   await expect(
     page.getByRole("button", { name: /Lifecycle notes/ }),
@@ -2295,7 +2301,15 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
   // nor intersects the uuid, revision, title or actions when it appears.
   await page.setViewportSize({ width: 360, height: 620 });
   await page.getByRole("button", { name: "Hide document list" }).click();
-  await expect(page.locator(".ub-list")).toBeHidden();
+  await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
+  await expect(page.locator(".ub-list")).toHaveAttribute("aria-hidden", "true");
+  await page.locator(".ub-body").evaluate(async (body) => {
+    await Promise.all(
+      body.getAnimations({ subtree: true }).map((animation) =>
+        animation.finished.catch(() => undefined),
+      ),
+    );
+  });
   const headerRects = (): Promise<Record<string, DOMRect>> =>
     page.evaluate(() => {
       const selectors = {
