@@ -100,8 +100,12 @@ last". Preserve literal text and newlines. Confirm scratch-file writes
 succeeded before posting; noclobber can leave stale content.
 
 Each run uses fresh private scratch outside the worktree, namespaced by its run
-id; never share it or treat it as durable state. A private transcript is never a
-handoff: GitHub must be sufficient for a fresh run to continue.
+id: put `$UB_AGENT_RUN` in the name of every temp directory you create. Never
+share scratch or treat it as durable state. The project cleanup hook covers only
+private-worktree runs (implementer and PR reviewer). Scratch from shared
+operator-checkout runs (issue preparer, issue reviewer and integrator), and that
+checkout's shared Claude task directory, are left to the operator. A private
+transcript is never a handoff: GitHub must be sufficient for a fresh run to continue.
 
 Before creating a follow-up issue discovered during a run, fetch `origin/main`
 and check the observation against that commit and existing open issues. Do not

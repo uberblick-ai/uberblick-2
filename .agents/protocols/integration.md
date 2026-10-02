@@ -123,6 +123,9 @@ run `sh scripts/housekeeping.sh` with every review SHA this run built — each
 exact head it gated and each merged-tree commit from an observed base advance —
 from the same freshly fetched base-ref checkout used for the container review,
 and record a concise summary on the PR. Besides the named review images, the
-command removes older review images, stopped containers, dangling layers and
-every host-wide unused image older than a week; it may prune build cache when
-disk space is low. It supports `--dry-run` to show what it would do.
+command removes review images older than 24 hours and dangling images. It prunes
+build cache older than a week, for a free-space floor (`HOUSEKEEPING_MIN_FREE`,
+default `5GB`), and to cap cache use (`HOUSEKEEPING_MAX_USED_SPACE`, default
+`1GB`). Each prune reports what it reclaimed. Containers, other tagged images,
+volumes and worktrees are left alone, including a stopped production hub. It
+supports `--dry-run` to show what it would do.
