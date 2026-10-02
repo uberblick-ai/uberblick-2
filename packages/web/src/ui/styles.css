@@ -559,6 +559,20 @@ body {
   overflow: clip;
   overflow-clip-margin: 1.25rem;
   padding: 0.5rem;
+  margin-inline-start: 0;
+  transition:
+    margin-inline-start 180ms ease,
+    visibility 0s;
+}
+
+/* Keep the sidebar at its full width while its footprint slides closed. The
+   adjacent pane follows the same edge in normal flow, including on reversal.
+   Visibility retires the overhanging control once the movement finishes; inert
+   and aria-hidden retire all interactions as soon as collapse begins. */
+.ub-body[data-sidebar-collapsed="true"] .ub-list {
+  margin-inline-start: calc(-1 * var(--sidebar-width));
+  visibility: hidden;
+  transition-delay: 0s, 180ms;
 }
 
 /* Both sidebar modes stay mounted so their transform can cross-fade, but only
@@ -1289,12 +1303,15 @@ body {
     var(--pane-document-inset) + var(--measure) + var(--document-rail-gap)
   );
   padding-inline: var(--pane-document-inset) var(--document-rail-gap);
+  transition:
+    padding-inline-start 180ms ease,
+    flex-basis 180ms ease;
 }
 
 /* The restore control floats at the page edge. Give the sidebar-less document
    a deliberate outer inset that clears its complete target rather than
    centring the document in the newly available width. */
-.ub-sidebar-restore ~ .ub-document-pane {
+.ub-body[data-sidebar-collapsed="true"] > .ub-document-pane {
   --pane-document-inset: 4rem;
 }
 
@@ -1675,15 +1692,31 @@ body {
     box-shadow: 8px 0 24px rgb(0 0 0 / 0.18);
   }
 
+  .ub-body[data-sidebar-collapsed="true"] .ub-list {
+    margin-inline-start: 0;
+    transform: translateX(-100%);
+  }
+
+  .ub-list {
+    transform: translateX(0);
+    transition:
+      transform 180ms ease,
+      visibility 0s;
+  }
+
+  .ub-body > .ub-pane > :not(.ub-pane-threads-toggle) {
+    transition: margin-block-start 180ms ease;
+  }
+
   /* The wide layout spends inline room to clear the floating restore button.
      A phone cannot afford that permanent gutter: move the pane's content below
      the button while its sticky edge controls keep their normal top position,
      and return the document to its compact edge inset. */
-  .ub-sidebar-restore + .ub-pane > :not(.ub-pane-threads-toggle) {
+  .ub-body[data-sidebar-collapsed="true"] > .ub-pane > :not(.ub-pane-threads-toggle) {
     margin-block-start: 2.75rem;
   }
 
-  .ub-sidebar-restore ~ .ub-document-pane {
+  .ub-body[data-sidebar-collapsed="true"] > .ub-document-pane {
     --pane-document-inset: 1rem;
   }
 
@@ -3958,6 +3991,9 @@ h3.ub-heading {
 /* Every transition above is decoration on a state change that has already
    happened, so removing it changes nothing but the movement. */
 @media (prefers-reduced-motion: reduce) {
+  .ub-list,
+  .ub-document-pane,
+  .ub-body > .ub-pane > :not(.ub-pane-threads-toggle),
   .ub-group-caret,
   .ub-group-body,
   .ub-group-act,

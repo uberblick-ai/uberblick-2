@@ -124,6 +124,7 @@ interface Dnd {
 }
 
 export function Sidebar({
+  collapsed = false,
   collapseButtonRef,
   collapseLabel,
   onCollapse,
@@ -146,7 +147,9 @@ export function Sidebar({
   settingsOpen,
   settingsPage,
 }: {
-  /** The pane-boundary control that removes this sidebar. */
+  /** Keep the shell mounted for movement while retiring its interactions. */
+  collapsed?: boolean;
+  /** The pane-boundary control that hides this sidebar. */
   collapseButtonRef?: Ref<HTMLButtonElement>;
   collapseLabel: string;
   onCollapse: () => void;
@@ -304,6 +307,8 @@ export function Sidebar({
       ref={sidebarRoot}
       className="ub-list"
       aria-label="Sidebar"
+      aria-hidden={collapsed}
+      inert={collapsed}
       data-mode={settingsOpen ? "settings" : "documents"}
       data-dragging={drag?.kind}
     >
@@ -322,8 +327,8 @@ export function Sidebar({
         <nav
           className="ub-sidebar-pane ub-document-sidebar"
           aria-label="Documents"
-          aria-hidden={settingsOpen}
-          inert={settingsOpen}
+          aria-hidden={settingsOpen || collapsed}
+          inert={settingsOpen || collapsed}
         >
           {/* The workspace, across the top of the column it is the workspace of
               (#74). Above the head rather than in it: the head is about this
@@ -334,7 +339,7 @@ export function Sidebar({
             docs={entries.length}
             onSwitch={onSwitchWorkspace}
             onOpenSettings={() => onOpenSettings("general")}
-            active={!settingsOpen}
+            active={!settingsOpen && !collapsed}
           />
           <div className="ub-list-head">
             <button
@@ -430,7 +435,7 @@ export function Sidebar({
                 Workspace settings
               </button>
             )}
-            {!settingsOpen && (
+            {!settingsOpen && !collapsed && (
               <UserMenu identity={identity} agentSessions={agentSessions} />
             )}
           </div>
@@ -439,7 +444,7 @@ export function Sidebar({
           workspace={workspace}
           identity={identity}
           agentSessions={agentSessions}
-          active={settingsOpen}
+          active={settingsOpen && !collapsed}
           page={settingsPage}
           onSelect={onOpenSettings}
           onBack={onBackToWorkspace}
