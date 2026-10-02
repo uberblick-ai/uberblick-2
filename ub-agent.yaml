@@ -41,6 +41,14 @@ agents:
       - "mcp__uberblick__*"
       - "Bash(sh scripts/housekeeping.sh *)"
       - "Bash(docker *)"
+      # Read-only and scratch helpers, so compound commands such as `cd /tmp/ub-x && mise run review SHA`
+      # or `… | tail` are not denied part by part in headless runs.
+      - "Bash(cd *)"
+      - "Bash(mkdir *)"
+      - "Bash(mktemp *)"
+      - "Bash(rm -rf /tmp/ub-*)"
+      - "Bash(head *)"
+      - "Bash(tail *)"
       - --strict-mcp-config
       - --mcp-config
       - .mcp.json
