@@ -106,10 +106,10 @@ selection criteria in **Web UI system**
 are absent, unavailable or unmet, or the PR lacks the evidence; when the
 library touches sync, persistence, auth or CRDT semantics; and to any runtime
 dependency outside `packages/web`. This exception requires the reviewed
-library-selection Corpus update accompanying this policy change to be applied
-to the live corpus after merge; a draft in a PR is not sufficient. It removes
-only this trigger: every other tier-3 trigger and the Reviews owed table still
-apply.
+library-selection Corpus update in [PR #1094](https://github.com/uberblick-ai/uberblick-2/pull/1094)
+to be applied to the live corpus after merge; a draft in a PR is not sufficient.
+It removes only this trigger: every other tier-3 trigger and the Reviews owed
+table still apply.
 
 The answer may come early. A person's answer on the issue or the PR that fixes
 the PR's intended shape — while shaping, to a question, or unprompted — covers
