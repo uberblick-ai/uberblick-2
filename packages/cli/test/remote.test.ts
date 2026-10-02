@@ -14,11 +14,9 @@
  */
 
 import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { createHash, randomUUID } from "node:crypto";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createTlsServer } from "node:tls";
-import { Worker } from "node:worker_threads";
 import {
   chmodSync,
   existsSync,
@@ -28,7 +26,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { createConnection, createServer, type Socket } from "node:net";
+import net, { createConnection, createServer, type Socket } from "node:net";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -58,7 +56,7 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import * as Y from "yjs";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Sandbox } from "./helpers.js";
 import { normalizeRemoteUrl, parseJoinTarget, setRemote } from "../src/remote.js";
 import {
@@ -1363,58 +1361,61 @@ describe("preflight observation instrument", () => {
   });
 
   it("leaves a connected first dial followed by a pending reconnect unattributable", async () => {
-    // Keep the listener alive but stop accepting after the first upgrade
-    // request. Filling its backlog makes the reconnect's TCP handshake wait.
-    // A worker blocks only this listener, leaving the observer's clock running.
-    const gate = new Int32Array(new SharedArrayBuffer(4));
-    const worker = new Worker(`
-      const { parentPort, workerData } = require("node:worker_threads");
-      const { createServer } = require("node:net");
-      const gate = new Int32Array(workerData);
-      const server = createServer(socket => {
+    const sockets = new Set<Socket>();
+    let requestReceived = false;
+    const server = createServer(socket => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+      socket.on("error", () => {});
+      socket.once("data", () => {
+        requestReceived = true;
+        // Drop the first real transport as soon as its upgrade request arrives,
+        // leaving the entire remaining connect budget for the native retry.
+        socket.destroy();
+      });
+    });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("missing port");
+    let pendingLookups = 0;
+    // The first dial uses real TCP. Later native sockets start connecting but
+    // their lookup never answers: no OS backlog sizes, filler races or blocked
+    // worker can turn this pending transport into a completed one. Undici and
+    // the observer still produce all diagnostics themselves.
+    const nativeConnect = net.connect;
+    const connect = vi.spyOn(net, "connect")
+      .mockImplementationOnce(nativeConnect)
+      .mockImplementation(() => {
+        const socket = new net.Socket();
         socket.on("error", () => {});
-        socket.once("data", () => {
-          parentPort.postMessage("request");
-          Atomics.wait(gate, 0, 0, 10_000);
-          socket.destroy();
-          Atomics.wait(gate, 0, 1, 10_000);
-          server.close();
-        });
+        sockets.add(socket);
+        socket.on("close", () => sockets.delete(socket));
+        return socket.connect({ host: "pending-reconnect.invalid", port: address.port,
+          lookup: () => { pendingLookups += 1; } });
       });
-      server.listen({ port: 0, host: "127.0.0.1", backlog: 1 }, () => {
-        parentPort.postMessage(server.address().port);
-      });
-      setTimeout(() => process.exit(1), 25_000);
-    `, { eval: true, workerData: gate.buffer });
-    const fillers: Socket[] = [];
-    let observation: ReturnType<typeof observePreflight> | undefined;
     try {
-      const [port] = await once(worker, "message");
-      const request = once(worker, "message");
-      observation = observePreflight(config(`ws://127.0.0.1:${port}`));
-      await request;
-      for (let index = 0; index < 8; index += 1) {
-        const socket = createConnection({ host: "127.0.0.1", port });
-        socket.on("error", () => {});
-        fillers.push(socket);
-      }
-      await waitUntil("backlog filling connection", () => fillers.some(socket => !socket.connecting));
-      await sleep(100);
-      Atomics.store(gate, 0, 1);
-      Atomics.notify(gate, 0);
-      const result = await observation;
+      const result = await observePreflight(config(`ws://127.0.0.1:${address.port}`));
+      const setup = (condition: string) => `pending reconnect precondition: ${condition}; ${JSON.stringify(result)}`;
+      const kinds = result.events.map(event => event.kind);
+      const connected = kinds.indexOf("transport-connected");
+      const upgrade = kinds.indexOf("upgrade-request-sent");
+      const reconnect = kinds.indexOf("connect-start", upgrade + 1);
+      expect(requestReceived, setup("first connection received its upgrade request")).toBe(true);
+      expect(connected, setup("first connection completed transport")).toBeGreaterThanOrEqual(0);
+      expect(upgrade, setup("first connection sent an upgrade request after transport connected")).toBeGreaterThan(connected);
+      expect(reconnect, setup("a later connection started after the first upgrade request")).toBeGreaterThan(upgrade);
+      expect(pendingLookups, setup("reconnect reached the held native lookup")).toBeGreaterThan(0);
+      expect(kinds.slice(reconnect), setup("reconnect transport remained pending through the preflight deadline"))
+        .not.toContain("transport-connected");
+      expect(kinds, setup("no connect-error replaced the pending transport"))
+        .not.toContain("connect-error");
+      expect(kinds, setup("no WebSocket opened instead of a pending transport")).not.toContain("websocket-open");
       expect(result).toMatchObject({ complete: false, stage: "unattributable" });
       expect(result.dials).toBeGreaterThan(1);
-      expect(result.events.some(event => event.kind === "upgrade-request-sent")).toBe(true);
-      expect(result.events.some(event => event.kind === "connect-error")).toBe(false);
-      const starts = result.events.filter(event => event.kind === "connect-start");
-      const connected = result.events.filter(event => event.kind === "transport-connected");
-      expect(connected.length).toBeGreaterThan(0);
-      expect(starts.length).toBeGreaterThan(connected.length);
     } finally {
-      for (const socket of fillers) socket.destroy();
-      await worker.terminate();
-      await observation;
+      connect.mockRestore();
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>(resolve => server.close(() => resolve()));
     }
   });
 

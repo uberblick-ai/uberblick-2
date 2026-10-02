@@ -17,7 +17,7 @@ cleanup:
 
 agents:
   issue-preparer:
-    runtime: "claude:claude-opus-5-5:high"
+    runtime: "claude:claude-opus-5-5:xhigh"
     kind: issue
     trigger: needs-preparation
     instructions: .agents/roles/issue-preparer.md
@@ -41,12 +41,20 @@ agents:
       - "mcp__uberblick__*"
       - "Bash(sh scripts/housekeeping.sh *)"
       - "Bash(docker *)"
+      # Read-only and scratch helpers, so compound commands such as `cd /tmp/ub-x && mise run review SHA`
+      # or `… | tail` are not denied part by part in headless runs.
+      - "Bash(cd *)"
+      - "Bash(mkdir *)"
+      - "Bash(mktemp *)"
+      - "Bash(rm -rf /tmp/ub-*)"
+      - "Bash(head *)"
+      - "Bash(tail *)"
       - --strict-mcp-config
       - --mcp-config
       - .mcp.json
 
   issue-reviewer:
-    runtime: "codex:gpt-6.1-sol:high"
+    runtime: "codex:gpt-6.1-sol:xhigh"
     kind: issue
     trigger: needs-review
     instructions: .agents/roles/reviewer.md
@@ -66,7 +74,7 @@ agents:
       - 'mcp_servers.uberblick.default_tools_approval_mode="approve"'
 
   implementer:
-    runtime: "codex:gpt-6.1-sol:high"
+    runtime: "codex:gpt-6.1-sol:ultra"
     trigger: [needs-changes, ready]
     instructions: .agents/roles/implementer.md
     worktree: true
@@ -79,7 +87,7 @@ agents:
     runtime-args: *codex-scoped
 
   pr-reviewer:
-    runtime: "claude:claude-opus-5-5:high"
+    runtime: "claude:claude-opus-5-5:xhigh"
     kind: pr
     trigger: needs-review
     different-runtime-from: implementer
@@ -93,7 +101,7 @@ agents:
     runtime-args: *claude-scoped
 
   integrator:
-    runtime: "claude:claude-opus-5-5:high"
+    runtime: "claude:claude-opus-5-5:xhigh"
     kind: pr
     trigger: ready-to-merge
     instructions: .agents/roles/integrator.md
