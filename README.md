@@ -114,9 +114,10 @@ PATH where they were. The upgrade replaces only what Homebrew installed:
 everything under [Where your files live](#where-your-files-live) —
 configuration, credentials, workspaces and their databases — is untouched, and
 `ub status` still reports the same workspace with the documents it already
-held. `.github/workflows/homebrew-formula.yml` proves installation and upgrade
-on Apple Silicon macOS and Linux x86_64 runners on every pull request and
-`main` push, covering every change to the formula or its payload.
+held. CI calls `.github/workflows/homebrew-formula.yml` to prove installation
+and upgrade on Apple Silicon macOS and Linux x86_64 runners on every pull
+request and `main` push, covering every change to the formula or its payload.
+The `gates` check requires all four proofs to succeed.
 
 ### The signing secret
 

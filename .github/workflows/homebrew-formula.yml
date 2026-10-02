@@ -1,11 +1,8 @@
 name: Homebrew formula
 
 on:
-  # Every PR and main push: the payload includes workspace source, templates,
-  # dependencies and toolchain inputs, including future ones.
-  pull_request:
-  push:
-    branches: [main]
+  # CI calls this on every PR and main push and requires its result for gates.
+  workflow_call:
 
 permissions:
   contents: read

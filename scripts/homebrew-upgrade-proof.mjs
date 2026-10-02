@@ -19,7 +19,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { treeDigest, withMcpSession } from "./lib/homebrew-proof.mjs";
+import { assertHomebrewPlatform, treeDigest, withMcpSession } from "./lib/homebrew-proof.mjs";
 import { formulaFor } from "./publish-homebrew-release.mjs";
 
 const [installedVersion, upgradedVersion] = process.argv.slice(2);
@@ -28,14 +28,7 @@ if (installedVersion === undefined || upgradedVersion === undefined) {
 		"usage: node scripts/homebrew-upgrade-proof.mjs <installed-version> <upgraded-version>",
 	);
 }
-if (
-	!(process.platform === "darwin" && process.arch === "arm64") &&
-	!(process.platform === "linux" && process.arch === "x64")
-) {
-	throw new Error(
-		`Homebrew proof needs Apple Silicon macOS or Linux x86_64, got ${process.platform}/${process.arch}`,
-	);
-}
+assertHomebrewPlatform();
 
 // Every brew call below is deliberate; an implicit `brew update` in the middle
 // of the probe would change the tap underneath it.

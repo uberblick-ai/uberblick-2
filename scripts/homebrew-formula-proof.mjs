@@ -13,7 +13,7 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { treeDigest, withMcpSession } from "./lib/homebrew-proof.mjs";
+import { assertHomebrewPlatform, treeDigest, withMcpSession } from "./lib/homebrew-proof.mjs";
 
 const [formulaName, expectedVersion, formulaPath] = process.argv.slice(2);
 if (formulaName === undefined || expectedVersion === undefined || formulaPath === undefined) {
@@ -21,14 +21,7 @@ if (formulaName === undefined || expectedVersion === undefined || formulaPath ==
     "usage: node scripts/homebrew-formula-proof.mjs <tap/formula> <version> <formula-path>",
   );
 }
-if (
-  !(process.platform === "darwin" && process.arch === "arm64") &&
-  !(process.platform === "linux" && process.arch === "x64")
-) {
-  throw new Error(
-    `Homebrew proof needs Apple Silicon macOS or Linux x86_64, got ${process.platform}/${process.arch}`,
-  );
-}
+assertHomebrewPlatform();
 
 const scratch = mkdtempSync(join(tmpdir(), "uberblick-homebrew-proof-"));
 const cwd = join(scratch, "cwd");

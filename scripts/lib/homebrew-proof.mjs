@@ -3,6 +3,12 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
 import { join, relative } from "node:path";
 
+export function assertHomebrewPlatform(platform = process.platform, arch = process.arch) {
+	if (!(platform === "darwin" && arch === "arm64") && !(platform === "linux" && arch === "x64")) {
+		throw new Error(`Homebrew proof needs Apple Silicon macOS or Linux x86_64, got ${platform}/${arch}`);
+	}
+}
+
 /**
  * A content digest of one directory tree: every path, mode, symlink target and
  * file byte under `root`.
