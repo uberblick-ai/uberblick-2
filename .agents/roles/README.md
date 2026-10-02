@@ -53,10 +53,8 @@ is there. The person who answers replaces it with the label that should run
 next — `needs-preparation` on an issue, `needs-changes` on a pull request —
 unless the answer calls for another.
 
-Until ub-agents runs this repository, a person starts each run and applies its
-outcome from the table, and the run posts its own summary as a comment on the
-item, headed `Outcome: <role> <outcome>`. At the switch, the table becomes the
-label transitions of the ub-agents configuration.
+`ub-agent.yaml` declares these label transitions and the queue policy in
+`.github/ISSUE_SPEC.md` for ub-agents to apply.
 
 ## Escalate what is not yours to decide
 
@@ -152,6 +150,4 @@ Work in the directory and on the branch the run was given; ub-agents creates
 and removes them. Push only that branch, and never rebase or force-push a pull
 request's head. A revision's checkout is detached, so push it with
 `git push origin HEAD:refs/heads/<branch>`. Leave other runs' worktrees and
-processes alone. Until ub-agents runs here, a new implementation starts a fresh
-worktree at `origin/main` on a new branch, and a revision one at the pull
-request's head.
+processes alone.

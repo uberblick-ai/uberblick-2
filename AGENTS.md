@@ -58,10 +58,9 @@ Delivery runs four roles: issue-preparer, implementer, reviewer and integrator.
 A run is given one issue or pull request and ends with one named outcome from
 its role file. The loop that starts runs and turns outcomes into the label
 changes in `.agents/roles/README.md` and handoff records is
-[ub-agents](https://github.com/uberblick-ai/ub-agents), a separate tool; roles
-never move workflow labels, claim work or start the agent review themselves. Until this repository carries its ub-agents configuration,
-a person starts each run, names its item, and applies the outcome with the table
-in `.agents/roles/README.md`.
+[ub-agents](https://github.com/uberblick-ai/ub-agents), a separate tool configured
+by `ub-agent.yaml`; roles never move workflow labels, claim work or start the
+agent review themselves.
 
 ## Read for the action
 

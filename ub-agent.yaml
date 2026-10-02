@@ -1,0 +1,111 @@
+# Uberblick's delivery workflow. Roles and outcomes live in .agents/roles/; the
+# label changes below mirror the outcome table in .agents/roles/README.md.
+repository: uberblick-ai/uberblick-2
+
+queue:
+  priority:
+    labels: [priority:urgent, priority:high, priority:medium, priority:low]
+    default: priority:medium
+  milestones: ignore
+  dependencies: wait
+
+stop-labels: [needs-human]
+
+agents:
+  issue-preparer:
+    runtime: "claude:claude-opus-5-5:high"
+    kind: issue
+    trigger: needs-preparation
+    instructions: .agents/roles/issue-preparer.md
+    outcomes:
+      ready: {add: [ready]}
+      review: {add: [needs-review]}
+      split: {}
+      wontfix: {}
+      needs-human: {add: [needs-human]}
+    agent-timeout-minutes: 60
+    runtime-args: &claude-scoped
+      - --permission-mode
+      - acceptEdits
+      - --permission-prompts
+      - none
+      - --allowedTools
+      - "Bash(git *)"
+      - "Bash(gh *)"
+      - "Bash(ub-agent *)"
+      - "Bash(mise *)"
+      - "mcp__uberblick__*"
+      - "Bash(sh scripts/housekeeping.sh *)"
+      - "Bash(docker *)"
+      - --strict-mcp-config
+      - --mcp-config
+      - .mcp.json
+
+  issue-reviewer:
+    runtime: "codex:gpt-6.1-sol:high"
+    kind: issue
+    trigger: needs-review
+    instructions: .agents/roles/reviewer.md
+    outcomes:
+      approve: {add: [ready]}
+      changes: {add: [needs-preparation]}
+      needs-human: {add: [needs-human]}
+    agent-timeout-minutes: 60
+    runtime-args: &codex-scoped
+      - --sandbox
+      - danger-full-access
+      - -c
+      - 'mcp_servers.uberblick.command="ub"'
+      - -c
+      - 'mcp_servers.uberblick.args=["mcp", "serve"]'
+      - -c
+      - 'mcp_servers.uberblick.default_tools_approval_mode="approve"'
+
+  implementer:
+    runtime: "codex:gpt-6.1-sol:high"
+    trigger: [needs-changes, ready]
+    instructions: .agents/roles/implementer.md
+    worktree: true
+    outcomes:
+      review: {add: [needs-review]}
+      integrate: {add: [ready-to-merge]}
+      returned: {add: [needs-preparation]}
+      needs-human: {add: [needs-human]}
+    agent-timeout-minutes: 180
+    runtime-args: *codex-scoped
+
+  pr-reviewer:
+    runtime: "claude:claude-opus-5-5:high"
+    kind: pr
+    trigger: needs-review
+    different-runtime-from: implementer
+    instructions: .agents/roles/reviewer.md
+    worktree: true
+    outcomes:
+      approve: {add: [ready-to-merge]}
+      changes: {add: [needs-changes]}
+      needs-human: {add: [needs-human]}
+    agent-timeout-minutes: 120
+    runtime-args: *claude-scoped
+
+  integrator:
+    runtime: "claude:claude-opus-5-5:high"
+    kind: pr
+    trigger: ready-to-merge
+    instructions: .agents/roles/integrator.md
+    outcomes:
+      merged: {}
+      changes: {add: [needs-changes]}
+      review: {add: [needs-review]}
+      needs-human: {add: [needs-human]}
+    agent-timeout-minutes: 120
+    runtime-args: *claude-scoped
+
+limits:
+  lease-minutes: 60
+  renewal-minutes: 5
+  max-attempts: 5
+  retry-backoff-seconds: 60
+  max-backoff-seconds: 3600
+
+poll-seconds: 30
