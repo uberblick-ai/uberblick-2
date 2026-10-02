@@ -2295,6 +2295,7 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
   // nor intersects the uuid, revision, title or actions when it appears.
   await page.setViewportSize({ width: 360, height: 620 });
   await page.getByRole("button", { name: "Hide document list" }).click();
+  await expect(page.locator(".ub-list")).toBeHidden();
   const headerRects = (): Promise<Record<string, DOMRect>> =>
     page.evaluate(() => {
       const selectors = {
