@@ -42,7 +42,7 @@ test.afterAll(async () => {
 
 /** A fresh context: its own awareness identity and its own tab. */
 async function openApp(browser: Browser): Promise<Page> {
-  const context = await browser.newContext({ hasTouch: true, recordVideo: { dir: "/private/tmp/sidebar-dnd-video" } });
+  const context = await browser.newContext({ hasTouch: true, recordVideo: { dir: test.info().outputPath("videos") } });
   contexts.push(context);
   const page = await context.newPage();
   await page.goto(harness().appUrl);
@@ -138,7 +138,7 @@ test("keyboard sorting, group sorting, collapsed and empty destinations, and Esc
   await expect(a.locator(".ub-group-label")).toHaveText(["Empty", "Pinned"]);
   await expect(b.locator(".ub-group-label")).toHaveText(["Empty", "Pinned"]);
   await expect(handle).toBeFocused();
-  await a.screenshot({ path: "/private/tmp/sidebar-dnd-after.png" });
+  await a.screenshot({ path: test.info().outputPath("sidebar-dnd-after.png") });
 });
 
 test("a collaborator ordering update cancels a drag without rolling back their update", async ({ browser }) => {
