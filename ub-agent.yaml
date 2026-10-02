@@ -17,7 +17,7 @@ cleanup:
 
 agents:
   issue-preparer:
-    runtime: "claude:claude-opus-5-5:high"
+    runtime: "claude:claude-opus-5-5:xhigh"
     kind: issue
     trigger: needs-preparation
     instructions: .agents/roles/issue-preparer.md
@@ -79,7 +79,7 @@ agents:
     runtime-args: *codex-scoped
 
   pr-reviewer:
-    runtime: "claude:claude-opus-5-5:high"
+    runtime: "claude:claude-opus-5-5:xhigh"
     kind: pr
     trigger: needs-review
     different-runtime-from: implementer
@@ -93,7 +93,7 @@ agents:
     runtime-args: *claude-scoped
 
   integrator:
-    runtime: "claude:claude-opus-5-5:high"
+    runtime: "claude:claude-opus-5-5:xhigh"
     kind: pr
     trigger: ready-to-merge
     instructions: .agents/roles/integrator.md
