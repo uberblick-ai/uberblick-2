@@ -49,6 +49,16 @@ agents:
       - "Bash(rm -rf /tmp/ub-*)"
       - "Bash(head *)"
       - "Bash(tail *)"
+      - "Bash(echo *)"
+      - "Bash(cat *)"
+      - "Bash(grep *)"
+      - "Bash(sed *)"
+      - "Bash(ls *)"
+      - "Bash(wc *)"
+      - "Bash(sort *)"
+      - "Bash(find *)"
+      - "Bash(jq *)"
+      - "Bash(node *)"
       - --strict-mcp-config
       - --mcp-config
       - .mcp.json
@@ -118,4 +128,6 @@ limits:
   retry-backoff-seconds: 60
   max-backoff-seconds: 3600
 
-poll-seconds: 30
+# Every poll reads each triggered item; keep idle polling slow to stay inside GitHub's
+# 5,000 requests per hour shared by all launchers (ub-agents #79, #80).
+poll-seconds: 300
