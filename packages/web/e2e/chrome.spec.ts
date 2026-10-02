@@ -825,7 +825,8 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   expectFixedOrigins(expandedEmpty, (reading) => reading.sidebar?.right ?? 0);
 
   await page.getByRole("button", { name: "Hide document list" }).click();
-  await expect(page.locator(".ub-list")).toBeHidden();
+  await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
+  await expect(page.locator(".ub-list")).toHaveAttribute("aria-hidden", "true");
   const collapsedEmpty = await atWidths([1400, 1600]);
   expectFixedOrigins(collapsedEmpty, (reading) => reading.body.left);
 
@@ -913,7 +914,8 @@ test("document actions stay reachable, close with the route, and archive into Re
   await page.locator(".ub-title").fill("Lifecycle notes");
   await page.setViewportSize({ width: 360, height: 720 });
   await page.getByRole("button", { name: "Hide document list" }).click();
-  await expect(page.locator(".ub-list")).toBeHidden();
+  await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
+  await expect(page.locator(".ub-list")).toHaveAttribute("aria-hidden", "true");
 
   const trigger = page.getByRole("button", { name: "Document actions" });
   const uuid = page.locator(".ub-copy-identity .ub-copy-link");
@@ -2299,7 +2301,15 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
   // nor intersects the uuid, revision, title or actions when it appears.
   await page.setViewportSize({ width: 360, height: 620 });
   await page.getByRole("button", { name: "Hide document list" }).click();
-  await expect(page.locator(".ub-list")).toBeHidden();
+  await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
+  await expect(page.locator(".ub-list")).toHaveAttribute("aria-hidden", "true");
+  await page.locator(".ub-body").evaluate(async (body) => {
+    await Promise.all(
+      body.getAnimations({ subtree: true }).map((animation) =>
+        animation.finished.catch(() => undefined),
+      ),
+    );
+  });
   const headerRects = (): Promise<Record<string, DOMRect>> =>
     page.evaluate(() => {
       const selectors = {

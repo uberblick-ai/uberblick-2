@@ -541,20 +541,6 @@ body {
   overflow: clip;
   overflow-clip-margin: 1.25rem;
   padding: 0.5rem;
-  margin-inline-start: 0;
-  transition:
-    margin-inline-start 180ms ease,
-    visibility 0s;
-}
-
-/* Keep the sidebar at its full width while its footprint slides closed. The
-   adjacent pane follows the same edge in normal flow, including on reversal.
-   Visibility retires the overhanging control once the movement finishes; inert
-   and aria-hidden retire all interactions as soon as collapse begins. */
-.ub-body[data-sidebar-collapsed="true"] .ub-list {
-  margin-inline-start: calc(-1 * var(--sidebar-width));
-  visibility: hidden;
-  transition-delay: 0s, 180ms;
 }
 
 /* Both sidebar modes stay mounted so their transform can cross-fade, but only
@@ -1649,6 +1635,10 @@ body {
 /* SidebarProvider's controlled state is shared across viewport sizes. The
    frame presents the panel as an overlay below 768px. */
 @media (max-width: 767px) {
+  .ub-body > .ub-pane > :not(.ub-pane-threads-toggle) {
+    transition: margin-block-start 180ms ease;
+  }
+
   /* The wide layout spends inline room to clear the floating restore button.
      A phone cannot afford that permanent gutter: move the pane's content below
      the button while its sticky edge controls keep their normal top position,

@@ -52,7 +52,7 @@ export function Sidebar({
     >
       <div
         data-slot="sidebar-gap"
-        className="relative hidden h-full w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear group-data-[collapsible=offcanvas]:w-0 motion-reduce:transition-none md:block"
+        className="relative hidden h-full w-(--sidebar-width) bg-transparent transition-[width] duration-[180ms] ease-[ease] group-data-[collapsible=offcanvas]:w-0 motion-reduce:transition-none md:block"
       />
       <aside
         {...props}
@@ -60,7 +60,7 @@ export function Sidebar({
         aria-hidden={!open}
         inert={!open}
         className={cn(
-          "absolute inset-y-0 left-0 z-5 flex w-[min(var(--sidebar-width),85vw)] flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-[8px_0_24px_rgb(0_0_0/0.18)] transition-[left] duration-200 ease-linear group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] group-data-[collapsible=offcanvas]:pointer-events-none group-data-[collapsible=offcanvas]:[&_.ub-sidebar-hide]:invisible motion-reduce:transition-none md:w-(--sidebar-width) md:shadow-none",
+          "absolute inset-y-0 left-0 z-5 flex w-[min(var(--sidebar-width),85vw)] flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-[8px_0_24px_rgb(0_0_0/0.18)] transition-[left] duration-[180ms] ease-[ease] group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] group-data-[collapsible=offcanvas]:pointer-events-none group-data-[collapsible=offcanvas]:[&_.ub-sidebar-hide]:invisible motion-reduce:transition-none md:w-(--sidebar-width) md:shadow-none",
           className,
         )}
       >

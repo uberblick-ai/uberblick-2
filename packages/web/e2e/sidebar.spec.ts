@@ -104,7 +104,8 @@ test("the sidebar and pane share the top edge, and collapse transfers focus", as
   expect(narrow.pane.width).toBeCloseTo(narrow.body.width, 1);
 
   await page.getByRole("button", { name: "Hide document list" }).click();
-  await expect(page.locator(".ub-list")).toBeHidden();
+  await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
+  await expect(page.locator(".ub-list")).toHaveAttribute("aria-hidden", "true");
   const restore = page.getByRole("button", { name: "Show document list" });
   await expect(restore).toBeFocused();
   await expect(restore).toHaveAttribute("aria-expanded", "false");
@@ -325,7 +326,8 @@ test("collapse isolates contents and portals immediately, and rapid reversal kee
     document.querySelector<HTMLButtonElement>(".ub-sidebar-hide")?.click();
   });
   await expect(restore).toBeFocused();
-  await expect(sidebar).toBeHidden();
+  await expect(sidebar).toHaveAttribute("inert", "");
+  await expect(sidebar).toHaveAttribute("aria-hidden", "true");
   await expect.poll(() =>
     page.locator(".ub-pane").evaluate((p) => p.getBoundingClientRect().left),
   ).toBe(0);
