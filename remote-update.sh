@@ -18,7 +18,8 @@
 # the host mirrors main and is not a place to edit. What it discarded is printed
 # so the loss is visible rather than silent. The host's `.env` is untracked and
 # survives ordinary updates — nothing here runs `git clean`; only the init
-# re-run mode explicitly replaces it with the configuration received on stdin.
+# re-run mode replaces its managed values with configuration received on stdin,
+# preserving the host's own GitHub app setting.
 
 mode=update
 case "${1-}" in
@@ -87,6 +88,16 @@ if [ "$mode" = remote-init-rerun ]; then
   trap 'rm -f "$staged_env"' 0 HUP INT TERM
   (umask 077 && cat > "$staged_env") || exit 103
   chmod 600 "$staged_env" || exit 103
+  # This app belongs to the hub operator, not the machine running init. Read it
+  # only while holding the checkout lock; a preflight copy could race another
+  # deployment. Preserve the operator's spelling without sourcing secret-bearing
+  # configuration or sending it back to the client.
+  if [ -f .env ]; then
+    sed -n \
+      -e '/^[[:space:]]*HUB_GITHUB_CLIENT_ID=/p' \
+      -e '/^[[:space:]]*export[[:space:]][[:space:]]*HUB_GITHUB_CLIENT_ID=/p' \
+      .env >> "$staged_env" || exit 103
+  fi
 
   git fetch --quiet origin main || exit 102
   git merge --ff-only origin/main || exit 102

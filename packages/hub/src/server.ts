@@ -57,6 +57,10 @@ import {
   defaultDatabasePath,
 } from "./config.js";
 import type { HubLogger } from "./log.js";
+import { CredentialRegistry } from "./credentials.js";
+import { GithubSignIn, handleGithubSignIn, validateGithubClientId } from "./github-sign-in.js";
+import { MembershipRegistry } from "./memberships.js";
+import { PrincipalRegistry } from "./principals.js";
 import { stderrLogger } from "./log.js";
 import { HubDatabase, isEphemeralDatabase } from "./persistence.js";
 import {
@@ -564,6 +568,7 @@ async function listen(
  * a server — which is what makes it usable from tests.
  */
 export async function createHub(config: HubConfig): Promise<Hub> {
+  if (config.github !== undefined) validateGithubClientId(config.github.clientId);
   if (config.authSecret === "") {
     throw new Error(
       "createHub: authSecret must not be empty — it is the HMAC secret tokens are signed with",
@@ -629,6 +634,17 @@ export async function createHub(config: HubConfig): Promise<Hub> {
     log({ event: "hub.database.ephemeral", database: databasePath });
   }
 
+  let signIn: GithubSignIn | undefined;
+  try {
+    if (config.github !== undefined) {
+      signIn = new GithubSignIn(config.github, new PrincipalRegistry(database),
+        new CredentialRegistry(database), new MembershipRegistry(database));
+    }
+  } catch (error) {
+    closeDatabase();
+    throw error;
+  }
+
   const server = new Server<HubContext>({
     port: config.port ?? DEFAULT_PORT,
     address,
@@ -660,6 +676,10 @@ export async function createHub(config: HubConfig): Promise<Hub> {
     },
 
     onAuthenticate: authenticate,
+
+    async onRequest({ request, response }) {
+      if (await handleGithubSignIn(signIn, request, response)) return Promise.reject();
+    },
 
     /**
      * Connection lifecycle, per room and not per socket: Hocuspocus runs these
@@ -708,6 +728,7 @@ export async function createHub(config: HubConfig): Promise<Hub> {
   } catch (error) {
     // Half a hub is worse than none: release the socket and the handle so the
     // caller sees a rejection and nothing else.
+    signIn?.stop();
     await server.destroy().catch((cleanup: unknown) => {
       log({ event: "hub.start.cleanupFailed", error: String(cleanup) });
     });
@@ -738,6 +759,9 @@ export async function createHub(config: HubConfig): Promise<Hub> {
   let stopping: Promise<void> | undefined;
 
   const runStop = async (): Promise<void> => {
+    // Fence asynchronous identity reads before any database teardown. An
+    // outstanding HTTP request can complete only with a safe failure now.
+    signIn?.stop();
     // Collected before the rooms are closed, because closing one removes the
     // connection that names its socket. See openSockets.
     const sockets = openSockets(hocuspocus);

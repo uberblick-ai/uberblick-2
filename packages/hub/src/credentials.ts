@@ -2,7 +2,7 @@
  * Hub-owned device credentials. These rows share the document database handle
  * and its backups, but are never synchronized document content. Independent
  * random signing keys keep the legacy shared root and other devices powerless
- * over a credential. Only issue() returns the key to its future sign-in caller.
+ * over a credential. Only issue() returns the key to its sign-in caller.
  */
 
 import type { StatementSync } from "node:sqlite";
@@ -87,7 +87,8 @@ function recordFromRow(row: CredentialRow): CredentialRecord {
 /**
  * This internal API fixes authorization at issuance. There is no mutation that
  * widens or restores a credential, and no route from client messages to it.
- * The live hub does not construct or install credential admission yet.
+ * Configured live sign-in constructs this registry for issuance; live room
+ * admission still uses the root secret until the coordinated client cutover.
  */
 export class CredentialRegistry {
   private readonly insert: StatementSync;

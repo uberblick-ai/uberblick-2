@@ -25,6 +25,7 @@
  */
 
 import type { HubLogger } from "./log.js";
+import { validateGithubClientId, type GithubSignInConfig } from "./github-sign-in.js";
 import type { StorageOptions } from "./storage.js";
 import { resolveStorage } from "./storage.js";
 
@@ -77,6 +78,8 @@ export interface HubConfig {
   databasePath?: string;
   /** HMAC secret tokens are signed with (`HUB_AUTH_TOKEN`). Required. */
   authSecret: string;
+  /** Optional remote GitHub sign-in; never changes room admission. */
+  github?: GithubSignInConfig;
   log?: HubLogger;
   /**
    * How long `onStoreDocument` is debounced (ms). Hocuspocus' own defaults
@@ -173,11 +176,14 @@ export function resolveHubConfig(
   }
 
   const host = env.HUB_HOST?.trim();
+  const githubClientId = env.HUB_GITHUB_CLIENT_ID;
+  if (githubClientId !== undefined && githubClientId !== "") validateGithubClientId(githubClientId);
 
   return {
     port: parsePort(env.PORT),
     address: host === undefined || host === "" ? DEFAULT_HOST : host,
     databasePath: hubDatabasePath(env),
     authSecret,
+    ...(githubClientId === undefined || githubClientId === "" ? {} : { github: { clientId: githubClientId } }),
   };
 }
