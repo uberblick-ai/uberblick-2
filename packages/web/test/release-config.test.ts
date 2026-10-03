@@ -40,12 +40,18 @@ it("builds without deployment values and has no endpoint or workspace fallback",
         workspaces: ["00000000-0000-4000-8000-000000000001"],
         hubAuthToken: "synthetic-runtime-token",
       }), { status: 200, headers: { "Content-Type": "application/json" } }));
-      console.log(JSON.stringify({ missing, runtime }));
+      const invalid = await readClientConfig(async () => new Response(JSON.stringify({
+        hubUrl: "https://not-a-websocket.invalid/", workspaces: ["not-a-workspace"],
+        hubAuthToken: "synthetic-runtime-token",
+      }), { status: 200 }));
+      console.log(JSON.stringify({ missing, invalid, runtime }));
     `], { encoding: "utf8", timeout: 10_000 });
     expect(executed.status, executed.stderr).toBe(0);
-    const { missing, runtime } = JSON.parse(executed.stdout);
+    const { missing, invalid, runtime } = JSON.parse(executed.stdout);
     expect(missing.hubUrl).toBe("");
     expect(missing.workspaces).toEqual([]);
+    expect(invalid.hubUrl).toBe("");
+    expect(invalid.workspaces).toEqual([]);
     expect(runtime.hubUrl).toBe("wss://runtime.tailnet.ts.net/ws");
     expect(runtime.hubUrlSource).toBe("document");
     expect(runtime.workspaces).toEqual(["00000000-0000-4000-8000-000000000001"]);

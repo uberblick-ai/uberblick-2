@@ -107,6 +107,20 @@ Compose model publishes only port 443 on `TAILSCALE_IP`, has no hub port and
 builds nothing on the host. Keep full Tailscale HTTPS verification explicit
 when the test machine cannot provide it.
 
+For a repeatable local proof after building two versions, run:
+
+```sh
+mise exec -- node scripts/hub-release-proof.mjs 0.1.0 0.2.0 "$(git rev-parse HEAD)"
+```
+
+This contributor-side probe requires Compose 2.24.4 or newer for its test-only
+override. It extracts host files into empty directories and starts an isolated,
+disposable project with localhost HTTPS, then checks backup, restore, setup
+status and replacement retaining private access and Caddy state. It cleans up
+its containers and volumes. It does not exercise Tailscale certificate issuance
+or anonymous registry pulls; the released recipe itself retains the Compose
+2.6 floor.
+
 A person then tags the intended commit and pushes that tag:
 
 ```sh

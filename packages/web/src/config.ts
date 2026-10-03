@@ -211,7 +211,7 @@ const BUILT_IN_HUB_URL: Pick<ClientConfig, "hubUrl" | "hubUrlSource"> =
     : { hubUrl: FALLBACK_HUB_URL, hubUrlSource: "fallback" };
 
 /**
- * The workspaces a build carries: `WORKSPACE_ID` first — it is the one that has
+ * Development/client builds carry `WORKSPACE_ID` first — it is the one that has
  * always answered `/` — then `WORKSPACES`, the menu.
  *
  * One ordered list, because the served document is one ordered list and the
@@ -464,9 +464,10 @@ export const HUB_CONFIG_TIMEOUT_MS = 3_000;
  * Read the client configuration: the served document, else the build-time
  * defines, else the in-code fallback.
  *
- * Never rejects, and always settles. A client left with no hub at all would be
- * worse than one dialling a stale address, and the `rejected` reason — which
- * {@link resolveClientConfig} logs — is what keeps the difference legible.
+ * Never rejects, and always settles. Development/client builds retain their
+ * fallback; hub release bundles settle with no endpoint when the document
+ * cannot supply one. The `rejected` reason, which {@link resolveClientConfig}
+ * logs, makes that missing configuration visible.
  */
 export async function readClientConfig(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
