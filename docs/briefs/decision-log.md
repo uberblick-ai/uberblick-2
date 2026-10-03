@@ -252,8 +252,14 @@ becomes `open | decided | rejected`; `rejected` records count for neither
 in force nor pending, and stay readable in the history for their reasoning.
 
 **Reading an earlier record.** Every history row opens that record in the same
-decision view as the current one, read-only, with its outcome and its successor
-named at the top and a way back to the current answer. A superseded or
+decision view as the current one, read-only. It must be unmistakable that this
+is an older version, not the answer to follow: a persistent banner at the top
+names its outcome (*Superseded*, *Rejected*, *Withdrawn*) and its successor,
+and the view is visibly muted against the current record's, so nobody mistakes
+it for the live answer. The banner carries one prominent action, **Go to the
+current decision**, which opens the record in force — or, when nothing is in
+force, the record currently being decided — in one tap, without returning to
+the history list. A superseded or
 rejected record is never edited, so the view offers no editing; comments stay
 possible, so someone can ask about old reasoning where it was written. Because
 a record stays short (section 1), reading an old one shows the reasoning at a
@@ -320,7 +326,7 @@ topics, chains, agent stances and conflicts.
 | Decision log on a product document | A fixed section after the body, one row per topic, oldest topic first. Each row: topic title, current answer, and a state — Open, Decided, Decided by agent, Reconsideration open, Conflict. |
 | Decision view | One decision record read, edited and commented in context, over the still-visible product document. |
 | Approve and change | Confirming an agent-decided record, approving or rejecting a reconsideration, and resolving a conflict — the only human-gated actions, so they must be obvious and hard to trigger by accident. |
-| History | A topic's records newest first, each ending in its outcome (section 4a) with who, when and its comment count; every row clickable into a read-only view of that record, with a way back to the current answer. |
+| History | A topic's records newest first, each ending in its outcome (section 4a) with who, when and its comment count; every row clickable into a read-only, visibly older view of that record with a banner naming its outcome and a one-tap **Go to the current decision** (in force, or being decided). |
 | Needs attention | One list across the workspace of open topics, agent-decided records awaiting review, and conflicts (principle 7) — where a person answers many small decisions quickly. |
 | Decisions in the document list | The existing *Decisions* mode in `shell/DocumentList.tsx`, showing one row per topic by default. |
 | Built-on marker | How an issue or pull request built on an open decision is visible from the decision, so a reversal finds its rework. |
