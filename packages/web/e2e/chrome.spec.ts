@@ -1572,7 +1572,7 @@ for (const scheme of ["light", "dark"] as const) {
     browser,
   }) => {
     const page = await openAppearanceApp(browser, scheme);
-    // Under the rail's 1100px breakpoint, which is the only width where the
+    // Below the shared xl breakpoint, which is the only layout where the
     // threads handle is on screen to be measured at all.
     await page.setViewportSize({ width: 1000, height: 800 });
 
@@ -2329,7 +2329,7 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
 
   // The three widths the layout has to hold at, including the iPad width the
   // 44px is *for*.
-  for (const width of [1280, 1100, 768]) {
+  for (const width of [1280, 1194, 768]) {
     await page.setViewportSize({ width, height: 620 });
     // Typing left the pane scrolled to the caret; the first reading is of the
     // header at rest.

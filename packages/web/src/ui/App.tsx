@@ -435,12 +435,12 @@ export function App(): ReactElement {
    * always remains a non-modal column.
    */
   const [threadsOpen, setThreadsOpen] = useState(false);
-  // Keep this query identical to the threads layout query in styles.css.
+  // Both panes use Tailwind xl; retain the rail's open state across resizing.
   const [narrowThreads, setNarrowThreads] = useState(
-    () => window.matchMedia?.("(max-width: 1100px)").matches ?? false,
+    () => window.matchMedia?.(NARROW_LAYOUT_QUERY).matches ?? false,
   );
   useEffect(() => {
-    const query = window.matchMedia?.("(max-width: 1100px)");
+    const query = window.matchMedia?.(NARROW_LAYOUT_QUERY);
     if (query === undefined) return;
     const update = (): void => setNarrowThreads(query.matches);
     update();

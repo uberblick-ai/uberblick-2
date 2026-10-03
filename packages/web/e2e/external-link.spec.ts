@@ -163,7 +163,7 @@ test("a link inside a comment wins in editable and read-only panes; other thread
   await page.locator(".ub-editor [data-comment-thread]").first().click({ position: { x: 3, y: 5 } });
   await expect(page.locator('.ub-thread[aria-current="true"]')).toHaveCount(1);
   await page.reload();
-  if ((page.viewportSize()?.width ?? 1280) <= 1100) {
+  if ((page.viewportSize()?.width ?? 1280) < 1280) {
     await page.locator(".ub-threads-toggle").click();
   }
   await page.locator(".ub-thread-card .ub-thread").click();

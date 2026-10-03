@@ -120,7 +120,8 @@ export function OutlinePane({
       }}
     >
       <div
-        className={obscured ? "ub-outline ub-outline-obscured" : "ub-outline"}
+        // The drawer covers this edge; hiding also removes the trigger from Tab order.
+        className={`ub-outline self-start shrink-0 mt-3 me-3${obscured ? " max-xl:hidden" : ""}`}
         onPointerEnter={openFromHover}
         onPointerLeave={closeAfterHover}
       >

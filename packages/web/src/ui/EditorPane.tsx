@@ -962,7 +962,7 @@ export function EditorPane({
       {threads.length > 0 && onToggleThreads !== undefined && (
         <button
           type="button"
-          className="ub-threads-toggle ub-pane-threads-toggle"
+          className="ub-threads-toggle ub-pane-threads-toggle hidden max-xl:inline-flex items-center gap-[0.35rem] [font-family:inherit] [font-weight:inherit] text-xs leading-[1.6] border border-border rounded-full py-[0.1rem] px-[0.55rem] bg-(--card-accent) text-secondary-foreground whitespace-nowrap cursor-pointer"
           aria-expanded={threadsOpen}
           aria-controls="ub-rail"
           onClick={onToggleThreads}

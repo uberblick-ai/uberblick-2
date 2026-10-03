@@ -56,6 +56,17 @@ unless the answer calls for another.
 `ub-agents.yaml` declares these label transitions and the queue policy in
 `.github/ISSUE_SPEC.md` for ub-agents to apply.
 
+## Preserve the shaped scope
+
+Interactive shaping follows `.agents/protocols/issue-shaping.md`: help broad ideas converge on the
+smallest useful outcome; questions clarify unresolved intent, not routine
+engineering. Delivery roles preserve that confirmed scope and its essential
+guarantees. Do not add optional capabilities because they are convenient to
+build, or drop agreed behavior in the name of an MVP. An unattended run uses
+evidence for factual gaps and makes engineering choices within scope; it raises
+unresolved owner choices through the existing escalation outcome, without
+waiting for a live dialogue. Other role-specific stops remain unchanged.
+
 ## Escalate what is not yours to decide
 
 Decide what the issue, settled decisions, adopted principles and repository
