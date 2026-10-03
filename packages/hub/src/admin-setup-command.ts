@@ -55,16 +55,20 @@ async function main(): Promise<void> {
           } else if (result.status === "pending") {
             console.log(`Open ${result.verificationUri} on any machine and approve code ${result.userCode} (expires in ${result.expiresIn}s).`);
           } else {
-            terminal = true;
             if (result.status === "complete") {
+              if (typeof result.identity?.githubUsername !== "string" ||
+                  typeof result.identity?.githubAccountId !== "string" ||
+                  typeof result.workspaceId !== "string" || typeof result.hadDocuments !== "boolean") throw new Error();
               console.log(`complete: ${result.identity.githubUsername} (GitHub account ${result.identity.githubAccountId}) is the first admin of workspace ${result.workspaceId}; ${result.hadDocuments ? "adopted existing hub documents" : "hub held no documents for this workspace"}. Setup ${result.setupId}.`);
+              terminal = true;
             } else if (result.status === "unknown") {
-              terminal = false;
               unknown();
-            } else {
+            } else if (["denied", "expired", "abandoned", "failed", "cancelled", "not-configured",
+                "workspace-has-membership", "invalid-request", "busy"].includes(result.status)) {
               console.log(`${result.status}${setupId === undefined ? "" : `: setup ${setupId}`}; no administrator was granted by this setup.`);
+              terminal = true;
               process.exitCode = 1;
-            }
+            } else throw new Error();
             socket.end();
           }
         } catch { unknown(); socket.destroy(); }

@@ -120,6 +120,7 @@ export async function startAdminSetup(options: {
     let flow: GithubDeviceFlow<Completion> | undefined;
     let approval: { requestId: string; collectionSecret: string } | undefined;
     let timer: NodeJS.Timeout | undefined;
+    let expiresAt = 0;
     let setupId: string | undefined;
     let started = false;
     let ended = false;
@@ -150,7 +151,8 @@ export async function startAdminSetup(options: {
       const result = await flow.collect(approval.requestId, approval.collectionSecret);
       if (ended) return;
       if (result.status === "pending") {
-        timer = setTimeout(() => { void poll().catch(() => finish({ status: "failed", setupId })); }, result.interval * 1000);
+        timer = setTimeout(() => { void poll().catch(() => finish({ status: "failed", setupId })); },
+          Math.max(1, Math.min(result.interval * 1000, expiresAt - Date.now())));
       } else if (result.status === "complete") {
         finish("grant" in result ? result.grant : { status: "workspace-has-membership", setupId });
       } else finish({ status: result.status, setupId });
@@ -194,11 +196,13 @@ export async function startAdminSetup(options: {
       if (ended) return;
       if (result.status !== "pending") { finish({ status: result.status, setupId }); return; }
       approval = result;
+      expiresAt = Date.now() + result.expiresIn * 1000;
       // GitHub device code and the flow's private collection secret never
       // reach even the host command; it receives only the public approval code.
       send({ status: "pending", setupId, workspaceId, verificationUri: result.verificationUri,
         userCode: result.userCode, expiresIn: result.expiresIn });
-      timer = setTimeout(() => { void poll().catch(() => finish({ status: "failed", setupId })); }, result.interval * 1000);
+      timer = setTimeout(() => { void poll().catch(() => finish({ status: "failed", setupId })); },
+        Math.max(1, Math.min(result.interval * 1000, expiresAt - Date.now())));
     };
 
     socket.setEncoding("utf8");
