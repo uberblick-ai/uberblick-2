@@ -2,19 +2,20 @@
  * The open document's directory stub: repaired on connect and on write, and
  * stamped with `updatedAt` when this replica is the one that changed something.
  *
- * The stub is a cache and `meta.title` in the document is authoritative, so
+ * The stub is a cache and the document's metadata is authoritative, so
  * something has to carry the document's own metadata back into the directory.
  * The MCP server does it from its replica observers
  * (`packages/mcp-server/src/replica.ts`, `repairStub`); a browser has no
- * replica layer, so it does it from the room it has open. Same rule, same
- * schema op — {@link upsertDirectoryEntry} — and deliberately the only place
- * the web writes a stub for a document it did not just create.
+ * replica layer, so it does it from the room it has open. The shared repair
+ * rule is {@link directoryStubDiffers}, written with {@link upsertDirectoryEntry},
+ * and this is deliberately the only place the web writes a stub for a document
+ * it did not just create.
  *
  * The rule, in the order it matters:
  *
- * - **A change this replica made stamps `updatedAt`.** Title, tags or lifecycle
- *   metadata stamp immediately — that write is happening anyway, because the
- *   stub caches them. A content change stamps at most once per
+ * - **A change this replica made stamps `updatedAt`.** Changes to cached
+ *   document metadata stamp immediately — that write is happening anyway.
+ *   A content change stamps at most once per
  *   {@link UPDATED_AT_COARSENESS_MS}, because the directory is broadcast to
  *   every client in the workspace and a stamp per keystroke would turn one
  *   person typing into traffic for everyone.
@@ -42,6 +43,7 @@
 
 import type * as Y from "yjs";
 import {
+  directoryStubDiffers,
   getDirectoryEntry,
   getMeta,
   upsertDirectoryEntry,
@@ -56,15 +58,6 @@ import {
  * the two would keep re-stamping inside the finer one's quiet period.
  */
 export const UPDATED_AT_COARSENESS_MS = 5 * 60_000;
-
-function sameSet(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false;
-  const left = new Set(a);
-  for (const value of b) {
-    if (!left.has(value)) return false;
-  }
-  return true;
-}
 
 /**
  * Bring one document's stub in line with the document, stamping it when
@@ -82,18 +75,13 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changedAt: number | null): voi
   const stub = getDirectoryEntry(dirDoc, meta.uuid);
   if (stub?.deleted === true) return;
 
-  const metaChanged =
-    stub === null ||
-    stub.title !== meta.title ||
-    stub.kind !== meta.kind ||
-    stub.status !== meta.status ||
-    !sameSet(stub.tags, meta.tags);
+  const metaChanged = directoryStubDiffers(stub, meta);
   const staleStamp =
     stub?.updatedAt === undefined ||
     (changedAt !== null &&
       changedAt - stub.updatedAt >= UPDATED_AT_COARSENESS_MS);
   const stamp = changedAt !== null && (metaChanged || staleStamp);
-  if (!metaChanged && !stamp) return;
+  if (!metaChanged && !stamp && stub?.createdAt !== undefined) return;
 
   upsertDirectoryEntry(dirDoc, {
     uuid: meta.uuid,
@@ -106,6 +94,7 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changedAt: number | null): voi
     description: meta.description ?? "",
     kind: meta.kind ?? "",
     status: meta.status ?? "",
+    createdAt: Date.now(),
     ...(stamp ? { updatedAt: changedAt } : {}),
   });
 }
