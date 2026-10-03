@@ -11,7 +11,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createHub, type Hub } from "@uberblick/hub";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
-  DEAD_HUB_URL, removeTempDirs, runUb, runUbAsync, sandbox, sleep, UB_BIN, waitUntil,
+  DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox, sleep, UB_BIN, waitUntil,
   type Run, type Sandbox,
 } from "./helpers.js";
 
@@ -197,35 +197,35 @@ function assertPublicOnly(run: Run, testRig: Awaited<ReturnType<typeof rig>>, ke
 }
 
 describe("ub auth local selection and command surface", () => {
-  it("provides progressive help and refuses unsupported usage without writing", () => {
+  it("provides progressive help and refuses unsupported usage without writing", async () => {
     const box = sandbox();
-    const root = runUb(["--help"], box);
+    const root = await runUbAsync(["--help"], box);
     expect(root.stdout.match(/^ {2}auth\s/gm)).toHaveLength(1);
     for (const args of [["auth"], ["auth", "login"], ["auth", "status"], ["auth", "logout"]]) {
-      const help = runUb([...args, "--help"], box);
+      const help = await runUbAsync([...args, "--help"], box);
       expect(help.status).toBe(0);
       expect(help.stdout).toContain(`ub ${args.join(" ")}`);
       expect(help.stderr).toBe("");
     }
     for (const args of [["auth", "unknown"], ["auth", "login", "--json"], ["auth", "logout", "a", "b"]]) {
-      expect(runUb(args, box).status).toBe(2);
+      expect((await runUbAsync(args, box)).status).toBe(2);
     }
     expect(existsSync(credentialPath(box))).toBe(false);
   });
 
-  it("requires an explicit or file-bound hub, ignores ambient HUB_URL and keeps local-only work quiet", () => {
+  it("requires an explicit or file-bound hub, ignores ambient HUB_URL and keeps local-only work quiet", async () => {
     const box = sandbox({ userConfig: { workspace: WORKSPACE } });
     for (const subcommand of ["login", "status", "logout"]) {
-      const run = runUb(["auth", subcommand], box, { HUB_URL: "ws://ambient.invalid" });
+      const run = await runUbAsync(["auth", subcommand], box, { HUB_URL: "ws://ambient.invalid" });
       expect(run.status).toBe(1);
       expect(run.stderr).toMatch(/local.only.*no login|local.only.*no sign.in/i);
     }
-    const status = runUb(["status"], box);
+    const status = await runUbAsync(["status"], box);
     expect(status.output).not.toMatch(/auth login|sign.in/i);
     expect(existsSync(credentialPath(box))).toBe(false);
   });
 
-  it("finds one offline login across host case, default-port and endpoint spellings without rebinding", () => {
+  it("finds one offline login across host case, default-port and endpoint spellings without rebinding", async () => {
     const origin = "https://hub.example.ts.net";
     const endpoint = "wss://Hub.Example.TS.net:443/ws";
     const old = fixture();
@@ -236,7 +236,7 @@ describe("ub auth local selection and command surface", () => {
     });
     const binding = readFileSync(configPath(box));
     for (const spelling of [undefined, "Hub.Example.TS.net:443", "https://Hub.Example.TS.net:443", endpoint]) {
-      const run = runUb(["auth", "status", ...(spelling ? [spelling] : [])], box);
+      const run = await runUbAsync(["auth", "status", ...(spelling ? [spelling] : [])], box);
       expect(run.status, run.stderr).toBe(0);
       expect(run.stdout).toContain(origin);
       expect(run.stdout).toContain(old.identity.githubUsername);
@@ -245,31 +245,31 @@ describe("ub auth local selection and command surface", () => {
       expect(run.output).toMatch(/local|not.*check|not.*verified/i);
       expect(run.output.includes(old.credential.key)).toBe(false);
     }
-    const logout = runUb(["auth", "logout", "Hub.Example.TS.net:443"], box);
+    const logout = await runUbAsync(["auth", "logout", "Hub.Example.TS.net:443"], box);
     expect(logout.status).toBe(0);
     expect(logout.stdout).toMatch(/until.*revok|revok.*device/i);
     expect(readStore(box)).toEqual({ signingSecret: SIGNING_SECRET, hubLogins: { [OTHER_HUB]: other } });
     expect(readFileSync(configPath(box))).toEqual(binding);
-    const missing = runUb(["auth", "status"], box);
+    const missing = await runUbAsync(["auth", "status"], box);
     expect(missing.status).toBe(1);
     expect(missing.output).toMatch(/no.*login|not.*signed/i);
     expect(missing.output).toContain("ub auth login");
     expect(missing.output).toContain(OTHER_HUB);
   });
 
-  it("requests a new login for a bound workspace outside the credential snapshot", () => {
+  it("requests a new login for a bound workspace outside the credential snapshot", async () => {
     const box = sandbox({
       userConfig: { workspace: OTHER_WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { hubLogins: { "http://127.0.0.1:1": fixture() } },
     });
-    const status = runUb(["auth", "status"], box);
+    const status = await runUbAsync(["auth", "status"], box);
     expect(status.status).toBe(1);
     expect(status.output).toContain(OTHER_WORKSPACE);
     expect(status.output).toMatch(/new login|login.*needed|login.*again/i);
     expect(status.output).toContain("ub auth login");
   });
 
-  it.each(["exposed", "unreadable", "invalid-entry"])("refuses %s local credentials without presenting identity as signed in", (kind) => {
+  it.each(["exposed", "unreadable", "invalid-entry"])("refuses %s local credentials without presenting identity as signed in", async (kind) => {
     const origin = "http://127.0.0.1:1";
     const old = fixture();
     const box = sandbox({
@@ -278,7 +278,7 @@ describe("ub auth local selection and command surface", () => {
     });
     if (kind === "exposed") chmodSync(credentialPath(box), 0o644);
     if (kind === "unreadable") { rmSync(credentialPath(box)); mkdirSync(credentialPath(box)); }
-    const run = runUb(["auth", "status"], box);
+    const run = await runUbAsync(["auth", "status"], box);
     expect(run.status).toBe(1);
     expect(run.output).not.toContain(old.identity.githubUsername);
     expect(run.output).toContain("ub auth login");
@@ -333,8 +333,8 @@ describe("hub-driven CLI GitHub sign-in", () => {
         hub: process.env.HUB_URL
       }));
     `;
-    const bridge = runUb(["env", "--", process.execPath, "-e", bridgeCheck], box);
-    const snippet = runUb(["mcp", "install", "zed", "--print"], box);
+    const bridge = await runUbAsync(["env", "--", process.execPath, "-e", bridgeCheck], box);
+    const snippet = await runUbAsync(["mcp", "install", "zed", "--print"], box);
     for (const text of [bridge.output, snippet.output, readFileSync(configPath(box), "utf8")]) {
       expect(text.includes(stored.credential.key), "credential key is only persisted in its private store").toBe(false);
       for (const request of remote.requests) {
@@ -349,8 +349,8 @@ describe("hub-driven CLI GitHub sign-in", () => {
     });
     await remote.hub.stop();
     const requestCount = remote.requests.length;
-    expect(runUb(["auth", "status"], box).status).toBe(0);
-    const logout = runUb(["auth", "logout"], box);
+    expect((await runUbAsync(["auth", "status"], box)).status).toBe(0);
+    const logout = await runUbAsync(["auth", "logout"], box);
     expect(logout.status).toBe(0);
     expect(logout.output).toMatch(/until.*revok|revok.*device/i);
     expect(privateDeviceRows(remote.databasePath)).toHaveLength(1);
@@ -371,10 +371,10 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(login.output).toMatch(/sign.in.*no membership|sign.in.*does not.*membership|no.*membership/i);
     expect(login.output).toMatch(/binding.*unchanged|unchanged.*binding/i);
     expect(savedLogin(box, remote.origin).credential.record.workspaces).toEqual([]);
-    const status = runUb(["auth", "status", remote.origin], box);
+    const status = await runUbAsync(["auth", "status", remote.origin], box);
     expect(status.status).toBe(0);
     expect(status.stdout).toMatch(/no.*workspace|workspaces.*none/i);
-    const logout = runUb(["auth", "logout", remote.origin], box);
+    const logout = await runUbAsync(["auth", "logout", remote.origin], box);
     expect(logout.status).toBe(0);
     expect(logout.output).toMatch(/binding.*unchanged|unchanged.*binding/i);
     expect(readFileSync(configPath(box))).toEqual(binding);
