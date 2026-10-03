@@ -369,18 +369,35 @@ test("a touch swipe scrolls from a row, while a held drag keeps native scrolling
   await expect(titles(b, "Pinned")).toHaveText(names);
   const pane = a.locator(".ub-sidebar-pane:not([inert])");
   await pane.evaluate((element) => { element.scrollTop = 0; });
-  const tap = row(a, "Document 5");
-  const swipe = row(a, "Document 6");
+  // Pick actual visible rows: navigation above the pins can change height.
+  // Leave room for the 120px swipe and stay clear of drag edge auto-scroll.
+  const visibleNames = await titles(a, "Pinned").evaluateAll((buttons) => {
+    const bounds = buttons[0]?.closest(".ub-sidebar-pane")?.getBoundingClientRect();
+    if (!bounds) throw new Error("Missing touch scroll pane");
+    const top = Math.max(bounds.top, 0);
+    const bottom = Math.min(bounds.bottom, window.innerHeight);
+    return buttons.filter((button) => {
+      const box = button.getBoundingClientRect();
+      return box.top >= top && box.bottom <= bottom
+        && box.y + box.height / 2 >= top + 120
+        && box.y + box.height / 2 <= bottom - 60;
+    }).map((button) => button.textContent ?? "");
+  });
+  if (visibleNames.length < 2) throw new Error("Missing visible touch rows");
+  const tappedName = visibleNames[visibleNames.length - 2]!;
+  const tap = row(a, tappedName);
+  const swipe = row(a, visibleNames[visibleNames.length - 1]!);
   const tapped = await tap.boundingBox();
-  const from = await swipe.boundingBox();
-  if (!tapped || !from) throw new Error("Missing touch rows");
+  if (!tapped) throw new Error("Missing touch row");
   const cdp = await a.context().newCDPSession(a);
   const touch = (x: number, y: number) => [{ x, y, id: 1 }];
   try {
     await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: touch(tapped.x + tapped.width / 2, tapped.y + tapped.height / 2) });
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-    await expect(a.locator(".ub-title")).toHaveValue("Document 5");
+    await expect(a.locator(".ub-title")).toHaveValue(tappedName);
     const path = new URL(a.url()).pathname;
+    const from = await swipe.boundingBox();
+    if (!from) throw new Error("Missing swipe row");
     const x = from.x + from.width / 2;
     const y = from.y + from.height / 2;
     await pane.evaluate((element) => {

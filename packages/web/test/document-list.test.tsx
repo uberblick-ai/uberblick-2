@@ -845,7 +845,7 @@ describe("the filter", () => {
         entries={[entry({ uuid: ONE, title: "Overview" })]}
         groups={[]}
         onSelect={() => {}}
-        onTogglePin={null}
+        onTogglePin={() => {}}
       />,
     );
     const field = filter(host);
@@ -855,9 +855,8 @@ describe("the filter", () => {
     // answer either — no unavailable state, no lag or cap caveat.
     expect(field.labels?.[0]?.textContent).toBe("Filter this list by title");
     expect(field.placeholder).toBe("Filter by title");
-    // Pin availability is a separate reading of the sidebar's write state.
     expect(host.textContent).not.toMatch(
-      /document text|lag|first \d+ matches|Loading/i,
+      /unavailable|document text|lag|first \d+ matches|Loading/i,
     );
 
     await act(async () => typeInto(field, "overview"));
@@ -894,12 +893,14 @@ describe("an empty list", () => {
     // otherwise be told it has none.
     const waiting = await open(false, []);
     expect(waiting.querySelector("table.ub-docs-table")).not.toBeNull();
+    expect(waiting.querySelector(".ub-docs-pin-unavailable")).toBeNull();
     expect(waiting.querySelector(".ub-docs-empty")?.textContent).toContain(
       "has not synced",
     );
     unmount();
 
     const synced = await open(true, []);
+    expect(synced.querySelector(".ub-docs-pin-unavailable")).toBeNull();
     expect(synced.querySelector(".ub-docs-empty")?.textContent).toBe(
       "No documents in this workspace yet.",
     );

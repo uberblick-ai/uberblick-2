@@ -351,7 +351,7 @@ export function DocumentList({
             onChange={(event) => setQuery(event.currentTarget.value)}
           />
         </label>
-        {onTogglePin === null && (
+        {onTogglePin === null && rows.length > 0 && (
           <p id={pinUnavailableId} className="ub-docs-pin-unavailable mb-2 mt-0 text-xs text-(--muted-foreground)">
             Pin changes unavailable while the sidebar is not ready to write.
           </p>
