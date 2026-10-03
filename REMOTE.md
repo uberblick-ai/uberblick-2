@@ -228,7 +228,17 @@ request ID and collection secret can collect its credential, once. Keep the
 collection secret private; the displayed code alone cannot collect anything.
 Cancellation abandons the attempt. The hub reads the authorized public account
 identity and discards GitHub's token; it accepts no supplied GitHub token or
-identity. This interface does not add CLI login commands or a browser session.
+identity. Run `ub auth login [hub]` to complete this flow from a terminal; omit
+the hub to use this machine's bound hub. Approval works in a browser on any
+machine and the terminal completes without further input. `ub auth status [hub]`
+reads the locally recorded identity and workspace limits, without checking hub
+acceptance. `ub auth logout [hub]` removes only that local login; the device
+keeps hub access until revoked through device management. Credentials live in
+the owner-only `credentials.json` store, separate from `config.json`; these
+commands never change the machine's hub or workspace binding. A new login
+replaces the stored device only after completion and does not revoke the old
+one. Concurrent logins and logout preserve other hubs' logins, the signing
+secret and unrelated credential fields. Sign-in does not create a browser session.
 The hub permits 100 active attempts, independently of finished attempts. Terminal
 statuses expire no later than fifteen minutes after the attempt's expiry; at
 most 100 are retained when new attempts start, evicting oldest requests first. Evicted or restarted

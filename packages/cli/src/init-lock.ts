@@ -174,6 +174,8 @@ export interface LockOptions {
   path?: string;
   /** How long to wait for a holder before giving up. Zero tries exactly once. */
   waitMs?: number;
+  /** The command to retry; omitted callers retain the init diagnostic. */
+  command?: string;
   /**
    * Called once, when this process has found the lock held and is about to
    * wait for it. A run that stops for seconds says why rather than looking
@@ -299,9 +301,10 @@ export async function acquireInitLock(
     }
 
     if (Date.now() >= deadline) {
+      const holder = options.command === undefined ? "another `ub init`" : "another configuration writer";
       throw new LockWaitTimeoutError(
-        `another \`ub init\` is holding ${path} (${describeAge(path)}). Wait ` +
-          "for it to finish and run `ub init` again — or, if nothing is " +
+        `${holder} is holding ${path} (${describeAge(path)}). Wait ` +
+          `for it to finish and run \`${options.command ?? "ub init"}\` again — or, if nothing is ` +
           `running, remove it: rm -- ${shellQuote(path)}`,
       );
     }
