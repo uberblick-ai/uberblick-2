@@ -81,15 +81,16 @@ Settled 2026-10-03:
   guarantees, resources and commitments, agent authority) starts `open` even as
   a first record, with the agent's recommendation, because those choices are a
   person's.
-- **Open does not mean blocked.** Work proceeds on the recommendation while the
-  record is open; the record names the work built on it, so a reversal knows
-  what to redo. Reversal costs extra work, accepted to avoid slowing delivery.
-  The exception is an open topic whose reversal would be costly to undo even
-  before launch — security, privacy or data-preservation guarantees, recurring
-  cost or an external commitment, and expanded agent authority: those stop the
-  affected work until a person answers. This narrows the workflow's "at a
-  boundary, pause only affected work" to those cases, and the agent workflow
-  document changes with it.
+- **Open does not mean blocked** (owner, 2026-10-03). Work proceeds on the
+  open record's recommended option, and merging continues. The issue or pull
+  request says *built on open decision: \<topic\>, recommended option*, so a
+  reversal can find what was built on it. Only irreversible steps wait for a
+  human answer: publishing a release, a migration that drops data, and
+  credential or permission changes. If a person decides differently, the new
+  decision supersedes the recommendation and a follow-up issue does the
+  rework; that rework cost is accepted to avoid slowing delivery. The agent
+  workflow's "at a boundary, pause only affected work" narrows to those
+  irreversible steps, and that document changes with it.
 - **Opening a topic and challenging a decision differ.** A new open topic
   proceeds on its recommendation; a challenge to a `decided` record stops the
   work that depends on it, as above.
