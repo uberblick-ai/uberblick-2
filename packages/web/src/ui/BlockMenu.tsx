@@ -2,10 +2,10 @@
  * The block-insertion menu — one component, two ways in.
  *
  * Typing `/` in an empty paragraph opens it at the caret and converts that
- * block; hovering a block reveals a `+` in the left gutter which opens the same
- * list and inserts a new block below. The entries, the filtering and the two
- * transactions live in `editor/block-menu.ts`; what this file owns is pixels,
- * focus and keys.
+ * block; hovering a block or placing a caret by touch reveals a `+` in the left
+ * gutter which opens the same list and inserts a new block below. The entries,
+ * filtering and transactions live in `editor/block-menu.ts`; what this file
+ * owns is pixels, focus and keys.
  *
  * ProseMirror owns composition and menu keys; the shared CaretMenu uses
  * Floating UI placement and native-click dismissal. Trigger state and picks
@@ -41,24 +41,25 @@ interface SlashSession {
 }
 
 /**
- * The block the pointer is over, and where its gutter button belongs. Named by
- * id: the block it points at has to be findable again after the document has
- * moved under it.
+ * The block the gutter button belongs to, by hover or touch caret. Named by id:
+ * its block has to be findable again after the document has moved under it.
  */
-interface Hover {
+interface GutterTarget {
   blockId: string;
   top: number;
+  touch: boolean;
 }
 
-/** The gutter button's height, in pixels — kept in step with `.ub-gutter-add`. */
-const BUTTON_SIZE = 22;
+/** Kept in step with the button's size utilities. */
+const FINE_BUTTON_SIZE = 24;
+const TOUCH_BUTTON_SIZE = 44;
 
 /**
  * The top-level block a DOM node inside the editor belongs to — its id and its
  * position — or `null` when the node is not in one.
  *
- * Two steps, both cheap, because this runs on every `mousemove` over the prose:
- * walk up the ancestors to the ProseMirror root's own child (bounded by nesting
+ * Two steps, both cheap, because this runs on every fine-pointer move over the
+ * prose: walk up the ancestors to the ProseMirror root's own child (bounded by nesting
  * depth, which this schema caps at a block plus its inline spans), then let the
  * view map that element to a document position in one call. Scanning the
  * document instead — `nodeDOM` per top-level node until one matches — was a walk
@@ -101,14 +102,20 @@ function blockAt(
  * line, so the `+` beside a heading lines up with the heading rather than
  * floating above it.
  */
-function gutterTop(editor: Editor, pos: number, frame: HTMLElement | null): number {
+function gutterTop(
+  editor: Editor,
+  pos: number,
+  frame: HTMLElement | null,
+  touch: boolean,
+): number {
   const dom = editor.view.nodeDOM(pos);
   if (frame === null || !(dom instanceof HTMLElement)) return 0;
   const rect = dom.getBoundingClientRect();
   const base = frame.getBoundingClientRect();
-  const lineHeight = Number.parseFloat(window.getComputedStyle(dom).lineHeight);
+  const lineHeight = Number.parseFloat(dom.ownerDocument.defaultView?.getComputedStyle(dom).lineHeight ?? "");
   const firstLine = Number.isFinite(lineHeight) ? lineHeight : rect.height;
-  const top = rect.top - base.top + Math.max(0, (firstLine - BUTTON_SIZE) / 2);
+  const size = touch ? TOUCH_BUTTON_SIZE : FINE_BUTTON_SIZE;
+  const top = rect.top - base.top + Math.max(0, (firstLine - size) / 2);
   return Number.isFinite(top) ? top : 0;
 }
 
@@ -121,9 +128,9 @@ export function BlockMenu({
   host: RefObject<HTMLElement | null>;
 }): ReactElement {
   const [slash, setSlash] = useState<SlashSession | null>(null);
-  const [hover, setHover] = useState<Hover | null>(null);
+  const [hover, setHover] = useState<GutterTarget | null>(null);
   /** The open gutter menu: which block it will insert below, and where it sits. */
-  const [gutter, setGutter] = useState<Hover | null>(null);
+  const [gutter, setGutter] = useState<GutterTarget | null>(null);
   const [gutterQuery, setGutterQuery] = useState("");
   /** The highlighted entry, and the list it was highlighted in. */
   const [highlight, setHighlight] = useState<{ list: string; index: number; keyboard: boolean }>({
@@ -139,6 +146,15 @@ export function BlockMenu({
    */
   const dismissed = useRef(false);
   const gutterButton = useRef<HTMLButtonElement | null>(null);
+  // A newly opened document may acquire its caret before the first pointer
+  // event. Use the primary pointer only as that initial fallback; real events
+  // below override it so an iPad's trackpad still uses hover.
+  const touchInput = useRef(
+    editor.view.dom.ownerDocument.defaultView?.matchMedia?.("(pointer: coarse)").matches ?? false,
+  );
+  // iOS may blur the editor between a gutter press and its click. The target
+  // must survive that interval so the same native click can open the menu.
+  const gutterPressed = useRef(false);
   /** The gutter menu's search field, when one is open — a composition surface. */
   const search = useRef<HTMLInputElement | null>(null);
   // Two questions with two different answers.
@@ -181,7 +197,7 @@ export function BlockMenu({
     };
   }, [editor]);
 
-  // Hover, for the gutter button. Tracked on the ProseMirror root so the button
+  // Fine-pointer hover is tracked on the ProseMirror root so the button
   // itself — which is outside it — never counts as leaving the block, and
   // cleared when the pointer leaves the frame. The gutter strip the button
   // overhangs into is the frame's too (`.ub-editor-frame::before`), so the
@@ -190,22 +206,90 @@ export function BlockMenu({
   useEffect(() => {
     const dom = editor.view.dom;
     const frame = host.current;
-    const track = (event: MouseEvent): void => {
-      const block = blockAt(editor, event.target);
-      if (block === null) return;
-      const top = gutterTop(editor, block.pos, frame);
+    const ownerDocument = dom.ownerDocument;
+    const ownerWindow = ownerDocument.defaultView;
+    const show = (blockId: string, pos: number, touch: boolean): void => {
+      const top = gutterTop(editor, pos, frame, touch);
       setHover((previous) =>
-        previous !== null && previous.blockId === block.blockId && previous.top === top
+        previous !== null && previous.blockId === blockId && previous.top === top && previous.touch === touch
           ? previous
-          : { blockId: block.blockId, top },
+          : { blockId, top, touch },
       );
     };
-    const leave = (): void => setHover(null);
-    dom.addEventListener("mousemove", track);
-    frame?.addEventListener("mouseleave", leave);
+    const readCaret = (): void => {
+      if (!touchInput.current) return;
+      const { selection } = editor.state;
+      const { $head } = selection;
+      if (!editor.isEditable || (!editor.isFocused && !gutterPressed.current) ||
+          !selection.empty || $head.depth < 1 || !$head.parent.isTextblock) {
+        setHover(null);
+        return;
+      }
+      const id: unknown = $head.node(1).attrs.id;
+      if (typeof id !== "string" || id === "") {
+        setHover(null);
+        return;
+      }
+      show(id, $head.before(1), true);
+    };
+    const track = (event: PointerEvent): void => {
+      // Pointer events distinguish a trackpad on an iPad from its touchscreen.
+      // Listening to mousemove would also reveal the button for iOS's
+      // compatibility mouse events after a tap or touch range selection.
+      if (event.pointerType === "touch") return;
+      touchInput.current = false;
+      const block = blockAt(editor, event.target);
+      if (block === null) return;
+      show(block.blockId, block.pos, false);
+    };
+    const press = (event: PointerEvent): void => {
+      touchInput.current = event.pointerType === "touch";
+      if (touchInput.current) readCaret();
+      else track(event);
+    };
+    const leave = (): void => {
+      if (!touchInput.current) setHover(null);
+    };
+    const blur = (): void => {
+      if (touchInput.current && !gutterPressed.current) setHover(null);
+    };
+    const changed = ({ transaction }: { transaction: Transaction }): void => {
+      if (touchInput.current) readCaret();
+      else if (transaction.docChanged) setHover(null);
+    };
+    const release = (): void => {
+      if (!gutterPressed.current) return;
+      gutterPressed.current = false;
+      readCaret();
+    };
+    const outsidePress = (event: PointerEvent): void => {
+      if (event.target !== gutterButton.current) release();
+    };
+    dom.addEventListener("pointermove", track);
+    dom.addEventListener("pointerdown", press);
+    frame?.addEventListener("pointerleave", leave);
+    // A touch click may follow pointerup in a later task. Release only when
+    // its native click has bubbled through React, or the gesture is cancelled
+    // or replaced by another press; no delay estimates its arrival.
+    ownerDocument.addEventListener("click", release);
+    ownerDocument.addEventListener("pointercancel", release);
+    ownerDocument.addEventListener("pointerdown", outsidePress, true);
+    ownerWindow?.addEventListener("resize", readCaret);
+    editor.on("transaction", changed);
+    editor.on("focus", readCaret);
+    editor.on("blur", blur);
+    readCaret();
     return () => {
-      dom.removeEventListener("mousemove", track);
-      frame?.removeEventListener("mouseleave", leave);
+      dom.removeEventListener("pointermove", track);
+      dom.removeEventListener("pointerdown", press);
+      frame?.removeEventListener("pointerleave", leave);
+      ownerDocument.removeEventListener("click", release);
+      ownerDocument.removeEventListener("pointercancel", release);
+      ownerDocument.removeEventListener("pointerdown", outsidePress, true);
+      ownerWindow?.removeEventListener("resize", readCaret);
+      editor.off("transaction", changed);
+      editor.off("focus", readCaret);
+      editor.off("blur", blur);
     };
   }, [editor, host]);
 
@@ -249,16 +333,17 @@ export function BlockMenu({
 
   /**
    * An *open* gutter menu follows its block on every transaction: gone means
-   * closed, moved means re-measured. It is the only anchor worth measuring —
-   * it is the one that can act, and there is at most one of them open.
+   * closed, moved means re-measured. Its target stays fixed even while focus
+   * belongs to the menu's search field rather than the editor.
    *
-   * A merely hovered button gets the cheap treatment below instead. Following it
+   * A merely hovered button gets the cheap treatment above instead. Following it
    * too meant a `findBlockById` plus a `getBoundingClientRect` plus a
    * `getComputedStyle` on **every transaction** — that is per keystroke, local
    * or remote, for as long as the pointer rests anywhere over the prose, to keep
    * a hint in the right place.
    */
   const menuAnchorId = gutter?.blockId ?? null;
+  const menuTouch = gutter?.touch ?? false;
   useEffect(() => {
     if (menuAnchorId === null) return;
     const follow = (): void => {
@@ -267,7 +352,7 @@ export function BlockMenu({
         closeGutter();
         return;
       }
-      const top = gutterTop(editor, found.pos, host.current);
+      const top = gutterTop(editor, found.pos, host.current, menuTouch);
       setGutter((previous) =>
         previous === null || previous.top === top ? previous : { ...previous, top },
       );
@@ -276,22 +361,7 @@ export function BlockMenu({
     return () => {
       editor.off("transaction", follow);
     };
-  }, [editor, host, menuAnchorId, closeGutter]);
-
-  // The hovered button is a hint, and a hint whose block may have just moved is
-  // simply not shown: an edit hides it, and the next pointer move — which is the
-  // only gesture that can reach it anyway — puts it back where it belongs. Both
-  // commands re-resolve their block by id when they run, so nothing here is
-  // load-bearing for correctness.
-  useEffect(() => {
-    const drop = ({ transaction }: { transaction: Transaction }): void => {
-      if (transaction.docChanged) setHover(null);
-    };
-    editor.on("transaction", drop);
-    return () => {
-      editor.off("transaction", drop);
-    };
-  }, [editor]);
+  }, [editor, host, menuAnchorId, menuTouch, closeGutter]);
 
   const choose = useCallback(
     (entry: BlockMenuEntry | undefined): void => {
@@ -301,7 +371,7 @@ export function BlockMenu({
         // answer and closes.
         insertBlockBelow(editor, gutter.blockId, entry);
         closeGutter();
-        setHover(null);
+        if (!gutter.touch) setHover(null);
         return;
       }
       if (slash !== null) {
@@ -371,13 +441,19 @@ export function BlockMenu({
       <button
         type="button"
         ref={gutterButton}
-        className={visible ? "ub-gutter-add ub-gutter-add-on" : "ub-gutter-add"}
+        className={`absolute z-[1] flex items-center justify-center rounded-(--radius-sm) border border-transparent bg-transparent p-0 text-base leading-none text-(--muted-foreground) [font-family:inherit] transition-opacity duration-[120ms] ease-out motion-reduce:transition-none ${
+          anchor?.touch ? "left-[-44px] size-11" : "left-[calc(-1*var(--block-gutter))] size-6"
+        } ${visible ? "pointer-events-auto cursor-pointer opacity-100 hover:bg-secondary hover:border-(--border) hover:text-foreground" : "pointer-events-none opacity-0"}`}
         style={{ top: `${anchor?.top ?? 0}px` }}
         aria-label="Insert block below"
         title="Insert block below"
         aria-hidden={!visible}
         tabIndex={-1}
         // The caret stays where it is until an entry is picked.
+        onPointerDown={(event) => {
+          gutterPressed.current = true;
+          event.preventDefault();
+        }}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => {
           if (hover === null) return;

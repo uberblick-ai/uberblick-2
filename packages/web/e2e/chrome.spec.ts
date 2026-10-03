@@ -701,8 +701,8 @@ test("a multiline comment composer stays above its selected passage", async ({ b
     if (index < 10) await page.keyboard.press("Enter");
   }
   await page.keyboard.press("Shift+Home");
-  await page.locator(".ub-composer-open").click();
-  const composer = page.locator(".ub-composer");
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  const composer = page.locator('[data-slot="selection-composer"]');
   await expect(composer).toHaveAttribute("data-placement", "above");
   const field = composer.locator("textarea");
   const lines = Array.from({ length: 8 }, (_, index) => `Comment line ${index + 1}`);
@@ -838,7 +838,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   await placeCaret(page);
   await page.keyboard.type("annotate me", { delay: 15 });
   await page.keyboard.press("Shift+Home");
-  await page.locator(".ub-composer-open").click();
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
   await page.keyboard.type("keep this beside the prose", { delay: 15 });
   await page.keyboard.press("Enter");
   await expect(page.locator(".ub-thread")).toBeVisible();
@@ -1610,11 +1610,11 @@ for (const scheme of ["light", "dark"] as const) {
     // measure in a room with one client in it.
     await openAppearanceApp(browser, scheme, new URL(page.url()).pathname);
 
-    await page.locator(".ub-composer-open").click();
+    await page.getByRole("button", { name: "Comment", exact: true }).click();
 
     // The open composer is its own `--card`, and the two `--secondary` fills on
     // it are the same pair as the three above (#567).
-    const composer = await painted(page, ".ub-composer", "background-color");
+    const composer = await painted(page, '[data-slot="selection-composer"]', "background-color");
     const cancel = page.getByRole("button", { name: "Cancel" });
     for (const fill of [cancel, page.locator(".ub-mention").first()]) {
       const ground = await paintedIn(fill, "background-color");
@@ -2118,7 +2118,7 @@ for (const scheme of ["light", "dark"] as const) {
     for (let back = 0; back < label.length; back += 1) {
       await page.keyboard.press("Shift+ArrowLeft");
     }
-    await page.locator(".ub-composer-open").click();
+    await page.getByRole("button", { name: "Comment", exact: true }).click();
     await page.keyboard.type("a thread", { delay: 15 });
     await page.keyboard.press("Enter");
     await expect(page.locator(".ub-editor .ub-comment a.ub-doclink")).toBeVisible();
@@ -2924,7 +2924,7 @@ for (const scheme of ["light", "dark"] as const) {
       }
       await page.keyboard.press("Escape");
       await page.locator(".ub-editor .ub-paragraph").first().hover();
-      await page.locator(".ub-gutter-add").click();
+      await page.getByRole("button", { name: "Insert block below" }).click();
       await collect();
       for (const option of await page.locator(".ub-blockmenu [role=option]").all()) {
         await option.hover();

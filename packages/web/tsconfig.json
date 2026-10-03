@@ -18,6 +18,7 @@
     "vite.config.ts",
     "playwright.config.ts",
     "playwright.external-link.config.ts",
-    "playwright.menu.config.ts"
+    "playwright.menu.config.ts",
+    "playwright.touch.config.ts"
   ]
 }

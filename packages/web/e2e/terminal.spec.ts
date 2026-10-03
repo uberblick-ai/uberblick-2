@@ -104,7 +104,7 @@ async function writeDemo(
   }
 
   await blocks.last().hover();
-  await page.locator(".ub-gutter-add").click();
+  await page.getByRole("button", { name: "Insert block below" }).click();
   await page.getByRole("option", { name: "Terminal demo" }).click();
   const lines = transcript === "" ? [] : transcript.split("\n");
   for (const [index, line] of lines.entries()) {

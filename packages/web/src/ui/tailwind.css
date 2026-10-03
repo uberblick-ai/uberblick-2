@@ -56,6 +56,7 @@
    `.collapse`). Scan the wrappers and product components migrated to utilities. */
 @source "./shadcn";
 @source "./CommentForm.tsx";
+@source "./CommentComposer.tsx";
 @source "./Sidebar.tsx";
 @source "./App.tsx";
 @source "./ThreadsPane.tsx";

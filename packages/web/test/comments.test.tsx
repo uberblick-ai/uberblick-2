@@ -192,11 +192,11 @@ function mountComposer(
   };
   draw();
   const query = <T extends Element>(selector: string): T | null =>
-    frame.querySelector<T>(selector);
+    document.querySelector<T>(selector);
   return {
     editor,
     created,
-    open: () => act(() => query<HTMLButtonElement>(".ub-composer-open")?.click()),
+    open: () => act(() => query<HTMLButtonElement>("[data-slot=\"selection-composer\"] button[aria-label=\"Comment\"], [data-slot=\"selection-composer\"] > button")?.click()),
     type: (text: string) => {
       const field = query<HTMLTextAreaElement>(".ub-comment-input");
       if (field === null) throw new Error("no composer field");
@@ -212,7 +212,7 @@ function mountComposer(
     submit: () =>
       act(() => {
         const buttons = [
-          ...frame.querySelectorAll<HTMLButtonElement>(".ub-comment-buttons button"),
+          ...document.querySelectorAll<HTMLButtonElement>(".ub-composer .ub-comment-buttons button"),
         ];
         buttons.at(-1)?.click();
       }),
@@ -338,9 +338,9 @@ describe("the prose selection toolbar", () => {
     label: string,
   ): HTMLButtonElement {
     const found = [
-      ...document.querySelectorAll<HTMLButtonElement>(".ub-selection-tool"),
+      ...document.querySelectorAll<HTMLButtonElement>("[data-selection-tool]"),
     ].find((button) => button.getAttribute("aria-label") === label);
-    if (found === undefined || !view.query(".ub-selection-menu")?.contains(found)) {
+    if (found === undefined || !view.query("[data-slot=\"selection-composer\"]")?.contains(found)) {
       throw new Error(`no selection tool ${label}`);
     }
     return found;
@@ -348,7 +348,7 @@ describe("the prose selection toolbar", () => {
 
   /** Change the link field through the browser event React listens to. */
   function linkValue(view: ReturnType<typeof mountComposer>, value: string): void {
-    const field = view.query<HTMLInputElement>(".ub-selection-link-input");
+    const field = view.query<HTMLInputElement>("[aria-label=\"External link URL\"]");
     if (field === null) throw new Error("no external link field");
     act(() => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
@@ -442,14 +442,14 @@ describe("the prose selection toolbar", () => {
       expect(tool(view, "External link").getAttribute("aria-pressed")).toBeNull();
       act(() => tool(view, "External link").click());
       linkValue(view, "mailto:ben@example.com");
-      act(() => view.query<HTMLButtonElement>(".ub-selection-apply")?.click());
-      expect(view.query(".ub-selection-error")?.textContent).toContain("http");
+      act(() => view.query<HTMLButtonElement>("[type=\"submit\"]")?.click());
+      expect(view.query("[role=\"alert\"]")?.textContent).toContain("http");
       expect(snapshotFragment(ydoc)[1]?.delta).not.toContainEqual(
         expect.objectContaining({ attributes: expect.objectContaining({ link: {} }) }),
       );
 
       linkValue(view, "https://example.com/first");
-      act(() => view.query<HTMLButtonElement>(".ub-selection-apply")?.click());
+      act(() => view.query<HTMLButtonElement>("[type=\"submit\"]")?.click());
       const linked = snapshotFragment(ydoc)[1]?.delta.find(
         (run) => run.insert === "quick brown",
       );
@@ -459,13 +459,13 @@ describe("the prose selection toolbar", () => {
       });
 
       act(() => tool(view, "External link").click());
-      expect(view.query<HTMLInputElement>(".ub-selection-link-input")?.value).toBe(
+      expect(view.query<HTMLInputElement>("[aria-label=\"External link URL\"]")?.value).toBe(
         "https://example.com/first",
       );
       linkValue(view, "https://example.com/cancelled");
       act(() =>
         view
-          .query<HTMLButtonElement>(".ub-selection-link button[type=button]")
+          .query<HTMLButtonElement>("[aria-label=\"External link\"] button[type=button]")
           ?.click(),
       );
       expect(snapshotFragment(ydoc)[1]?.delta).toEqual(
@@ -481,7 +481,7 @@ describe("the prose selection toolbar", () => {
 
       act(() => tool(view, "External link").click());
       linkValue(view, "https://example.com/edited");
-      act(() => view.query<HTMLButtonElement>(".ub-selection-apply")?.click());
+      act(() => view.query<HTMLButtonElement>("[type=\"submit\"]")?.click());
       expect(
         snapshotFragment(ydoc)[1]?.delta.find(
           (run) => run.insert === "quick brown",
@@ -502,8 +502,8 @@ describe("the prose selection toolbar", () => {
       });
       act(() => tool(view, "External link").click());
       linkValue(view, "https://example.com/replacement");
-      act(() => view.query<HTMLButtonElement>(".ub-selection-apply")?.click());
-      expect(view.query(".ub-selection-error")?.textContent).toContain(
+      act(() => view.query<HTMLButtonElement>("[type=\"submit\"]")?.click());
+      expect(view.query("[role=\"alert\"]")?.textContent).toContain(
         "document link",
       );
       expect(
@@ -529,10 +529,10 @@ describe("the prose selection toolbar", () => {
       const before = snapshotFragment(ydoc);
       act(() => tool(view, "External link").click());
       linkValue(view, "https://example.com/日本語");
-      const field = view.query<HTMLInputElement>(".ub-selection-link-input")!;
+      const field = view.query<HTMLInputElement>("[aria-label=\"External link URL\"]")!;
 
       composingKey(field, "Escape", afterCompositionEnd);
-      expect(view.query(".ub-selection-link-input")).toBe(field);
+      expect(view.query("[aria-label=\"External link URL\"]")).toBe(field);
       expect(field.value).toBe("https://example.com/日本語");
       expect(document.activeElement).toBe(field);
       expect(snapshotFragment(ydoc)).toEqual(before);
@@ -540,8 +540,8 @@ describe("the prose selection toolbar", () => {
       act(() => field.dispatchEvent(new KeyboardEvent("keydown", {
         key: "Escape", bubbles: true, cancelable: true,
       })));
-      expect(view.query(".ub-selection-link-input")).toBeNull();
-      expect(view.query(".ub-selection-toolbar")).not.toBeNull();
+      expect(view.query("[aria-label=\"External link URL\"]")).toBeNull();
+      expect(view.query("[role=\"toolbar\"]")).not.toBeNull();
       expect(snapshotFragment(ydoc)).toEqual(before);
     } finally {
       view.unmount();
@@ -554,14 +554,14 @@ describe("the prose selection toolbar", () => {
     const view = mountComposer(ydoc);
     try {
       select(view.editor, 1, 20, 6, 2);
-      expect(view.query(".ub-selection-toolbar")).toBeNull();
-      expect(view.query(".ub-composer-open")?.textContent).toBe(
+      expect(view.query("[role=\"toolbar\"]")).toBeNull();
+      expect(view.query("[data-slot=\"selection-composer\"] button[aria-label=\"Comment\"], [data-slot=\"selection-composer\"] > button")?.textContent).toBe(
         "Comment on Paragraph 2",
       );
 
       select(view.editor, 3, 0, 5);
-      expect(view.query(".ub-selection-toolbar")).toBeNull();
-      expect(view.query(".ub-composer-open")?.textContent).toBe(
+      expect(view.query("[role=\"toolbar\"]")).toBeNull();
+      expect(view.query("[data-slot=\"selection-composer\"] button[aria-label=\"Comment\"], [data-slot=\"selection-composer\"] > button")?.textContent).toBe(
         "Comment on Code block 4",
       );
     } finally {
@@ -574,7 +574,7 @@ describe("the prose selection toolbar", () => {
     const view = mountComposer(ydoc);
     try {
       select(view.editor, 1, 4, 15);
-      expect(view.query(".ub-selection-toolbar")).not.toBeNull();
+      expect(view.query("[role=\"toolbar\"]")).not.toBeNull();
       view.open();
       expect(view.query(".ub-comment-form")).not.toBeNull();
       act(() => {
@@ -586,7 +586,7 @@ describe("the prose selection toolbar", () => {
           }),
         );
       });
-      expect(view.query(".ub-selection-toolbar")).not.toBeNull();
+      expect(view.query("[role=\"toolbar\"]")).not.toBeNull();
       expect(view.editor.state.selection.empty).toBe(false);
 
       act(() => {
@@ -613,7 +613,7 @@ describe("the prose selection toolbar", () => {
           new CompositionEvent("compositionend", { bubbles: true }),
         );
       });
-      expect(view.query(".ub-selection-toolbar")).not.toBeNull();
+      expect(view.query("[role=\"toolbar\"]")).not.toBeNull();
       expect(view.editor.state.selection.empty).toBe(false);
     } finally {
       view.unmount();
@@ -681,7 +681,7 @@ describe("starting a thread from the prose", () => {
         key: "Escape", bubbles: true, cancelable: true,
       })));
       expect(view.query(".ub-comment-input")).toBeNull();
-      expect(view.query(".ub-selection-toolbar")).not.toBeNull();
+      expect(view.query("[role=\"toolbar\"]")).not.toBeNull();
     } finally {
       view.unmount();
     }
@@ -696,12 +696,12 @@ describe("starting a thread from the prose", () => {
       expect(view.query(".ub-composer")).toBeNull();
 
       select(view.editor, 1, 4, 15);
-      expect(view.query(".ub-selection-toolbar")).not.toBeNull();
-      expect(view.query(".ub-composer-open")?.textContent).toBe("Comment");
+      expect(view.query("[role=\"toolbar\"]")).not.toBeNull();
+      expect(view.query("[data-slot=\"selection-composer\"] button[aria-label=\"Comment\"], [data-slot=\"selection-composer\"] > button")?.textContent).toBe("Comment");
 
       view.open();
       // The card quotes exactly the range the mark will cover.
-      expect(view.query(".ub-thread-excerpt")?.textContent).toBe("quick brown");
+      expect(view.query('[data-slot="selection-excerpt"]')?.textContent).toBe("quick brown");
       view.type("why quick?");
       view.submit();
 
@@ -776,11 +776,11 @@ describe("starting a thread from the prose", () => {
       // and quoted text exactly as they were.
       select(view.editor, 1, 20, PARAGRAPH.length);
       view.open();
-      expect(view.query(".ub-chip-orphaned")).toBeNull();
+      expect(view.query('[data-slot="selection-clamp"]')).toBeNull();
 
       select(view.editor, 1, 20, 6, 2);
-      expect(view.query(".ub-chip-orphaned")?.textContent).toBe("first block only");
-      expect(view.query(".ub-thread-excerpt")?.textContent).toBe("jumps.");
+      expect(view.query('[data-slot="selection-clamp"]')?.textContent).toBe("first block only");
+      expect(view.query('[data-slot="selection-excerpt"]')?.textContent).toBe("jumps.");
 
       view.type("the tail only");
       view.submit();
@@ -823,7 +823,7 @@ describe("starting a thread from the prose", () => {
         "why quick?",
       );
       // …and quoting the same words at their new offsets.
-      expect(view.query(".ub-thread-excerpt")?.textContent).toBe("quick brown");
+      expect(view.query('[data-slot="selection-excerpt"]')?.textContent).toBe("quick brown");
 
       view.submit();
       const [thread] = listAnnotations(ydoc);
