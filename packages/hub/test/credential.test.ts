@@ -1,18 +1,8 @@
-/**
- * The credential contract, end to end and in the dark corners.
- *
- * The blocker this file exists to close: an earlier design had a client call
- * `deriveCredentialKey(root, workspace, keyVersion, credId)`, which a client
- * cannot do — it holds neither the root secret nor the `keyVersion`. Nothing
- * caught it, twice, because no test drove a credential from issuance through a
- * client mint to a hub verification. {@link round-trip} is that test, and the
- * golden vector below is what stops the wire format drifting under it.
- */
+/** The credential encoding and key import contract used by future clients. */
 
 import { describe, expect, it } from "vitest";
 import {
   MAX_TOKEN_LIFETIME_SECONDS,
-  deriveCredentialKey,
   formatCredential,
   importCredentialKey,
   importRootSecret,
@@ -23,12 +13,7 @@ import {
 
 const ROOT = "a-dev-root-secret";
 const WORKSPACE = "3f6a1c20-9d84-4b1e-8a77-2c5e9b0d4411";
-const KEY_VERSION = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
 const CRED_ID = "6c1f0f4a-2b3d-4c5e-8f90-1a2b3c4d5e6f";
-
-function hex(bytes: Uint8Array): string {
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 /** The claims a client mints once it has imported its credential's bytes. */
 function roomClaims(kid: string) {
@@ -42,140 +27,18 @@ function roomClaims(kid: string) {
   } as const;
 }
 
-describe("the round-trip vector", () => {
-  it("issues, parses, imports, mints, and verifies under an independently derived key", async () => {
-    // Hub, at issuance: derive and format. The `keyVersion` never leaves here.
-    const issued = formatCredential({
-      workspaceUuid: WORKSPACE,
-      credId: CRED_ID,
-      keyBytes: await deriveCredentialKey(ROOT, WORKSPACE, KEY_VERSION, CRED_ID),
-    });
-    expect(issued.startsWith("ubc1.")).toBe(true);
-    expect(issued).not.toContain(KEY_VERSION);
-
-    // Client: parse, import, mint. It never touches the root secret or the
-    // key version, because it has neither.
+describe("the credential key round trip", () => {
+  it("formats, parses, imports, mints and verifies under independently issued bytes", async () => {
+    const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+    const issued = formatCredential({ workspaceUuid: WORKSPACE, credId: CRED_ID, keyBytes });
     const parsed = parseCredential(issued);
-    if ("invalid" in parsed) {
-      throw new Error(`the issued credential did not parse: ${parsed.invalid}`);
-    }
-    expect(parsed.workspaceUuid).toBe(WORKSPACE);
-    expect(parsed.credId).toBe(CRED_ID);
-    const token = await mintToken(
-      await importCredentialKey(parsed.keyBytes),
-      roomClaims(parsed.credId),
-    );
+    if ("invalid" in parsed) throw new Error("issued fixture did not parse");
+    const token = await mintToken(await importCredentialKey(parsed.keyBytes), roomClaims(parsed.credId));
 
-    // Hub, at verification: re-derive from the row's own fields — never from
-    // anything the client sent — and verify.
-    const hubKey = await importCredentialKey(
-      await deriveCredentialKey(ROOT, WORKSPACE, KEY_VERSION, CRED_ID),
-    );
-    const claims = await verifyToken(hubKey, token);
-
-    expect(claims?.workspace).toBe(WORKSPACE);
-    expect(claims?.kid).toBe(CRED_ID);
-  });
-
-  it("refuses a token minted under a credential issued at another key version", async () => {
-    // A rekey regenerates `key_version`; the credential string does not carry
-    // it, so the hub re-derives under the *current* version and the client's
-    // bytes no longer match. This is the second of the two refusals — the
-    // first is the row's precondition, which arrives with the registry.
-    const stale = formatCredential({
-      workspaceUuid: WORKSPACE,
-      credId: CRED_ID,
-      keyBytes: await deriveCredentialKey(ROOT, WORKSPACE, KEY_VERSION, CRED_ID),
+    expect(await verifyToken(await importCredentialKey(keyBytes), token)).toMatchObject({
+      workspace: WORKSPACE, kid: CRED_ID,
     });
-    const parsed = parseCredential(stale);
-    if ("invalid" in parsed) throw new Error("fixture did not parse");
-
-    const token = await mintToken(
-      await importCredentialKey(parsed.keyBytes),
-      roomClaims(CRED_ID),
-    );
-    const afterRekey = await importCredentialKey(
-      await deriveCredentialKey(
-        ROOT,
-        WORKSPACE,
-        "ffffffffffffffffffffffffffffffff",
-        CRED_ID,
-      ),
-    );
-
-    expect(await verifyToken(afterRekey, token)).toBeNull();
-  });
-});
-
-describe("deriveCredentialKey", () => {
-  it("pins the derivation to a golden vector", async () => {
-    // A fixed root secret, workspace, key version and credential id produce
-    // exactly these 32 bytes. Change this value and every credential ever
-    // issued stops verifying — so a diff that changes it is a wire-format
-    // change and has to say so.
-    const derived = await deriveCredentialKey(
-      ROOT,
-      WORKSPACE,
-      KEY_VERSION,
-      CRED_ID,
-    );
-
-    expect(derived).toHaveLength(32);
-    expect(hex(derived)).toBe(
-      "6f5d64120f8362799e6ae006a1ceaeef71e1441ad4b56f88a8b083d2267a5107",
-    );
-  });
-
-  it("lets no field bleed into the next", async () => {
-    // The bleed this rules out: a `keyVersion` that ends one character early
-    // and a `credId` that starts one character early would concatenate to the
-    // same string as the honest pair, and a derivation that merely joined its
-    // fields would hand both the same key. Every neighbouring pair below moves
-    // exactly one character across a boundary, and all four keys differ.
-    const otherVersion = `${KEY_VERSION.slice(0, 31)}1`;
-    const otherId = `1${CRED_ID.slice(1)}`;
-    expect(otherVersion).not.toBe(KEY_VERSION);
-    expect(otherId).not.toBe(CRED_ID);
-
-    const keys = await Promise.all(
-      [
-        [KEY_VERSION, CRED_ID],
-        [otherVersion, CRED_ID],
-        [KEY_VERSION, otherId],
-        [otherVersion, otherId],
-      ].map(([version, id]) =>
-        deriveCredentialKey(ROOT, WORKSPACE, version as string, id as string),
-      ),
-    );
-
-    expect(new Set(keys.map(hex)).size).toBe(4);
-
-    // And a different workspace, same everything else, is a different key.
-    const elsewhere = await deriveCredentialKey(
-      ROOT,
-      "11111111-2222-3333-4444-555555555555",
-      KEY_VERSION,
-      CRED_ID,
-    );
-    expect(hex(elsewhere)).not.toBe(hex(keys[0] as Uint8Array));
-  });
-
-  it("refuses a field that is not in its fixed format", async () => {
-    // The format checks are what make the previous test's guarantee absolute:
-    // a `keyVersion` carrying a newline could otherwise spell any derivation
-    // string it liked.
-    await expect(
-      deriveCredentialKey(ROOT, `uberblick-${WORKSPACE}`, KEY_VERSION, CRED_ID),
-    ).rejects.toThrow(/workspaceUuid/);
-    await expect(
-      deriveCredentialKey(ROOT, WORKSPACE, `abc\n${CRED_ID}`, CRED_ID),
-    ).rejects.toThrow(/keyVersion/);
-    await expect(
-      deriveCredentialKey(ROOT, WORKSPACE, KEY_VERSION.toUpperCase(), CRED_ID),
-    ).rejects.toThrow(/keyVersion/);
-    await expect(
-      deriveCredentialKey(ROOT, WORKSPACE, KEY_VERSION, "not-a-uuid"),
-    ).rejects.toThrow(/credId/);
+    expect(await verifyToken(await importRootSecret(ROOT), token)).toBeNull();
   });
 });
 
@@ -300,10 +163,8 @@ describe("importCredentialKey", () => {
   });
 
   it("mints a token the root secret cannot verify", async () => {
-    // The two key spaces are disjoint, which is the point of deriving at all:
-    // a credential is not a smaller root secret.
     const credentialKey = await importCredentialKey(
-      await deriveCredentialKey(ROOT, WORKSPACE, KEY_VERSION, CRED_ID),
+      crypto.getRandomValues(new Uint8Array(32)),
     );
     const token = await mintToken(credentialKey, roomClaims(CRED_ID));
 

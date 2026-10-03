@@ -1,11 +1,9 @@
 /**
  * Two properties the type system cannot state, checked by reading the source.
  *
- * 1. **`deriveCredentialKey` is hub-only.** A client holds neither the root
- *    secret nor the workspace's `keyVersion`, so a client that calls it cannot
- *    work — an instruction to do exactly that survived two rounds of external
- *    review before anybody tried to run it. Nothing outside `packages/hub` may
- *    name it.
+ * 1. **The registry and credential admission stay hub-only.** Clients receive
+ *    independent random keys; the legacy root cannot derive them. No client
+ *    may import the authority that issues, verifies or revokes credentials.
  * 2. **Every place that mints a token is enumerated.** That the three claims are
  *    passed at all is a compile-time guarantee — `TokenRequest` makes `typ`,
  *    `kid` and `lifetimeSeconds` required — so this checks the one thing the
@@ -53,17 +51,12 @@ function mentioning(needle: string): string[] {
     .filter((path) => readFileSync(`${REPO}${path}`, "utf8").includes(needle));
 }
 
-describe("deriveCredentialKey is hub-only", () => {
+describe("credential authority is hub-only", () => {
   it("is named nowhere outside packages/hub", () => {
-    const outside = mentioning("deriveCredentialKey").filter(
-      (path) => !path.startsWith("packages/hub/"),
-    );
-
-    expect(
-      outside,
-      "a client cannot derive a credential key — it has neither the root " +
-        "secret nor the keyVersion. Parse the credential and import its bytes.",
-    ).toEqual([]);
+    for (const name of ["CredentialRegistry", "CredentialAdmission"]) {
+      expect(mentioning(name).filter((path) => !path.startsWith("packages/hub/"))).toEqual([]);
+    }
+    expect(mentioning("deriveCredentialKey")).toEqual([]);
   });
 });
 
@@ -77,6 +70,9 @@ describe("token minting sites", () => {
     // Browser-shaped integration token: maximum lifetime, no credential kid.
     "packages/cli/test/open.test.ts",
     "packages/cli/test/remote.test.ts",
+    "packages/hub/test/credential-admission.test.ts",
+    "packages/hub/test/credential-compatibility.test.ts",
+    "packages/hub/test/credential-registry.test.ts",
     "packages/hub/test/credential.test.ts",
     "packages/hub/test/helpers.ts",
     "packages/hub/test/token.test.ts",

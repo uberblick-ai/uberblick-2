@@ -1,6 +1,7 @@
 /**
  * Device-credential admission, deliberately absent from createHub and ub open.
- * Compose this extension with HubDatabase; the coordinated client cutover owns
+ * Compose this extension with HubDatabase and the same CredentialRegistry
+ * used by issuance and management. The coordinated client cutover owns
  * installing it on remote hubs. It never accepts the legacy root key.
  */
 import type {
@@ -43,6 +44,7 @@ interface PendingAdmission {
 
 export class CredentialAdmission implements Extension<CredentialContext> {
   private readonly instances = new Set<Hocuspocus<CredentialContext>>();
+  private readonly connections = new Set<Connection<CredentialContext>>();
   private readonly pending = new Map<string, PendingAdmission>();
   private readonly unsubscribe: () => void;
 
@@ -70,12 +72,22 @@ export class CredentialAdmission implements Extension<CredentialContext> {
       this.options.log({ event: "hub.auth.rejected", peer: peer.address, cause });
       throw new CredentialRefusal(reason);
     };
-    if (["token", "access_token", "auth", "authToken"].some((key) => requestParameters.has(key))) {
+    if (
+      ["token", "access_token", "auth", "authToken"].some((key) =>
+        requestParameters.has(key),
+      )
+    ) {
       return refuse("token-in-query");
     }
     const envelope = readAuthEnvelope(token);
-    if (envelope === null || envelope.protocolVersion !== this.options.protocolVersion) {
-      return refuse("protocol-mismatch", protocolMismatchReason(this.options.protocolVersion));
+    if (
+      envelope === null ||
+      envelope.protocolVersion !== this.options.protocolVersion
+    ) {
+      return refuse(
+        "protocol-mismatch",
+        protocolMismatchReason(this.options.protocolVersion),
+      );
     }
     const verified = await this.registry.verify(envelope.token);
     if ("failure" in verified) {
@@ -104,25 +116,37 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     };
     connectionConfig.readOnly = verified.claims.scope === "read-only";
     this.instances.add(instance);
-    this.pending.set(this.key(socketId, documentName), { context, config: connectionConfig });
-    this.options.log({ event: "hub.auth.accepted", credentialId: record.id, workspace });
+    this.pending.set(this.key(socketId, documentName), {
+      context, config: connectionConfig,
+    });
+    this.options.log({
+      event: "hub.auth.accepted", credentialId: record.id, workspace,
+    });
     return context;
   };
 
-  connected = async ({ connection, socketId, documentName }: connectedPayload<CredentialContext>): Promise<void> => {
+  connected = async ({
+    connection, socketId, documentName,
+  }: connectedPayload<CredentialContext>): Promise<void> => {
     this.pending.delete(this.key(socketId, documentName));
     this.check(connection, documentName);
   };
 
-  beforeHandleMessage = async ({ connection, documentName }: beforeHandleMessagePayload<CredentialContext>): Promise<void> => {
+  beforeHandleMessage = async ({
+    connection, documentName,
+  }: beforeHandleMessagePayload<CredentialContext>): Promise<void> => {
     this.check(connection, documentName);
   };
 
-  beforeSync = async ({ connection, documentName }: beforeSyncPayload<CredentialContext>): Promise<void> => {
+  beforeSync = async ({
+    connection, documentName,
+  }: beforeSyncPayload<CredentialContext>): Promise<void> => {
     this.check(connection, documentName);
   };
 
-  onDisconnect = async ({ socketId, documentName }: onDisconnectPayload<CredentialContext>): Promise<void> => {
+  onDisconnect = async ({
+    socketId, documentName,
+  }: onDisconnectPayload<CredentialContext>): Promise<void> => {
     this.pending.delete(this.key(socketId, documentName));
   };
 
@@ -130,6 +154,7 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     this.unsubscribe();
     this.pending.clear();
     this.instances.clear();
+    this.connections.clear();
   };
 
   /**
@@ -145,19 +170,23 @@ export class CredentialAdmission implements Extension<CredentialContext> {
         config.readOnly = true;
       }
     }
-    const connections: Connection<CredentialContext>[] = [];
+    const candidates = new Set(this.connections);
     for (const instance of this.instances) {
       for (const document of instance.documents.values()) {
         for (const connection of document.getConnections()) {
-          if (predicate(connection.context)) {
-            connection.context.authorization.active = false;
-            // MessageReceiver checks this *after* awaiting beforeSync and
-            // immediately before both Yjs apply branches. This also fences a
-            // frame whose authorization check passed before revocation.
-            connection.readOnly = true;
-            connections.push(connection);
-          }
+          candidates.add(connection);
         }
+      }
+    }
+    const connections: Connection<CredentialContext>[] = [];
+    for (const connection of candidates) {
+      if (predicate(connection.context)) {
+        connection.context.authorization.active = false;
+        // MessageReceiver checks this *after* awaiting beforeSync and
+        // immediately before both Yjs apply branches. This also fences a
+        // frame whose authorization check passed before revocation.
+        connection.readOnly = true;
+        connections.push(connection);
       }
     }
     for (const connection of connections) {
@@ -166,20 +195,44 @@ export class CredentialAdmission implements Extension<CredentialContext> {
   }
 
   private check(connection: Connection<CredentialContext>, room: string): void {
+    this.track(connection);
     const context = connection.context;
     const record = this.registry.get(context.credentialId);
     const workspace = workspaceOf(room);
-    const cause = record === null ? "unknown-credential"
-      : record.revokedAt !== null ? "revoked-credential"
-      : !context.authorization.active ? "access-ended"
-      : workspace === null || workspace !== context.workspace || !record.workspaces.includes(workspace) ? "workspace-mismatch"
-      : null;
+    const cause = record === null
+      ? "unknown-credential"
+      : record.revokedAt !== null
+        ? "revoked-credential"
+        : !context.authorization.active
+          ? "access-ended"
+          : workspace === null ||
+              workspace !== context.workspace ||
+              !record.workspaces.includes(workspace)
+            ? "workspace-mismatch"
+            : null;
     if (cause !== null) {
       context.authorization.active = false;
       connection.readOnly = true;
       connection.close({ code: 4403, reason: "invalid-token" });
       this.options.log({ event: "hub.auth.rejected", cause });
       throw new CredentialRefusal();
+    }
+  }
+
+  private track(connection: Connection<CredentialContext>): void {
+    if (this.connections.has(connection)) return;
+    this.connections.add(connection);
+    const release = (): void => {
+      // A room detached before revocation may still have an in-flight frame.
+      // Keep its apply fence reachable until Hocuspocus finishes that loop.
+      void connection.waitForPendingMessages().then(() => {
+        this.connections.delete(connection);
+      });
+    };
+    if (connection.document.hasConnection(connection)) {
+      connection.onClose(release);
+    } else {
+      release();
     }
   }
 
