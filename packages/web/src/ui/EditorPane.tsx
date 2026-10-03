@@ -98,24 +98,24 @@ function ArchivedBanner({
     onRestoreFocused?.();
   }, [focusRestore, onRestoreFocused]);
   return (
-    <p className="ub-archived-banner">
-      <strong>Archived.</strong> This document is tombstoned in the directory:
+    <p className="ub-archived-banner mb-3 flex flex-wrap items-baseline gap-2 rounded-(--radius) border border-(--status-warning) bg-(--status-warning-subtle) px-3 py-[0.6rem] leading-[1.5] text-(--foreground)">
+      <strong className="font-medium">Archived.</strong> This document is tombstoned in the directory:
       it is read-only here and hidden from the document list. Restore it to edit
       it again.
       <button
         ref={restore}
         type="button"
-        className="ub-tool"
+        className="ml-auto cursor-pointer rounded-(--radius-sm) border border-(--border) bg-(--secondary) px-[0.45rem] py-[0.15rem] font-[inherit] text-xs text-(--secondary-foreground)"
         disabled={onRestore === null}
-        title={
-          onRestore === null
-            ? "Restore unavailable while the directory is offline"
-            : undefined
-        }
         onClick={() => onRestore?.()}
       >
         {onRestore === null ? "Restore unavailable" : "Restore"}
       </button>
+      {onRestore === null && (
+        <span className="ub-restore-unavailable basis-full text-xs">
+          Restore is unavailable while the directory is not ready to write.
+        </span>
+      )}
     </p>
   );
 }
@@ -291,6 +291,7 @@ export function StatusLine({
   connection,
   presence,
   lastUpdated,
+  onLastUpdatedChange,
   endpoint = null,
   hubAcked,
   syncOpen = false,
@@ -310,6 +311,10 @@ export function StatusLine({
   presence: readonly RemotePresence[];
   /** The selected directory stub's edit-freshness hint, not a sync state. */
   lastUpdated?: number | undefined;
+  /** Report the displayed stamp so the details panel mirrors this segment. */
+  onLastUpdatedChange?:
+    | ((room: string, value: number | undefined) => void)
+    | undefined;
   /** The hub this reading describes, null while configuration is resolving. */
   endpoint?: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
@@ -413,6 +418,16 @@ export function StatusLine({
         </time>
       </span>
     );
+  const shownUpdatedAt =
+    blank || formattedUpdatedAt === null ? undefined : lastUpdated;
+  // The details panel mounts independently, often after this line has already
+  // settled. Report what this line actually shows before paint rather than
+  // give the panel another initial settle window or display a stamp this line
+  // omitted. Pair every report with its room, including unmount cleanup.
+  useLayoutEffect(() => {
+    onLastUpdatedChange?.(connection.room, shownUpdatedAt);
+    return () => onLastUpdatedChange?.(connection.room, undefined);
+  }, [connection.room, onLastUpdatedChange, shownUpdatedAt]);
 
   // A refusal replaces the rest of the line rather than decorating it: the
   // backlog and peer strip are about a connection that is working or returning.
@@ -843,6 +858,7 @@ export function EditorPane({
   catalogConnection = null,
   archived,
   updatedAt,
+  onLastUpdatedChange,
   pinned = false,
   onTogglePin = null,
   onArchive = null,
@@ -876,6 +892,9 @@ export function EditorPane({
   archived: boolean;
   /** The selected directory stub's edit-freshness hint. */
   updatedAt?: number | undefined;
+  onLastUpdatedChange?:
+    | ((room: string, value: number | undefined) => void)
+    | undefined;
   pinned?: boolean;
   onTogglePin?: (() => void) | null;
   onArchive?: (() => void) | null;
@@ -998,6 +1017,7 @@ export function EditorPane({
           connection={connection}
           presence={presence}
           lastUpdated={updatedAt}
+          onLastUpdatedChange={onLastUpdatedChange}
           endpoint={endpoint}
           hubAcked={hubAcked}
           syncOpen={syncOpen}

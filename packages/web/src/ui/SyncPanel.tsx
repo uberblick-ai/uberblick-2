@@ -24,15 +24,27 @@ import { documentSyncFacts } from "./sync-facts.js";
 import type { RemotePresence } from "./doc-chrome.js";
 import { useRoomStatus } from "./hooks.js";
 import { PeerAvatar } from "./PeerAvatar.js";
+import { formatExactTimestamp } from "./timestamps.js";
 
 /** What a fact reads as before this client knows it. */
 const UNKNOWN = "—";
 
-function Fact({ label, value }: { label: string; value: string }): ReactElement {
+function Fact({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | ReactElement;
+}): ReactElement {
   return (
-    <div className="ub-sync-fact">
-      <dt>{label}</dt>
-      <dd>{value}</dd>
+    <div className="ub-sync-fact flex items-baseline gap-2 py-[0.15rem]">
+      <dt className="w-[4.5rem] flex-none text-xs/[1.5] text-(--muted-foreground)">
+        {label}
+      </dt>
+      {/* Identifiers and exact timestamps wrap inside the panel. */}
+      <dd className="m-0 min-w-0 font-mono text-xs/[1.5] [overflow-wrap:anywhere]">
+        {value}
+      </dd>
     </div>
   );
 }
@@ -59,6 +71,7 @@ export function SyncPanel({
   presence,
   endpoint,
   hubAcked,
+  lastUpdated,
   onClose,
 }: {
   connection: RoomConnection | null;
@@ -68,6 +81,8 @@ export function SyncPanel({
   endpoint: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
   hubAcked?: boolean | null | undefined;
+  /** The stamp currently shown by the status line; absent while it omits it. */
+  lastUpdated?: number | undefined;
   onClose: () => void;
 }): ReactElement {
   const status = useRoomStatus(connection);
@@ -80,6 +95,8 @@ export function SyncPanel({
   const facts = documentSyncFacts(status, state, reading, hubAcked);
   const hasReading = connection !== null && facts.primary !== null;
   const namedEndpoint = hubAcked !== undefined && !facts.twoFact ? null : endpoint;
+  const updated =
+    lastUpdated === undefined ? null : formatExactTimestamp(lastUpdated);
 
   /**
    * Escape closes the panel, and the panel alone.
@@ -161,6 +178,12 @@ export function SyncPanel({
             connection === null ? UNKNOWN : backlogLabel(status.unsyncedChanges)
           }
         />
+        {updated !== null && (
+          <Fact
+            label="Last updated"
+            value={<time dateTime={updated.dateTime}>{updated.label}</time>}
+          />
+        )}
       </dl>
       <h2 className="ub-rail-head">Present now</h2>
       {presence.length === 0 ? (
@@ -168,17 +191,24 @@ export function SyncPanel({
       ) : (
         <ul className="ub-presence">
           {presence.map((session) => (
-            <li key={session.clientId} className="ub-presence-row">
+            <li
+              key={session.clientId}
+              className="ub-presence-row flex min-w-0 items-baseline gap-[0.4rem]"
+            >
               {/* The same avatar the peer strip draws, decorative here: this
                   is a list, so the name stays in words and is the row's
                   accessible name. A labelled avatar would announce every
                   session twice. */}
               <PeerAvatar session={session} />
-              <span className="ub-presence-name">{session.name}</span>
+              <span className="ub-presence-name min-w-0 [overflow-wrap:anywhere]">
+                {session.name}
+              </span>
               {/* Only where the caret resolves to a block a reader can see.
                   Silence beats a number the document disagrees with. */}
               {session.block !== null && (
-                <span className="ub-muted">block {session.block}</span>
+                <span className="ub-muted shrink-0 whitespace-nowrap">
+                  block {session.block}
+                </span>
               )}
             </li>
           ))}

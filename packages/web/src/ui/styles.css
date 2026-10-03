@@ -525,7 +525,7 @@ body {
    The transparent border is load-bearing: the open row gains a 1px edge below,
    and reserving it here is what stops selection from nudging every row. */
 .ub-list-head button,
-.ub-list li:not(.ub-pin-row) button,
+.ub-list li:not(.ub-pin-row) button:not(.ub-nav-soon),
 .ub-settings-entry,
 .ub-group-add {
   display: flex;
@@ -550,7 +550,7 @@ body {
    placeholder rows say the same thing with `aria-disabled`, because they stay
    focusable (#483), and they are declined here for the same reason. */
 .ub-list-head button:hover:not(:disabled),
-.ub-list li:not(.ub-pin-row) button:hover:not(:disabled, [aria-disabled="true"]),
+.ub-list li:not(.ub-pin-row) button:not(.ub-nav-soon):hover:not(:disabled, [aria-disabled="true"]),
 .ub-settings-entry:hover,
 .ub-group-add:hover:not(:disabled) {
   background: var(--sidebar-accent);
@@ -561,7 +561,7 @@ body {
    class and the All-docs entry by `aria-current`, which meant two rules painting
    one state — and only one of them told a screen reader anything. Now the
    attribute is the state, and the rule is one. */
-.ub-list li:not(.ub-pin-row) button[aria-current="page"] {
+.ub-list li:not(.ub-pin-row) button:not(.ub-nav-soon)[aria-current="page"] {
   background: var(--sidebar-accent);
   border-color: var(--sidebar-selected-border);
   color: var(--sidebar-foreground);
@@ -579,7 +579,7 @@ body {
   padding: 0;
 }
 
-.ub-list li:not(.ub-pin-row) button {
+.ub-list li:not(.ub-pin-row) button:not(.ub-nav-soon) {
   width: 100%;
 }
 
@@ -615,20 +615,6 @@ body {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--sidebar-group-label);
-}
-
-/* Shown and unavailable, like the workspace menu's management items (#480).
-   The hover rule above already declines it; what is left is the ink and the
-   cursor, so nothing about the row offers a click it cannot take. */
-.ub-list li:not(.ub-pin-row) button[aria-disabled="true"] {
-  color: var(--sidebar-muted-foreground);
-  cursor: default;
-}
-
-/* And its glyph goes with it — the mark of an unavailable row must not read
-   more present than the row's own name. */
-.ub-list li:not(.ub-pin-row) button[aria-disabled="true"] .ub-nav-icon {
-  color: inherit;
 }
 
 /* Everything the row is called, in one flex child: the title, and the `·
@@ -1088,31 +1074,6 @@ body {
   margin: 0 0 1.25rem;
 }
 
-.ub-sync-fact {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.15rem 0;
-}
-
-.ub-sync-fact dt {
-  flex: none;
-  width: 4.5rem;
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
-}
-
-/* The values are identifiers — an endpoint, a room key — so they are mono, and
-   they wrap: both are long unbreakable words, and a panel that scrolled
-   sideways would hide the end of the very address it exists to show. */
-.ub-sync-fact dd {
-  margin: 0;
-  min-width: 0;
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  overflow-wrap: anywhere;
-}
-
 .ub-presence {
   list-style: none;
   margin: 0;
@@ -1120,22 +1081,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-}
-
-.ub-presence-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  min-width: 0;
-}
-
-/* A session may call itself anything, and a long name has to end in an ellipsis
-   rather than push the block number out of the panel. */
-.ub-presence-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .ub-sync-panel .ub-rail-head {
@@ -1476,31 +1421,6 @@ body {
 .ub-peers > .ub-peer-control:hover,
 .ub-peers > .ub-peer-control:focus-visible {
   z-index: 4;
-}
-
-.ub-peer-tooltip {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 0.4rem);
-  z-index: 4;
-  width: max-content;
-  max-width: min(18rem, 80vw);
-  padding: 0.25rem 0.4rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--card);
-  color: var(--card-foreground);
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.16);
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
-  overflow-wrap: anywhere;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.ub-peer-control:hover .ub-peer-tooltip,
-.ub-peer-control:focus-visible .ub-peer-tooltip {
-  opacity: 1;
 }
 
 .ub-peer-more {
@@ -2381,36 +2301,6 @@ h3.ub-heading {
   overflow-wrap: anywhere;
 }
 
-/* ---- the archive banner (#146) ---- */
-
-/* A state, not an error, so the warning ground rather than the destructive one
-   — and built like the unsupported-content banner otherwise, since both say
-   "this pane will not take an edit". The prose stays `--foreground` for the
-   same contrast reason given there. */
-.ub-archived-banner {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  background: var(--status-warning-subtle);
-  color: var(--foreground);
-  border: 1px solid var(--status-warning);
-  border-radius: var(--radius);
-  padding: 0.6rem 0.75rem;
-  margin-bottom: 0.75rem;
-  line-height: 1.5;
-}
-
-.ub-archived-banner strong {
-  font-weight: 500;
-}
-
-/* The action pushed to the end of the row, so it reads as the banner's answer
-   rather than as a word inside its sentence. */
-.ub-archived-banner .ub-tool {
-  margin-left: auto;
-}
-
 /* ---- the document's person-facing quick summary (#534) ---- */
 
 .ub-tldr {
@@ -3126,33 +3016,4 @@ h3.ub-heading {
   padding: 0;
   text-align: right;
   vertical-align: middle;
-}
-
-/* Quiet until the row is hovered or something in it has focus — the same
-   restraint the group actions in the sidebar show. */
-.ub-docs-pin {
-  padding: 0.25rem;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--muted-foreground);
-  font: inherit;
-  cursor: pointer;
-  opacity: 0;
-}
-
-.ub-docs-pin-icon {
-  display: block;
-  width: 1rem;
-  height: 1rem;
-}
-
-.ub-docs-row:hover .ub-docs-pin,
-.ub-docs-row:focus-within .ub-docs-pin,
-.ub-docs-pin[aria-pressed="true"] {
-  opacity: 1;
-}
-
-.ub-docs-pin:hover {
-  color: var(--foreground);
 }

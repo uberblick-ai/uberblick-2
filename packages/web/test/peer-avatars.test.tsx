@@ -368,10 +368,6 @@ describe("the strip follows a marker that arrives late", () => {
       expect(avatar()?.textContent).toBe("C🤖");
       expect(avatar()?.style.borderColor).toBe("rgb(123, 94, 199)");
       expect(control()?.getAttribute("aria-label")).toBe("Claude Code · agent");
-      expect(control()?.querySelector(".ub-peer-tooltip")?.textContent).toBe(
-        "Claude Code · agent",
-      );
-
       // Then the session id, with the marker unchanged. Two updates rather than
       // one because `sameSession` compares the two new fields independently: a
       // single publish flipping both is still caught when only one comparison

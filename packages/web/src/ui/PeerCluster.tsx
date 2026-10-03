@@ -11,6 +11,8 @@ import {
   PopoverTrigger,
 } from "./shadcn/popover.js";
 
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./shadcn/tooltip.js";
+
 const VISIBLE_PEERS = 3;
 
 function peerKey(clientId: number): string {
@@ -92,98 +94,103 @@ export function PeerCluster({
   };
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(shown) => {
-        if (shown) interactedOutside.current = false;
-        setOpen(shown);
-      }}
-    >
-      <span className="ub-peers" ref={cluster}>
-        {visible.map((session) => {
-          const label = presenceLabel(session);
-          return (
-            <button
-              key={session.clientId}
-              type="button"
-              className="ub-peer-control"
-              data-peer-id={peerKey(session.clientId)}
-              aria-label={label}
-              onFocus={() => {
-                focusWasInside.current = true;
-                focusedPeer.current = session.clientId;
-              }}
-              onBlur={leaveCluster}
-              onClick={() => activate(session)}
-            >
-              <PeerAvatar session={session} />
-              <span className="ub-peer-tooltip" role="tooltip">
-                {session.name} · {session.kind === "agent" ? "agent" : "person"}
-              </span>
-            </button>
-          );
-        })}
+    <TooltipProvider>
+      <Popover
+        open={open}
+        onOpenChange={(shown) => {
+          if (shown) interactedOutside.current = false;
+          setOpen(shown);
+        }}
+      >
+        <span className="ub-peers" ref={cluster}>
+          {visible.map((session) => {
+            const label = presenceLabel(session);
+            return (
+              <Tooltip key={session.clientId}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="ub-peer-control"
+                    data-peer-id={peerKey(session.clientId)}
+                    aria-label={label}
+                    onFocus={() => {
+                      focusWasInside.current = true;
+                      focusedPeer.current = session.clientId;
+                    }}
+                    onBlur={leaveCluster}
+                    onClick={() => activate(session)}
+                  >
+                    <PeerAvatar session={session} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent align="end">
+                  {session.name} · {session.kind === "agent" ? "agent" : "person"}
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+          {remaining.length > 0 && (
+            <PopoverTrigger asChild>
+              <button
+                ref={overflowTrigger}
+                type="button"
+                className="ub-peer-control ub-peer-more"
+                aria-label={`${remaining.length} more active ${
+                  remaining.length === 1 ? "collaborator" : "collaborators"
+                }`}
+                onFocus={() => {
+                  focusWasInside.current = true;
+                  focusedPeer.current = null;
+                }}
+                onBlur={leaveCluster}
+              >
+                +{remaining.length}
+              </button>
+            </PopoverTrigger>
+          )}
+        </span>
         {remaining.length > 0 && (
-          <PopoverTrigger asChild>
-            <button
-              ref={overflowTrigger}
-              type="button"
-              className="ub-peer-control ub-peer-more"
-              aria-label={`${remaining.length} more active ${
-                remaining.length === 1 ? "collaborator" : "collaborators"
-              }`}
-              onFocus={() => {
-                focusWasInside.current = true;
-                focusedPeer.current = null;
-              }}
-              onBlur={leaveCluster}
-            >
-              +{remaining.length}
-            </button>
-          </PopoverTrigger>
+          <PopoverContent
+            ref={overflow}
+            align="end"
+            className="ub-peer-overflow"
+            aria-label="More active collaborators"
+            onInteractOutside={() => {
+              interactedOutside.current = true;
+            }}
+            onCloseAutoFocus={(event) => {
+              // Radix owns the close policy; this local override changes only its
+              // trigger focus to preventScroll. Plain focus would undo #616's
+              // editor jump by scrolling the pane back to this status row.
+              if (interactedOutside.current) return;
+              event.preventDefault();
+              overflowTrigger.current?.focus({ preventScroll: true });
+            }}
+          >
+            {remaining.map((session) => (
+              <button
+                key={session.clientId}
+                type="button"
+                className="ub-peer-overflow-row"
+                data-peer-id={peerKey(session.clientId)}
+                aria-label={presenceLabel(session)}
+                onFocus={() => {
+                  focusWasInside.current = true;
+                  focusedPeer.current = session.clientId;
+                }}
+                onBlur={leaveCluster}
+                onClick={() => activate(session, true)}
+              >
+                <PeerAvatar session={session} />
+                <span className="ub-peer-overflow-name">{session.name}</span>
+                <span className="ub-muted">
+                  {session.kind === "agent" ? "agent" : "person"}
+                </span>
+              </button>
+            ))}
+          </PopoverContent>
         )}
-      </span>
-      {remaining.length > 0 && (
-        <PopoverContent
-          ref={overflow}
-          align="end"
-          className="ub-peer-overflow"
-          aria-label="More active collaborators"
-          onInteractOutside={() => {
-            interactedOutside.current = true;
-          }}
-          onCloseAutoFocus={(event) => {
-            // Radix owns the close policy; this local override changes only its
-            // trigger focus to preventScroll. Plain focus would undo #616's
-            // editor jump by scrolling the pane back to this status row.
-            if (interactedOutside.current) return;
-            event.preventDefault();
-            overflowTrigger.current?.focus({ preventScroll: true });
-          }}
-        >
-          {remaining.map((session) => (
-            <button
-              key={session.clientId}
-              type="button"
-              className="ub-peer-overflow-row"
-              data-peer-id={peerKey(session.clientId)}
-              aria-label={presenceLabel(session)}
-              onFocus={() => {
-                focusWasInside.current = true;
-                focusedPeer.current = session.clientId;
-              }}
-              onBlur={leaveCluster}
-              onClick={() => activate(session, true)}
-            >
-              <PeerAvatar session={session} />
-              <span className="ub-peer-overflow-name">{session.name}</span>
-              <span className="ub-muted">
-                {session.kind === "agent" ? "agent" : "person"}
-              </span>
-            </button>
-          ))}
-        </PopoverContent>
-      )}
-    </Popover>
+      </Popover>
+    </TooltipProvider>
   );
 }
