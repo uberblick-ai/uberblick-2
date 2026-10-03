@@ -49,6 +49,14 @@ context needed to decide it, with options where they help. Once decided, the
 body leads with **the decision itself**, then the reasoning and the guidance it
 gives the work that follows.
 
+**A record stays short; details live in GitHub** (owner, 2026-10-03). A
+decision record carries the topic, the decision, the reasons that still bind,
+and the guidance for later work — a few short paragraphs, readable in a
+minute. Evidence, investigation, measurements, the full weighing of
+alternatives and implementation notes belong in the issue or pull request the
+record links through `refs` (section 8). A reader who needs the depth follows
+the link; a record that grows past a screen has GitHub material in it.
+
 A "Reconsidering" section is **optional**. Write one when a real revival
 trigger is known; do not invent one to satisfy a gate. The `set_status` /
 `create_doc` refusal that requires an exact `Reconsidering` heading before
