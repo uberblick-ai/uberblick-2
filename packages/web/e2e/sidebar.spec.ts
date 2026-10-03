@@ -92,7 +92,7 @@ async function expectPaneClearsOpener(page: Page): Promise<{ left: number; width
   });
   const layout = await page.evaluate(() => {
     const pane = document.querySelector<HTMLElement>(".ub-pane");
-    const content = pane?.querySelector<HTMLElement>(":scope > .ub-column, :scope > .ub-settings-column");
+    const content = pane?.querySelector<HTMLElement>(":scope > .ub-column, :scope[data-settings-page] > div");
     const opener = document.querySelector<HTMLButtonElement>(".ub-sidebar-restore");
     if (!pane || !content || !opener) throw new Error("e2e: incomplete pane");
     const p = pane.getBoundingClientRect();
@@ -165,7 +165,7 @@ async function sampleToggle(page: Page, collapse: boolean) {
     const sidebar = document.querySelector<HTMLElement>(".ub-list");
     const pane = document.querySelector<HTMLElement>(".ub-pane");
     const content = pane?.querySelector<HTMLElement>(
-      ":scope > .ub-column, :scope > .ub-settings-column",
+      ":scope > .ub-column, :scope[data-settings-page] > div",
     );
     const toggle = document.querySelector<HTMLButtonElement>(
       collapse ? ".ub-sidebar-hide" : ".ub-sidebar-restore",

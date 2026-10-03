@@ -90,11 +90,10 @@ function buildStampPlugin(): Plugin {
 }
 
 export default defineConfig({
-  // Tailwind is chrome-only (#27): it compiles `src/ui/tailwind.css`, which the
-  // vendored shadcn components under `src/ui/shadcn` are styled with. Preflight
-  // is deliberately not imported there — see that file. The plugin is a no-op
-  // for every module that does not import that stylesheet, the editor's and the
-  // sidebar's plain CSS included.
+  // Tailwind compiles `src/ui/tailwind.css` for shadcn and product UI utilities.
+  // Web UI system keeps editor content in plain CSS; other legacy surfaces
+  // migrate when next changed. Preflight is deliberately omitted so the
+  // existing editor and unmigrated controls keep their defaults — see that file.
   plugins: [tailwindcss(), react(), devConfigDocumentPlugin(), buildStampPlugin()],
   define: {
     __HUB_URL__: JSON.stringify(process.env.HUB_URL ?? "ws://localhost:1234"),

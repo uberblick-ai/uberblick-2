@@ -23,9 +23,9 @@
  * could do it. Workspace settings is navigation now that the client has that
  * address, and uses the same route-driven selection as switching workspaces.
  *
- * The surface is the vendored shadcn menu (#27); everything about how this
- * particular menu *looks* is plain CSS on `.ub-*` classes, like every other
- * product surface. See `ui/tailwind.css` for why the two coexist.
+ * The surface is the vendored shadcn menu. Its remaining `.ub-*` styling moves
+ * to utilities when this surface is next changed, under Web UI system's
+ * Styling rule. See `ui/tailwind.css` for the current cascade and token bridge.
  */
 
 import { useEffect, useState } from "react";

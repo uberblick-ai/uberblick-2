@@ -1,10 +1,9 @@
-/* The product's own surfaces — editor, sidebar, reading layout — in plain CSS.
- * No framework reaches any of them. The app *also* loads Tailwind, for the
- * vendored shadcn chrome and for nothing else (#27); everything that framework
- * emits sits inside a cascade layer, and nothing here does, so no Tailwind
- * default can outrank a rule in this file. `ui/tailwind.css` is the other half
- * of that arrangement, and it reads its colours from the token block below
- * rather than declaring any of its own.
+/* Product tokens, fonts, editor content and unmigrated UI in plain CSS.
+ * Web UI system calls for Tailwind utilities and shadcn variants on all UI
+ * except editor content. Legacy surfaces move to utilities when next changed,
+ * deleting their product rules in the same change. Tailwind output is layered
+ * and this file is not, so these remaining rules outrank utilities.
+ * `ui/tailwind.css` bridges the token block below without a second palette.
  *
  * Colors live in the token block below and nowhere else: every rule reads a
  * custom property, and every custom property names both of its values at once
@@ -48,9 +47,7 @@
   /* The page's own ground, and the one token that is not a flat colour: the
      warm radial fall-off the deployed uberblick.ai paints behind everything
      (#480). `body` is its only consumer — `--background` stays flat because the
-     four fields that read it (the comment composer, the language picker, the
-     block-menu search, the All-docs search) are boxes, and a gradient in a box
-     is a smear. The `light-dark()` is per *stop* rather than around the whole
+     fields that read it are boxes, and a gradient in a box is a smear. The `light-dark()` is per *stop* rather than around the whole
      value, which is what keeps the one-block architecture above true: still one
      property naming both of its halves at once. */
   --page-ground: radial-gradient(
@@ -704,10 +701,9 @@ body {
 
 /* ---- the sidebar's two anchored menus (#74, design 1c) ----
 
-   Both are the vendored shadcn menu (#27) in the product's own clothes. The
-   floating surface — ground, border, radius, lift — is the Tailwind side of
-   the components reading these same tokens through the bridge; everything
-   below is plain CSS, like every other product surface.
+   Both use vendored shadcn surfaces reading these tokens through the Tailwind
+   bridge. The remaining product rules below move to utilities when these
+   surfaces are next changed, under Web UI system's Styling rule.
 
    A portalled menu is a sibling of `.ub-app`, not a child, so every selector
    here matches a class *on* the menu or inside it. None of them reaches down
@@ -1161,176 +1157,6 @@ body {
   transition:
     padding-inline-start 180ms ease,
     flex-basis 180ms ease;
-}
-
-/* ---- workspace settings ---- */
-
-.ub-settings-column {
-  width: 100%;
-  max-width: 48rem;
-  margin-inline: auto;
-}
-
-.ub-settings-column h1 {
-  margin: 0 0 1rem;
-  font-size: 1.5rem;
-  font-weight: 500;
-}
-
-.ub-settings-card {
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--card);
-  color: var(--card-foreground);
-}
-
-.ub-settings-facts {
-  gap: 0;
-  padding-top: 0;
-  border-top: 0;
-}
-
-.ub-settings-facts .ub-panel-fact {
-  padding: 0.65rem 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.ub-settings-facts .ub-panel-fact:first-child {
-  padding-top: 0;
-}
-
-.ub-settings-facts .ub-panel-fact:last-child {
-  padding-bottom: 0;
-  border-bottom: 0;
-}
-
-.ub-settings-facts dt {
-  color: var(--muted-foreground);
-  font-size: 0.8rem;
-}
-
-.ub-settings-facts dd {
-  max-width: 70%;
-  color: var(--foreground);
-  font-size: 0.8rem;
-  text-align: right;
-  overflow-wrap: anywhere;
-}
-
-.ub-settings-fact-detail {
-  display: block;
-  margin-top: 0.2rem;
-  color: var(--muted-foreground);
-  font-family: var(--font-sans);
-}
-
-.ub-settings-tags-card {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.ub-settings-waiting,
-.ub-settings-read-only,
-.ub-settings-feedback,
-.ub-settings-tag-create p,
-.ub-settings-tag-section p {
-  margin: 0;
-  font-size: 0.8rem;
-}
-
-.ub-settings-tag-create {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.ub-settings-tag-create > label,
-.ub-settings-tag-section h2 {
-  color: var(--foreground);
-  font-size: 0.9rem;
-  font-weight: 500;
-}
-
-.ub-settings-tag-create > div {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.ub-settings-tag-create input {
-  flex: 1;
-  min-width: 0;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-sm);
-  padding: 0.5rem 0.65rem;
-  background: var(--background);
-  color: var(--foreground);
-  font: inherit;
-}
-
-.ub-settings-tag-create button,
-.ub-settings-tag-list button {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0.45rem 0.7rem;
-  background: var(--secondary);
-  color: var(--secondary-foreground);
-  font: inherit;
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
-.ub-settings-tag-create button:hover:not(:disabled),
-.ub-settings-tag-list button:hover:not(:disabled) {
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-
-.ub-settings-tag-create :disabled,
-.ub-settings-tag-list button:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
-.ub-settings-feedback-error {
-  color: var(--destructive);
-}
-
-.ub-settings-tag-groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-  gap: 1rem;
-}
-
-.ub-settings-tag-section {
-  min-width: 0;
-}
-
-.ub-settings-tag-section h2 {
-  margin: 0 0 0.5rem;
-}
-
-.ub-settings-tag-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ub-settings-tag-list li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  min-height: 2.5rem;
-  padding: 0.35rem 0.4rem 0.35rem 0.65rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--foreground);
-  font-size: 0.85rem;
 }
 
 /* The reading column is capped at the measure. A document pane anchors it at

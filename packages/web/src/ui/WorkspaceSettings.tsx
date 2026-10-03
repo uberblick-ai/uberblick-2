@@ -21,6 +21,8 @@ import type { RoomConnection } from "../collab/rooms.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
 import { useRoomStatus } from "./hooks.js";
 import type { SettingsPage, Workspace } from "./route.js";
+import { Button } from "./shadcn/button.js";
+import { Input } from "./shadcn/input.js";
 import { statusReading } from "./status-reading.js";
 import { useTagCatalog } from "./tags.js";
 
@@ -29,9 +31,11 @@ const UNKNOWN = "—";
 
 function Fact({ label, children }: { label: string; children: ReactNode }): ReactElement {
   return (
-    <div className="ub-panel-fact">
-      <dt>{label}</dt>
-      <dd>{children}</dd>
+    <div className="flex items-baseline justify-between gap-2 border-b border-(--border) py-3 first:pt-0 last:border-b-0 last:pb-0">
+      <dt className="text-sm">{label}</dt>
+      <dd className="m-0 max-w-[70%] font-(family-name:--font-mono) text-sm text-right wrap-anywhere">
+        {children}
+      </dd>
     </div>
   );
 }
@@ -62,11 +66,13 @@ function GeneralSettings({
   const documents = directoryReceived ? listDirectory(connection.ydoc).length : null;
 
   return (
-    <section className="ub-pane ub-settings-page" aria-labelledby="ub-settings-title">
-      <div className="ub-settings-column">
-        <h1 id="ub-settings-title">General</h1>
-        <div className="ub-settings-card">
-          <dl className="ub-panel-facts ub-settings-facts">
+    <section className="ub-pane" data-settings-page aria-labelledby="ub-settings-title">
+      <div className="mx-auto w-full max-w-3xl">
+        <h1 id="ub-settings-title" className="mt-0 mb-4 text-2xl font-medium">
+          General
+        </h1>
+        <div className="rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
+          <dl className="m-0 grid" data-settings-facts>
             <Fact label="Workspace UUID">{workspace.uuid}</Fact>
             <Fact label="Address segment">{workspace.segment}</Fact>
             <Fact label="Documents">{documents ?? UNKNOWN}</Fact>
@@ -77,7 +83,9 @@ function GeneralSettings({
             <Fact label="Connection">
               <span>{reading.word}</span>
               {reading.detail !== null && (
-                <span className="ub-settings-fact-detail"> {reading.detail}</span>
+                <span className="mt-1 block font-(family-name:--font-sans)">
+                  {" "}{reading.detail}
+                </span>
               )}
             </Fact>
             <Fact label="MCP connections">{agentSessions}</Fact>
@@ -147,7 +155,7 @@ function TagSettings({
     if (card === null) return;
     const left = [
       ...card.querySelectorAll<HTMLButtonElement>(
-        `[aria-labelledby="ub-${refocus.from}-tags"] .ub-settings-tag-list button`,
+        `[aria-labelledby="ub-${refocus.from}-tags"] [data-tag-entry]`,
       ),
     ];
     // The control that took the moved entry's place, the last one when it was
@@ -160,11 +168,13 @@ function TagSettings({
 
   if (!seeded) {
     return (
-      <section className="ub-pane ub-settings-page" aria-labelledby="ub-settings-title">
-        <div className="ub-settings-column">
-          <h1 id="ub-settings-title">Tags</h1>
-          <div className="ub-settings-card">
-            <p className="ub-settings-waiting" role="status">
+      <section className="ub-pane" data-settings-page aria-labelledby="ub-settings-title">
+        <div className="mx-auto w-full max-w-3xl">
+          <h1 id="ub-settings-title" className="mt-0 mb-4 text-2xl font-medium">
+            Tags
+          </h1>
+          <div className="rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
+            <p className="m-0 text-sm" role="status">
               Waiting for the tag catalog…
             </p>
           </div>
@@ -223,24 +233,31 @@ function TagSettings({
   };
 
   const list = (state: "active" | "retired", items: TagCatalogEntry[]) => (
-    <section className="ub-settings-tag-section" aria-labelledby={`ub-${state}-tags`}>
-      <h2 id={`ub-${state}-tags`}>{state === "active" ? "Active" : "Retired"}</h2>
+    <section className="min-w-0" aria-labelledby={`ub-${state}-tags`}>
+      <h2 id={`ub-${state}-tags`} className="mt-0 mb-2 text-base font-medium">
+        {state === "active" ? "Active" : "Retired"}
+      </h2>
       {items.length === 0 ? (
-        <p className="ub-muted">No {state} tags.</p>
+        <p className="m-0 text-sm">No {state} tags.</p>
       ) : (
-        <ul className="ub-settings-tag-list">
+        <ul className="m-0 flex list-none flex-col gap-2 p-0" data-tag-list>
           {items.map((entry, at) => (
-            <li key={entry.id}>
-              <span>{entry.name}</span>
-              <button
+            <li
+              key={entry.id}
+              className="flex items-center justify-between gap-3 rounded-(--radius-sm) border border-(--border) p-2 text-sm"
+            >
+              <span className="min-w-0 wrap-anywhere">{entry.name}</span>
+              <Button
+                variant="outline"
+                size="sm"
                 type="button"
                 data-tag-entry={entry.id}
                 disabled={!writable}
                 onClick={() => changeState(entry, at)}
               >
                 {entry.state === "active" ? "Retire" : "Restore"}
-                <span className="ub-sr-only"> {entry.name}</span>
-              </button>
+                <span className="sr-only"> {entry.name}</span>
+              </Button>
             </li>
           ))}
         </ul>
@@ -249,14 +266,17 @@ function TagSettings({
   );
 
   return (
-    <section className="ub-pane ub-settings-page" aria-labelledby="ub-settings-title">
-      <div className="ub-settings-column">
-        <h1 id="ub-settings-title">Tags</h1>
-        <div className="ub-settings-card ub-settings-tags-card">
-          <form className="ub-settings-tag-create" onSubmit={create}>
-            <label htmlFor="ub-new-tag">Create a tag</label>
-            <div>
-              <input
+    <section className="ub-pane" data-settings-page aria-labelledby="ub-settings-title">
+      <div className="mx-auto w-full max-w-3xl">
+        <h1 id="ub-settings-title" className="mt-0 mb-4 text-2xl font-medium">
+          Tags
+        </h1>
+        <div className="flex flex-col gap-4 rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
+          <form className="flex flex-col gap-2" onSubmit={create}>
+            <label htmlFor="ub-new-tag" className="text-sm font-medium">Create a tag</label>
+            <div className="flex gap-2">
+              <Input
+                className="flex-1"
                 id="ub-new-tag"
                 value={draft}
                 disabled={!writable}
@@ -266,29 +286,33 @@ function TagSettings({
                   setFeedback(null);
                 }}
               />
-              <button type="submit" disabled={!writable}>
+              <Button type="submit" disabled={!writable}>
                 Create
-              </button>
+              </Button>
             </div>
-            <p id="ub-tag-name-help" className="ub-muted">
+            <p id="ub-tag-name-help" className="m-0 text-sm">
               Lowercase letters and numbers, separated by hyphens; 30 characters
               maximum.
             </p>
           </form>
           {!writable && (
-            <p className="ub-settings-read-only" role="status">
+            <p className="m-0 text-sm" role="status">
               Tag changes are unavailable while this page is disconnected.
             </p>
           )}
           {feedback !== null && (
             <p
-              className={`ub-settings-feedback ub-settings-feedback-${feedback.kind}`}
+              className={
+                feedback.kind === "error"
+                  ? "m-0 rounded-(--radius-sm) border border-destructive p-2 text-sm"
+                  : "m-0 text-sm"
+              }
               role={feedback.kind === "error" ? "alert" : "status"}
             >
               {feedback.text}
             </p>
           )}
-          <div className="ub-settings-tag-groups" ref={groups}>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2" ref={groups}>
             {list("active", active)}
             {list("retired", retired)}
           </div>

@@ -43,7 +43,7 @@
 
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
+import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import {
   importRootSecret,
@@ -99,8 +99,9 @@ async function openApp(
   colorScheme: "light" | "dark",
   path = "",
   hasTouch = false,
+  contextOptions: BrowserContextOptions = {},
 ): Promise<Page> {
-  const context = await browser.newContext({ colorScheme, hasTouch });
+  const context = await browser.newContext({ colorScheme, hasTouch, ...contextOptions });
   contexts.push(context);
   // This file's synthetic peers exercise direct hub presence. Relaying that
   // presence through `ub open` is #753, so preserve the existing proof by
@@ -118,7 +119,7 @@ async function openApp(
   });
   const page = await context.newPage();
   await page.goto(new URL(path, harness().appUrl).href);
-  await expect(page.locator(".ub-workspace")).toBeVisible();
+  await expect(page.locator(path.includes("/settings") ? "[data-settings-page]" : ".ub-workspace")).toBeVisible();
   return page;
 }
 
@@ -1434,11 +1435,10 @@ test("the document collaborator cluster stays compact and jumps once without mov
 });
 
 /**
- * A painted colour in OKLab. Every token measured below is written `oklch()`
- * and Chromium's computed value keeps that space, so this is polar-to-
- * rectangular arithmetic and nothing is quantised on the way. A serialization
- * that is not `oklch()` throws rather than guesses: a wrong number here would
- * look like a passing measurement.
+ * A painted colour in OKLab. Tokens use `oklch()`; Chromium also serializes
+ * transitions and color-mix() results as rectangular `oklab()`. Both keep the
+ * original precision. Unknown serializations throw rather than guess: a wrong
+ * number here would look like a passing measurement.
  */
 function oklab(painted: string): {
   L: number;
@@ -1447,6 +1447,22 @@ function oklab(painted: string): {
   chroma: number;
   alpha: number;
 } {
+  const rectangular = /^oklab\((\d*\.?\d+) (-?\d*\.?\d+) (-?\d*\.?\d+)(?: \/ (\d*\.?\d+))?\)$/.exec(painted.trim());
+  if (rectangular !== null) {
+    const [, rawL, rawA, rawB, rawAlpha] = rectangular;
+    if (rawL === undefined || rawA === undefined || rawB === undefined) {
+      throw new Error(`unreadable oklab colour: ${painted}`);
+    }
+    const a = Number(rawA);
+    const b = Number(rawB);
+    return {
+      L: Number(rawL),
+      a,
+      b,
+      chroma: Math.hypot(a, b),
+      alpha: rawAlpha === undefined ? 1 : Number(rawAlpha),
+    };
+  }
   // `none` is how an achromatic colour reports the hue it does not have, and
   // the alpha half only appears on the tokens that carry one (#515).
   const parts =
@@ -1455,7 +1471,7 @@ function oklab(painted: string): {
     );
   const [, rawL, rawC, rawH, rawA] = parts ?? [];
   if (rawL === undefined || rawC === undefined || rawH === undefined) {
-    throw new Error(`not an oklch colour: ${painted}`);
+    throw new Error(`not an OKLab colour: ${painted}`);
   }
   const chroma = Number(rawC);
   const radians = ((rawH === "none" ? 0 : Number(rawH)) * Math.PI) / 180;
@@ -1728,13 +1744,37 @@ function surface(page: Page, root: string): Promise<Reading[]> {
       return slashed === null ? 1 : Number(slashed[1]);
     };
 
-    // The nearest ancestor that actually paints something: a transparent
-    // element's ink lands on whatever is behind it, which is the ground the
-    // reader compares it against.
-    const groundOf = (element: Element | null): string => {
+    // Transparent backgrounds expose their ancestor's ground; translucent
+    // backgrounds, including Button hover fills, must be composited onto it.
+    const composite = (ground: string, fills: string[]): string => {
+      if (fills.length === 0) return ground;
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1;
+      const painter = canvas.getContext("2d");
+      if (painter === null) throw new Error("no canvas for background compositing");
+      for (const colour of [ground, ...[...fills].reverse()]) {
+        painter.fillStyle = colour;
+        painter.fillRect(0, 0, 1, 1);
+      }
+      const [red, green, blue] = painter.getImageData(0, 0, 1, 1).data;
+      return `rgb(${red}, ${green}, ${blue})`;
+    };
+    const groundOf = (element: Element | null): string[] => {
+      const fills: string[] = [];
       for (let node = element; node !== null; node = node.parentElement) {
-        const colour = getComputedStyle(node).backgroundColor;
-        if (alphaOf(colour) === 1) return colour;
+        const style = getComputedStyle(node);
+        if (style.backgroundImage !== "none") {
+          // The body's token paints a gradient. Checking every stop defends
+          // text anywhere on it, including a settings page's heading.
+          if (node !== document.body) throw new Error("cannot establish the ground through a painted image");
+          const stops = style.backgroundImage.match(/(?:rgba?|oklch)\([^)]*\)/g);
+          if (stops === null) throw new Error("no readable page ground");
+          return stops.map((ground) => composite(ground, fills));
+        }
+        const colour = style.backgroundColor;
+        const alpha = alphaOf(colour);
+        if (alpha === 1) return [composite(colour, fills)];
+        if (alpha > 0) fills.push(colour);
       }
       throw new Error(`nothing opaque under ${selector}`);
     };
@@ -1768,12 +1808,12 @@ function surface(page: Page, root: string): Promise<Reading[]> {
             node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "",
         );
       if (speaks) {
-        readings.push({
+        readings.push(...groundOf(element).map((ground) => ({
           where,
-          kind: "text",
+          kind: "text" as const,
           colour: style.color,
-          ground: groundOf(element),
-        });
+          ground,
+        })));
       }
 
       for (const side of ["top", "right", "bottom", "left"] as const) {
@@ -1781,14 +1821,14 @@ function surface(page: Page, root: string): Promise<Reading[]> {
         const colour = style.getPropertyValue(`border-${side}-color`);
         // A transparent border reserves geometry; it is not a separator (#515).
         if (width > 0 && alphaOf(colour) > 0) {
-          readings.push({
+          readings.push(...groundOf(element).map((ground) => ({
             where: `${where} border-${side}`,
-            kind: "stroke",
+            kind: "stroke" as const,
             colour,
             // The background paints under the border, so an element that has
             // one is its own border's ground.
-            ground: groundOf(element),
-          });
+            ground,
+          })));
         }
       }
 
@@ -1797,23 +1837,23 @@ function surface(page: Page, root: string): Promise<Reading[]> {
       const outline = Number.parseFloat(style.outlineWidth);
       const drawn = style.outlineStyle !== "none" && style.outlineStyle !== "auto";
       if (outline > 0 && drawn && alphaOf(style.outlineColor) > 0) {
-        readings.push({
+        readings.push(...groundOf(element.parentElement).map((ground) => ({
           where: `${where} outline`,
-          kind: "stroke",
+          kind: "stroke" as const,
           colour: style.outlineColor,
-          ground: groundOf(element.parentElement),
-        });
+          ground,
+        })));
       }
 
       const hairline =
         Math.min(box.width, box.height) <= 2 && Math.max(box.width, box.height) > 2;
       if (hairline && alphaOf(style.backgroundColor) > 0) {
-        readings.push({
+        readings.push(...groundOf(element.parentElement).map((ground) => ({
           where: `${where} fill`,
-          kind: "stroke",
+          kind: "stroke" as const,
           colour: style.backgroundColor,
-          ground: groundOf(element.parentElement),
-        });
+          ground,
+        })));
       }
     }
     return readings;
@@ -2569,3 +2609,91 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
     page.getByRole("region", { name: "Active" }).getByRole("listitem"),
   ).toHaveCount(5);
 });
+
+test("Workspace Settings uses the shared touch floors at iPhone and iPad widths", async ({ browser }) => {
+  for (const width of [375, 932, 744, 1024, 1366]) {
+    const page = await openApp(browser, "light", `/${harness().workspace}/settings/tags`, true, {
+      isMobile: true,
+      viewport: { width, height: 900 },
+    });
+    expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    await expect(page.getByLabel("Create a tag")).toBeEnabled();
+    const controls = await page.locator("[data-settings-page] [data-slot]").evaluateAll((elements) =>
+      elements.map((element) => ({
+        slot: element.getAttribute("data-slot"),
+        height: element.getBoundingClientRect().height,
+        font: Number.parseFloat(getComputedStyle(element).fontSize),
+      })),
+    );
+    expect(new Set(controls.map((one) => one.slot))).toEqual(new Set(["button", "input"]));
+    for (const one of controls) {
+      expect(one.height, `${one.slot} at ${width}px`).toBeGreaterThanOrEqual(44);
+      if (one.slot === "input") expect(one.font).toBeGreaterThanOrEqual(16);
+    }
+    const geometry = await page.locator("[data-settings-page]").evaluate((element) => ({
+      visible: element.clientWidth,
+      content: element.scrollWidth,
+    }));
+    expect(geometry.content, `settings overflow at ${width}px`).toBeLessThanOrEqual(geometry.visible);
+  }
+});
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`both settings pages keep every text readable through curation states — ${scheme}`, async ({ browser }) => {
+    const path = `/${harness().workspace}/settings/tags`;
+    const page = await openApp(browser, scheme, `/${harness().workspace}/settings`);
+    const readings = await surface(page, "[data-settings-page]");
+    expect(readings.filter((one) => one.kind === "text")).not.toHaveLength(0);
+    await page.goto(new URL(path, harness().appUrl).href);
+    const field = page.getByLabel("Create a tag");
+    await expect(field).toBeEnabled();
+    readings.push(...await surface(page, "[data-settings-page]"));
+
+    const name = `proof-${scheme}-${randomUUID().slice(0, 8)}`;
+    await field.fill("Invalid Name");
+    await page.getByRole("button", { name: "Create", exact: true }).click();
+    await expect(page.getByRole("alert")).toBeVisible();
+    readings.push(...await surface(page, "[data-settings-page]"));
+    await field.fill(name);
+    await page.getByRole("button", { name: "Create", exact: true }).click();
+    await expect(page.getByRole("button", { name: `Retire ${name}` })).toBeVisible();
+    readings.push(...await surface(page, "[data-settings-page]"));
+
+    // The field's value, both action variants on their hover grounds, and the
+    // active/retired duplicate feedback all paint text beyond the resting page.
+    await field.fill(name);
+    await page.getByRole("button", { name: "Create", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("already an active tag");
+    readings.push(...await surface(page, "[data-settings-page]"));
+    for (const variant of ["default", "outline"]) {
+      const button = page.locator(`[data-settings-page] button[data-variant=${variant}]`).first();
+      await button.hover();
+      await expect.poll(() => button.evaluate((element) => element.getAnimations().length)).toBe(0);
+      readings.push(...await surface(page, "[data-settings-page]"));
+    }
+    await page.getByRole("button", { name: `Retire ${name}` }).click();
+    await expect(page.getByRole("button", { name: `Restore ${name}` })).toBeVisible();
+    await page.getByRole("button", { name: "Create", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("is retired");
+    readings.push(...await surface(page, "[data-settings-page]"));
+
+    // A connected client becomes read-only; a fresh replica waits for the
+    // catalog. Both are ordinary product states, reached through real transport.
+    await harness().stopHub();
+    try {
+      await expect(page.getByText("Tag changes are unavailable while this page is disconnected.")).toBeVisible();
+      readings.push(...await surface(page, "[data-settings-page]"));
+      const waiting = await openApp(browser, scheme, path);
+      await expect(waiting.getByText("Waiting for the tag catalog…")).toBeVisible();
+      readings.push(...await surface(waiting, "[data-settings-page]"));
+    } finally {
+      await harness().startHub();
+    }
+
+    for (const { where, kind, colour, ground } of readings) {
+      if (kind === "text") {
+        expect(contrast(colour, ground), `${where} — ${colour} on ${ground}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+}
