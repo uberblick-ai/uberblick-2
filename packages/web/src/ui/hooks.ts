@@ -49,16 +49,17 @@ import type { ThreadView } from "./threads.js";
  * also gates the *workspaces*, which come out of the same read: they say which
  * rooms there are to join at all.
  *
- * Never false forever: `resolveClientConfig` always resolves, falling back
- * rather than rejecting, so a deployment with no config document simply becomes
- * ready one tick later.
+ * Development/client fallbacks become ready after resolution. Hub release
+ * bundles have no endpoint fallback: an absent or invalid served endpoint
+ * keeps this gate closed, so WebSocket never interprets an empty URL as the
+ * page's own origin.
  */
 export function useHubEndpoint(): boolean {
   const [ready, setReady] = useState(false);
   useEffect(() => {
     let live = true;
-    void resolveClientConfig().then(() => {
-      if (live) setReady(true);
+    void resolveClientConfig().then((config) => {
+      if (live) setReady(config.hubUrl !== "");
     });
     return () => {
       live = false;
