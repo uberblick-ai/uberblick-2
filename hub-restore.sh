@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # Put a backup taken by `hub-backup.sh` back into this host's deployment. Run it
-# in the host's checkout: `sh hub-restore.sh ~/hub-2026-08-28.sqlite`.
+# in the deployment directory: `sh hub-restore.sh ~/hub-2026-08-28.sqlite`.
 #
 # **Verified before anything is touched.** A restore runs on the worst day
 # somebody has, against a file nobody has opened since it was written, and it
@@ -44,10 +44,8 @@
 # both restart attempts fail the script exits non-zero however well the restore
 # went.
 #
-# Every compose call goes through `remote-compose.sh`: `docker-compose.yml`
-# gates Caddy's secret on a variable only the wrapper exports and Compose
-# interpolates the whole model for every subcommand, so a bare
-# `docker compose stop hub` fails on this host.
+# Every compose call goes through `remote-compose.sh`, which resolves and checks
+# this deployment's settings in both a checkout and an extracted hub release.
 
 set -eu
 
@@ -64,7 +62,7 @@ if [ $# -ne 1 ]; then
 fi
 
 # Resolved before the `cd` below, so a relative path means what the operator
-# typed it in, not something inside the checkout.
+# typed it in, not something inside the deployment directory.
 backup=$1
 case "$backup" in
   /*) ;;
@@ -78,8 +76,8 @@ fi
 
 umask 077
 
-checkout=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-cd "$checkout"
+deployment=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$deployment"
 
 compose() {
   sh remote-compose.sh "$@"

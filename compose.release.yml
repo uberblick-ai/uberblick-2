@@ -2,17 +2,15 @@ name: uberblick-remote
 
 services:
   hub:
-    build:
-      context: .
-      target: hub
+    image: __HUB_IMAGE__
+    platform: linux/amd64
     environment:
       HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
       # Unset/empty uses public Uberblick Login: no app registration is needed.
-      # Optionally set your own Device Flow app to control its settings/budget;
-      # init re-runs and updates preserve it. Remove and recreate to use the
-      # default again. See REMOTE.md for app settings and shared limits. GitHub
-      # names the app, not the hub; setup codes go only to the intended admin.
-      # This reaches only the hub, never browser configuration or the web build.
+      # Optionally use your own Device Flow app to control its settings/budget.
+      # Remove and recreate to use the default again. GitHub names the app, not
+      # the hub; give setup codes only to the intended admin. This reaches only
+      # the hub, never browser configuration or the web build. See REMOTE.md.
       HUB_GITHUB_CLIENT_ID: "${HUB_GITHUB_CLIENT_ID:-}"
     restart: unless-stopped
     stop_grace_period: 30s
@@ -20,17 +18,15 @@ services:
       - hub-data:/data
 
   caddy:
-    build:
-      context: .
-      target: web
+    image: __WEB_IMAGE__
+    platform: linux/amd64
     depends_on:
       - hub
     environment:
       TAILSCALE_HOST: "${TAILSCALE_HOST:?set TAILSCALE_HOST in .env}"
-      # Native operator names are validated by the image entrypoint before
-      # becoming Caddy's HUB_URL and WORKSPACES. One bundle serves every host.
       WEB_HUB_URL: "${WEB_HUB_URL:-}"
       WEB_WORKSPACES: "${WEB_WORKSPACES:-}"
+      # Entrypoints validate all document inputs, including with plain Compose.
       HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
     ports:
       - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:443:443"

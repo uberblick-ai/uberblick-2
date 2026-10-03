@@ -44,8 +44,7 @@ describe("first-admin host wrapper", () => {
     const { directory, capture, result } = run(args, 7);
     expect(result.status).toBe(7);
     expect(readFileSync(capture, "utf8").trimEnd().split("\n")).toEqual([
-      directory, "exec", "-T", "hub", "packages/hub/node_modules/.bin/tsx",
-      "packages/hub/src/admin-setup-command.ts", ...args,
+      directory, "exec", "-T", "hub", "node", "/app/hub-admin-setup.mjs", ...args,
     ]);
   });
 
@@ -53,8 +52,7 @@ describe("first-admin host wrapper", () => {
     const { directory, capture, result } = run(args, 0, true);
     expect(result.status).toBe(0);
     expect(readFileSync(capture, "utf8").trimEnd().split("\n")).toEqual([
-      directory, "exec", "hub", "packages/hub/node_modules/.bin/tsx",
-      "packages/hub/src/admin-setup-command.ts", ...args,
+      directory, "exec", "hub", "node", "/app/hub-admin-setup.mjs", ...args,
     ]);
   });
 
