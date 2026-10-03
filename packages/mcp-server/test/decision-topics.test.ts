@@ -55,6 +55,10 @@ describe("decision topics through directory stubs", () => {
     expect(rows[0]).toMatchObject({ topic: a.uuid, inForce: null, pending: [{ uuid: f }] });
     expect(rows[0].conflicts.map((record: any) => record.uuid).sort()).toEqual([c, d].sort());
     expect(rows[0].superseded).toBeUndefined();
+    const combined = (await rig.ok("list_docs", { kind: "decision", status: "open", tag: "sync" })).docs;
+    expect(combined).toMatchObject([{ topic: a.uuid, inForce: null, pending: [{ uuid: f }] }]);
+    expect(combined[0].conflicts.map((record: any) => record.uuid).sort()).toEqual([c, d].sort());
+    expect((await rig.ok("list_docs", { kind: "decision", status: "open", tag: "sync", include_superseded: true })).docs).toEqual([]);
     const read = await rig.ok("get_doc", { uuid: a.uuid });
     expect(read.successors.map((record: any) => [record.uuid, record.status]).sort()).toEqual([[b, "rejected"], [c, "decided"]].sort());
     expect(read.resolution.inForce).toBeNull();

@@ -1522,7 +1522,7 @@ export function registerTools(
         "predicate to ask for its exact matches, including matching decisions; `kind: \"decision\"` lists decision " +
         "topics with one row per topic. Each row presents the record in force, else a pending record, else the first record, " +
         "and names all pending records and all conflicting maximal decided records. `inForce: null` means no answer is in force. " +
-        "A status or tag predicate matches a topic if any live record matches, while resolution still uses its whole graph. " +
+        "A status or tag predicate matches a topic if any live record matches; each predicate may match a different live record. Resolution still uses its whole graph. " +
         "`include_superseded: true` returns every record with predicates applied per record. `include_deleted` admits archived topics but is not a predicate and does not lift the default omission, " +
         "so an archived decision needs it together with a matching predicate. A fresh replica can list the whole " +
         "corpus once the directory room has synced.\n\n" +
@@ -1574,17 +1574,19 @@ export function registerTools(
       const decisionRows = !hasPredicate ? [] : include_superseded
         ? topics.filter(topic => include_deleted || !topic.archived)
           .flatMap(topic => topic.records.filter(matches).map(entry => ({ ...entry, deleted: topic.archived })))
-        : topics.filter(topic => (include_deleted || !topic.archived) &&
-          (kind === undefined || kind === "decision") &&
-          ((tagId === null && status === undefined) || topic.records.some(entry =>
-            entry.status !== "rejected" && entry.status !== "withdrawn" && matches(entry))))
+        : topics.filter(topic => {
+          if ((!include_deleted && topic.archived) || (kind !== undefined && kind !== "decision")) return false;
+          const live = topic.records.filter(entry => entry.status !== "rejected" && entry.status !== "withdrawn");
+          return (status === undefined || live.some(entry => entry.status === status)) &&
+            (tagId === null || live.some(entry => readDirectoryTags(entry, catalog).some(assignment => assignment.id === tagId)));
+        })
           .map(topic => ({ ...topic.representative, deleted: topic.archived, ...topicJson(topic) }));
       // Derived, never stored: the sidebar doc is the one place a pin lives.
       const pinned = pinnedUuids(replicas);
       return json({
         workspace: replicas.config.workspaceId,
         docs: [...documents, ...decisionRows]
-          .sort((a, b) => a.title.localeCompare(b.title) || a.uuid.localeCompare(b.uuid))
+          .sort((a, b) => a.title < b.title ? -1 : a.title > b.title ? 1 : a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0)
           .map((entry) => ({
           ...entry,
           tags: readDirectoryTags(entry, catalog),
