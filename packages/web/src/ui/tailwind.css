@@ -1,11 +1,10 @@
-/* Tailwind v4, for app CHROME only (#27).
+/* Tailwind v4 for shadcn and product UI.
  *
- * Product content — editor, sidebar rows, reading layout — is plain CSS
- * (`styles.css`). The app frame and standard chrome use vendored components.
- * Tailwind lets us vendor
- * shadcn/ui components (`ui/shadcn/`) over Radix primitives, so the menus and
- * popovers the design needs are standard mature open source rather than
- * hand-built. Coexistence, not a rewrite.
+ * Web UI system's Styling rule uses utilities and shadcn variants for all UI
+ * except editor content, which ProseMirror renders and keeps in `styles.css`.
+ * Legacy surfaces migrate when next changed, deleting their product rules in
+ * the same change. Local shadcn components (`ui/shadcn/`) own shared styling;
+ * Radix primitives provide the interaction behavior where it is needed.
  *
  * Three things make that coexistence safe, and each is load-bearing:
  *
@@ -43,8 +42,7 @@
  * - **Type is inherited, not bridged.** `--font-sans` collides the same way,
  *   and does not need bridging: `:root` sets `font-family` to the Geist stack,
  *   a portalled surface is a child of `<body>`, and inheritance does the rest.
- *   The one thing that does not inherit is a `<button>`, which the base layer
- *   below fixes.
+ *   Native form controls need the base layer below to inherit type.
  */
 
 @layer theme, base, components, utilities;
@@ -59,9 +57,12 @@
 @source "./shadcn";
 @source "./Sidebar.tsx";
 @source "./ThreadsPane.tsx";
+@source "./WorkspaceSettings.tsx";
 
 /* The bridge. Left side: what shadcn's markup asks for. Right side: what this
-   product already is. No colour is defined here. */
+   product already is. No colour is defined here. The sidebar mappings serve
+   the vendored menus; other UI checks their ground and uses product tokens
+   directly where those mappings do not fit. */
 @theme inline {
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
@@ -81,18 +82,15 @@
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
-  /* Follows the popover onto the sidebar, like the highlight below and for the
-     same reason: the only thing in the scanned source that resolves through
-     this entry is the menu label, and that label sits on `--sidebar`, where
-     `--muted-foreground` is 3.96:1 in light — under WCAG AA for text that size
-     (#515). */
+  /* Menu labels sit on `--sidebar`, where the product's `--muted-foreground`
+     lacked sufficient contrast (#515), so this maps to the sidebar token.
+     Product UI on other grounds must check contrast before using this name. */
   --color-muted-foreground: var(--sidebar-muted-foreground);
   /* Follows the popover onto the sidebar for the same reason, and here it is
      load-bearing rather than tidy: `--accent` and `--sidebar` are the same value
      in dark, so a menu item highlighted with `--accent` over a sidebar ground
-     would be invisible to pointer and keyboard alike. `data-[highlighted]` on
-     `dropdown-menu.tsx` is the only thing in the scanned source that resolves
-     through this entry, so nothing outside those two menus moves with it. */
+     would be invisible to pointer and keyboard alike. Other UI must account
+     for this sidebar mapping when choosing a hover or selection ground. */
   --color-accent: var(--sidebar-accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
@@ -100,8 +98,8 @@
   /* And the strokes, for the same reason again: the menu's own edge and its
      separator are drawn *on* `--sidebar`, where `--border` is OKLab ΔE 0.021
      against the ground — half the 0.040 `--sidebar-border` gives the column's
-     outer edge (#515). `border-border` and `bg-border` in the two vendored
-     components are all that resolves through this entry. */
+     outer edge (#515). UI outside the sidebar can read its product border
+     token directly rather than inheriting this mapping. */
   --color-border: var(--sidebar-border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -115,8 +113,8 @@
      are. `data-slot` is on every shadcn v4 element, so this reaches them and
      nothing else: a portalled menu is a sibling of `.ub-app`, not a child, and
      no `.ub-*` rule can style it.
-     `font: inherit` because a <button> does not inherit type from its
-     ancestors, and every trigger is one. */
+     `font: inherit` gives native form controls their ancestor's type,
+     including the shared fields and the vendored triggers. */
   [data-slot] {
     box-sizing: border-box;
     font: inherit;

@@ -17,8 +17,9 @@
  * pick one of and leave; this is a small panel of controls and readouts you
  * come back out of unchanged, and two of its rows are facts rather than
  * actions. The workspace switcher above it *is* a list of commands, and is a
- * menu (see `WorkspaceSwitcher`). Both surfaces are vendored shadcn (#27); how
- * they look is plain CSS on `.ub-*` classes, like every other product surface.
+ * menu (see `WorkspaceSwitcher`). Both surfaces use vendored shadcn; their
+ * remaining `.ub-*` styling moves to utilities when next changed, under Web UI
+ * system's Styling rule.
  */
 
 import { useState } from "react";

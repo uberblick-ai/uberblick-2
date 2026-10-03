@@ -158,7 +158,7 @@ function peerOf(local: Y.Doc): Y.Doc {
 
 function facts(host: HTMLElement): Map<string, string> {
   return new Map(
-    [...host.querySelectorAll<HTMLElement>(".ub-settings-facts .ub-panel-fact")].map(
+    [...host.querySelectorAll<HTMLElement>("[data-settings-facts] > div")].map(
       (row) => [
         row.querySelector("dt")?.textContent ?? "",
         row.querySelector("dd")?.textContent ?? "",
@@ -258,7 +258,7 @@ it("waits for server state, seeds once, and keeps a retired-only reading offline
 
   expect(host.textContent).toContain("Waiting for the tag catalog");
   expect(host.querySelector("input")).toBeNull();
-  expect(host.querySelector(".ub-settings-tag-list")).toBeNull();
+  expect(host.querySelector("[data-tag-list]")).toBeNull();
 
   room.update({
     connected: true,
@@ -269,7 +269,7 @@ it("waits for server state, seeds once, and keeps a retired-only reading offline
   });
   await act(async () => {});
   expect(
-    [...host.querySelectorAll("#ub-active-tags + .ub-settings-tag-list > li")].map(
+    [...host.querySelectorAll("#ub-active-tags + [data-tag-list] > li")].map(
       (row) => row.firstElementChild?.textContent,
     ),
   ).toEqual(EXAMPLE_TAGS.map((entry) => entry.name));
@@ -281,21 +281,20 @@ it("waits for server state, seeds once, and keeps a retired-only reading offline
   });
   expect(host.textContent).toContain("No active tags.");
   expect(
-    host.querySelectorAll("#ub-retired-tags + .ub-settings-tag-list > li"),
+    host.querySelectorAll("#ub-retired-tags + [data-tag-list] > li"),
   ).toHaveLength(EXAMPLE_TAGS.length);
 
   room.update({ connected: false, synced: false, writable: false });
   expect(host.textContent).not.toContain("Waiting for the tag catalog");
   expect(host.textContent).toContain("Tag changes are unavailable");
-  expect(
-    [...host.querySelectorAll<HTMLButtonElement>(".ub-settings-tags-card button")].every(
-      (button) => button.disabled,
-    ),
-  ).toBe(true);
+  const controls = [...host.querySelectorAll<HTMLButtonElement>("button")];
+  expect(controls).toHaveLength(EXAMPLE_TAGS.length + 1);
+  expect(controls.every((button) => button.disabled)).toBe(true);
+  expect(host.querySelector<HTMLInputElement>("input")?.disabled).toBe(true);
 
   room.update({ connected: true, synced: true, writable: true });
   expect(
-    [...host.querySelectorAll<HTMLButtonElement>(".ub-settings-tag-list button")].every(
+    [...host.querySelectorAll<HTMLButtonElement>("[data-tag-list] button")].every(
       (button) => !button.disabled,
     ),
   ).toBe(true);
@@ -310,7 +309,7 @@ it("validates unique names and converges create, retire, and restore with a peer
   const host = await mountTags(room.connection);
   const input = host.querySelector<HTMLInputElement>("#ub-new-tag");
   const submit = host.querySelector<HTMLButtonElement>(
-    ".ub-settings-tag-create button[type=submit]",
+    "form button[type=submit]",
   );
   if (input === null || submit === null) throw new Error("the create form is missing");
 
@@ -318,16 +317,16 @@ it("validates unique names and converges create, retire, and restore with a peer
     typeInto(input, "Needs spaces");
     submit.click();
   });
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain(
-    "lowercase letters or numbers",
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+    "Use 1–30 lowercase letters or numbers, separated by single hyphens.",
   );
 
   act(() => {
     typeInto(input, "auth");
     submit.click();
   });
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain(
-    "already an active tag",
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+    "“auth” is already an active tag.",
   );
 
   act(() => {
@@ -337,7 +336,7 @@ it("validates unique names and converges create, retire, and restore with a peer
   const created = listTagCatalog(peer).find((entry) => entry.name === "product");
   expect(created).toMatchObject({ name: "product", state: "active" });
 
-  const productRow = [...host.querySelectorAll(".ub-settings-tag-list li")].find(
+  const productRow = [...host.querySelectorAll("[data-tag-list] li")].find(
     (row) => row.firstElementChild?.textContent === "product",
   );
   act(() => productRow?.querySelector<HTMLButtonElement>("button")?.click());
@@ -345,7 +344,15 @@ it("validates unique names and converges create, retire, and restore with a peer
     "retired",
   );
 
-  const retiredProduct = [...host.querySelectorAll(".ub-settings-tag-list li")].find(
+  act(() => {
+    typeInto(input, "product");
+    submit.click();
+  });
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+    "“product” is retired. Restore it from the retired list.",
+  );
+
+  const retiredProduct = [...host.querySelectorAll("[data-tag-list] li")].find(
     (row) => row.firstElementChild?.textContent === "product",
   );
   act(() => retiredProduct?.querySelector<HTMLButtonElement>("button")?.click());
@@ -362,7 +369,7 @@ it("validates unique names and converges create, retire, and restore with a peer
 /** The Retire or Restore control of one entry, by its accessible name. */
 function lifecycle(host: HTMLElement, name: string): HTMLButtonElement {
   const control = [
-    ...host.querySelectorAll<HTMLButtonElement>(".ub-settings-tag-list button"),
+    ...host.querySelectorAll<HTMLButtonElement>("[data-tag-list] button"),
   ].find((button) => button.textContent === name);
   if (control === undefined) throw new Error(`no “${name}” control`);
   return control;

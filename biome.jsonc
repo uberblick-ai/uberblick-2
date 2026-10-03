@@ -16,10 +16,10 @@
 
   "overrides": [
     {
-      // The one stylesheet that is Tailwind's (#27). Scoped rather than global
-      // on purpose: `@theme` and `@source` are a parse error everywhere else in
-      // this repo, which is how the "chrome only, plain CSS elsewhere" rule
-      // stays enforced rather than remembered.
+      // Tailwind directives live in this stylesheet. Keep their parser scoped
+      // here; UI components use the utilities it generates. Web UI system
+      // keeps editor content in plain CSS and migrates other legacy surfaces
+      // to utilities when they are next changed.
       "includes": ["packages/web/src/ui/tailwind.css"],
       "css": { "parser": { "tailwindDirectives": true } }
     },
