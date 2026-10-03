@@ -409,43 +409,6 @@ body {
   overflow-wrap: anywhere;
 }
 
-/* One control in either sidebar state: attached to the open pane's boundary,
-   or floating over the main pane while the sidebar is absent. Neither form
-   reserves a cross-pane row. */
-.ub-sidebar-toggle {
-  position: absolute;
-  z-index: 4;
-  font: inherit;
-  line-height: 1;
-  width: 2rem;
-  height: 2rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--card-accent);
-  color: var(--secondary-foreground);
-  cursor: pointer;
-}
-
-.ub-sidebar-toggle:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-
-.ub-sidebar-hide {
-  top: 0.5rem;
-  right: -1rem;
-  /* The accent fill is the boundary. A second quiet stroke against that fill
-     is neither distinct nor meaningful; focus supplies the operable outline. */
-  border-color: transparent;
-  background: var(--sidebar-accent);
-  color: var(--sidebar-foreground);
-}
-
-.ub-sidebar-restore {
-  top: 0.5rem;
-  left: 0.5rem;
-}
-
 .ub-muted {
   color: var(--muted-foreground);
   font-size: 0.8rem;
@@ -1200,13 +1163,6 @@ body {
     flex-basis 180ms ease;
 }
 
-/* The restore control floats at the page edge. Give the sidebar-less document
-   a deliberate outer inset that clears its complete target rather than
-   centring the document in the newly available width. */
-.ub-body[data-sidebar-collapsed="true"] > .ub-document-pane {
-  --pane-document-inset: 4rem;
-}
-
 /* ---- workspace settings ---- */
 
 .ub-settings-column {
@@ -1530,25 +1486,7 @@ body {
   }
 }
 
-/* SidebarProvider's controlled state is shared across viewport sizes. The
-   frame presents the panel as an overlay below 768px. */
 @media (max-width: 767px) {
-  .ub-body > .ub-pane > :not(.ub-pane-threads-toggle) {
-    transition: margin-block-start 180ms ease;
-  }
-
-  /* The wide layout spends inline room to clear the floating restore button.
-     A phone cannot afford that permanent gutter: move the pane's content below
-     the button while its sticky edge controls keep their normal top position,
-     and return the document to its compact edge inset. */
-  .ub-sidebar-restore ~ .ub-pane > :not(.ub-pane-threads-toggle) {
-    margin-block-start: 2.75rem;
-  }
-
-  .ub-body[data-sidebar-collapsed="true"] > .ub-document-pane {
-    --pane-document-inset: 1rem;
-  }
-
   /* The uuid is the actionable identity at this width; the revision is the one
      optional fact in the row. Removing only that suffix keeps the identity,
      copy and actions controls inside the viewport without shrinking their
@@ -3821,7 +3759,6 @@ h3.ub-heading {
    happened, so removing it changes nothing but the movement. */
 @media (prefers-reduced-motion: reduce) {
   .ub-document-pane,
-  .ub-body > .ub-pane > :not(.ub-pane-threads-toggle),
   .ub-group-caret,
   .ub-group-body,
   .ub-group-act,

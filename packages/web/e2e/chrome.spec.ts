@@ -917,9 +917,8 @@ test("document actions stay reachable, close with the route, and archive into Re
   await page.getByRole("button", { name: "+ new doc" }).click();
   await page.locator(".ub-title").fill("Lifecycle notes");
   await page.setViewportSize({ width: 360, height: 720 });
-  await page.getByRole("button", { name: "Hide document list" }).click();
-  await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
-  await expect(page.locator(".ub-list")).toHaveAttribute("aria-hidden", "true");
+  await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
 
   const trigger = page.getByRole("button", { name: "Document actions" });
   const uuid = page.locator(".ub-copy-identity .ub-copy-link");
@@ -1138,9 +1137,9 @@ test("the document collaborator cluster stays compact and jumps once without mov
   browser,
 }) => {
   const page = await openApp(browser, "light");
-  // At this breakpoint the sidebar overlays the full-width document pane,
-  // exercising the compact cluster in the narrow shell.
+  // The narrow drawer closes on creation, leaving the full-width document pane.
   await page.setViewportSize({ width: 720, height: 640 });
+  await page.getByRole("button", { name: "Show document list", exact: true }).click();
   await page.getByRole("button", { name: "+ new doc" }).click();
   await page.locator(".ub-title").fill("Live collaborators");
   const firstBlock = page.locator(".ub-editor .ProseMirror > *").first();
@@ -1562,6 +1561,7 @@ for (const scheme of ["light", "dark"] as const) {
 
     // The block menu is its own `--card` floating over the prose, and one entry
     // carries the highlight from the moment it opens.
+    await page.getByRole("button", { name: "Show document list", exact: true }).click();
     await page.getByRole("button", { name: "+ new doc" }).click();
     await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
     await placeCaret(page);
@@ -1626,7 +1626,7 @@ for (const scheme of ["light", "dark"] as const) {
     // card is grounded `--brand-subtle`. The floor is about the resting pair,
     // so this measures the card a reader finds on opening the document.
     await page.reload();
-    await expect(page.locator(".ub-workspace")).toBeVisible();
+    await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
     await handle.click();
     const thread = page.locator(".ub-thread").first();
     const chip = page.locator(".ub-thread .ub-chip");
@@ -1660,7 +1660,7 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(page.locator(".ub-chip-orphaned")).toBeVisible();
 
     await page.reload();
-    await expect(page.locator(".ub-workspace")).toBeVisible();
+    await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
     await handle.click();
     const orphaned = page.locator(".ub-thread").first();
     const orphanedChip = orphaned.locator(".ub-chip-orphaned");
@@ -2311,9 +2311,8 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
   // The identity confirmation uses the target's lower half: it neither moves
   // nor intersects the uuid, revision, title or actions when it appears.
   await page.setViewportSize({ width: 360, height: 620 });
-  await page.getByRole("button", { name: "Hide document list" }).click();
-  await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
-  await expect(page.locator(".ub-list")).toHaveAttribute("aria-hidden", "true");
+  await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
   await page.locator(".ub-body").evaluate(async (body) => {
     await Promise.all(
       body.getAnimations({ subtree: true }).map((animation) =>

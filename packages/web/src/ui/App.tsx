@@ -46,7 +46,7 @@ import type { RoomConnection } from "../collab/rooms.js";
 import type { RemotePresence } from "./doc-chrome.js";
 import { CopyLink } from "./DocChrome.js";
 import { Sidebar, togglePin } from "./Sidebar.js";
-import { SidebarProvider } from "./shadcn/sidebar.js";
+import { SidebarProvider, SIDEBAR_TOGGLE_CLASSES } from "./shadcn/sidebar.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { SyncPanel } from "./SyncPanel.js";
@@ -86,6 +86,8 @@ import {
 
 /** Sidebar preference, persisted per browser. */
 const SIDEBAR_COLLAPSED_KEY = "uberblick.sidebar.collapsed";
+/** Exact complement of Tailwind xl, including fractional CSS widths. */
+const NARROW_LAYOUT_QUERY = "(width < 80rem)";
 
 /** The frozen serving process is still useful; this notice only names its binding. */
 export function ReboundNotice({
@@ -371,6 +373,22 @@ export function App(): ReactElement {
   // Both addresses that name the workspace render the document list, so the
   // sidebar's entry for it is the current page at either one.
   const listing = route.kind === "all" || route.kind === "list";
+  const [narrowSidebar, setNarrowSidebar] = useState(
+    () => window.matchMedia?.(NARROW_LAYOUT_QUERY).matches ?? false,
+  );
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia?.(NARROW_LAYOUT_QUERY);
+    if (query === undefined) return;
+    const update = (): void => {
+      setNarrowSidebar(query.matches);
+      setSidebarOpen(false);
+    };
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  const closeSidebarDrawer = useCallback(() => setSidebarOpen(false), []);
   const [collapsed, setCollapsed] = useStoredFlag(SIDEBAR_COLLAPSED_KEY, false);
   const hideSidebar = useRef<HTMLButtonElement | null>(null);
   const restoreSidebar = useRef<HTMLButtonElement | null>(null);
@@ -383,8 +401,12 @@ export function App(): ReactElement {
   useEffect(() => {
     if (previousCollapsed.current === collapsed) return;
     previousCollapsed.current = collapsed;
-    (collapsed ? restoreSidebar : hideSidebar).current?.focus();
-  }, [collapsed]);
+    if (!narrowSidebar) (collapsed ? restoreSidebar : hideSidebar).current?.focus();
+  }, [collapsed, narrowSidebar]);
+  const restoreSidebarFocus = useCallback((event: Event) => {
+    event.preventDefault();
+    (restoreSidebar.current ?? hideSidebar.current)?.focus();
+  }, []);
   /**
    * The thread the reader is looking at. It lives here because the two ends of
    * the link are in different panes: a highlight in the editor and a card in the
@@ -662,8 +684,11 @@ export function App(): ReactElement {
   const onSwitchWorkspace = useCallback(
     // A workspace's list, not a document: two corpora share no uuid, so
     // carrying the open document across would be a link to nowhere.
-    (segment: string) => navigate(`/${segment}`),
-    [navigate],
+    (segment: string) => {
+      closeSidebarDrawer();
+      navigate(`/${segment}`);
+    },
+    [closeSidebarDrawer, navigate],
   );
 
   /**
@@ -689,9 +714,10 @@ export function App(): ReactElement {
   const segment = workspace?.segment ?? null;
   const onSelect = useCallback(
     (uuid: string) => {
+      closeSidebarDrawer();
       if (segment !== null) navigate(docPath(segment, uuid));
     },
-    [navigate, segment],
+    [closeSidebarDrawer, navigate, segment],
   );
 
   /**
@@ -723,16 +749,19 @@ export function App(): ReactElement {
 
   /** Going to the listing is navigating to it, like opening a document. */
   const onOpenAll = useCallback(() => {
+    closeSidebarDrawer();
     if (segment !== null) navigate(allPath(segment));
-  }, [navigate, segment]);
+  }, [closeSidebarDrawer, navigate, segment]);
 
   /** Enter settings, or leave it for the workspace's fixed list address. */
   const onOpenSettings = useCallback((page: "general" | "tags") => {
+    closeSidebarDrawer();
     if (segment !== null) navigate(settingsPath(segment, page));
-  }, [navigate, segment]);
+  }, [closeSidebarDrawer, navigate, segment]);
   const onBackToWorkspace = useCallback(() => {
+    closeSidebarDrawer();
     if (segment !== null) navigate(`/${segment}`);
-  }, [navigate, segment]);
+  }, [closeSidebarDrawer, navigate, segment]);
 
   /**
    * A create needs the new document's Y.Doc *before* React has mounted the
@@ -864,42 +893,43 @@ export function App(): ReactElement {
     });
   }, [doc, directory]);
 
-  const sidebarToggleLabel = settings
-    ? collapsed
-      ? "Show sidebar"
-      : "Hide sidebar"
-    : collapsed
-      ? "Show document list"
-      : "Hide document list";
+  const sidebarHidden = narrowSidebar ? !sidebarOpen : collapsed;
+  const sidebarName = settings ? "sidebar" : "document list";
+  const sidebarToggleLabel = `${sidebarHidden ? "Show" : "Hide"} ${sidebarName}`;
+  const sidebarCloseLabel = narrowSidebar ? `Close ${sidebarName}` : sidebarToggleLabel;
 
   return (
     <main className="ub-app">
       <ReboundNotice serving={serving} />
       <SidebarProvider
         open={!collapsed}
+        narrow={narrowSidebar}
+        openMobile={sidebarOpen}
+        onOpenMobileChange={setSidebarOpen}
+        onCloseAutoFocus={restoreSidebarFocus}
         className="ub-body"
-        data-sidebar-collapsed={collapsed}
+        data-sidebar-collapsed={sidebarHidden}
       >
-        {collapsed && (
+        {(narrowSidebar || collapsed) && (
           /* Pane-local and out of flow: restoring the sidebar costs no global
              row and leaves every route at the application's top edge. */
           <button
             ref={restoreSidebar}
             type="button"
-            className="ub-sidebar-toggle ub-sidebar-restore"
-            aria-expanded="false"
-            aria-label={sidebarToggleLabel}
-            title={sidebarToggleLabel}
-            onClick={() => setCollapsed(false)}
+            className={`${SIDEBAR_TOGGLE_CLASSES} ub-sidebar-toggle ub-sidebar-restore top-2 left-2 border-(--border) bg-(--card-accent) text-(--secondary-foreground)`}
+            aria-expanded={narrowSidebar ? sidebarOpen : false}
+            aria-label={`Show ${sidebarName}`}
+            title={`Show ${sidebarName}`}
+            onClick={() => narrowSidebar ? setSidebarOpen(true) : setCollapsed(false)}
           >
             »
           </button>
         )}
         <Sidebar
-          collapsed={collapsed}
+          collapsed={narrowSidebar ? false : collapsed}
           collapseButtonRef={hideSidebar}
-          collapseLabel={sidebarToggleLabel}
-          onCollapse={() => setCollapsed(true)}
+          collapseLabel={sidebarCloseLabel}
+          onCollapse={() => narrowSidebar ? closeSidebarDrawer() : setCollapsed(true)}
           connection={directory}
           sidebar={sidebar}
           groups={sidebarGroups}

@@ -58,6 +58,7 @@
    `.collapse`). Scan the wrappers and product components migrated to utilities. */
 @source "./shadcn";
 @source "./Sidebar.tsx";
+@source "./App.tsx";
 @source "./ThreadsPane.tsx";
 
 /* The bridge. Left side: what shadcn's markup asks for. Right side: what this

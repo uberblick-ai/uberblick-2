@@ -1,10 +1,10 @@
 /**
- * Project-trimmed shadcn Sheet: right-edge content and its close control.
+ * Project-trimmed shadcn Sheet: left/right content and its close control.
  * Source (MIT):
  * https://github.com/shadcn-ui/ui/blob/main/apps/v4/registry/new-york-v4/ui/sheet.tsx
  *
  * Radix owns the portal, modal isolation, focus scope and dismissal. Unused
- * sides, layout helpers and animation utilities are omitted. Content follows
+ * layout helpers and animation utilities are omitted. Content follows
  * Radix's normal mount lifetime so a closed sheet releases background hiding.
  */
 import * as SheetPrimitive from "@radix-ui/react-dialog";
@@ -38,9 +38,13 @@ function SheetContent({
   className,
   children,
   closeLabel = "Close",
+  side = "right",
+  showClose = true,
   ...props
 }: ComponentProps<typeof SheetPrimitive.Content> & {
   closeLabel?: string;
+  side?: "left" | "right";
+  showClose?: boolean;
 }): ReactElement {
   return (
     <SheetPrimitive.Portal>
@@ -51,13 +55,16 @@ function SheetContent({
       <SheetPrimitive.Content
         data-slot="sheet-content"
         className={cn(
-          "fixed inset-y-0 right-0 z-30 flex h-dvh w-[min(20rem,85vw)] flex-col border-l border-border bg-card text-card-foreground shadow-lg outline-hidden",
+          "fixed inset-y-0 z-30 flex h-dvh flex-col border-border shadow-lg outline-hidden",
+          side === "left"
+            ? "left-0 border-r w-[min(var(--sidebar-width),85vw)] bg-sidebar text-sidebar-foreground"
+            : "right-0 border-l w-[min(20rem,85vw)] bg-card text-card-foreground",
           className,
         )}
         {...props}
       >
         {children}
-        <SheetClose className="absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+        {showClose && <SheetClose className="absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
           <svg
             aria-hidden="true"
             className="size-4"
@@ -71,7 +78,7 @@ function SheetContent({
             <path d="M18 6 6 18M6 6l12 12" />
           </svg>
           <span className="sr-only">{closeLabel}</span>
-        </SheetClose>
+        </SheetClose>}
       </SheetPrimitive.Content>
     </SheetPrimitive.Portal>
   );

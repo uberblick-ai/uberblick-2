@@ -1,32 +1,62 @@
 /**
  * Project-trimmed shadcn Sidebar: controlled Provider, left offcanvas panel,
- * and its animated desktop gap. Source (MIT):
+ * its mobile Sheet, and its animated desktop gap. Source (MIT):
  * https://github.com/shadcn-ui/ui/blob/main/apps/v4/registry/new-york-v4/ui/sidebar.tsx
  *
  * The app retains its localStorage preference and paired-control focus handoff.
  * Upstream's cookie and Cmd+B shortcut would change those contracts (Cmd+B is
- * editor bold). Its independent mobile Sheet state is omitted in this spike:
- * the same controlled state continues to present a nonmodal mobile overlay.
+ * editor bold). Mobile state is separate and unsaved, as in upstream.
  * No menu primitives, icon mode, rail, tooltip, or additional dependencies.
  */
 import { createContext, useContext } from "react";
 import type { ComponentProps, ReactElement } from "react";
 import { cn } from "./cn.js";
+import { Sheet, SheetContent, SheetTitle } from "./sheet.js";
 
-const SidebarContext = createContext<{ open: boolean } | null>(null);
+type SidebarState = {
+  open: boolean;
+  narrow: boolean;
+  openMobile: boolean;
+  onOpenMobileChange?: ((open: boolean) => void) | undefined;
+  onCloseAutoFocus?: ((event: Event) => void) | undefined;
+};
+
+const SidebarContext = createContext<SidebarState | null>(null);
+
+export function useSidebar(): SidebarState {
+  const context = useContext(SidebarContext);
+  if (context === null) throw new Error("Sidebar requires SidebarProvider");
+  return context;
+}
+
+export const SIDEBAR_TOGGLE_CLASSES = "absolute z-4 size-8 cursor-pointer rounded-(--radius-sm) border font-[inherit] [font-size:inherit] leading-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
 export function SidebarProvider({
   open,
+  narrow = false,
+  openMobile = false,
+  onOpenMobileChange,
+  onCloseAutoFocus,
   className,
   children,
   ...props
-}: ComponentProps<"div"> & { open: boolean }): ReactElement {
+}: ComponentProps<"div"> & Omit<SidebarState, "narrow" | "openMobile"> & {
+  narrow?: boolean;
+  openMobile?: boolean;
+}): ReactElement {
   return (
-    <SidebarContext.Provider value={{ open }}>
+    <SidebarContext.Provider
+      value={{ open, narrow, openMobile, onOpenMobileChange, onCloseAutoFocus }}
+    >
       <div
         data-slot="sidebar-wrapper"
         data-state={open ? "expanded" : "collapsed"}
-        className={cn("relative flex min-h-0 flex-1", className)}
+        className={cn(
+          "relative flex min-h-0 flex-1",
+          // Clear the narrow opener vertically; docked collapse uses an inset.
+          "max-xl:[&>.ub-pane>:not(.ub-pane-threads-toggle)]:mt-11 max-xl:[&>.ub-document-pane]:[--pane-document-inset:1rem] xl:data-[sidebar-collapsed=true]:[&>.ub-document-pane]:[--pane-document-inset:4rem]",
+          className,
+        )}
         {...props}
       >
         {children}
@@ -38,11 +68,36 @@ export function SidebarProvider({
 export function Sidebar({
   className,
   children,
+  onEscapeKeyDown,
   ...props
-}: ComponentProps<"aside">): ReactElement {
-  const context = useContext(SidebarContext);
-  if (context === null) throw new Error("Sidebar requires SidebarProvider");
-  const { open } = context;
+}: ComponentProps<"aside"> & {
+  onEscapeKeyDown?: ComponentProps<typeof SheetContent>["onEscapeKeyDown"];
+}): ReactElement {
+  const { open, narrow, openMobile, onOpenMobileChange, onCloseAutoFocus } = useSidebar();
+  if (narrow) {
+    return (
+      <Sheet open={openMobile} onOpenChange={(shown) => onOpenMobileChange?.(shown)}>
+        <SheetContent
+          side="left"
+          showClose={false}
+          className="p-0"
+          aria-describedby={undefined}
+          onCloseAutoFocus={(event) => onCloseAutoFocus?.(event)}
+          onEscapeKeyDown={(event) => onEscapeKeyDown?.(event)}
+        >
+          <SheetTitle className="sr-only">Sidebar</SheetTitle>
+          <aside
+            {...props}
+            data-slot="sidebar-container"
+            data-mobile="true"
+            className={cn("relative flex min-h-0 flex-1 flex-col", className)}
+          >
+            {children}
+          </aside>
+        </SheetContent>
+      </Sheet>
+    );
+  }
   return (
     <div
       data-slot="sidebar"
@@ -52,7 +107,7 @@ export function Sidebar({
     >
       <div
         data-slot="sidebar-gap"
-        className="relative hidden h-full w-(--sidebar-width) bg-transparent transition-[width] duration-[180ms] ease-[ease] group-data-[collapsible=offcanvas]:w-0 motion-reduce:transition-none md:block"
+        className="relative hidden h-full w-(--sidebar-width) bg-transparent transition-[width] duration-[180ms] ease-[ease] group-data-[collapsible=offcanvas]:w-0 motion-reduce:transition-none xl:block"
       />
       <aside
         {...props}
@@ -60,7 +115,7 @@ export function Sidebar({
         aria-hidden={!open}
         inert={!open}
         className={cn(
-          "absolute inset-y-0 left-0 z-5 flex w-[min(var(--sidebar-width),85vw)] flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-[8px_0_24px_rgb(0_0_0/0.18)] transition-[left] duration-[180ms] ease-[ease] group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] group-data-[collapsible=offcanvas]:shadow-none group-data-[collapsible=offcanvas]:pointer-events-none group-data-[collapsible=offcanvas]:[&_.ub-sidebar-hide]:invisible motion-reduce:transition-none md:w-(--sidebar-width) md:shadow-none",
+          "absolute inset-y-0 left-0 z-5 flex w-(--sidebar-width) flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[left] duration-[180ms] ease-[ease] group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] group-data-[collapsible=offcanvas]:pointer-events-none group-data-[collapsible=offcanvas]:[&_.ub-sidebar-hide]:invisible motion-reduce:transition-none",
           className,
         )}
       >
