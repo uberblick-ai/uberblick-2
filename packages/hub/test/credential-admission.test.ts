@@ -466,7 +466,7 @@ describe("credential admission on a composed server", () => {
     }
   });
 
-  it("ends selected workspace access without revoking the credential or its other workspace rooms", async () => {
+  it("closes selected admitted workspace rooms without revoking the credential or its other rooms", async () => {
     const rig = await startServer();
     const laptop = issue(rig.registry, "laptop", [WORKSPACE, OTHER_WORKSPACE]);
     const firstRoom = testRoom();

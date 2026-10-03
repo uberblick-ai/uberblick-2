@@ -6,20 +6,18 @@
  */
 import type {
   Connection,
-  ConnectionConfiguration,
   Extension,
   Hocuspocus,
   beforeHandleMessagePayload,
   beforeSyncPayload,
   connectedPayload,
   onAuthenticatePayload,
-  onDisconnectPayload,
 } from "@hocuspocus/server";
 import { parseRoom } from "@uberblick/schema";
 import type { CredentialRegistry } from "./credentials.js";
 import type { HubLogger } from "./log.js";
 import { protocolMismatchReason, readAuthEnvelope } from "./protocol.js";
-import { resolvePeer } from "./server.js";
+import { resolvePeer, TOKEN_QUERY_PARAMS } from "./server.js";
 
 export interface CredentialContext {
   credentialId: string;
@@ -37,15 +35,9 @@ class CredentialRefusal extends Error {
   }
 }
 
-interface PendingAdmission {
-  context: CredentialContext;
-  config: ConnectionConfiguration;
-}
-
 export class CredentialAdmission implements Extension<CredentialContext> {
   private readonly instances = new Set<Hocuspocus<CredentialContext>>();
   private readonly connections = new Set<Connection<CredentialContext>>();
-  private readonly pending = new Map<string, PendingAdmission>();
   private readonly unsubscribe: () => void;
 
   constructor(
@@ -63,7 +55,6 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     requestHeaders,
     requestParameters,
     connectionConfig,
-    socketId,
     instance,
   }: onAuthenticatePayload<CredentialContext>): Promise<CredentialContext> => {
     const peer = resolvePeer(requestHeaders);
@@ -72,11 +63,7 @@ export class CredentialAdmission implements Extension<CredentialContext> {
       this.options.log({ event: "hub.auth.rejected", peer: peer.address, cause });
       throw new CredentialRefusal(reason);
     };
-    if (
-      ["token", "access_token", "auth", "authToken"].some((key) =>
-        requestParameters.has(key),
-      )
-    ) {
+    if (TOKEN_QUERY_PARAMS.some((key) => requestParameters.has(key))) {
       return refuse("token-in-query");
     }
     const envelope = readAuthEnvelope(token);
@@ -116,9 +103,6 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     };
     connectionConfig.readOnly = verified.claims.scope === "read-only";
     this.instances.add(instance);
-    this.pending.set(this.key(socketId, documentName), {
-      context, config: connectionConfig,
-    });
     this.options.log({
       event: "hub.auth.accepted", credentialId: record.id, workspace,
     });
@@ -126,9 +110,8 @@ export class CredentialAdmission implements Extension<CredentialContext> {
   };
 
   connected = async ({
-    connection, socketId, documentName,
+    connection, documentName,
   }: connectedPayload<CredentialContext>): Promise<void> => {
-    this.pending.delete(this.key(socketId, documentName));
     this.check(connection, documentName);
   };
 
@@ -144,32 +127,20 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     this.check(connection, documentName);
   };
 
-  onDisconnect = async ({
-    socketId, documentName,
-  }: onDisconnectPayload<CredentialContext>): Promise<void> => {
-    this.pending.delete(this.key(socketId, documentName));
-  };
-
   onDestroy = async (): Promise<void> => {
     this.unsubscribe();
-    this.pending.clear();
     this.instances.clear();
     this.connections.clear();
   };
 
   /**
-   * End selected access, reusable for workspace membership removal. The latch
-   * and readOnly flag are set synchronously before closing any room. Closing
-   * alone leaves Hocuspocus' in-flight loop and queued frames alive.
+   * Close selected admitted rooms, reusable for workspace membership removal.
+   * Callers must first change the backing authority so authentication and
+   * message checks refuse that access, including admissions still in flight.
+   * The latch and readOnly flag are set synchronously before closing any room;
+   * closing alone leaves in-flight loops and queued frames alive.
    */
   closeWhere(predicate: (context: CredentialContext) => boolean): void {
-    for (const { context, config } of this.pending.values()) {
-      if (predicate(context)) {
-        context.authorization.active = false;
-        // A connection still loading its document inherits this fence.
-        config.readOnly = true;
-      }
-    }
     const candidates = new Set(this.connections);
     for (const instance of this.instances) {
       for (const document of instance.documents.values()) {
@@ -234,10 +205,6 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     } else {
       release();
     }
-  }
-
-  private key(socketId: string, room: string): string {
-    return `${socketId}/${room}`;
   }
 }
 

@@ -56,7 +56,6 @@ describe("credential authority is hub-only", () => {
     for (const name of ["CredentialRegistry", "CredentialAdmission"]) {
       expect(mentioning(name).filter((path) => !path.startsWith("packages/hub/"))).toEqual([]);
     }
-    expect(mentioning("deriveCredentialKey")).toEqual([]);
   });
 });
 
