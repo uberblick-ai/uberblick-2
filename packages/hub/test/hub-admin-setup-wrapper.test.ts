@@ -15,7 +15,7 @@ afterAll(() => {
   for (const directory of directories) rmSync(directory, { recursive: true, force: true });
 });
 
-function run(args: string[], exitCode = 0) {
+function run(args: string[], exitCode = 0, terminal = false) {
   const directory = mkdtempSync(join(tmpdir(), `uberblick-${process.env.UB_AGENT_RUN ?? "test"}-admin-wrapper-`));
   directories.push(directory);
   copyFileSync(SCRIPT, join(directory, "hub-admin-setup.sh"));
@@ -24,10 +24,16 @@ function run(args: string[], exitCode = 0) {
 printf '%s\\n' "$PWD" "$@" > "$UB_TEST_ADMIN_CAPTURE"
 exit "$UB_TEST_ADMIN_EXIT"
 `);
-  const result = spawnSync("sh", [join(directory, "hub-admin-setup.sh"), ...args], {
+  const command = [join(directory, "hub-admin-setup.sh"), ...args];
+  // Use the same cross-platform PTY utility as the CLI's welcome-script tests.
+  const scriptArgs = process.platform === "darwin"
+    ? ["-q", "/dev/null", "/bin/sh", ...command]
+    : ["-qec", `/bin/sh ${command.map((arg) => `'${arg.replaceAll("'", "'\\''")}'`).join(" ")}`, "/dev/null"];
+  const result = spawnSync(terminal ? "script" : "sh", terminal ? scriptArgs : command, {
     cwd: tmpdir(),
     env: { ...process.env, UB_TEST_ADMIN_CAPTURE: capture, UB_TEST_ADMIN_EXIT: String(exitCode) },
     encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
     timeout: 5000,
   });
   return { directory, capture, result };
@@ -39,6 +45,15 @@ describe("first-admin host wrapper", () => {
     expect(result.status).toBe(7);
     expect(readFileSync(capture, "utf8").trimEnd().split("\n")).toEqual([
       directory, "exec", "-T", "hub", "packages/hub/node_modules/.bin/tsx",
+      "packages/hub/src/admin-setup-command.ts", ...args,
+    ]);
+  });
+
+  it.each([[WORKSPACE], ["status", SETUP]])("gives terminal input %j a container TTY so Ctrl-C can reach the command", (...args) => {
+    const { directory, capture, result } = run(args, 0, true);
+    expect(result.status).toBe(0);
+    expect(readFileSync(capture, "utf8").trimEnd().split("\n")).toEqual([
+      directory, "exec", "hub", "packages/hub/node_modules/.bin/tsx",
       "packages/hub/src/admin-setup-command.ts", ...args,
     ]);
   });

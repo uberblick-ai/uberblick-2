@@ -298,11 +298,18 @@ GitHub configuration refuses setup distinctly as `not-configured`.
 ### Cancellation and a missing result
 
 Denied, abandoned, expired and failed approvals end distinctly without a grant.
+With terminal input, the script allocates a container terminal so **Ctrl-C**
+reaches the setup command. Over SSH, allocate a terminal with `ssh -t <hub-host>`.
+Press Ctrl-C and wait for `cancelled` or an unknown-result message.
 If the hub observes cancellation or interruption before committing, it fences
 that setup: approving its code later grants nothing. A grant already committed
 stands even if the command or its connection dies before displaying success.
-A process started by Compose may survive a dropped SSH connection; its setup
-can still finish on approval or expiry.
+
+With redirected input or SSH without a terminal, Compose does not forward host
+signals to the command. Interrupting that host process does **not** cancel setup;
+the code can still be approved until it expires. A command can also survive a
+dropped SSH connection. Treat these interruptions as unknown results and check
+status; they do not prove cancellation.
 
 Losing the result does **not** establish that nothing changed. Reconnect to
 the host checkout and use the setup ID printed by the original command:
