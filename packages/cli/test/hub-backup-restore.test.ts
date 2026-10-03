@@ -13,7 +13,7 @@
  * Nothing the scripts hand the hub image is faked either. The stub executes the
  * `sh -c` payload it is given, with the container paths rewritten into the
  * sandbox: the verification runs under the real `node`, so `PRAGMA
- * integrity_check` and the `documents` count are performed by the same
+ * integrity_check` and the document/access-state checks use the same
  * `node:sqlite` the hub persists with; the placement payload runs against a
  * directory standing in for the volume, so its ordering, its globs and its
  * failure handling are the script's own. Only `chown` is answered rather than
@@ -34,6 +34,11 @@ import {
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
+import { SetupReceipts } from "../../hub/src/admin-setup.js";
+import { CredentialRegistry } from "../../hub/src/credentials.js";
+import { MembershipRegistry } from "../../hub/src/memberships.js";
+import { HubDatabase } from "../../hub/src/persistence.js";
+import { PrincipalRegistry } from "../../hub/src/principals.js";
 import { REPO_ROOT, removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -313,18 +318,75 @@ describe("hub-restore.sh", () => {
     expect(existsSync(join(fix.volume, "hub.sqlite"))).toBe(false);
   });
 
-  /** A valid database with nothing in it passes the pragma, so the count is the check. */
-  it("refuses a backup whose documents table is empty", () => {
+  /** Empty private tables do not make an empty hub worth restoring. */
+  it.each(["legacy", "current"])("refuses a truly empty %s hub without touching the live database", (schema) => {
     const fix = fixture();
+    const live = join(fix.volume, "hub.sqlite");
+    hubDatabase(live, 3);
+    const before = readFileSync(live);
     const backup = join(fix.checkout, "empty.sqlite");
     hubDatabase(backup, 0);
+    if (schema === "current") {
+      const database = new HubDatabase(backup, () => {});
+      database.open();
+      try {
+        new PrincipalRegistry(database);
+        new CredentialRegistry(database);
+        new MembershipRegistry(database);
+        new SetupReceipts(database);
+      } finally {
+        database.close();
+      }
+    }
 
     const ran = run(fix, "hub-restore.sh", [backup]);
 
     expect(ran.status).not.toBe(0);
     expect(ran.stderr).toContain("empty");
     expect(subcommands(fix)).toEqual(["run"]);
-    expect(existsSync(join(fix.volume, "hub.sqlite"))).toBe(false);
+    expect(readFileSync(live)).toEqual(before);
+  });
+
+  it("backs up and restores a first-admin grant and receipt with no documents", () => {
+    const fix = fixture();
+    const live = join(fix.volume, "hub.sqlite");
+    const workspaceId = "00000000-0000-4000-8000-000000000001";
+    const setupId = "00000000-0000-4000-8000-000000000002";
+    const database = new HubDatabase(live, () => {});
+    database.open();
+    const identity = new PrincipalRegistry(database).identify("1234", "first-admin");
+    const grant = { status: "complete" as const, setupId, workspaceId, identity, hadDocuments: false };
+    try {
+      new CredentialRegistry(database);
+      new MembershipRegistry(database).grant({ workspaceId, principalId: identity.id, role: "admin" });
+      new SetupReceipts(database).save(grant);
+    } finally {
+      database.close();
+    }
+
+    const backup = join(fix.checkout, "access-only.sqlite");
+    const backedUp = run(fix, "hub-backup.sh", [backup]);
+    expect(backedUp.status).toBe(0);
+    // Stand in for loss of the original access records before recovery.
+    hubDatabase(join(fix.checkout, "replacement.sqlite"), 2);
+    copyFileSync(join(fix.checkout, "replacement.sqlite"), live);
+
+    const restored = run(fix, "hub-restore.sh", [backup]);
+
+    expect(restored.status, restored.stderr).toBe(0);
+    expect(restored.stdout).toContain("private access state");
+    expect(readFileSync(live)).toEqual(readFileSync(backup));
+    const recovered = new HubDatabase(live, () => {});
+    recovered.open();
+    try {
+      expect(new PrincipalRegistry(recovered).identify("1234", "first-admin")).toEqual(identity);
+      expect(new MembershipRegistry(recovered).roleFor(workspaceId, identity.id)).toBe("admin");
+      expect(new SetupReceipts(recovered).find(setupId)).toEqual(grant);
+      expect(recovered.connection.prepare("SELECT count(*) AS count FROM documents").get()?.count).toBe(0);
+      expect(recovered.connection.prepare("SELECT count(*) AS count FROM hub_credentials").get()?.count).toBe(0);
+    } finally {
+      recovered.close();
+    }
   });
 
   it("verifies, then stops, stages, renames into place and starts again", () => {

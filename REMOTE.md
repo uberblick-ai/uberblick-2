@@ -599,9 +599,11 @@ sh hub-restore.sh ~/uberblick-hub-2026-08-28.sqlite
 
 **Verified before anything is touched.** A restore runs on somebody's worst day,
 against a file nobody has opened since it was written, over the only copy that is
-left. So the backup is read first — `PRAGMA integrity_check`, *and* a non-empty
-`documents` table, because an empty but perfectly valid database passes the
-pragma and would restore a corpus of nothing. That check runs inside the hub's
+left. So the backup is read first — `PRAGMA integrity_check`, *and* documents
+or private access state. Identities, credentials, memberships and committed
+setup receipts are worth restoring even before the first document exists.
+A database with neither documents nor private access records is refused:
+it passes the pragma but would restore nothing. That check runs inside the hub's
 own image through `node:sqlite`, the module the hub itself persists with (the
 image is `node:26-bookworm-slim` and carries no `sqlite3` CLI), and writes the
 candidate to the container's `/tmp`, never to `/data`. A missing, corrupt or
