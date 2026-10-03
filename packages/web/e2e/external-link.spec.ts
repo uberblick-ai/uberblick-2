@@ -1,41 +1,25 @@
 /** Native editor activation and selection require a real browser. */
 import { expect, test } from "@playwright/test";
+import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import type { Locator, Page } from "@playwright/test";
-import { placeCaret, startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
+import { placeCaret } from "./harness.js";
+
+const { harness } = setupHarness();
 
 const TARGET = "https://example.invalid/external-link";
 const TEXT = "before external target after";
-let started: Harness | null = null;
-
-test.describe.configure({ mode: "serial" });
-test.beforeAll(async () => {
-  started = await startHarness();
-});
-test.afterAll(async () => {
-  const running = started;
-  started = null;
-  await running?.stop();
-});
-
-function editor(page: Page): Locator {
-  return page.locator(".ub-editor .ProseMirror");
-}
 
 async function openDoc(page: Page): Promise<void> {
-  if (started === null) throw new Error("e2e: the harness is not running");
   // Every target is fulfilled locally, including the first request in a new
   // tab (a page route cannot catch that request).
   await page.context().route("https://example.invalid/**", async (route) => {
     await route.fulfill({ contentType: "text/html", body: "<p>External target</p>" });
   });
-  await page.goto(started.appUrl);
+  await page.goto(harness().appUrl);
   if ((page.viewportSize()?.width ?? 1280) < 1280) {
     await page.getByRole("button", { name: "Show document list", exact: true }).click();
   }
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(editor(page)).toBeVisible();
-  await page.locator(".ub-title").fill("External link activation");
+  await createDoc(page, "External link activation");
   await placeCaret(page);
   await page.keyboard.type(`before [external target](${TARGET}) after`);
   await expect(editor(page)).toHaveText(TEXT);

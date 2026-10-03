@@ -8,98 +8,16 @@
  * people's tests, and the contracts already pinned by `test/` (golden
  * round-trip, block ids, the palette gate) are not re-tested here.
  *
- * The file is serial and shares one harness: the hub's port has to be known
- * before the dev server starts, and the third test stops the hub while the
- * browser stays up.
+ * Each test owns its documents and shares the file's harness. A failed test
+ * gets a fresh worker and harness, so independent proofs still run.
  */
 
 import { expect, test } from "@playwright/test";
-import type { Browser, BrowserContext, Page } from "@playwright/test";
-import { openUpstreamApp, placeCaret, startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
+import { createDoc, docTitle, editor, openDoc, setupHarness } from "./app-helpers.js";
+import type { Page } from "@playwright/test";
+import { placeCaret } from "./harness.js";
 
-test.describe.configure({ mode: "serial" });
-
-let started: Harness | null = null;
-const contexts: BrowserContext[] = [];
-
-/**
- * The running harness.
- *
- * A function, not a bare variable: if `beforeAll` failed there is nothing to
- * dereference, and a `TypeError` here would bury the real bootstrap error.
- */
-function harness(): Harness {
-  if (started === null) {
-    throw new Error("e2e: the harness is not running — its bootstrap failed");
-  }
-  return started;
-}
-
-test.beforeAll(async () => {
-  started = await startHarness();
-});
-
-test.afterEach(async () => {
-  for (const context of contexts.splice(0)) await context.close();
-});
-
-test.afterAll(async () => {
-  // Tolerates a failed bootstrap: `startHarness` cleans up after itself, so
-  // there is nothing left to stop.
-  const running = started;
-  started = null;
-  await running?.stop();
-});
-
-/** A fresh context: its own awareness identity and its own tab. */
-async function openApp(browser: Browser, path = "/"): Promise<Page> {
-  const context = await browser.newContext();
-  contexts.push(context);
-  const page = await context.newPage();
-  await page.goto(new URL(path, harness().appUrl).href);
-  await expect(page.locator(".ub-list-head")).toBeVisible();
-  return page;
-}
-
-/** Read through the upstream hub, bypassing `ub open`'s loopback server. */
-async function openUpstream(browser: Browser, path: string): Promise<Page> {
-  const { context, page } = await openUpstreamApp(browser, harness(), path);
-  contexts.push(context);
-  return page;
-}
-
-/** Unique per run: every test in the file shares one workspace directory. */
-function docTitle(label: string): string {
-  return `${label}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function docButton(page: Page, title: string) {
-  return page.locator(".ub-list").getByRole("button", { name: title, exact: true });
-}
-
-function editor(page: Page) {
-  return page.locator(".ub-editor .ProseMirror");
-}
-
-async function createDoc(page: Page, title: string): Promise<void> {
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(editor(page)).toBeVisible();
-  await page.locator(".ub-title").fill(title);
-  // Pinned, because the sidebar lists what is pinned and nothing else (#115) —
-  // and this is how the *other* context navigates to it.
-  await page.getByRole("button", { name: "Document actions" }).click();
-  await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
-  // The sidebar doc carries the pin and the directory stub carries the title,
-  // and both are what the *other* context navigates by.
-  await expect(docButton(page, title)).toBeVisible();
-}
-
-/** Open a document the way a second client has to: from the sidebar. */
-async function openDoc(page: Page, title: string): Promise<void> {
-  await docButton(page, title).click();
-  await expect(editor(page)).toBeVisible();
-}
+const { harness, openApp, trackContext } = setupHarness({ app: { readySelector: ".ub-list-head" } });
 
 /**
  * The open document's first block, with remote-cursor widgets stripped.
@@ -133,7 +51,7 @@ test("two contexts typing into different ranges of one block converge byte-ident
   const right = "-right-right-right-right";
 
   const [a, b] = await Promise.all([openApp(browser), openApp(browser)]);
-  await createDoc(a, title);
+  await createDoc(a, title, { pin: true });
   await placeCaret(a);
   await type(a, seed);
 
@@ -158,7 +76,7 @@ test("a TL;DR added, edited and cleared in one client follows in the other", asy
 }) => {
   const title = docTitle("tldr");
   const [a, b] = await Promise.all([openApp(browser), openApp(browser)]);
-  await createDoc(a, title);
+  await createDoc(a, title, { pin: true });
   await openDoc(b, title);
 
   await a.getByRole("button", { name: "Document actions" }).click();
@@ -195,8 +113,8 @@ test("the upstream fact recovers after an acknowledged typing burst", async ({
   browser,
 }) => {
   const page = await openApp(browser);
-  await createDoc(page, docTitle("calm-upstream"));
-  const observer = await openUpstream(browser, new URL(page.url()).pathname);
+  await createDoc(page, docTitle("calm-upstream"), { pin: true });
+  const observer = await openApp(browser, new URL(page.url()).pathname, { upstream: true });
   await expect(editor(observer)).toBeVisible();
   await placeCaret(page);
   const upstream = page.locator(".ub-status-word--hub");
@@ -216,7 +134,7 @@ test("a peer's cursor renders in the other context with its name and colour", as
   const title = docTitle("cursor");
 
   const [a, b] = await Promise.all([openApp(browser), openApp(browser)]);
-  await createDoc(a, title);
+  await createDoc(a, title, { pin: true });
   await placeCaret(a);
   await type(a, "watch this");
 
@@ -274,7 +192,7 @@ test("a peer joining leaves the status row's height and the prose where they wer
   // 28px control in it.
   const title = docTitle("row-height");
   const [a, b] = await Promise.all([openApp(browser), openApp(browser)]);
-  await createDoc(a, title);
+  await createDoc(a, title, { pin: true });
   await placeCaret(a);
   await type(a, "still");
 
@@ -301,7 +219,7 @@ test("the open document's last-updated reading follows its stub through status a
   browser,
 }) => {
   const context = await browser.newContext();
-  contexts.push(context);
+  trackContext(context);
   const page = await context.newPage();
   const title = docTitle("freshness");
   const realNow = Date.now();
@@ -312,7 +230,7 @@ test("the open document's last-updated reading follows its stub through status a
   await page.clock.install({ time: realNow });
   await page.goto(harness().appUrl);
   await expect(page.locator(".ub-list-head")).toBeVisible();
-  await createDoc(page, title);
+  await createDoc(page, title, { pin: true });
 
   const reading = page.locator(".ub-last-updated");
   const time = reading.locator("time");
@@ -417,7 +335,7 @@ test("a fresh browser hydrates from the ub open store while the upstream is offl
   browser,
 }) => {
   const seeded = await openApp(browser);
-  await createDoc(seeded, docTitle("checkpoint"));
+  await createDoc(seeded, docTitle("checkpoint"), { pin: true });
   const path = new URL(seeded.url()).pathname;
 
   await harness().stopHub();
@@ -449,7 +367,7 @@ test("a multi-author block survives upstream loss and converges back without dup
   const title = docTitle("offline");
 
   const [a, b] = await Promise.all([openApp(browser), openApp(browser)]);
-  await createDoc(a, title);
+  await createDoc(a, title, { pin: true });
   await placeCaret(a);
   await type(a, "before");
 
@@ -462,30 +380,34 @@ test("a multi-author block survives upstream loss and converges back without dup
   await expect.poll(() => blockText(a)).toBe("before-peer");
   await expect(a.locator(".ub-status-word--hub")).toHaveText("synced with hub");
   await harness().stopHub();
-  await expect(a.locator(".ub-status-word--hub")).toHaveText(
-    "not synced with hub",
-  );
+  try {
+    await expect(a.locator(".ub-status-word--hub")).toHaveText(
+      "not synced with hub",
+    );
 
-  // Reload with no upstream. Both rooms hydrate from the process-local store,
-  // and the browser still has a real durability boundary to acknowledge it.
-  await a.reload();
-  await openDoc(a, title);
-  await expect.poll(() => blockText(a)).toBe("before-peer");
-  await expect(a.locator(".ub-status-word--saved")).toHaveText("saved here");
-  await expect(a.locator(".ub-status-word--hub")).toHaveText(
-    "not synced with hub",
-  );
+    // Reload with no upstream. Both rooms hydrate from the process-local store,
+    // and the browser still has a real durability boundary to acknowledge it.
+    await a.reload();
+    await openDoc(a, title);
+    await expect.poll(() => blockText(a)).toBe("before-peer");
+    await expect(a.locator(".ub-status-word--saved")).toHaveText("saved here");
+    await expect(a.locator(".ub-status-word--hub")).toHaveText(
+      "not synced with hub",
+    );
 
-  await placeCaret(a);
-  await type(a, "-offline");
-  await expect.poll(() => blockText(b)).toBe("before-peer-offline");
+    await placeCaret(a);
+    await type(a, "-offline");
+    await expect.poll(() => blockText(b)).toBe("before-peer-offline");
 
-  await harness().startHub();
-  // A browser connected directly to the restarted upstream sees the update
-  // once the silent replica drains its pending row. Exact text rules out a
-  // duplicate replay as well as a missing write.
-  const upstream = await openUpstream(browser, new URL(a.url()).pathname);
-  await expect
-    .poll(() => blockText(upstream), { timeout: 40_000 })
-    .toBe("before-peer-offline");
+    await harness().startHub();
+    // A browser connected directly to the restarted upstream sees the update
+    // once the silent replica drains its pending row. Exact text rules out a
+    // duplicate replay as well as a missing write.
+    const upstream = await openApp(browser, new URL(a.url()).pathname, { upstream: true });
+    await expect
+      .poll(() => blockText(upstream), { timeout: 40_000 })
+      .toBe("before-peer-offline");
+  } finally {
+    await harness().startHub();
+  }
 });

@@ -20,23 +20,13 @@
  */
 
 import { expect, test } from "@playwright/test";
-import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
-import { openUpstreamApp, startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
+import { createDoc, docTitle, setupHarness } from "./app-helpers.js";
+import type { Locator, Page } from "@playwright/test";
 import { McpAgent } from "./mcp-agent.js";
 
-test.describe.configure({ mode: "serial" });
+const { harness, openApp } = setupHarness({ app: { readySelector: ".ub-list-head" } });
 
-let started: Harness | null = null;
 let mcpAgent: McpAgent | null = null;
-const contexts: BrowserContext[] = [];
-
-function harness(): Harness {
-  if (started === null) {
-    throw new Error("e2e: the harness is not running — its bootstrap failed");
-  }
-  return started;
-}
 
 function agent(): McpAgent {
   if (mcpAgent === null) {
@@ -46,7 +36,6 @@ function agent(): McpAgent {
 }
 
 test.beforeAll(async () => {
-  started = await startHarness();
   mcpAgent = new McpAgent({
     workspace: harness().workspace,
     hubUrl: harness().hubUrl,
@@ -57,41 +46,16 @@ test.beforeAll(async () => {
 
 test.afterEach(async () => {
   await mcpAgent?.closeSessions();
-  for (const context of contexts.splice(0)) await context.close();
 });
 
 test.afterAll(async () => {
-  const running = started;
-  started = null;
   await mcpAgent?.close();
   mcpAgent = null;
-  await running?.stop();
 });
-
-/** A fresh context: its own history and its own tab. */
-async function openApp(browser: Browser): Promise<Page> {
-  const context = await browser.newContext();
-  contexts.push(context);
-  const page = await context.newPage();
-  await page.goto(harness().appUrl);
-  await expect(page.locator(".ub-list-head")).toBeVisible();
-  return page;
-}
-
-/** Unique per run: every test in the file shares one workspace. */
-function docTitle(label: string): string {
-  return `${label}-${Math.random().toString(36).slice(2, 8)}`;
-}
 
 /** The titles the list shows, top to bottom. */
 function listedTitles(page: Page): Locator {
   return page.locator(".ub-docs-title");
-}
-
-async function createDoc(page: Page, title: string): Promise<void> {
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
-  await page.locator(".ub-title").fill(title);
 }
 
 test("the workspace address is the list, and it holds what another browser created", async ({
@@ -200,8 +164,7 @@ test("a lifecycle update outside the browser moves the row and both badges", asy
   const title = docTitle("roadmap");
   // The local/upstream store replay is #752. This criterion concerns #441's
   // lifecycle UI, so keep its browser on the same upstream as its MCP writer.
-  const { context, page } = await openUpstreamApp(browser, harness());
-  contexts.push(context);
+  const page = await openApp(browser, "/", { upstream: true });
   // No `ub open` behind this page, and the filter does not care: what it
   // narrows already arrived over the hub connection.
   const filterField = page.getByRole("searchbox", {

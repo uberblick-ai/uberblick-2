@@ -37,6 +37,7 @@ import type * as Y from "yjs";
 import { readDocumentLifecycle } from "./types.js";
 import type {
   DirectoryEntry,
+  DocMeta,
   DocumentKind,
   DocumentStatus,
 } from "./types.js";
@@ -56,6 +57,42 @@ interface StoredEntry {
   description?: string;
   kind?: DocumentKind;
   status?: DocumentStatus;
+}
+
+function sameSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = new Set(a);
+  for (const value of b) {
+    if (!left.has(value)) return false;
+  }
+  return true;
+}
+
+/**
+ * Shared web/MCP cache-repair rule: the document's metadata is authoritative.
+ * A missing stub or a different title, tag set, description, kind or status
+ * needs repair. Tag order is immaterial; absent and empty descriptions agree.
+ * Each repair states all these fields from its replica's document, even if that
+ * copy lags another replica's stub: the cache heals on observed updates rather
+ * than arbitrating which copy is newer.
+ *
+ * Callers leave observed tombstones alone and also write a live stub missing
+ * `createdAt`, even when its metadata agrees. Every repair supplies that stamp;
+ * `upsertDirectoryEntry` preserves an existing one. Authorship, clocks,
+ * `updatedAt` coarseness and write gates remain the writer's responsibility.
+ */
+export function directoryStubDiffers(
+  stub: DirectoryEntry | null,
+  meta: DocMeta,
+): boolean {
+  return (
+    stub === null ||
+    stub.title !== meta.title ||
+    !sameSet(stub.tags, meta.tags) ||
+    (stub.description ?? "") !== (meta.description ?? "") ||
+    stub.kind !== meta.kind ||
+    stub.status !== meta.status
+  );
 }
 
 /** A stored epoch-millisecond stamp, or undefined when absent or malformed. */
@@ -195,8 +232,8 @@ export interface DirectoryUpsert {
   updatedAt?: number;
   /**
    * The document's description, cached here for listings. Written when given and
-   * carried forward untouched otherwise — the web client repairs stubs without
-   * knowing this field exists, and must not erase it by writing a title.
+   * carried forward untouched otherwise. Document repairs state it explicitly;
+   * writers changing only other fields can omit it to preserve the cache.
    *
    * The empty string is the one way to clear it, which is how a document whose
    * description was removed stops advertising the old one.

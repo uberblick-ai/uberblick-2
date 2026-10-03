@@ -28,6 +28,7 @@ import {
   getDirectoryMap,
   setTags,
   setTitle,
+  upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import {
@@ -202,21 +203,50 @@ describe("directory timestamps", () => {
     expect(stub(author, doc.uuid).updatedAt).toBe(T0);
   });
 
-  it("repairs a stub it disagrees with, and backfills createdAt, without stamping", async () => {
+  it("repairs description-only drift on a later log replay without stamping", async () => {
+    const databasePath = tempDatabasePath();
+    const author = await localRig(testConfig({ databasePath }));
+    const doc = await author.ok("create_doc", {
+      title: "Described elsewhere",
+      description: "Current description.",
+    });
+    const observer = await localRig(testConfig({ databasePath }));
+    await observer.ok("list_docs");
+
+    // The author stays inside its stamp window. Only the later observer's
+    // document replay can repair this subsequently drifted description.
+    vi.setSystemTime(T0 + 1_000);
+    await typeInto(author, doc.uuid, "a later update");
+    upsertDirectoryEntry(author.instance.replicas.directory().doc, {
+      uuid: doc.uuid,
+      title: "Described elsewhere",
+      description: "Stale description.",
+    });
+
+    vi.setSystemTime(T0 + 3 * WINDOW);
+    await observer.ok("list_docs");
+    expect(stub(observer, doc.uuid)).toMatchObject({
+      description: "Current description.",
+      createdAt: T0,
+      updatedAt: T0,
+    });
+  });
+
+  it("backfills only missing createdAt without stamping", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
       title: "Right",
       description: "A test document.",
     });
 
-    // A stub as an older writer left it: a drifted title and no stamps at all.
-    // Written into the map directly, for the reason the backfill test above
-    // gives.
+    // Keep every cached field and updatedAt correct, isolating the missing
+    // creation time. A normal upsert would carry createdAt forward.
     getDirectoryMap(rig.instance.replicas.directory().doc).set(doc.uuid, {
-      title: "Drifted",
+      title: "Right",
       tags: [],
+      description: "A test document.",
+      updatedAt: T0,
     });
-    rig.instance.replicas.directory().doc.getMap("updatedAt").clear();
 
     // Rebuilding the derived index is not editing a document — but it does reach
     // the stub, and the stub is the one thing here that is not rebuildable.
@@ -226,8 +256,8 @@ describe("directory timestamps", () => {
     expect(stub(rig, doc.uuid)).toMatchObject({
       title: "Right",
       createdAt: T0 + 3 * WINDOW,
+      updatedAt: T0,
     });
-    expect(stub(rig, doc.uuid).updatedAt).toBeUndefined();
   });
 
   it("republishes a stub on restore without inventing a stamp for it", async () => {

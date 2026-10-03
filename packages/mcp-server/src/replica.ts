@@ -30,6 +30,7 @@ import {
   SETTINGS_SUFFIX,
   SIDEBAR_SUFFIX,
   directoryRoom,
+  directoryStubDiffers,
   getBlocksFragment,
   getBlocksWithInline,
   getDirectoryEntry,
@@ -158,15 +159,6 @@ export function docLinkRanges(
     index = end;
   }
   return ranges;
-}
-
-function sameSet(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false;
-  const left = new Set(a);
-  for (const value of b) {
-    if (!left.has(value)) return false;
-  }
-  return true;
 }
 
 export class Replicas {
@@ -939,8 +931,8 @@ export class Replicas {
    * Bring the directory stub back in line with the document, and stamp it where
    * this server authored the change it is reacting to.
    *
-   * `meta.title` and `meta.description` in the doc are authoritative; the stub
-   * is a cache. A tombstone is left alone — `upsertDirectoryEntry` keeps it
+   * The cache-repair rule lives beside {@link directoryStubDiffers}. A
+   * tombstone is left alone — `upsertDirectoryEntry` keeps it
    * sticky, but rewriting it on every observed update would churn the directory
    * for nothing.
    *
@@ -954,7 +946,7 @@ export class Replicas {
    *
    * - `createdAt` is set once. Passing it on every repair costs nothing (the
    *   schema keeps the existing one) and is what backfills a stub written
-   *   before the field existed, on the first change anyone observes.
+   *   before the field existed, on the first repair.
    * - `updatedAt` is stamped only for a change this server authored — `authored`
    *   — because the field says when someone changed the document, not when a
    *   replica noticed it. An update that merely arrived, a log replay, an index
@@ -969,8 +961,8 @@ export class Replicas {
    *   than `updatedAtCoarsenessMs`. A burst of edits to one document therefore
    *   costs one directory update per window, not one per keystroke.
    *
-   * This is the rule `packages/web/src/collab/directory-stub.ts` already
-   * follows, where `transaction.local` is what `authored` is here.
+   * The web uses the same comparison, with `transaction.local` where this
+   * server uses `authored`, and keeps its own clock, window and write gate.
    *
    * The stamp read back is the directory's resolved maximum, so a second
    * replica that has already stamped this window suppresses this one's write
@@ -985,13 +977,7 @@ export class Replicas {
       return;
     }
     const now = Date.now();
-    const metaChanged =
-      stub === null ||
-      stub.title !== meta.title ||
-      (stub.description ?? null) !== meta.description ||
-      stub.kind !== meta.kind ||
-      stub.status !== meta.status ||
-      !sameSet(stub.tags, meta.tags);
+    const metaChanged = directoryStubDiffers(stub, meta);
     const staleStamp =
       stub?.updatedAt === undefined ||
       now - stub.updatedAt >= this.config.updatedAtCoarsenessMs;
@@ -999,7 +985,7 @@ export class Replicas {
     // Whether to write and whether to stamp are separate questions: a stub
     // missing `createdAt` is written to backfill it even when nothing else
     // changed and nothing is stamped.
-    if (!metaChanged && !stamp && stub.createdAt !== undefined) {
+    if (!metaChanged && !stamp && stub?.createdAt !== undefined) {
       return;
     }
     upsertDirectoryEntry(directory.doc, {

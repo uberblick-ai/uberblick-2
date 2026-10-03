@@ -451,12 +451,12 @@ export function DocumentList({
                       aria-pressed={groupOf.has(entry.uuid)}
                       aria-label={
                         onTogglePin === null
-                          ? `${pinLabel(entry, groupOf.has(entry.uuid))} unavailable while sidebar is read-only`
+                          ? `${pinLabel(entry, groupOf.has(entry.uuid))} unavailable while sidebar is not ready to write`
                           : pinLabel(entry, groupOf.has(entry.uuid))
                       }
                       title={
                         onTogglePin === null
-                          ? "Pin unavailable while the sidebar is read-only"
+                          ? "Pin unavailable while the sidebar is not ready to write"
                           : pinLabel(entry, groupOf.has(entry.uuid))
                       }
                       onClick={() => onTogglePin?.(entry.uuid)}

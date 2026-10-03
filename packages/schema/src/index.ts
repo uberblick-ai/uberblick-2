@@ -164,6 +164,7 @@ export {
 
 export {
   DIRECTORY_DOCS_KEY,
+  directoryStubDiffers,
   getDirectoryEntry,
   getDirectoryMap,
   listDirectory,

@@ -43,7 +43,8 @@
 
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } from "@playwright/test";
+import { setupHarness } from "./app-helpers.js";
+import type { Browser, BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import {
   importRootSecret,
@@ -58,69 +59,23 @@ import {
   MAX_TAG_NAME_LENGTH,
 } from "@uberblick/schema";
 import * as Y from "yjs";
-import { placeCaret, startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
+import { placeCaret } from "./harness.js";
 
-test.describe.configure({ mode: "serial" });
+const { harness, openApp } = setupHarness();
 
-let started: Harness | null = null;
-const contexts: BrowserContext[] = [];
-
-function harness(): Harness {
-  if (started === null) {
-    throw new Error("e2e: the harness is not running — its bootstrap failed");
-  }
-  return started;
-}
-
-test.beforeAll(async () => {
-  started = await startHarness();
-});
-
-test.afterEach(async () => {
-  for (const context of contexts.splice(0)) await context.close();
-});
-
-test.afterAll(async () => {
-  const running = started;
-  started = null;
-  await running?.stop();
-});
-
-/**
- * The app in its own context, at `path` — `/`, and the workspace the harness
- * configured, unless a test names another address.
- *
- * The address is an argument rather than a second `goto`; each proof starts on
- * the production serving path it means to exercise.
- */
-async function openApp(
+/** The appearance and input context required by this file's CSS proofs. */
+async function openAppearanceApp(
   browser: Browser,
   colorScheme: "light" | "dark",
   path = "",
   hasTouch = false,
   contextOptions: BrowserContextOptions = {},
 ): Promise<Page> {
-  const context = await browser.newContext({ colorScheme, hasTouch, ...contextOptions });
-  contexts.push(context);
-  // This file's synthetic peers exercise direct hub presence. Relaying that
-  // presence through `ub open` is #753, so preserve the existing proof by
-  // keeping the browser on the same upstream as those peers.
-  await context.route("**/uberblick-config.json", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        hubUrl: harness().hubUrl,
-        workspaces: [harness().workspace],
-        hubAuthToken: harness().authSecret,
-      }),
-    });
+  return openApp(browser, path, {
+    upstream: true,
+    contextOptions: { colorScheme, hasTouch, ...contextOptions },
+    readySelector: path.includes("/settings") ? "[data-settings-page]" : ".ub-workspace",
   });
-  const page = await context.newPage();
-  await page.goto(new URL(path, harness().appUrl).href);
-  await expect(page.locator(path.includes("/settings") ? "[data-settings-page]" : ".ub-workspace")).toBeVisible();
-  return page;
 }
 
 /** Visit the owner surface once so its ordinary example catalog is available. */
@@ -245,7 +200,7 @@ for (const scheme of ["light", "dark"] as const) {
   test(`the sidebar's menus are the product's own surface — ${scheme}`, async ({
     browser,
   }) => {
-    const page = await openApp(browser, scheme);
+    const page = await openAppearanceApp(browser, scheme);
 
     // The switcher: anchored to the sidebar's header and as wide as it.
     await page.locator(".ub-workspace").click();
@@ -302,7 +257,7 @@ for (const scheme of ["light", "dark"] as const) {
   test(`the selected appearance has one non-hue cue — ${scheme}`, async ({
     browser,
   }) => {
-    const page = await openApp(browser, scheme);
+    const page = await openAppearanceApp(browser, scheme);
     await page.locator(".ub-user-card").click();
     const panel = page.locator("[data-slot=popover-content]");
     await expect(panel).toBeVisible();
@@ -382,7 +337,7 @@ for (const scheme of ["light", "dark"] as const) {
   test(`presence selection and keyboard focus stay distinct — ${scheme}`, async ({
     browser,
   }) => {
-    const page = await openApp(browser, scheme);
+    const page = await openAppearanceApp(browser, scheme);
     await page.locator(".ub-user-card").click();
     const panel = page.locator("[data-slot=popover-content]");
     await expect(panel).toBeVisible();
@@ -448,7 +403,7 @@ for (const scheme of ["light", "dark"] as const) {
 test("workspace settings is an address-selected, inert sidebar drill-in", async ({
   browser,
 }) => {
-  const page = await openApp(browser, "light");
+  const page = await openAppearanceApp(browser, "light");
   const workspacePath = `/${harness().workspace}`;
   const settingsPath = `${workspacePath}/settings`;
   const documents = page.locator(".ub-document-sidebar");
@@ -536,7 +491,7 @@ for (const scheme of ["light", "dark"] as const) {
   test(`a disabled sidebar control keeps its ground under the pointer — ${scheme}`, async ({
     browser,
   }) => {
-    const page = await openApp(browser, scheme, "not-a-workspace");
+    const page = await openAppearanceApp(browser, scheme, "not-a-workspace");
     const create = page.getByRole("button", { name: "new doc unavailable" });
     await expect(create).toBeDisabled();
 
@@ -570,7 +525,7 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
 }) => {
   // A browser whose system preference is light: everything that follows is the
   // reader overruling it, which is the whole point of the setting.
-  const page = await openApp(browser, "light");
+  const page = await openAppearanceApp(browser, "light");
   // A document, so there is an editor on screen to re-theme — its ink comes
   // from `--prose-text`, a token nothing else in the app reads.
   await page.getByRole("button", { name: "+ new doc" }).click();
@@ -609,7 +564,7 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
 test("the TL;DR callout keeps its hierarchy, themes and wrapping at both reading widths", async ({
   browser,
 }) => {
-  const page = await openApp(browser, "light");
+  const page = await openAppearanceApp(browser, "light");
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
   await page.getByRole("button", { name: "Document actions" }).click();
@@ -699,7 +654,7 @@ test("the TL;DR callout keeps its hierarchy, themes and wrapping at both reading
 test("the open document owns the remaining chrome and its one sync-details handle", async ({
   browser,
 }) => {
-  const page = await openApp(browser, "light");
+  const page = await openAppearanceApp(browser, "light");
   const removed = page.locator(".ub-header, .ub-brand, .ub-crumb, .ub-me");
   await expect(removed).toHaveCount(0);
   await expect(page.locator(".ub-sync-toggle")).toHaveCount(0);
@@ -727,7 +682,7 @@ test("the open document owns the remaining chrome and its one sync-details handl
 });
 
 test("a multiline comment composer stays above its selected passage", async ({ browser }) => {
-  const page = await openApp(browser, "light");
+  const page = await openAppearanceApp(browser, "light");
   await page.setViewportSize({ width: 1400, height: 800 });
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
@@ -765,7 +720,7 @@ test("a multiline comment composer stays above its selected passage", async ({ b
 test("the document and comments rail stay left-anchored as the viewport changes", async ({
   browser,
 }) => {
-  const page = await openApp(browser, "light");
+  const page = await openAppearanceApp(browser, "light");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize({ width: 1400, height: 800 });
   await page.getByRole("button", { name: "+ new doc" }).click();
@@ -950,7 +905,12 @@ test("the document and comments rail stay left-anchored as the viewport changes"
 test("document actions stay reachable, close with the route, and archive into Restore", async ({
   browser,
 }) => {
-  const page = await openApp(browser, "light", "", true);
+  const page = await openApp(browser, "", {
+    upstream: true,
+    contextOptions: { colorScheme: "light", hasTouch: true },
+    beforeNavigate: async (page) => { await page.clock.install(); },
+    readySelector: ".ub-workspace",
+  });
   await page.getByRole("button", { name: "+ new doc" }).click();
   await page.locator(".ub-title").fill("Lifecycle notes");
   await page.setViewportSize({ width: 360, height: 720 });
@@ -1051,13 +1011,11 @@ test("document actions stay reachable, close with the route, and archive into Re
 
   // A touch pointer takes the same outside-dismissal path. The dialog layer's
   // first passive effect queues the zero-delay timer that arms its document
-  // pointerdown listener. The following timer is scheduled over a later CDP
-  // round trip, behind that arming timer. This ordering, not an elapsed
-  // interval, makes the single touch tap deterministic.
+  // pointerdown listener. Run that timer under test control before the tap.
   await trigger.click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
   await expect(confirmation).toHaveCount(1);
-  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  await page.clock.runFor(1);
   await page.touchscreen.tap(4, 4);
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();
@@ -1094,7 +1052,7 @@ for (const scheme of ["light", "dark"] as const) {
   test(`the archive confirmation is opaque over the page — ${scheme}`, async ({
     browser,
   }) => {
-    const page = await openApp(browser, scheme);
+    const page = await openAppearanceApp(browser, scheme);
     await page.getByRole("button", { name: "+ new doc" }).click();
     await page.locator(".ub-title").fill("Lifecycle notes");
     await page.getByRole("button", { name: "Document actions" }).click();
@@ -1128,7 +1086,7 @@ for (const scheme of ["light", "dark"] as const) {
 test("MCP connections counts a connected agent session, and stops when it goes", async ({
   browser,
 }) => {
-  const page = await openApp(browser, "dark");
+  const page = await openAppearanceApp(browser, "dark");
   const connections = page.locator(".ub-panel-fact", { hasText: "MCP connections" });
 
   await page.locator(".ub-user-card").click();
@@ -1173,7 +1131,7 @@ test("MCP connections counts a connected agent session, and stops when it goes",
 test("the document collaborator cluster stays compact and jumps once without moving selection", async ({
   browser,
 }) => {
-  const page = await openApp(browser, "light");
+  const page = await openAppearanceApp(browser, "light");
   // The narrow drawer closes on creation, leaving the full-width document pane.
   await page.setViewportSize({ width: 720, height: 640 });
   await page.getByRole("button", { name: "Show document list", exact: true }).click();
@@ -1606,7 +1564,7 @@ for (const scheme of ["light", "dark"] as const) {
   test(`a card-grounded highlight steps off its ground — ${scheme}`, async ({
     browser,
   }) => {
-    const page = await openApp(browser, scheme);
+    const page = await openAppearanceApp(browser, scheme);
     // Under the rail's 1100px breakpoint, which is the only width where the
     // threads handle is on screen to be measured at all.
     await page.setViewportSize({ width: 1000, height: 800 });
@@ -1637,7 +1595,7 @@ for (const scheme of ["light", "dark"] as const) {
     // A second client on the same document, because a mention chip is offered
     // for a peer publishing awareness and for nobody else — there is no chip to
     // measure in a room with one client in it.
-    await openApp(browser, scheme, new URL(page.url()).pathname);
+    await openAppearanceApp(browser, scheme, new URL(page.url()).pathname);
 
     await page.locator(".ub-composer-open").click();
 
@@ -1940,7 +1898,7 @@ for (const scheme of ["light", "dark"] as const) {
   test(`the sidebar's interior reads the sidebar's own tokens — ${scheme}`, async ({
     browser,
   }) => {
-    const page = await openApp(browser, scheme);
+    const page = await openAppearanceApp(browser, scheme);
 
     // The floor is the column's outer edge, whatever it is painted.
     const edge = await painted(page, ".ub-list", "border-right-color");
@@ -2122,7 +2080,7 @@ for (const scheme of ["light", "dark"] as const) {
   test(`the brand's functional ink is one readable value — ${scheme}`, async ({
     browser,
   }) => {
-    const page = await openApp(browser, scheme);
+    const page = await openAppearanceApp(browser, scheme);
 
     // A document carrying the three consumers outside the sidebar. It needs a
     // title before the header offers Pin at all.
@@ -2213,7 +2171,7 @@ for (const scheme of ["light", "dark"] as const) {
 test("the document title is set in the bundled Fraunces, and nothing else moved", async ({
   browser,
 }) => {
-  const page = await openApp(browser, "light");
+  const page = await openAppearanceApp(browser, "light");
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
@@ -2290,7 +2248,7 @@ test("the document title is set in the bundled Fraunces, and nothing else moved"
 test("the copy-link control is a 44px target, at rest and once the pane has scrolled", async ({
   browser,
 }) => {
-  const page = await openApp(browser, "light");
+  const page = await openAppearanceApp(browser, "light");
   await ensureExampleCatalog(page);
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
@@ -2481,7 +2439,7 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
     });
   };
 
-  const waiting = await openApp(
+  const waiting = await openAppearanceApp(
     browser,
     "light",
     `/${harness().workspace}/${randomUUID()}`,
@@ -2502,7 +2460,7 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
 test("the document's tags are wrapping pills, and the panel earns its search field — dark", async ({
   browser,
 }) => {
-  const page = await openApp(browser, "dark");
+  const page = await openAppearanceApp(browser, "dark");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await ensureExampleCatalog(page);
   await page.getByRole("button", { name: "+ new doc" }).click();
@@ -2664,7 +2622,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
 
 test("Workspace Settings uses the shared touch floors at iPhone and iPad widths", async ({ browser }) => {
   for (const width of [375, 932, 744, 1024, 1366]) {
-    const page = await openApp(browser, "light", `/${harness().workspace}/settings/tags`, true, {
+    const page = await openAppearanceApp(browser, "light", `/${harness().workspace}/settings/tags`, true, {
       isMobile: true,
       viewport: { width, height: 900 },
     });
@@ -2693,7 +2651,7 @@ test("Workspace Settings uses the shared touch floors at iPhone and iPad widths"
 for (const scheme of ["light", "dark"] as const) {
   test(`both settings pages keep every text readable through curation states — ${scheme}`, async ({ browser }) => {
     const path = `/${harness().workspace}/settings/tags`;
-    const page = await openApp(browser, scheme, `/${harness().workspace}/settings`);
+    const page = await openAppearanceApp(browser, scheme, `/${harness().workspace}/settings`);
     const readings = await surface(page, "[data-settings-page]");
     expect(readings.filter((one) => one.kind === "text")).not.toHaveLength(0);
     await page.goto(new URL(path, harness().appUrl).href);
@@ -2735,7 +2693,7 @@ for (const scheme of ["light", "dark"] as const) {
     try {
       await expect(page.getByText("Tag changes are unavailable while this page is disconnected.")).toBeVisible();
       readings.push(...await surface(page, "[data-settings-page]"));
-      const waiting = await openApp(browser, scheme, path);
+      const waiting = await openAppearanceApp(browser, scheme, path);
       await expect(waiting.getByText("Waiting for the tag catalog…")).toBeVisible();
       readings.push(...await surface(waiting, "[data-settings-page]"));
     } finally {

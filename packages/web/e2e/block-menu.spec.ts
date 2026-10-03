@@ -22,31 +22,16 @@
 
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
-import { placeCaret, startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
+import { createDoc, setupHarness } from "./app-helpers.js";
+import { placeCaret } from "./harness.js";
 
-test.describe.configure({ mode: "serial" });
-
-let started: Harness | null = null;
-
-test.beforeAll(async () => {
-  started = await startHarness();
-});
-
-test.afterAll(async () => {
-  const running = started;
-  started = null;
-  await running?.stop();
-});
+const { harness } = setupHarness();
 
 /** A fresh document, open and focused, with one paragraph of prose in it. */
 async function openDoc(page: Page, seed: string): Promise<void> {
-  if (started === null) throw new Error("e2e: the harness is not running");
-  await page.goto(started.appUrl);
+  await page.goto(harness().appUrl);
   await expect(page.locator(".ub-list-head")).toBeVisible();
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
-  await page.locator(".ub-title").fill("block menu");
+  await createDoc(page, "block menu");
 
   await placeCaret(page);
   await page.keyboard.type(seed, { delay: 15 });
@@ -112,7 +97,7 @@ async function walk(
   await page.mouse.move(to.x, to.y, { steps });
 }
 
-/** Move slowly enough for hover state and the opacity transition to settle. */
+/** Observe the rendered hover state at every pixel of the pointer route. */
 async function humanWalk(
   page: Page,
   from: { x: number; y: number },
@@ -125,8 +110,17 @@ async function humanWalk(
       from.x + (to.x - from.x) * progress,
       from.y + (to.y - from.y) * progress,
     );
-    await page.waitForTimeout(8);
+    await expect(page.locator(".ub-gutter-add")).toHaveClass(/\bub-gutter-add-on\b/);
   }
+}
+
+/** Wait out the CSS close transition before proving that the hint still holds. */
+async function settleGutter(button: Locator): Promise<void> {
+  await button.evaluate(async (control) => {
+    await Promise.all(control.getAnimations().map((animation) =>
+      animation.finished.catch(() => undefined),
+    ));
+  });
 }
 
 /**
@@ -194,10 +188,10 @@ test("the pointer can walk from the prose onto the gutter + and press it", async
     await page.mouse.move(inProse.x, inProse.y);
     await expect(button).toHaveCSS("opacity", "1");
     await humanWalk(page, inProse, gutterPause);
-    await page.waitForTimeout(180);
+    await settleGutter(button);
     await expect(button).toHaveCSS("opacity", "1");
     await humanWalk(page, gutterPause, centre);
-    await page.waitForTimeout(180);
+    await settleGutter(button);
     await expect(button).toHaveCSS("opacity", "1");
     expect(
       await button.evaluate((control) => {

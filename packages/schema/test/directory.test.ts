@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
+  directoryStubDiffers,
   getDirectoryEntry,
   getDirectoryMap,
   listDirectory,
@@ -8,6 +9,7 @@ import {
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "../src/index.js";
+import type { DirectoryEntry, DocMeta } from "../src/index.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
 const ALPHA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -415,8 +417,8 @@ describe("directory doc", () => {
       "What Alpha is for.",
     );
 
-    // The web client repairs stubs without knowing this field exists. A writer
-    // that only means to fix a title must not erase what it never mentioned.
+    // A writer that only means to fix a title must not erase the description
+    // when it does not restate it.
     upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha, renamed" });
     expect(getDirectoryEntry(dir, ALPHA)?.description).toBe(
       "What Alpha is for.",
@@ -605,5 +607,90 @@ describe("directory doc", () => {
       title: "Alpha",
       tags: [],
     });
+  });
+});
+
+describe("directory stub metadata divergence", () => {
+  const meta: DocMeta = {
+    uuid: ALPHA,
+    title: "Alpha",
+    tags: ["draft", "schema"],
+    description: "What Alpha is for.",
+    kind: "requirement",
+    links: [],
+  };
+  const undescribedStub: DirectoryEntry = {
+    uuid: ALPHA,
+    title: meta.title,
+    tags: meta.tags,
+    kind: "requirement",
+  };
+  const stub: DirectoryEntry = {
+    ...undescribedStub,
+    description: meta.description ?? "",
+  };
+
+  it("detects a missing stub and accepts matching cached metadata", () => {
+    expect(directoryStubDiffers(null, meta)).toBe(true);
+    expect(directoryStubDiffers(stub, meta)).toBe(false);
+  });
+
+  it.each([
+    ["title", { title: "Alpha, renamed" }],
+    ["tag set", { tags: ["draft", "reference"] }],
+    ["description", { description: "A new purpose." }],
+    ["kind", { kind: "decision" }],
+    ["status", { status: "planned" }],
+  ] satisfies Array<[string, Partial<DirectoryEntry>]>)(
+    "detects a difference in %s alone",
+    (_field, change) => {
+      expect(directoryStubDiffers({ ...stub, ...change }, meta)).toBe(true);
+    },
+  );
+
+  it("compares tags without regard to order", () => {
+    expect(
+      directoryStubDiffers({ ...stub, tags: ["schema", "draft"] }, meta),
+    ).toBe(false);
+  });
+
+  it.each([
+    [undefined, null],
+    [undefined, ""],
+    ["", null],
+    ["", ""],
+  ] satisfies Array<[string | undefined, string | null]>)(
+    "treats an absent or empty description as the same value",
+    (cached, document) => {
+      expect(
+        directoryStubDiffers(
+          {
+            ...undescribedStub,
+            ...(cached === undefined ? {} : { description: cached }),
+          },
+          { ...meta, description: document },
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("detects a description present on only one side", () => {
+    expect(directoryStubDiffers(undescribedStub, meta)).toBe(true);
+    expect(directoryStubDiffers(stub, { ...meta, description: null })).toBe(true);
+  });
+
+  it("leaves uncached metadata, timestamps and tombstones to callers", () => {
+    expect(
+      directoryStubDiffers(
+        { ...stub, uuid: BETA, createdAt: 1_000, updatedAt: 2_000, deleted: true },
+        {
+          ...meta,
+          links: [GAMMA],
+          tldr: "A summary for readers.",
+          changelogSuggestion: "A release note.",
+          supersedes: GAMMA,
+        },
+      ),
+    ).toBe(false);
   });
 });

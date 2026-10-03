@@ -22,77 +22,10 @@
  */
 
 import { expect, test } from "@playwright/test";
-import type { Browser, BrowserContext, Page } from "@playwright/test";
-import { placeCaret, startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
+import { createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
+import { placeCaret } from "./harness.js";
 
-test.describe.configure({ mode: "serial" });
-
-let started: Harness | null = null;
-const contexts: BrowserContext[] = [];
-
-function harness(): Harness {
-  if (started === null) {
-    throw new Error("e2e: the harness is not running — its bootstrap failed");
-  }
-  return started;
-}
-
-test.beforeAll(async () => {
-  started = await startHarness();
-});
-
-test.afterEach(async () => {
-  for (const context of contexts.splice(0)) await context.close();
-});
-
-test.afterAll(async () => {
-  const running = started;
-  started = null;
-  await running?.stop();
-});
-
-async function openApp(browser: Browser, path = "/"): Promise<Page> {
-  const context = await browser.newContext();
-  contexts.push(context);
-  const page = await context.newPage();
-  await page.goto(new URL(path, harness().appUrl).href);
-  return page;
-}
-
-function editor(page: Page) {
-  return page.locator(".ub-editor .ProseMirror");
-}
-
-function openPath(page: Page): string {
-  return new URL(page.url()).pathname;
-}
-
-/** The workspace segment the bundle was built with — what `/` redirects to. */
-function ws(): string {
-  return harness().workspace;
-}
-
-/** Unique per run: every test in the file shares one workspace directory. */
-function docTitle(label: string): string {
-  return `${label}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/** A new, titled document. Its uuid comes from the address bar. */
-async function createDoc(page: Page, title: string): Promise<string> {
-  const before = openPath(page);
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect.poll(() => openPath(page)).not.toBe(before);
-  await expect(page.locator(".ub-title")).toHaveValue("Untitled");
-  await expect(editor(page)).toBeVisible();
-
-  const uuid = openPath(page).split("/")[2];
-  if (uuid === undefined || uuid === "") {
-    throw new Error(`e2e: creating a document left the address at ${openPath(page)}`);
-  }
-  await page.locator(".ub-title").fill(title);
-  return uuid;
-}
+const { openApp, ws } = setupHarness();
 
 test("a typed reference is a link to the document it names, and Back comes home", async ({
   browser,

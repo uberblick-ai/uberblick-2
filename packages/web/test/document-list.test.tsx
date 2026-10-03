@@ -56,9 +56,9 @@ const THREE = "7c2e5a11-3f80-4d66-b1a9-8e4d2c6f0a55";
 const GONE = "0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d";
 const FOUR = "3b8a52d4-12c7-4c8f-9a61-9f18e35d7c2a";
 
-const OFFLINE: RoomStatus = {
-  connected: false,
-  synced: false,
+const LIVE: RoomStatus = {
+  connected: true,
+  synced: true,
   hasReceivedServerState: true,
   writable: true,
   storeRefused: false,
@@ -78,9 +78,9 @@ function room(name: string): RoomConnection {
     room: name,
     ydoc: new Y.Doc(),
     provider: { awareness: null },
-    status: OFFLINE,
+    status: LIVE,
     onStatusChange: (listener: (next: RoomStatus) => void) => {
-      listener(OFFLINE);
+      listener(LIVE);
       return () => {};
     },
   } as unknown as RoomConnection;
@@ -870,7 +870,7 @@ describe("an empty list", () => {
     return {
       ...room(`status-${String(synced)}`),
       onStatusChange: (listener: (next: RoomStatus) => void) => {
-        listener({ ...OFFLINE, connected: synced, synced });
+        listener({ ...LIVE, connected: synced, synced });
         return () => {};
       },
     } as unknown as RoomConnection;

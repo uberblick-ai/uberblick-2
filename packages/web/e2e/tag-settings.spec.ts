@@ -1,43 +1,16 @@
 /** Workspace settings through the real browser, serving replica, and hub. */
 
 import { expect, test } from "@playwright/test";
-import type { BrowserContext, Page } from "@playwright/test";
-import { startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
+import { setupHarness } from "./app-helpers.js";
 
-test.describe.configure({ mode: "serial" });
-
-let started: Harness | null = null;
-const contexts: BrowserContext[] = [];
-
-function harness(): Harness {
-  if (started === null) throw new Error("e2e: the harness is not running");
-  return started;
-}
-
-test.beforeAll(async () => {
-  started = await startHarness();
-});
-
-test.afterEach(async () => {
-  for (const context of contexts.splice(0)) await context.close();
-});
-
-test.afterAll(async () => {
-  const running = started;
-  started = null;
-  await running?.stop();
-});
+const { harness, openApp } = setupHarness();
 
 test("a workspace rename reaches another page live and preserves its document links", async ({
   browser,
 }) => {
   const settingsPath = `/${harness().workspace}/settings`;
-  const open = async (): Promise<Page> => {
-    const context = await browser.newContext();
-    contexts.push(context);
-    const page = await context.newPage();
-    await page.goto(new URL(settingsPath, harness().appUrl).href);
+  const open = async () => {
+    const page = await openApp(browser, settingsPath);
     await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
     return page;
   };
@@ -94,15 +67,8 @@ test("Tags settings is address-selected and its catalog changes converge", async
   browser,
 }) => {
   const path = `/${harness().workspace}/settings/tags`;
-  const open = async (): Promise<Page> => {
-    const context = await browser.newContext();
-    contexts.push(context);
-    const page = await context.newPage();
-    await page.goto(new URL(path, harness().appUrl).href);
-    return page;
-  };
-  const first = await open();
-  const second = await open();
+  const first = await openApp(browser, path);
+  const second = await openApp(browser, path);
   const examples = ["auth", "billing", "mcp", "permissions", "sync"];
 
   await expect(first).toHaveURL(new URL(path, harness().appUrl).href);
