@@ -21,6 +21,7 @@ import {
   isProseBlockType,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
+import type { Transaction } from "@tiptap/pm/state";
 import { endUndoCapture } from "../editor/block-menu.js";
 import { commentTargetOf } from "../editor/selection.js";
 import type { CommentTarget } from "../editor/selection.js";
@@ -215,6 +216,7 @@ export function CommentComposer({
   const [href, setHref] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [touch, setTouch] = useState(false);
+  const selectionInput = useRef(false);
   const range = useRef<string | null>(null);
   const dismissed = useRef<string | null>(null);
   const composing = useRef(false);
@@ -229,7 +231,7 @@ export function CommentComposer({
     // component's passive cleanup during a route or fallback transition.
     const editorDom = editor.view.dom;
     const ownerDocument = editorDom.ownerDocument;
-    const read = (): void => {
+    const read = (event?: { transaction: Transaction }): void => {
       if (composing.current) return;
       const target = commentTargetOf(editor, ydoc);
       if (target === null) {
@@ -250,6 +252,10 @@ export function CommentComposer({
         dismissed.current = null;
       }
       if (range.current !== key) {
+        // Only a selection adjustment adopts the pending input. Touching the
+        // prose to scroll, or a peer edit remapping the range, preserves the
+        // input that actually selected it.
+        if (!event?.transaction.docChanged) setTouch(selectionInput.current);
         range.current = key;
         setError(null);
       }
@@ -301,12 +307,12 @@ export function CommentComposer({
       read();
     };
     const pointer = (event: PointerEvent): void => {
-      setTouch(event.pointerType === "touch");
+      selectionInput.current = event.pointerType === "touch";
     };
     const keyboard = (event: KeyboardEvent): void => {
       if (/^(Arrow|Home|End|Page)/.test(event.key) ||
           (event.key.toLowerCase() === "a" && (event.metaKey || event.ctrlKey))) {
-        setTouch(false);
+        selectionInput.current = false;
       }
     };
     read();
@@ -432,7 +438,7 @@ export function CommentComposer({
       ref={floating}
       data-slot="selection-composer"
       data-input={touch ? "touch" : "fine"}
-      className={`ub-composer fixed top-0 left-0 z-50 flex overflow-auto text-card-foreground shadow-(--shadow-float) data-[input=touch]:[&_[data-selection-tool]]:min-h-11 data-[input=touch]:[&_[data-selection-tool]]:min-w-11 data-[input=touch]:[&_input]:min-h-11 data-[input=touch]:[&_input]:text-base ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) border-l-2 border-l-brand bg-card px-[0.6rem] py-2 text-[0.85rem]" : mode === "toolbar" && !prose ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-[calc(var(--radius-sm)+2px)] border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}
+      className={`ub-composer fixed top-0 left-0 z-50 flex overflow-auto text-card-foreground shadow-(--shadow-float) data-[input=touch]:[&_[data-selection-tool]]:min-h-11 data-[input=touch]:[&_[data-selection-tool]]:min-w-11 data-[input=touch]:[&_input]:min-h-11 data-[input=touch]:[&_input]:text-base [@media(any-pointer:coarse)]:[&_[data-selection-tool]]:min-h-11 [@media(any-pointer:coarse)]:[&_[data-selection-tool]]:min-w-11 [@media(any-pointer:coarse)]:[&_input]:min-h-11 [@media(any-pointer:coarse)]:[&_input]:text-base ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) border-l-2 border-l-brand bg-card px-[0.6rem] py-2 text-[0.85rem]" : mode === "toolbar" && !prose ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-[calc(var(--radius-sm)+2px)] border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}
     >
       {mode === "comment" ? (
         <>

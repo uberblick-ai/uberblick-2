@@ -205,6 +205,11 @@ test("touch selects below, keyboard and mouse select above, and touch toolbar co
   await expect(card(page)).toHaveAttribute("data-placement", "above");
   await selectBlock(paragraph, "mouse");
   await expect(card(page)).toHaveAttribute("data-placement", "above");
+  // A touch on prose can start scrolling without adjusting the selected
+  // range. Its placement still belongs to the input that selected it.
+  await paragraph.dispatchEvent("pointerdown", { pointerType: "touch" });
+  await paragraph.dispatchEvent("pointerup", { pointerType: "touch" });
+  await expect(card(page)).toHaveAttribute("data-input", "fine");
   await insideVisibleArea(page);
   await minimumTargets(toolbar.getByRole("button"), 24, true);
 });
