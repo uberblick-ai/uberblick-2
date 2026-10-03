@@ -80,6 +80,8 @@ describe("token minting sites", () => {
     "packages/hub/test/github-sign-in.test.ts",
     "packages/hub/test/helpers.ts",
     "packages/hub/test/membership-registry.test.ts",
+    // Cross-hub verification probes: 60-second tokens with issued credential kids.
+    "packages/hub/test/shared-github-login.test.ts",
     "packages/hub/test/token.test.ts",
     "packages/mcp-server/src/sync.ts",
     // Wraps the real mint to hold a token call in flight — no minting site of its own.
