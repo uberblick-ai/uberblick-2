@@ -81,8 +81,11 @@ Settled 2026-10-03:
   `decided`, every write surface — MCP block and metadata tools and the web
   editor — refuses changes to its text and decision line; comments stay open.
   Any change, a wording fix included, goes through Reconsider as a new record
-  a person approves. Recording a person's answer stores the fingerprint of the
-  content they approved (the existing document fingerprint). Because a
+  a person approves. Recording a person's answer stores an **approval
+  fingerprint** of the content they approved: the title, the decision line and
+  the block text. It excludes comments, comment anchors and the approval
+  bookkeeping itself, so discussion never invalidates an approval (the
+  existing document fingerprint hashes annotations and cannot be reused). Because a
   read-only rule is enforced per replica, an edit made offline before the
   decision can still merge afterwards; when the content's fingerprint no
   longer matches the approved one, the record shows *changed after approval*
@@ -185,9 +188,10 @@ act under that person's GitHub identity. Two consequences:
 
 Until such a design exists, "changes need a person" is a convention backed by
 the recorded answer and its citation, with one cheap guard once
-device-credential admission ships: `decided` written from an agent-account
-connection (today `uberblick-agent`) is refused unless it records a person's
-answer.
+device-credential admission ships. From an agent-account connection (today
+`uberblick-agent`), `decided` is accepted only as a topic's first record carrying
+the agent-stance marker, or when it records a person's answer. Clearing the
+marker or deciding a successor without a recorded answer is refused.
 
 ### 3. All links live on the decision record
 
@@ -224,7 +228,7 @@ record; that is the failure this rule avoids.
 
 ### 4. In force and pending
 
-For each live topic, considering every record except `rejected` and `withdrawn` ones:
+For each topic, considering every record except `rejected` and `withdrawn` ones — individual archive state is never consulted:
 
 | Answer | Rule |
 | --- | --- |
@@ -287,7 +291,14 @@ No individual decision record is ever archived, restored or deleted, so
 nothing can silently bring an earlier answer back into force. Archiving
 applies to a whole topic that no longer matters: `archive_doc` on any record of
 a topic archives every record in it, and `restore_doc` restores them all,
-reported per room in the existing partial-write shape. An archived topic
+reported per room in the existing partial-write shape. The topic's archive
+state has one authority: the tombstone of its **first record**, whose uuid is
+the `topic` id. Every other record's own tombstone only mirrors it and is
+never read for authority. Resolution (section 4) always runs over every
+record in the topic regardless of individual tombstones, so a partial or
+concurrent archive or restore can change only whether the whole topic is
+visible, never which answer is in force. Concurrent archive and restore of
+the first record converge like any directory tombstone today. An archived topic
 leaves listings and its product document's decision log, and its records stay
 readable by uuid and fully read-only. Retiring a decision while keeping the
 topic is a superseding record that says so (for example *Lease renewal: no
