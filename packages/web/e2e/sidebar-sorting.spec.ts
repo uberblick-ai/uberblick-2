@@ -383,10 +383,11 @@ test("a touch swipe scrolls from a row, while a held drag keeps native scrolling
         && box.y + box.height / 2 <= bottom - 60;
     }).map((button) => button.textContent ?? "");
   });
-  if (visibleNames.length < 2) throw new Error("Missing visible touch rows");
-  const tappedName = visibleNames[visibleNames.length - 2]!;
+  const tappedName = visibleNames[visibleNames.length - 2];
+  const swipedName = visibleNames[visibleNames.length - 1];
+  if (tappedName === undefined || swipedName === undefined) throw new Error("Missing visible touch rows");
   const tap = row(a, tappedName);
-  const swipe = row(a, visibleNames[visibleNames.length - 1]!);
+  const swipe = row(a, swipedName);
   const tapped = await tap.boundingBox();
   if (!tapped) throw new Error("Missing touch row");
   const cdp = await a.context().newCDPSession(a);
