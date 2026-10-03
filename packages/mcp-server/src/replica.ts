@@ -47,6 +47,7 @@ import {
 } from "@uberblick/schema";
 import type { Block, DocMeta, InlineRun } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
+import { githubReference } from "./github-reference.js";
 import { log } from "./log.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
 import { HubSync } from "./sync.js";
@@ -720,6 +721,8 @@ export class Replicas {
    * backlinks answer for it without anyone duplicating the edge by hand.
    * `meta.links` itself is never touched — it stays the curated list a human or
    * an agent wrote. The store de-dupes the union and drops a self-link.
+   * Decision GitHub references come only from external hrefs in prose, using
+   * the schema's inline runs so a concurrent docLink retains precedence.
    *
    * One traversal for both the body text and the marks: looking each block's
    * inline runs up by id would rescan the fragment per block.
@@ -740,6 +743,18 @@ export class Replicas {
             docLinkRanges(block, inline).map((range) => range.docId),
           ),
         ],
+        githubRefs:
+          meta.kind === "decision"
+            ? blocks.flatMap(({ block, inline }) => {
+              if (!isProseBlockType(block.type)) return [];
+              return inline.flatMap((run) => {
+                const ref = run.marks.link === undefined
+                  ? null
+                  : githubReference(run.marks.link);
+                return ref === null ? [] : [ref];
+              });
+            })
+            : [],
         body: blocks.map(({ block }) => block.text).join("\n"),
       },
       replica.indexedThroughSeq,

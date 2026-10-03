@@ -5,7 +5,7 @@
  * 1. **The file format is the format.** `better-sqlite3.sqlite` was written by
  *    the better-sqlite3 build (see `fixtures/make-legacy.ts`); `node:sqlite`
  *    opens it and finds the same log, the same snapshot and the same FTS index.
- *    There is no migration, and this test is what says so.
+ *    Compatibility migrations leave the authoritative log intact.
  * 2. **BLOBs are the bytes handed in**, including when those bytes are a view
  *    into a longer buffer.
  * 3. **All-or-nothing writes.** `node:sqlite` has no `.transaction()` wrapper,
@@ -14,15 +14,17 @@
  *    longest of the six bodies, by aborting one of its later statements.
  */
 
+import { execFile } from "node:child_process";
 import { copyFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { getBlocks, getMeta } from "@uberblick/schema";
 import { MirrorStore } from "../src/store.js";
-import { WORKSPACE, removeTempDirs, tempDatabasePath } from "./helpers.js";
+import { PACKAGE_ROOT, WORKSPACE, removeTempDirs, tempDatabasePath } from "./helpers.js";
 
 /** The document `fixtures/make-legacy.ts` wrote, and what it wrote about it. */
 const LEGACY = {
@@ -36,6 +38,10 @@ const FIXTURE = join(
   fileURLToPath(new URL("./fixtures/", import.meta.url)),
   "better-sqlite3.sqlite",
 );
+
+const GITHUB_ITEM = "uberblick-ai/uberblick-2#1125";
+const OTHER_GITHUB_ITEM = "uberblick-ai/uberblick-2#1135";
+const execFileAsync = promisify(execFile);
 
 const stores: MirrorStore[] = [];
 
@@ -129,16 +135,17 @@ describe("a transaction body that throws", () => {
         tags: ["kept"],
         description: "",
         links: [],
+        githubRefs: [GITHUB_ITEM],
         body: "the indexed body",
       },
       1,
     );
 
-    // Abort `indexDoc` from inside SQLite, at its link statement — by which
-    // point the title row and the tag rows have already been rewritten.
+    // Abort at the GitHub reference statement, after the other rows and the
+    // deletion of the old reference have been offered in the transaction.
     const saboteur = new DatabaseSync(databasePath);
     saboteur.exec(
-      "CREATE TRIGGER refuse_links BEFORE INSERT ON doc_links " +
+      "CREATE TRIGGER refuse_links BEFORE INSERT ON decision_github_refs " +
         "BEGIN SELECT RAISE(ABORT, 'no reindexing today'); END",
     );
     saboteur.close();
@@ -151,6 +158,7 @@ describe("a transaction body that throws", () => {
           tags: ["replaced"],
           description: "",
           links: [LEGACY.linked],
+          githubRefs: [OTHER_GITHUB_ITEM],
           body: "a different body",
         },
         2,
@@ -158,7 +166,7 @@ describe("a transaction body that throws", () => {
     ).toThrow(/no reindexing today/);
 
     // Nothing from the failed attempt survives — not the title, not the tags,
-    // not the links, not the FTS row.
+    // not either kind of link, not the FTS row, not its generation marker.
     expect(opened.search("body", 10)).toEqual([
       {
         uuid: LEGACY.uuid,
@@ -170,6 +178,18 @@ describe("a transaction body that throws", () => {
     ]);
     expect(opened.search("different", 10)).toEqual([]);
     expect(opened.backlinks(LEGACY.linked)).toEqual([]);
+    expect(opened.decisionsForGithub(GITHUB_ITEM)).toEqual([
+      { uuid: LEGACY.uuid, title: "before" },
+    ]);
+    expect(opened.decisionsForGithub(OTHER_GITHUB_ITEM)).toEqual([]);
+
+    const inspector = new DatabaseSync(databasePath);
+    expect(
+      inspector
+        .prepare("SELECT indexed_through_seq FROM doc_index_seq WHERE uuid = ?")
+        .get(LEGACY.uuid),
+    ).toEqual({ indexed_through_seq: 1 });
+    inspector.close();
   });
 });
 
@@ -184,6 +204,7 @@ describe("derived index sequencing", () => {
       tags: ["old"],
       description: "",
       links: [],
+      githubRefs: [OTHER_GITHUB_ITEM],
       body: "stateBravo",
     };
 
@@ -198,6 +219,7 @@ describe("derived index sequencing", () => {
         tags: ["new"],
         description: "",
         links: [LEGACY.linked],
+        githubRefs: [GITHUB_ITEM],
         body: "stateCharlie",
       },
       2,
@@ -218,5 +240,143 @@ describe("derived index sequencing", () => {
         description: null,
       },
     ]);
+    expect(slow.decisionsForGithub(GITHUB_ITEM)).toEqual([
+      { uuid: LEGACY.uuid, title: "Newer derivation" },
+    ]);
+    expect(slow.decisionsForGithub(OTHER_GITHUB_ITEM)).toEqual([]);
+  });
+});
+
+describe("derived GitHub references", () => {
+  it("deduplicates and orders records, replaces references, and clears them with the index", () => {
+    const opened = store(tempDatabasePath());
+    const record = {
+      uuid: LEGACY.uuid,
+      title: "Zulu",
+      tags: [],
+      description: "",
+      links: [],
+      githubRefs: [GITHUB_ITEM, GITHUB_ITEM],
+      body: "record text",
+    };
+    opened.indexDoc(record, 1);
+    opened.indexDoc({ ...record, uuid: LEGACY.linked, title: "Alpha" }, 1);
+    opened.indexDoc(
+      { ...record, uuid: "00000000-0000-4000-8000-000000000001", title: "Alpha" },
+      1,
+    );
+
+    expect(opened.decisionsForGithub(GITHUB_ITEM)).toEqual([
+      { uuid: "00000000-0000-4000-8000-000000000001", title: "Alpha" },
+      { uuid: LEGACY.linked, title: "Alpha" },
+      { uuid: LEGACY.uuid, title: "Zulu" },
+    ]);
+
+    // An empty replacement also represents losing the decision kind.
+    opened.indexDoc({ ...record, githubRefs: [] }, 2);
+    opened.unindexDoc(LEGACY.linked);
+    expect(opened.decisionsForGithub(GITHUB_ITEM)).toEqual([
+      { uuid: "00000000-0000-4000-8000-000000000001", title: "Alpha" },
+    ]);
+    opened.clearDerived();
+    expect(opened.decisionsForGithub(GITHUB_ITEM)).toEqual([]);
+    opened.indexDoc(record, 1);
+    expect(opened.decisionsForGithub(GITHUB_ITEM)).toEqual([
+      { uuid: LEGACY.uuid, title: "Zulu" },
+    ]);
+  });
+
+  it("re-derives pre-change rows once at their existing cuts without admitting older cuts", () => {
+    const databasePath = legacyDatabase();
+    const legacy = new DatabaseSync(databasePath);
+    // The historical file predates sequencing. Give it the immediately prior
+    // schema to exercise an already-indexed database with unchanged log cuts.
+    legacy.exec(
+      "CREATE TABLE doc_index_seq (uuid TEXT PRIMARY KEY, " +
+        "indexed_through_seq INTEGER NOT NULL, catalog_through_seq INTEGER NOT NULL DEFAULT 0)",
+    );
+    legacy.prepare("INSERT INTO doc_index_seq VALUES (?, 2, 7)").run(LEGACY.uuid);
+    legacy.close();
+
+    const opened = store(databasePath);
+    const record = {
+      uuid: LEGACY.uuid,
+      title: LEGACY.title,
+      tags: ["legacy"],
+      description: "",
+      links: [LEGACY.linked],
+      githubRefs: [GITHUB_ITEM],
+      body: LEGACY.blocks.join("\n"),
+    };
+    expect(opened.decisionsForGithub(GITHUB_ITEM)).toEqual([]);
+    opened.indexDoc({ ...record, title: "Older document" }, 1, 7);
+    opened.indexDoc({ ...record, title: "Older catalog" }, 2, 6);
+    expect(opened.decisionsForGithub(GITHUB_ITEM)).toEqual([]);
+    expect(opened.search("binding", 10)[0]?.title).toBe(LEGACY.title);
+
+    // No document or catalog edit is needed: the migration permits one equal
+    // cut and marks the derivation complete only with the new rows committed.
+    opened.indexDoc(record, 2, 7);
+    expect(opened.decisionsForGithub(GITHUB_ITEM)).toEqual([
+      { uuid: LEGACY.uuid, title: LEGACY.title },
+    ]);
+    opened.indexDoc({ ...record, githubRefs: [] }, 2, 7);
+    opened.close();
+    const reopened = store(databasePath);
+    reopened.indexDoc({ ...record, githubRefs: [] }, 2, 7);
+    expect(reopened.decisionsForGithub(GITHUB_ITEM)).toEqual([
+      { uuid: LEGACY.uuid, title: LEGACY.title },
+    ]);
+  });
+
+  it("allows simultaneous processes to upgrade an existing database", async () => {
+    const databasePath = tempDatabasePath();
+    const record = {
+      uuid: LEGACY.uuid,
+      title: "Existing decision",
+      tags: [],
+      description: "",
+      links: [],
+      body: "record text",
+    };
+    const before = store(databasePath);
+    before.indexDoc(record, 2, 7);
+    before.close();
+    const legacy = new DatabaseSync(databasePath);
+    legacy.exec(
+      "DROP TABLE decision_github_refs; " +
+        "ALTER TABLE doc_index_seq DROP COLUMN github_refs_indexed",
+    );
+    legacy.close();
+
+    const source = `
+      import { MirrorStore } from ${JSON.stringify(new URL("../src/store.ts", import.meta.url).href)};
+      const store = new MirrorStore(${JSON.stringify(databasePath)}, ${JSON.stringify(WORKSPACE)});
+      store.indexDoc({...${JSON.stringify(record)}, githubRefs: [${JSON.stringify(GITHUB_ITEM)}]}, 2, 7);
+      store.close();
+    `;
+    // Wait for every child even on failure before the fixture is cleaned up.
+    const results = await Promise.allSettled(
+      Array.from({ length: 4 }, () =>
+        execFileAsync(
+          process.execPath,
+          ["--import", "tsx", "--input-type=module", "--eval", source],
+          { cwd: PACKAGE_ROOT, timeout: 20_000 },
+        ),
+      ),
+    );
+    for (const result of results) {
+      if (result.status === "rejected") throw result.reason;
+    }
+    expect(store(databasePath).decisionsForGithub(GITHUB_ITEM)).toEqual([
+      { uuid: LEGACY.uuid, title: record.title },
+    ]);
+    const inspector = new DatabaseSync(databasePath);
+    expect(
+      inspector
+        .prepare("SELECT indexed_through_seq, catalog_through_seq FROM doc_index_seq WHERE uuid = ?")
+        .get(LEGACY.uuid),
+    ).toEqual({ indexed_through_seq: 2, catalog_through_seq: 7 });
+    inspector.close();
   });
 });

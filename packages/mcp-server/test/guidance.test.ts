@@ -72,6 +72,7 @@ it("refuses every document mutation before logging, teaches recovery, and leaves
   for (const [name, args] of [
     ["list_docs", {}], ["list_tags", {}], ["search", { query: "writing" }],
     ["backlinks", { uuid }], ["export_markdown", { uuid }], ["sync_status", {}], ["get_sidebar", {}],
+    ["find_decisions", { github_ref: "owner/repo#1" }],
   ] as const) await rig.ok(name, args);
   await rig.ok("pin_doc", { uuid, group: "Reference" });
   const sidebar = await rig.ok("get_sidebar");

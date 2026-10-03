@@ -10,9 +10,10 @@
  *    call that produced it returns, which is what makes `kill -9` after a write
  *    lose nothing.
  * 2. **The derived index** (`doc_index`, `doc_index_seq`, `docs_fts`,
- *    `doc_tags`, `doc_links`) is a cache of what the Y.Docs say, rebuildable at
- *    any time from the log — see {@link MirrorStore.clearDerived}. It is never
- *    authoritative, and no document state exists only here.
+ *    `doc_tags`, `doc_links`, `decision_github_refs`) is a cache of what the
+ *    Y.Docs say, rebuildable at any time from the log — see
+ *    {@link MirrorStore.clearDerived}. It is never authoritative, and no
+ *    document state exists only here.
  *
  * Alongside both, `meta` records process-local facts that cannot be derived
  * from documents. The permanent `workspace` row binds the file to its corpus;
@@ -107,6 +108,8 @@ export interface IndexedDoc {
   description: string;
   /** Outbound links, by target document UUID. */
   links: string[];
+  /** GitHub items linked by a decision's prose, as normalized owner/repo#n. */
+  githubRefs?: readonly string[];
   /** The document's block text, concatenated, for full-text search. */
   body: string;
 }
@@ -233,7 +236,8 @@ CREATE TABLE IF NOT EXISTS doc_index (
 CREATE TABLE IF NOT EXISTS doc_index_seq (
   uuid                TEXT PRIMARY KEY,
   indexed_through_seq INTEGER NOT NULL,
-  catalog_through_seq INTEGER NOT NULL DEFAULT 0
+  catalog_through_seq INTEGER NOT NULL DEFAULT 0,
+  github_refs_indexed INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS doc_tags (
   uuid TEXT NOT NULL,
@@ -247,6 +251,12 @@ CREATE TABLE IF NOT EXISTS doc_links (
   PRIMARY KEY (source, target)
 );
 CREATE INDEX IF NOT EXISTS doc_links_target ON doc_links (target);
+CREATE TABLE IF NOT EXISTS decision_github_refs (
+  source TEXT NOT NULL,
+  target TEXT NOT NULL,
+  PRIMARY KEY (source, target)
+);
+CREATE INDEX IF NOT EXISTS decision_github_refs_target ON decision_github_refs (target);
 
 -- The description is searched as part of \`body\` rather than as a column of its
 -- own. FTS5 has no ADD COLUMN, so a fourth column would mean dropping and
@@ -303,9 +313,11 @@ interface Prepared<P extends SQLInputValue[]> {
  * better-sqlite3's `.transaction()` wrapper, in the lines `node:sqlite` leaves
  * to the caller: run `body` between BEGIN and COMMIT, roll back if it throws.
  *
- * The deferred `BEGIN` is what the old binding issued. The read-only body takes
- * a consistent snapshot without blocking another instance's writer; write
- * bodies acquire their place in the writer queue at their first statement.
+ * The default deferred `BEGIN` is what the old binding issued. A read-only body
+ * takes a consistent snapshot without blocking another instance's writer;
+ * write bodies acquire their place in the writer queue at their first statement.
+ * A migration can request an immediate transaction to serialize a schema
+ * check with the alteration it authorizes.
  *
  * Nesting is unsupported and does not occur: none of the wrapped bodies calls
  * another (the one that spans three reads calls plain statement methods). A
@@ -316,9 +328,10 @@ interface Prepared<P extends SQLInputValue[]> {
 function transactional<A extends unknown[], R>(
   db: DatabaseSync,
   body: (...args: A) => R,
+  mode: "deferred" | "immediate" = "deferred",
 ): (...args: A) => R {
   return (...args: A): R => {
-    db.exec("BEGIN");
+    db.exec(mode === "immediate" ? "BEGIN IMMEDIATE" : "BEGIN");
     try {
       const result = body(...args);
       db.exec("COMMIT");
@@ -372,10 +385,13 @@ export class MirrorStore {
     putTag: Prepared<[string, string]>;
     dropLinks: Prepared<[string]>;
     putLink: Prepared<[string, string]>;
+    dropGithubRefs: Prepared<[string]>;
+    putGithubRef: Prepared<[string, string]>;
     dropFts: Prepared<[string]>;
     putFts: Prepared<[string, string, string]>;
     search: Prepared<[string, string | null, string | null, number]>;
     backlinks: Prepared<[string]>;
+    decisionsForGithub: Prepared<[string]>;
   };
 
   private readonly appendTx: (
@@ -445,6 +461,7 @@ export class MirrorStore {
     this.migratePendingRooms();
     this.migrateDocDescription();
     this.migrateCatalogIndexSequence();
+    this.migrateGithubRefsIndexSequence();
 
     const prepare = <P extends SQLInputValue[]>(sql: string): Prepared<P> =>
       this.db.prepare(sql) as Prepared<P>;
@@ -496,14 +513,16 @@ export class MirrorStore {
       ),
       listPending: prepare("SELECT room, seq FROM pending_rooms ORDER BY room"),
       advanceIndex: prepare(
-        "INSERT INTO doc_index_seq (uuid, indexed_through_seq, catalog_through_seq) VALUES (?, ?, ?) " +
+        "INSERT INTO doc_index_seq (uuid, indexed_through_seq, catalog_through_seq, github_refs_indexed) VALUES (?, ?, ?, 1) " +
           "ON CONFLICT (uuid) DO UPDATE SET " +
           "indexed_through_seq = excluded.indexed_through_seq, " +
-          "catalog_through_seq = excluded.catalog_through_seq " +
+          "catalog_through_seq = excluded.catalog_through_seq, " +
+          "github_refs_indexed = excluded.github_refs_indexed " +
           "WHERE doc_index_seq.indexed_through_seq <= excluded.indexed_through_seq " +
           "AND doc_index_seq.catalog_through_seq <= excluded.catalog_through_seq " +
           "AND (doc_index_seq.indexed_through_seq < excluded.indexed_through_seq " +
-          "OR doc_index_seq.catalog_through_seq < excluded.catalog_through_seq)",
+          "OR doc_index_seq.catalog_through_seq < excluded.catalog_through_seq " +
+          "OR doc_index_seq.github_refs_indexed = 0)",
       ),
       putDoc: prepare(
         "INSERT INTO doc_index (uuid, title, description) VALUES (?, ?, ?) " +
@@ -520,6 +539,10 @@ export class MirrorStore {
       dropLinks: prepare("DELETE FROM doc_links WHERE source = ?"),
       putLink: prepare(
         "INSERT INTO doc_links (source, target) VALUES (?, ?) ON CONFLICT DO NOTHING",
+      ),
+      dropGithubRefs: prepare("DELETE FROM decision_github_refs WHERE source = ?"),
+      putGithubRef: prepare(
+        "INSERT INTO decision_github_refs (source, target) VALUES (?, ?) ON CONFLICT DO NOTHING",
       ),
       dropFts: prepare("DELETE FROM docs_fts WHERE uuid = ?"),
       putFts: prepare(
@@ -544,6 +567,11 @@ export class MirrorStore {
           "COALESCE(d.description, '') AS description " +
           "FROM doc_links l LEFT JOIN doc_index d ON d.uuid = l.source " +
           "WHERE l.target = ? ORDER BY title, l.source",
+      ),
+      decisionsForGithub: prepare(
+        "SELECT r.source AS uuid, d.title AS title " +
+          "FROM decision_github_refs r JOIN doc_index d ON d.uuid = r.source " +
+          "WHERE r.target = ? ORDER BY title, r.source",
       ),
     };
 
@@ -645,6 +673,10 @@ export class MirrorStore {
       for (const target of new Set(doc.links)) {
         if (target !== doc.uuid) this.statements.putLink.run(doc.uuid, target);
       }
+      this.statements.dropGithubRefs.run(doc.uuid);
+      for (const target of new Set(doc.githubRefs ?? [])) {
+        this.statements.putGithubRef.run(doc.uuid, target);
+      }
       this.statements.dropFts.run(doc.uuid);
       // The description leads the indexed body, so a description-only match
       // gives a snippet that reads as the description rather than as an
@@ -660,6 +692,7 @@ export class MirrorStore {
       this.statements.dropFts.run(uuid);
       this.statements.dropTags.run(uuid);
       this.statements.dropLinks.run(uuid);
+      this.statements.dropGithubRefs.run(uuid);
       this.statements.dropDoc.run(uuid);
       this.statements.dropIndexSeq.run(uuid);
     });
@@ -818,7 +851,8 @@ export class MirrorStore {
    * `throughSeq` and `catalogThroughSeq` are the highest contiguous document
    * and settings log cuts used for the derivation. The metadata row, both cuts
    * and every dependent row land in one transaction, so a derivation stale on
-   * either input cannot replace one newer on both.
+   * either input cannot replace one newer on both. A migrated row can also be
+   * replaced once at equal cuts to derive newly introduced reference rows.
    */
   indexDoc(
     doc: IndexedDoc,
@@ -858,7 +892,7 @@ export class MirrorStore {
     transactional(this.db, () => {
       this.db.exec(
         "DELETE FROM doc_index; DELETE FROM doc_index_seq; DELETE FROM doc_tags; " +
-          "DELETE FROM doc_links; DELETE FROM docs_fts;",
+          "DELETE FROM doc_links; DELETE FROM decision_github_refs; DELETE FROM docs_fts;",
       );
     })();
   }
@@ -903,6 +937,14 @@ export class MirrorStore {
       title: row.title,
       description: row.description === "" ? null : row.description,
     }));
+  }
+
+  /** Indexed decision records linking one normalized GitHub item, by title then UUID. */
+  decisionsForGithub(key: string): { uuid: string; title: string }[] {
+    return this.statements.decisionsForGithub.all(key) as {
+      uuid: string;
+      title: string;
+    }[];
   }
 
   /**
@@ -1033,6 +1075,39 @@ export class MirrorStore {
     this.db.exec(
       "ALTER TABLE doc_index_seq ADD COLUMN catalog_through_seq INTEGER NOT NULL DEFAULT 0",
     );
+  }
+
+  /**
+   * Re-derive existing rows once to populate decision GitHub references.
+   *
+   * Their log cuts may be unchanged at startup. Marking their old derivation
+   * incomplete allows an equal-cut replacement without clearing the cuts and
+   * letting a slower replica overwrite newer rows. The flag and all derived
+   * rows commit together in indexTx; reopening the store never resets it.
+   */
+  private migrateGithubRefsIndexSequence(): void {
+    const hasFlag = (): boolean => {
+      const columns = this.db
+        .prepare("SELECT name FROM pragma_table_info('doc_index_seq')")
+        .all() as { name: string }[];
+      return columns.some((column) => column.name === "github_refs_indexed");
+    };
+    if (hasFlag()) {
+      return;
+    }
+    // Simultaneous startups can both see the old schema. Take the write lock
+    // before checking again, so only the winner attempts the alteration.
+    transactional(
+      this.db,
+      () => {
+        if (!hasFlag()) {
+          this.db.exec(
+            "ALTER TABLE doc_index_seq ADD COLUMN github_refs_indexed INTEGER NOT NULL DEFAULT 0",
+          );
+        }
+      },
+      "immediate",
+    )();
   }
 
   /**
