@@ -467,7 +467,7 @@ describe("credential admission on a composed server", () => {
       ["a reconnect diff", messageYjsSyncStep2, false],
       ["a detached connection's live update", messageYjsUpdate, true],
       ["a detached connection's reconnect diff", messageYjsSyncStep2, true],
-    ] as const)("fences %s already past the admission check and the burst queued behind it", async (_label, type, detachBeforeRemoval) => {
+    ] as const)("fences %s already past the admission check and the burst queued behind it", async (_label, type, detachBeforeAccessEnd) => {
       const held = gate();
       const entered = gate();
       const completed = gate();
@@ -521,24 +521,24 @@ describe("credential admission on a composed server", () => {
         const serverDocument = rig.hocuspocus.documents.get(room)!;
         expect(serverDocument.getText(TEXT_KEY).toString()).toBe("preserved content");
 
-        if (detachBeforeRemoval) {
+        if (detachBeforeAccessEnd) {
           // Timeout and client departure remove a connection from the document
-          // without cancelling this loop. Revocation must still fence its frame.
+          // without cancelling this loop. Ended access must still fence its frame.
           victimConnection.close({ code: 1000, reason: "unrelated closure" });
           expect(serverDocument.getConnections().map((connection) => connection.context.credentialId)).toEqual([phone.record.id]);
         }
         endAccess(rig, accessEnd, laptop);
         expect(serverDocument.getConnections().map((connection) => connection.context.credentialId)).toEqual([phone.record.id]);
-        const appliedAfterRevoke: Uint8Array[] = [];
-        const onUpdate = (update: Uint8Array) => appliedAfterRevoke.push(update);
+        const appliedAfterAccessEnd: Uint8Array[] = [];
+        const onUpdate = (update: Uint8Array) => appliedAfterAccessEnd.push(update);
         serverDocument.on("update", onUpdate);
         held.open();
-        await waitFor("the held frame to finish after revocation", completed.opened);
+        await waitFor("the held frame to finish after access ends", completed.opened);
         await waitUntil("the queued frame to be rejected by current authority", () =>
           rig.logs.some((record) => record.cause === (accessEnd === "revocation" ? "revoked-credential" : "missing-membership")));
         expect(serverDocument.getText(TEXT_KEY).toString()).toBe("preserved content");
         expect(observer.text.toString()).toBe("preserved content");
-        expect(appliedAfterRevoke).toEqual([]);
+        expect(appliedAfterAccessEnd).toEqual([]);
         serverDocument.off("update", onUpdate);
         observer.text.insert(observer.text.length, " + other device still writes");
         await waitUntil("the other device's acknowledged update after the burst", () =>
