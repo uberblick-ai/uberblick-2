@@ -98,7 +98,7 @@ describe("hub-owned workspace memberships", () => {
     }
   });
 
-  it.each(["demote", "remove"] as const)("refuses to %s the final admin and rolls back every effect", (operation) => {
+  it.each(["demote", "remove"] as const)("refuses to %s the final admin without effects", (operation) => {
     const store = registry();
     grant(store, "admin", "admin");
     grant(store, "member");
@@ -112,8 +112,8 @@ describe("hub-owned workspace memberships", () => {
     }).toThrow("final workspace admin must remain");
     expect(store.listMembers(WORKSPACE, "admin")).toEqual(before);
     expect(removed).toEqual([]);
-    // A refused transaction releases its lock; a later authorized promotion
-    // provides a remaining administrator and permits the same operation.
+    // A later authorized promotion provides a remaining administrator and
+    // permits the same operation.
     store.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "member", role: "admin" });
     if (operation === "demote") store.changeRole({ ...request, role: "member" });
     else expect(store.remove(request)).toBe(true);
@@ -138,50 +138,7 @@ describe("hub-owned workspace memberships", () => {
     expect(store.roleFor(WORKSPACE, "member")).toBe("member");
   });
 
-  it("reads current authority across registries and database handles before every mutation", () => {
-    const path = tempDatabasePath();
-    const firstDatabase = database(path);
-    const first = new MembershipRegistry(firstDatabase);
-    const sharedHandle = new MembershipRegistry(firstDatabase);
-    const otherHandle = registry(path);
-    grant(first, "admin", "admin");
-    grant(first, "other-admin", "admin");
-    grant(first, "member");
-    sharedHandle.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "other-admin", role: "member" });
-    expect(otherHandle.ownRole(WORKSPACE, "other-admin")).toBe("member");
-    expect(() => otherHandle.remove({ workspaceId: WORKSPACE, actorPrincipalId: "other-admin", principalId: "member" }))
-      .toThrow("workspace admin required");
-    expect(() => otherHandle.remove({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "admin" }))
-      .toThrow("final workspace admin must remain");
-    sharedHandle.remove({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "other-admin" });
-    expect(otherHandle.roleFor(WORKSPACE, "other-admin")).toBeNull();
-    expect(first.roleFor(WORKSPACE, "member")).toBe("member");
-  });
-
-  it("cannot mutate under stale authority while another SQLite writer changes it", () => {
-    const path = tempDatabasePath();
-    const firstDatabase = database(path);
-    const first = new MembershipRegistry(firstDatabase);
-    const otherDatabase = database(path);
-    otherDatabase.connection.exec("PRAGMA busy_timeout = 0");
-    const other = new MembershipRegistry(otherDatabase);
-    grant(first, "admin", "admin");
-    grant(first, "other-admin", "admin");
-    grant(first, "member");
-    firstDatabase.connection.exec("BEGIN IMMEDIATE");
-    try {
-      firstDatabase.connection.prepare("UPDATE hub_memberships SET role = 'member' WHERE principal_id = 'other-admin'").run();
-      expect(() => other.remove({ workspaceId: WORKSPACE, actorPrincipalId: "other-admin", principalId: "member" }))
-        .toThrow("database is locked");
-    } finally {
-      firstDatabase.connection.exec("COMMIT");
-    }
-    expect(() => other.remove({ workspaceId: WORKSPACE, actorPrincipalId: "other-admin", principalId: "member" }))
-      .toThrow("workspace admin required");
-    expect(first.roleFor(WORKSPACE, "member")).toBe("member");
-  });
-
-  it("rolls back a failed SQLite removal and never notifies subscribers", () => {
+  it("preserves membership and never notifies subscribers after a failed SQLite removal", () => {
     const db = database();
     const store = new MembershipRegistry(db);
     grant(store, "admin", "admin");
@@ -199,10 +156,8 @@ describe("hub-owned workspace memberships", () => {
     expect(removed).toEqual(["member"]);
   });
 
-  it("commits removal before listeners, isolates workspaces, and retries all failed closures", () => {
-    const path = tempDatabasePath();
-    const store = registry(path);
-    const observer = registry(path);
+  it("removes membership before listeners, isolates workspaces, and retries all failed closures", () => {
+    const store = registry();
     grant(store, "admin", "admin");
     grant(store, "person");
     grant(store, "other-member");
@@ -211,8 +166,7 @@ describe("hub-owned workspace memberships", () => {
     const unsubscribeFailing = store.onRemove(() => { throw new Error("first closure failed"); });
     const unsubscribeOtherFailing = store.onRemove(() => { throw new Error("second closure failed"); });
     store.onRemove((workspaceId, principalId) => {
-      // A different connection seeing absence proves COMMIT preceded closure.
-      expect(observer.roleFor(workspaceId, principalId)).toBeNull();
+      expect(store.roleFor(workspaceId, principalId)).toBeNull();
       events.push(`${workspaceId}/${principalId}`);
     });
     const request = { workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "person" };

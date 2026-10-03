@@ -155,13 +155,15 @@ function connect(options: {
     ...{ delay: 60_000, minDelay: 60_000 },
   });
   providers.push(provider);
+  const authenticated = vi.fn();
+  provider.on("authenticated", authenticated);
   const synced = new Promise<void>((resolve) => provider.on("synced", resolve));
   const denied = new Promise<string>((resolve) => {
     provider.on("authenticationFailed", ({ reason }: { reason: string }) => resolve(reason));
   });
   const closed = new Promise<void>((resolve) => provider.on("close", resolve));
   if (options.websocketProvider !== undefined) provider.attach();
-  return { doc, provider, text: doc.getText(TEXT_KEY), synced, denied, closed };
+  return { doc, provider, text: doc.getText(TEXT_KEY), authenticated, synced, denied, closed };
 }
 
 function sharedSocket(port: number) {
@@ -225,6 +227,7 @@ describe("credential admission on a composed server", () => {
     const nonMember = issue(rig.registry, "outsider-device", [WORKSPACE], "outsider");
     const refused = connect({ port: rig.port, room: testRoom(), token: await credentialToken(nonMember, WORKSPACE, { sub: "admin" }) });
     expect(await waitFor("missing membership to refuse admission", refused.denied)).toBe("invalid-token");
+    expect(refused.authenticated).not.toHaveBeenCalled();
     expect(rig.logs.at(-1)).toMatchObject({ cause: "missing-membership" });
     rig.memberships.grant({ workspaceId: WORKSPACE, principalId: "outsider", role: "member" });
     const admitted = connect({ port: rig.port, room: testRoom(), token: await credentialToken(nonMember) });
@@ -419,6 +422,7 @@ describe("credential admission on a composed server", () => {
       rig.memberships.remove({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "person" });
       held.open();
       expect(await waitFor("the authenticating device to be refused", sender.denied)).toBe("invalid-token");
+      expect(sender.authenticated).not.toHaveBeenCalled();
       expect(rig.logs.at(-1)).toMatchObject({ cause: "missing-membership" });
       const peer = issue(rig.registry, "peer", [WORKSPACE], "observer");
       const observer = connect({ port: rig.port, room, token: await credentialToken(peer) });
@@ -627,8 +631,9 @@ describe("credential admission on a composed server", () => {
     await waitUntil("the remaining member to keep writing", () =>
       rig.hocuspocus.documents.get(firstRoom)?.getText(TEXT_KEY).toString() === "retained document + peer writes" && !observer.provider.hasUnsyncedChanges);
     for (const credential of [laptop, phone]) {
-      const refused = connect({ port: rig.port, room: testRoom(), token: await credentialToken(credential) });
+      const refused = connect({ port: rig.port, room: firstRoom, token: await credentialToken(credential) });
       expect(await waitFor("all removed devices to be refused", refused.denied)).toBe("invalid-token");
+      expect(refused.authenticated).not.toHaveBeenCalled();
       expect(rig.logs.at(-1)).toMatchObject({ cause: "missing-membership" });
     }
     rig.memberships.grant({ workspaceId: WORKSPACE, principalId: "person", role: "member" });

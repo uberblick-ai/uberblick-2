@@ -1,6 +1,6 @@
 /** Hub-owned workspace access, outside synchronized document content. */
 
-import type { DatabaseSync, StatementSync } from "node:sqlite";
+import type { StatementSync } from "node:sqlite";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { HubDatabase } from "./persistence.js";
 
@@ -50,10 +50,11 @@ function validateRole(role: MembershipRole): void {
  * Only trusted hub callers grant a membership. Actor-facing operations cannot
  * add one, and read the actor's current authority from this database. Admission
  * and management must share this instance so removal reaches its subscribers.
+ * Checks and each single-statement mutation stay synchronous on the hub's one
+ * database connection, so another operation cannot interleave between them.
  * The live hub does not construct or install this authority yet.
  */
 export class MembershipRegistry {
-  private readonly db: DatabaseSync;
   private readonly insert: StatementSync;
   private readonly selectRole: StatementSync;
   private readonly selectMembers: StatementSync;
@@ -63,29 +64,29 @@ export class MembershipRegistry {
   private readonly removeListeners = new Set<(workspaceId: string, principalId: string) => void>();
 
   constructor(database: HubDatabase) {
-    this.db = database.connection;
-    this.db.exec(SCHEMA);
-    this.insert = this.db.prepare(`
+    const db = database.connection;
+    db.exec(SCHEMA);
+    this.insert = db.prepare(`
       INSERT INTO hub_memberships (workspace_id, principal_id, role)
       VALUES ($workspaceId, $principalId, $role)
     `);
-    this.selectRole = this.db.prepare(`
+    this.selectRole = db.prepare(`
       SELECT role FROM hub_memberships
       WHERE workspace_id = $workspaceId AND principal_id = $principalId
     `);
-    this.selectMembers = this.db.prepare(`
+    this.selectMembers = db.prepare(`
       SELECT principal_id, role FROM hub_memberships
       WHERE workspace_id = $workspaceId ORDER BY principal_id
     `);
-    this.countAdmins = this.db.prepare(`
+    this.countAdmins = db.prepare(`
       SELECT COUNT(*) AS count FROM hub_memberships
       WHERE workspace_id = $workspaceId AND role = 'admin'
     `);
-    this.updateRole = this.db.prepare(`
+    this.updateRole = db.prepare(`
       UPDATE hub_memberships SET role = $role
       WHERE workspace_id = $workspaceId AND principal_id = $principalId
     `);
-    this.deleteMember = this.db.prepare(`
+    this.deleteMember = db.prepare(`
       DELETE FROM hub_memberships
       WHERE workspace_id = $workspaceId AND principal_id = $principalId
     `);
@@ -123,29 +124,25 @@ export class MembershipRegistry {
   }
 
   listMembers(workspaceId: string, actorPrincipalId: string): MembershipRecord[] {
-    return this.transaction(() => {
-      this.requireAdmin(workspaceId, actorPrincipalId);
-      return this.selectMembers.all({ workspaceId }).map((row) => ({
-        workspaceId,
-        principalId: row.principal_id as string,
-        role: row.role as MembershipRole,
-      }));
-    });
+    this.requireAdmin(workspaceId, actorPrincipalId);
+    return this.selectMembers.all({ workspaceId }).map((row) => ({
+      workspaceId,
+      principalId: row.principal_id as string,
+      role: row.role as MembershipRole,
+    }));
   }
 
   changeRole(request: ChangeMembershipRoleRequest): void {
     validateIdentity(request.workspaceId, request.principalId);
     validateRole(request.role);
-    this.transaction(() => {
-      this.requireAdmin(request.workspaceId, request.actorPrincipalId);
-      const previousRole = this.roleFor(request.workspaceId, request.principalId);
-      if (previousRole === null) throw new Error("MembershipRegistry: member not found");
-      if (request.role !== "admin") this.protectLastAdmin(request.workspaceId, previousRole);
-      this.updateRole.run({
-        workspaceId: request.workspaceId,
-        principalId: request.principalId,
-        role: request.role,
-      });
+    this.requireAdmin(request.workspaceId, request.actorPrincipalId);
+    const previousRole = this.roleFor(request.workspaceId, request.principalId);
+    if (previousRole === null) throw new Error("MembershipRegistry: member not found");
+    if (request.role !== "admin") this.protectLastAdmin(request.workspaceId, previousRole);
+    this.updateRole.run({
+      workspaceId: request.workspaceId,
+      principalId: request.principalId,
+      role: request.role,
     });
   }
 
@@ -156,15 +153,13 @@ export class MembershipRegistry {
    */
   remove(request: RemoveMembershipRequest): boolean {
     validateIdentity(request.workspaceId, request.principalId);
-    const changed = this.transaction(() => {
-      this.requireAdmin(request.workspaceId, request.actorPrincipalId);
-      const previousRole = this.roleFor(request.workspaceId, request.principalId);
-      this.protectLastAdmin(request.workspaceId, previousRole);
-      return this.deleteMember.run({
-        workspaceId: request.workspaceId,
-        principalId: request.principalId,
-      }).changes !== 0;
-    });
+    this.requireAdmin(request.workspaceId, request.actorPrincipalId);
+    const previousRole = this.roleFor(request.workspaceId, request.principalId);
+    this.protectLastAdmin(request.workspaceId, previousRole);
+    const changed = this.deleteMember.run({
+      workspaceId: request.workspaceId,
+      principalId: request.principalId,
+    }).changes !== 0;
     const failures: unknown[] = [];
     for (const listener of this.removeListeners) {
       try {
@@ -187,20 +182,6 @@ export class MembershipRegistry {
   private protectLastAdmin(workspaceId: string, previousRole: MembershipRole | null): void {
     if (previousRole === "admin" && this.countAdmins.get({ workspaceId })?.count === 1) {
       throw new Error("MembershipRegistry: final workspace admin must remain");
-    }
-  }
-
-  private transaction<T>(operation: () => T): T {
-    // Lock before reading authority or counting admins: another SQLite writer
-    // cannot demote this actor or remove the other admin between check and write.
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const result = operation();
-      this.db.exec("COMMIT");
-      return result;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
     }
   }
 }
