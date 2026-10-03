@@ -378,6 +378,26 @@ laptop widths, with the approve and change flows walked through. A person
 reviews it before the web issues are written; the spike's prototype branch
 remains available as an integration reference.
 
+## Where agent behavior lives
+
+Every agent rule in this brief — taking an initial stance, raising a
+reconsideration, stopping work on a challenge, marking work *built on open
+decision*, reviewers drafting records, the when-to-record test — is written
+into **uberblick-2's own instruction files**, never into ub-agents (owner,
+2026-10-03). ub-agents runs roles and applies the label changes a project
+declares; it knows nothing about Uberblick, decision records or this corpus,
+and needs no change for any of this. The lease-renewal topic used throughout
+is sample content only.
+
+| Rule | Instruction file in uberblick-2 |
+| --- | --- |
+| When to record; initial stance; boundary topics start open | `.agents/protocols/delivery-policy.md`, `.agents/roles/implementer.md` |
+| Proceed on an open decision's recommendation; *built on open decision* line; major-impact steps wait | `.agents/roles/implementer.md`, `.github/ISSUE_SPEC.md` |
+| A challenge stops the dependent work | `.agents/roles/implementer.md`, `.agents/roles/issue-preparer.md` |
+| Reviewers draft missing records | `.agents/roles/reviewer.md`, `.agents/protocols/review-protocol.md` |
+| Preparers cite relevant decisions in the reading guide | `.agents/protocols/issue-preparation.md` |
+| Shaping raises decisions as records rather than issue text | `.agents/protocols/issue-shaping.md` |
+
 ## Re-implementation: no legacy owed
 
 Decision records may be re-implemented from scratch (owner, 2026-10-03). Like
@@ -406,7 +426,7 @@ legacy detection is owed:
 | --- | --- | --- |
 | Topic wording | — | Editorial contract (Decision template), Decision logs guide |
 | Optional Reconsidering | `packages/mcp-server/src/tools.ts` (`hasRevivalTrigger` and both callers, tool descriptions), `failures.ts`, tests in `test/descriptions.test.ts`, `test/archive.test.ts` | Editorial contract, MCP interface contract, `.agents/protocols/issue-shaping.md` |
-| Agent initial stance, human-approved changes, agent-decided marker, when to record | `set_status` / `create_doc` (marker, approval of a successor), tool descriptions | Editorial contract, Decision logs guide, agent workflow, role contracts (challenge stops affected work) |
+| Agent initial stance, human-approved changes, agent-decided marker, when to record | `set_status` / `create_doc` (marker, approval of a successor), tool descriptions | Editorial contract, Decision logs guide, agent workflow, uberblick-2 `.agents/` roles and protocols |
 | Links on the record (`governs`, `topic`, `supersedes`) cached in the stub; derived decision log; topics, chains and default listing | `packages/schema/src/doc.ts` (drop the `decisions` root), `packages/schema/src/directory.ts`, stub writers in web and MCP, `create_doc`, `list_docs`, `get_doc` | Document model, MCP interface contract, Decision logs guide |
 | GitHub links derived from record text | derived index in `packages/mcp-server` (extract GitHub issue/PR links from link marks), a lookup by issue or PR | MCP interface contract, Editorial contract note |
 
@@ -420,7 +440,8 @@ Each step is one independently mergeable pull request.
    one-row-per-topic the default decision listing, with `include_superseded`.
 2. Topic and decision wording, optional Reconsidering (gate removed), and the
    agent-stance / human-approval rules with the agent-decided marker, and the
-   when-to-record test, across code, descriptions, corpus and role contracts.
+   when-to-record test, across code, descriptions, corpus and uberblick-2's
+   `.agents/` instruction files (section "Where agent behavior lives").
 3. The derived index of GitHub links in decision records, with a lookup by
    issue or pull request.
 
