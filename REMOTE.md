@@ -240,6 +240,102 @@ These credentials are not accepted by the live hub or `ub open` yet; configuring
 sign-in never activates credential admission. Existing clients continue using
 the shared signing secret and the private tailnet boundary.
 
+## Establish a workspace's first administrator
+
+After [enabling GitHub sign-in](#enable-github-sign-in), run setup in the
+repository checkout **on the hub host**, for example over SSH:
+
+```sh
+sh hub-admin-setup.sh <workspace-uuid>
+```
+
+Name exactly one bare workspace UUID. For an existing workspace, use the UUID
+`ub status` shows on a machine that holds it, including the workspace deployed
+by `ub remote init`. Setup adopts that same workspace; it does not replace its
+identity or documents. For a new workspace, choose a fresh UUID and pass it to
+the same command. Setup establishes its first administrator without creating
+documents or selecting the workspace in host or client configuration.
+
+The command prints a setup ID, GitHub's approval URL and a short code. Keep
+the ID for checking the result, and keep the code private: the GitHub account
+that approves **that code** becomes the administrator. Open the URL in a
+browser on any machine, sign in to the intended account and approve the code.
+The hub host needs no browser. The command waits for approval and reports the
+GitHub login and durable account ID, the named workspace, and whether the hub
+already held documents for that workspace. The hub logs the committed grant.
+Approval expires within fifteen minutes.
+
+Host access is the authority for this operation. The script runs a command in
+the running hub container through `remote-compose.sh`; the command connects to
+a private Unix socket beside the hub database. No deployment HTTP or WebSocket
+route can start setup, complete it or retrieve its result. A shared signing
+secret, device credential or supplied GitHub token cannot authorize setup.
+The hub uses GitHub's token briefly to read the approving account's public
+identity, then discards it. That token is never sent to the command, printed,
+logged or saved.
+
+### What setup can change
+
+Setup works only while the workspace has **no membership**, including a new
+workspace the hub holds nothing for. It refuses a workspace with any membership
+both when starting and when approval completes. Two setups racing for one
+workspace can establish only one administrator. You may run the command again
+for a different workspace with no membership.
+
+Running the command does not give the host operator a role or membership. Only
+the account approving its code gains that workspace's admin membership, using
+the same principal that the account's ordinary GitHub sign-in reaches. Setup
+issues no device credential and changes no documents, credentials or other
+workspace's memberships. Ordinary sign-in grants no membership before, during
+or after setup. Once membership exists, setup cannot add, replace or remove
+anyone there; access management belongs to that workspace's admins.
+
+Setup also leaves live sync admission unchanged: the live hub and `ub open`
+still use the shared signing secret. Setup activates no credential or
+membership admission, and local-only work needs none of it. A hub without
+GitHub configuration refuses setup distinctly as `not-configured`.
+
+### Cancellation and a missing result
+
+Denied, abandoned, expired and failed approvals end distinctly without a grant.
+If the hub observes cancellation or interruption before committing, it fences
+that setup: approving its code later grants nothing. A grant already committed
+stands even if the command or its connection dies before displaying success.
+A process started by Compose may survive a dropped SSH connection; its setup
+can still finish on approval or expiry.
+
+Losing the result does **not** establish that nothing changed. Reconnect to
+the host checkout and use the setup ID printed by the original command:
+
+```sh
+sh hub-admin-setup.sh status <setup-uuid>
+```
+
+The committed receipt is private hub data and survives a hub restart. This
+lookup retrieves what that setup committed without granting or changing
+anything. An unknown result never proves that nothing changed: for example,
+a database restore can replace the recorded history. Check the hub's grant
+logs with `sh remote-compose.sh logs hub` and the applicable backups when the
+receipt is unavailable. Do not interpret a connection failure or an unknown
+result as permission to replace an administrator.
+
+### Out of scope: recovery of administrator access
+
+Setup provides no privileged recovery route. It never acts on a workspace with
+membership, and access management cannot remove or demote its final admin.
+Administrator authority belongs to durable GitHub account IDs. Restoring a
+backup whose administrators are the same inaccessible accounts restores the
+same lockout; it cannot recover those GitHub accounts.
+
+An older backup can recover access only if its access state permits access
+again: a historical administrator whose GitHub account is still accessible,
+or a workspace with no membership where setup can run anew. A restore replaces
+the **whole hub database**, including the documents and access state of every
+workspace, not just the affected workspace. Use the
+[backup and restore procedure](#backing-the-hub-up) below. Without a suitable
+backup, this version offers no supported recovery. Any operator recovery route
+requires a separate owner decision.
+
 ## What the command does, by hand
 
 The manual procedure, kept as the reference for what `ub remote init` automates
@@ -476,9 +572,10 @@ died between the stop and the start would leave the hub down for good.
 The file lands at mode `0600`, and it lands whole: the copy goes to a temporary
 sibling and is renamed onto the name you gave, so an interrupted run leaves the
 previous backup exactly as it was rather than a truncated file wearing its name.
-It is every document in the workspace in one readable file; treat it exactly
-like the signing secret. Naming an existing directory, or a directory that is
-not writable, is refused before the hub is stopped.
+It contains the documents and private access records of every workspace in one
+readable file; treat it exactly like the signing secret. Naming an existing
+directory, or a directory that is not writable, is refused before the hub is
+stopped.
 
 **Agents keep working while the hub is stopped; browser tabs pause.** Caddy
 stays up and serves the app; `/ws` answers 502 for those seconds. Every MCP
@@ -566,7 +663,7 @@ the host. Nothing here schedules a backup, rotates one, or sends one anywhere.
 The hub this deployment starts is empty; `ub remote init` pointed the machine
 that ran it at the new endpoint. Every other computer joins. Which process runs
 where matters: everything in this section runs on **your** computers, not on the
-remote host, which only ever runs `sh remote-compose.sh`.
+remote host, which runs the deployment and operator scripts.
 
 There is one verb for joining a workspace that exists, and it is the same on
 every machine:
