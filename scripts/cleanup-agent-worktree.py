@@ -65,7 +65,7 @@ def remove_entry(parent, name, path, uid):
 
 
 def cleanup():
-    run = os.environ.get("UB_AGENT_RUN", "")
+    run = os.environ.get("UB_AGENTS_RUN", "")
     if re.fullmatch(r"[0-9a-f]{32}", run) is None:
         return
     uid = os.getuid()
@@ -78,8 +78,8 @@ def cleanup():
 
         # The hook runs from the operator's configuration checkout. An exact
         # match also excludes other runs, shared checkouts and traversal aliases.
-        worktree = os.path.join(os.getcwd(), ".ub-agent", "worktrees", run)
-        if os.environ.get("UB_AGENT_WORKTREE") != worktree:
+        worktree = os.path.join(os.getcwd(), ".ub-agents", "worktrees", run)
+        if os.environ.get("UB_AGENTS_WORKTREE") != worktree:
             return
         worktree_fd = open_directory(worktree)
         os.close(worktree_fd)

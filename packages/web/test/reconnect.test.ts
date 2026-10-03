@@ -503,7 +503,7 @@ async function admissionToken(workspace = WORKSPACE): Promise<string> {
 }
 
 it("paces live name rooms below the hub ceiling, including after a reconnect", async () => {
-  const dir = mkdtempSync(join(tmpdir(), `room-admission-${process.env.UB_AGENT_RUN ?? process.pid}-`));
+  const dir = mkdtempSync(join(tmpdir(), `room-admission-${process.env.UB_AGENTS_RUN ?? process.pid}-`));
   const hub = await createHub({
     authSecret: SECRET, port: 0, databasePath: join(dir, "hub.sqlite"),
     maxPendingDocuments: 3, log: silentLogger,
@@ -555,7 +555,7 @@ it("paces live name rooms below the hub ceiling, including after a reconnect", a
 }, 30_000);
 
 it("discards a token that resolves after its socket generation ended", async () => {
-  const dir = mkdtempSync(join(tmpdir(), `room-admission-${process.env.UB_AGENT_RUN ?? process.pid}-`));
+  const dir = mkdtempSync(join(tmpdir(), `room-admission-${process.env.UB_AGENTS_RUN ?? process.pid}-`));
   const hub = await createHub({
     authSecret: SECRET, port: 0, databasePath: join(dir, "hub.sqlite"), log: silentLogger,
     shutdownTimeoutMs: 2_000,

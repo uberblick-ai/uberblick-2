@@ -62,7 +62,7 @@ async function startServer(
   hooks: Partial<ServerConfiguration<CredentialContext>> = {},
 ) {
   const directory = mkdtempSync(
-    join(tmpdir(), `credential-admission-${process.env.UB_AGENT_RUN ?? "test"}-`),
+    join(tmpdir(), `credential-admission-${process.env.UB_AGENTS_RUN ?? "test"}-`),
   );
   directories.push(directory);
   const database = new HubDatabase(join(directory, "hub.sqlite"), (error) => {

@@ -11,7 +11,7 @@ The commands that build, run and validate a change:
 | `mise run e2e` | the browser proof, owed when the outcome is browser-observable |
 | `mise run review <sha>` | the immutable review, when delivery policy requires it |
 | `mise exec -- pnpm run test:agent-cleanup`, `mise exec -- pnpm run test:housekeeping` | focused run-scratch cleanup and Docker housekeeping contract tests |
-| `python3 scripts/cleanup-agent-worktree.py` | ub-agents hook before private-worktree removal; uses `UB_AGENT_RUN` and `UB_AGENT_WORKTREE` |
+| `python3 scripts/cleanup-agent-worktree.py` | ub-agents hook before private-worktree removal; uses `UB_AGENTS_RUN` and `UB_AGENTS_WORKTREE` |
 | `sh scripts/housekeeping.sh <review sha>...` | the host cleanup an integrator runs after a durable outcome |
 
 Prefer these to direct package-manager invocations, and run a command that needs

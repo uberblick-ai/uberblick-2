@@ -23,13 +23,13 @@ const script = join(root, "scripts/cleanup-agent-worktree.py");
 function fixture(t) {
 	const base = realpathSync(
 		mkdtempSync(
-			join(tmpdir(), `agent-cleanup-${process.env.UB_AGENT_RUN ?? "local"}-`),
+			join(tmpdir(), `agent-cleanup-${process.env.UB_AGENTS_RUN ?? "local"}-`),
 		),
 	);
 	t.after(() => rmSync(base, { recursive: true, force: true }));
 	const run = randomUUID().replaceAll("-", "");
 	const operator = join(base, "operator");
-	const worktree = join(operator, ".ub-agent", "worktrees", run);
+	const worktree = join(operator, ".ub-agents", "worktrees", run);
 	mkdirSync(worktree, { recursive: true });
 	const tasks = join(base, `claude-${process.getuid()}`);
 	mkdirSync(tasks);
@@ -38,7 +38,7 @@ function fixture(t) {
 	const sharedTask = join(tasks, slug(operator));
 	const peerTask = join(
 		tasks,
-		slug(join(operator, ".ub-agent", "worktrees", "f".repeat(32))),
+		slug(join(operator, ".ub-agents", "worktrees", "f".repeat(32))),
 	);
 	for (const path of [task, sharedTask, peerTask]) {
 		mkdirSync(path);
@@ -47,8 +47,8 @@ function fixture(t) {
 	const env = {
 		...process.env,
 		TMPDIR: base,
-		UB_AGENT_RUN: run,
-		UB_AGENT_WORKTREE: worktree,
+		UB_AGENTS_RUN: run,
+		UB_AGENTS_WORKTREE: worktree,
 	};
 	return {
 		base,
@@ -75,7 +75,7 @@ function invoke(f, overrides = {}, code) {
 
 test("configured hook removes all run scratch and only its private Claude tasks, and retries safely", (t) => {
 	const f = fixture(t);
-	const config = readFileSync(join(root, "ub-agent.yaml"), "utf8");
+	const config = readFileSync(join(root, "ub-agents.yaml"), "utf8");
 	assert.ok(
 		config.includes(
 			"cleanup:\n  command: [python3, scripts/cleanup-agent-worktree.py]\n  timeout-seconds: 60",
@@ -138,10 +138,42 @@ test("missing, empty and malformed run ids remove nothing", (t) => {
 		`${f.run}\n`,
 		"*".repeat(32),
 	]) {
-		assert.equal(invoke(f, { UB_AGENT_RUN: run }).stderr, "");
+		assert.equal(invoke(f, { UB_AGENTS_RUN: run }).stderr, "");
 		assert.equal(existsSync(scratch), true);
 		assert.equal(existsSync(f.task), true);
 	}
+});
+
+test("legacy launcher inputs cannot authorize cleanup", (t) => {
+	const f = fixture(t);
+	const scratch = join(f.base, `scratch-${f.run}`);
+	mkdirSync(scratch);
+	// Construct retired names so the repository contains only current names.
+	const legacyRun = ["UB", "AGENT", "RUN"].join("_");
+	const legacyWorktreeVariable = ["UB", "AGENT", "WORKTREE"].join("_");
+	const legacyWorktree = join(
+		f.operator,
+		[".ub", "agent"].join("-"),
+		"worktrees",
+		f.run,
+	);
+	mkdirSync(legacyWorktree, { recursive: true });
+	const legacyTask = join(f.tasks, legacyWorktree.replaceAll(/[^a-zA-Z0-9]/g, "-"));
+	mkdirSync(legacyTask);
+	writeFileSync(join(legacyTask, "keep"), "legacy task\n");
+	invoke(f, {
+		UB_AGENTS_RUN: undefined,
+		UB_AGENTS_WORKTREE: undefined,
+		[legacyRun]: f.run,
+		[legacyWorktreeVariable]: legacyWorktree,
+	});
+	for (const path of [scratch, f.task, legacyTask])
+		assert.equal(existsSync(path), true, path);
+
+	invoke(f, { UB_AGENTS_WORKTREE: legacyWorktree });
+	assert.equal(existsSync(scratch), false);
+	for (const path of [f.task, legacyTask, f.sharedTask, f.peerTask])
+		assert.equal(existsSync(path), true, path);
 });
 
 test("task cleanup requires this operator checkout's exact private-worktree path", (t) => {
@@ -153,9 +185,9 @@ test("task cleanup requires this operator checkout's exact private-worktree path
 		f.peerTask,
 		`${f.worktree}/`,
 		`${f.worktree}/../${f.run}`,
-		join(f.base, ".ub-agent", "worktrees", f.run),
+		join(f.base, ".ub-agents", "worktrees", f.run),
 	]) {
-		invoke(f, { UB_AGENT_WORKTREE: path });
+		invoke(f, { UB_AGENTS_WORKTREE: path });
 		for (const task of [f.task, f.sharedTask, f.peerTask])
 			assert.equal(existsSync(task), true);
 	}

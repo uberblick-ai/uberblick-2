@@ -36,7 +36,7 @@ agents:
       - --allowedTools
       - "Bash(git *)"
       - "Bash(gh *)"
-      - "Bash(ub-agent *)"
+      - "Bash(ub-agents *)"
       - "Bash(mise *)"
       - "mcp__uberblick__*"
       - "Bash(sh scripts/housekeeping.sh *)"
