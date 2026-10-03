@@ -100,6 +100,8 @@ describe("token minting sites", () => {
 
   it("enumerates operation-bound request proof minting sites separately", () => {
     expect(mentioning("mintRequestProof(")).toEqual([
+      // Inactive client renewal proof: operation-bound, 60 seconds, stored credential kid.
+      "packages/hub/src/device-login.ts",
       "packages/hub/test/credential-admission.test.ts",
       "packages/hub/test/credential-compatibility.test.ts",
       "packages/hub/test/credential-renewal-http.test.ts",

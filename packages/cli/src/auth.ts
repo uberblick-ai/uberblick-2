@@ -11,7 +11,8 @@ import {
 } from "./auth-store.js";
 import { readUserConfig } from "./config.js";
 import type { Io } from "./io.js";
-import { normalizeRemoteUrl } from "./remote.js";
+import { authenticationOrigin } from "@uberblick/hub/remote-url";
+export { authenticationOrigin } from "@uberblick/hub/remote-url";
 
 export const AUTH_HELP = `usage: ub auth <command>
 
@@ -60,13 +61,6 @@ management; logout never revokes it. The machine's binding stays unchanged.
 options:
   -h, --help             show this help
 `;
-
-/** URL canonicalization is for login identity only, never a binding rewrite. */
-export function authenticationOrigin(hub: string): string {
-  const url = new URL(normalizeRemoteUrl(hub));
-  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
-  return url.origin;
-}
 
 interface Selection {
   origin: string;

@@ -2389,8 +2389,12 @@ export function registerTools(
       title: "Sync status",
       description:
         "What this replica holds and what the hub has acknowledged.\n\n" +
-        "`hub.status` distinguishes a hub that is down from a token the hub rejected — the first resolves itself, " +
-        "the second needs a human — and `disabled` means no secret was configured, so this server is local-only. " +
+        "`hub.status` distinguishes `hub-down`, a retryable connection or renewal failure, from `auth-failed`, " +
+        "an authentication problem that needs human action. `disabled` means sync is disabled, so this server is local-only. " +
+        "Every reading carries `hub.recoveryClass`: `retry` means a missing room can still arrive as the connection " +
+        "recovers; `manual` means a person must act before sync can resume. This also applies to shared-secret " +
+        "readings. `hub.authRecovery`, when present on `auth-failed`, distinguishes `sign-in-required`, " +
+        "`no-workspace-access`, `credential-store` and `renewal-unavailable`; `hub.reason` gives the needed action. " +
         "`update-required` is the third kind: this replica and the hub speak different sync protocol versions, so " +
         "the hub refuses the connection outright. `hub.protocolVersion` is this replica's and " +
         "`hub.hubProtocolVersion` the hub's, and `hub.reason` says which side is older; nothing syncs until that " +

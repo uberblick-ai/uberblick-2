@@ -262,6 +262,7 @@ describe("with the hub stopped", () => {
 
     const status = await rig.ok("sync_status", {});
     expect(status.hub.status).toBe("hub-down");
+    expect(status.hub.recoveryClass).toBe("retry");
     expect(status.hub.reason).toContain("127.0.0.1:1");
     expect(status.unsyncedChanges).toBeGreaterThan(0);
     // The doc's own room and the directory room both hold local-only changes,
@@ -281,6 +282,7 @@ describe("with the hub stopped", () => {
     rigs.push(disabled);
     const off = await disabled.ok("sync_status", {});
     expect(off.hub.status).toBe("disabled");
+    expect(off.hub.recoveryClass).toBe("manual");
     expect(off.hub.url).toBeNull();
     const local = await disabled.ok("create_doc", { title: "Local only", description: "A test document." });
     expect(local.applied).toBe(true);

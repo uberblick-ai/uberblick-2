@@ -50,6 +50,8 @@ import { dirname, join } from "node:path";
 import type { StoragePaths } from "@uberblick/hub/storage";
 import { resolveStorage } from "@uberblick/hub/storage";
 import { parseWorkspaceId } from "@uberblick/schema";
+import { CREDENTIALS_FILE, credentialsPath } from "@uberblick/hub/auth-store";
+export { CREDENTIALS_FILE, credentialsPath } from "@uberblick/hub/auth-store";
 import {
   publishOwnerOnly,
   publishStaged,
@@ -58,9 +60,6 @@ import {
 
 /** Per-user identity, default workspace, remote endpoint. Not committed. */
 export const USER_CONFIG_FILE = "config.json";
-
-/** The hub signing secret and, later, remote tokens. Never committed. */
-export const CREDENTIALS_FILE = "credentials.json";
 
 /** The key holding the hub's HMAC signing secret in `credentials.json`. */
 const SIGNING_SECRET_KEY = "signingSecret";
@@ -141,10 +140,6 @@ export function configDir(env: NodeJS.ProcessEnv = process.env): string {
 
 export function userConfigPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(configDir(env), USER_CONFIG_FILE);
-}
-
-export function credentialsPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(configDir(env), CREDENTIALS_FILE);
 }
 
 function message(error: unknown): string {
