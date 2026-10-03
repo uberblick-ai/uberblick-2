@@ -84,13 +84,15 @@ Settled 2026-10-03:
 - **Open does not mean blocked** (owner, 2026-10-03). Work proceeds on the
   open record's recommended option, and merging continues. The issue or pull
   request says *built on open decision: \<topic\>, recommended option*, so a
-  reversal can find what was built on it. Only irreversible steps wait for a
-  human answer: publishing a release, a migration that drops data, and
-  credential or permission changes. If a person decides differently, the new
+  reversal can find what was built on it. Hardly anything is irreversible, so
+  the line is **major impact**: only a step whose reversal would mean
+  substantial rework across the system waits for a human answer — for example
+  replacing the database (PostgreSQL with MongoDB), a migration that drops
+  data, or a credential or permission change. If a person decides differently, the new
   decision supersedes the recommendation and a follow-up issue does the
   rework; that rework cost is accepted to avoid slowing delivery. The agent
   workflow's "at a boundary, pause only affected work" narrows to those
-  irreversible steps, and that document changes with it.
+  major-impact steps, and that document changes with it.
 - **Opening a topic and challenging a decision differ.** A new open topic
   proceeds on its recommendation; a challenge to a `decided` record stops the
   work that depends on it, as above.
