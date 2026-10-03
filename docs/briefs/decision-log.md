@@ -101,7 +101,12 @@ Settled 2026-10-03:
   decision supersedes the recommendation and a follow-up issue does the
   rework; that rework cost is accepted to avoid slowing delivery. The agent
   workflow's "at a boundary, pause only affected work" narrows to those
-  major-impact steps, and that document changes with it.
+  major-impact steps, and that document changes with it. This concerns only
+  work *within an already approved issue* whose implementation meets an open
+  decision. It approves no new outcome: `ISSUE_SPEC.md`'s person-approval rule
+  for `Implements:` outcomes, its refusal of unresolved product choices in a
+  ready issue, and `delivery-policy.md`'s review and merge tiers all stay as
+  they are.
 - **Opening a topic and challenging a decision differ.** A new open topic
   proceeds on its recommendation; a challenge to a `decided` record stops the
   work that depends on it, as above.
@@ -157,14 +162,22 @@ act under that person's GitHub identity. Two consequences:
 - The identity says *whose credential* recorded the decision, not whether a
   person or an agent made the call. On a person's device, "changes need a
   human" stays a rule agents obey; the hub cannot tell the two apart there.
-- The decider is recorded from the credential's principal, never from a
-  self-asserted name.
+- A record stores two people separately: **who decided** (the person whose
+  answer is recorded) and **who recorded it** (the principal of the
+  connection that wrote it). They differ whenever an agent records a person's
+  answer through MCP.
+- Admission identifies the connecting principal, not the author of every Yjs
+  update it relays: a replica can forward another participant's or an offline
+  edit. So identity lets the hub refuse a `decided` write that arrives on a
+  connection authenticated as an agent account, but it cannot prove who
+  approved. Verifiable approval provenance needs its own design and is out of
+  scope here.
 
-With the identity in hand, the hub can tell an agent account (today
-`uberblick-agent`) from a person's, so agent-decided marking and the rule that
-changes need a human can be enforced for agent accounts rather than trusted.
-Until device-credential admission ships, both are conventions backed by the
-citation in the record.
+Until such a design exists, "changes need a person" is a convention backed by
+the recorded answer and its citation, with one cheap guard once
+device-credential admission ships: `decided` written from an agent-account
+connection (today `uberblick-agent`) is refused unless it records a person's
+answer.
 
 ### 3. All links live on the decision record
 
@@ -205,9 +218,15 @@ For each topic, considering only live (non-archived) decision records:
 
 | Answer | Rule |
 | --- | --- |
-| **In force** | The `decided` record that no live `decided` record supersedes — the latest by chain order, never by timestamp. This is what agents follow. |
-| **Pending** | An `open` record at the head of the chain, if any: the topic is being reconsidered, or has never been settled. |
-| **Superseded** | Every `decided` record that a later live `decided` record supersedes. History only. |
+| **In force** | The single `decided` record that no live `decided` record supersedes, directly or through intermediate records — never chosen by timestamp. This is what agents follow. |
+| **In conflict** | Two or more such maximal `decided` records. None is in force; all are listed and the topic shows a conflict. |
+| **Pending** | Every live `open` record in the topic — there may be several, for instance two agents reconsidering offline at once. |
+| **Superseded** | Every `decided` record that a live `decided` record supersedes, directly or transitively. History only. |
+
+Resolution runs over the topic's whole `supersedes` graph, not a single
+chain. Example: with B → A, C → A and D → B, all decided, the maximal decided
+records are C and D — a conflict. Rejecting B changes nothing (D still
+descends from A); a person resolves it by rejecting C or D.
 
 Consequences:
 
@@ -219,10 +238,9 @@ Consequences:
 - A person declining a reconsideration sets it `rejected`; the earlier
   decision stays in force. Its author dropping it before anyone answers is
   archiving it, which shows as *withdrawn*.
-- Two live `decided` records superseding the same record is a **fork**. The
-  topic shows a **conflict** for a person to resolve, listing both records; it
-  is never resolved by creation time or any other timestamp. A person resolves
-  it by rejecting one of the two.
+- More than one maximal `decided` record is a **conflict** for a person to
+  resolve; it is never resolved by creation time or any other timestamp. A
+  person resolves it by rejecting maximal records until one remains.
 - A superseded record keeps status `decided`; "superseded" is derived from the
   chain, so nobody has to remember to edit the old record.
 
@@ -239,6 +257,7 @@ exactly one outcome a reader can see without opening it:
 | **Superseded** | Was in force; replaced by the named later record. | Derived from `supersedes` |
 | **Rejected** | Proposed — a first stance, a reconsideration or one side of a conflict — and a person declined it. | Status `rejected` |
 | **Withdrawn** | Proposed and dropped by its author before anyone answered. | Archived while `open` |
+| **In conflict** | One of several competing decided records; waits for a person to keep one. | Derived (section 4) |
 | **Open** | Proposed and waiting for a person. | Status `open` |
 
 Every record — current or historical — is its own document, its own Y.Doc
@@ -255,25 +274,43 @@ in force nor pending, and stay readable in the history for their reasoning.
 **Reading an earlier record.** Every history row opens that record in the same
 decision view as the current one, read-only. It must be unmistakable that this
 is an older version, not the answer to follow: a persistent banner at the top
-names its outcome (*Superseded*, *Rejected*, *Withdrawn*) and its successor,
-and the view is visibly muted against the current record's, so nobody mistakes
+names its outcome (*Superseded*, *Rejected*, *Withdrawn*) and its successor
+when it has one, and the view is visibly muted against the current record's, so nobody mistakes
 it for the live answer. The banner carries one prominent action, **Go to the
 current decision**, which opens the record in force — or, when nothing is in
 force, the record currently being decided — in one tap, without returning to
-the history list. A superseded or
-rejected record is never edited, so the view offers no editing; comments stay
-possible, so someone can ask about old reasoning where it was written. Because
+the history list. When the topic has neither a record in force nor one being
+decided — a rejected or withdrawn first proposal — the banner says so and the
+action is omitted. A superseded or rejected record is never edited, so the
+view offers no editing; comments stay possible on it, so someone can ask about
+old reasoning where it was written. A withdrawn record is archived, and
+archived documents stay fully read-only, comments included. Because
 a record stays short (section 1), reading an old one shows the reasoning at a
 glance, and its links lead to the issue or pull request that holds the
 detail.
 
 ### 5. Efficient discovery from the directory stub
 
-The directory stub caches `governs`, `topic`, `supersedes` and a
-`commentCount` (the number of comments across the record's threads) beside
-`kind` and `status`, under the same rule as those fields: the document is
-authoritative, every stub writer states it rather than carrying it forward, and
-repair converges the cache.
+The directory stub caches, beside `kind` and `status`, everything the
+listings and history rows show:
+
+| Cached field | Source in the document | Shown as |
+| --- | --- | --- |
+| `governs`, `topic`, `supersedes` | `meta` links (section 3) | Grouping, chain order, conflicts |
+| `tldr` | `meta.tldr` — the decision line (section 1) | The answer on every log and history row |
+| `agentStance` | `meta`, set when an agent records a stance, cleared on confirmation | *Agent stance* state |
+| `decidedBy`, `decidedAt` | `meta`, written when a person's answer is recorded | "Decided by … on …", "confirmed by …" |
+| `commentCount` | Comments across the record's threads | The comment count |
+
+The document is authoritative. Writers that hold the hydrated document —
+creation, edits, status changes, and stub repair — restate every field from it.
+Directory-only writers that never hydrate the document — `archive_doc`,
+`restore_doc` and the schema's tombstone and restore operations — preserve the
+cached fields as they find them, so an archive never erases a relationship.
+Comparison, serialization, tombstone and restore paths gain the new fields
+together. The decision line moving into the stub replaces the Document
+model's current rule that the TL;DR has no stub (allowed: section
+"Re-implementation").
 
 With that, every answer above comes from the directory alone — one synced
 document already in memory, one pass over its stubs, no decision room opened.
@@ -288,6 +325,12 @@ Default behavior:
   if there is one, otherwise the open record, with any pending successor or
   conflict named on the row.
 - `include_superseded: true` returns every record, history included.
+- Filters select **topics**, and resolution always uses the topic's whole
+  unfiltered graph. A `status` or `tag` predicate matches a topic when any of
+  its live records matches; the row still shows the topic's resolved answer.
+  With `include_superseded`, predicates apply to individual records instead.
+  `include_deleted` adds archived records to history rows; it never changes
+  what is in force.
 - `get_doc` on a decision returns its predecessors and, when superseded, the
   record that superseded it.
 - `get_doc` on a requirement returns its derived decision log: one entry per
@@ -296,8 +339,10 @@ Default behavior:
 ### 6. Discussion through the standard comments
 
 Discussion uses the ordinary Yjs comment threads every document has: select the
-words in question and comment. No decision-specific comment system, comment
-count or status control is added.
+words in question and comment. No decision-specific comment system is added:
+counts come from the ordinary threads, and the only decision-specific controls
+are the lifecycle actions (confirm, approve, reject, reconsider) described
+above.
 
 ### 7. Labels: the existing tag catalog
 
@@ -315,9 +360,12 @@ GitHub issue or pull request and stores it beside the record, so "which
 decision covers #1125?" is a cheap lookup like search. The text stays the one
 source; nothing is written twice or kept in sync.
 
-The reverse direction needs no field either: work built on an open decision
-says so in its issue or pull request (*built on open decision: \<topic\>*),
-and the same derived lookup finds it when a reversal needs its rework list.
+The reverse direction needs no field either. Work built on an open decision
+says so in its issue or pull request (*built on open decision: \<topic\>,
+\<topic uuid\>*), **and** the implementer adds that issue or pull request,
+repository-qualified (`owner/repo#n`), to the open record's *Links*. The
+decision record therefore carries its own rework list, and the derived lookup
+finds it without reading GitHub.
 
 The Editorial contract's ban on issue and PR numbers applies to Regular
 Documents; it gains an explicit note that decision records may link them.
