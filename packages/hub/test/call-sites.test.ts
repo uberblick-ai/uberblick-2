@@ -73,6 +73,7 @@ describe("token minting sites", () => {
     "packages/hub/test/credential-admission.test.ts",
     "packages/hub/test/credential-compatibility.test.ts",
     "packages/hub/test/credential-registry.test.ts",
+    "packages/hub/test/credential-renewal.test.ts",
     "packages/hub/test/credential.test.ts",
     // Collected sign-in credentials, including restart verification and
     // composed admission; bounded lifetime and issued credential kid.
@@ -80,6 +81,7 @@ describe("token minting sites", () => {
     "packages/hub/test/github-sign-in.test.ts",
     "packages/hub/test/helpers.ts",
     "packages/hub/test/membership-registry.test.ts",
+    "packages/hub/test/request-proof.test.ts",
     "packages/hub/test/token.test.ts",
     "packages/mcp-server/src/sync.ts",
     // Wraps the real mint to hold a token call in flight — no minting site of its own.
@@ -94,5 +96,15 @@ describe("token minting sites", () => {
 
   it("are exactly the files this list names", () => {
     expect(mentioning("mintToken(")).toEqual(EXPECTED);
+  });
+
+  it("enumerates operation-bound request proof minting sites separately", () => {
+    expect(mentioning("mintRequestProof(")).toEqual([
+      "packages/hub/test/credential-admission.test.ts",
+      "packages/hub/test/credential-compatibility.test.ts",
+      "packages/hub/test/credential-renewal-http.test.ts",
+      "packages/hub/test/credential-renewal.test.ts",
+      "packages/hub/test/request-proof.test.ts",
+    ]);
   });
 });

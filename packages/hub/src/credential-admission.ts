@@ -93,8 +93,8 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     // verify includes WebCrypto awaits. Revocation can also land between its
     // resolution and this continuation, so admission reads authority again.
     const record = this.registry.get(verified.record.id);
-    if (record === null || record.revokedAt !== null) {
-      return refuse("revoked-credential");
+    if (record === null || record.revokedAt !== null || record.replacedAt !== null) {
+      return refuse(record !== null && record.replacedAt !== null ? "replaced-credential" : "revoked-credential");
     }
     const workspace = workspaceOf(documentName);
     if (workspace === null || workspace !== verified.claims.workspace) {
@@ -189,6 +189,8 @@ export class CredentialAdmission implements Extension<CredentialContext> {
       ? "unknown-credential"
       : record.revokedAt !== null
         ? "revoked-credential"
+        : record.replacedAt !== null
+          ? "replaced-credential"
         : workspace === null ||
               workspace !== context.workspace ||
               !record.workspaces.includes(workspace)

@@ -61,7 +61,7 @@ describe("hub-owned credential registry", () => {
       claims: expect.objectContaining({ sub: "untrusted-client-identity", kid: laptop.record.id }),
     });
     expect(Object.keys(store.get(laptop.record.id) ?? {}).sort()).toEqual([
-      "deviceId", "id", "issuedAt", "principalId", "revokedAt", "workspaces",
+      "deviceId", "id", "issuedAt", "principalId", "replacedAt", "revokedAt", "workspaces",
     ]);
     expect(await store.verify(await token(laptop, phone.keyBytes))).toEqual({ failure: "bad-signature" });
 
