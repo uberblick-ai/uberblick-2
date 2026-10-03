@@ -392,7 +392,6 @@ export function BlockMenu({
         anchor={path === "gutter" ? gutterButton : undefined}
         open={open}
         onDismiss={dismiss}
-        onFieldEscape={() => handleKey("Escape")}
         listKey={list}
         listId={listId}
         label="Block types"
@@ -414,7 +413,7 @@ export function BlockMenu({
             aria-expanded={open}
             aria-controls={entries.length > 0 ? listId : undefined}
             aria-activedescendant={activeId}
-            className="mb-[0.3rem] w-full shrink-0 rounded-(--radius-sm) border border-input bg-background px-[0.4rem] py-[0.3rem] text-[0.85rem] text-foreground [@media(pointer:coarse)]:text-base"
+            className="mb-[0.3rem] w-full shrink-0 rounded-(--radius-sm) border border-input bg-background px-[0.4rem] py-[0.3rem] text-[0.85rem] text-foreground [font-family:inherit] [@media(pointer:coarse)]:text-base"
             placeholder="Search blocks…"
             aria-label="Search blocks"
             value={gutterQuery}

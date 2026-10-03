@@ -34,7 +34,6 @@ export function CaretMenu({
   choose,
   empty,
   children,
-  onFieldEscape,
   listKey,
 }: {
   editor: Editor;
@@ -43,7 +42,6 @@ export function CaretMenu({
   anchor?: RefObject<HTMLElement | null> | undefined;
   open: boolean;
   onDismiss: () => void;
-  onFieldEscape?: () => void;
   listId: string;
   listKey: string;
   label: string;
@@ -101,13 +99,8 @@ export function CaretMenu({
         // Prose focus is deliberately outside the portalled card.
         onFocusOutside={(event) => event.preventDefault()}
         onEscapeKeyDown={(event) => {
-          // Radix owns the document's capture listener. Suppress its default
-          // dismissal, then send prose Escape through the public PM prop chain
-          // too. A prevented native event alone would never reach PM's input.
-          event.preventDefault();
-          if (event.isComposing || event.keyCode === 229 || editor.view.composing) return;
-          if (anchor) onFieldEscape?.();
-          else editor.view.someProp("handleKeyDown", (handler) => handler(editor.view, event));
+          // Let Radix dismiss unless Escape belongs to the input method.
+          if (event.isComposing || event.keyCode === 229 || editor.view.composing) event.preventDefault();
         }}
       >
         {children}
@@ -136,7 +129,7 @@ export function CaretMenu({
                   tabIndex={-1}
                   aria-label={option.label}
                   aria-selected={index === active}
-                  className={`flex min-h-6 w-full cursor-pointer items-center gap-2 rounded-(--radius-sm) border px-[0.4rem] py-[0.3rem] text-left text-[0.9rem] [@media(pointer:coarse)]:min-h-11 ${index === active ? "border-(--border) bg-(--card-accent) text-(--accent-foreground)" : "border-transparent bg-transparent text-card-foreground"}`}
+                  className={`flex min-h-6 w-full cursor-pointer items-center gap-2 rounded-(--radius-sm) border px-[0.4rem] py-[0.3rem] text-left text-[0.9rem] [font-family:inherit] [@media(pointer:coarse)]:min-h-11 ${index === active ? "border-(--border) bg-(--card-accent) text-(--accent-foreground)" : "border-transparent bg-transparent text-card-foreground"}`}
                   // A pick must run against the prose selection, before focus
                   // can leave it. Touch clicks still reach the same command.
                   onMouseDown={(event) => event.preventDefault()}
