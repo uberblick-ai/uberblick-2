@@ -24,6 +24,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { HELP, MCP_HELP, runCli } from "../src/cli.js";
+import { AUTH_HELP, AUTH_LOGIN_HELP, AUTH_LOGOUT_HELP, AUTH_STATUS_HELP } from "../src/auth.js";
 import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
 import { ENV_HELP } from "../src/env.js";
 import { INIT_HELP, INIT_OPTIONS } from "../src/init.js";
@@ -124,6 +125,10 @@ const PATHS: Path[] = [
   { argv: ["remote", "init"], help: REMOTE_INIT_HELP, options: REMOTE_INIT_OPTIONS },
   { argv: ["remote", "update"], help: REMOTE_UPDATE_HELP, options: REMOTE_UPDATE_OPTIONS },
   { argv: ["remote", "join"], help: REMOTE_JOIN_HELP, options: REMOTE_BRIDGE_OPTIONS },
+  { argv: ["auth"], help: AUTH_HELP, options: {}, children: ["login", "status", "logout"] },
+  { argv: ["auth", "login"], help: AUTH_LOGIN_HELP, options: {} },
+  { argv: ["auth", "status"], help: AUTH_STATUS_HELP, options: {} },
+  { argv: ["auth", "logout"], help: AUTH_LOGOUT_HELP, options: {} },
   { argv: ["mcp"], help: MCP_HELP, options: {}, children: ["install"] },
   { argv: ["mcp", "install"], help: INSTALL_HELP, options: INSTALL_OPTIONS },
   { argv: ["env"], help: ENV_HELP, options: {} },
@@ -140,6 +145,7 @@ const DISPATCHERS = [
   { file: "cli.ts", group: ["mcp"], variable: "subcommand" },
   { file: "workspace.ts", group: ["workspace"], variable: "sub" },
   { file: "remote.ts", group: ["remote"], variable: "sub" },
+  { file: "auth.ts", group: ["auth"], variable: "sub" },
 ];
 
 /** Not commands: the hidden machine entry, the help words, the version flags. */
@@ -344,6 +350,9 @@ describe("help before the work", () => {
     ["remote", "init", "--help"],
     ["remote", "update", "uberblick@example.invalid", "--help"],
     ["remote", "join", "ws://example.invalid:1234", "-h"],
+    ["auth", "login", "--help"],
+    ["auth", "status", "-h"],
+    ["auth", "logout", "--help"],
     ["env", "--help"],
     ["mcp", "install", "zed", "--help"],
     ["mcp", "install", "claude", "--help"],

@@ -1,0 +1,355 @@
+/** Remote sign-in stores a device credential; live sync still uses its existing auth. */
+import { setTimeout as delay } from "node:timers/promises";
+import { parseWorkspaceId } from "@uberblick/schema";
+import {
+  type StoredHubLogin,
+  isHubLogin,
+  preflightHubLoginStore,
+  readHubLogins,
+  removeHubLogin,
+  writeHubLogin,
+} from "./auth-store.js";
+import { readUserConfig } from "./config.js";
+import type { Io } from "./io.js";
+import { normalizeRemoteUrl } from "./remote.js";
+
+export const AUTH_HELP = `usage: ub auth <command>
+
+commands:
+  login [hub]            sign in to a remote hub with GitHub
+  status [hub]           show this machine's stored login
+  logout [hub]           remove this machine's stored login
+
+options:
+  -h, --help             show this help; after a command, that command's help
+`;
+
+export const AUTH_LOGIN_HELP = `usage: ub auth login [hub]
+
+Sign in to the given hub, or the hub bound in this machine's config.json.
+The hub can be a bare host, an http(s) address or a ws(s) endpoint.
+Approve the displayed GitHub URL and code in a browser on any machine;
+this command completes automatically and never asks for keyboard input.
+Store the issued device credential privately on this machine. Sync does
+not use this login yet. A replacement does not revoke the previous device.
+Local-only work needs no login. The machine's binding stays unchanged.
+
+options:
+  -h, --help             show this help
+`;
+
+export const AUTH_STATUS_HELP = `usage: ub auth status [hub]
+
+Show the locally recorded GitHub identity and credential workspace limits
+for the given hub, or the hub bound in this machine's config.json.
+The hub can be a bare host, an http(s) address or a ws(s) endpoint.
+No network is used; this cannot establish whether the hub accepts the device.
+Other stored hubs are named too. The machine's binding stays unchanged.
+
+options:
+  -h, --help             show this help
+`;
+
+export const AUTH_LOGOUT_HELP = `usage: ub auth logout [hub]
+
+Remove this machine's login for the given hub, or the hub bound in config.json.
+The hub can be a bare host, an http(s) address or a ws(s) endpoint.
+No network is used. The device keeps hub access until revoked through device
+management; logout never revokes it. The machine's binding stays unchanged.
+
+options:
+  -h, --help             show this help
+`;
+
+/** URL canonicalization is for login identity only, never a binding rewrite. */
+export function authenticationOrigin(hub: string): string {
+  const url = new URL(normalizeRemoteUrl(hub));
+  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+  return url.origin;
+}
+
+interface Selection {
+  origin: string;
+  bound: boolean;
+  workspace: string | undefined;
+}
+
+function selectHub(hub: string | undefined, io: Io): Selection | number {
+  const { config, warnings } = readUserConfig();
+  const reportWarnings = () => {
+    for (const warning of warnings) io.err(`ub auth: ${warning}\n`);
+  };
+  const selected = hub ?? config.hubUrl;
+  if (selected === undefined) {
+    reportWarnings();
+    io.err("ub auth: no hub given and none bound. Local-only work needs no login. Give a hub to `ub auth login <hub>`.\n");
+    return 1;
+  }
+  let origin: string;
+  try {
+    origin = authenticationOrigin(selected);
+  } catch {
+    // Never echo an operand: it may be a pasted secret or a credential URL.
+    reportWarnings();
+    io.err("ub auth: invalid hub; use a bare host, http(s) address or ws(s) endpoint without credentials, query or fragment.\n");
+    return 2;
+  }
+  io.out(`Hub: ${origin}\n`);
+  reportWarnings();
+  let bound = false;
+  if (config.hubUrl !== undefined) {
+    try { bound = authenticationOrigin(config.hubUrl) === origin; } catch { /* Invalid binding is never rewritten. */ }
+  }
+  if (!bound) io.out("This machine's hub and workspace binding is unchanged.\n");
+  return { origin, bound, workspace: config.workspace };
+}
+
+function describeLogin(login: StoredHubLogin, io: Io): void {
+  // A hub-supplied username is display data, so control characters stay quoted.
+  io.out(`GitHub username recorded at sign-in: ${JSON.stringify(login.identity.githubUsername)}\n`);
+  const workspaces = login.credential.record.workspaces;
+  io.out(workspaces.length === 0
+    ? "Credential covers no workspaces. Sign-in grants no membership.\n"
+    : `Credential covers workspaces: ${workspaces.join(", ")}\n`);
+}
+
+function needsWorkspaceLogin(selection: Selection, login: StoredHubLogin, io: Io): boolean {
+  if (!selection.bound || selection.workspace === undefined) return false;
+  let workspace: string;
+  try { workspace = parseWorkspaceId(selection.workspace).uuid; } catch {
+    io.err("ub auth: the bound workspace is invalid; fix workspace in config.json.\n");
+    return true;
+  }
+  if (login.credential.record.workspaces.includes(workspace)) return false;
+  io.err(`ub auth: a new login is needed for bound workspace ${workspace}. Run \`ub auth login ${selection.origin}\` after membership is granted.\n`);
+  return true;
+}
+
+function status(selection: Selection, io: Io): number {
+  const stored = readHubLogins();
+  const others = Object.keys(stored.logins).filter(origin => origin !== selection.origin).sort();
+  if (others.length > 0) io.out(`Other hubs with a stored login: ${others.join(", ")}\n`);
+  io.out("Local state only; the hub's acceptance of this credential has not been checked.\n");
+  const login = stored.logins[selection.origin];
+  if (login === undefined) {
+    const reason = stored.state === "refused" ? "stored login refused"
+      : stored.state === "unreadable" || stored.unreadableHubs.includes(selection.origin) ? "stored login unreadable" : "no login stored";
+    io.err(`ub auth: ${reason} for ${selection.origin}. ${stored.diagnostic ?? ""} Run \`ub auth login ${selection.origin}\`.\n`);
+    return 1;
+  }
+  describeLogin(login, io);
+  if (login.credential.record.revokedAt !== null) {
+    io.err(`ub auth: this stored credential is recorded as revoked. Run \`ub auth login ${selection.origin}\`.\n`);
+    return 1;
+  }
+  return needsWorkspaceLogin(selection, login, io) ? 1 : 0;
+}
+
+async function logout(selection: Selection, io: Io): Promise<number> {
+  try {
+    const removed = await removeHubLogin(selection.origin);
+    io.out(removed ? "Removed this machine's stored login.\n" : "No login stored for this hub.\n");
+    io.out("The device keeps its hub access until revoked through device management. Logout revokes nothing.\n");
+    return 0;
+  } catch (error) {
+    io.err(`ub auth: ${error instanceof Error ? error.message : "could not remove the stored login"}\n`);
+    return 1;
+  }
+}
+
+const REQUEST_MS = 10_000;
+const CANCEL_MS = 2_000;
+const MAX_LIFETIME_SECONDS = 900;
+const MAX_RESPONSE_BYTES = 65_536;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+class SignInFailure extends Error {}
+
+function object(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function seconds(value: unknown, allowZero = false): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= (allowZero ? 0 : 1);
+}
+
+/** Every byte and every network wait is bounded, including a stalled JSON body. */
+async function post(
+  origin: string, route: "start" | "collect" | "cancel", body: object,
+  signal: AbortSignal, timeoutMs: number,
+  received?: (result: Record<string, unknown>) => void,
+): Promise<Record<string, unknown>> {
+  const response = await fetch(`${origin}/auth/github/${route}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body), redirect: "error",
+    signal: AbortSignal.any([signal, AbortSignal.timeout(Math.max(1, Math.ceil(timeoutMs)))]),
+  });
+  // A proxy can answer while its hub is stopped or restarting. Valid hub
+  // replies still distinguish an upstream failure or unconfigured sign-in.
+  const invalidResponse = (missingInterface = false) => new SignInFailure(
+    [502, 503, 504].includes(response.status)
+      ? "the hub is unreachable or temporarily unavailable; try login again"
+      : missingInterface ? "the hub does not offer a valid GitHub sign-in interface; update the hub"
+      : "the hub returned an invalid GitHub sign-in response; update the hub",
+  );
+  if (response.body === null) throw invalidResponse(true);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      size += chunk.value.length;
+      if (size > MAX_RESPONSE_BYTES) throw invalidResponse();
+      chunks.push(chunk.value);
+    }
+  } finally {
+    await reader.cancel();
+  }
+  let result: unknown;
+  try { result = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch {
+    throw invalidResponse(true);
+  }
+  if (!object(result)) {
+    throw invalidResponse();
+  }
+  received?.(result);
+  if (typeof result.status !== "string") throw invalidResponse();
+  const allowed = route === "start"
+    ? ["pending", "failed", "busy", "not-configured", "invalid-request"]
+    : ["pending", "complete", "denied", "expired", "abandoned", "failed", "collected", "unknown-request", "not-configured", "invalid-request"];
+  if (!allowed.includes(result.status)) throw invalidResponse();
+  const expectedCode = result.status === "not-configured" ? 503
+    : result.status === "invalid-request" ? 400
+    : result.status === "unknown-request" ? 404
+    : route === "start" && result.status === "busy" ? 429
+    : route === "start" && result.status === "failed" ? 502 : 200;
+  if (response.status !== expectedCode) throw invalidResponse();
+  return result;
+}
+
+function terminal(result: Record<string, unknown>): never {
+  const messages: Record<string, string> = {
+    denied: "GitHub sign-in was denied",
+    expired: "GitHub sign-in expired; run login again",
+    abandoned: "GitHub sign-in was abandoned",
+    failed: "GitHub sign-in failed at the hub or GitHub",
+    collected: "the sign-in credential was already collected; run login again",
+    "unknown-request": "the sign-in attempt was lost at the hub (restart or eviction); run login again",
+    "not-configured": "the hub is not configured for GitHub sign-in",
+    busy: "the hub is busy with sign-in attempts; try again later",
+    "invalid-request": "the hub refused the sign-in request; update the hub and client",
+  };
+  throw new SignInFailure(messages[String(result.status)] ?? "the hub returned an invalid GitHub sign-in response; update the hub");
+}
+
+async function login(selection: Selection, io: Io): Promise<number> {
+  try { preflightHubLoginStore(); } catch (error) {
+    io.err(`ub auth: ${error instanceof Error ? error.message : "credential store is not writable"}\n`);
+    return 1;
+  }
+  const interrupted = new AbortController();
+  const interrupt = () => interrupted.abort();
+  process.on("SIGINT", interrupt);
+  process.on("SIGTERM", interrupt);
+  let attempt: { requestId: string; collectionSecret: string } | undefined;
+  let deadline: number | undefined;
+  let collected = false;
+  let stored = false;
+  try {
+    // A start interrupted before its reply has no collection secret to cancel
+    // with. Finish this bounded read so a late reply can still be abandoned.
+    const started = await post(selection.origin, "start", {}, new AbortController().signal, REQUEST_MS, (result) => {
+      // Valid authority permits cleanup even if the envelope or public fields
+      // are malformed. Never display any of the private start fields.
+      if (typeof result.requestId === "string" && UUID.test(result.requestId) &&
+          typeof result.collectionSecret === "string" && /^[A-Za-z0-9_-]{43}$/.test(result.collectionSecret)) {
+        attempt = { requestId: result.requestId, collectionSecret: result.collectionSecret };
+      }
+    });
+    if (started.status !== "pending") terminal(started);
+    if (attempt === undefined ||
+        started.verificationUri !== "https://github.com/login/device" ||
+        typeof started.userCode !== "string" || !/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(started.userCode) ||
+        !seconds(started.expiresIn, true) || started.expiresIn > MAX_LIFETIME_SECONDS ||
+        !seconds(started.interval) || started.interval > MAX_LIFETIME_SECONDS) {
+      throw new SignInFailure("the hub returned an invalid GitHub sign-in response; update the hub");
+    }
+    deadline = performance.now() + started.expiresIn * 1000;
+    if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
+    io.out(`Approve in a browser: ${started.verificationUri}\nCode: ${started.userCode}\nWaiting for GitHub approval…\n`);
+    let interval = started.interval;
+    for (;;) {
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) throw new SignInFailure("GitHub sign-in expired; run login again");
+      await delay(Math.min(interval * 1000, remaining), undefined, { signal: interrupted.signal });
+      const budget = deadline - performance.now();
+      if (budget <= 0) throw new SignInFailure("GitHub sign-in expired; run login again");
+      const result = await post(selection.origin, "collect", attempt, interrupted.signal, Math.min(REQUEST_MS, budget));
+      if (result.status === "pending" && seconds(result.interval)) { interval = result.interval; continue; }
+      if (result.status !== "complete") terminal(result);
+      collected = true;
+      const credential = { identity: result.identity, credential: result.credential };
+      if (!isHubLogin(credential) || credential.identity.githubUsername.includes(attempt.collectionSecret)) {
+        throw new SignInFailure("the hub returned an invalid sign-in credential; run login again");
+      }
+      if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
+      let replaced: boolean;
+      try { replaced = await writeHubLogin(selection.origin, credential, process.env, interrupted.signal); } catch (error) {
+        if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
+        io.err(`ub auth: could not store login for ${selection.origin}: ${error instanceof Error ? error.message : "credential store write failed"}. The issued device remains on the hub; revoke it through device management if needed.\n`);
+        return 1;
+      }
+      stored = true;
+      io.out(`Stored login for ${selection.origin}.\n`);
+      describeLogin(credential, io);
+      if (replaced) io.out("The replaced device keeps its hub access until it is revoked through device management.\n");
+      io.out("Sync does not use this stored login yet.\n");
+      return 0;
+    }
+  } catch (error) {
+    const message = interrupted.signal.aborted ? "GitHub sign-in interrupted"
+      : deadline !== undefined && performance.now() >= deadline ? "GitHub sign-in expired; run login again"
+      : error instanceof SignInFailure ? error.message : "the hub is unreachable or the sign-in request timed out";
+    io.err(`ub auth: ${selection.origin}: ${message}.\n`);
+    if (collected) io.err("ub auth: the issued device remains on the hub; revoke it through device management if needed.\n");
+    return 1;
+  } finally {
+    if (attempt !== undefined && !stored) {
+      try {
+        const result = await post(selection.origin, "cancel", attempt, new AbortController().signal, CANCEL_MS);
+        if (result.status === "collected" && !collected) {
+          io.err("ub auth: the issued device remains on the hub; revoke it through device management if needed.\n");
+        }
+      } catch {
+        if (!collected) io.err(`ub auth: ${selection.origin}: could not abandon the sign-in attempt at the hub; any pending attempt will expire. A device may have been issued; revoke it through device management if needed.\n`);
+      }
+    }
+    process.off("SIGINT", interrupt);
+    process.off("SIGTERM", interrupt);
+  }
+}
+
+export async function authCommand(argv: string[], io: Io): Promise<number> {
+  const [sub, ...args] = argv;
+  if (sub === undefined || sub === "help" || sub === "--help" || sub === "-h") {
+    io.out(AUTH_HELP);
+    return 0;
+  }
+  let help: string;
+  if (sub === "login") help = AUTH_LOGIN_HELP;
+  else if (sub === "status") help = AUTH_STATUS_HELP;
+  else if (sub === "logout") help = AUTH_LOGOUT_HELP;
+  else { io.err(`ub auth: unknown command\n\n${AUTH_HELP}`); return 2; }
+  if (args.includes("--help") || args.includes("-h")) { io.out(help); return 0; }
+  if (args.length > 1 || args.some(arg => arg.startsWith("-"))) {
+    io.err(`ub auth ${sub}: expected at most one hub\n\n${help}`);
+    return 2;
+  }
+  const selection = selectHub(args[0], io);
+  if (typeof selection === "number") return selection;
+  if (sub === "login") return await login(selection, io);
+  if (sub === "status") return status(selection, io);
+  return await logout(selection, io);
+}
