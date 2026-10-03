@@ -49,6 +49,11 @@ const FIRST_GROUP_NAME = "Pinned";
 /** What `+ group` creates, before the reader types over it. */
 const NEW_GROUP_NAME = "New group";
 
+// The inset belongs inside each scroll pane: the workspace header's negative
+// margins then reach the pane's edges without creating a horizontal scroll range.
+// Both modes share a grid cell and keep their own vertical scroll position.
+const SIDEBAR_PANE_CLASSES = "ub-sidebar-pane [grid-area:1/1] min-w-0 min-h-0 flex flex-col overflow-y-auto p-2 transition-[transform,opacity] duration-[180ms] ease-[ease] motion-reduce:transition-none motion-reduce:duration-0 [&[inert]]:pointer-events-none [&[inert]_*]:pointer-events-none [&>*]:flex-none";
+
 /** Per-group collapse preference, persisted per browser like the sidebar's own. */
 function groupCollapsedKey(groupId: string): string {
   return `uberblick.sidebar.group.${groupId}.collapsed`;
@@ -221,7 +226,7 @@ export function Sidebar({
   return (
     <SidebarFrame
       ref={sidebarRoot}
-      className="ub-list"
+      className="ub-list group/sidebar overflow-clip [overflow-clip-margin:1.25rem]"
       aria-label="Sidebar"
       data-mode={settingsOpen ? "settings" : "documents"}
     >
@@ -240,9 +245,9 @@ export function Sidebar({
         connection={sidebar}
         active={!collapsed && !settingsOpen && sidebarWritable}
       >
-      <div className="ub-sidebar-stack">
+      <div className="ub-sidebar-stack grid min-w-0 min-h-0 flex-1">
         <nav
-          className="ub-sidebar-pane ub-document-sidebar"
+          className={`${SIDEBAR_PANE_CLASSES} ub-document-sidebar [transform:translateX(0)] opacity-100 group-data-[mode=settings]/sidebar:[transform:translateX(-25%)] group-data-[mode=settings]/sidebar:opacity-0`}
           aria-label="Documents"
           aria-hidden={settingsOpen || collapsed}
           inert={settingsOpen || collapsed}
@@ -379,7 +384,7 @@ function SettingsNavigation({
 }): ReactElement {
   return (
     <nav
-      className="ub-sidebar-pane ub-settings-sidebar"
+      className={`${SIDEBAR_PANE_CLASSES} ub-settings-sidebar z-1 [transform:translateX(100%)] opacity-0 group-data-[mode=settings]/sidebar:[transform:translateX(0)] group-data-[mode=settings]/sidebar:opacity-100`}
       aria-label="Workspace settings"
       aria-hidden={!active}
       inert={!active}

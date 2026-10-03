@@ -55,9 +55,9 @@
    whole source list — `@source` *adds* to detection rather than replacing it,
    so without it Tailwind sweeps the package and mines class names out of
    English prose (`src/editor` alone was producing `.list-item`, `.italic` and
-   `.collapse`). Scan the wrappers and the rail, whose container has moved to
-   utilities, without scanning editor content. */
+   `.collapse`). Scan the wrappers and product components migrated to utilities. */
 @source "./shadcn";
+@source "./Sidebar.tsx";
 @source "./ThreadsPane.tsx";
 
 /* The bridge. Left side: what shadcn's markup asks for. Right side: what this
