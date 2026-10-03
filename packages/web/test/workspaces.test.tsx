@@ -38,6 +38,7 @@ const RESEARCH = `research-${RESEARCH_UUID}`;
 
 /** What the client resolved: the served document's list, else the defines'. */
 const CONFIGURED = [UBERBLICK, RESEARCH];
+const NAMES: ReadonlyMap<string, string | null> = new Map([[UBERBLICK_UUID, "Uberblick"], [RESEARCH_UUID, "Product Research"]]);
 
 const uberblick: Workspace = { uuid: UBERBLICK_UUID, segment: UBERBLICK };
 const research: Workspace = { uuid: RESEARCH_UUID, segment: RESEARCH };
@@ -97,6 +98,7 @@ function Probe({ configured }: { configured: readonly string[] }): ReactElement 
     <WorkspaceSwitcher
       workspaces={workspaceList(configured, current)}
       current={current}
+      names={NAMES}
       docs={0}
       onSwitch={(segment) => navigate(`/${segment}`)}
       onOpenSettings={() => {
@@ -160,12 +162,12 @@ describe("switching workspace is navigating to it", () => {
     const root = createRoot(host);
     act(() => root.render(<Probe configured={CONFIGURED} />));
 
-    expect(trigger(host).textContent).toContain(UBERBLICK);
+    expect(trigger(host).textContent).toContain("Uberblick");
     open(host);
-    expect(offered()).toEqual([`${UBERBLICK}0 docs`, RESEARCH]);
+    expect(offered()).toEqual(["Uberblick0 docs", "Product Research"]);
 
     act(() => {
-      items().find((item) => item.textContent === RESEARCH)?.click();
+      items().find((item) => item.textContent === "Product Research")?.click();
     });
 
     // The address moved, and it is the *list* of the other workspace — not the
@@ -175,7 +177,7 @@ describe("switching workspace is navigating to it", () => {
       kind: "list",
       workspace: research,
     });
-    expect(trigger(host).textContent).toContain(RESEARCH);
+    expect(trigger(host).textContent).toContain("Product Research");
 
     act(() => root.unmount());
     host.remove();
@@ -199,7 +201,7 @@ describe("switching workspace is navigating to it", () => {
     });
     // Unconfigured, and still on the menu — with the configured one beside it.
     open(host);
-    expect(offered()).toEqual([UBERBLICK, `${RESEARCH}0 docs`]);
+    expect(offered()).toEqual(["Uberblick", "Product Research0 docs"]);
 
     act(() => root.unmount());
     host.remove();
@@ -213,9 +215,9 @@ describe("switching workspace is navigating to it", () => {
     const root = createRoot(host);
     act(() => root.render(<Probe configured={[]} />));
 
-    expect(trigger(host).textContent).toContain(UBERBLICK);
+    expect(trigger(host).textContent).toContain("Uberblick");
     open(host);
-    expect(offered()).toEqual([`${UBERBLICK}0 docs`]);
+    expect(offered()).toEqual(["Uberblick0 docs"]);
 
     act(() => root.unmount());
     host.remove();

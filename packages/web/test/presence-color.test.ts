@@ -139,3 +139,39 @@ it("publishes a chosen presence colour to peers, in every room and after a reloa
   expect(seenByPeer(reloaded.connection).color).toBe(CHOSEN);
   reloaded.release();
 });
+
+it("reads a workspace name silently and withdraws presence when only that reader remains", () => {
+  const identity = { name: "unhurried otter", color: DEALT };
+  const room = `${WORKSPACE}/_settings`;
+  const silent = acquireRoom(room, identity, { presence: false });
+  const awareness = silent.connection.provider.awareness as Awareness;
+  const peerDoc = new Y.Doc();
+  const peer = new Awareness(peerDoc);
+  const readState = (): Record<string, unknown> => {
+    applyAwarenessUpdate(peer, encodeAwarenessUpdate(awareness, [awareness.clientID]), "test");
+    return (peer.getStates().get(awareness.clientID) ?? {}) as Record<string, unknown>;
+  };
+
+  expect(readState()).not.toHaveProperty("user");
+  expect(readState()).not.toHaveProperty("client");
+  setSetting("presenceColor", CHOSEN);
+  expect(readState()).not.toHaveProperty("user");
+  expect(readState()).not.toHaveProperty("client");
+
+  const first = acquireRoom(room, identity);
+  const second = acquireRoom(room, identity);
+  expect(first.connection).toBe(silent.connection);
+  expect(readState().user).toEqual({ ...identity, color: CHOSEN });
+  expect(readState().client).toBe("web");
+  first.release();
+  expect(readState()).toHaveProperty("user");
+  second.release();
+  expect(readState()).not.toHaveProperty("user");
+  expect(readState()).not.toHaveProperty("client");
+  setSetting("presenceColor", AWARENESS_COLORS[2]?.hex as string);
+  expect(readState()).not.toHaveProperty("user");
+  expect(readState()).not.toHaveProperty("client");
+  silent.release();
+  peer.destroy();
+  peerDoc.destroy();
+});

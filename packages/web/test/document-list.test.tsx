@@ -39,6 +39,7 @@ import {
   readSidebar,
   roomForDoc,
   sidebarRoom,
+  settingsRoom,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -549,9 +550,9 @@ describe("the list", () => {
     expect(rowTitles(host)).toEqual(["Editing", "Overview"]);
     // Discovery is the directory doc, and the list is that doc: rendering the
     // whole corpus opens no document room. (`_sidebar` is the shell's, for the
-    // group a row is pinned in.)
+    // group a row is pinned in; `_settings` supplies the workspace name.)
     expect([...rooms.keys()].sort()).toEqual(
-      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE)].sort(),
+      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
     );
     expect(parseRoute(`/${WORKSPACE}/all`, null)).toEqual({
       kind: "all",
@@ -697,7 +698,7 @@ describe("the filter", () => {
     expect(rowTitles(host)).toEqual(["Foreign shape", "Working note"]);
     expect(host.querySelectorAll(".ub-lifecycle-badge")).toHaveLength(0);
     expect([...rooms.keys()].sort()).toEqual(
-      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE)].sort(),
+      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
     );
 
     await act(async () => mode("Product")?.click());

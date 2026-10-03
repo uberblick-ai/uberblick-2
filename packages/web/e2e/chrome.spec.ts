@@ -212,7 +212,7 @@ for (const scheme of ["light", "dark"] as const) {
     );
 
     // The configured workspace, with the count the directory reports.
-    const configured = menu.getByRole("menuitem", { name: harness().workspace });
+    const configured = menu.getByRole("menuitem", { name: /^Unnamed workspace · / });
     await expect(configured).toBeVisible();
 
     // And an item on that surface stays visible when it is the one being
@@ -1995,6 +1995,22 @@ for (const scheme of ["light", "dark"] as const) {
         expect(separation(colour, under), seen).toBeGreaterThanOrEqual(floor);
       }
     }
+
+    // Settings uses the same sidebar ground. Its Back control is a native
+    // button, so its utilities must carry both the hover and inherited face.
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+    const back = page.locator(".ub-settings-back");
+    await expect(back).toBeVisible();
+    expect(await paintedIn(back, "font-family")).toBe(
+      await painted(page, ".ub-settings-sidebar", "font-family"),
+    );
+    await page.mouse.move(viewport.width - 1, viewport.height - 1);
+    const backResting = await paintedIn(back, "background-color");
+    await back.hover();
+    const backGround = await paintedIn(back, "background-color");
+    expect(backGround).not.toBe(backResting);
+    expect(contrast(await paintedIn(back, "color"), backGround)).toBeGreaterThanOrEqual(4.5);
   });
 }
 

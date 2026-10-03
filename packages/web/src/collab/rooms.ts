@@ -27,7 +27,7 @@
  */
 
 import {
-  HocuspocusProvider,
+  type HocuspocusProvider,
   HocuspocusProviderWebsocket,
   WebSocketStatus,
 } from "@hocuspocus/provider";
@@ -43,6 +43,7 @@ import { getSetting, subscribeSettings } from "../settings.js";
 import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "./token.js";
 import { WEB_CLIENT } from "./identity.js";
 import type { AwarenessUser } from "./identity.js";
+import { PacedRoomProvider, RoomAdmission } from "./room-admission.js";
 
 /**
  * The shared socket's reconnect band.
@@ -75,6 +76,7 @@ export const SOCKET_BACKOFF = {
 } as const;
 
 let socket: HocuspocusProviderWebsocket | null = null;
+const admission = new RoomAdmission();
 
 /** Set while a forced drop is in flight, so the `disconnect` handler re-dials. */
 let redialAfterDrop = false;
@@ -432,8 +434,9 @@ export interface RoomConnection {
 interface Entry {
   connection: RoomConnection;
   listeners: Set<(status: RoomStatus) => void>;
-  /** Stop republishing this room's awareness colour — see `publishUser`. */
-  stopPreference: () => void;
+  startPresence: () => void;
+  stopPresence: (withdraw: boolean) => void;
+  presenceRefs: number;
   refs: number;
 }
 
@@ -442,7 +445,7 @@ const entries = new Map<string, Entry>();
 function openRoom(room: string, identity: AwarenessUser): Entry {
   const ydoc = new Y.Doc();
   const socket = sharedSocket();
-  const provider = new HocuspocusProvider({
+  const provider = new PacedRoomProvider(admission, {
     name: room,
     document: ydoc,
     websocketProvider: socket,
@@ -481,11 +484,26 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     publishedColor = color;
     provider.setAwarenessField("user", { ...identity, color });
   };
-  publishUser();
-  const stopPreference = subscribeSettings(publishUser);
-  // What kind of client this is, so remote sessions can be told apart — see
-  // `WEB_CLIENT`.
-  provider.setAwarenessField("client", WEB_CLIENT);
+  let stopPreference = (): void => {};
+  const startPresence = (): void => {
+    publishedColor = "";
+    publishUser();
+    stopPreference = subscribeSettings(publishUser);
+    provider.setAwarenessField("client", WEB_CLIENT);
+  };
+  const stopPresence = (withdraw: boolean): void => {
+    stopPreference();
+    if (!withdraw) return;
+    const awareness = provider.awareness;
+    const state = awareness?.getLocalState();
+    if (state === null || state === undefined) return;
+    const next = { ...state };
+    delete next.user;
+    delete next.client;
+    // An ordinary update reaches peers immediately; setting null would leave
+    // a stale presence at hubs that discard inbound awareness removals.
+    awareness?.setLocalState(next);
+  };
 
   // Seeded from the socket rather than defaulted to false. A room joined while
   // the shared socket is already connected gets no `status` event — the event
@@ -614,7 +632,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     },
   };
 
-  return { connection, listeners, stopPreference, refs: 0 };
+  return { connection, listeners, startPresence, stopPresence, presenceRefs: 0, refs: 0 };
 }
 
 /**
@@ -624,6 +642,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
 export function acquireRoom(
   room: string,
   identity: AwarenessUser,
+  { presence = true }: { presence?: boolean } = {},
 ): { connection: RoomConnection; release: () => void } {
   let entry = entries.get(room);
   if (entry === undefined) {
@@ -631,6 +650,7 @@ export function acquireRoom(
     entries.set(room, entry);
   }
   entry.refs += 1;
+  if (presence && entry.presenceRefs++ === 0) entry.startPresence();
   const held = entry;
   let released = false;
   return {
@@ -639,10 +659,10 @@ export function acquireRoom(
       if (released) return;
       released = true;
       held.refs -= 1;
+      if (presence && --held.presenceRefs === 0) held.stopPresence(held.refs > 0);
       if (held.refs > 0) return;
       entries.delete(room);
       held.listeners.clear();
-      held.stopPreference();
       held.connection.provider.destroy();
       held.connection.ydoc.destroy();
       // Nothing left to repair: a deferred drop would reconnect a socket no

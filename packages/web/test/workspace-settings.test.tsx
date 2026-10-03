@@ -7,6 +7,8 @@ import {
   EXAMPLE_TAGS,
   createTagCatalogEntry,
   listTagCatalog,
+  getWorkspaceName,
+  setWorkspaceName,
   retireTagCatalogEntry,
   settingsRoom,
   upsertDirectoryEntry,
@@ -95,6 +97,7 @@ afterEach(() => {
 async function mount(
   connection: RoomConnection | null,
   endpoint: HubEndpoint | null = ENDPOINT,
+  catalogConnection: RoomConnection | null = null,
 ): Promise<HTMLElement> {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
@@ -108,6 +111,7 @@ async function mount(
         workspace={WORKSPACE}
         endpoint={endpoint}
         connection={connection}
+        catalogConnection={catalogConnection}
         agentSessions={2}
       />,
     );
@@ -440,4 +444,90 @@ it("takes offline and refusal readings live from the shared status derivation", 
   room.update({ tokenMissing: false, authFailed: true });
   expect(facts(host).get("Connection")).toContain("not authorized");
   expect(facts(host).get("Connection")).toContain("hub rejected");
+});
+
+
+it("renames only shared workspace state and refuses invalid drafts without changing the name", async () => {
+  const directory = statusRoom(SYNCED);
+  const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  setWorkspaceName(settings.connection.ydoc, "Current name");
+  createTagCatalogEntry(settings.connection.ydoc, "product");
+  const catalog = listTagCatalog(settings.connection.ydoc);
+  const host = await mount(directory.connection, ENDPOINT, settings.connection);
+  const input = host.querySelector<HTMLInputElement>("#ub-workspace-name") as HTMLInputElement;
+  const submit = host.querySelector<HTMLButtonElement>("form button[type=submit]") as HTMLButtonElement;
+  expect(input.value).toBe("Current name");
+
+  for (const invalid of ["   ", "x".repeat(65), "Control\u0007name", "Format\u200bname"]) {
+    act(() => typeInto(input, invalid));
+    act(() => submit.click());
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("1–64 characters after trimming");
+    expect(getWorkspaceName(settings.connection.ydoc)).toBe("Current name");
+  }
+  act(() => typeInto(input, "  Product Research  "));
+  act(() => submit.click());
+  expect(getWorkspaceName(settings.connection.ydoc)).toBe("Product Research");
+  expect(input.value).toBe("Product Research");
+  expect(listTagCatalog(settings.connection.ydoc)).toEqual(catalog);
+  expect(facts(host).get("Workspace UUID")).toBe(WORKSPACE.uuid);
+  expect(facts(host).get("Address segment")).toBe(WORKSPACE.segment);
+  directory.connection.ydoc.destroy(); settings.connection.ydoc.destroy();
+});
+
+it("follows shared names while pristine and preserves an edited rename draft", async () => {
+  const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  const peer = peerOf(settings.connection.ydoc);
+  const host = await mount(null, ENDPOINT, settings.connection);
+  const input = host.querySelector<HTMLInputElement>("#ub-workspace-name") as HTMLInputElement;
+  const submit = host.querySelector<HTMLButtonElement>("form button[type=submit]") as HTMLButtonElement;
+  expect(input.value).toBe("");
+
+  act(() => setWorkspaceName(peer, "Arriving name"));
+  expect(input.value).toBe("Arriving name");
+  act(() => typeInto(input, "Local draft"));
+  act(() => setWorkspaceName(peer, "Peer name"));
+  expect(input.value).toBe("Local draft");
+  act(() => setWorkspaceName(peer, "Another peer name"));
+  expect(input.value).toBe("Local draft");
+
+  act(() => typeInto(input, "Another peer name"));
+  act(() => setWorkspaceName(peer, "Followed name"));
+  expect(input.value).toBe("Followed name");
+  act(() => typeInto(input, "Saved local name"));
+  act(() => submit.click());
+  expect(getWorkspaceName(peer)).toBe("Saved local name");
+  act(() => setWorkspaceName(peer, "Later peer name"));
+  expect(input.value).toBe("Later peer name");
+  settings.connection.ydoc.destroy();
+  peer.destroy();
+});
+
+it("waits for settings state and refuses renaming when its room cannot write", async () => {
+  const settings = statusRoom({ ...SYNCED, hasReceivedServerState: false }, settingsRoom(WORKSPACE.uuid));
+  setWorkspaceName(settings.connection.ydoc, "Existing name");
+  const host = await mount(null, ENDPOINT, settings.connection);
+  const input = host.querySelector<HTMLInputElement>("#ub-workspace-name") as HTMLInputElement;
+  const form = host.querySelector<HTMLFormElement>("form") as HTMLFormElement;
+  const button = form.querySelector<HTMLButtonElement>("button") as HTMLButtonElement;
+  expect(input.disabled).toBe(true);
+  expect(button.disabled).toBe(true);
+  expect(input.value).toBe("");
+  expect(host.textContent).toContain("Waiting for workspace settings");
+  act(() => {
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+  expect(getWorkspaceName(settings.connection.ydoc)).toBe("Existing name");
+  settings.update({ hasReceivedServerState: true });
+  expect(input.value).toBe("Existing name");
+  expect(input.disabled).toBe(false);
+  act(() => typeInto(input, "Disconnected overwrite"));
+  settings.update({ writable: false, connected: false, synced: false });
+  expect(input.disabled).toBe(true);
+  expect(button.disabled).toBe(true);
+  act(() => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(getWorkspaceName(settings.connection.ydoc)).toBe("Existing name");
+  expect(host.textContent).toContain("Reconnect before renaming");
+  settings.update({ writable: true, connected: true, synced: true });
+  expect(button.disabled).toBe(false);
+  settings.connection.ydoc.destroy();
 });
