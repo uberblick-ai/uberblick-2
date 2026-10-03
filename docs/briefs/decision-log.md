@@ -260,6 +260,60 @@ so a listing can be filtered by issue ("which decision covers #1125?").
 The Editorial contract's ban on issue and PR numbers applies to Regular
 Documents; it gains an explicit note that decision `refs` are the exception.
 
+## Design work
+
+The web surface is designed before it is built, as its own step after the data
+model (build step 4). The 2026-08-28 mockup (`assets/decision-log-mockup.png`)
+is superseded: its three-state control, comment count and inline rows predate
+topics, chains, agent stances and conflicts.
+
+### Surfaces to design
+
+| Surface | What it must show |
+| --- | --- |
+| Decision log on a product document | A fixed section after the body, one row per topic, oldest topic first. Each row: topic title, current answer, and a state — Open, Decided, Decided by agent, Reconsideration open, Conflict. |
+| Decision view | One decision record read, edited and commented in context, over the still-visible product document. |
+| Approve and change | Confirming an agent-decided record, approving or rejecting a reconsideration, and resolving a conflict — the only human-gated actions, so they must be obvious and hard to trigger by accident. |
+| History | A topic's chain: superseded records, who decided each and when, reachable from the current answer without crowding it. |
+| Needs attention | One list across the workspace of open topics, agent-decided records awaiting review, and conflicts (principle 7) — where a person answers many small decisions quickly. |
+| Decisions in the document list | The existing *Decisions* mode in `shell/DocumentList.tsx`, showing one row per topic by default. |
+| Built-on marker | How an issue or pull request built on an open decision is visible from the decision, so a reversal finds its rework. |
+
+### Constraints
+
+- Off-the-shelf first: shadcn/ui components on Tailwind, reusing what the web
+  already ships (`ui/shadcn/dialog.tsx`, `sheet.tsx`, `popover.tsx`,
+  `Disclosure`, `LifecycleBadge`, the Threads rail and comment composer).
+  Custom components need a reason the standard one cannot meet.
+- iPhone, iPad and a 13-inch MacBook, with touch as a first-class input; the
+  phone and iPad layouts are designed, not left to shrink.
+- Discussion is the standard comment threads (section 6); no decision-specific
+  conversation UI.
+
+### Starting point and open design questions
+
+Spike #844 (`docs/spikes/844-decision-in-context.md`) recommends a modal over
+the still-mounted requirement for the decision view, using the existing dialog
+and a second `EditorPane`. Its open choices become the design questions:
+
+1. Does an open decision view have its own address, so reload, Back and a
+   shared link restore it?
+2. Where does the decision's comment rail live while the modal is open — its
+   own rail, or the shell's rail swapped to the active document?
+3. Which editor chrome belongs in the compact view, and how much of the
+   product document stays visible behind it?
+4. On a phone, is the decision view a full-height sheet rather than a modal?
+5. How do archive, supersession or a conflict arriving while the view is open
+   close it or turn it read-only?
+
+### Design deliverable
+
+A clickable design covering every surface above in each state (Open, Decided,
+Decided by agent, Reconsideration open, Conflict, archived), at phone, iPad and
+laptop widths, with the approve and change flows walked through. A person
+reviews it before the web issues are written; the spike's prototype branch
+remains available as an integration reference.
+
 ## Re-implementation: no legacy owed
 
 Decision records may be re-implemented from scratch (owner, 2026-10-03). Like
@@ -305,8 +359,9 @@ Each step is one independently mergeable pull request.
    when-to-record test, across code, descriptions, corpus and role contracts.
 3. The `refs` field.
 
-The web rendering of the decision log — reading and editing a decision inside
-its requirement — stays a separate, later job.
+4. Design the web surface (section "Design work"), reviewed by a person.
+5. Build the web surface from the reviewed design, split into issues by
+   surface.
 
 ## Corpus findings to reconcile alongside
 
