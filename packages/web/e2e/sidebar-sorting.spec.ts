@@ -94,19 +94,14 @@ for (const width of [1400, 820]) {
     await openDrawer();
     const cdp = await a.context().newCDPSession(a);
     const tap = async (target: Locator): Promise<void> => {
-      await target.scrollIntoViewIfNeeded();
-      const box = await target.boundingBox();
-      if (!box) throw new Error("Missing touch row");
-      await cdp.send("Input.dispatchTouchEvent", {
-        type: "touchStart",
-        touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 }],
-      });
-      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await target.tap();
     };
     const releaseHeld = async (target: Locator, label: string, ending: "drop" | "escape" | "touchCancel"): Promise<void> => {
       await expect(a.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
       await target.focus();
-      await target.scrollIntoViewIfNeeded();
+      // aria-expanded changes before the group's opening animation finishes.
+      // Use Playwright's stability/hit-test gate before sending raw hold coordinates.
+      await target.tap({ trial: true });
       const box = await target.boundingBox();
       if (!box) throw new Error("Missing held touch row");
       await cdp.send("Input.dispatchTouchEvent", {
@@ -367,12 +362,12 @@ test("a touch swipe scrolls from a row, while a held drag keeps native scrolling
   const names = Array.from({ length: 16 }, (_, index) => `Document ${index}`);
   for (const name of names) await createPinnedDoc(a, name);
   await expect(titles(b, "Pinned")).toHaveText(names);
-  const pane = a.locator(".ub-sidebar-pane:not([inert])");
+  const pane = a.locator('.ub-sidebar-pane:not([inert]) [data-slot="sidebar-content"]');
   await pane.evaluate((element) => { element.scrollTop = 0; });
   // Pick actual visible rows: navigation above the pins can change height.
   // Leave room for the 120px swipe and stay clear of drag edge auto-scroll.
   const visibleNames = await titles(a, "Pinned").evaluateAll((buttons) => {
-    const bounds = buttons[0]?.closest(".ub-sidebar-pane")?.getBoundingClientRect();
+    const bounds = buttons[0]?.closest('[data-slot="sidebar-content"]')?.getBoundingClientRect();
     if (!bounds) throw new Error("Missing touch scroll pane");
     const top = Math.max(bounds.top, 0);
     const bottom = Math.min(bounds.bottom, window.innerHeight);

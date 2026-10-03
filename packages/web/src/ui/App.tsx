@@ -976,7 +976,6 @@ export function App(): ReactElement {
           connection={directory}
           sidebar={sidebar}
           groups={sidebarGroups}
-          entries={entries}
           workspaces={workspaces}
           workspace={workspace}
           workspaceNames={workspaceNames}
