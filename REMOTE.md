@@ -244,6 +244,29 @@ statuses expire no later than fifteen minutes after the attempt's expiry; at
 most 100 are retained when new attempts start, evicting oldest requests first. Evicted or restarted
 requests return `unknown-request`.
 
+Device renewal is `POST /auth/credential/renew`, beside those sign-in routes.
+Its JSON body is `{protocolVersion, token}`: `token` is an HMAC-SHA256 request
+proof signed with the presented credential's key, with `typ: "request"`,
+`operation: "renew-credential"`, its credential UUID as `kid`, and `iat` and
+`exp` in epoch seconds. The hub applies the same fifteen-minute proof lifetime
+ceiling and sixty-second clock skew as room tokens. A request proof opens no
+room, and a room token authorizes no renewal. Send secrets only in JSON bodies,
+never URLs or an `Authorization` header; bodies are limited to 4096 bytes and
+all answers are `no-store`.
+
+Renewal needs no GitHub approval or GitHub connection. It retires the presented
+credential and returns `renewed` with `credential: {record, key}` once, for the
+same principal and device and exactly its current memberships, including none.
+It grants no membership. Retirement closes and fences any rooms admitted under
+the old credential when credential admission is composed with the server.
+Replaying a verified proof under that retired credential returns
+`already-replaced`; unknown, revoked or unverifiable credentials return
+`sign-in-required`, revealing no identity or workspace. If the replacement
+answer is lost, sign in again: its key cannot be collected a second time.
+Malformed requests return `invalid-request`, version skew returns
+`protocol-mismatch` with the hub's version, and an unconfigured hub returns
+the same `not-configured` result as sign-in. Clients do not renew yet.
+
 Sign-in identifies the durable GitHub account and issues one Uberblick device
 credential for its existing workspace memberships. It grants no membership.
 These credentials are not accepted by the live hub or `ub open` yet; configuring
