@@ -36,7 +36,7 @@ commands:
                          Homebrew installation, or a checkout on main
   open [options]         serve the web app and a hub in the foreground, and
                          open the browser
-  status [--json]        workspace, hub, credential, database and sync state
+  status [--json]        workspace, hub, connection, pending work and failures
   doctor [--json]        check the local stack against its known failure modes
   workspace [command]    which workspace is in force, and how to change it
   remote [command]       the endpoint documents sync with, and the one-time bridge

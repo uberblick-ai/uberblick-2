@@ -156,8 +156,7 @@ describe("`ub status`", () => {
   });
 
   it("says two signing secrets differ without leaking either, in text and JSON", async () => {
-    // The conflict is reported on the one surface a human runs, and the report
-    // is the *fact* and nothing else: the two secrets are distinct and of
+    // The conflict remains in warnings and JSON: the two secrets are distinct and of
     // different lengths, and neither may survive in either stream — not whole,
     // not in four-character fragments, not as a size. See `tracesOf`.
     const box = sandbox({
@@ -169,7 +168,7 @@ describe("`ub status`", () => {
     const text = await runUbAsync(["status"], box, pinned);
     expect(text.status).toBe(0);
     expect(text.stderr).toContain("holds a different signing secret");
-    expect(text.stdout).toMatch(/^shadowed .*credential in credentials file/m);
+    expect(text.stdout).not.toMatch(/shadowed|credential/);
     expect(tracesOf(SECRET_IN_ENV, text.output)).toEqual([]);
     expect(tracesOf(SECRET_ON_FILE, text.output)).toEqual([]);
 
@@ -186,7 +185,7 @@ describe("`ub status`", () => {
     expect(tracesOf(SECRET_ON_FILE, json.output)).toEqual([]);
   });
 
-  it("names the layer a pin shadowed, and only when they disagree", async () => {
+  it("keeps shadowed layers in JSON and warnings, outside the human overview", async () => {
     // The report answered "which layer won?" and nothing else, so a machine
     // whose environment named one workspace and whose config.json named
     // another looked healthy. In-process rather than spawned: no secret, so
@@ -200,13 +199,11 @@ describe("`ub status`", () => {
     expect(conflict.report.shadowed).toEqual([
       { setting: "workspace", layer: "user config" },
     ]);
-    expect(renderStatus(conflict.report)).toMatch(
-      /^shadowed .*workspace in user config/m,
-    );
+    expect(renderStatus(conflict.report)).not.toMatch(/shadowed|user config/);
     expect(conflict.warnings.join("\n")).toMatch(/names a different workspace/);
 
     // Agreeing layers leave the key out entirely, so `--json` carries the
-    // conflict by its presence and the human output stays one line shorter.
+    // conflict by its presence.
     const agreed = await statusReport({
       env: { ...box.env, WORKSPACE_ID: WORKSPACE },
     });
@@ -215,16 +212,13 @@ describe("`ub status`", () => {
     expect(agreed.warnings).toEqual([]);
   });
 
-  it("names the data root once in the human output", async () => {
+  it("keeps database and storage paths outside the human overview", async () => {
     const box = sandbox({ userConfig: { workspace: WORKSPACE } });
     const run = await runUbAsync(["status"], box);
 
     expect(run.status).toBe(0);
-    const named = run.stdout
-      .split("\n")
-      .filter((line) => line.startsWith("storage"));
-    expect(named).toHaveLength(1);
-    expect(named[0]).toContain(join(box.dataHome, "uberblick"));
+    expect(run.stdout).not.toMatch(/^storage|^database/m);
+    expect(run.stdout).not.toContain(box.dataHome);
   });
 });
 
@@ -242,6 +236,7 @@ describe("`ub doctor`", () => {
       "workspace",
       "credential",
       "database",
+      "persistence",
       "hub",
       "clock",
       "port",
