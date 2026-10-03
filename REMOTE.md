@@ -260,7 +260,7 @@ These GitHub limits include both ordinary login and first-admin setup:
   guarantee against it. Repeated violations can cause the integration to be
   banned, affecting every hub using it.
 - Reading `/user` uses the
-  [user's REST API budget](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#primary-rate-limit-for-github-app-installations):
+  [user's REST API budget](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#primary-rate-limit-for-authenticated-users):
   normally 5,000 requests per hour, combined with that person's other GitHub
   Apps, OAuth apps and personal access tokens. The documented Enterprise Cloud
   exception can raise it. An operator-owned app does not give each hub or token
