@@ -76,6 +76,7 @@ interface Selection {
 
 function selectHub(hub: string | undefined, io: Io): Selection | number {
   const { config, warnings } = readUserConfig();
+  for (const warning of warnings) io.err(`ub auth: ${warning}\n`);
   const selected = hub ?? config.hubUrl;
   if (selected === undefined) {
     io.err("ub auth: no hub given and none bound. Local-only work needs no login. Give a hub to `ub auth login <hub>`.\n");
@@ -90,7 +91,6 @@ function selectHub(hub: string | undefined, io: Io): Selection | number {
     return 2;
   }
   io.out(`Hub: ${origin}\n`);
-  for (const warning of warnings) io.err(`ub auth: ${warning}\n`);
   let bound = false;
   if (config.hubUrl !== undefined) {
     try { bound = authenticationOrigin(config.hubUrl) === origin; } catch { /* Invalid binding is never rewritten. */ }
@@ -178,7 +178,15 @@ async function post(
     body: JSON.stringify(body), redirect: "error",
     signal: AbortSignal.any([signal, AbortSignal.timeout(Math.max(1, Math.ceil(timeoutMs)))]),
   });
-  if (response.body === null) throw new SignInFailure("the hub does not offer a valid GitHub sign-in interface; update the hub");
+  // A proxy can answer while its hub is stopped or restarting. Valid hub
+  // replies still distinguish an upstream failure or unconfigured sign-in.
+  const invalidResponse = (missingInterface = false) => new SignInFailure(
+    [502, 503, 504].includes(response.status)
+      ? "the hub is unreachable or temporarily unavailable; try login again"
+      : missingInterface ? "the hub does not offer a valid GitHub sign-in interface; update the hub"
+      : "the hub returned an invalid GitHub sign-in response; update the hub",
+  );
+  if (response.body === null) throw invalidResponse(true);
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -187,7 +195,7 @@ async function post(
       const chunk = await reader.read();
       if (chunk.done) break;
       size += chunk.value.length;
-      if (size > MAX_RESPONSE_BYTES) throw new SignInFailure("the hub returned an invalid GitHub sign-in response; update the hub");
+      if (size > MAX_RESPONSE_BYTES) throw invalidResponse();
       chunks.push(chunk.value);
     }
   } finally {
@@ -195,21 +203,21 @@ async function post(
   }
   let result: unknown;
   try { result = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch {
-    throw new SignInFailure("the hub does not offer a valid GitHub sign-in interface; update the hub");
+    throw invalidResponse(true);
   }
   if (!object(result) || typeof result.status !== "string") {
-    throw new SignInFailure("the hub returned an invalid GitHub sign-in response; update the hub");
+    throw invalidResponse();
   }
   const allowed = route === "start"
     ? ["pending", "failed", "busy", "not-configured", "invalid-request"]
     : ["pending", "complete", "denied", "expired", "abandoned", "failed", "collected", "unknown-request", "not-configured", "invalid-request"];
-  if (!allowed.includes(result.status)) throw new SignInFailure("the hub returned an invalid GitHub sign-in response; update the hub");
+  if (!allowed.includes(result.status)) throw invalidResponse();
   const expectedCode = result.status === "not-configured" ? 503
     : result.status === "invalid-request" ? 400
     : result.status === "unknown-request" ? 404
     : route === "start" && result.status === "busy" ? 429
     : route === "start" && result.status === "failed" ? 502 : 200;
-  if (response.status !== expectedCode) throw new SignInFailure("the hub returned an invalid GitHub sign-in response; update the hub");
+  if (response.status !== expectedCode) throw invalidResponse();
   return result;
 }
 
@@ -240,6 +248,7 @@ async function login(selection: Selection, io: Io): Promise<number> {
   let attempt: { requestId: string; collectionSecret: string } | undefined;
   let deadline: number | undefined;
   let collected = false;
+  let stored = false;
   try {
     // A start interrupted before its reply has no collection secret to cancel
     // with. Finish this bounded read so a late reply can still be abandoned.
@@ -278,6 +287,7 @@ async function login(selection: Selection, io: Io): Promise<number> {
         io.err(`ub auth: could not store login for ${selection.origin}: ${error instanceof Error ? error.message : "credential store write failed"}. The issued device remains on the hub; revoke it through device management if needed.\n`);
         return 1;
       }
+      stored = true;
       io.out(`Stored login for ${selection.origin}.\n`);
       describeLogin(credential, io);
       if (replaced) io.out("The replaced device keeps its hub access until it is revoked through device management.\n");
@@ -292,9 +302,14 @@ async function login(selection: Selection, io: Io): Promise<number> {
     if (collected) io.err("ub auth: the issued device remains on the hub; revoke it through device management if needed.\n");
     return 1;
   } finally {
-    if (attempt !== undefined && interrupted.signal.aborted) {
-      try { await post(selection.origin, "cancel", attempt, new AbortController().signal, CANCEL_MS); } catch {
-        io.err(`ub auth: ${selection.origin}: could not abandon the interrupted attempt at the hub; it will expire.\n`);
+    if (attempt !== undefined && !stored) {
+      try {
+        const result = await post(selection.origin, "cancel", attempt, new AbortController().signal, CANCEL_MS);
+        if (result.status === "collected" && !collected) {
+          io.err("ub auth: the issued device remains on the hub; revoke it through device management if needed.\n");
+        }
+      } catch {
+        if (!collected) io.err(`ub auth: ${selection.origin}: could not abandon the sign-in attempt at the hub; any pending attempt will expire. A device may have been issued; revoke it through device management if needed.\n`);
       }
     }
     process.off("SIGINT", interrupt);

@@ -72,6 +72,7 @@ class GithubFake {
   tokenResult: Record<string, unknown> = { access_token: GITHUB_TOKEN, token_type: "bearer", scope: "" };
   calls: string[] = [];
   failAt: string | undefined;
+  tokenHook: (() => void | Promise<void>) | undefined;
   identityHook: (() => void | Promise<void>) | undefined;
   fetch: typeof fetch = async (input) => {
     const url = String(input);
@@ -84,7 +85,10 @@ class GithubFake {
         expires_in: this.lifetime, interval: 1,
       });
     }
-    if (url === "https://github.com/login/oauth/access_token") return Response.json(this.tokenResult);
+    if (url === "https://github.com/login/oauth/access_token") {
+      await this.tokenHook?.();
+      return Response.json(this.tokenResult);
+    }
     await this.identityHook?.();
     return Response.json({ id: 1234, login: USERNAME });
   };
@@ -138,11 +142,13 @@ async function rig(workspaces: string[] = [], configured = true) {
   }
 
   const requests: { path: string; method: string | undefined; authorization: string | undefined; body: Record<string, unknown> }[] = [];
+  const collectionStatuses: string[] = [];
   const controls: {
     onStart: ((result: Record<string, unknown>) => Promise<void> | void) | undefined;
     holdCollection: boolean;
+    unavailableCollection: boolean;
     transform: ((path: string, status: number, result: Record<string, unknown>) => { status: number; result: unknown }) | undefined;
-  } = { onStart: undefined, holdCollection: false, transform: undefined };
+  } = { onStart: undefined, holdCollection: false, unavailableCollection: false, transform: undefined };
   const proxy = await serve((request, response) => {
     void (async () => {
       const chunks: Buffer[] = [];
@@ -150,6 +156,11 @@ async function rig(workspaces: string[] = [], configured = true) {
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
       const path = request.url ?? "";
       requests.push({ path, method: request.method, authorization: request.headers.authorization, body });
+      if (controls.unavailableCollection && path === "/auth/github/collect") {
+        response.writeHead(502);
+        response.end();
+        return;
+      }
       if (controls.holdCollection && path === "/auth/github/collect") {
         response.writeHead(200, { "Content-Type": "application/json" });
         response.write('{"status":"');
@@ -160,6 +171,7 @@ async function rig(workspaces: string[] = [], configured = true) {
         body: JSON.stringify(body),
       });
       const result = await upstream.json() as Record<string, unknown>;
+      if (path === "/auth/github/collect") collectionStatuses.push(String(result.status));
       if (path === "/auth/github/start") await controls.onStart?.(result);
       const reply = controls.transform?.(path, upstream.status, result) ?? { status: upstream.status, result };
       response.writeHead(reply.status, { "Content-Type": "application/json" });
@@ -170,7 +182,7 @@ async function rig(workspaces: string[] = [], configured = true) {
     });
   });
   return {
-    ...proxy, box, github, logs, requests, databasePath, controls,
+    ...proxy, box, github, logs, requests, collectionStatuses, databasePath, controls,
     get hub() { return hub; },
     async restart() { await hub.stop(); hub = await startHub(); },
     async cancel(body: Record<string, unknown>) {
@@ -222,6 +234,16 @@ describe("ub auth local selection and command surface", () => {
     }
     const status = await runUbAsync(["status"], box);
     expect(status.output).not.toMatch(/auth login|sign.in/i);
+    expect(existsSync(credentialPath(box))).toBe(false);
+  });
+
+  it("reports a malformed config before refusing a missing hub", async () => {
+    const box = sandbox({ raw: { userConfig: '{"hubUrl":"wss://hub.example.ts.net/ws",' } });
+    const run = await runUbAsync(["auth", "status"], box);
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain(`ignoring ${configPath(box)}: invalid JSON`);
+    expect(run.stderr.indexOf("invalid JSON")).toBeLessThan(run.stderr.indexOf("no hub given"));
     expect(existsSync(credentialPath(box))).toBe(false);
   });
 
@@ -555,6 +577,85 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     expect(readFileSync(credentialPath(box))).toEqual(before);
   });
 
+  it.each([502, 503, 504])("reports an empty proxy %s as unreachable and preserves existing credentials", async (status) => {
+    const proxy = await serve((_request, response) => { response.writeHead(status); response.end(); });
+    const box = sandbox({ credentials: { hubLogins: { [proxy.origin]: fixture() } } });
+    const before = readFileSync(credentialPath(box));
+    const run = await runUbAsync(["auth", "login", proxy.origin], box);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toMatch(/unreachable|cannot reach/i);
+    expect(run.stderr).not.toMatch(/update.*hub/i);
+    expect(readFileSync(credentialPath(box))).toEqual(before);
+  });
+
+  it("reports a proxy outage during collection and abandons the existing attempt", async () => {
+    const remote = await rig();
+    remote.controls.unavailableCollection = true;
+    const box = sandbox({ credentials: { hubLogins: { [remote.origin]: fixture() } } });
+    const before = readFileSync(credentialPath(box));
+    const run = await runUbAsync(["auth", "login", remote.origin], box);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toMatch(/unreachable|cannot reach/i);
+    expect(run.stderr).not.toMatch(/update.*hub/i);
+    const cancellation = remote.requests.find((request) => request.path === "/auth/github/cancel");
+    expect(cancellation).toBeDefined();
+    if (!cancellation) throw new Error("missing cancellation after proxy outage");
+    expect((await (await remote.cancel(cancellation.body)).json() as { status: string }).status).toBe("abandoned");
+    expect(readFileSync(credentialPath(box))).toEqual(before);
+    expect(privateDeviceRows(remote.databasePath)).toHaveLength(0);
+    assertPublicOnly(run, remote);
+  });
+
+  it("cancels a timed-out collection before slow GitHub reads can issue a device", async () => {
+    const remote = await rig();
+    remote.github.lifetime = 30;
+    // Both provider reads fit the hub's individual ten-second budgets; their
+    // combined wait exceeds the CLI's collection request limit.
+    remote.github.tokenHook = () => sleep(6_000);
+    let identityRead: Promise<void> | undefined;
+    remote.github.identityHook = () => { identityRead = sleep(6_000); return identityRead; };
+    const box = sandbox({ credentials: { hubLogins: { [remote.origin]: fixture() } } });
+    const before = readFileSync(credentialPath(box));
+    try {
+      const run = await runUbAsync(["auth", "login", remote.origin], box);
+      expect(run.status).toBe(1);
+      expect(run.stderr).toMatch(/unreachable|timed out/i);
+      const cancellation = remote.requests.find((request) => request.path === "/auth/github/cancel");
+      expect(cancellation).toBeDefined();
+      if (!cancellation) throw new Error("missing cancellation after collection timeout");
+      expect((await (await remote.cancel(cancellation.body)).json() as { status: string }).status).toBe("abandoned");
+      expect(remote.github.calls).toContain("https://api.github.com/user");
+      expect(identityRead).toBeDefined();
+      await identityRead;
+      await waitUntil("slow hub collection finished after cancellation", () => remote.collectionStatuses.length === 1, 5_000);
+      expect(remote.collectionStatuses).toEqual(["abandoned"]);
+      expect(readFileSync(credentialPath(box))).toEqual(before);
+      expect(privateDeviceRows(remote.databasePath)).toHaveLength(0);
+      assertPublicOnly(run, remote);
+    } finally { await identityRead; }
+  });
+
+  it("reports a device already issued when failure cleanup finds a collected attempt", async () => {
+    const remote = await rig();
+    let issuedKey: string | undefined;
+    remote.controls.transform = (path, status, result) => {
+      if (!path.endsWith("collect") || result.status !== "complete") return { status, result };
+      issuedKey = (result.credential as Login["credential"]).key;
+      return { status, result: { status: "failed" } };
+    };
+    const box = sandbox({ credentials: { hubLogins: { [remote.origin]: fixture() } } });
+    const before = readFileSync(credentialPath(box));
+    const run = await runUbAsync(["auth", "login", remote.origin], box);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toMatch(/failed/i);
+    expect(run.stderr).toMatch(/issued.*device.*remain.*hub/i);
+    expect(remote.requests.some((request) => request.path === "/auth/github/cancel")).toBe(true);
+    expect(readFileSync(credentialPath(box))).toEqual(before);
+    expect(privateDeviceRows(remote.databasePath)).toHaveLength(1);
+    expect(privateDeviceRows(remote.databasePath)[0]?.revoked_at).toBeNull();
+    assertPublicOnly(run, remote, issuedKey);
+  });
+
   it("recognizes busy and failed starts by their validated body", async () => {
     const remote = await rig();
     remote.github.failAt = "https://github.com/login/device/code";
@@ -579,7 +680,7 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     if (kind !== "old-hub") remote.controls.transform = (path, status, result) => {
       if (!path.endsWith("start")) return { status, result };
       if (kind === "wrong-shape") return { status, result: { status: "pending", collectionSecret: GITHUB_TOKEN } };
-      if (kind === "wrong-status") return { status: 502, result };
+      if (kind === "wrong-status") return { status: 201, result };
       if (kind === "unsafe-verification-url") return { status, result: { ...result, verificationUri: `https://attacker.invalid/${GITHUB_TOKEN}` } };
       return { status, result: { ...result, userCode: GITHUB_TOKEN } };
     };
