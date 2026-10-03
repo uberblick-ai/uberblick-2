@@ -227,7 +227,9 @@ Consequences:
 
 ### 4a. Every record in a topic's history ends with an outcome
 
-A topic's history is a list of its records, oldest first, and each one ends in
+A topic's history is a list of its records, **newest first** (owner,
+2026-10-03) — by chain order where one record supersedes another, by creation
+time for records outside the chain such as rejected proposals — and each one ends in
 exactly one outcome a reader can see without opening it:
 
 | Outcome | Meaning | Source |
@@ -318,7 +320,7 @@ topics, chains, agent stances and conflicts.
 | Decision log on a product document | A fixed section after the body, one row per topic, oldest topic first. Each row: topic title, current answer, and a state — Open, Decided, Decided by agent, Reconsideration open, Conflict. |
 | Decision view | One decision record read, edited and commented in context, over the still-visible product document. |
 | Approve and change | Confirming an agent-decided record, approving or rejecting a reconsideration, and resolving a conflict — the only human-gated actions, so they must be obvious and hard to trigger by accident. |
-| History | A topic's records oldest first, each ending in its outcome (section 4a) with who, when and its comment count; every row clickable into a read-only view of that record, with a way back to the current answer. |
+| History | A topic's records newest first, each ending in its outcome (section 4a) with who, when and its comment count; every row clickable into a read-only view of that record, with a way back to the current answer. |
 | Needs attention | One list across the workspace of open topics, agent-decided records awaiting review, and conflicts (principle 7) — where a person answers many small decisions quickly. |
 | Decisions in the document list | The existing *Decisions* mode in `shell/DocumentList.tsx`, showing one row per topic by default. |
 | Built-on marker | How an issue or pull request built on an open decision is visible from the decision, so a reversal finds its rework. |
