@@ -15,19 +15,10 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { HocuspocusProvider } from "@hocuspocus/provider";
 import type { Hub } from "@uberblick/hub";
-import {
-  createHub,
-  importRootSecret,
-  MAX_TOKEN_LIFETIME_SECONDS,
-  mintToken,
-  silentLogger,
-} from "@uberblick/hub";
-import { wrapToken } from "@uberblick/hub/protocol";
+import { createHub, silentLogger } from "@uberblick/hub";
 import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
 import { directoryRoom, upsertDirectoryEntry } from "@uberblick/schema";
-import * as Y from "yjs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Check, DoctorReport } from "../src/doctor.js";
 import type { StatusReport } from "../src/status.js";
@@ -39,10 +30,8 @@ const DOCUMENT = "13b04df6-1c7b-45f1-9ec9-5f22034f71d3";
 const SECRET = "doctor-persistence-test-secret";
 const REFUSED = "doctor fixture refuses update-log appends";
 const hubs: Hub[] = [];
-const providers: HocuspocusProvider[] = [];
 
 afterEach(async () => {
-  for (const provider of providers.splice(0)) provider.destroy();
   for (const hub of hubs.splice(0)) await hub.stop();
   removeTempDirs();
 });
@@ -91,25 +80,26 @@ async function seededHub(box: Sandbox): Promise<Hub> {
     shutdownTimeoutMs: 5_000,
   });
   hubs.push(hub);
-  const document = new Y.Doc();
-  const provider = new HocuspocusProvider({
-    url: `ws://127.0.0.1:${hub.port}`,
-    name: directoryRoom(WORKSPACE),
-    token: wrapToken(await mintToken(await importRootSecret(SECRET), {
-      typ: "room",
-      sub: "doctor-persistence-fixture",
-      workspace: WORKSPACE,
-      scope: "read-write",
-      kid: null,
-      lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-    })),
-    document,
+  // Seed through the existing replica/client flow rather than introducing
+  // another token-minting site just for this fixture.
+  const seed = createMcpServer({
+    ...resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }),
+    databasePath: join(box.cwd, "seed.sqlite"),
+    hubUrl: `ws://127.0.0.1:${hub.port}`,
+    authSecret: SECRET,
   });
-  providers.push(provider);
-  await waitUntil("the fixture directory to sync", () => provider.isSynced);
-  upsertDirectoryEntry(document, { uuid: DOCUMENT, title: "Remote update", tags: [] });
-  await waitUntil("the remote update to be acknowledged", () =>
-    provider.isSynced && !provider.hasUnsyncedChanges);
+  try {
+    await seed.replicas.settle();
+    upsertDirectoryEntry(seed.replicas.directory().doc, {
+      uuid: DOCUMENT,
+      title: "Remote update",
+      tags: [],
+    });
+    await waitUntil("the remote update to be acknowledged", () =>
+      seed.replicas.isRoomQuiet(directoryRoom(WORKSPACE)));
+  } finally {
+    await seed.close();
+  }
   return hub;
 }
 
