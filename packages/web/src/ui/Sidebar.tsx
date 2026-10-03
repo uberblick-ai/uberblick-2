@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactElement, ReactNode, Ref } from "react";
+import type { ReactElement, ReactNode, Ref, RefObject } from "react";
 import type * as Y from "yjs";
 import {
   createGroup,
@@ -38,7 +38,8 @@ import { useSortable } from "@dnd-kit/react/sortable";
 import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { useDroppable } from "@dnd-kit/react";
 import { SidebarDragProvider } from "./sidebar-drag.js";
-import { Sidebar as SidebarFrame } from "./shadcn/sidebar.js";
+import { Sidebar as SidebarFrame, SIDEBAR_TOGGLE_CLASSES, useSidebar } from "./shadcn/sidebar.js";
+import { Input } from "./shadcn/input.js";
 import { UserMenu } from "./UserMenu.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import type { SettingsPage, Workspace } from "./route.js";
@@ -82,30 +83,7 @@ export function togglePin(sidebarDoc: Y.Doc, uuid: string): void {
   pinDoc(sidebarDoc, target, uuid);
 }
 
-export function Sidebar({
-  collapsed = false,
-  collapseButtonRef,
-  collapseLabel,
-  onCollapse,
-  connection,
-  sidebar,
-  groups,
-  entries,
-  workspaces,
-  workspace,
-  onSwitchWorkspace,
-  identity,
-  agentSessions,
-  selected,
-  onSelect,
-  onCreate,
-  onOpenAll,
-  onOpenSettings,
-  onBackToWorkspace,
-  allOpen,
-  settingsOpen,
-  settingsPage,
-}: {
+type SidebarProps = {
   /** Keep the shell mounted for movement while retiring its interactions. */
   collapsed?: boolean;
   /** The pane-boundary control that hides this sidebar. */
@@ -149,6 +127,71 @@ export function Sidebar({
   settingsOpen: boolean;
   /** The selected settings destination, when settings is open. */
   settingsPage: SettingsPage | null;
+};
+
+export function Sidebar(props: SidebarProps): ReactElement {
+  const sidebarRoot = useRef<HTMLElement | null>(null);
+  const dragging = useRef(false);
+  const onDraggingChange = useCallback((active: boolean) => {
+    dragging.current = active;
+  }, []);
+  const { narrow } = useSidebar();
+  return (
+    <SidebarFrame
+      ref={sidebarRoot}
+      className="ub-list group/sidebar overflow-clip [overflow-clip-margin:1.25rem]"
+      aria-label="Sidebar"
+      data-mode={props.settingsOpen ? "settings" : "documents"}
+      onEscapeKeyDown={(event) => {
+        // Radix sees Escape in capture, before the field and dnd-kit. Let those
+        // existing handlers cancel their operation without dismissing the sheet.
+        if (
+          dragging.current ||
+          (event.target instanceof Element && event.target.closest(".ub-group-rename") !== null)
+        ) event.preventDefault();
+      }}
+    >
+      <SidebarContent
+        {...props}
+        drawer={narrow}
+        sidebarRoot={sidebarRoot}
+        onDraggingChange={onDraggingChange}
+      />
+    </SidebarFrame>
+  );
+}
+
+// Radix unmounts this body on drawer closure, retiring menus, drafts and drags.
+function SidebarContent({
+  drawer,
+  sidebarRoot,
+  onDraggingChange,
+  collapsed = false,
+  collapseButtonRef,
+  collapseLabel,
+  onCollapse,
+  connection,
+  sidebar,
+  groups,
+  entries,
+  workspaces,
+  workspace,
+  onSwitchWorkspace,
+  identity,
+  agentSessions,
+  selected,
+  onSelect,
+  onCreate,
+  onOpenAll,
+  onOpenSettings,
+  onBackToWorkspace,
+  allOpen,
+  settingsOpen,
+  settingsPage,
+}: SidebarProps & {
+  drawer: boolean;
+  sidebarRoot: RefObject<HTMLElement | null>;
+  onDraggingChange: (active: boolean) => void;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const sidebarStatus = useRoomStatus(sidebar);
@@ -178,8 +221,6 @@ export function Sidebar({
     [stubs],
   );
   const shownMode = useRef(settingsOpen);
-  const sidebarRoot = useRef<HTMLElement | null>(null);
-
   useEffect(() => {
     if (shownMode.current === settingsOpen) return;
     shownMode.current = settingsOpen;
@@ -188,7 +229,7 @@ export function Sidebar({
         ".ub-sidebar-pane:not([inert]) [data-swap-focus]",
       )
       ?.focus();
-  }, [settingsOpen]);
+  }, [settingsOpen, sidebarRoot]);
 
   const addGroup = (): void => {
     if (ydoc === null || !canWriteSidebar()) return;
@@ -224,28 +265,24 @@ export function Sidebar({
   }, [sidebarWritable]);
 
   return (
-    <SidebarFrame
-      ref={sidebarRoot}
-      className="ub-list group/sidebar overflow-clip [overflow-clip-margin:1.25rem]"
-      aria-label="Sidebar"
-      data-mode={settingsOpen ? "settings" : "documents"}
-    >
+    <>
       <button
         ref={collapseButtonRef}
         type="button"
-        className="ub-sidebar-toggle ub-sidebar-hide"
+        className={`${SIDEBAR_TOGGLE_CLASSES} ub-sidebar-toggle ub-sidebar-hide top-2 border-transparent bg-(--sidebar-accent) text-sidebar-foreground ${drawer ? "right-2" : "-right-4"}`}
         aria-expanded="true"
         aria-label={collapseLabel}
         title={collapseLabel}
         onClick={onCollapse}
       >
-        «
+        {drawer ? "×" : "«"}
       </button>
       <SidebarDragProvider
         connection={sidebar}
+        onDraggingChange={onDraggingChange}
         active={!collapsed && !settingsOpen && sidebarWritable}
       >
-      <div className="ub-sidebar-stack grid min-w-0 min-h-0 flex-1">
+      <div className={`ub-sidebar-stack grid min-w-0 min-h-0 flex-1 ${drawer ? "pt-10" : ""}`}>
         <nav
           className={`${SIDEBAR_PANE_CLASSES} ub-document-sidebar [transform:translateX(0)] opacity-100 group-data-[mode=settings]/sidebar:[transform:translateX(-25%)] group-data-[mode=settings]/sidebar:opacity-0`}
           aria-label="Documents"
@@ -360,7 +397,7 @@ export function Sidebar({
         />
       </div>
       </SidebarDragProvider>
-    </SidebarFrame>
+    </>
   );
 }
 
@@ -718,26 +755,32 @@ function GroupSection({
     <section className="ub-group" ref={sortable.ref}>
       <div className="ub-group-head" ref={append.ref} data-drop-target={append.isDropTarget}>
         {editing ? (
-          <input
-            className="ub-group-rename"
-            defaultValue={group.name}
-            aria-label="Group name"
-            // Focused *and* selected: the field is opened to replace the name
-            // far more often than to edit it, and `select()` alone leaves the
-            // caret somewhere the keyboard is not.
-            ref={openField}
-            onBlur={(event) => onCommit(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                // Through the blur, so there is one commit path.
-                event.currentTarget.blur();
-              } else if (event.key === "Escape") {
-                event.preventDefault();
-                onCancel();
-              }
+          <form
+            className="mx-[0.4rem] my-1 flex-1 min-w-0"
+            onSubmit={(event) => {
+              event.preventDefault();
+              // Native Enter submission uses the same commit path as leaving.
+              event.currentTarget.querySelector<HTMLInputElement>("input")?.blur();
             }}
-          />
+          >
+            <Input
+              className="ub-group-rename font-medium tracking-[0.12em] uppercase [--input:var(--sidebar-input)] [--background:var(--sidebar)]"
+              defaultValue={group.name}
+              aria-label="Group name"
+              // Focused *and* selected: the field is opened to replace the name
+              // far more often than to edit it, and `select()` alone leaves the
+              // caret somewhere the keyboard is not.
+              ref={openField}
+              onBlur={(event) => onCommit(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  onCancel();
+                }
+              }}
+            />
+          </form>
         ) : (
           <button
             type="button"

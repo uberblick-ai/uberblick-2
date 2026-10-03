@@ -59,15 +59,20 @@ class SidebarSortingPlugin extends OptimisticSortingPlugin {
 export function SidebarDragProvider({
   connection,
   active,
+  onDraggingChange,
   children,
 }: {
   connection: RoomConnection | null;
   active: boolean;
+  onDraggingChange?: (active: boolean) => void;
   children: ReactNode;
 }): ReactElement {
   const dragging = useRef<DragDropManager | null>(null);
   const initialOrder = useRef<string | null>(null);
-  const cancel = useCallback((): void => dragging.current?.actions.stop({ canceled: true }), []);
+  const cancel = useCallback((): void => {
+    dragging.current?.actions.stop({ canceled: true });
+    onDraggingChange?.(false);
+  }, [onDraggingChange]);
 
   // Cancel before a shared update renders over dnd-kit's optimistic DOM order.
   // There is no snapshot rollback: the observer always renders current Yjs data.
@@ -115,10 +120,12 @@ export function SidebarDragProvider({
       }}
       onDragStart={(_event, manager) => {
         dragging.current = manager;
+        onDraggingChange?.(true);
         initialOrder.current = connection === null ? null : order(connection.ydoc);
       }}
       onDragEnd={(event) => {
         dragging.current = null;
+        onDraggingChange?.(false);
         const expectedOrder = initialOrder.current;
         initialOrder.current = null;
         if (event.canceled || !active || connection?.status.writable !== true) return;

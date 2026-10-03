@@ -386,6 +386,9 @@ export function CommentComposer({
     };
     const dismiss = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || draftNow.current === null) return;
+      // This listener runs before the fields. A composing Escape belongs to
+      // the input method, so leave the active form and draft intact.
+      if (event.isComposing || event.keyCode === 229) return;
       event.preventDefault();
       event.stopPropagation();
       if (modeNow.current !== "toolbar") {

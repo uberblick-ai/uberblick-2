@@ -8,36 +8,19 @@
  */
 
 import { expect, test } from "@playwright/test";
-import type { BrowserContext, Locator, Page } from "@playwright/test";
-import { placeCaret, startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
+import { createDoc, setupHarness } from "./app-helpers.js";
+import type { Locator, Page } from "@playwright/test";
+import { placeCaret } from "./harness.js";
 
-test.describe.configure({ mode: "serial" });
-
-let started: Harness | null = null;
-const contexts: BrowserContext[] = [];
-
-test.beforeAll(async () => {
-  started = await startHarness();
-});
-
-test.afterEach(async () => {
-  for (const context of contexts.splice(0)) await context.close();
-});
-
-test.afterAll(async () => {
-  const running = started;
-  started = null;
-  await running?.stop();
-});
+const { harness, trackContext } = setupHarness();
 
 async function openDoc(page: Page, text: string): Promise<void> {
-  if (started === null) throw new Error("e2e: the harness is not running");
-  await page.goto(started.appUrl);
+  await page.goto(harness().appUrl);
+  if ((page.viewportSize()?.width ?? 1280) < 1280) {
+    await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  }
   await expect(page.locator(".ub-list-head")).toBeVisible();
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
-  await page.locator(".ub-title").fill("Selection toolbar");
+  await createDoc(page, "Selection toolbar");
   await placeCaret(page);
   await page.keyboard.insertText(text);
 }
@@ -148,9 +131,7 @@ test("the measured toolbar flips below at the viewport edge and follows scrollin
 }) => {
   await page.setViewportSize({ width: 520, height: 360 });
   await openDoc(page, "scrolling prose ".repeat(350));
-  await page.getByRole("button", { name: "Hide document list" }).click();
-  await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
-  await expect(page.locator(".ub-list")).toHaveAttribute("aria-hidden", "true");
+  await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
   const pane = page.locator(".ub-pane");
   const paragraph = page.locator(".ub-paragraph").first();
   await pane.evaluate((element) => {
@@ -185,7 +166,7 @@ test("touch activation preserves the range and IME composition suspends the chro
   browser,
 }) => {
   const context = await browser.newContext({ hasTouch: true });
-  contexts.push(context);
+  trackContext(context);
   const page = await context.newPage();
   await openDoc(page, "touch keeps this range");
   const editor = page.locator(".ub-editor .ProseMirror");

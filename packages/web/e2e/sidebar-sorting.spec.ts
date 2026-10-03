@@ -1,29 +1,24 @@
 /** Real gestures, React ownership, and convergence through a private hub. */
 import { expect, test as base } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
-import { startHarness } from "./harness.js";
+import { setupHarness } from "./app-helpers.js";
 import { createPinnedDoc, dragOnto } from "./sidebar-helpers.js";
 
-// Each case owns its workspace; running one test never needs an earlier test.
+// Exact ordering proofs need each case to begin with an empty sidebar.
+const { openApp } = setupHarness({ scope: "test" });
+
 const test = base.extend<{ peers: [Page, Page] }>({
   peers: async ({ browser }, use) => {
-    const running = await startHarness();
-    const contexts = await Promise.all([browser.newContext({ hasTouch: true }), browser.newContext()]);
     const errors: string[] = [];
-    try {
-      const pages = await Promise.all(contexts.map(async (context) => {
-        const page = await context.newPage();
-        page.on("pageerror", (error) => errors.push(error.message));
-        await page.goto(running.appUrl);
-        await expect(page.locator(".ub-list-head")).toBeVisible();
-        return page;
-      }));
-      await use(pages as [Page, Page]);
-      expect(errors).toEqual([]);
-    } finally {
-      await Promise.all(contexts.map((context) => context.close()));
-      await running.stop();
-    }
+    const beforeNavigate = async (page: Page): Promise<void> => {
+      page.on("pageerror", (error) => errors.push(error.message));
+    };
+    const pages = await Promise.all([
+      openApp(browser, "/", { contextOptions: { hasTouch: true }, beforeNavigate, readySelector: ".ub-list-head" }),
+      openApp(browser, "/", { beforeNavigate, readySelector: ".ub-list-head" }),
+    ]);
+    await use(pages as [Page, Page]);
+    expect(errors).toEqual([]);
   },
 });
 

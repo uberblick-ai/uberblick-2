@@ -9,36 +9,18 @@
 
 import { expect, test } from "@playwright/test";
 import type { Browser, Page } from "@playwright/test";
-import { placeCaret, startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
+import { createDoc, editor, setupHarness } from "./app-helpers.js";
+import { placeCaret } from "./harness.js";
 
-test.describe.configure({ mode: "serial" });
-
-let started: Harness | null = null;
-
-function harness(): Harness {
-  if (started === null) {
-    throw new Error("e2e: the harness is not running — its bootstrap failed");
-  }
-  return started;
-}
-
-test.beforeAll(async () => {
-  started = await startHarness();
-});
-
-test.afterAll(async () => {
-  const running = started;
-  started = null;
-  await running?.stop();
-});
+const { harness } = setupHarness();
 
 async function openDocument(page: Page): Promise<void> {
   await page.goto(harness().appUrl);
+  if ((page.viewportSize()?.width ?? 1280) < 1280) {
+    await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  }
   await expect(page.locator(".ub-list-head")).toBeVisible();
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
-  await page.locator(".ub-title").fill("Outline interactions");
+  await createDoc(page, "Outline interactions");
   await placeCaret(page);
 }
 
@@ -71,6 +53,7 @@ async function typeLongOutline(page: Page): Promise<string[]> {
 }
 
 test("pointer and keyboard share one contained, stable outline", async ({ page }) => {
+  await page.clock.install();
   await page.setViewportSize({ width: 1400, height: 360 });
   await openDocument(page);
 
@@ -140,11 +123,12 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
     rowGround,
   );
   await panel.hover();
-  await page.waitForTimeout(180);
+  await page.clock.runFor(180);
   await expect(panel).toBeVisible();
   await page.mouse.move(0, 0);
+  await page.clock.runFor(180);
   await expect(panel).toBeHidden();
-  await expect(page.locator(".ub-editor .ProseMirror")).toBeFocused();
+  await expect(editor(page)).toBeFocused();
   await page.keyboard.type("x");
   await expect(page.locator(".ub-editor .ub-paragraph").last()).toHaveText("x");
 
@@ -230,8 +214,6 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     await page.setViewportSize({ width: 720, height: 540 });
     await openDocument(page);
     await typeHeading(page, 1, "Touch target");
-    await page.getByRole("button", { name: "Hide document list" }).tap();
-
     const trigger = page.getByRole("button", { name: "Contents 1" });
     const panel = page.getByRole("menu", { name: "Contents 1" });
     await trigger.tap();
@@ -367,13 +349,18 @@ test("touch reveals a low thread in the sheet while its close control stays in v
       if (index > 0) await page.keyboard.press("Enter");
       await page.keyboard.insertText(anchor);
     }
-    for (const [index] of anchors.entries()) {
+    for (const [index, anchor] of anchors.entries()) {
       await page.locator(".ub-editor .ub-paragraph").nth(index).click();
       await page.keyboard.press("Home");
       await page.keyboard.press("Shift+End");
+      await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(anchor);
       await page.locator(".ub-composer-open").click();
       await page.getByPlaceholder(/Comment as/).fill(`conversation ${index + 1}`);
       await page.keyboard.press("Enter");
+      // Creating a comment returns focus through Tiptap's next animation frame.
+      // Let that finish before another selection can be overwritten by it.
+      await expect(page.locator(".ub-thread")).toHaveCount(index + 1);
+      await expect(editor(page)).toBeFocused();
     }
     await expect(page.locator(".ub-thread")).toHaveCount(10);
     await page

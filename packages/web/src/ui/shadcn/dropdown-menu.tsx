@@ -49,7 +49,7 @@ function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-10 min-w-[12rem] overflow-y-auto overflow-x-hidden rounded-(--radius) border border-border bg-popover p-1 text-[0.85rem] text-popover-foreground shadow-(--shadow-float)",
+          "z-50 min-w-[12rem] overflow-y-auto overflow-x-hidden rounded-(--radius) border border-border bg-popover p-1 text-[0.85rem] text-popover-foreground shadow-(--shadow-float)",
           "max-h-(--radix-dropdown-menu-content-available-height)",
           className,
         )}

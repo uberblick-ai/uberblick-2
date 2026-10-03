@@ -1,29 +1,32 @@
 /** Native sidebar geometry and input: clipping an oversized scroller is not a fix. */
-import { expect, test as base } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
-import { startHarness } from "./harness.js";
+import { setupHarness } from "./app-helpers.js";
 import { createPinnedDoc } from "./sidebar-helpers.js";
 
-const test = base.extend<{ app: Page }>({
-  app: async ({ browser }, use) => {
-    const running = await startHarness();
-    const context = await browser.newContext();
-    const errors: string[] = [];
-    try {
-      const page = await context.newPage();
-      page.on("pageerror", (error) => errors.push(error.message));
-      await page.goto(running.appUrl);
-      await expect(page.locator(".ub-list-head")).toBeVisible();
-      await use(page);
-      expect(errors).toEqual([]);
-    } finally {
-      await context.close();
-      await running.stop();
-    }
-  },
+const { harness } = setupHarness({ scope: "test" });
+let errors: string[] = [];
+
+test.beforeEach(async ({ page }) => {
+  errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(harness().appUrl);
+  await expect(page.locator(".ub-list-head")).toBeVisible();
+});
+
+test.afterEach(() => {
+  expect(errors).toEqual([]);
 });
 
 const activePane = (page: Page): Locator => page.locator(".ub-sidebar-pane:not([inert])");
+
+async function openSidebar(page: Page, settings = false): Promise<void> {
+  if ((page.viewportSize()?.width ?? 1280) >= 1280) return;
+  if (await page.getByRole("dialog", { name: "Sidebar", exact: true }).count() === 0) {
+    await page.getByRole("button", { name: settings ? "Show sidebar" : "Show document list", exact: true }).click();
+  }
+  await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
+}
 
 async function settleSidebar(page: Page): Promise<void> {
   await page.locator(".ub-body").evaluate(async (body) => {
@@ -55,7 +58,10 @@ async function expectHorizontalFit(page: Page): Promise<void> {
 }
 
 async function horizontalWheel(page: Page): Promise<void> {
-  const box = await activePane(page).boundingBox();
+  const pane = activePane(page);
+  await expect(pane).toBeVisible();
+  await settleSidebar(page);
+  const box = await pane.boundingBox();
   if (box === null) throw new Error("e2e: missing sidebar pane");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   for (const delta of [240, -240]) {
@@ -85,7 +91,7 @@ async function addGroup(page: Page, name: string): Promise<void> {
   await expect(page.locator(".ub-group-label").filter({ hasText: name })).toBeVisible();
 }
 
-test("empty and long-label sidebars fit supported widths and breakpoint edges in both modes", async ({ app: page }) => {
+test("empty and long-label sidebars fit supported widths and breakpoint edges in both modes", async ({ page }) => {
   for (const content of ["empty", "long labels"]) {
     if (content === "long labels") {
       await page.setViewportSize({ width: 1280, height: 832 });
@@ -94,9 +100,10 @@ test("empty and long-label sidebars fit supported widths and breakpoint edges in
       await addGroup(page, "A group name long enough to truncate within its heading ".repeat(3));
       await addGroup(page, "unbreakablegroup".repeat(25));
     }
-    for (const width of [320, 375, 744, 767, 768, 932, 1024, 1280, 1366, 1470]) {
+    for (const width of [320, 375, 744, 768, 932, 1024, 1279, 1280, 1366, 1470]) {
       await test.step(`${content} at ${width}px`, async () => {
         await page.setViewportSize({ width, height: 832 });
+        await openSidebar(page);
         await settleSidebar(page);
         await expectHorizontalFit(page);
         await horizontalWheel(page);
@@ -115,39 +122,47 @@ test("empty and long-label sidebars fit supported widths and breakpoint edges in
         });
         expect(outside).toEqual([]);
         await page.locator(".ub-settings-entry").click();
+        await openSidebar(page, true);
         await expect(page.locator(".ub-list")).toHaveAttribute("data-mode", "settings");
         await settleSidebar(page);
         await horizontalWheel(page);
         await page.locator(".ub-settings-back").click();
+        await openSidebar(page);
         await settleSidebar(page);
         await expectHorizontalFit(page);
       });
     }
   }
 
-  // The hide control deliberately overhangs the frame. Exercise its outer
-  // half so tightening the frame's clip cannot silently take it away.
-  for (const width of [320, 768]) {
+  // The docked hide control overhangs its frame; the drawer's close control
+  // fits inside it. Exercise the outer half of each to defend their hit area.
+  for (const width of [320, 1280]) {
     await page.setViewportSize({ width, height: 832 });
-    const hide = page.getByRole("button", { name: "Hide document list" });
+    await openSidebar(page);
+    const hide = page.getByRole("button", { name: width < 1280 ? "Close document list" : "Hide document list", exact: true });
     const box = await hide.boundingBox();
-    if (box === null) throw new Error("e2e: missing hide control");
+    if (box === null) throw new Error("e2e: missing close control");
     await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2);
-    await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
-    await expect(page.getByRole("button", { name: "Show document list" })).toBeFocused();
+    if (width < 1280) {
+      await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
+    } else {
+      await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
+    }
+    await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeFocused();
     await settleSidebar(page);
-    await page.getByRole("button", { name: "Show document list" }).click();
+    await page.getByRole("button", { name: "Show document list", exact: true }).click();
     await settleSidebar(page);
     await expect(hide).toBeFocused();
     await expectHorizontalFit(page);
   }
 });
 
-test("edge-held drags never pan sideways and a tall sidebar still scrolls vertically", async ({ app: page }) => {
+test("edge-held drags never pan sideways and a tall sidebar still scrolls vertically", async ({ page }) => {
   for (let index = 0; index < 18; index += 1) await createPinnedDoc(page, `Document ${index}`);
 
   for (const width of [320, 768, 1280]) {
     await page.setViewportSize({ width, height: 500 });
+    await openSidebar(page);
     await settleSidebar(page);
     const pane = activePane(page);
     await pane.evaluate((element) => { element.scrollTop = 0; });
@@ -184,7 +199,10 @@ test("edge-held drags never pan sideways and a tall sidebar still scrolls vertic
         return [...panned];
       });
       expect(pannedDuringHold).toEqual([]);
-      if (edge === "left") await page.keyboard.press("Escape");
+      if (edge === "left") {
+        await page.keyboard.press("Escape");
+        if (width < 1280) await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
+      }
       await page.mouse.up();
       await expect(page.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
       await expectHorizontalFit(page);

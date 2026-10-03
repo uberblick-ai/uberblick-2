@@ -406,43 +406,6 @@ body {
   overflow-wrap: anywhere;
 }
 
-/* One control in either sidebar state: attached to the open pane's boundary,
-   or floating over the main pane while the sidebar is absent. Neither form
-   reserves a cross-pane row. */
-.ub-sidebar-toggle {
-  position: absolute;
-  z-index: 4;
-  font: inherit;
-  line-height: 1;
-  width: 2rem;
-  height: 2rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--card-accent);
-  color: var(--secondary-foreground);
-  cursor: pointer;
-}
-
-.ub-sidebar-toggle:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-
-.ub-sidebar-hide {
-  top: 0.5rem;
-  right: -1rem;
-  /* The accent fill is the boundary. A second quiet stroke against that fill
-     is neither distinct nor meaningful; focus supplies the operable outline. */
-  border-color: transparent;
-  background: var(--sidebar-accent);
-  color: var(--sidebar-foreground);
-}
-
-.ub-sidebar-restore {
-  top: 0.5rem;
-  left: 0.5rem;
-}
-
 .ub-muted {
   color: var(--muted-foreground);
   font-size: 0.8rem;
@@ -1119,26 +1082,6 @@ body {
   background: var(--sidebar-accent);
 }
 
-/* Renaming happens in place, in the header the name is read in — so the field
-   wears the label's own typography (#481). The ink stays `--foreground` rather
-   than the label's step-back: this is text somebody is typing, and a draft has
-   to be readable while it is being written. */
-.ub-group-rename {
-  flex: 1;
-  min-width: 0;
-  margin: 0.25rem 0.4rem;
-  padding: 0 0.2rem;
-  background: transparent;
-  border: 1px solid var(--sidebar-input);
-  border-radius: var(--radius-sm);
-  color: var(--foreground);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
 .ub-group-add {
   align-self: flex-start;
   margin-top: 0.35rem;
@@ -1194,13 +1137,6 @@ body {
   transition:
     padding-inline-start 180ms ease,
     flex-basis 180ms ease;
-}
-
-/* The restore control floats at the page edge. Give the sidebar-less document
-   a deliberate outer inset that clears its complete target rather than
-   centring the document in the newly available width. */
-.ub-body[data-sidebar-collapsed="true"] > .ub-document-pane {
-  --pane-document-inset: 4rem;
 }
 
 /* The reading column is capped at the measure. A document pane anchors it at
@@ -1328,10 +1264,9 @@ body {
    The toggle appears, and opening it brings the rail back *over* the prose
    instead of taking a column the window does not have. */
 @media (max-width: 1100px) {
-  /* The rail is an overlay here, so its reserved gap is released. With the
-     sidebar still open, keep the pane's original compact edge inset; the
-     deliberate 4rem page inset above remains the more specific collapsed
-     state. */
+  /* At the threads rail's own breakpoint, release its reserved gap and keep
+     the compact document inset. SidebarProvider selects sidebar presentation
+     independently. */
   .ub-document-pane {
     --pane-document-inset: 1rem;
     --document-rail-gap: 1rem;
@@ -1346,35 +1281,9 @@ body {
   .ub-threads-toggle {
     display: inline-flex;
   }
-
-  .ub-pane-threads-toggle {
-    position: sticky;
-    top: 0;
-    z-index: 4;
-    align-self: flex-end;
-    margin-bottom: 0.25rem;
-  }
 }
 
-/* SidebarProvider's controlled state is shared across viewport sizes. The
-   frame presents the panel as an overlay below 768px. */
 @media (max-width: 767px) {
-  .ub-body > .ub-pane > :not(.ub-pane-threads-toggle) {
-    transition: margin-block-start 180ms ease;
-  }
-
-  /* The wide layout spends inline room to clear the floating restore button.
-     A phone cannot afford that permanent gutter: move the pane's content below
-     the button while its sticky edge controls keep their normal top position,
-     and return the document to its compact edge inset. */
-  .ub-sidebar-restore ~ .ub-pane > :not(.ub-pane-threads-toggle) {
-    margin-block-start: 2.75rem;
-  }
-
-  .ub-body[data-sidebar-collapsed="true"] > .ub-document-pane {
-    --pane-document-inset: 1rem;
-  }
-
   /* The uuid is the actionable identity at this width; the revision is the one
      optional fact in the row. Removing only that suffix keeps the identity,
      copy and actions controls inside the viewport without shrinking their
@@ -1797,22 +1706,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-}
-
-.ub-comment-input {
-  font: inherit;
-  font-size: 0.85rem;
-  resize: vertical;
-  padding: 0.35rem 0.45rem;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-sm);
-  background: var(--background);
-  color: var(--foreground);
-}
-
-.ub-comment-input:focus {
-  outline: none;
-  border-color: var(--ring);
 }
 
 .ub-mentions {
@@ -3647,7 +3540,6 @@ h3.ub-heading {
    happened, so removing it changes nothing but the movement. */
 @media (prefers-reduced-motion: reduce) {
   .ub-document-pane,
-  .ub-body > .ub-pane > :not(.ub-pane-threads-toggle),
   .ub-group-caret,
   .ub-group-body,
   .ub-group-act,

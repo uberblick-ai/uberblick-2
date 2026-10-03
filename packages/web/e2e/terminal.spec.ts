@@ -24,21 +24,12 @@
 
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
-import { startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
+import { createDoc, setupHarness } from "./app-helpers.js";
 
-test.describe.configure({ mode: "serial" });
+const { harness } = setupHarness();
 
-let started: Harness | null = null;
-
-test.beforeAll(async () => {
-  started = await startHarness();
-});
-
-test.afterAll(async () => {
-  const running = started;
-  started = null;
-  await running?.stop();
+test.beforeEach(async ({ page }) => {
+  await page.clock.install();
 });
 
 const TRANSCRIPT = "$ ub init\nworkspace ready";
@@ -79,6 +70,12 @@ async function frameText(page: Page): Promise<string> {
   return (await frame(page).textContent()) ?? "";
 }
 
+/** Advance scheduled playback while observing every part of the original proof. */
+async function advancePlayback(page: Page): Promise<string> {
+  await page.clock.runFor(100);
+  return frameText(page);
+}
+
 /**
  * A document whose last block is a terminal demonstration, with the caret left
  * in it. `fillerLines` paragraphs go in front of it, for the one test that
@@ -91,10 +88,11 @@ async function writeDemo(
   transcript = TRANSCRIPT,
 ): Promise<void> {
   await page.goto(url);
+  if ((page.viewportSize()?.width ?? 1280) < 1280) {
+    await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  }
   await expect(page.locator(".ub-list-head")).toBeVisible();
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
-  await page.locator(".ub-title").fill("demos");
+  await createDoc(page, "demos");
 
   const blocks = page.locator(".ub-editor .ProseMirror > *");
   if (fillerLines > 0) {
@@ -120,8 +118,7 @@ async function writeDemo(
 test("a transcript plays on screen, opens under the caret, and stops on its control", async ({
   page,
 }) => {
-  if (started === null) throw new Error("e2e: the harness is not running");
-  await writeDemo(page, started.appUrl);
+  await writeDemo(page, harness().appUrl);
 
   // The caret is in the block, so the reader is looking at what they typed and
   // nothing is playing behind it.
@@ -132,12 +129,12 @@ test("a transcript plays on screen, opens under the caret, and stops on its cont
   await caretAway(page);
   await expect(panel(page)).toBeVisible();
   await expect(source(page)).toBeHidden();
-  await expect(frame(page)).toContainText("$ ub init");
-  await expect(frame(page)).toContainText("workspace ready");
+  await expect.poll(() => advancePlayback(page), { intervals: [0] }).toContain("$ ub init");
+  await expect.poll(() => advancePlayback(page), { intervals: [0] }).toContain("workspace ready");
 
   // It loops: the panel clears and the first prompt comes round again.
   await expect
-    .poll(() => frameText(page), { timeout: 20_000 })
+    .poll(() => advancePlayback(page), { intervals: [0], timeout: 20_000 })
     .not.toContain("workspace ready");
 
   // Clicking the panel is how a reader gets back to the transcript.
@@ -156,19 +153,18 @@ test("a transcript plays on screen, opens under the caret, and stops on its cont
   await expect(control(page)).toHaveText("Play");
 
   const held = await frameText(page);
-  await page.waitForTimeout(3_000);
+  await page.clock.runFor(3_000);
   expect(await frameText(page)).toBe(held);
 
   await page.keyboard.press("Enter");
   await expect(control(page)).toHaveText("Pause");
-  await expect.poll(() => frameText(page)).not.toBe(held);
+  await expect.poll(() => advancePlayback(page), { intervals: [0] }).not.toBe(held);
 });
 
 test("a demonstration nobody can see is not running", async ({ page }) => {
-  if (started === null) throw new Error("e2e: the harness is not running");
   await page.setViewportSize({ width: 1_000, height: 400 });
   // Enough document in front of the block to scroll it off the screen.
-  await writeDemo(page, started.appUrl, 40);
+  await writeDemo(page, harness().appUrl, 40);
 
   // The caret goes to the top of the document, which takes the panel with it.
   await caretAway(page);
@@ -176,20 +172,19 @@ test("a demonstration nobody can see is not running", async ({ page }) => {
 
   // Nothing paints into a panel nobody is looking at.
   await expect.poll(() => frameText(page)).toBe("");
-  await page.waitForTimeout(2_000);
+  await page.clock.runFor(2_000);
   expect(await frameText(page)).toBe("");
 
   // Scrolled back to, it starts — from the top, not from where it left off.
   await panel(page).scrollIntoViewIfNeeded();
-  await expect.poll(() => frameText(page)).toContain("$ ub init");
+  await expect.poll(() => advancePlayback(page), { intervals: [0] }).toContain("$ ub init");
 });
 
 test("reduced motion gets the whole transcript, and no control at all", async ({
   page,
 }) => {
-  if (started === null) throw new Error("e2e: the harness is not running");
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await writeDemo(page, started.appUrl);
+  await writeDemo(page, harness().appUrl);
   await caretAway(page);
 
   await expect(panel(page)).toBeVisible();
@@ -199,7 +194,7 @@ test("reduced motion gets the whole transcript, and no control at all", async ({
   // satisfied the role engine while the cascade still painted the button.
   await expect(toggle(page)).toBeHidden();
   const settled = await frameText(page);
-  await page.waitForTimeout(3_000);
+  await page.clock.runFor(3_000);
   expect(await frameText(page)).toBe(settled);
 
   // Turned off mid-view, the demonstration starts — the reader is answered
@@ -207,7 +202,7 @@ test("reduced motion gets the whole transcript, and no control at all", async ({
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await expect(control(page)).toHaveText("Pause");
   await expect(toggle(page)).toBeVisible();
-  await expect.poll(() => frameText(page)).not.toBe(settled);
+  await expect.poll(() => advancePlayback(page), { intervals: [0] }).not.toBe(settled);
 
   // …and turned back on mid-run the control goes again, rather than standing
   // there as a button that would stop nothing.
@@ -217,8 +212,7 @@ test("reduced motion gets the whole transcript, and no control at all", async ({
 });
 
 test("an empty transcript is an idle panel with no control on it", async ({ page }) => {
-  if (started === null) throw new Error("e2e: the harness is not running");
-  await writeDemo(page, started.appUrl, 0, "");
+  await writeDemo(page, harness().appUrl, 0, "");
   await caretAway(page);
 
   // Nothing plays, so the same rule holds for a reason that has nothing to do
@@ -231,8 +225,7 @@ test("an empty transcript is an idle panel with no control on it", async ({ page
 test("assistive technology is offered the transcript, not the animation", async ({
   page,
 }) => {
-  if (started === null) throw new Error("e2e: the harness is not running");
-  await writeDemo(page, started.appUrl);
+  await writeDemo(page, harness().appUrl);
   await caretAway(page);
   await expect(panel(page)).toBeVisible();
 
