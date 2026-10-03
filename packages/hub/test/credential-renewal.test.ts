@@ -15,6 +15,7 @@ const DEVICE = "renewing-device";
 const hubs: Hub[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const hub of hubs.splice(0)) await hub.stop();
   removeTempDatabases();
 });
@@ -257,5 +258,20 @@ describe("device credential renewal over HTTP", () => {
     expect(privateRows(testRig.databasePath)).toEqual(before);
     expect(JSON.stringify(testRig.logs)).not.toContain("private persistence detail");
     expect(JSON.stringify(testRig.logs)).not.toContain(presented);
+  });
+
+  it("revocation between registry completion and HTTP delivery suppresses and revokes the replacement", async () => {
+    const testRig = await rig([], [WORKSPACE]);
+    const renew = CredentialRegistry.prototype.renew;
+    vi.spyOn(CredentialRegistry.prototype, "renew").mockImplementation(async function(this: CredentialRegistry, token, memberships) {
+      const result = await renew.call(this, token, memberships);
+      this.revoke(testRig.issued.record.id);
+      return result;
+    });
+    expect(await post(testRig.hub, envelope(await proof(testRig.issued))))
+      .toEqual({ code: 401, result: { status: "sign-in-required" } });
+    const rows = privateRows(testRig.databasePath).credentials;
+    expect(rows.filter((row) => row.principal_id === PRINCIPAL && row.revoked_at === null && row.replaced_at === null))
+      .toHaveLength(0);
   });
 });

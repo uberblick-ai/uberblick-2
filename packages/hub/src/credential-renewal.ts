@@ -4,6 +4,7 @@ import { authReply, readAuthBody } from "./auth-http.js";
 import type { CredentialRegistry } from "./credentials.js";
 import type { MembershipRegistry } from "./memberships.js";
 import { readAuthEnvelope } from "./protocol.js";
+import { readTokenKeyId } from "./token.js";
 
 export async function handleCredentialRenewal(
   credentials: CredentialRegistry | undefined,
@@ -36,6 +37,16 @@ export async function handleCredentialRenewal(
   try {
     const result = await credentials.renew(envelope.token, memberships);
     if (result.status === "complete") {
+      // A revocation can also land between renewal's resolution and this
+      // continuation. Check again at the HTTP delivery boundary, with no await
+      // between this authority read and sending the only copy of the new key.
+      const presented = readTokenKeyId(envelope.token);
+      if ("failure" in presented || presented.kid === null ||
+          credentials.get(presented.kid)?.revokedAt !== null) {
+        credentials.revoke(result.credential.record.id);
+        reply(401, { status: "sign-in-required" });
+        return true;
+      }
       reply(200, { status: "complete", credential: { record: result.credential.record,
         key: Buffer.from(result.credential.keyBytes).toString("base64url") } });
     } else {
