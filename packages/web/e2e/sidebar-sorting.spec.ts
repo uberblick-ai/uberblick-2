@@ -79,6 +79,106 @@ test("stationary mouse holds and Enter retain the rows' own actions", async ({ p
   await expect(a.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
 });
 
+for (const width of [1400, 820]) {
+  test(`held touch releases and cancellations preserve row actions at ${width}px`, async ({ peers: [a, b] }) => {
+    for (const title of ["alpha", "beta"]) await createPinnedDoc(a, title);
+    await expect(titles(b, "Pinned")).toHaveText(["alpha", "beta"]);
+    await a.setViewportSize({ width, height: 832 });
+    const drawer = a.getByRole("dialog", { name: "Sidebar", exact: true });
+    const openDrawer = async (): Promise<void> => {
+      if (width < 1280) {
+        await a.getByRole("button", { name: "Show document list", exact: true }).click();
+        await expect(drawer).toBeVisible();
+      }
+    };
+    await openDrawer();
+    const cdp = await a.context().newCDPSession(a);
+    const tap = async (target: Locator): Promise<void> => {
+      await target.scrollIntoViewIfNeeded();
+      const box = await target.boundingBox();
+      if (!box) throw new Error("Missing touch row");
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 }],
+      });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    };
+    const releaseHeld = async (target: Locator, label: string, ending: "drop" | "escape" | "touchCancel"): Promise<void> => {
+      await expect(a.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
+      await target.focus();
+      await target.scrollIntoViewIfNeeded();
+      const box = await target.boundingBox();
+      if (!box) throw new Error("Missing held touch row");
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 }],
+      });
+      await expect(target.locator('xpath=ancestor::*[@data-dnd-dragging="true"][1]')).toHaveCount(1);
+      if (ending === "escape") {
+        await a.keyboard.press("Escape");
+        await expect(a.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
+      }
+      // No touchMove: the native click after releasing in place is the regression.
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: ending === "touchCancel" ? "touchCancel" : "touchEnd", touchPoints: [],
+      });
+      await expect(a.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
+      await expect(a.locator('body > [role="status"]')).toContainText(
+        ending === "drop" ? `Kept ${label} in place.` : `Cancelled moving ${label}.`,
+      );
+    };
+    try {
+      for (const canceled of [false, true]) {
+        const path = new URL(a.url()).pathname;
+        const heading = row(a, "Pinned");
+        await releaseHeld(heading, "group Pinned", canceled ? "escape" : "drop");
+        await expect(heading).toHaveAttribute("aria-expanded", "true");
+        expect(new URL(a.url()).pathname).toBe(path);
+        if (width < 1280) await expect(drawer).toBeVisible();
+
+        // The guard must clear for a new deliberate activation, including a
+        // keyboard action after cancellation without an intervening pointer.
+        if (canceled) await heading.press("Enter");
+        else await tap(heading);
+        await expect(heading).toHaveAttribute("aria-expanded", "false");
+        await tap(heading);
+        await expect(heading).toHaveAttribute("aria-expanded", "true");
+        if (width < 1280) await expect(drawer).toBeVisible();
+
+        const document = row(a, "alpha");
+        await releaseHeld(document, "alpha", canceled ? "escape" : "drop");
+        await expect(a.locator(".ub-title")).toHaveValue("beta");
+        expect(new URL(a.url()).pathname).toBe(path);
+        if (width < 1280) await expect(drawer).toBeVisible();
+        for (const page of [a, b]) await expect(titles(page, "Pinned")).toHaveText(["alpha", "beta"]);
+
+        if (canceled) await document.press("Enter");
+        else await tap(document);
+        await expect(a.locator(".ub-title")).toHaveValue("alpha");
+        expect(new URL(a.url()).pathname).not.toBe(path);
+        if (width < 1280) await expect(drawer).toHaveCount(0);
+        await openDrawer();
+        await tap(row(a, "beta"));
+        await expect(a.locator(".ub-title")).toHaveValue("beta");
+        if (width < 1280) await expect(drawer).toHaveCount(0);
+        await openDrawer();
+      }
+      // touchCancel emits no click, so the next keyboard/touch interaction must
+      // work even with an unconsumed guard left by the previous gesture.
+      const heading = row(a, "Pinned");
+      await releaseHeld(heading, "group Pinned", "touchCancel");
+      await expect(heading).toHaveAttribute("aria-expanded", "true");
+      await heading.press("Enter");
+      await expect(heading).toHaveAttribute("aria-expanded", "false");
+      await tap(heading);
+      await expect(heading).toHaveAttribute("aria-expanded", "true");
+      if (width < 1280) await expect(drawer).toBeVisible();
+    } finally {
+      await cdp.detach();
+    }
+  });
+}
+
 test("group actions and selecting a rename draft never pick up a group", async ({ peers: [a, b] }) => {
   await addGroup(a, "First");
   await addGroup(a, "Second");

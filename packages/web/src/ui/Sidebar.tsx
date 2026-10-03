@@ -37,7 +37,7 @@ import { statusReading } from "./status-reading.js";
 import { useSortable } from "@dnd-kit/react/sortable";
 import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { useDroppable } from "@dnd-kit/react";
-import { SidebarDragProvider, sidebarRowSensors, useSidebarDragInstructions } from "./sidebar-drag.js";
+import { SidebarDragProvider, sidebarRowSensors, useSidebarDragInstructions, useSidebarRowClickGuard } from "./sidebar-drag.js";
 import { Sidebar as SidebarFrame, SIDEBAR_TOGGLE_CLASSES, useSidebar } from "./shadcn/sidebar.js";
 import { Input } from "./shadcn/input.js";
 import { UserMenu } from "./UserMenu.js";
@@ -727,6 +727,7 @@ function GroupSection({
     data: { kind: "group", id: group.id, label: `group ${group.name}` },
   });
   const instructions = useSidebarDragInstructions();
+  const rowClickGuard = useSidebarRowClickGuard();
   const [collapsed, setCollapsed] = useStoredFlag(groupCollapsedKey(group.id), false);
   const append = useDroppable({
     id: `append:${group.id}`,
@@ -786,6 +787,7 @@ function GroupSection({
         ) : (
           <button
             type="button"
+            {...rowClickGuard}
             className="ub-group-toggle flex flex-1 min-w-0 items-center gap-1 rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 text-left font-[inherit] text-[11px] font-medium tracking-[0.12em] uppercase text-(--sidebar-group-label) cursor-pointer select-none [-webkit-touch-callout:none] hover:text-sidebar-foreground"
             ref={sortable.handleRef}
             aria-describedby={ydoc === null ? undefined : instructions}
@@ -860,9 +862,11 @@ function PinnedRow({ uuid, index, group, entry, selected, onSelect, disabled }: 
     data: { kind: "doc", id: uuid, label: pinTitle(uuid, entry) },
   });
   const instructions = useSidebarDragInstructions();
+  const rowClickGuard = useSidebarRowClickGuard();
   return (
     <li className="ub-pin-row flex items-center data-[drop-target=true]:bg-(--sidebar-accent)" ref={sortable.ref} data-drop-target={sortable.isDropTarget && !sortable.isDragSource}>
       <button type="button" aria-current={uuid === selected ? "page" : undefined}
+        {...rowClickGuard}
         className="flex flex-1 min-w-0 w-full min-h-8.5 items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] text-sm text-(--sidebar-row-foreground) cursor-pointer select-none [-webkit-touch-callout:none] hover:bg-(--sidebar-accent) hover:text-sidebar-foreground aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium"
         ref={sortable.handleRef} aria-describedby={disabled ? undefined : instructions}
         onClick={() => onSelect(uuid)} title={pinTitle(uuid, entry)}>
