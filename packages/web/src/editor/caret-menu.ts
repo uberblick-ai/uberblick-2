@@ -40,6 +40,7 @@ export const CaretMenuKeys = Extension.create<Record<string, never>, CaretMenuSt
             role: "textbox",
             "aria-label": "Document content",
             "aria-multiline": "true",
+            "aria-readonly": String(!this.editor.isEditable),
             ...(active?.activeId !== undefined ? { "aria-controls": active.listId, "aria-activedescendant": active.activeId } : {}),
           };
         },
