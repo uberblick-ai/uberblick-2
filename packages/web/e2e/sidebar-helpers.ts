@@ -13,7 +13,7 @@ export async function createPinnedDoc(page: Page, title: string): Promise<void> 
   await page.keyboard.press("Escape");
 }
 
-/** Drag from the dedicated handle with real pointer events. */
+/** Drag the row itself with real pointer events. */
 export async function dragOnto(page: Page, source: Locator, target: Locator): Promise<void> {
   await expect(page.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
   const from = await source.boundingBox();
@@ -21,7 +21,7 @@ export async function dragOnto(page: Page, source: Locator, target: Locator): Pr
   if (from === null || to === null) throw new Error("e2e: nothing to drag");
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2 - 5);
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2 - 8);
   const x = to.x + to.width / 2;
   const y = to.y + to.height / 2;
   await page.mouse.move(x, y, { steps: 12 });

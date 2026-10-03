@@ -530,8 +530,7 @@ body {
    The transparent border is load-bearing: the open row gains a 1px edge below,
    and reserving it here is what stops selection from nudging every row. */
 .ub-list-head button,
-.ub-list li button,
-.ub-drag-handle,
+.ub-list li:not(.ub-pin-row) button,
 .ub-settings-entry,
 .ub-settings-back,
 .ub-group-add {
@@ -557,7 +556,7 @@ body {
    placeholder rows say the same thing with `aria-disabled`, because they stay
    focusable (#483), and they are declined here for the same reason. */
 .ub-list-head button:hover:not(:disabled),
-.ub-list li button:hover:not(:disabled, [aria-disabled="true"]),
+.ub-list li:not(.ub-pin-row) button:hover:not(:disabled, [aria-disabled="true"]),
 .ub-settings-entry:hover,
 .ub-settings-back:hover,
 .ub-group-add:hover:not(:disabled) {
@@ -569,7 +568,7 @@ body {
    class and the All-docs entry by `aria-current`, which meant two rules painting
    one state — and only one of them told a screen reader anything. Now the
    attribute is the state, and the rule is one. */
-.ub-list li button[aria-current="page"] {
+.ub-list li:not(.ub-pin-row) button[aria-current="page"] {
   background: var(--sidebar-accent);
   border-color: var(--sidebar-selected-border);
   color: var(--sidebar-foreground);
@@ -587,7 +586,7 @@ body {
   padding: 0;
 }
 
-.ub-list li button {
+.ub-list li:not(.ub-pin-row) button {
   width: 100%;
 }
 
@@ -628,14 +627,14 @@ body {
 /* Shown and unavailable, like the workspace menu's management items (#480).
    The hover rule above already declines it; what is left is the ink and the
    cursor, so nothing about the row offers a click it cannot take. */
-.ub-list li button[aria-disabled="true"] {
+.ub-list li:not(.ub-pin-row) button[aria-disabled="true"] {
   color: var(--sidebar-muted-foreground);
   cursor: default;
 }
 
 /* And its glyph goes with it — the mark of an unavailable row must not read
    more present than the row's own name. */
-.ub-list li button[aria-disabled="true"] .ub-nav-icon {
+.ub-list li:not(.ub-pin-row) button[aria-disabled="true"] .ub-nav-icon {
   color: inherit;
 }
 
@@ -988,36 +987,6 @@ body {
   align-items: center;
 }
 
-/* The label row is the toggle *and* the group's drag handle — the row you see
-   is the row you drag (#115). */
-.ub-group-toggle {
-  display: flex;
-  align-items: center;
-  /* Tight: the mark belongs to the label it discloses, not beside it. */
-  gap: 0.25rem;
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  background: none;
-  border: 0;
-  border-radius: var(--radius-sm);
-  padding: 0.25rem 0.4rem;
-  cursor: pointer;
-  font: inherit;
-  /* The small-caps section label (#481): sans now that `.ub-group-head` has
-     left the mono selector, and wide-tracked, which is what lets 11px read as a
-     label rather than as small body text. */
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--sidebar-group-label);
-}
-
-.ub-group-toggle:hover {
-  color: var(--sidebar-foreground);
-}
-
 /* A named group can be named anything, and the sidebar is 16rem wide. */
 .ub-group-label {
   min-width: 0;
@@ -1091,28 +1060,6 @@ body {
   cursor: default;
   opacity: 0.5;
 }
-
-/* dnd-kit handles are separate from navigation/disclosure. Touch gestures
-   belong to these targets; the rest of the list remains normally scrollable. */
-.ub-list .ub-drag-handle {
-  flex: none;
-  width: 2rem;
-  min-height: 2rem;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: grab;
-  touch-action: none;
-  color: var(--sidebar-muted-foreground);
-}
-
-.ub-drag-handle:active { cursor: grabbing; }
-.ub-drag-handle:disabled { cursor: default; opacity: 0.5; }
-.ub-pin-row { display: flex; align-items: center; }
-.ub-pin-row > button:first-child { min-width: 0; flex: 1; }
-.ub-group-head[data-drop-target="true"],
-.ub-pin-row[data-drop-target="true"] { background: var(--sidebar-accent); }
 
 /* ---- editor pane ---- */
 

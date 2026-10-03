@@ -317,8 +317,8 @@ test("a drag reorders the sidebar, and the other browser sees the new order", as
   // already looking at it — nobody told it anything.
   await expect(pinnedTitles(b)).toHaveText([first, second]);
 
-  // dnd-kit starts from a separate handle; clicking the document still navigates.
-  await dragOnto(a, a.getByRole("button", { name: `Move document ${second}`, exact: true }), pinnedTitles(a).nth(0));
+  // Dragging the row reorders it without also opening its document.
+  await dragOnto(a, a.getByRole("button", { name: second, exact: true }), pinnedTitles(a).nth(0));
 
   await expect(pinnedTitles(a)).toHaveText([second, first]);
   await expect(pinnedTitles(b)).toHaveText([second, first]);
@@ -376,39 +376,45 @@ test("the drawer's menus, group editing and pointer, keyboard and touch sorting 
   await expect(drawer).toBeVisible();
 
   const selectedTitles = pinnedTitles(page).filter({ hasText: new RegExp(`${first}|${second}`) });
-  const handle = (title: string) => page.getByRole("button", { name: `Move document ${title}`, exact: true });
-  await dragOnto(page, handle(second), selectedTitles.filter({ hasText: first }));
+  const row = (title: string) => page.getByRole("button", { name: title, exact: true });
+  const path = new URL(page.url()).pathname;
+  await dragOnto(page, row(second), selectedTitles.filter({ hasText: first }));
   await expect(selectedTitles).toHaveText([second, first]);
   await expect(drawer).toBeVisible();
 
   await expect(page.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
-  await handle(first).focus();
+  await row(first).focus();
   await page.keyboard.press("Space");
-  await expect(handle(first)).toHaveAttribute("aria-pressed", "true");
+  await expect(row(first).locator('xpath=ancestor::*[@data-dnd-dragging="true"][1]')).toHaveCount(1);
+  const announcements = page.locator('body > [role="status"]');
+  await expect(announcements).not.toHaveAttribute("aria-hidden", "true");
+  await expect(announcements).toContainText(`Moving ${first}.`);
   await page.keyboard.press("ArrowUp");
-  await page.keyboard.press("Space");
+  await page.keyboard.press("Enter");
   await expect(selectedTitles).toHaveText([first, second]);
+  await expect(row(first)).toBeFocused();
+  expect(new URL(page.url()).pathname).toBe(path);
   await expect(drawer).toBeVisible();
   await expect(page.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
-  await handle(first).focus();
+  await row(first).focus();
   await page.keyboard.press("Space");
-  await expect(handle(first)).toHaveAttribute("aria-pressed", "true");
+  await expect(row(first).locator('xpath=ancestor::*[@data-dnd-dragging="true"][1]')).toHaveCount(1);
   await page.keyboard.press("ArrowDown");
   await expect(selectedTitles).toHaveText([second, first]);
   await page.keyboard.press("Escape");
   await expect(page.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
   await expect(selectedTitles).toHaveText([first, second]);
-  await expect(handle(first)).toBeFocused();
+  await expect(row(first)).toBeFocused();
   await expect(drawer).toBeVisible();
 
-  const from = await handle(second).boundingBox();
+  const from = await row(second).boundingBox();
   const to = await selectedTitles.filter({ hasText: first }).boundingBox();
   if (!from || !to) throw new Error("e2e: missing touch targets");
   const cdp = await page.context().newCDPSession(page);
   try {
     const touch = (x: number, y: number) => [{ x, y, id: 1 }];
     await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: touch(from.x + from.width / 2, from.y + from.height / 2) });
-    await expect(handle(second)).toHaveAttribute("aria-pressed", "true");
+    await expect(row(second).locator('xpath=ancestor::*[@data-dnd-dragging="true"][1]')).toHaveCount(1);
     await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: touch(to.x + to.width / 2, to.y + to.height / 2) });
     await expect(selectedTitles).toHaveText([second, first]);
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
@@ -416,6 +422,7 @@ test("the drawer's menus, group editing and pointer, keyboard and touch sorting 
     await cdp.detach();
   }
   await expect(drawer).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe(path);
   expect(await page.evaluate(() => localStorage.getItem("uberblick.sidebar.collapsed"))).toBe("true");
   await page.getByRole("button", { name: "Close document list", exact: true }).click();
   await expect(drawer).toHaveCount(0);
