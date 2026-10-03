@@ -946,7 +946,7 @@ export class Replicas {
    *
    * - `createdAt` is set once. Passing it on every repair costs nothing (the
    *   schema keeps the existing one) and is what backfills a stub written
-   *   before the field existed, on the first change anyone observes.
+   *   before the field existed, on the first repair.
    * - `updatedAt` is stamped only for a change this server authored — `authored`
    *   — because the field says when someone changed the document, not when a
    *   replica noticed it. An update that merely arrived, a log replay, an index
