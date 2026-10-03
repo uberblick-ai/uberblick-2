@@ -94,19 +94,14 @@ for (const width of [1400, 820]) {
     await openDrawer();
     const cdp = await a.context().newCDPSession(a);
     const tap = async (target: Locator): Promise<void> => {
-      await target.scrollIntoViewIfNeeded();
-      const box = await target.boundingBox();
-      if (!box) throw new Error("Missing touch row");
-      await cdp.send("Input.dispatchTouchEvent", {
-        type: "touchStart",
-        touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 }],
-      });
-      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await target.tap();
     };
     const releaseHeld = async (target: Locator, label: string, ending: "drop" | "escape" | "touchCancel"): Promise<void> => {
       await expect(a.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
       await target.focus();
-      await target.scrollIntoViewIfNeeded();
+      // aria-expanded changes before the group's opening animation finishes.
+      // Use Playwright's stability/hit-test gate before sending raw hold coordinates.
+      await target.tap({ trial: true });
       const box = await target.boundingBox();
       if (!box) throw new Error("Missing held touch row");
       await cdp.send("Input.dispatchTouchEvent", {
