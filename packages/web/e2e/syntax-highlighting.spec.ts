@@ -8,23 +8,10 @@
  */
 
 import { expect, test } from "@playwright/test";
+import { createDoc, setupHarness } from "./app-helpers.js";
 import type { Locator } from "@playwright/test";
-import { startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
 
-test.describe.configure({ mode: "serial" });
-
-let started: Harness | null = null;
-
-test.beforeAll(async () => {
-  started = await startHarness();
-});
-
-test.afterAll(async () => {
-  const running = started;
-  started = null;
-  await running?.stop();
-});
+const { harness } = setupHarness();
 
 async function ink(element: Locator): Promise<string> {
   return element.evaluate((node) => getComputedStyle(node).color);
@@ -33,13 +20,10 @@ async function ink(element: Locator): Promise<string> {
 test("code tokens follow the appearance while language and Enter stay live", async ({
   page,
 }) => {
-  if (started === null) throw new Error("e2e: the harness is not running");
   await page.emulateMedia({ colorScheme: "light" });
-  await page.goto(started.appUrl);
+  await page.goto(harness().appUrl);
   await expect(page.locator(".ub-list-head")).toBeVisible();
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
-  await page.locator(".ub-title").fill("syntax highlighting");
+  await createDoc(page, "syntax highlighting");
 
   const first = page.locator(".ub-editor .ProseMirror > *").first();
   await first.hover();

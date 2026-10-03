@@ -34,7 +34,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@playwright/test";
-import type { Browser, BrowserContext, Page } from "@playwright/test";
+import type { Browser, BrowserContext, BrowserContextOptions, Page } from "@playwright/test";
 import { createHub, silentLogger } from "@uberblick/hub";
 import type { Hub, HubConfig } from "@uberblick/hub";
 import { build } from "vite";
@@ -209,8 +209,14 @@ export async function openUpstreamApp(
   browser: Browser,
   running: Pick<Harness, "appUrl" | "hubUrl" | "workspace" | "authSecret">,
   path = "/",
+  options: {
+    contextOptions?: BrowserContextOptions;
+    workspaces?: string[];
+    beforeNavigate?: (page: Page) => Promise<void>;
+    readySelector?: string | null;
+  } = {},
 ): Promise<{ context: BrowserContext; page: Page }> {
-  const context = await browser.newContext();
+  const context = await browser.newContext(options.contextOptions);
   try {
     await context.route("**/uberblick-config.json", async (route) => {
       await route.fulfill({
@@ -218,14 +224,16 @@ export async function openUpstreamApp(
         contentType: "application/json",
         body: JSON.stringify({
           hubUrl: running.hubUrl,
-          workspaces: [running.workspace],
+          workspaces: options.workspaces ?? [running.workspace],
           hubAuthToken: running.authSecret,
         }),
       });
     });
     const page = await context.newPage();
+    await options.beforeNavigate?.(page);
     await page.goto(new URL(path, running.appUrl).href);
-    await expect(page.locator(".ub-list-head")).toBeVisible();
+    const readySelector = options.readySelector === undefined ? ".ub-list-head" : options.readySelector;
+    if (readySelector !== null) await expect(page.locator(readySelector)).toBeVisible();
     return { context, page };
   } catch (error) {
     await context.close();

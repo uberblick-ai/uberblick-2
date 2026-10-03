@@ -9,29 +9,10 @@
 
 import { expect, test } from "@playwright/test";
 import type { Browser, Page } from "@playwright/test";
-import { placeCaret, startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
+import { createDoc, editor, setupHarness } from "./app-helpers.js";
+import { placeCaret } from "./harness.js";
 
-test.describe.configure({ mode: "serial" });
-
-let started: Harness | null = null;
-
-function harness(): Harness {
-  if (started === null) {
-    throw new Error("e2e: the harness is not running — its bootstrap failed");
-  }
-  return started;
-}
-
-test.beforeAll(async () => {
-  started = await startHarness();
-});
-
-test.afterAll(async () => {
-  const running = started;
-  started = null;
-  await running?.stop();
-});
+const { harness } = setupHarness();
 
 async function openDocument(page: Page): Promise<void> {
   await page.goto(harness().appUrl);
@@ -39,9 +20,7 @@ async function openDocument(page: Page): Promise<void> {
     await page.getByRole("button", { name: "Show document list", exact: true }).click();
   }
   await expect(page.locator(".ub-list-head")).toBeVisible();
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
-  await page.locator(".ub-title").fill("Outline interactions");
+  await createDoc(page, "Outline interactions");
   await placeCaret(page);
 }
 
@@ -74,6 +53,7 @@ async function typeLongOutline(page: Page): Promise<string[]> {
 }
 
 test("pointer and keyboard share one contained, stable outline", async ({ page }) => {
+  await page.clock.install();
   await page.setViewportSize({ width: 1400, height: 360 });
   await openDocument(page);
 
@@ -143,11 +123,12 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
     rowGround,
   );
   await panel.hover();
-  await page.waitForTimeout(180);
+  await page.clock.runFor(180);
   await expect(panel).toBeVisible();
   await page.mouse.move(0, 0);
+  await page.clock.runFor(180);
   await expect(panel).toBeHidden();
-  await expect(page.locator(".ub-editor .ProseMirror")).toBeFocused();
+  await expect(editor(page)).toBeFocused();
   await page.keyboard.type("x");
   await expect(page.locator(".ub-editor .ub-paragraph").last()).toHaveText("x");
 

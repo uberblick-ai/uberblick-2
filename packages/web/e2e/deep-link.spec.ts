@@ -34,109 +34,10 @@
 
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import type { Browser, BrowserContext, Page } from "@playwright/test";
-import { startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
+import { createDoc, docButton, docTitle, editor, openPath, setupHarness } from "./app-helpers.js";
+import type { Page } from "@playwright/test";
 
-test.describe.configure({ mode: "serial" });
-
-let started: Harness | null = null;
-const contexts: BrowserContext[] = [];
-
-function harness(): Harness {
-  if (started === null) {
-    throw new Error("e2e: the harness is not running — its bootstrap failed");
-  }
-  return started;
-}
-
-test.beforeAll(async () => {
-  started = await startHarness();
-});
-
-test.afterEach(async () => {
-  for (const context of contexts.splice(0)) await context.close();
-});
-
-test.afterAll(async () => {
-  const running = started;
-  started = null;
-  await running?.stop();
-});
-
-/** A fresh context: its own history and its own tab. */
-async function openApp(browser: Browser, path = "/", workspaces?: string[]): Promise<Page> {
-  const context = await browser.newContext();
-  contexts.push(context);
-  if (workspaces !== undefined) {
-    await context.route("**/uberblick-config.json", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          hubUrl: harness().hubUrl,
-          workspaces,
-          hubAuthToken: harness().authSecret,
-        }),
-      });
-    });
-  }
-  const page = await context.newPage();
-  await page.goto(new URL(path, harness().appUrl).href);
-  return page;
-}
-
-/** Unique per run: every test in the file shares one workspace directory. */
-function docTitle(label: string): string {
-  return `${label}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function editor(page: Page) {
-  return page.locator(".ub-editor .ProseMirror");
-}
-
-function docButton(page: Page, title: string) {
-  return page.locator(".ub-list").getByRole("button", { name: title, exact: true });
-}
-
-function openPath(page: Page): string {
-  return new URL(page.url()).pathname;
-}
-
-/** The workspace segment the bundle was built with — what `/` redirects to. */
-function ws(): string {
-  return harness().workspace;
-}
-
-/**
- * A new document, titled and listed. Its uuid comes from the address bar.
- *
- * Both waits before the title is typed are load-bearing when a document is
- * already open, because then the editor is *already* visible and waiting for it
- * proves nothing: the address has to have changed, and the title field has to
- * hold the new document's initial title, or the edit lands on the document that
- * was open a moment ago.
- */
-async function createDoc(page: Page, title: string): Promise<string> {
-  const before = openPath(page);
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect.poll(() => openPath(page)).not.toBe(before);
-  await expect(page.locator(".ub-title")).toHaveValue("Untitled");
-  await expect(editor(page)).toBeVisible();
-
-  const uuid = openPath(page).split("/")[2];
-  if (uuid === undefined || uuid === "") {
-    throw new Error(`e2e: creating a document left the address at ${openPath(page)}`);
-  }
-
-  await page.locator(".ub-title").fill(title);
-  // Pinned, because the sidebar lists what is pinned and nothing else (#115) —
-  // and this is how the *other* context navigates to it.
-  await page.getByRole("button", { name: "Document actions" }).click();
-  await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
-  await expect(docButton(page, title)).toBeVisible();
-  return uuid;
-}
+const { harness, openApp, trackContext, ws } = setupHarness();
 
 /**
  * Start recording whether `selector` is ever inserted into the page.
@@ -237,7 +138,7 @@ test("a workspace answers to both its spellings, and to neither of somebody else
   // either, over the real transport.
   const author = await openApp(browser);
   const title = docTitle("both-spellings");
-  const uuid = await createDoc(author, title);
+  const uuid = await createDoc(author, title, { pin: true });
 
   const bare = await openApp(browser, `/${harness().workspaceUuid}/${uuid}`);
   await expect(bare.locator(".ub-title")).toHaveValue(title);
@@ -267,8 +168,8 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
 
   const firstTitle = docTitle("first");
   const secondTitle = docTitle("second");
-  const first = await createDoc(author, firstTitle);
-  const second = await createDoc(author, secondTitle);
+  const first = await createDoc(author, firstTitle, { pin: true });
+  const second = await createDoc(author, secondTitle, { pin: true });
   expect(openPath(author)).toBe(`/${ws()}/${second}`);
 
   // ---- the sidebar writes the address, without reloading ----
@@ -323,9 +224,9 @@ test("a reloaded document whose server is unreachable shows no prior content", a
   // Bypass `ub open` for this case: its local store is itself a reachable
   // server when the upstream stops, while this contract needs the routed room
   // to have no server answering at all.
-  const page = await openApp(browser, "/", [ws()]);
+  const page = await openApp(browser, "/", { workspaces: [ws()] });
   const title = docTitle("unreachable");
-  await createDoc(page, title);
+  await createDoc(page, title, { pin: true });
   await expect(page.locator(".ub-title")).toHaveValue(title);
   await expect(editor(page)).toBeVisible();
 
@@ -352,9 +253,9 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
   // `ub open` serves this machine's one configured workspace. The switcher
   // proof owns its two-workspace document explicitly, just like the
   // different-document proof below, so it does not rely on a build-time list.
-  const page = await openApp(browser, "/", [ws(), harness().secondWorkspace]);
+  const page = await openApp(browser, "/", { workspaces: [ws(), harness().secondWorkspace] });
   const title = docTitle("uberblick-only");
-  await createDoc(page, title);
+  await createDoc(page, title, { pin: true });
 
   await page.locator(".ub-workspace").click();
   await expect(page.getByRole("menu").getByRole("menuitem")).toHaveCount(
@@ -389,7 +290,7 @@ test("the served configuration names the workspaces, and the build's define is o
   // and joins that workspace's rooms.
   const served = [`served-${randomUUID()}`, randomUUID()];
   const context = await browser.newContext();
-  contexts.push(context);
+  trackContext(context);
   await context.route("**/uberblick-config.json", async (route) => {
     await route.fulfill({
       status: 200,
@@ -427,7 +328,7 @@ test("the served configuration names the workspaces, and the build's define is o
   // module, so a component test can hold one resolved endpoint, never the path
   // from a served document through the shell to both surfaces. On a document
   // route, because that is where the status surfaces are (#424).
-  await createDoc(page, docTitle("served"));
+  await createDoc(page, docTitle("served"), { pin: true });
   await page.locator(".ub-sync-toggle").click();
   const source = page.locator('.ub-sync-fact:has(dt:text-is("Source")) dd');
   // "served …", not either of the two "… not used" answers: falling back to
@@ -454,7 +355,7 @@ test("a rebound local-serving document stays visible without blocking the page",
   browser,
 }) => {
   const context = await browser.newContext();
-  contexts.push(context);
+  trackContext(context);
   await context.route("**/uberblick-config.json", async (route) => {
     await route.fulfill({
       status: 200,
