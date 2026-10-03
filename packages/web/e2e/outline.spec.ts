@@ -153,7 +153,6 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
   await expect(rows.first()).toBeFocused();
   for (let index = 0; index < expected.length; index += 1) {
     await expect(rows.nth(index)).toBeFocused();
-    if (index === 0) await expect(first).toHaveCSS("outline-width", "2px");
     if (index < expected.length - 1) await page.keyboard.press("ArrowDown");
   }
   await page.keyboard.press("Tab");

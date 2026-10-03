@@ -5,10 +5,10 @@
  * and this file is not, so these remaining rules outrank utilities.
  * `ui/tailwind.css` bridges the token block below without a second palette.
  *
- * Colors live in the token block below and nowhere else: every rule reads a
- * custom property, and every custom property names both of its values at once
- * with `light-dark()`. There is no second palette anywhere in the file, which
- * is what keeps the two schemes from drifting.
+ * Theme colors live in the token block below, with both appearances named
+ * together by `light-dark()`. The fixed dark terminal palette and targeted
+ * lifecycle ink variants stay local to their surfaces; changing an accent to
+ * make it text would repaint every other consumer of that accent.
  *
  * Which half is in force is `color-scheme`, and only that: unset by the reader
  * it is `light dark`, so the system preference decides and the app restyles
@@ -30,9 +30,8 @@
  * and colour already carry. Keep new rules inside those two — the one known
  * exception, the browser's own <strong>, is noted at the inline-marks section.
  *
- * The one place a color literal is allowed in the app is the awareness palette
- * in `src/collab/identity.ts`: y-prosemirror only accepts `#rrggbb` for remote
- * cursors, so those colors cannot be tokens.
+ * The awareness palette in `src/collab/identity.ts` also uses color literals:
+ * y-prosemirror only accepts `#rrggbb` for remote cursors.
  */
 
 :root {
@@ -69,7 +68,11 @@
   --secondary: light-dark(oklch(0.97 0 0), oklch(0.22 0.01 65));
   --secondary-foreground: light-dark(oklch(0.205 0 0), oklch(0.985 0 0));
   --muted: light-dark(oklch(0.97 0 0), oklch(0.22 0.01 65));
-  --muted-foreground: light-dark(oklch(0.556 0 0), oklch(0.708 0 0));
+  /* Light stops at the tightest full-strength rendered reading: card-accent
+     under the Contents count, block-menu hints and collaborator rows. At
+     0.511 it clears AA without collapsing the secondary tier into body ink.
+     Enabled copy and thread text must not add opacity to this ink. */
+  --muted-foreground: light-dark(oklch(0.511 0 0), oklch(0.708 0 0));
   --accent: light-dark(oklch(0.97 0 0), oklch(0.22 0.01 65));
   --accent-foreground: light-dark(oklch(0.205 0 0), oklch(0.985 0 0));
   --destructive: light-dark(oklch(0.577 0.245 27.325), oklch(0.704 0.191 22.216));
@@ -93,8 +96,9 @@
      all land on `--sidebar`'s dark value: an affordance on this surface has to
      step off it, and those three no longer can. Its consumers are the document
      row, the workspace header, the user card, the group action, `+ group`,
-     `+ new doc`, All docs, and the appearance options — plus the two vendored
-     menus, through the bridge in `ui/tailwind.css`.
+     `+ new doc`, All docs, and the appearance options — plus the workspace,
+     user, Contents, Document actions and tag picker panels through the bridge
+     in `ui/tailwind.css`.
 
      The ink does not move: `--sidebar-foreground` carries `--card-foreground`'s
      two halves unchanged. */
@@ -113,21 +117,13 @@
      They carry both halves the way every token above does, so light and dark
      step back by the same amount rather than by two hand-picked colours.
 
-     The fifth is the AA half of #515, and it is why the label reads 60% rather
-     than the 55% #481 derived. In light this surface was under WCAG AA's 4.5:1
-     for small text twice over: `--muted-foreground` measures 3.96:1 on
-     `--sidebar` and 3.40:1 on `--sidebar-accent`, and the 55% label 4.20:1 and
-     4.01:1. (`--muted-foreground` failed on `--card` too, at 4.34:1, so #480
-     moved a surface out from under an existing failure rather than creating
-     one.) Owner decision, 2026-08-30: AA wins, one rung. The label steps to the
-     ladder's next rung, 60% — 4.96:1 and 4.70:1 — and every reading that was
-     `--muted-foreground` on this ground takes `--sidebar-muted-foreground` at
-     that same step, so the column carries one small-text ink rather than two
-     five points apart. Two names for one value on purpose: the label is a rung
-     of the ladder above and moves if that ladder is ever re-derived, while the
-     muted ink is the AA floor small text on this surface reads. Dark was never
-     the problem — 5.81:1 at 55% — and rises with them. `--muted-foreground`
-     itself does not move: it is what every other surface reads. */
+     The fifth is the AA half of #515. Owner decision, 2026-08-30: AA wins,
+     one rung. The label and muted ink share the ladder's 60% rung, reaching
+     4.96:1 on the column and 4.70:1 on its highlight in light. Two names for
+     one value on purpose: the label follows the ladder, while the muted ink
+     is the floor for small text on this surface. The global muted ink serves
+     other grounds; its light value now also meets AA, without changing these
+     settled sidebar tints or either token's dark value. */
   --sidebar-row-foreground: light-dark(oklch(0.145 0 0 / 82%), oklch(0.985 0 0 / 82%));
   --sidebar-row-icon: light-dark(oklch(0.145 0 0 / 68%), oklch(0.985 0 0 / 68%));
   --sidebar-group-label: light-dark(oklch(0.145 0 0 / 60%), oklch(0.985 0 0 / 60%));
@@ -505,8 +501,8 @@ body {
 /* The column's own small text: the "nothing pinned yet" line, and the `·
    archived` suffix or uuid stub inside a pinned row. `.ub-muted` is a
    whole-app class and keeps `--muted-foreground` everywhere else; on this
-   ground that reading is 3.96:1 (#515). Ahead of the head rule below, which
-   ties on specificity and has its own step. */
+   ground it keeps the sidebar's settled 60% rung (#515). Ahead of the head
+   rule below, which ties on specificity and has its own step. */
 .ub-list .ub-muted {
   color: var(--sidebar-muted-foreground);
 }
@@ -1076,64 +1072,6 @@ body {
   outline-offset: 2px;
 }
 
-.ub-outline-panel {
-  width: min(20rem, calc(100vw - 2rem));
-  max-height: min(
-    calc(100vh - 2rem),
-    var(--radix-dropdown-menu-content-available-height)
-  );
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 0;
-}
-
-.ub-outline-panel-body {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 0.75rem;
-}
-
-.ub-outline-panel ul {
-  min-height: 0;
-  overflow-y: auto;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.ub-outline-panel li button {
-  display: block;
-  width: 100%;
-  overflow: hidden;
-  border: 0;
-  border-radius: var(--radius-sm);
-  padding: 0.35rem 0.5rem;
-  background: transparent;
-  color: var(--muted-foreground);
-  font: inherit;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.ub-outline-panel li button:hover,
-.ub-outline-panel li button:focus-visible {
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-
-.ub-outline-panel li button:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-
-.ub-outline-panel .ub-outline-l2 button {
-  padding-inline-start: 1.25rem;
-}
-
 /* Below this the three panes stop fitting; the rail is the one that goes — and
    with it the only way to read a thread, which is what the drawer is for (#101).
    The toggle appears, and opening it brings the rail back *over* the prose
@@ -1253,7 +1191,7 @@ body {
   white-space: nowrap;
 }
 
-.ub-rail-head {
+.ub-sync-panel .ub-rail-head {
   margin: 0 0 0.4rem;
   font-size: 0.7rem;
   letter-spacing: 0.06em;
@@ -1261,64 +1199,9 @@ body {
   color: var(--muted-foreground);
 }
 
-/* ---- threads rail ---- */
-
-.ub-threads ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-/* One button per card: the whole card is the click target, so it is also a
-   single tab stop that Enter activates. Everything inside it is phrasing
-   content — a button may not contain a blockquote. */
-.ub-thread {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  width: 100%;
-  text-align: left;
-  font: inherit;
-  cursor: pointer;
-  padding: 0.5rem 0.6rem;
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--card);
-  color: var(--card-foreground);
-}
-
-.ub-thread:hover {
-  border-left-color: var(--brand);
-}
-
-/* The focused card, which is also what a click on the highlight in the prose
-   selects. The amber edge is the same signal the highlight itself carries. */
-.ub-thread-focused {
-  background: var(--brand-subtle);
-  border-left-color: var(--brand);
-}
-
-/* The anchor is gone, so the card stops looking like a place in the document —
-   but it keeps its text, and it stays in the list. */
-.ub-thread-orphaned {
-  opacity: 0.72;
-}
-
-.ub-thread-head {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-/* The auto margin sits here, on the one element there is exactly one of: a card
-   can carry both an `orphaned` and a `resolved` chip, and two chips each with
-   `margin-left: auto` would split the free space between them instead of
-   grouping them at the right edge. */
-.ub-thread-ref {
+/* The composer keeps these shared readings in product CSS until it next
+   changes. Thread cards now carry their styles in their own utilities. */
+.ub-composer .ub-thread-ref {
   margin-right: auto;
   font-family: var(--font-mono);
   font-size: 0.7rem;
@@ -1326,11 +1209,7 @@ body {
   color: var(--muted-foreground);
 }
 
-/* The plain chip has one consumer — the `resolved` pill inside a thread card,
-   which is a `--card` surface — so it takes the card accent for the same reason
-   the composer's own fills do (#516, and see `--card-accent`). The ink does not
-   move: every other card-accent consumer keeps `--secondary-foreground`. */
-.ub-chip {
+.ub-composer .ub-chip {
   font-size: 0.65rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1343,82 +1222,26 @@ body {
 /* Loud comes from the ground; the label stays `--foreground`, because
    `--status-warning` as text on its own subtle ground fails contrast in the
    light theme (same reasoning as `.ub-tool-on`). */
-.ub-chip-orphaned {
+.ub-composer .ub-chip-orphaned {
   background: var(--status-warning-subtle);
   color: var(--foreground);
 }
 
-/* The subtle warning fill disappears on a focused card's amber ground. Its
-   full warning partner stays status-coloured there, with the shared dark ink
-   used on light amber fills in both appearances. */
-.ub-thread-focused .ub-chip-orphaned {
-  background: var(--status-warning);
-  color: var(--brand-foreground);
-}
-
 /* The quote marks are chrome, so they are CSS rather than characters in the
    excerpt — the excerpt itself is the document's own text, verbatim. */
-.ub-thread-excerpt {
+.ub-composer .ub-thread-excerpt {
   font-style: italic;
   color: var(--foreground);
   border-left: 2px solid var(--border);
   padding-left: 0.4rem;
 }
 
-.ub-thread-excerpt::before {
+.ub-composer .ub-thread-excerpt::before {
   content: "\201C";
 }
 
-.ub-thread-excerpt::after {
+.ub-composer .ub-thread-excerpt::after {
   content: "\201D";
-}
-
-.ub-thread-gone {
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
-}
-
-.ub-thread-comment {
-  display: flex;
-  flex-direction: column;
-}
-
-.ub-thread-byline {
-  display: flex;
-  gap: 0.35rem;
-  font-size: 0.7rem;
-  color: var(--muted-foreground);
-}
-
-.ub-thread-author {
-  font-weight: 500;
-  color: var(--foreground);
-}
-
-.ub-thread-text {
-  white-space: pre-wrap;
-}
-
-.ub-thread-replies {
-  font-size: 0.7rem;
-  color: var(--muted-foreground);
-}
-
-/* A settled conversation, kept and quietened: below the open ones, dimmed, and
-   collapsed to its head until the reader opens it back up. */
-.ub-thread-resolved {
-  opacity: 0.65;
-}
-
-.ub-rail-subhead {
-  margin-top: 0.9rem;
-}
-
-/* Beside the card's button, never inside it: a button may not contain one. */
-.ub-thread-actions {
-  display: flex;
-  gap: 0.25rem;
-  padding: 0.3rem 0 0 0.6rem;
 }
 
 /* ---- writing a comment ---- */
@@ -2104,118 +1927,6 @@ body {
   min-height: 2rem;
 }
 
-.ub-tag-picker-panel {
-  width: min(20rem, calc(100vw - 2rem));
-  padding: 0;
-  overflow: hidden;
-}
-
-.ub-tag-search-wrap {
-  padding: 0.5rem;
-  border-bottom: 1px solid var(--border);
-}
-
-/* The field reads as a field by stepping *down* from the panel, not up (#958).
-   The panel is `--popover`, which the bridge in `ui/tailwind.css` resolves to
-   `--sidebar`; `--input` as a ground is 15% white over it in dark, a wash
-   brighter than the surface it sits on. `--background` is darker than the panel
-   in dark and its own colour in light, which is what every other field in this
-   stylesheet does — and the stroke is `--sidebar-input`, the token #515 derived
-   for exactly this: a field's edge on this surface. */
-.ub-tag-search-field {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--sidebar-input);
-  border-radius: var(--radius-sm);
-  background: var(--background);
-  color: var(--foreground);
-}
-
-/* The ring moves to the composed field, because the input inside it no longer
-   has an edge of its own to draw one around. */
-.ub-tag-search-field:focus-within {
-  outline: 2px solid var(--ring);
-  outline-offset: -1px;
-}
-
-.ub-tag-search-icon {
-  display: block;
-  width: 14px;
-  height: 14px;
-  flex: none;
-  color: var(--muted-foreground);
-}
-
-.ub-tag-search {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  padding: 0;
-}
-
-.ub-tag-search:focus-visible {
-  outline: none;
-}
-
-.ub-tag-options {
-  max-height: 14rem;
-  overflow-y: auto;
-  padding: 0.35rem;
-}
-
-.ub-tag-option {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  width: 100%;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--foreground);
-  font: inherit;
-  padding: 0.4rem 0.45rem;
-  text-align: left;
-  cursor: pointer;
-}
-
-/* `--sidebar-accent`, not `--accent`: this panel is painted on `--sidebar`, and
-   in dark `--accent` *is* that value — a highlight that steps nowhere. Without
-   a search field the focused option is the only thing that says the keyboard is
-   in the list, so it has to be visible (#958). The two vendored menus reach the
-   same token through the bridge in `ui/tailwind.css`, for the same reason. */
-.ub-tag-option:hover,
-.ub-tag-option:focus-visible {
-  background: var(--sidebar-accent);
-  outline: none;
-}
-
-.ub-tag-check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1rem;
-  height: 1rem;
-  flex: none;
-  border: 1px solid var(--border);
-  border-radius: 0.2rem;
-}
-
-.ub-tag-retired {
-  margin-left: auto;
-  color: var(--muted-foreground);
-}
-
-.ub-tag-empty {
-  margin: 0;
-  padding: 0.65rem 0.5rem;
-  color: var(--muted-foreground);
-}
-
 /* Machine facts, in the machine face — and monospaced for the other reason
    too: the rev changes on every edit, and a proportional one would breathe in
    and out under the title while somebody types. */
@@ -2256,14 +1967,6 @@ body {
 .ub-actions-trigger:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 1px;
-}
-
-.ub-action-danger {
-  color: var(--destructive);
-}
-
-.ub-action-pinned {
-  color: var(--brand-ink);
 }
 
 /* A card, not the sidebar's ground. `DialogContent` supplies the portal and the
@@ -2724,6 +2427,8 @@ h3.ub-heading {
   background: #7fd6a2;
 }
 
+/* Positioned beside the screen. Root light-dark() tokens resolve before
+   inheritance, so these controls keep the original dark inks locally. */
 .ub-terminal-toggle {
   display: none;
   position: absolute;
@@ -2734,7 +2439,7 @@ h3.ub-heading {
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
-  color: var(--muted-foreground);
+  color: oklch(0.708 0 0);
   font-family: var(--font-mono);
   font-size: 0.7rem;
   letter-spacing: 0.04em;
@@ -2745,7 +2450,7 @@ h3.ub-heading {
 
 .ub-terminal-toggle:hover,
 .ub-terminal-toggle:focus-visible {
-  color: var(--foreground);
+  color: oklch(0.985 0 0);
 }
 
 /* The control is removed, not merely greyed, where nothing plays — a reduced
@@ -3304,7 +3009,6 @@ h3.ub-heading {
   text-align: center;
   cursor: pointer;
   user-select: none;
-  opacity: 0.6;
   transition:
     opacity 120ms ease,
     color 120ms ease;
@@ -3317,6 +3021,19 @@ h3.ub-heading {
 .ub-copy:focus-visible {
   opacity: 1;
   color: var(--foreground);
+}
+
+/* On the fixed dark screen, keep the original dark rendering in both
+   appearances. The source representation uses the ordinary page ink. */
+.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-copy {
+  color: oklch(0.708 0 0);
+  opacity: 0.6;
+}
+
+.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing):hover .ub-copy,
+.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-copy:focus-visible {
+  color: oklch(0.985 0 0);
+  opacity: 1;
 }
 
 /* ---- the disclosure row (#563) ----

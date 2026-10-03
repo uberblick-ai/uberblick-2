@@ -54,12 +54,21 @@ import {
 import { wrapToken } from "@uberblick/hub/protocol";
 import {
   appendBlock,
+  assignDocumentTags,
+  createAnnotation,
+  createTagCatalogEntry,
+  deleteBlock,
   directoryRoom,
   getBlocksFragment,
   MAX_TAG_NAME_LENGTH,
+  retireTagCatalogEntry,
+  seedTagCatalog,
+  setAnnotationResolved,
+  settingsRoom,
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { placeCaret } from "./harness.js";
+import { renderedText, strokeSeparation } from "./contrast-helpers.js";
 
 const { harness, openApp } = setupHarness();
 
@@ -1489,7 +1498,7 @@ function oklab(painted: string): {
  * below and throws rather than being classified by a chroma nobody computed.
  */
 function legacySrgb(painted: string): [number, number, number] | null {
-  const parts = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(painted.trim());
+  const parts = /^rgb\((\d*\.?\d+), (\d*\.?\d+), (\d*\.?\d+)\)$/.exec(painted.trim());
   if (parts === null) return null;
   const [r, g, b] = parts.slice(1).map((channel) => Number(channel) / 255);
   return [r ?? 0, g ?? 0, b ?? 0];
@@ -2711,3 +2720,329 @@ for (const scheme of ["light", "dark"] as const) {
     }
   });
 }
+
+/** Real document, catalog and presence state; all peers end with the proof. */
+async function contrastDocument(
+  page: Page,
+  scheme: "light" | "dark",
+  prove: () => Promise<void>,
+): Promise<void> {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.locator(".ub-title").fill(`Contrast ${scheme}`);
+  const uuid = new URL(page.url()).pathname.split("/")[2];
+  const secret = await importRootSecret(harness().authSecret);
+  const peers: Array<{ doc: Y.Doc; provider: HocuspocusProvider }> = [];
+  const peer = async (room: string) => {
+    const doc = new Y.Doc();
+    const provider = new HocuspocusProvider({
+      url: harness().hubUrl,
+      name: room,
+      document: doc,
+      token: async () => wrapToken(await mintToken(secret, {
+        typ: "room", sub: randomUUID(), workspace: harness().workspaceUuid,
+        scope: "read-write", kid: null, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+      })),
+    });
+    peers.push({ doc, provider });
+    await new Promise<void>((resolve) => provider.on("synced", resolve));
+    return { doc, provider };
+  };
+  try {
+    const { doc } = await peer(`${harness().workspaceUuid}/${uuid}`);
+    appendBlock(doc, { type: "heading", level: 1, text: "Overview" });
+    appendBlock(doc, { type: "heading", level: 2, text: "Details" });
+    const resolved = appendBlock(doc, { type: "paragraph", text: "resolved range" });
+    const thread = createAnnotation(doc, resolved, 0, 8, "Reviewer", "Resolved conversation");
+    setAnnotationResolved(doc, thread.id, true);
+    const orphan = appendBlock(doc, { type: "paragraph", text: "deleted range" });
+    createAnnotation(doc, orphan, 0, 7, "Reviewer", "Orphaned conversation");
+    deleteBlock(doc, orphan);
+    appendBlock(doc, { type: "paragraph", inline: [
+      { text: "waiting reference", marks: { docLink: randomUUID() } },
+      { text: " on the page", marks: {} },
+    ] });
+    appendBlock(doc, { type: "code", language: "ts", text: "const answer = 42;" });
+    appendBlock(doc, { type: "mermaid", text: "graph TD; A-->B" });
+    appendBlock(doc, { type: "terminal", text: "$ ub init\nworkspace ready" });
+    await expect(page.locator(".ub-terminal-screen")).toBeVisible();
+    await expect(page.locator(".ub-thread")).toHaveCount(2);
+    const catalog = (await peer(settingsRoom(harness().workspaceUuid))).doc;
+    seedTagCatalog(catalog);
+    for (let index = 0; index < 6; index += 1) createTagCatalogEntry(catalog, `contrast-${index}`);
+    const retired = createTagCatalogEntry(catalog, `retired-${scheme}-${randomUUID().slice(0, 8)}`);
+    assignDocumentTags(doc, catalog, [retired.id]);
+    retireTagCatalogEntry(catalog, retired.id);
+    for (let index = 0; index < 4; index += 1) {
+      const { provider } = await peer(`${harness().workspaceUuid}/${uuid}`);
+      provider.setAwarenessField("user", { name: `Contrast peer ${index}`, color: "#0675c9" });
+      provider.setAwarenessField("client", "agent");
+    }
+    await expect(page.locator(".ub-peer-more")).toBeVisible();
+    await page.mouse.move(1399, 999);
+    await prove();
+  } finally {
+    for (const { provider, doc } of peers) {
+      provider.destroy();
+      doc.destroy();
+    }
+  }
+}
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`document menus keep sidebar contrast and a full-row highlight — ${scheme}`, async ({ browser }) => {
+    const page = await openAppearanceApp(browser, scheme);
+    await contrastDocument(page, scheme, async () => {
+      const ground = await painted(page, ".ub-list", "background-color");
+      const edge = await painted(page, ".ub-list", "border-right-color");
+      await page.locator(".ub-workspace").hover();
+      const sidebarHighlight = await painted(page, ".ub-workspace", "background-color");
+      const step = separation(sidebarHighlight, ground);
+      const floor = scheme === "light" ? separation(edge, ground) : contrast(edge, ground);
+      const check = async (root: string) => {
+        expect(await painted(page, root, "background-color")).toBe(ground);
+        // The cascade constraint is stronger than today's colour ratios: no
+        // unlayered product paint may override a vendored panel state later.
+        const overrides = await page.locator(root).evaluate((panel) => {
+          const elements = [panel, ...panel.querySelectorAll("*")];
+          const found: string[] = [];
+          const inspect = (rules: CSSRuleList): void => {
+            for (const rule of rules) {
+              if (rule.cssText.startsWith("@layer")) continue;
+              if (rule instanceof CSSMediaRule && !matchMedia(rule.conditionText).matches) continue;
+              if (rule instanceof CSSSupportsRule && !CSS.supports(rule.conditionText)) continue;
+              if (rule instanceof CSSStyleRule) {
+                const selector = rule.selectorText.replace(/::(?:before|after|placeholder|marker)\b/g, "");
+                if (!elements.some((element) => element.matches(selector))) continue;
+                const paint = [...rule.style].filter((property) =>
+                  property === "color" || property === "fill" || property === "stroke" ||
+                  property.startsWith("background") || property.startsWith("border") ||
+                  property.startsWith("outline"),
+                );
+                if (paint.length > 0) found.push(`${rule.selectorText}: ${paint.join(", ")}`);
+              } else if ("cssRules" in rule) {
+                inspect((rule as CSSGroupingRule).cssRules);
+              }
+            }
+          };
+          for (const sheet of document.styleSheets) inspect(sheet.cssRules);
+          return found;
+        });
+        expect(overrides, "unlayered paint inside the panel").toEqual([]);
+        const text = await renderedText(page, root);
+        expect(text.length).toBeGreaterThan(0);
+        for (const reading of text) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
+        for (const reading of (await surface(page, root)).filter((one) => one.kind === "stroke")) {
+          if (oklab(reading.colour).chroma > accentChroma || reading.where.endsWith(" outline")) continue;
+          const strength = scheme === "light"
+            ? await strokeSeparation(page, reading.colour, reading.ground) : contrast(reading.colour, reading.ground);
+          expect(strength, JSON.stringify(reading)).toBeGreaterThanOrEqual(floor);
+        }
+        // Borders alone miss the search icon's neutral SVG strokes.
+        for (const shape of await page.locator(`${root} svg [stroke]`).all()) {
+          const ink = await paintedIn(shape, "stroke");
+          if (ink === "none" || oklab(ink).chroma > accentChroma) continue;
+          for (const under of await groundsUnder(page, shape)) {
+            const strength = scheme === "light"
+              ? await strokeSeparation(page, ink, under) : contrast(ink, under);
+            expect(strength, `SVG ${ink} on ${under}`).toBeGreaterThanOrEqual(floor);
+          }
+        }
+      };
+      const contents = page.getByRole("button", { name: "Contents 2" });
+      await contents.hover();
+      await expect(page.locator(".ub-outline-panel")).toBeVisible();
+      await check(".ub-outline-panel");
+      const row = page.locator(".ub-outline-panel [role=menuitem]").first();
+      await row.hover();
+      expect(separation(await paintedIn(row, "background-color"), ground)).toBeGreaterThanOrEqual(step);
+      const [rowBox, listBox] = await Promise.all([row.boundingBox(), page.locator(".ub-outline-panel ul").boundingBox()]);
+      expect(rowBox?.width).toBeCloseTo(listBox?.width ?? 0, 1);
+      await check(".ub-outline-panel");
+      await page.keyboard.press("Escape");
+      await page.mouse.move(1399, 999);
+      await contents.focus();
+      await page.keyboard.press("Enter");
+      await expect(page.locator(".ub-outline-panel [role=menuitem]").first()).toBeFocused();
+      await page.keyboard.press("ArrowDown");
+      const keyboardRow = page.locator(".ub-outline-panel [role=menuitem]").nth(1);
+      await expect(keyboardRow).toBeFocused();
+      await expect.poll(async () => {
+        const fill = await paintedIn(keyboardRow, "background-color");
+        return alphaOf(fill) === 0 ? 0 : separation(fill, ground);
+      }).toBeGreaterThanOrEqual(step);
+      await check(".ub-outline-panel");
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Document actions" }).click();
+      await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
+      await page.getByRole("button", { name: "Document actions" }).click();
+      const actions = "[data-slot=dropdown-menu-content]";
+      await check(actions);
+      for (const item of await page.locator(`${actions} [role=menuitem]`).all()) {
+        await item.hover();
+        await check(actions);
+      }
+      const danger = await painted(page, ".ub-action-danger", "color");
+      const red = oklab(danger);
+      expect(red.a).toBeGreaterThan(0.05);
+      expect(red.b).toBeGreaterThan(0);
+      await page.keyboard.press("Escape");
+      await page.locator(".ub-tags").click();
+      const picker = ".ub-tag-picker-panel";
+      await expect(page.getByPlaceholder("Search tags")).toBeVisible();
+      await check(picker);
+      // Include every option's neutral check box over the highlighted ground,
+      // and the retired small text, rather than only reading a panel at rest.
+      for (const option of await page.locator(`${picker} [role=option]`).all()) {
+        await option.hover();
+        await check(picker);
+      }
+      await page.getByPlaceholder("Search tags").fill("no matching tag");
+      await expect(page.locator(".ub-tag-empty")).toBeVisible();
+      await check(picker);
+    });
+  });
+
+  test(`muted text and enabled dimmed consumers meet their rendered floors — ${scheme}`, async ({ browser }, testInfo) => {
+    const page = await openAppearanceApp(browser, scheme);
+    await contrastDocument(page, scheme, async () => {
+      await page.addStyleTag({ content: "* { transition: none !important; }" });
+      const readings: Awaited<ReturnType<typeof renderedText>> = [];
+      const collect = async (root = "body") => readings.push(...await renderedText(page, root, { mutedOnly: true }));
+      await collect();
+      await page.locator(".ub-outline-trigger").hover();
+      await collect();
+      await page.keyboard.press("Escape");
+      await page.locator(".ub-sync-toggle").click();
+      await collect();
+      await page.getByRole("button", { name: "Close sync details" }).click();
+      await page.locator(".ub-peer-more").click();
+      await collect();
+      for (const row of await page.locator(".ub-peer-overflow-row").all()) {
+        await row.hover();
+        await collect();
+      }
+      await page.keyboard.press("Escape");
+      await page.locator(".ub-editor .ub-paragraph").first().hover();
+      await page.locator(".ub-gutter-add").click();
+      await collect();
+      for (const option of await page.locator(".ub-blockmenu [role=option]").all()) {
+        await option.hover();
+        await collect();
+      }
+      await page.keyboard.press("Escape");
+      const enabled: Awaited<ReturnType<typeof renderedText>> = [];
+      for (const kind of ["code", "mermaid"]) {
+        const copy = `.ub-${kind} .ub-copy`;
+        await page.mouse.move(1399, 999);
+        enabled.push(...await renderedText(page, copy));
+      }
+      for (const state of ["resolved", "orphaned"]) {
+        const root = `.ub-thread-card:has(.ub-thread-${state})`;
+        const card = page.locator(`.ub-thread-${state}`);
+        await page.mouse.move(1399, 999);
+        enabled.push(...await renderedText(page, root));
+        await card.hover();
+        enabled.push(...await renderedText(page, root));
+        await card.click();
+        await card.focus();
+        await expect(card).toHaveAttribute("aria-current", "true");
+        enabled.push(...await renderedText(page, root));
+        await collect();
+        if (state === "resolved") {
+          // Keep the conversation expanded while removing its selected ground,
+          // so enabled author/time/body text is also read at rest and hovered.
+          await page.locator(".ub-thread-orphaned").click();
+          await page.mouse.move(1399, 999);
+          enabled.push(...await renderedText(page, root));
+          await card.hover();
+          enabled.push(...await renderedText(page, root));
+        }
+      }
+      await page.getByRole("button", { name: "All docs", exact: true }).click();
+      await collect();
+      for (const row of await page.locator(".ub-docs-row").all()) {
+        await row.hover();
+        await collect();
+      }
+      await testInfo.attach(`rendered-${scheme}`, { body: JSON.stringify({ muted: readings, enabled }, null, 2), contentType: "application/json" });
+      const minima = new Map<string, (typeof readings)[number]>();
+      for (const reading of readings) {
+        const key = `${reading.ground} / ${reading.opacity}`;
+        if ((minima.get(key)?.ratio ?? Infinity) > reading.ratio) minima.set(key, reading);
+      }
+      console.log(`Rendered ${scheme} minima: ${JSON.stringify([...minima.values()])}`);
+      if (scheme === "light") {
+        const fullStrength = readings.filter((one) => one.opacity === 1 &&
+          (legacySrgb(one.ground) ?? []).every((channel) => channel > 0.7));
+        const limits = fullStrength.map((reading) => {
+          let low = 0;
+          let high = 1;
+          for (let step = 0; step < 30; step += 1) {
+            const middle = (low + high) / 2;
+            if (contrast(`oklch(${middle} 0 0)`, reading.ground) >= 4.5) low = middle;
+            else high = middle;
+          }
+          return { where: reading.where, ground: reading.ground, lightness: low };
+        }).sort((one, two) => one.lightness - two.lightness);
+        console.log(`Rendered light limiting reading: ${JSON.stringify(limits[0])}`);
+        const current = fullStrength[0];
+        if (current === undefined || limits[0] === undefined) throw new Error("no full-strength light muted reading");
+        // Choose only the darkening the rendered grounds require, at the
+        // token's thousandth precision. Consumer opacity cannot choose it.
+        const extra = limits[0].lightness - oklab(current.colour).L;
+        expect(extra).toBeGreaterThanOrEqual(0);
+        expect(extra).toBeLessThan(0.001);
+      }
+      expect(readings.length).toBeGreaterThan(0);
+      expect(enabled.length).toBeGreaterThan(0);
+      // Dark global ink is intentionally unchanged; its enabled opacity
+      // consumers still have the same AA requirement as light's.
+      for (const reading of [...(scheme === "light" ? readings : []), ...enabled]) {
+        expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+  });
+}
+
+// The screen is deliberately dark in both appearances. Compare each light
+// control to the corresponding dark rendering, including opacity and focus.
+test("terminal controls keep their dark-screen contrast in either appearance", async ({ browser }, testInfo) => {
+  const page = await openAppearanceApp(browser, "dark");
+  await contrastDocument(page, "dark", async () => {
+    await page.addStyleTag({ content: "* { transition: none !important; }" });
+    const readings: Record<string, Awaited<ReturnType<typeof renderedText>>> = {};
+    for (const scheme of ["dark", "light"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      for (const selector of [".ub-terminal-toggle", ".ub-terminal .ub-copy"]) {
+        const control = page.locator(selector);
+        for (const state of ["rest", "hover", "focus"] as const) {
+          await page.mouse.move(1399, 999);
+          await page.locator(".ub-title").focus();
+          if (state === "hover") await control.hover();
+          if (state === "focus") {
+            await control.focus();
+            await page.keyboard.press("ArrowRight");
+            expect(await control.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+          }
+          readings[`${scheme} ${selector} ${state}`] = await renderedText(page, selector);
+        }
+      }
+    }
+    console.log(`Terminal readings: ${JSON.stringify(readings)}`);
+    await testInfo.attach("terminal-controls", { body: JSON.stringify(readings, null, 2), contentType: "application/json" });
+    for (const [key, values] of Object.entries(readings)) {
+      const floor = key.endsWith("rest")
+        ? key.includes("ub-copy") ? 3.317915 : 7.054520
+        : 17.521906;
+      expect(values[0]?.ratio, key).toBeGreaterThanOrEqual(floor);
+    }
+    for (const [key, light] of Object.entries(readings).filter(([key]) => key.startsWith("light"))) {
+      const dark = readings[key.replace(/^light/, "dark")];
+      expect(light.length).toBe(1);
+      expect(dark?.length).toBe(1);
+      expect(legacySrgb(light[0]?.ground ?? "")).toEqual(legacySrgb(await painted(page, ".ub-terminal-screen", "background-color")));
+      expect(light[0]?.ratio).toBeGreaterThanOrEqual(dark?.[0]?.ratio ?? Infinity);
+    }
+  });
+});

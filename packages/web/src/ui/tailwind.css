@@ -64,6 +64,8 @@
 @source "./MentionMenu.tsx";
 @source "./WorkspaceSettings.tsx";
 @source "./WorkspaceSwitcher.tsx";
+@source "./OutlinePane.tsx";
+@source "./DocChrome.tsx";
 
 /* The bridge. Left side: what shadcn's markup asks for. Right side: what this
    product already is. No colour is defined here. The sidebar mappings serve
@@ -77,10 +79,10 @@
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
-  /* The workspace switcher and user panel use these vendored surfaces as the
-     sidebar that floats (#480), so their framework defaults stay on sidebar
-     tokens. The document collaborator popover is the other consumer; its
-     product class overrides the surface with card tokens where it is used. */
+  /* The workspace switcher, user panel, Contents, Document actions and tag
+     picker use these vendored surfaces on sidebar tokens. The collaborator
+     overflow popover also uses the wrapper; its product class paints on card
+     tokens. Other consumers check their own ground when overriding defaults. */
   --color-popover: var(--sidebar);
   --color-popover-foreground: var(--sidebar-foreground);
   --color-primary: var(--primary);

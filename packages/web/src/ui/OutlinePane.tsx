@@ -141,7 +141,7 @@ export function OutlinePane({
         align="end"
         side="bottom"
         collisionPadding={8}
-        className="ub-outline-panel"
+        className="ub-outline-panel flex w-[min(20rem,calc(100vw_-_2rem))] max-h-[min(calc(100vh_-_2rem),var(--radix-dropdown-menu-content-available-height))]! flex-col overflow-hidden! p-0!"
         onPointerEnter={(event) => {
           if (event.pointerType === "mouse") cancelClose();
         }}
@@ -173,16 +173,19 @@ export function OutlinePane({
           trigger.current?.focus({ preventScroll: true });
         }}
       >
-        <div className="ub-outline-panel-body">
-          <DropdownMenuLabel className="ub-rail-head">On this page</DropdownMenuLabel>
-          <ul role="none">
+        <div className="ub-outline-panel-body flex min-h-0 flex-col p-3">
+          <DropdownMenuLabel className="mb-[0.4rem] mt-0 text-[0.7rem]! tracking-[0.06em] uppercase">On this page</DropdownMenuLabel>
+          <ul role="none" className="m-0 min-h-0 list-none overflow-y-auto p-0">
             {entries.map((entry) => (
               <li
                 key={entry.id}
                 role="none"
                 className={`ub-outline-l${entry.level}`}
               >
-                <DropdownMenuItem asChild>
+                <DropdownMenuItem
+                  asChild
+                  className={`block! w-full overflow-hidden px-2! py-[0.35rem]! text-muted-foreground text-left text-ellipsis whitespace-nowrap ${entry.level === 2 ? "pl-5!" : ""}`}
+                >
                   <button
                     type="button"
                     onClick={() => {
