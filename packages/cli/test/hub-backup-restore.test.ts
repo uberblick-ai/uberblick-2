@@ -13,7 +13,7 @@
  * Nothing the scripts hand the hub image is faked either. The stub executes the
  * `sh -c` payload it is given, with the container paths rewritten into the
  * sandbox: the verification runs under the real `node`, so `PRAGMA
- * integrity_check` and the `documents` count are performed by the same
+ * integrity_check` and the document/access-state checks use the same
  * `node:sqlite` the hub persists with; the placement payload runs against a
  * directory standing in for the volume, so its ordering, its globs and its
  * failure handling are the script's own. Only `chown` is answered rather than
@@ -154,13 +154,36 @@ function fixture(): Fixture {
 }
 
 /** Write a hub-shaped SQLite database with `rows` documents in it. */
-function hubDatabase(path: string, rows: number): void {
+function hubDatabase(path: string, rows: number, privateTables = false): void {
   const db = new DatabaseSync(path);
   db.exec(`CREATE TABLE "documents" ("name" varchar(255) NOT NULL, "data" blob NOT NULL, UNIQUE(name))`);
   const insert = db.prepare(`INSERT INTO "documents" ("name", "data") VALUES ($name, $data)`);
   for (let index = 0; index < rows; index += 1) {
     insert.run({ name: `workspace/doc-${index}`, data: new Uint8Array([1, 2, 3]) });
   }
+  // Backup/restore treats these records as opaque bytes. Use the hub's table
+  // shapes without importing its authority into a client package.
+  if (privateTables) db.exec(`
+    CREATE TABLE hub_principals (
+      id TEXT PRIMARY KEY NOT NULL, github_account_id TEXT UNIQUE NOT NULL,
+      github_username TEXT NOT NULL
+    );
+    CREATE TABLE hub_credentials (
+      id TEXT PRIMARY KEY NOT NULL, principal_id TEXT NOT NULL,
+      device_id TEXT NOT NULL, workspaces TEXT NOT NULL,
+      signing_key BLOB NOT NULL CHECK(length(signing_key) = 32),
+      issued_at INTEGER NOT NULL, revoked_at INTEGER
+    );
+    CREATE TABLE hub_memberships (
+      workspace_id TEXT NOT NULL, principal_id TEXT NOT NULL CHECK(length(principal_id) > 0),
+      role TEXT NOT NULL CHECK(role IN ('admin', 'member')), PRIMARY KEY (workspace_id, principal_id)
+    );
+    CREATE TABLE hub_admin_setup_grants (
+      setup_id TEXT PRIMARY KEY NOT NULL, workspace_id TEXT NOT NULL,
+      principal_id TEXT NOT NULL, github_account_id TEXT NOT NULL,
+      github_username TEXT NOT NULL, had_documents INTEGER NOT NULL CHECK(had_documents IN (0, 1))
+    );
+  `);
   db.close();
 }
 
@@ -313,18 +336,69 @@ describe("hub-restore.sh", () => {
     expect(existsSync(join(fix.volume, "hub.sqlite"))).toBe(false);
   });
 
-  /** A valid database with nothing in it passes the pragma, so the count is the check. */
-  it("refuses a backup whose documents table is empty", () => {
+  /** Empty private tables do not make an empty hub worth restoring. */
+  it.each(["legacy", "current"])("refuses a truly empty %s hub without touching the live database", (schema) => {
     const fix = fixture();
+    const live = join(fix.volume, "hub.sqlite");
+    hubDatabase(live, 3);
+    const before = readFileSync(live);
     const backup = join(fix.checkout, "empty.sqlite");
-    hubDatabase(backup, 0);
+    hubDatabase(backup, 0, schema === "current");
 
     const ran = run(fix, "hub-restore.sh", [backup]);
 
     expect(ran.status).not.toBe(0);
     expect(ran.stderr).toContain("empty");
     expect(subcommands(fix)).toEqual(["run"]);
-    expect(existsSync(join(fix.volume, "hub.sqlite"))).toBe(false);
+    expect(readFileSync(live)).toEqual(before);
+  });
+
+  it("backs up and restores a first-admin grant and receipt with no documents", () => {
+    const fix = fixture();
+    const live = join(fix.volume, "hub.sqlite");
+    const workspaceId = "00000000-0000-4000-8000-000000000001";
+    const setupId = "00000000-0000-4000-8000-000000000002";
+    const identity = { id: crypto.randomUUID(), github_account_id: "1234", github_username: "first-admin" };
+    const membership = { workspace_id: workspaceId, principal_id: identity.id, role: "admin" };
+    const grant = { setup_id: setupId, workspace_id: workspaceId, principal_id: identity.id,
+      github_account_id: identity.github_account_id,
+      github_username: identity.github_username, had_documents: 0 };
+    hubDatabase(live, 0, true);
+    const database = new DatabaseSync(live);
+    try {
+      database.prepare("INSERT INTO hub_principals VALUES (?, ?, ?)")
+        .run(identity.id, identity.github_account_id, identity.github_username);
+      database.prepare("INSERT INTO hub_memberships VALUES (?, ?, ?)")
+        .run(workspaceId, identity.id, membership.role);
+      database.prepare("INSERT INTO hub_admin_setup_grants VALUES (?, ?, ?, ?, ?, ?)")
+        .run(setupId, workspaceId, identity.id, identity.github_account_id, identity.github_username, 0);
+    } finally {
+      database.close();
+    }
+
+    const backup = join(fix.checkout, "access-only.sqlite");
+    const backedUp = run(fix, "hub-backup.sh", [backup]);
+    expect(backedUp.status).toBe(0);
+    // Stand in for loss of the original access records before recovery.
+    hubDatabase(join(fix.checkout, "replacement.sqlite"), 2);
+    copyFileSync(join(fix.checkout, "replacement.sqlite"), live);
+
+    const restored = run(fix, "hub-restore.sh", [backup]);
+
+    expect(restored.status, restored.stderr).toBe(0);
+    expect(restored.stdout).toContain("private access state");
+    expect(readFileSync(live)).toEqual(readFileSync(backup));
+    const recovered = new DatabaseSync(live, { readOnly: true });
+    try {
+      expect(recovered.prepare("SELECT * FROM hub_principals WHERE github_account_id = ?")
+        .get(identity.github_account_id)).toEqual(identity);
+      expect(recovered.prepare("SELECT * FROM hub_memberships").get()).toEqual(membership);
+      expect(recovered.prepare("SELECT * FROM hub_admin_setup_grants WHERE setup_id = ?").get(setupId)).toEqual(grant);
+      expect(recovered.prepare("SELECT count(*) AS count FROM documents").get()?.count).toBe(0);
+      expect(recovered.prepare("SELECT count(*) AS count FROM hub_credentials").get()?.count).toBe(0);
+    } finally {
+      recovered.close();
+    }
   });
 
   it("verifies, then stops, stages, renames into place and starts again", () => {

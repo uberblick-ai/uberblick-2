@@ -59,6 +59,7 @@ import {
 } from "./config.js";
 import type { HubLogger } from "./log.js";
 import { CredentialRegistry } from "./credentials.js";
+import { startAdminSetup } from "./admin-setup.js";
 import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
 import { MembershipRegistry } from "./memberships.js";
 import { PrincipalRegistry } from "./principals.js";
@@ -568,7 +569,7 @@ async function listen(
  * handlers and mutates no process state — `main.ts` owns the process, this owns
  * a server — which is what makes it usable from tests.
  */
-export async function createHub(config: HubConfig): Promise<Hub> {
+export async function createHub(config: HubConfig, options: { operatorSetup?: boolean } = {}): Promise<Hub> {
   if (config.github !== undefined) validateGithubClientId(config.github.clientId);
   if (config.authSecret === "") {
     throw new Error(
@@ -636,10 +637,16 @@ export async function createHub(config: HubConfig): Promise<Hub> {
   }
 
   let signIn: GithubSignIn | undefined;
+  let principals: PrincipalRegistry | undefined;
+  let memberships: MembershipRegistry | undefined;
   try {
-    if (config.github !== undefined) {
-      signIn = new GithubSignIn(config.github, new PrincipalRegistry(database),
-        new CredentialRegistry(database), new MembershipRegistry(database), log);
+    if (config.github !== undefined || options.operatorSetup) {
+      principals = new PrincipalRegistry(database);
+      memberships = new MembershipRegistry(database);
+      if (config.github !== undefined) {
+        signIn = new GithubSignIn(config.github, principals,
+          new CredentialRegistry(database), memberships, log);
+      }
     }
   } catch (error) {
     closeDatabase();
@@ -724,12 +731,22 @@ export async function createHub(config: HubConfig): Promise<Hub> {
   });
 
   let hocuspocus: Hocuspocus<HubContext>;
+  let adminSetup: Awaited<ReturnType<typeof startAdminSetup>> | undefined;
   try {
+    if (options.operatorSetup) {
+      if (principals === undefined || memberships === undefined || isEphemeralDatabase(databasePath)) {
+        throw new Error("hub setup: durable hub database required");
+      }
+      adminSetup = await startAdminSetup({ database, principals, memberships,
+        github: config.github, log, hasLiveDocuments: (workspaceId) =>
+          [...server.hocuspocus.documents.keys()].some((name) => name.startsWith(`${workspaceId}/`)) });
+    }
     hocuspocus = await listen(server);
   } catch (error) {
     // Half a hub is worse than none: release the socket and the handle so the
     // caller sees a rejection and nothing else.
     signIn?.stop();
+    await adminSetup?.stop();
     await server.destroy().catch((cleanup: unknown) => {
       log({ event: "hub.start.cleanupFailed", error: String(cleanup) });
     });
@@ -763,6 +780,7 @@ export async function createHub(config: HubConfig): Promise<Hub> {
     // Fence asynchronous identity reads before any database teardown. An
     // outstanding HTTP request can complete only with a safe failure now.
     signIn?.stop();
+    await adminSetup?.stop();
     // Collected before the rooms are closed, because closing one removes the
     // connection that names its socket. See openSockets.
     const sockets = openSockets(hocuspocus);

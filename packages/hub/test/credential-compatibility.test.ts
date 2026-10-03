@@ -2,20 +2,19 @@
 
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { createConnection } from "node:net";
+import { DatabaseSync } from "node:sqlite";
 import { Server } from "@hocuspocus/server";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { adminSocketPath, type SetupGrant } from "../src/admin-setup.js";
 import type { GithubSignIn, SignInCollection } from "../src/github-sign-in.js";
 import { silentLogger } from "../src/log.js";
-import { MembershipRegistry } from "../src/memberships.js";
-import { HubDatabase } from "../src/persistence.js";
-import { PrincipalRegistry } from "../src/principals.js";
 import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
-import { createRoomAuthenticator, type Hub, type HubContext } from "../src/server.js";
+import { createHub, createRoomAuthenticator, type Hub, type HubContext } from "../src/server.js";
 import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "../src/token.js";
 import {
   createClient,
   removeTempDatabases,
-  startHub,
   tempDatabasePath,
   TEST_SECRET,
   testRoom,
@@ -31,23 +30,16 @@ let issuedToken: string;
 const clients: TestClient[] = [];
 
 beforeAll(async () => {
-  // An existing member can sign in on the live hub without activating
-  // credential admission. Root admission must remain independent of both.
+  // Actual host setup must leave root admission independent of membership,
+  // and issue no credential until the approving account later signs in.
   const databasePath = tempDatabasePath();
-  const database = new HubDatabase(databasePath, () => {});
-  database.open();
-  try {
-    const principal = new PrincipalRegistry(database).identify("1234", "compatibility-member");
-    new MembershipRegistry(database).grant({
-      workspaceId: WORKSPACE,
-      principalId: principal.id,
-      role: "admin",
-    });
-  } finally {
-    database.close();
-  }
   let now = 1000;
-  hub = await startHub({
+  hub = await createHub({
+    authSecret: TEST_SECRET,
+    port: 0,
+    address: "127.0.0.1",
+    log: silentLogger,
+    shutdownTimeoutMs: 5_000,
     databasePath,
     github: {
       clientId: "Iv1.0123456789abcdef",
@@ -64,7 +56,54 @@ beforeAll(async () => {
         return Response.json(body);
       },
     },
+  }, { operatorSetup: true });
+  const setup = await new Promise<SetupGrant>((resolve, reject) => {
+    const socket = createConnection(adminSocketPath(databasePath));
+    let input = "";
+    let grant: SetupGrant | undefined;
+    socket.setTimeout(5_000, () => socket.destroy(new Error("setup timed out")));
+    socket.on("error", reject);
+    socket.on("close", () => {
+      if (grant === undefined) reject(new Error("setup closed before completing"));
+      else resolve(grant);
+    });
+    socket.on("connect", () => {
+      socket.write(`${JSON.stringify({ action: "start", workspaceId: WORKSPACE })}\n`);
+    });
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk: string) => {
+      try {
+        input += chunk;
+        for (;;) {
+          const newline = input.indexOf("\n");
+          if (newline < 0) return;
+          const message = JSON.parse(input.slice(0, newline)) as { status: string; userCode?: string };
+          input = input.slice(newline + 1);
+          if (message.status === "pending") {
+            expect(message.userCode).toBe("ABCD-EFGH");
+            now += 1000;
+          } else if (message.status === "complete") {
+            grant = message as SetupGrant;
+            socket.end();
+          } else if (message.status !== "starting") {
+            throw new Error(`setup ended with ${message.status}`);
+          }
+        }
+      } catch (error) {
+        socket.destroy(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
   });
+  expect(setup.workspaceId).toBe(WORKSPACE);
+  expect(setup.hadDocuments).toBe(false);
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    expect(database.prepare("SELECT COUNT(*) AS count FROM hub_credentials").get()?.count).toBe(0);
+    expect(database.prepare("SELECT workspace_id, principal_id, role FROM hub_memberships").all())
+      .toEqual([{ workspace_id: WORKSPACE, principal_id: setup.identity.id, role: "admin" }]);
+  } finally {
+    database.close();
+  }
   const post = (path: string, body: unknown) => fetch(`http://127.0.0.1:${hub.port}${path}`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
@@ -75,6 +114,7 @@ beforeAll(async () => {
     requestId: started.requestId, collectionSecret: started.collectionSecret,
   })).json() as SignInCollection;
   if (collected.status !== "complete") throw new Error("sign-in did not complete");
+  expect(collected.identity.id).toBe(setup.identity.id);
   expect(collected.credential.record.workspaces).toEqual([WORKSPACE]);
   issuedToken = await mintToken(await importCredentialKey(Buffer.from(collected.credential.key, "base64url")), {
     typ: "room",

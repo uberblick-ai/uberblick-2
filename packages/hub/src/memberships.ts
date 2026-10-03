@@ -61,6 +61,7 @@ export class MembershipRegistry {
   private readonly selectMembers: StatementSync;
   private readonly selectWorkspaces: StatementSync;
   private readonly countAdmins: StatementSync;
+  private readonly selectAny: StatementSync;
   private readonly updateRole: StatementSync;
   private readonly deleteMember: StatementSync;
   private readonly removeListeners = new Set<(workspaceId: string, principalId: string) => void>();
@@ -88,6 +89,7 @@ export class MembershipRegistry {
       SELECT COUNT(*) AS count FROM hub_memberships
       WHERE workspace_id = $workspaceId AND role = 'admin'
     `);
+    this.selectAny = db.prepare(`SELECT 1 FROM hub_memberships WHERE workspace_id = $workspaceId LIMIT 1`);
     this.updateRole = db.prepare(`
       UPDATE hub_memberships SET role = $role
       WHERE workspace_id = $workspaceId AND principal_id = $principalId
@@ -108,6 +110,12 @@ export class MembershipRegistry {
       principalId: record.principalId,
       role: record.role,
     });
+  }
+
+  /** Internal first-admin guard: even a non-admin membership prevents setup. */
+  hasMembership(workspaceId: string): boolean {
+    validateIdentity(workspaceId, "internal");
+    return this.selectAny.get({ workspaceId }) !== undefined;
   }
 
   /** Internal admission lookup; neither role changes document access. */

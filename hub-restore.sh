@@ -6,9 +6,10 @@
 # **Verified before anything is touched.** A restore runs on the worst day
 # somebody has, against a file nobody has opened since it was written, and it
 # overwrites the only copy left. So the backup is read first — `PRAGMA
-# integrity_check` and a non-empty `documents` table, because an empty but
-# perfectly valid database passes the pragma and would restore a corpus of
-# nothing. The check runs inside the hub's own image through `node:sqlite`,
+# integrity_check` and documents or private access state, because a hub can
+# hold identities, credentials, memberships or setup receipts before its first
+# document. A truly empty database passes the pragma but restores nothing.
+# The check runs inside the hub's own image through `node:sqlite`,
 # which is the module the hub itself persists with: the image is
 # `node:26-bookworm-slim` and carries no `sqlite3` CLI, and this needs no new
 # dependency anywhere. It writes the candidate to the container's `/tmp`, never
@@ -101,11 +102,20 @@ try {
     process.exit(1);
   }
   const count = db.prepare("SELECT count(*) AS documents FROM documents").get().documents;
-  if (count < 1) {
-    console.error("the documents table is empty, so this backup would restore nothing");
+  // Older document-only backups need not have these private tables. Check
+  // only known hub records, without reading their identities or signing keys.
+  const hasPrivateAccessState = [
+    "hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants",
+  ].some((table) =>
+    db.prepare("SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?").get("table", table) !== undefined &&
+    db.prepare("SELECT 1 FROM " + table + " LIMIT 1").get() !== undefined
+  );
+  if (count < 1 && !hasPrivateAccessState) {
+    console.error("the hub has no documents or private access state, so this empty backup would restore nothing");
     process.exit(1);
   }
-  console.log("backup holds " + count + " documents and passes integrity_check");
+  console.log("backup holds " + count + " documents" +
+    (hasPrivateAccessState ? " and private access state" : "") + " and passes integrity_check");
 } catch (error) {
   console.error("not a usable hub database: " + error.message);
   process.exit(1);

@@ -12,12 +12,16 @@
 import { resolveHubConfig } from "./config.js";
 import { stderrLogger } from "./log.js";
 import { createHub } from "./server.js";
+import { isEphemeralDatabase } from "./persistence.js";
 
 const SIGNALS = ["SIGTERM", "SIGINT"] as const;
 
 async function main(): Promise<void> {
   const config = resolveHubConfig();
-  const hub = await createHub(config);
+  const hub = await createHub(config, {
+    operatorSetup: process.platform !== "win32" &&
+      !isEphemeralDatabase(config.databasePath ?? "durable-default"),
+  });
 
   let shuttingDown = false;
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
