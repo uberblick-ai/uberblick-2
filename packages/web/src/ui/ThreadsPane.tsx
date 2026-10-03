@@ -450,6 +450,9 @@ export function ThreadsPane({
                 threads.some((thread) => thread.id === replyTo && !thread.resolved)
               ) {
                 event.preventDefault();
+                // Prevent Radix dismissal during composition too, without
+                // taking the reply draft away from the input method.
+                if (event.isComposing || event.keyCode === 229) return;
                 cancelReply();
               }
             }}

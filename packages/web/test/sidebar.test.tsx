@@ -412,7 +412,9 @@ describe("the sidebar is the _sidebar document", () => {
     });
     expect(field?.selectionStart).toBe("Reading".length);
 
-    act(() => press(field, "Enter"));
+    // jsdom has no implicit Enter submission; the browser suite exercises that
+    // native key path. Here the form's submit must reach the same blur commit.
+    act(() => field?.form?.requestSubmit());
     expect(groupNames(host)).toEqual(["Reading", "Elsewhere"]);
     expect(stored(peer)).toEqual([
       ["Reading", []],

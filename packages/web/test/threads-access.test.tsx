@@ -181,10 +181,10 @@ function highlight(host: HTMLElement, threadId: string): HTMLElement {
   return span;
 }
 
-function press(target: HTMLElement, key: string): void {
+function press(target: HTMLElement, key: string, init: KeyboardEventInit = {}): void {
   act(() => {
     target.dispatchEvent(
-      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }),
     );
   });
 }
@@ -386,6 +386,48 @@ describe("the threads rail can be opened where the layout hides it", () => {
       field.dispatchEvent(new Event("input", { bubbles: true }));
     });
   }
+
+  function composingKey(field: HTMLTextAreaElement, key: string, afterCompositionEnd: boolean): void {
+    act(() => {
+      field.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      if (afterCompositionEnd) {
+        field.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      }
+      press(field, key, {
+        isComposing: !afterCompositionEnd,
+        ...(afterCompositionEnd ? { keyCode: 229 } : {}),
+      });
+      if (!afterCompositionEnd) {
+        field.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      }
+    });
+  }
+
+  it.each([
+    ["before compositionend", false],
+    ["after compositionend", true],
+  ] as const)("keeps a composing Escape %s in a drawer reply, then cancels only the form", async (_order, afterCompositionEnd) => {
+    threadsWidth(true);
+    const { host, ydoc, threadId } = await openAnnotatedDoc();
+    await settle(() => toggle(host).click());
+    await settle(() => button("Reply").click());
+    typeReply("日本語の返信");
+    const field = sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")!;
+
+    // Radix's capture-phase dismissal runs before the textarea sees Escape.
+    await settle(() => composingKey(field, "Escape", afterCompositionEnd));
+    expect(sheet().querySelector(".ub-comment-input")).toBe(field);
+    expect(field.value).toBe("日本語の返信");
+    expect(document.activeElement).toBe(field);
+    expect(getAnnotation(ydoc, threadId)?.comments).toHaveLength(1);
+    expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
+
+    await settle(() => press(field, "Escape"));
+    expect(sheet().querySelector(".ub-comment-input")).toBeNull();
+    expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
+    await settle(() => button("Reply").click());
+    expect(sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe("");
+  });
 
   it("counts threads and lets reply-form Escape cancel only the form", async () => {
     threadsWidth(true);

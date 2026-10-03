@@ -726,6 +726,42 @@ test("the open document owns the remaining chrome and its one sync-details handl
   expect(new URL(page.url()).pathname).toBe(path);
 });
 
+test("a multiline comment composer stays above its selected passage", async ({ browser }) => {
+  const page = await openApp(browser, "light");
+  await page.setViewportSize({ width: 1400, height: 800 });
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+  await placeCaret(page);
+  for (let index = 1; index <= 10; index += 1) {
+    await page.keyboard.type(`Passage ${index}`);
+    if (index < 10) await page.keyboard.press("Enter");
+  }
+  await page.keyboard.press("Shift+Home");
+  await page.locator(".ub-composer-open").click();
+  const composer = page.locator(".ub-composer");
+  await expect(composer).toHaveAttribute("data-placement", "above");
+  const field = composer.locator("textarea");
+  const lines = Array.from({ length: 8 }, (_, index) => `Comment line ${index + 1}`);
+  for (const [index, line] of lines.entries()) {
+    if (index > 0) await page.keyboard.press("Shift+Enter");
+    await page.keyboard.type(line);
+  }
+  await expect(field).toHaveValue(lines.join("\n"));
+  const card = await composer.boundingBox();
+  const passage = await page.locator(".ub-editor .ub-paragraph").nth(9).boundingBox();
+  if (card === null || passage === null) throw new Error("e2e: comment geometry is missing");
+  expect(card.y).toBeGreaterThanOrEqual(0);
+  expect(card.y + card.height).toBeLessThanOrEqual(passage.y);
+  expect(await field.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  for (const name of ["Comment", "Cancel"]) {
+    const button = await composer.getByRole("button", { name, exact: true }).boundingBox();
+    if (button === null) throw new Error("e2e: comment action is missing");
+    expect(button.y + button.height).toBeLessThanOrEqual(800);
+  }
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".ub-thread")).toContainText("Comment line 8");
+});
+
 test("the document and comments rail stay left-anchored as the viewport changes", async ({
   browser,
 }) => {
@@ -1944,10 +1980,10 @@ for (const scheme of ["light", "dark"] as const) {
     // field and once with the header at rest.
     await page.getByRole("button", { name: "+ group" }).click();
     readings.push(...(await surface(page, ".ub-list")));
+    const groupName = `Sidebar tokens ${scheme}`;
+    await page.getByLabel("Group name").fill(groupName);
     await page.getByLabel("Group name").press("Enter");
-    // `.first()` because the sidebar is one workspace shared by this file's
-    // tests, so the appearance before this one has already left a group here.
-    await expect(page.locator(".ub-group-toggle").first()).toBeVisible();
+    await expect(page.locator(".ub-group-label").filter({ hasText: groupName })).toBeVisible();
     readings.push(...(await surface(page, ".ub-list")));
 
     // Both anchored menus, each while it is open: they are portalled siblings

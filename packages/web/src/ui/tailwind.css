@@ -55,6 +55,7 @@
    English prose (`src/editor` alone was producing `.list-item`, `.italic` and
    `.collapse`). Scan the wrappers and product components migrated to utilities. */
 @source "./shadcn";
+@source "./CommentForm.tsx";
 @source "./Sidebar.tsx";
 @source "./App.tsx";
 @source "./ThreadsPane.tsx";

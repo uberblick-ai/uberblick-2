@@ -14,6 +14,7 @@ import {
   directoryRoom,
   initDoc,
   pinDoc,
+  readSidebar,
   roomForDoc,
   sidebarRoom,
   upsertDirectoryEntry,
@@ -274,4 +275,45 @@ it.each(destinations)("closes and restores focus after choosing $choice", async 
   } else {
     expect(window.location.pathname).toBe(destination.path);
   }
+});
+
+it.each([
+  ["before compositionend", false],
+  ["after compositionend (Safari)", true],
+] as const)("leaves composing Escape %s to the group-name field", async (_order, afterCompositionEnd) => {
+  await openApp();
+  await openDrawer();
+  await click(sidebarButton(".ub-group-add"));
+  const field = drawer()?.querySelector<HTMLInputElement>(".ub-group-rename");
+  if (field === null || field === undefined) throw new Error("Missing group-name field");
+  const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+  const groups = readSidebar(sidebar);
+  field.value = "日本語";
+  await act(async () => {
+    field.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    if (afterCompositionEnd) {
+      field.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    }
+    field.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Escape", bubbles: true, cancelable: true,
+      isComposing: !afterCompositionEnd,
+      ...(afterCompositionEnd ? { keyCode: 229 } : {}),
+    }));
+    if (!afterCompositionEnd) {
+      field.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    }
+  });
+  expect(drawer()?.querySelector(".ub-group-rename")).toBe(field);
+  expect(field.value).toBe("日本語");
+  expect(document.activeElement).toBe(field);
+  expect(readSidebar(sidebar)).toEqual(groups);
+
+  // The next ordinary Escape cancels the fresh name and removes its group,
+  // while the sidebar's capture-phase listener still leaves the drawer open.
+  await act(async () => field.dispatchEvent(new KeyboardEvent("keydown", {
+    key: "Escape", bubbles: true, cancelable: true,
+  })));
+  expect(drawer()).not.toBeNull();
+  expect(drawer()?.querySelector(".ub-group-rename")).toBeNull();
+  expect(readSidebar(sidebar)).toEqual(groups.slice(0, -1));
 });

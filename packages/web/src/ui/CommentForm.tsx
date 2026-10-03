@@ -14,6 +14,7 @@
 
 import { useRef, useState } from "react";
 import type { ReactElement } from "react";
+import { Textarea } from "./shadcn/textarea.js";
 
 /** `@name`, appended to `text` with a separating space where one is needed. */
 export function withMention(text: string, name: string): string {
@@ -62,18 +63,22 @@ export function CommentForm({
 
   return (
     <div className="ub-comment-form">
-      <textarea
+      <Textarea
         ref={field}
-        className="ub-comment-input"
+        // Keep the floating card's measured height stable above its selection.
+        // Replies in the rail can grow and resize with their content.
+        className="ub-comment-input resize-y in-[.ub-composer]:max-h-16 in-[.ub-composer]:resize-none"
         rows={2}
         // New-comment composers focus on opening; reply forms can also remount
         // on a resize, so their pane owns the initial focus gesture instead.
-        // biome-ignore lint/a11y/noAutofocus: the composer focuses on the gesture that opens it.
         autoFocus={autoFocus}
         placeholder={placeholder}
         value={text}
         onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
+          // Safari can deliver the confirming key after compositionend, with
+          // isComposing already false but the IME keyCode still set.
+          if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
             submit();
