@@ -355,20 +355,20 @@ export function StatusLine({
     </span>
   );
   const primary = (
-    <>
+    <span className="inline-flex items-center gap-2">
       {mark(facts.primaryTone)}
       <span
         className={`ub-status-word${facts.twoFact ? " ub-status-word--saved" : ""}`}
       >
         {facts.primary}
       </span>
-    </>
+    </span>
   );
   const hubFact = facts.twoFact ? (
-    <>
+    <span className="inline-flex items-center gap-2">
       {mark(facts.hubTone)}
       <span className="ub-status-word ub-status-word--hub">{facts.hub}</span>
-    </>
+    </span>
   ) : null;
   const blank = facts.primary === null;
   const hub =
@@ -387,7 +387,7 @@ export function StatusLine({
     ) : (
       <button
         type="button"
-        className="ub-status-sync ub-sync-toggle"
+        className={`ub-status-sync ub-sync-toggle${facts.hubDetail === null ? "" : " min-w-0 max-w-full flex-wrap"}`}
         aria-expanded={syncOpen}
         aria-controls="ub-sync-panel"
         aria-label={
@@ -435,10 +435,9 @@ export function StatusLine({
   // A refusal replaces the rest of the line rather than decorating it: the
   // backlog and peer strip are about a connection that is working or returning.
   return (
-    <div className="ub-status">
+    <div className={`ub-status flex min-w-0 items-center gap-2 text-[0.8rem]/[1.2] min-h-[calc(28px+0.7rem+1px)] text-[var(--muted-foreground)] py-[0.35rem] border-b border-[var(--border)] mb-3${facts.hubDetail === null ? "" : " flex-wrap"}`}>
       {syncReading}
       {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
-      {facts.hubDetail !== null && <span className="ub-muted">{facts.hubDetail}</span>}
       {!blank && saveNote}
       {!blank && updatedReading}
       {!blank &&
@@ -455,6 +454,9 @@ export function StatusLine({
           is why this is the presence reading and not `usePeers`: the block a
           caret sits in is resolved once, in `readPresence`. */}
       {reading.detail === null && peerStrip}
+      {facts.hubDetail !== null && (
+        <span className="ub-muted min-w-0 basis-full">{facts.hubDetail}</span>
+      )}
     </div>
   );
 }

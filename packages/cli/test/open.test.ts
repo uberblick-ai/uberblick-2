@@ -678,6 +678,10 @@ describe("ub open", () => {
     });
 
     expect(app.url).toBe(`http://127.0.0.1:${webPort}/`);
+    const configuration = await (await get(`${app.url}uberblick-config.json`)).text();
+    expect(configuration).not.toContain(SECRET);
+    expect(JSON.parse(configuration).hubAuthToken).toBe(localBrowserKey(WORKSPACE, box.env));
+    expect(app.stdout() + app.stderr()).not.toContain(localBrowserKey(WORKSPACE, box.env));
     expect(await (await get(app.url)).text()).toContain("<title>uberblick</title>");
     expect(await (await get(`${app.url}assets/app.js`)).text()).toContain("marker");
 
@@ -918,9 +922,9 @@ describe("ub open", () => {
         const hub = await startHub(box);
         const hubUrl = `ws://127.0.0.1:${hub.port}`;
         writeCredentials(box, SECRET);
-        pointAt(box, hubUrl);
         expect(await (await get(`${app.url}uberblick-config.json`)).json())
           .toMatchObject({ hubAuthToken: key, rebound: true });
+        pointAt(box, hubUrl);
         expect((await app.interrupt()).status).toBe(0);
         app = await open(box, ["--port", String(webPort)], env);
         expect(localBrowserKey(WORKSPACE, box.env)).toBe(key);
@@ -941,6 +945,8 @@ describe("ub open", () => {
 
         // The still-open local providers keep their original key after losing hub auth too.
         rmSync(join(configDir(box), "credentials.json"));
+        expect(await (await get(`${app.url}uberblick-config.json`)).json())
+          .toMatchObject({ hubAuthToken: key, rebound: true });
         expect((await app.interrupt()).status).toBe(0);
         app = await open(box, ["--port", String(webPort)], env);
         await waitUntil("the same browser room to resume local-only after restart", () =>
