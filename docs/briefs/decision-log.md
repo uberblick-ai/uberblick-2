@@ -87,12 +87,12 @@ Record a decision when **all three** hold:
 
 1. **It outlives its task.** The choice still binds something after the issue
    that raised it closes (the boundary the Editorial contract already draws).
-2. **Someone could reasonably choose otherwise.** There were real
-   alternatives, and a fresh agent or teammate without the reasoning might pick
-   a different one.
-3. **Choosing otherwise later would be a mistake, not a preference.** The
-   quick test: if a fresh agent made the opposite choice next month, would it
-   be a bug or a regression someone has to undo?
+2. **There was a real alternative** not already dictated by an existing
+   decision record or corpus document.
+3. **Reversing it costs something:** it fixes user-facing behavior, a command
+   or API, a data shape, a guarantee, a dependency, or a process rule. Quick
+   test: if a fresh agent made the opposite choice next month, would someone
+   have to undo it?
 
 It is overkill — keep it in the issue, the pull request, or a code comment —
 when any of these is true:
@@ -102,14 +102,18 @@ when any of these is true:
 - Something already decides it: an existing decision record, a corpus
   document, a linter or formatter, or an established convention in the code.
   Link to that source instead.
-- It is cheap to reverse and binds nothing downstream: naming inside one
-  module, an internal helper's shape, a test layout.
+- It is cheap to reverse and binds nothing downstream: naming, refactors, an
+  internal helper's shape, test structure.
+- It is a bug fix that restores intended behavior.
 - It describes current behavior rather than a choice between alternatives.
   That belongs in the Regular Document that owns the behavior; a decision
   records why one option was chosen over another.
 
 When in doubt, an agent records nothing new and mentions the choice in its pull
-request; a reviewer or a person can promote it to a decision record later. One
+request; a reviewer or a person can promote it to a decision record later.
+
+**Open question — reviewers.** Whether a reviewer drafts a record when a pull
+request settles something that passes this test, rather than only flagging it. One
 topic per record: a record that collects many choices (*Deferred designs and
 their triggers*) is a catalog, not a decision.
 
