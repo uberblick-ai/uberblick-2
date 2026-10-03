@@ -1180,11 +1180,12 @@ export function registerTools(
         " A decision may pass `governs`, the UUID of a live, hydrated requirement in this replica. The decision " +
         "stores `governs` in its own metadata; the requirement's decision log is derived from directory stubs. Any other use " +
         "of `governs` is refused before a UUID is allocated or a room is written. " +
-        "A decision may also pass `supersedes`, the UUID of a readable, hydrated decision it replaces. The " +
+        "A decision may also pass `supersedes`, the UUID of a hydrated decision in a live topic it replaces. The " +
         "reference is immutable, and its predecessor's topic is copied forward; a first record uses its own UUID as topic. " +
         "`topic` is never an input. Supersession is returned by get_doc and is a derived link: backlinks on the earlier " +
         "decision exposes every successor without editing that earlier document. A non-decision target or a " +
-        "self-reference is refused before any room is written. " +
+        "self-reference is refused before any room is written. An archived predecessor topic is refused with " +
+        "`doc_archived` before a UUID is allocated or a room is written; restore the topic before reconsidering it. " +
         "A decision created with `status: decided` must seed the record of what would reopen it: a heading whose " +
         "text is exactly `Reconsidering`, immediately followed by a non-heading block with non-whitespace text — " +
         "another heading does not count as that content. Without it the call is refused before a UUID is " +
@@ -1276,7 +1277,7 @@ export function registerTools(
           ? null
           : canonicalDocumentUuid(supersedes);
       const superseded =
-        supersedesUuid === null ? null : requireDoc(supersedesUuid);
+        supersedesUuid === null ? null : requireWritableDoc(supersedesUuid);
       const supersededKind =
         superseded === null ? null : (getMeta(superseded.doc).kind ?? null);
       if (superseded !== null && supersededKind !== "decision") {

@@ -396,7 +396,7 @@ export function upsertDirectoryEntry(
  * Tombstone a directory entry: sets `deleted: true` and keeps the entry, so the
  * deletion itself replicates. Entries are never removed from the map.
  */
-function tombstoneOneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
+function tombstoneOneDirectoryEntry(dirDoc: Y.Doc, uuid: string, topic?: string): void {
   const docs = getDirectoryMap(dirDoc);
   dirDoc.transact(() => {
     const existing = withResolvedUpdatedAt(
@@ -410,6 +410,8 @@ function tombstoneOneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
           title: existing?.title ?? "",
           tags: existing?.tags ?? [],
           deleted: true,
+          // A missing first record still owns its decision topic's lifecycle.
+          ...(existing === null && topic !== undefined ? { kind: "decision" as const, topic } : {}),
         },
         existing,
       ) satisfies StoredEntry,
@@ -478,7 +480,9 @@ function archiveTargets(dirDoc: Y.Doc, uuid: string): string[] {
 /** Archive a decision's whole topic; directory-only writes retain all caches. */
 export function tombstoneDirectoryEntry(dirDoc: Y.Doc, uuid: string): string[] {
   const targets = archiveTargets(dirDoc, uuid);
-  dirDoc.transact(() => { for (const target of targets) tombstoneOneDirectoryEntry(dirDoc, target); });
+  const entry = getDirectoryEntry(dirDoc, uuid);
+  const topic = entry?.kind === "decision" ? (entry.topic ?? entry.uuid) : undefined;
+  dirDoc.transact(() => { for (const target of targets) tombstoneOneDirectoryEntry(dirDoc, target, topic); });
   return targets;
 }
 

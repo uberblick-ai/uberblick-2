@@ -3232,7 +3232,7 @@ test("decision archive and restore follow the whole topic and its first record",
     await page.getByRole("alertdialog").getByRole("button", { name: "Archive document" }).click();
     await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
     await expect(earlier.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
-    await expect.poll(() => readSidebar(sidebar)[0]?.docs).toEqual([]);
+    await expect.poll(() => readSidebar(sidebar).find((entry) => entry.id === group)?.docs).toEqual([]);
     await expect.poll(() => getDirectoryEntry(directory, first)?.deleted).toBe(true);
     await expect.poll(() => getDirectoryEntry(directory, successor)?.deleted).toBe(true);
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");

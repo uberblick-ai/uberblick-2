@@ -240,13 +240,21 @@ describe("stubs-only topic resolution", () => {
     expect(ids(resolveDecisionTopics(directory)[0]!.conflicts)).toEqual(resolution);
   });
 
-  it("archives even a foreign topic whose first record stub is missing", () => {
+  it("archives and restores a foreign topic with a missing first stub without an ordinary phantom", () => {
     const directory = new Y.Doc();
     stub(directory, B, { supersedes: A });
     expect(resolveDecisionTopics(directory)[0]!.archived).toBe(false);
     tombstoneDirectoryEntry(directory, B);
     expect(decisionTopicArchived(directory, B)).toBe(true);
     expect(resolveDecisionTopics(directory)[0]!.archived).toBe(true);
+    expect(listDirectory(directory)).toEqual([]);
+    expect(getDirectoryEntry(directory, A)).toMatchObject({ kind: "decision", topic: A });
+    expect(restoreDirectoryEntry(directory, A)).toEqual([A, B]);
+    expect(listDirectory(directory)).toHaveLength(2);
+    expect(listDirectory(directory).every((entry) => entry.kind === "decision")).toBe(true);
+    expect(decisionTopicArchived(directory, B)).toBe(false);
+    expect(resolveDecisionTopics(directory)[0]!.inForce?.uuid).toBe(B);
+    expect(tombstoneDirectoryEntry(directory, A)).toEqual([A, B]);
     expect(listDirectory(directory)).toEqual([]);
   });
 

@@ -74,12 +74,47 @@ describe("decision topics through directory stubs", () => {
     for (const uuid of [b, c, d, e, f]) expect(rig.instance.replicas.hydrated(uuid)).toBe(false);
   });
 
+  it("refuses successors into an archived topic before writing any room", async () => {
+    const rig = await localRig();
+    const first = await decision(rig, { status: "decided" });
+    const next = await decision(rig, { supersedes: first.uuid });
+    const pinned = await rig.ok("pin_doc", { uuid: next.uuid, group: "Reading" });
+    await rig.ok("archive_doc", { uuid: next.uuid });
+    // The successor's mirror can be live while the first record still archives the topic.
+    rawDeleted(rig, next.uuid, false);
+    const directory = rig.instance.replicas.directory().doc;
+    const sidebar = rig.instance.replicas.sidebar().doc;
+    const beforeDirectory = Y.encodeStateAsUpdate(directory);
+    const beforeSidebar = Y.encodeStateAsUpdate(sidebar);
+    const beforeLog = rig.instance.store.logSize();
+    for (const predecessor of [first.uuid, next.uuid]) {
+      const refused = await rig.call("create_doc", {
+        title: "Reconsideration", description: "Must restore its topic first.",
+        kind: "decision", supersedes: predecessor,
+        sidebar: { group: { id: pinned.group.id } },
+      });
+      expect(refused.isError).toBe(true);
+      expect(refused.payload).toMatchObject({ error: "doc_archived", applied: false, partial: false, synced: false });
+    }
+    expect(Y.encodeStateAsUpdate(directory)).toEqual(beforeDirectory);
+    expect(Y.encodeStateAsUpdate(sidebar)).toEqual(beforeSidebar);
+    expect(rig.instance.store.logSize()).toBe(beforeLog);
+    await rig.ok("restore_doc", { uuid: next.uuid });
+    expect((await decision(rig, { supersedes: next.uuid })).topic).toBe(first.uuid);
+  });
+
   it("uses only the first tombstone for listing, read-only refusal and derived log; archive and restore affect all records", async () => {
     const rig = await localRig();
     const requirement = await rig.ok("create_doc", { title: "Product", description: "Product direction.", kind: "requirement" });
     const a = await decision(rig, { status: "decided", governs: requirement.uuid });
     const b = await decision(rig, { status: "decided", supersedes: a.uuid, governs: requirement.uuid });
+    await rig.ok("pin_doc", { uuid: a.uuid, group: "Reading" });
+    await rig.ok("pin_doc", { uuid: b.uuid, group: "Reading" });
     rawDeleted(rig, b.uuid, true);
+    expect((await rig.ok("get_sidebar")).groups[0].docs).toEqual([
+      { uuid: a.uuid, title: "Topic", status: "ok" },
+      { uuid: b.uuid, title: "Topic", status: "ok" },
+    ]);
     expect((await rig.ok("search", { query: "constraints" })).hits.map((hit: any) => hit.uuid).sort()).toEqual([a.uuid, b.uuid].sort());
     expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ uuid: b.uuid, inForce: { uuid: b.uuid } }]);
     await rig.ok("set_tldr", { uuid: b.uuid, tldr: "The answer." });
@@ -87,6 +122,10 @@ describe("decision topics through directory stubs", () => {
     expect((await rig.ok("list_docs", { kind: "decision" })).docs[0].inForce.deleted).toBe(false);
     rawDeleted(rig, a.uuid, true);
     rawDeleted(rig, b.uuid, false);
+    expect((await rig.ok("get_sidebar")).groups[0].docs).toEqual([
+      { uuid: a.uuid, title: "Topic", status: "archived" },
+      { uuid: b.uuid, title: "Topic", status: "archived" },
+    ]);
     expect((await rig.ok("list_docs", { kind: "decision" })).docs).toEqual([]);
     expect((await rig.ok("get_doc", { uuid: requirement.uuid })).decisions).toEqual([]);
     expect((await rig.ok("search", { query: "constraints" })).hits).toEqual([]);
