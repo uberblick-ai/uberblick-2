@@ -19,10 +19,10 @@ import { resolveClientConfig } from "./config.js";
 import { App } from "./ui/App.js";
 import { applyStoredAppearance } from "./ui/theme.js";
 import "./ui/styles.css";
-// The app's own surfaces are the plain CSS above; this is the chrome
-// framework the vendored shadcn components need (#27). It is imported after,
-// and everything it emits is inside a cascade layer, so it cannot reach a
-// `.ub-*` rule — see ui/tailwind.css.
+// Tailwind styles shadcn and product UI over the tokens above. Web UI system
+// keeps editor content in plain CSS and migrates legacy surfaces when next
+// changed. Its output is layered, so the unlayered legacy `.ub-*` rules still
+// win where they remain — see ui/tailwind.css.
 import "./ui/tailwind.css";
 
 const container = document.getElementById("root");

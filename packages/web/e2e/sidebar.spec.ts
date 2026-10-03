@@ -172,7 +172,7 @@ async function sampleToggle(page: Page, collapse: boolean) {
     const sidebar = document.querySelector<HTMLElement>(".ub-list");
     const pane = document.querySelector<HTMLElement>(".ub-pane");
     const content = pane?.querySelector<HTMLElement>(
-      ":scope > .ub-column, :scope > .ub-settings-column",
+      ":scope > .ub-column, :scope[data-settings-page] > div",
     );
     const toggle = document.querySelector<HTMLButtonElement>(
       collapse ? ".ub-sidebar-hide" : ".ub-sidebar-restore",
