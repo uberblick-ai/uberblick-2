@@ -27,6 +27,7 @@ class GithubFake {
   calls: { url: string; body: URLSearchParams; headers: Headers }[] = [];
   pauseIdentity: (() => Promise<void>) | undefined;
   failedUrl: string | undefined;
+  failedResponse: { url: string; status: number; body: Record<string, unknown> } | undefined;
   lifetime = 900;
   fetch: typeof fetch = async (input, init) => {
     const url = String(input);
@@ -34,6 +35,9 @@ class GithubFake {
     const headers = new Headers(init?.headers);
     this.calls.push({ url, body, headers });
     if (this.failedUrl === url) throw new Error(`${GITHUB_TOKEN} ${TEST_SECRET}`);
+    if (this.failedResponse?.url === url) {
+      return Response.json(this.failedResponse.body, { status: this.failedResponse.status });
+    }
     if (url === "https://github.com/login/device/code") {
       return Response.json({ device_code: DEVICE_CODE, user_code: "ABCD-EFGH", verification_uri: "https://github.com/login/device", expires_in: this.lifetime, interval: 5 });
     }
@@ -96,18 +100,21 @@ function privateRows(path: string) {
 describe("hub-driven GitHub identity", () => {
   it("binds durable account ID across devices, renames, username reassignment and restart", async () => {
     const first = await rig();
+    first.github.account.login = "first_acme";
     const a = await complete(first);
-    first.github.account.login = "new-name";
+    first.github.account.login = "new_acme";
     const b = await complete(first);
-    expect(b.result.identity).toEqual({ ...a.result.identity, githubUsername: "new-name" });
+    expect(b.result.identity).toEqual({ ...a.result.identity, githubUsername: "new_acme" });
     expect(b.result.credential.record.deviceId).not.toBe(a.result.credential.record.deviceId);
     expect(b.result.credential.record.id).not.toBe(a.result.credential.record.id);
     expect(b.result.credential.key).not.toBe(a.result.credential.key);
     await first.hub.stop();
     const restarted = await rig(first.databasePath);
+    restarted.github.account.login = "new_acme";
     const again = await complete(restarted);
-    expect(again.result.identity.id).toBe(a.result.identity.id);
+    expect(again.result.identity).toEqual(b.result.identity);
     restarted.github.account.id = 5678;
+    restarted.github.account.login = "first_acme";
     const other = await complete(restarted);
     expect(other.result.identity.githubUsername).toBe(a.result.identity.githubUsername);
     expect(other.result.identity.id).not.toBe(a.result.identity.id);
@@ -238,16 +245,34 @@ describe("bounded device requests", () => {
     expect(await post(restarted.hub, "collect", pending)).toMatchObject({ code: 404, result: { status: "unknown-request" } });
   });
 
-  it("bounds requests and GitHub lifetimes, then frees capacity after retention", async () => {
+  it("bounds active attempts independently of retained outcomes and caps GitHub lifetimes", async () => {
     const testRig = await rig();
     testRig.github.lifetime = 86_400;
     const requests = await Promise.all(Array.from({ length: 105 }, () => post(testRig.hub, "start", {})));
     expect(requests.filter((response) => response.code === 200)).toHaveLength(100);
     expect(requests.filter((response) => response.code === 429)).toHaveLength(5);
     expect(requests[0]!.result.expiresIn).toBe(900);
-    testRig.github.time += 1_800_000;
+    const accepted = requests.filter((response) => response.code === 200).map(({ result }) => ({
+      requestId: result.requestId as string, collectionSecret: result.collectionSecret as string,
+    }));
+    testRig.github.time += 5000;
+    expect(await post(testRig.hub, "collect", accepted[0])).toMatchObject({ result: { status: "complete" } });
+    await start(testRig.hub);
+    expect(await post(testRig.hub, "collect", accepted[0])).toMatchObject({ result: { status: "collected" } });
+    expect(await post(testRig.hub, "start", {})).toMatchObject({ code: 429 });
+    for (const request of accepted.slice(1)) await post(testRig.hub, "cancel", request);
+    const next = await start(testRig.hub);
+    expect(await post(testRig.hub, "cancel", next)).toMatchObject({ result: { status: "abandoned" } });
+    await start(testRig.hub);
+    expect(await post(testRig.hub, "collect", accepted[0])).toMatchObject({ code: 404, result: { status: "unknown-request" } });
+    expect(await post(testRig.hub, "collect", next)).toMatchObject({ result: { status: "abandoned" } });
+    testRig.github.time += 900_000;
     expect(await post(testRig.hub, "start", {})).toMatchObject({ code: 200 });
-    expect(privateRows(testRig.databasePath).credentials).toHaveLength(0);
+    expect(await post(testRig.hub, "collect", next)).toMatchObject({ result: { status: "abandoned" } });
+    testRig.github.time += 900_000;
+    await start(testRig.hub);
+    expect(await post(testRig.hub, "collect", next)).toMatchObject({ code: 404 });
+    expect(privateRows(testRig.databasePath).credentials).toHaveLength(1);
   });
 
   it("GitHub start or identity failure fails that request without changing hub availability", async () => {
@@ -259,8 +284,36 @@ describe("bounded device requests", () => {
     testRig.github.time += 5000;
     expect(await post(testRig.hub, "collect", request)).toMatchObject({ result: { status: "failed" } });
     expect(privateRows(testRig.databasePath).credentials).toHaveLength(0);
+    expect(testRig.logs.filter((line) => line.event === "hub.github.sign-in.failed")).toEqual([
+      { event: "hub.github.sign-in.failed", step: "start", code: "request-failed" },
+      { event: "hub.github.sign-in.failed", step: "identity", code: "request-failed" },
+    ]);
+    for (const secret of [GITHUB_TOKEN, REFRESH_TOKEN, DEVICE_CODE, TEST_SECRET]) {
+      expect(JSON.stringify(testRig.logs)).not.toContain(secret);
+    }
     testRig.github.failedUrl = undefined;
     expect((await complete(testRig)).result.status).toBe("complete");
+  });
+
+  it.each([
+    { step: "start", url: "https://github.com/login/device/code", error: "device_flow_disabled", status: 200, code: "device_flow_disabled" },
+    { step: "start", url: "https://github.com/login/device/code", error: "incorrect_client_credentials", status: 200, code: "incorrect_client_credentials" },
+    { step: "token", url: "https://github.com/login/oauth/access_token", error: GITHUB_TOKEN, status: 200, code: "provider-error" },
+    { step: "identity", url: "https://api.github.com/user", error: GITHUB_TOKEN, status: 503, code: "http-error" },
+  ])("logs safe diagnostics for $step/$code and issues nothing", async ({ step, url, error, status, code }) => {
+    const testRig = await rig();
+    testRig.github.failedResponse = { url, status, body: { error, error_description: `${GITHUB_TOKEN} ${TEST_SECRET}` } };
+    const request = step === "start" ? {} : await start(testRig.hub);
+    testRig.github.time += 5000;
+    const response = await post(testRig.hub, step === "start" ? "start" : "collect", request);
+    expect(response.result).toEqual({ status: "failed" });
+    expect(testRig.logs.filter((line) => line.event === "hub.github.sign-in.failed")).toEqual([
+      { event: "hub.github.sign-in.failed", step, code, ...(status === 200 ? {} : { status }) },
+    ]);
+    expect(privateRows(testRig.databasePath).credentials).toHaveLength(0);
+    for (const secret of [GITHUB_TOKEN, REFRESH_TOKEN, DEVICE_CODE, TEST_SECRET]) {
+      expect(JSON.stringify({ response, logs: testRig.logs, rows: privateRows(testRig.databasePath) })).not.toContain(secret);
+    }
   });
 });
 
@@ -279,7 +332,7 @@ describe("optional GitHub configuration", () => {
 
   it("names invalid or missing client ID without echoing its value, before listening", async () => {
     for (const clientId of [" ", "OAuth-client", "Iv23.short", TEST_SECRET]) {
-      expect(() => resolveHubConfig({ HUB_AUTH_TOKEN: "secret", HUB_GITHUB_CLIENT_ID: clientId })).toThrow(/HUB_GITHUB_CLIENT_ID/);
+      await expect(startHub(resolveHubConfig({ HUB_AUTH_TOKEN: "secret", HUB_GITHUB_CLIENT_ID: clientId }))).rejects.toThrow(/HUB_GITHUB_CLIENT_ID/);
     }
     await expect(startHub({ github: {} as { clientId: string } })).rejects.toThrow(/HUB_GITHUB_CLIENT_ID/);
     try { await startHub({ github: { clientId: TEST_SECRET } }); }

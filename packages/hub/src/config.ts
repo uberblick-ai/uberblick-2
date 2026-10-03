@@ -169,8 +169,8 @@ export function validateGithubClientId(clientId: string): void {
 /**
  * Build a config from the environment.
  *
- * @throws when `HUB_AUTH_TOKEN` is missing, `PORT` is not a valid port, or a
- * configured `HUB_GITHUB_CLIENT_ID` is not a GitHub App client ID.
+ * @throws when `HUB_AUTH_TOKEN` is missing or `PORT` is not a valid port.
+ * `createHub` validates GitHub configuration before opening the database.
  */
 export function resolveHubConfig(
   env: NodeJS.ProcessEnv = process.env,
@@ -185,7 +185,6 @@ export function resolveHubConfig(
 
   const host = env.HUB_HOST?.trim();
   const githubClientId = env.HUB_GITHUB_CLIENT_ID;
-  if (githubClientId !== undefined && githubClientId !== "") validateGithubClientId(githubClientId);
 
   return {
     port: parsePort(env.PORT),

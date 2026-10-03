@@ -5,8 +5,8 @@
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { validateGithubClientId } from "./config.js";
 import type { CredentialRecord, CredentialRegistry } from "./credentials.js";
+import { type HubLogger, stderrLogger } from "./log.js";
 import type { MembershipRegistry } from "./memberships.js";
 import type { PrincipalRecord, PrincipalRegistry } from "./principals.js";
 
@@ -19,6 +19,7 @@ export interface GithubSignInConfig {
 
 const MAX_LIFETIME_MS = 15 * 60_000;
 const MAX_REQUESTS = 100;
+const MAX_TERMINAL_REQUESTS = 100;
 type TerminalStatus = "denied" | "expired" | "abandoned" | "failed" | "collected";
 interface SignInRequest {
   secret: string;
@@ -45,6 +46,20 @@ function seconds(value: unknown): number {
   return value;
 }
 
+/** Only fixed codes and HTTP status may cross the upstream logging boundary. */
+class GithubFailure extends Error {
+  constructor(
+    readonly code: "http-error" | "device_flow_disabled" | "incorrect_client_credentials" | "provider-error",
+    readonly status?: number,
+  ) { super(); }
+}
+
+function providerFailure(error: unknown): GithubFailure {
+  const code = error === "device_flow_disabled" || error === "incorrect_client_credentials"
+    ? error : "provider-error";
+  return new GithubFailure(code);
+}
+
 export class GithubSignIn {
   private readonly requests = new Map<string, SignInRequest>();
   private readonly closed = new AbortController();
@@ -57,8 +72,8 @@ export class GithubSignIn {
     private readonly principals: PrincipalRegistry,
     private readonly credentials: CredentialRegistry,
     private readonly memberships: MembershipRegistry,
+    private readonly log: HubLogger = stderrLogger,
   ) {
-    validateGithubClientId(config.clientId);
     this.now = config.now ?? Date.now;
     this.fetch = config.fetch ?? globalThis.fetch;
   }
@@ -70,12 +85,24 @@ export class GithubSignIn {
 
   async start() {
     if (this.closed.signal.aborted) return { status: "failed" } as const;
-    // Expired outcomes remain collectable for another bounded lifetime. There
-    // is no durable request/token record, and restart refuses unknown requests.
+    // Active requests and retained outcomes have separate bounds. Outcomes
+    // last at most another lifetime; oldest ones may be evicted at capacity.
+    // There is no durable request/token record, and restart refuses requests.
+    let pending = 0;
+    let terminal = 0;
     for (const [id, request] of this.requests) {
       if (this.now() >= request.expiresAt + MAX_LIFETIME_MS) this.requests.delete(id);
+      else if (this.active(request)) pending++;
+      else terminal++;
     }
-    if (this.requests.size + this.starting >= MAX_REQUESTS) return { status: "busy" } as const;
+    for (const [id, request] of this.requests) {
+      if (terminal <= MAX_TERMINAL_REQUESTS) break;
+      if (request.status !== "pending") {
+        this.requests.delete(id);
+        terminal--;
+      }
+    }
+    if (pending + this.starting >= MAX_REQUESTS) return { status: "busy" } as const;
     this.starting++;
     const startedAt = this.now();
     try {
@@ -84,6 +111,7 @@ export class GithubSignIn {
         body: new URLSearchParams({ client_id: this.config.clientId }),
       });
       if (this.closed.signal.aborted) throw new Error();
+      if (result.error !== undefined) throw providerFailure(result.error);
       const expiresAt = startedAt + Math.min(seconds(result.expires_in) * 1000, MAX_LIFETIME_MS);
       const intervalMs = seconds(result.interval) * 1000;
       if (expiresAt <= this.now() || intervalMs > MAX_LIFETIME_MS ||
@@ -101,8 +129,9 @@ export class GithubSignIn {
         verificationUri: result.verification_uri, userCode: result.user_code,
         expiresIn: Math.floor((expiresAt - this.now()) / 1000), interval: intervalMs / 1000,
       } as const;
-    } catch {
+    } catch (error) {
       // Never expose/log upstream bodies or exceptions: they can carry tokens.
+      if (!this.closed.signal.aborted) this.logFailure("start", error);
       return { status: "failed" } as const;
     } finally {
       this.starting--;
@@ -123,6 +152,7 @@ export class GithubSignIn {
     if (request.polling || this.now() < request.nextPollAt) return this.pending(request);
     request.polling = true;
     request.nextPollAt = this.now() + request.intervalMs;
+    let step = "token";
     try {
       if (request.deviceCode === undefined) throw new Error();
       const result = await this.github("https://github.com/login/oauth/access_token", {
@@ -143,6 +173,7 @@ export class GithubSignIn {
       if (result.error !== undefined) {
         const status = result.error === "access_denied" ? "denied"
           : result.error === "expired_token" ? "expired" : "failed";
+        if (status === "failed") throw providerFailure(result.error);
         this.finish(request, status);
         return { status };
       }
@@ -150,12 +181,14 @@ export class GithubSignIn {
           result.token_type !== "bearer" || result.scope !== "") throw new Error();
       // Only /user's numeric durable ID and current login are read. Neither
       // access_token nor refresh_token is copied into any retained state.
+      step = "identity";
       const identity = await this.github("https://api.github.com/user", {
         headers: { Authorization: `Bearer ${result.access_token}` },
       });
       if (!this.active(request)) return { status: request.status as TerminalStatus };
       if (typeof identity.id !== "number" || !Number.isSafeInteger(identity.id) || identity.id < 1 ||
           typeof identity.login !== "string") throw new Error();
+      step = "issuance";
       const principal = this.principals.identify(String(identity.id), identity.login);
       const issued = this.credentials.issue({
         principalId: principal.id, deviceId: crypto.randomUUID(),
@@ -168,12 +201,23 @@ export class GithubSignIn {
         status: "complete", identity: principal,
         credential: { record: issued.record, key: Buffer.from(issued.keyBytes).toString("base64url") },
       };
-    } catch {
-      if (this.active(request)) this.finish(request, "failed");
+    } catch (error) {
+      if (this.active(request)) {
+        this.logFailure(step, error);
+        this.finish(request, "failed");
+      }
       return { status: request.status as TerminalStatus };
     } finally {
       request.polling = false;
     }
+  }
+
+  private logFailure(step: string, error: unknown): void {
+    this.log({
+      event: "hub.github.sign-in.failed", step,
+      code: error instanceof GithubFailure ? error.code : "request-failed",
+      ...(error instanceof GithubFailure && error.status !== undefined ? { status: error.status } : {}),
+    });
   }
 
   private lookup(id: string, secret: string): SignInRequest | undefined {
@@ -204,7 +248,7 @@ export class GithubSignIn {
       signal: AbortSignal.any([this.closed.signal, AbortSignal.timeout(10_000)]),
       headers: { Accept: "application/json", "User-Agent": "Uberblick-Hub", "X-GitHub-Api-Version": "2026-03-10", ...init.headers },
     });
-    if (!response.ok) throw new Error();
+    if (!response.ok) throw new GithubFailure("http-error", response.status);
     // Even a successful provider response is bounded before parsing. Only a
     // public identity or a small OAuth result is needed, never a large payload.
     if (response.body === null) throw new Error();

@@ -214,6 +214,11 @@ Omitting the setting, or leaving it empty, disables sign-in with a distinct
 `not-configured` response. A malformed client ID prevents hub startup and names
 `HUB_GITHUB_CLIENT_ID`; GitHub refusing or being unreachable fails only the
 attempt in progress. Local-only work and `ub open` need no GitHub app.
+Failed attempts emit `hub.github.sign-in.failed` in the hub's stderr JSON log,
+with the failing step, a fixed code and the upstream HTTP status when available.
+No GitHub token, response body or upstream exception is logged. Check the app's
+Device Flow setting and client ID when the code reports `device_flow_disabled`
+or `incorrect_client_credentials`.
 
 The sign-in interface is `POST /auth/github/start`, `POST /auth/github/collect`
 and `POST /auth/github/cancel`. Starting returns a GitHub approval URL, short
@@ -224,6 +229,10 @@ collection secret private; the displayed code alone cannot collect anything.
 Cancellation abandons the attempt. The hub reads the authorized public account
 identity and discards GitHub's token; it accepts no supplied GitHub token or
 identity. This interface does not add CLI login commands or a browser session.
+The hub permits 100 active attempts, independently of finished attempts. Terminal
+statuses expire no later than fifteen minutes after the attempt's expiry; at
+most 100 are retained when new attempts start, evicting oldest requests first. Evicted or restarted
+requests return `unknown-request`.
 
 Sign-in identifies the durable GitHub account and issues one Uberblick device
 credential for its existing workspace memberships. It grants no membership.

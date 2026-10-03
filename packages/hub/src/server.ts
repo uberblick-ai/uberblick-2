@@ -639,7 +639,7 @@ export async function createHub(config: HubConfig): Promise<Hub> {
   try {
     if (config.github !== undefined) {
       signIn = new GithubSignIn(config.github, new PrincipalRegistry(database),
-        new CredentialRegistry(database), new MembershipRegistry(database));
+        new CredentialRegistry(database), new MembershipRegistry(database), log);
     }
   } catch (error) {
     closeDatabase();

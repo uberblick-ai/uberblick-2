@@ -97,7 +97,9 @@ describe("signed-in credentials on composed admission", () => {
     rig.memberships.grant({ workspaceId: WORKSPACE, principalId: "existing-admin", role: "admin" });
     const before = membershipSnapshot(rig.database);
     const signedIn = await rig.completeSignIn();
-    expect(rig.principals.findByGithubAccountId("1234")).toEqual(signedIn.identity);
+    expect(rig.database.connection.prepare("SELECT id, github_account_id, github_username FROM hub_principals").all()).toEqual([{
+      id: signedIn.identity.id, github_account_id: "1234", github_username: "signed-in-person",
+    }]);
     expect(signedIn.credential.record.workspaces).toEqual([]);
     expect(rig.credentials.get(signedIn.credential.record.id)).toEqual(signedIn.credential.record);
     expect(membershipSnapshot(rig.database)).toEqual(before);
