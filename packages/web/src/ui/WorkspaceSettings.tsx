@@ -115,11 +115,15 @@ function WorkspaceNameForm({
   const arrived = connection?.room === settingsRoom(workspace.uuid) && status.hasReceivedServerState;
   const currentName = arrived ? sharedName : null;
   const [draft, setDraft] = useState(currentName ?? "");
+  const previousName = useRef(currentName ?? "");
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const writable = arrived && status.writable;
 
   useEffect(() => {
-    setDraft(currentName ?? "");
+    const previous = previousName.current;
+    const next = currentName ?? "";
+    setDraft((value) => value === previous ? next : value);
+    previousName.current = next;
   }, [currentName]);
 
   const save = (event: FormEvent<HTMLFormElement>): void => {

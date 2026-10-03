@@ -474,6 +474,34 @@ it("renames only shared workspace state and refuses invalid drafts without chang
   directory.connection.ydoc.destroy(); settings.connection.ydoc.destroy();
 });
 
+it("follows shared names while pristine and preserves an edited rename draft", async () => {
+  const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  const peer = peerOf(settings.connection.ydoc);
+  const host = await mount(null, ENDPOINT, settings.connection);
+  const input = host.querySelector<HTMLInputElement>("#ub-workspace-name") as HTMLInputElement;
+  const submit = host.querySelector<HTMLButtonElement>("form button[type=submit]") as HTMLButtonElement;
+  expect(input.value).toBe("");
+
+  act(() => setWorkspaceName(peer, "Arriving name"));
+  expect(input.value).toBe("Arriving name");
+  act(() => typeInto(input, "Local draft"));
+  act(() => setWorkspaceName(peer, "Peer name"));
+  expect(input.value).toBe("Local draft");
+  act(() => setWorkspaceName(peer, "Another peer name"));
+  expect(input.value).toBe("Local draft");
+
+  act(() => typeInto(input, "Another peer name"));
+  act(() => setWorkspaceName(peer, "Followed name"));
+  expect(input.value).toBe("Followed name");
+  act(() => typeInto(input, "Saved local name"));
+  act(() => submit.click());
+  expect(getWorkspaceName(peer)).toBe("Saved local name");
+  act(() => setWorkspaceName(peer, "Later peer name"));
+  expect(input.value).toBe("Later peer name");
+  settings.connection.ydoc.destroy();
+  peer.destroy();
+});
+
 it("waits for settings state and refuses renaming when its room cannot write", async () => {
   const settings = statusRoom({ ...SYNCED, hasReceivedServerState: false }, settingsRoom(WORKSPACE.uuid));
   setWorkspaceName(settings.connection.ydoc, "Existing name");
@@ -486,7 +514,6 @@ it("waits for settings state and refuses renaming when its room cannot write", a
   expect(input.value).toBe("");
   expect(host.textContent).toContain("Waiting for workspace settings");
   act(() => {
-    typeInto(input, "Unreceived overwrite");
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   });
   expect(getWorkspaceName(settings.connection.ydoc)).toBe("Existing name");

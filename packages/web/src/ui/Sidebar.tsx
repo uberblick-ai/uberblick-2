@@ -435,7 +435,7 @@ function SettingsNavigation({
     >
       <button
         type="button"
-        className="ub-settings-back mb-2 flex min-h-8.5 pointer-coarse:min-h-11 w-full items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left text-sm text-(--sidebar-row-foreground) cursor-pointer hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        className="ub-settings-back mb-2 flex min-h-8.5 pointer-coarse:min-h-11 w-full items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left text-sm font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
         data-swap-focus
         onClick={onBack}
       >

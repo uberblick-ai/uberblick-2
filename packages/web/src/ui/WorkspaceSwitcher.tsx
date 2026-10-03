@@ -95,7 +95,7 @@ export function WorkspaceSwitcher({
   return (
     <DropdownMenu open={active && open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <button type="button" className="ub-workspace -mx-2 -mt-2 mb-2 flex w-[calc(100%+1rem)] min-h-6 pointer-coarse:min-h-11 items-center gap-2 border-0 border-b border-(--sidebar-border) bg-transparent p-2 text-left font-inherit text-inherit cursor-pointer hover:border-b-[light-dark(var(--sidebar),var(--sidebar-border))] hover:bg-sidebar-accent hover:text-accent-foreground" aria-label="Workspace">
+        <button type="button" className="ub-workspace -mx-2 -mt-2 mb-2 flex w-[calc(100%+1rem)] min-h-6 pointer-coarse:min-h-11 items-center gap-2 border-0 border-b border-(--sidebar-border) bg-transparent p-2 text-left font-[inherit] text-inherit cursor-pointer hover:border-b-[light-dark(var(--sidebar),var(--sidebar-border))] hover:bg-(--sidebar-accent) hover:text-accent-foreground" aria-label="Workspace">
           {/* Hidden like the user card's tile: a letter announced beside the
               name it repeats is the name read twice. */}
           {current !== null && (
