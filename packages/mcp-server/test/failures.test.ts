@@ -94,6 +94,7 @@ const EXPECTED: Record<
   string,
   { recoveryClass: string | null; detail: string[] }
 > = {
+  invalid_github_reference: { recoveryClass: "manual", detail: ["github_ref"] },
   persistence_failed: { recoveryClass: "manual", detail: ["room"] },
   stale_block: {
     recoveryClass: "reread",
@@ -203,6 +204,7 @@ describe("the failure contract", () => {
     };
 
     record((await rig.call("get_doc", { uuid: randomUUID() })).payload);
+    record((await rig.call("find_decisions", { github_ref: "#1" })).payload);
     record(
       (await rig.call("get_doc", { uuid: stubOnly(rig) })).payload,
     );
@@ -466,6 +468,36 @@ describe("the failure contract", () => {
     expect(blockedRead.payload.applied).toBeUndefined();
     expect(blockedRead.payload.partial).toBeUndefined();
     expect(blockedRead.payload.synced).toBeUndefined();
+  });
+
+  it("refuses values that name no single GitHub issue or pull request without claiming a write", async () => {
+    const rig = await localRig();
+    const size = rig.instance.store.logSize();
+    for (const github_ref of [
+      "",
+      "#1",
+      "https://example.com/owner/repo/issues/1",
+      "https://github.com/owner/repo",
+      "https://github.com/owner/repo/issues",
+      "https://github.com/owner/repo/pull/",
+      "https://github.com/owner/repo/commit/1",
+      "https://github.com/owner/repo/discussions/1",
+    ]) {
+      const refused = await rig.call("find_decisions", { github_ref });
+      expect(refused).toMatchObject({
+        isError: true,
+        payload: {
+          error: "invalid_github_reference",
+          github_ref,
+          recoveryClass: "manual",
+          recovery: expect.stringContaining("Correct github_ref"),
+        },
+      });
+      expect(refused.payload).not.toHaveProperty("applied");
+      expect(refused.payload).not.toHaveProperty("partial");
+      expect(refused.payload).not.toHaveProperty("synced");
+    }
+    expect(rig.instance.store.logSize()).toBe(size);
   });
 
   it("makes doc_not_hydrated retryable only while a hub could still deliver the room", () => {

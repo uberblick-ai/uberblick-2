@@ -142,6 +142,7 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "list_docs",
   "search",
   "backlinks",
+  "find_decisions",
   "export_markdown",
   "sync_status",
   "get_sidebar",
@@ -162,6 +163,11 @@ interface Recovery {
  * the call that finishes it — but never contradict the class.
  */
 const RECOVERIES: Record<string, Recovery> = {
+  invalid_github_reference: {
+    recoveryClass: "manual",
+    guidance:
+      "Correct github_ref to one owner/repo#n reference or an http(s) github.com URL naming /issues/n or /pull/n, then call find_decisions again.",
+  },
   guidance_required: {
     recoveryClass: "reread",
     guidance: "Read each unread guidance document with get_doc, then retry the refused tool call.",
