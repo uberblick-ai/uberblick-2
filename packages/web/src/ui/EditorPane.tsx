@@ -8,6 +8,7 @@ import type { ReactElement, ReactNode } from "react";
 import {
   getAnnotation,
   getBlocksFragment,
+  isExternalHref,
   MAX_TLDR_LENGTH,
   parseRoom,
   setTldr,
@@ -17,6 +18,7 @@ import type { Editor } from "@tiptap/core";
 import { bindGuardedEditor } from "../editor/guarded-binding.js";
 import { docLinkFromTarget } from "../editor/doc-links.js";
 import type { DocLinkContext } from "../editor/doc-links.js";
+import { linkAnchorFromTarget } from "../editor/external-links.js";
 import { describeForeignBlocks } from "../editor/palette.js";
 import type { LinkConflict } from "../editor/palette.js";
 import { repairLinkConflict } from "../editor/link-repair.js";
@@ -660,10 +662,10 @@ function BoundEditor({
     // A comment highlight is a plain span ProseMirror renders from the `comment`
     // mark, so the click that focuses its thread is read by delegation on the
     // host: no ProseMirror plugin, and nothing competing with the caret. A
-    // document reference is read the same way, and *first*: the two can overlap,
-    // and a click that both navigated and opened a thread would be two actions
-    // from one gesture. The reference wins, and the thread stays reachable by
-    // clicking the highlight beside the link or its card in the rail.
+    // document reference is read the same way, and *first*. External links also
+    // bypass thread selection: following a link and opening a thread would be
+    // two actions from one gesture. The link wins; the thread stays reachable
+    // through the highlight beside the link or its card in the rail.
     const selectThread = (threadId: string, viaKeyboard = false): void => {
       onSelectThread(threadId, {
         viaKeyboard,
@@ -692,6 +694,21 @@ function BoundEditor({
         }
         return;
       }
+      const anchor = linkAnchorFromTarget(event.target);
+      if (anchor !== null) {
+        // Editable links open through ProseMirror's non-moving handleClick,
+        // never this DOM click (which also fires after a selection drag). A
+        // read-only link keeps its native target/rel behavior. Refuse other
+        // schemes at this boundary too, even if an anchor's DOM was changed.
+        if (
+          binding.editor?.isEditable ||
+          event.shiftKey ||
+          !isExternalHref(anchor.getAttribute("href"))
+        ) {
+          event.preventDefault();
+        }
+        return;
+      }
       const threadId = threadIdFromTarget(event.target);
       if (threadId !== null) selectThread(threadId);
     };
@@ -717,6 +734,18 @@ function BoundEditor({
         event.preventDefault();
         event.stopPropagation();
         docLinks.open(docId);
+        return;
+      }
+      const anchor = linkAnchorFromTarget(event.target);
+      if (anchor !== null) {
+        // Enter on a focused read-only anchor belongs to the browser; neither
+        // Enter nor Space on it activates the surrounding comment highlight.
+        if (
+          event.key === "Enter" &&
+          !isExternalHref(anchor.getAttribute("href"))
+        ) {
+          event.preventDefault();
+        }
         return;
       }
       const threadId = threadIdFromActivation(event);
