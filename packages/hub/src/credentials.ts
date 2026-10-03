@@ -2,11 +2,12 @@
  * Hub-owned device credentials. These rows share the document database handle
  * and its backups, but are never synchronized document content. Independent
  * random signing keys keep the legacy shared root and other devices powerless
- * over a credential. Only issue() returns the key to its sign-in caller.
+ * over a credential. Issuance and renewal each return a new key once.
  */
 
-import type { StatementSync } from "node:sqlite";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { parseWorkspaceId } from "@uberblick/schema";
+import type { MembershipRegistry } from "./memberships.js";
 import type { HubDatabase } from "./persistence.js";
 import {
   type ClampFailure,
@@ -15,6 +16,7 @@ import {
   clampToken,
   importCredentialKey,
   inspectToken,
+  inspectRequestProof,
   readTokenKeyId,
 } from "./token.js";
 
@@ -25,6 +27,7 @@ export interface CredentialRecord {
   workspaces: string[];
   issuedAt: number;
   revokedAt: number | null;
+  replacedAt: number | null;
 }
 
 export interface IssueCredentialRequest {
@@ -39,13 +42,18 @@ export interface IssuedCredential {
   keyBytes: Uint8Array;
 }
 
+export type CredentialRenewal =
+  | { status: "complete"; credential: IssuedCredential }
+  | { status: "replaced-credential" | "sign-in-required" };
+
 /** Specific internal causes; admission sends a single safe refusal. */
 export type CredentialFailure =
   | TokenFailure
   | ClampFailure
   | "root-key"
   | "unknown-credential"
-  | "revoked-credential";
+  | "revoked-credential"
+  | "replaced-credential";
 
 export type CredentialVerification =
   | { record: CredentialRecord; claims: TokenClaims }
@@ -58,6 +66,7 @@ interface CredentialRow {
   workspaces: string;
   issued_at: number;
   revoked_at: number | null;
+  replaced_at: number | null;
 }
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS hub_credentials (
@@ -67,11 +76,12 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS hub_credentials (
   workspaces TEXT NOT NULL,
   signing_key BLOB NOT NULL CHECK(length(signing_key) = 32),
   issued_at INTEGER NOT NULL,
-  revoked_at INTEGER
+  revoked_at INTEGER,
+  replaced_at INTEGER
 )`;
 
 const PUBLIC_COLUMNS =
-  "id, principal_id, device_id, workspaces, issued_at, revoked_at";
+  "id, principal_id, device_id, workspaces, issued_at, revoked_at, replaced_at";
 
 function recordFromRow(row: CredentialRow): CredentialRecord {
   return {
@@ -81,25 +91,35 @@ function recordFromRow(row: CredentialRow): CredentialRecord {
     workspaces: JSON.parse(row.workspaces) as string[],
     issuedAt: row.issued_at,
     revokedAt: row.revoked_at,
+    replacedAt: row.replaced_at,
   };
 }
 
 /**
  * This internal API fixes authorization at issuance. There is no mutation that
- * widens or restores a credential, and no route from client messages to it.
+ * widens or restores a credential in place. Renewal retires the original.
  * Configured live sign-in constructs this registry for issuance; live room
  * admission still uses the root secret until the coordinated client cutover.
  */
 export class CredentialRegistry {
+  private readonly db: DatabaseSync;
   private readonly insert: StatementSync;
   private readonly select: StatementSync;
   private readonly selectKey: StatementSync;
   private readonly markRevoked: StatementSync;
+  private readonly markReplaced: StatementSync;
   private readonly revokeListeners = new Set<(credentialId: string) => void>();
 
   constructor(database: HubDatabase) {
     const db = database.connection;
+    this.db = db;
     db.exec(SCHEMA);
+    // Sign-in has already created this table on existing hubs. CREATE IF NOT
+    // EXISTS alone cannot add the new retirement state to those databases.
+    if (!db.prepare("PRAGMA table_info(hub_credentials)").all()
+      .some((column) => column.name === "replaced_at")) {
+      db.exec("ALTER TABLE hub_credentials ADD COLUMN replaced_at INTEGER");
+    }
     this.insert = db.prepare(`
       INSERT INTO hub_credentials
         (id, principal_id, device_id, workspaces, signing_key, issued_at)
@@ -114,6 +134,10 @@ export class CredentialRegistry {
     this.markRevoked = db.prepare(`
       UPDATE hub_credentials SET revoked_at = $revokedAt
       WHERE id = $id AND revoked_at IS NULL
+    `);
+    this.markReplaced = db.prepare(`
+      UPDATE hub_credentials SET replaced_at = $replacedAt
+      WHERE id = $id AND revoked_at IS NULL AND replaced_at IS NULL
     `);
   }
 
@@ -138,6 +162,7 @@ export class CredentialRegistry {
       workspaces: [...new Set(request.workspaces)].sort(),
       issuedAt: Date.now(),
       revokedAt: null,
+      replacedAt: null,
     };
     const keyBytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
     this.insert.run({
@@ -164,6 +189,7 @@ export class CredentialRegistry {
     const record = this.get(lookup.kid);
     if (record === null) return { failure: "unknown-credential" };
     if (record.revokedAt !== null) return { failure: "revoked-credential" };
+    if (record.replacedAt !== null) return { failure: "replaced-credential" };
     const row = this.selectKey.get({ id: record.id });
     const keyBytes = row?.signing_key;
     if (!(keyBytes instanceof Uint8Array)) {
@@ -178,7 +204,64 @@ export class CredentialRegistry {
     const current = this.get(record.id);
     if (current === null) return { failure: "unknown-credential" };
     if (current.revokedAt !== null) return { failure: "revoked-credential" };
+    if (current.replacedAt !== null) return { failure: "replaced-credential" };
     return { record: current, claims: inspected };
+  }
+
+  /**
+   * Key possession for this operation only. A retired key is retained privately
+   * so a verified retry can say replaced without revealing state to a forgery.
+   * After the last WebCrypto await, snapshot membership, issue and retire in
+   * one synchronous transaction. Revocation and a second exchange cannot slip
+   * between the authority check and replacement, nor can a disk failure leave
+   * two credentials usable.
+   */
+  async renew(token: string, memberships: MembershipRegistry): Promise<CredentialRenewal> {
+    const lookup = readTokenKeyId(token);
+    if ("failure" in lookup || lookup.kid === null) return { status: "sign-in-required" };
+    const row = this.selectKey.get({ id: lookup.kid });
+    if (!(row?.signing_key instanceof Uint8Array)) return { status: "sign-in-required" };
+    const proof = await inspectRequestProof(await importCredentialKey(row.signing_key), token);
+    if ("failure" in proof || proof.operation !== "renew-credential" ||
+      clampToken(proof, Math.floor(Date.now() / 1000)) !== null) {
+      return { status: "sign-in-required" };
+    }
+
+    this.db.exec("BEGIN IMMEDIATE");
+    let replacement: IssuedCredential;
+    try {
+      const current = this.get(lookup.kid);
+      if (current === null || current.revokedAt !== null) {
+        this.db.exec("ROLLBACK");
+        return { status: "sign-in-required" };
+      }
+      if (current.replacedAt !== null) {
+        this.db.exec("ROLLBACK");
+        return { status: "replaced-credential" };
+      }
+      replacement = this.issue({ principalId: current.principalId,
+        deviceId: current.deviceId, workspaces: memberships.workspacesFor(current.principalId) });
+      this.markReplaced.run({ id: current.id, replacedAt: Date.now() });
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    try {
+      this.closeAccess(lookup.kid);
+    } catch (error) {
+      // A key whose exchange failed must never remain usable, even if closure
+      // listeners failed after the durable transaction. No key is returned.
+      this.revoke(replacement.record.id);
+      throw error;
+    }
+    // Subscribers are synchronous but may themselves revoke access. Such a
+    // revocation still landed during this exchange, before its key went out.
+    if (this.get(lookup.kid)?.revokedAt !== null) {
+      this.revoke(replacement.record.id);
+      return { status: "sign-in-required" };
+    }
+    return { status: "complete", credential: replacement };
   }
 
   /**
@@ -192,6 +275,12 @@ export class CredentialRegistry {
     // A previous listener failure left the row revoked. Retrying must still
     // fence every connection before it can report success to its caller.
     if (!changed && this.get(id) === null) return false;
+    this.closeAccess(id);
+    return changed;
+  }
+
+  /** Both revocation and replacement persist before notifying admission. */
+  private closeAccess(id: string): void {
     const failures: unknown[] = [];
     for (const listener of this.revokeListeners) {
       try {
@@ -203,7 +292,6 @@ export class CredentialRegistry {
     if (failures.length > 0) {
       throw new AggregateError(failures, "CredentialRegistry.revoke: closure failed");
     }
-    return changed;
   }
 
   onRevoke(listener: (credentialId: string) => void): () => void {

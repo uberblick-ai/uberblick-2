@@ -73,6 +73,9 @@ describe("token minting sites", () => {
     "packages/hub/test/credential-admission.test.ts",
     "packages/hub/test/credential-compatibility.test.ts",
     "packages/hub/test/credential-registry.test.ts",
+    // Renewal probes keep room tokens distinct from operation-bound proofs.
+    "packages/hub/test/credential-renewal-registry.test.ts",
+    "packages/hub/test/credential-renewal.test.ts",
     "packages/hub/test/credential.test.ts",
     // Collected sign-in credentials, including restart verification and
     // composed admission; bounded lifetime and issued credential kid.

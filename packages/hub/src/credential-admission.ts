@@ -96,6 +96,7 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     if (record === null || record.revokedAt !== null) {
       return refuse("revoked-credential");
     }
+    if (record.replacedAt !== null) return refuse("replaced-credential");
     const workspace = workspaceOf(documentName);
     if (workspace === null || workspace !== verified.claims.workspace) {
       return refuse("workspace-mismatch");
@@ -189,15 +190,17 @@ export class CredentialAdmission implements Extension<CredentialContext> {
       ? "unknown-credential"
       : record.revokedAt !== null
         ? "revoked-credential"
-        : workspace === null ||
-              workspace !== context.workspace ||
-              !record.workspaces.includes(workspace)
-          ? "workspace-mismatch"
-          : this.memberships.roleFor(workspace, record.principalId) === null
-            ? "missing-membership"
-            : !context.authorization.active
-              ? "access-ended"
-              : null;
+        : record.replacedAt !== null
+          ? "replaced-credential"
+          : workspace === null ||
+                workspace !== context.workspace ||
+                !record.workspaces.includes(workspace)
+            ? "workspace-mismatch"
+            : this.memberships.roleFor(workspace, record.principalId) === null
+              ? "missing-membership"
+              : !context.authorization.active
+                ? "access-ended"
+                : null;
     if (cause !== null) {
       context.authorization.active = false;
       connection.readOnly = true;

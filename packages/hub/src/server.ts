@@ -59,6 +59,7 @@ import {
 } from "./config.js";
 import type { HubLogger } from "./log.js";
 import { CredentialRegistry } from "./credentials.js";
+import { handleCredentialRenewal } from "./credential-renewal.js";
 import { startAdminSetup } from "./admin-setup.js";
 import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
 import { MembershipRegistry } from "./memberships.js";
@@ -639,13 +640,15 @@ export async function createHub(config: HubConfig, options: { operatorSetup?: bo
   let signIn: GithubSignIn | undefined;
   let principals: PrincipalRegistry | undefined;
   let memberships: MembershipRegistry | undefined;
+  let credentials: CredentialRegistry | undefined;
   try {
     if (config.github !== undefined || options.operatorSetup) {
       principals = new PrincipalRegistry(database);
       memberships = new MembershipRegistry(database);
       if (config.github !== undefined) {
+        credentials = new CredentialRegistry(database);
         signIn = new GithubSignIn(config.github, principals,
-          new CredentialRegistry(database), memberships, log);
+          credentials, memberships, log);
       }
     }
   } catch (error) {
@@ -686,6 +689,7 @@ export async function createHub(config: HubConfig, options: { operatorSetup?: bo
     onAuthenticate: authenticate,
 
     async onRequest({ request, response }) {
+      if (await handleCredentialRenewal(credentials, memberships, protocolVersion, request, response)) return Promise.reject();
       if (await handleGithubSignIn(signIn, request, response)) return Promise.reject();
     },
 

@@ -5,15 +5,25 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { ClampFailure, TokenClaims, TokenRequest } from "../src/token.js";
+import type {
+  ClampFailure,
+  RequestProofRequest,
+  TokenClaims,
+  TokenRequest,
+} from "../src/token.js";
 import {
   CLOCK_SKEW_SECONDS,
   MAX_TOKEN_LENGTH,
   MAX_TOKEN_LIFETIME_SECONDS,
   clampToken,
   formatCredential,
+  importCredentialKey,
   importRootSecret,
+  inspectRequestProof,
+  inspectToken,
+  mintRequestProof,
   mintToken,
+  readTokenKeyId,
   verifyToken,
 } from "../src/token.js";
 
@@ -257,6 +267,183 @@ describe("mintToken / verifyToken", () => {
 
   it("refuses an empty root secret", async () => {
     await expect(importRootSecret("")).rejects.toThrow(/root secret/);
+  });
+});
+
+describe("operation-bound request proofs", () => {
+  const NOW = 1_800_000_000;
+  const deviceKeyPromise = importCredentialKey(new Uint8Array(32).fill(7));
+
+  function proofRequest(
+    overrides: Record<string, unknown> = {},
+  ): RequestProofRequest {
+    return {
+      kid: CRED_ID,
+      operation: "renew-credential",
+      iat: NOW,
+      lifetimeSeconds: 60,
+      ...overrides,
+    } as RequestProofRequest;
+  }
+
+  it("proves a device key without any workspace or room authority", async () => {
+    const deviceKey = await deviceKeyPromise;
+    const proof = await mintRequestProof(deviceKey, proofRequest());
+
+    expect(readTokenKeyId(proof)).toEqual({ kid: CRED_ID });
+    expect(await inspectRequestProof(deviceKey, proof)).toEqual({
+      typ: "request",
+      operation: "renew-credential",
+      kid: CRED_ID,
+      iat: NOW,
+      exp: NOW + 60,
+    });
+    expect(await inspectToken(deviceKey, proof)).toMatchObject({
+      failure: "unsupported-claims",
+    });
+    expect(await verifyToken(deviceKey, proof)).toBeNull();
+
+    // The live shared-secret authenticator must also refuse a request proof,
+    // even when someone possessing that secret signs one correctly.
+    const rootProof = await mintRequestProof(key, proofRequest());
+    expect(await verifyToken(key, rootProof)).toBeNull();
+    const roomToken = await mintToken(deviceKey, request({ kid: CRED_ID }));
+    expect(await inspectRequestProof(deviceKey, roomToken)).toMatchObject({
+      failure: "unsupported-claims",
+    });
+  });
+
+  it("refuses proofs signed by another device or the shared secret", async () => {
+    const deviceKey = await deviceKeyPromise;
+    for (const signingKey of [
+      key,
+      await importCredentialKey(new Uint8Array(32).fill(8)),
+    ]) {
+      const proof = await mintRequestProof(signingKey, proofRequest());
+      expect(await inspectRequestProof(deviceKey, proof)).toMatchObject({
+        failure: "bad-signature",
+      });
+    }
+  });
+
+  it("accepts only the bound operation and a credential key id", async () => {
+    const claims = {
+      typ: "request",
+      operation: "renew-credential",
+      kid: CRED_ID,
+      iat: NOW,
+      exp: NOW + 60,
+    };
+    expect(await inspectRequestProof(key, await forge(claims))).toEqual(claims);
+
+    for (const changedClaims of [
+      { ...claims, typ: "room" },
+      { ...claims, operation: "revoke-device" },
+      { ...claims, operation: undefined },
+      { ...claims, kid: null },
+      { ...claims, kid: "not-a-uuid" },
+      { ...claims, iat: 1.5 },
+      { ...claims, iat: -1 },
+      { ...claims, iat: Number.MAX_SAFE_INTEGER + 1 },
+      { ...claims, exp: undefined },
+      { ...claims, exp: NOW },
+    ]) {
+      expect(
+        await inspectRequestProof(key, await forge(changedClaims)),
+        JSON.stringify(changedClaims),
+      ).toMatchObject({ failure: "unsupported-claims" });
+    }
+
+    const otherOperation = await forge({
+      ...claims,
+      operation: "revoke-device",
+    });
+    const [, signature] = otherOperation.split(".");
+    const renewal = await forge(claims);
+    const [payload] = renewal.split(".");
+    expect(
+      await inspectRequestProof(key, `${payload}.${signature}`),
+    ).toMatchObject({ failure: "bad-signature" });
+  });
+
+  it("shares bounded canonical parsing with room tokens", async () => {
+    const proof = await mintRequestProof(key, proofRequest());
+    const [payload, signature] = proof.split(".");
+    for (const candidate of [
+      "",
+      "not-a-proof",
+      "a.b.c",
+      "!!!.!!!",
+      `${payload}.${signature}=`,
+      `${payload?.slice(0, 8)} ${payload?.slice(8)}.${signature}`,
+      "a".repeat(MAX_TOKEN_LENGTH + 1),
+    ]) {
+      expect(await inspectRequestProof(key, candidate)).toEqual({
+        failure: "unparseable",
+        identity: null,
+      });
+    }
+  });
+
+  it("shares the lifetime ceiling, clock skew and expiry clamp", async () => {
+    for (const [iat, lifetimeSeconds, expected] of [
+      [NOW, MAX_TOKEN_LIFETIME_SECONDS, null],
+      [NOW + CLOCK_SKEW_SECONDS, 60, null],
+      [NOW + CLOCK_SKEW_SECONDS + 1, 60, "not-yet-issued"],
+      [NOW - 61, 60, "expired"],
+    ] as const) {
+      const proof = await mintRequestProof(
+        key,
+        proofRequest({ iat, lifetimeSeconds }),
+      );
+      const inspected = await inspectRequestProof(key, proof);
+      expect("failure" in inspected).toBe(false);
+      if ("failure" in inspected) throw new Error(inspected.failure);
+      expect(clampToken(inspected, NOW)).toBe(expected);
+    }
+
+    const tooLong = await inspectRequestProof(
+      key,
+      await forge({
+        typ: "request",
+        operation: "renew-credential",
+        kid: CRED_ID,
+        iat: NOW,
+        exp: NOW + MAX_TOKEN_LIFETIME_SECONDS + 1,
+      }),
+    );
+    if ("failure" in tooLong) throw new Error(tooLong.failure);
+    expect(clampToken(tooLong, NOW)).toBe("lifetime-too-long");
+  });
+
+  it("refuses to mint invalid request claims and lifetimes", async () => {
+    for (const overrides of [
+      { operation: "room" },
+      { kid: null },
+      { kid: "not-a-uuid" },
+      { iat: -1 },
+      { iat: 1.5 },
+      { iat: Number.MAX_SAFE_INTEGER },
+      { lifetimeSeconds: 0 },
+      { lifetimeSeconds: -1 },
+      { lifetimeSeconds: 1.5 },
+      { lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS + 1 },
+    ]) {
+      await expect(
+        mintRequestProof(key, proofRequest(overrides)),
+        JSON.stringify(overrides),
+      ).rejects.toThrow(/mintRequestProof/);
+    }
+
+    const before = Math.floor(Date.now() / 1000);
+    const proof = await mintRequestProof(
+      key,
+      proofRequest({ iat: undefined }),
+    );
+    const inspected = await inspectRequestProof(key, proof);
+    if ("failure" in inspected) throw new Error(inspected.failure);
+    expect(inspected.iat).toBeGreaterThanOrEqual(before);
+    expect(inspected.iat).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
   });
 });
 

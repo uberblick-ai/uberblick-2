@@ -11,7 +11,7 @@ import type { GithubSignIn, SignInCollection } from "../src/github-sign-in.js";
 import { silentLogger } from "../src/log.js";
 import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
 import { createHub, createRoomAuthenticator, type Hub, type HubContext } from "../src/server.js";
-import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "../src/token.js";
+import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintRequestProof, mintToken } from "../src/token.js";
 import {
   createClient,
   removeTempDatabases,
@@ -27,6 +27,7 @@ import {
 let hub: Hub;
 let localServer: Server<HubContext>;
 let issuedToken: string;
+let renewedToken: string;
 const clients: TestClient[] = [];
 
 beforeAll(async () => {
@@ -124,6 +125,30 @@ beforeAll(async () => {
     kid: collected.credential.record.id,
     lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
   });
+  const renewalProof = await mintRequestProof(await importCredentialKey(Buffer.from(collected.credential.key, "base64url")), {
+    kid: collected.credential.record.id,
+    operation: "renew-credential",
+    lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+  });
+  const renewed = await (await post("/auth/credential/renew", {
+    protocolVersion: SYNC_PROTOCOL_VERSION,
+    token: renewalProof,
+  })).json() as { status: string; credential?: typeof collected.credential };
+  if (renewed.status !== "complete" || renewed.credential === undefined) throw new Error("renewal did not complete");
+  expect(renewed.credential.record).toMatchObject({
+    principalId: collected.credential.record.principalId,
+    deviceId: collected.credential.record.deviceId,
+    workspaces: [WORKSPACE],
+  });
+  expect(renewed.credential.record.id).not.toBe(collected.credential.record.id);
+  renewedToken = await mintToken(await importCredentialKey(Buffer.from(renewed.credential.key, "base64url")), {
+    typ: "room",
+    sub: collected.identity.id,
+    workspace: WORKSPACE,
+    scope: "read-write",
+    kid: renewed.credential.record.id,
+    lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+  });
 
   // This is the shared authenticator installed by ub open. It needs only its
   // local secret and served workspace, without a registry or credential.
@@ -183,13 +208,13 @@ describe("current admission is unchanged", () => {
     },
   );
 
-  it("the live hub refuses a token signed under an issued credential", async () => {
-    const client = connect(hub.port, WORKSPACE, issuedToken);
+  it.each(["issued", "renewed"] as const)("the live hub refuses a token signed under an %s credential", async (kind) => {
+    const client = connect(hub.port, WORKSPACE, kind === "issued" ? issuedToken : renewedToken);
     await expect(client.denied).resolves.toBe("invalid-token");
   });
 
-  it("the local authenticator refuses a token signed under an issued credential", async () => {
-    const client = connect(localServer.address.port, WORKSPACE, issuedToken);
+  it.each(["issued", "renewed"] as const)("the local authenticator refuses a token signed under an %s credential", async (kind) => {
+    const client = connect(localServer.address.port, WORKSPACE, kind === "issued" ? issuedToken : renewedToken);
     await expect(client.denied).resolves.toBe("invalid-token");
   });
 });

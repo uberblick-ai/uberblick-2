@@ -1,5 +1,6 @@
 /** Public sign-in identifies a person and issues a credential, never membership. */
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { authReply, readAuthBody } from "./auth-http.js";
 import type { CredentialRecord, CredentialRegistry } from "./credentials.js";
 import { GithubDeviceFlow, type DeviceFlowCollection, type GithubSignInConfig } from "./github-device-flow.js";
 import { type HubLogger, stderrLogger } from "./log.js";
@@ -25,11 +26,6 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult> {
   }
 }
 
-function object(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error();
-  return value as Record<string, unknown>;
-}
-
 /** HTTP bodies carry secrets; URLs, logs and browser configuration never do. */
 export async function handleGithubSignIn(
   signIn: GithubSignIn | undefined,
@@ -39,8 +35,7 @@ export async function handleGithubSignIn(
   const path = request.url ?? "";
   if (!path.startsWith("/auth/")) return false;
   const reply = (status: number, body: unknown) => {
-    response.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    response.end(JSON.stringify(body));
+    authReply(response, status, body);
   };
   if (!["/auth/github/start", "/auth/github/collect", "/auth/github/cancel"].includes(path)) {
     reply(404, { status: "unknown-request" });
@@ -50,21 +45,8 @@ export async function handleGithubSignIn(
     reply(503, { status: "not-configured" });
     return true;
   }
-  if (request.method !== "POST" || request.headers.authorization !== undefined ||
-      request.headers["content-type"]?.split(";")[0] !== "application/json") {
-    reply(400, { status: "invalid-request" });
-    return true;
-  }
   try {
-    let size = 0;
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) {
-      const bytes = Buffer.from(chunk as Uint8Array);
-      size += bytes.length;
-      if (size > 4096) throw new Error();
-      chunks.push(bytes);
-    }
-    const body = object(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    const body = await readAuthBody(request);
     if (path === "/auth/github/start") {
       if (Object.keys(body).length !== 0) throw new Error();
       const result = await signIn.start();
