@@ -349,13 +349,18 @@ test("touch reveals a low thread in the sheet while its close control stays in v
       if (index > 0) await page.keyboard.press("Enter");
       await page.keyboard.insertText(anchor);
     }
-    for (const [index] of anchors.entries()) {
+    for (const [index, anchor] of anchors.entries()) {
       await page.locator(".ub-editor .ub-paragraph").nth(index).click();
       await page.keyboard.press("Home");
       await page.keyboard.press("Shift+End");
+      await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(anchor);
       await page.locator(".ub-composer-open").click();
       await page.getByPlaceholder(/Comment as/).fill(`conversation ${index + 1}`);
       await page.keyboard.press("Enter");
+      // Creating a comment returns focus through Tiptap's next animation frame.
+      // Let that finish before another selection can be overwritten by it.
+      await expect(page.locator(".ub-thread")).toHaveCount(index + 1);
+      await expect(editor(page)).toBeFocused();
     }
     await expect(page.locator(".ub-thread")).toHaveCount(10);
     await page
