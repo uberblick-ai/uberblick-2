@@ -78,7 +78,7 @@ test("the docked sidebar shares the pane's top edge and transfers focus", async 
   await page.reload();
   await expect(restore).toBeVisible();
   await expect(restore).not.toBeFocused();
-  expect(await page.locator(".ub-body").evaluate((body) => body.getAnimations({ subtree: true }).length)).toBe(0);
+  expect(await page.locator(".ub-body").evaluate((body) => body.getAnimations({ subtree: true }).filter((animation) => animation instanceof CSSTransition).length)).toBe(0);
 });
 
 async function openDrawer(page: Page, settings = false): Promise<void> {
@@ -88,7 +88,7 @@ async function openDrawer(page: Page, settings = false): Promise<void> {
 
 async function expectPaneClearsOpener(page: Page): Promise<{ left: number; width: number }> {
   await page.locator(".ub-body").evaluate(async (body) => {
-    await Promise.all(body.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
+    await Promise.all(body.getAnimations({ subtree: true }).filter((animation) => animation instanceof CSSTransition).map((animation) => animation.finished.catch(() => undefined)));
   });
   const layout = await page.evaluate(() => {
     const pane = document.querySelector<HTMLElement>(".ub-pane");
@@ -99,6 +99,7 @@ async function expectPaneClearsOpener(page: Page): Promise<{ left: number; width
     const c = content.getBoundingClientRect();
     const o = opener.getBoundingClientRect();
     return {
+      paneTop: p.top,
       paneLeft: p.left,
       paneWidth: p.width,
       viewport: innerWidth,
@@ -110,6 +111,8 @@ async function expectPaneClearsOpener(page: Page): Promise<{ left: number; width
   expect(layout.paneLeft).toBe(0);
   expect(layout.paneWidth).toBeGreaterThan(0);
   expect(layout.paneWidth).toBeLessThanOrEqual(layout.viewport);
+  // The scrollport itself clears the opener, so scrolling cannot cover prose.
+  expect(layout.paneTop).toBeGreaterThanOrEqual(layout.openerBottom);
   expect(layout.contentTop).toBeGreaterThanOrEqual(layout.openerBottom);
   expect(layout.reachable).toBe(true);
   return { left: layout.paneLeft, width: layout.paneWidth };
@@ -118,7 +121,7 @@ async function expectPaneClearsOpener(page: Page): Promise<{ left: number; width
 test("phone, iPad and MacBook widths keep the drawer and pane controls inside the viewport", async ({ browser }) => {
   const page = await openApp(browser);
   await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(page.locator(".ub-document-pane > .ub-column")).toBeVisible();
+  await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
   for (const settings of [false, true]) {
     await page.setViewportSize({ width: 1280, height: 832 });
     if (settings) {
@@ -155,7 +158,7 @@ test("phone, iPad and MacBook widths keep the drawer and pane controls inside th
   }
 });
 
-/** Sample real CSS transitions at fixed times, without racing a 180ms clock. */
+/** Sample layout transitions only; loading animations have their own lifetime. */
 async function sampleToggle(page: Page, collapse: boolean) {
   return page.evaluate(async (collapse) => {
     const body = document.querySelector<HTMLElement>(".ub-body");
@@ -188,7 +191,7 @@ async function sampleToggle(page: Page, collapse: boolean) {
     const before = reading();
     toggle.click();
     await new Promise(requestAnimationFrame);
-    const animations = body.getAnimations({ subtree: true });
+    const animations = body.getAnimations({ subtree: true }).filter((animation) => animation instanceof CSSTransition);
     for (const animation of animations) animation.pause();
     const frames = [0, 45, 90, 135, 180].map((time) => {
       for (const animation of animations) animation.currentTime = time;
@@ -204,12 +207,12 @@ test("desktop edges and document inset move together in both directions", async 
 }) => {
   const page = await openApp(browser);
   await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(page.locator(".ub-document-pane > .ub-column")).toBeVisible();
+  await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
   for (const width of [1280, 1400]) {
     await page.setViewportSize({ width, height: 800 });
     // Finish any inset transition caused by the breakpoint change itself.
     await page.locator(".ub-body").evaluate((body) => {
-      for (const animation of body.getAnimations({ subtree: true })) {
+      for (const animation of body.getAnimations({ subtree: true }).filter((animation) => animation instanceof CSSTransition)) {
         animation.finish();
       }
     });
@@ -251,7 +254,7 @@ test("collapse isolates contents and portals immediately, and rapid reversal kee
     document.querySelector<HTMLButtonElement>(".ub-sidebar-hide")?.click();
     await new Promise(requestAnimationFrame);
     const animations =
-      document.querySelector(".ub-body")?.getAnimations({ subtree: true }) ?? [];
+      document.querySelector(".ub-body")?.getAnimations({ subtree: true }).filter((animation) => animation instanceof CSSTransition) ?? [];
     for (const animation of animations) {
       animation.pause();
       animation.currentTime = 60;
@@ -302,7 +305,7 @@ test("reduced motion keeps docked toggles immediate", async ({ browser }) => {
   const page = await openApp(browser);
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(page.locator(".ub-document-pane > .ub-column")).toBeVisible();
+  await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
   for (const collapse of [true, false]) {
     const { frames, animated } = await sampleToggle(page, collapse);
     expect(animated).toBe(false);

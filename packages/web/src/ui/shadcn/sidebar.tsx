@@ -53,8 +53,8 @@ export function SidebarProvider({
         data-state={open ? "expanded" : "collapsed"}
         className={cn(
           "relative flex min-h-0 flex-1",
-          // Clear the narrow opener vertically; docked collapse uses an inset.
-          "max-xl:[&>.ub-pane>:not(.ub-pane-threads-toggle)]:mt-11 max-xl:[&>.ub-document-pane]:[--pane-document-inset:1rem] xl:data-[sidebar-collapsed=true]:[&>.ub-document-pane]:[--pane-document-inset:4rem]",
+          // Keep scrolling content below the narrow opener; docked collapse uses an inset.
+          "max-xl:[&>.ub-pane]:mt-11 max-xl:[&>.ub-document-pane]:[--pane-document-inset:1rem] xl:data-[sidebar-collapsed=true]:[&>.ub-document-pane]:[--pane-document-inset:4rem]",
           className,
         )}
         {...props}
