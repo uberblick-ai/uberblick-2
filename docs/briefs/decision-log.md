@@ -238,6 +238,11 @@ exactly one outcome a reader can see without opening it:
 | **Withdrawn** | Proposed and dropped by its author before anyone answered. | Archived while `open` |
 | **Open** | Proposed and waiting for a person. | Status `open` |
 
+Every record — current or historical — is its own document, its own Y.Doc
+with its own blocks and comment threads (owner, 2026-10-03); history is never
+folded into one record. Each row shows that record's **comment count**, so a
+reader sees where the discussion happened before opening anything.
+
 Each row also says who decided or approved it, and when; a confirmed agent
 stance reads *confirmed by \<person\>*. There is no summary such as "changed
 twice": the outcomes are the summary. A decision record's status set therefore
@@ -255,7 +260,8 @@ detail.
 
 ### 5. Efficient discovery from the directory stub
 
-The directory stub caches `governs`, `topic`, `supersedes` and `refs` beside
+The directory stub caches `governs`, `topic`, `supersedes`, `refs` and a
+`commentCount` (the number of comments across the record's threads) beside
 `kind` and `status`, under the same rule as those fields: the document is
 authoritative, every stub writer states it rather than carrying it forward, and
 repair converges the cache.
@@ -263,7 +269,9 @@ repair converges the cache.
 With that, every answer above comes from the directory alone — one synced
 document already in memory, one pass over its stubs, no decision room opened.
 `topic` makes grouping one key lookup; `supersedes` orders a chain and exposes
-forks.
+forks. `commentCount` lets a history list show counts without opening a
+room; like `updatedAt` it is a display hint, recomputed from the document's
+threads by whichever writer changes them and healed by stub repair.
 
 Default behavior:
 
@@ -310,7 +318,7 @@ topics, chains, agent stances and conflicts.
 | Decision log on a product document | A fixed section after the body, one row per topic, oldest topic first. Each row: topic title, current answer, and a state — Open, Decided, Decided by agent, Reconsideration open, Conflict. |
 | Decision view | One decision record read, edited and commented in context, over the still-visible product document. |
 | Approve and change | Confirming an agent-decided record, approving or rejecting a reconsideration, and resolving a conflict — the only human-gated actions, so they must be obvious and hard to trigger by accident. |
-| History | A topic's records oldest first, each ending in its outcome (section 4a) with who and when; every row clickable into a read-only view of that record, with a way back to the current answer. |
+| History | A topic's records oldest first, each ending in its outcome (section 4a) with who, when and its comment count; every row clickable into a read-only view of that record, with a way back to the current answer. |
 | Needs attention | One list across the workspace of open topics, agent-decided records awaiting review, and conflicts (principle 7) — where a person answers many small decisions quickly. |
 | Decisions in the document list | The existing *Decisions* mode in `shell/DocumentList.tsx`, showing one row per topic by default. |
 | Built-on marker | How an issue or pull request built on an open decision is visible from the decision, so a reversal finds its rework. |
