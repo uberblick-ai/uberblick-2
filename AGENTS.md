@@ -81,8 +81,9 @@ documents, and expand discovery when code or findings reveal missing context.
 A pointer is a route to the source, not a substitute for reading it.
 
 - **Discuss or shape:** `.agents/protocols/issue-shaping.md` plus relevant corpus;
-  it governs the human’s choice of draft requirement or confirmed intake, and
-  resuming a requirement by UUID. A draft grants no queue authority.
+  condense intent into the smallest useful outcome before technical preparation.
+  It routes shared drafts and resumption by UUID to the linked reference.
+  A draft grants no queue authority.
 - **Run a role:** `.agents/roles/README.md`, then `.agents/roles/<role>.md`.
 - **Prepare an issue:** `.agents/protocols/issue-preparation.md` and
   `.github/ISSUE_SPEC.md` for the issue contract.

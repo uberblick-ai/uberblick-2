@@ -1,18 +1,15 @@
 ---
 name: shape-issue
 description: >-
-  Explore and shape new Uberblick functionality through interactive discussion,
-  keeping intent, decisions, and open questions clear across larger efforts.
-  Publish or resume a draft requirement, or create a confirmed issue intake,
-  when the human chooses; do not prepare or implement it.
+  Condense user intent into a focused, useful MVP through interactive discussion.
+  Publish or resume an Uberblick draft requirement, or create a confirmed issue
+  intake when the human chooses; leave technical preparation and implementation
+  to the delivery roles.
 ---
 
 # shape-issue
 
-Read `.agents/protocols/issue-shaping.md` in full and follow it. This adapter
-adds no product, preparation, implementation, or queue policy. Discussion need
-not produce an issue. Preserve effort context only with the authorization the
-protocol requires. After confirmation, offer its coworker-review and small-
-intake exits and follow only the human's choice; resume an existing requirement
-only by uuid. Stop after publishing the draft or creating the intake;
-preparing it is the issue-preparer's separate run.
+Follow `.agents/protocols/issue-shaping.md`. Narrow broad ideas without forcing
+questions on clear requests, and preserve the human's settled choices. Read
+`.agents/protocols/requirement-resumption.md` only for a shared draft or resumption
+by UUID. This adapter adds no policy; stop at the authorized draft or intake.

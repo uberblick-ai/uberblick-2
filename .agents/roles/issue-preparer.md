@@ -27,6 +27,12 @@ disproportionate and finish `wontfix` without a review. Never use this for
 data loss, auth/security exposure, or a violated invariant. A concrete bug
 observed later may be filed or reopened as new evidence.
 
+Preserve the smallest useful outcome confirmed in shaping. Supply the technical
+grounding it deliberately omits; do not expand deferred ideas into acceptance
+criteria. Clarify factual gaps from evidence and routine engineering choices
+within scope. If narrowing would remove agreed behavior or change a product
+trade-off, raise that one choice under the shared escalation rule.
+
 Follow the protocol's route, challenge and final recheck. A `trivial` route
 finishes `ready`. A `challenged` route finishes `review`: the reviewer
 challenges the issue on another runtime, and when it asks for changes the issue
