@@ -39,6 +39,7 @@ import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { useDroppable } from "@dnd-kit/react";
 import { SidebarDragProvider } from "./sidebar-drag.js";
 import { Sidebar as SidebarFrame, SIDEBAR_TOGGLE_CLASSES, useSidebar } from "./shadcn/sidebar.js";
+import { Input } from "./shadcn/input.js";
 import { UserMenu } from "./UserMenu.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import type { SettingsPage, Workspace } from "./route.js";
@@ -754,26 +755,32 @@ function GroupSection({
     <section className="ub-group" ref={sortable.ref}>
       <div className="ub-group-head" ref={append.ref} data-drop-target={append.isDropTarget}>
         {editing ? (
-          <input
-            className="ub-group-rename"
-            defaultValue={group.name}
-            aria-label="Group name"
-            // Focused *and* selected: the field is opened to replace the name
-            // far more often than to edit it, and `select()` alone leaves the
-            // caret somewhere the keyboard is not.
-            ref={openField}
-            onBlur={(event) => onCommit(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                // Through the blur, so there is one commit path.
-                event.currentTarget.blur();
-              } else if (event.key === "Escape") {
-                event.preventDefault();
-                onCancel();
-              }
+          <form
+            className="mx-[0.4rem] my-1 flex-1 min-w-0"
+            onSubmit={(event) => {
+              event.preventDefault();
+              // Native Enter submission uses the same commit path as leaving.
+              event.currentTarget.querySelector<HTMLInputElement>("input")?.blur();
             }}
-          />
+          >
+            <Input
+              className="ub-group-rename font-medium tracking-[0.12em] uppercase [--input:var(--sidebar-input)] [--background:var(--sidebar)]"
+              defaultValue={group.name}
+              aria-label="Group name"
+              // Focused *and* selected: the field is opened to replace the name
+              // far more often than to edit it, and `select()` alone leaves the
+              // caret somewhere the keyboard is not.
+              ref={openField}
+              onBlur={(event) => onCommit(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  onCancel();
+                }
+              }}
+            />
+          </form>
         ) : (
           <button
             type="button"

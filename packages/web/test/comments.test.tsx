@@ -128,6 +128,30 @@ async function settle(gesture: () => void): Promise<void> {
   });
 }
 
+/** The confirming key may arrive either side of compositionend. */
+function composingKey(
+  field: HTMLTextAreaElement,
+  key: string,
+  afterCompositionEnd: boolean,
+): void {
+  act(() => {
+    field.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    if (afterCompositionEnd) {
+      field.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    }
+    field.dispatchEvent(new KeyboardEvent("keydown", {
+      key,
+      bubbles: true,
+      cancelable: true,
+      isComposing: !afterCompositionEnd,
+      ...(afterCompositionEnd ? { keyCode: 229 } : {}),
+    }));
+    if (!afterCompositionEnd) {
+      field.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    }
+  });
+}
+
 beforeEach(() => {
   Element.prototype.scrollIntoView = function scrollIntoView() {};
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -568,6 +592,71 @@ describe("the prose selection toolbar", () => {
 });
 
 describe("starting a thread from the prose", () => {
+  it.each([
+    ["before compositionend", false],
+    ["after compositionend", true],
+  ] as const)("keeps a composing Enter %s in the comment field, then sends on Enter", (_order, afterCompositionEnd) => {
+    const { ydoc } = annotatedDoc();
+    const view = mountComposer(ydoc);
+    try {
+      select(view.editor, 1, 4, 15);
+      view.open();
+      view.type("日本語のコメント");
+      const field = view.query<HTMLTextAreaElement>(".ub-comment-input")!;
+
+      composingKey(field, "Enter", afterCompositionEnd);
+      expect(listAnnotations(ydoc)).toEqual([]);
+      expect(view.query(".ub-comment-input")).toBe(field);
+      expect(field.value).toBe("日本語のコメント");
+      expect(document.activeElement).toBe(field);
+
+      act(() => field.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Enter", shiftKey: true, bubbles: true, cancelable: true,
+      })));
+      expect(listAnnotations(ydoc)).toEqual([]);
+      expect(view.query(".ub-comment-input")).toBe(field);
+
+      act(() => field.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Enter", bubbles: true, cancelable: true,
+      })));
+      expect(listAnnotations(ydoc)).toHaveLength(1);
+      expect(listAnnotations(ydoc)[0]?.comments[0]?.text).toBe("日本語のコメント");
+      expect(view.query(".ub-comment-input")).toBeNull();
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it.each([
+    ["before compositionend", false],
+    ["after compositionend", true],
+  ] as const)("keeps a composing Escape %s in the comment field, then returns to the toolbar", (_order, afterCompositionEnd) => {
+    const { ydoc } = annotatedDoc();
+    const view = mountComposer(ydoc);
+    try {
+      select(view.editor, 1, 4, 15);
+      view.open();
+      view.type("日本語のコメント");
+      const field = view.query<HTMLTextAreaElement>(".ub-comment-input")!;
+
+      // Dispatch through the composer frame, whose capture listener sees
+      // Escape before the field's own handler can preserve the draft.
+      composingKey(field, "Escape", afterCompositionEnd);
+      expect(view.query(".ub-comment-input")).toBe(field);
+      expect(field.value).toBe("日本語のコメント");
+      expect(document.activeElement).toBe(field);
+      expect(listAnnotations(ydoc)).toEqual([]);
+
+      act(() => field.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Escape", bubbles: true, cancelable: true,
+      })));
+      expect(view.query(".ub-comment-input")).toBeNull();
+      expect(view.query(".ub-selection-toolbar")).not.toBeNull();
+    } finally {
+      view.unmount();
+    }
+  });
+
   it("marks the selected range and shows the thread to a second client", () => {
     const { ydoc, blocks } = annotatedDoc();
     const remote = mirrorOf(ydoc);
