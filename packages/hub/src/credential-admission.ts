@@ -1,7 +1,7 @@
 /**
  * Device-credential admission, deliberately absent from createHub and ub open.
  * Compose this extension with HubDatabase and the same CredentialRegistry
- * used by issuance and management. The coordinated client cutover owns
+ * and MembershipRegistry used by issuance and management. The coordinated client cutover owns
  * installing it on remote hubs. It never accepts the legacy root key.
  */
 import type {
@@ -16,6 +16,7 @@ import type {
 import { parseRoom } from "@uberblick/schema";
 import type { CredentialRegistry } from "./credentials.js";
 import type { HubLogger } from "./log.js";
+import type { MembershipRegistry } from "./memberships.js";
 import { protocolMismatchReason, readAuthEnvelope } from "./protocol.js";
 import { resolvePeer, TOKEN_QUERY_PARAMS } from "./server.js";
 
@@ -42,11 +43,20 @@ export class CredentialAdmission implements Extension<CredentialContext> {
 
   constructor(
     private readonly registry: CredentialRegistry,
+    private readonly memberships: MembershipRegistry,
     private readonly options: { protocolVersion: number; log: HubLogger },
   ) {
-    this.unsubscribe = registry.onRevoke((id) => {
+    const unsubscribeRevoke = registry.onRevoke((id) => {
       this.closeWhere((context) => context.credentialId === id);
     });
+    const unsubscribeRemove = memberships.onRemove((workspace, principalId) => {
+      this.closeWhere((context) =>
+        context.workspace === workspace && context.principalId === principalId);
+    });
+    this.unsubscribe = () => {
+      unsubscribeRevoke();
+      unsubscribeRemove();
+    };
   }
 
   onAuthenticate = async ({
@@ -92,6 +102,11 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     }
     if (!record.workspaces.includes(workspace)) {
       return refuse("workspace-not-authorized");
+    }
+    // Read membership after verification's last await, from the same authority
+    // management mutates. Neither token claims nor a cached role grant access.
+    if (this.memberships.roleFor(workspace, record.principalId) === null) {
+      return refuse("missing-membership");
     }
     const context: CredentialContext = {
       credentialId: record.id,
@@ -174,13 +189,15 @@ export class CredentialAdmission implements Extension<CredentialContext> {
       ? "unknown-credential"
       : record.revokedAt !== null
         ? "revoked-credential"
-        : !context.authorization.active
-          ? "access-ended"
-          : workspace === null ||
+        : workspace === null ||
               workspace !== context.workspace ||
               !record.workspaces.includes(workspace)
-            ? "workspace-mismatch"
-            : null;
+          ? "workspace-mismatch"
+          : this.memberships.roleFor(workspace, record.principalId) === null
+            ? "missing-membership"
+            : !context.authorization.active
+              ? "access-ended"
+              : null;
     if (cause !== null) {
       context.authorization.active = false;
       connection.readOnly = true;

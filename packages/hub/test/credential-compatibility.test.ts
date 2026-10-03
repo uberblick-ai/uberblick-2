@@ -1,4 +1,4 @@
-/** Credential admission stays unwired until the coordinated client cutover. */
+/** Credential and membership admission stay unwired until the client cutover. */
 
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -6,6 +6,7 @@ import { Server } from "@hocuspocus/server";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { CredentialRegistry } from "../src/credentials.js";
 import { silentLogger } from "../src/log.js";
+import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
 import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
 import { createRoomAuthenticator, type Hub, type HubContext } from "../src/server.js";
@@ -17,7 +18,9 @@ import {
   tempDatabasePath,
   TEST_SECRET,
   testRoom,
+  token,
   type TestClient,
+  waitForText,
   WORKSPACE,
 } from "./helpers.js";
 
@@ -27,8 +30,8 @@ let issuedToken: string;
 const clients: TestClient[] = [];
 
 beforeAll(async () => {
-  // Start the live hub on a file already holding a credential: registry state
-  // alone must not change its admission mode.
+  // Start the live hub on a file already holding a credential and membership:
+  // authority state alone must not change its admission mode.
   const databasePath = tempDatabasePath();
   const database = new HubDatabase(databasePath, () => {});
   database.open();
@@ -38,6 +41,11 @@ beforeAll(async () => {
       principalId: randomUUID(),
       deviceId: randomUUID(),
       workspaces: [WORKSPACE],
+    });
+    new MembershipRegistry(database).grant({
+      workspaceId: WORKSPACE,
+      principalId: issued.record.principalId,
+      role: "admin",
     });
     issuedToken = await mintToken(await importCredentialKey(issued.keyBytes), {
       typ: "room",
@@ -79,10 +87,15 @@ afterAll(async () => {
   removeTempDatabases();
 });
 
-function connect(port: number, workspace: string, presented: string): TestClient {
+function connect(
+  port: number,
+  workspace: string,
+  presented: string,
+  room: string = testRoom(workspace),
+): TestClient {
   const client = createClient({
     port,
-    room: testRoom(workspace),
+    room,
     token: presented,
     reconnectDelayMs: 60_000,
   });
@@ -91,6 +104,20 @@ function connect(port: number, workspace: string, presented: string): TestClient
 }
 
 describe("current admission is unchanged", () => {
+  it.each(["live hub", "local authenticator"])(
+    "%s admits root-signed document edits without membership",
+    async (server) => {
+      const port = server === "live hub" ? hub.port : localServer.address.port;
+      const room = testRoom();
+      // Neither root-token principal has a membership or device credential.
+      const writer = connect(port, WORKSPACE, await token("read-write", { sub: randomUUID() }), room);
+      const observer = connect(port, WORKSPACE, await token("read-write", { sub: randomUUID() }), room);
+      await Promise.all([writer.synced, observer.synced]);
+      writer.text.insert(0, "root access still writes");
+      await waitForText("the root-signed observer", observer.text, "root access still writes");
+    },
+  );
+
   it("the live hub refuses a token signed under an issued credential", async () => {
     const client = connect(hub.port, WORKSPACE, issuedToken);
     await expect(client.denied).resolves.toBe("invalid-token");
@@ -102,12 +129,12 @@ describe("current admission is unchanged", () => {
   });
 });
 
-describe("no live credential-admission switch", () => {
+describe("no live credential or membership admission switch", () => {
   it.each(["server.ts", "config.ts", "main.ts", "local-browser-server.ts"])(
-    "%s does not import the credential boundary",
+    "%s does not import credential or membership authority",
     (file) => {
       const source = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8");
-      expect(source).not.toMatch(/from\s+["']\.\/credential[^"']*["']/);
+      expect(source).not.toMatch(/(?:from\s+|import\s*\(?\s*)["']\.\/(?:credential|memberships)[^"']*["']/);
     },
   );
 });
