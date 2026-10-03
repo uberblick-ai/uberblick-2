@@ -5,6 +5,7 @@
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { validateGithubClientId } from "./config.js";
 import type { CredentialRecord, CredentialRegistry } from "./credentials.js";
 import type { MembershipRegistry } from "./memberships.js";
 import type { PrincipalRecord, PrincipalRegistry } from "./principals.js";
@@ -14,12 +15,6 @@ export interface GithubSignInConfig {
   /** Test seams; production always uses the fixed github.com endpoints. */
   fetch?: typeof globalThis.fetch;
   now?: () => number;
-}
-
-export function validateGithubClientId(clientId: string): void {
-  if (typeof clientId !== "string" || !/^(?:Iv1\.[a-fA-F0-9]{16}|Iv23[A-Za-z0-9]{16})$/.test(clientId)) {
-    throw new Error("HUB_GITHUB_CLIENT_ID must be a GitHub App client ID (Iv1. followed by 16 hex digits, or Iv23 followed by 16 alphanumeric characters)");
-  }
 }
 
 const MAX_LIFETIME_MS = 15 * 60_000;

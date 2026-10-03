@@ -55,10 +55,11 @@ import {
   DEFAULT_PORT,
   MAX_PENDING_DOCUMENTS,
   defaultDatabasePath,
+  validateGithubClientId,
 } from "./config.js";
 import type { HubLogger } from "./log.js";
 import { CredentialRegistry } from "./credentials.js";
-import { GithubSignIn, handleGithubSignIn, validateGithubClientId } from "./github-sign-in.js";
+import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
 import { MembershipRegistry } from "./memberships.js";
 import { PrincipalRegistry } from "./principals.js";
 import { stderrLogger } from "./log.js";
