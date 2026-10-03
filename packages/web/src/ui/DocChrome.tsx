@@ -596,7 +596,7 @@ function DocumentActions({
               onSelect={() => onTogglePin?.()}
             >
               {onTogglePin === null
-                ? `${pinned ? "Unpin" : "Pin"} unavailable — sidebar is read-only`
+                ? `${pinned ? "Unpin" : "Pin"} unavailable — sidebar is not ready to write`
                 : pinned
                   ? "Unpin from sidebar"
                   : "Pin to sidebar"}

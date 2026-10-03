@@ -706,10 +706,18 @@ export function App(): ReactElement {
    * for the document on screen, and a row of the corpus listing (#118). Which
    * group and which position are the drag's business; this only decides that
    * the document belongs in the sidebar at all.
+   * Wait for the current sidebar state, as Archive does, and re-check at click
+   * time so an unseen group or unpin level cannot turn this into a wrong pin.
    */
   const onTogglePinDoc = useCallback(
     (uuid: string) => {
-      if (sidebar === null || !sidebar.status.writable) return;
+      if (
+        sidebar === null ||
+        !sidebar.status.writable ||
+        !sidebar.status.synced
+      ) {
+        return;
+      }
       togglePin(sidebar.ydoc, uuid);
     },
     [sidebar],
@@ -990,7 +998,11 @@ export function App(): ReactElement {
             entries={entries}
             groups={sidebarGroups}
             onSelect={onSelect}
-            onTogglePin={sidebarStatus.writable ? onTogglePinDoc : null}
+            onTogglePin={
+              sidebarStatus.writable && sidebarStatus.synced
+                ? onTogglePinDoc
+                : null
+            }
           />
         ) : (
           <RoutePane
@@ -1008,7 +1020,9 @@ export function App(): ReactElement {
             docLinks={docLinks}
             pinned={pinned}
             onTogglePin={
-              sidebarStatus.writable && selected !== null ? onTogglePin : null
+              sidebarStatus.writable && sidebarStatus.synced && selected !== null
+                ? onTogglePin
+                : null
             }
             onArchive={
               selectedDirectoryEntry !== null &&
