@@ -1,8 +1,8 @@
 /** Remote sign-in contracts across the real CLI, HTTP hub and owner-only store. */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
-  chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync,
+  chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync,
   statSync, writeFileSync,
 } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -237,14 +237,39 @@ describe("ub auth local selection and command surface", () => {
     expect(existsSync(credentialPath(box))).toBe(false);
   });
 
-  it("reports a malformed config before refusing a missing hub", async () => {
+  it("reports a malformed config before refusing a missing or invalid hub", async () => {
     const box = sandbox({ raw: { userConfig: '{"hubUrl":"wss://hub.example.ts.net/ws",' } });
-    const run = await runUbAsync(["auth", "status"], box);
-    expect(run.status).toBe(1);
-    expect(run.stdout).toBe("");
-    expect(run.stderr).toContain(`ignoring ${configPath(box)}: invalid JSON`);
-    expect(run.stderr.indexOf("invalid JSON")).toBeLessThan(run.stderr.indexOf("no hub given"));
+    for (const invalid of [false, true]) {
+      const run = await runUbAsync(["auth", "status", ...(invalid ? ["https://hub.example.ts.net/?invalid"] : [])], box);
+      expect(run.status).toBe(invalid ? 2 : 1);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain(`ignoring ${configPath(box)}: invalid JSON`);
+      expect(run.stderr.indexOf("invalid JSON")).toBeLessThan(run.stderr.indexOf(invalid ? "invalid hub" : "no hub given"));
+    }
     expect(existsSync(credentialPath(box))).toBe(false);
+  });
+
+  it.each(["login", "status", "logout"])("emits Hub before config warnings for %s with a valid explicit selection", (subcommand) => {
+    const origin = "http://127.0.0.1:1";
+    const box = sandbox({
+      raw: { userConfig: '{"hubUrl":"wss://hub.example.ts.net/ws",' },
+      credentials: { hubLogins: { [origin]: fixture() } },
+    });
+    const outputPath = join(box.cwd, "auth-output.txt");
+    // One descriptor records the order the real CLI writes both streams,
+    // without relying on the parent's scheduling of two independent pipes.
+    const descriptor = openSync(outputPath, "w", 0o600);
+    let status: number | null;
+    try {
+      status = spawnSync(process.execPath, [UB_BIN, "auth", subcommand, DEAD_HUB_URL], {
+        cwd: box.cwd, env: box.env, stdio: ["ignore", descriptor, descriptor], timeout: 15_000,
+      }).status;
+    } finally { closeSync(descriptor); }
+    expect(status).toBe(subcommand === "login" ? 1 : 0);
+    const output = readFileSync(outputPath, "utf8");
+    expect(output.split("\n")[0]).toBe(`Hub: ${origin}`);
+    expect(output).toContain(`ignoring ${configPath(box)}: invalid JSON`);
+    expect(output).not.toContain("wss://hub.example.ts.net/ws");
   });
 
   it("finds one offline login across host case, default-port and endpoint spellings without rebinding", async () => {
@@ -675,13 +700,16 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     expect(existsSync(credentialPath(box))).toBe(false);
   });
 
-  it.each(["old-hub", "wrong-shape", "wrong-status", "unsafe-verification-url", "unsafe-code"])("refuses %s responses without trusting or printing their contents", async (kind) => {
+  it.each(["old-hub", "wrong-shape", "wrong-status", "invalid-envelope", "unsafe-verification-url", "unsafe-code", "invalid-lifetime", "invalid-interval"])("refuses %s responses without trusting or printing their contents", async (kind) => {
     const remote = await rig();
     if (kind !== "old-hub") remote.controls.transform = (path, status, result) => {
       if (!path.endsWith("start")) return { status, result };
       if (kind === "wrong-shape") return { status, result: { status: "pending", collectionSecret: GITHUB_TOKEN } };
       if (kind === "wrong-status") return { status: 201, result };
+      if (kind === "invalid-envelope") return { status, result: { ...result, status: "unsupported" } };
       if (kind === "unsafe-verification-url") return { status, result: { ...result, verificationUri: `https://attacker.invalid/${GITHUB_TOKEN}` } };
+      if (kind === "invalid-lifetime") return { status, result: { ...result, expiresIn: 901 } };
+      if (kind === "invalid-interval") return { status, result: { ...result, interval: 0 } };
       return { status, result: { ...result, userCode: GITHUB_TOKEN } };
     };
     const old = kind === "old-hub" ? await serve((_request, response) => {
@@ -695,6 +723,18 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     expect(run.stderr).toMatch(/offer|invalid|malformed|unsupported|response/i);
     expect(run.output).not.toContain(GITHUB_TOKEN);
     expect(readFileSync(credentialPath(box))).toEqual(before);
+    if (!["old-hub", "wrong-shape"].includes(kind)) {
+      const cancellation = remote.requests.find((request) => request.path === "/auth/github/cancel");
+      expect(cancellation).toBeDefined();
+      if (!cancellation) throw new Error("missing cancellation authority from malformed start");
+      expect((await (await remote.cancel(cancellation.body)).json() as { status: string }).status).toBe("abandoned");
+      expect(remote.requests.some((request) => request.path === "/auth/github/collect")).toBe(false);
+      expect(run.stdout).not.toContain("Approve in a browser");
+      expect(privateDeviceRows(remote.databasePath)).toHaveLength(0);
+      assertPublicOnly(run, remote);
+    } else {
+      expect(remote.requests.some((request) => request.path === "/auth/github/cancel")).toBe(false);
+    }
   });
 
   it.each(["invalid-key", "username-echoes-key", "username-echoes-collection-secret"])("refuses a complete response with %s and explains the issued device", async (kind) => {

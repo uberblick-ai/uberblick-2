@@ -1,5 +1,7 @@
+import { spawn, type ChildProcess } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
@@ -7,7 +9,9 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   type StoredHubLogin,
@@ -18,8 +22,9 @@ import {
   writeHubLogin,
 } from "../src/auth-store.js";
 import { credentialsPath, resolveConfig, userConfigPath } from "../src/config.js";
+import { acquireInitLock, initLockPath, tryAcquireInitLock } from "../src/init-lock.js";
 import * as safeWrite from "../src/safe-write.js";
-import { SECRET_ON_FILE, removeTempDirs, sandbox } from "./helpers.js";
+import { PACKAGE_ROOT, SECRET_IN_ENV, SECRET_ON_FILE, removeTempDirs, sandbox, waitUntil, type Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 afterEach(() => vi.restoreAllMocks());
@@ -49,6 +54,125 @@ function login(): StoredHubLogin {
   };
 }
 
+type Mutation = { command: "write"; origin: string; login: StoredHubLogin }
+  | { command: "remove"; origin: string }
+  | { command: "remote"; secret: string };
+
+/**
+ * Pause independent writers after their real credential read. Without mutual
+ * exclusion both can hold the same snapshot; with it the second must wait for
+ * the first's lock before reading. The barriers choose the adverse ordering
+ * rather than depending on two short file operations happening to overlap.
+ */
+async function interleaveWriters(box: Sandbox, first: Mutation, second: Mutation): Promise<void> {
+  const scratch = join(box.cwd, `auth-writers-${process.env.UB_AGENT_RUN ?? "test"}`);
+  mkdirSync(scratch);
+  const worker = join(scratch, "writer.mjs");
+  writeFileSync(worker, `
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { writeHubLogin, removeHubLogin } from ${JSON.stringify(pathToFileURL(join(PACKAGE_ROOT, "src/auth-store.ts")).href)};
+import { credentialsPath } from ${JSON.stringify(pathToFileURL(join(PACKAGE_ROOT, "src/config.ts")).href)};
+import { acquireInitLock, initLockPath } from ${JSON.stringify(pathToFileURL(join(PACKAGE_ROOT, "src/init-lock.ts")).href)};
+import { setRemote } from ${JSON.stringify(pathToFileURL(join(PACKAGE_ROOT, "src/remote.ts")).href)};
+
+const job = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const barrier = process.argv[3];
+const read = fs.readFileSync;
+const open = fs.openSync;
+let paused = false;
+fs.readFileSync = (path, ...args) => {
+  const contents = read(path, ...args);
+  if (!paused && String(path) === credentialsPath()) {
+    paused = true;
+    fs.writeFileSync(barrier + ".read", "");
+    const deadline = Date.now() + 10_000;
+    const sleeper = new Int32Array(new SharedArrayBuffer(4));
+    while (!fs.existsSync(barrier + ".release")) {
+      if (Date.now() >= deadline) throw new Error("credential-read barrier timed out");
+      Atomics.wait(sleeper, 0, 0, 10);
+    }
+  }
+  return contents;
+};
+fs.openSync = (path, ...args) => {
+  try { return open(path, ...args); } catch (error) {
+    if (String(path) === initLockPath() && error.code === "EEXIST") {
+      fs.writeFileSync(barrier + ".waiting", "");
+    }
+    throw error;
+  }
+};
+syncBuiltinESMExports();
+const lifetime = setTimeout(() => process.exit(2), 12_000);
+process.once("message", async () => {
+  try {
+    if (job.command === "write") await writeHubLogin(job.origin, job.login);
+    else if (job.command === "remove") await removeHubLogin(job.origin);
+    else {
+      // The persistence phase used by ub remote join, under its real lock.
+      const lock = await acquireInitLock();
+      try { setRemote("wss://new.example.test/ws", { secret: job.secret }); }
+      finally { lock.release(); }
+    }
+  } catch (error) {
+    process.stderr.write(String(error) + "\\n");
+    process.exitCode = 1;
+  } finally {
+    clearTimeout(lifetime);
+    process.disconnect();
+  }
+});
+process.send("ready");
+`, "utf8");
+  const children: { child: ChildProcess; ready: boolean; done: Promise<{ status: number | null; output: string }>; barrier: string }[] = [];
+  for (const [index, job] of [first, second].entries()) {
+    const task = join(scratch, `task-${index}.json`);
+    writeFileSync(task, JSON.stringify(job), { mode: 0o600 });
+    const barrier = join(scratch, `barrier-${index}`);
+    const child = spawn(process.execPath, [
+      "--import", createRequire(import.meta.url).resolve("tsx"), worker, task, barrier,
+    ], { cwd: box.cwd, env: box.env, timeout: 15_000, stdio: ["ignore", "pipe", "pipe", "ipc"] });
+    let output = "";
+    const handle = {
+      child, barrier, ready: false,
+      done: new Promise<{ status: number | null; output: string }>((resolve) => {
+        child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString("utf8"); });
+        child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString("utf8"); });
+        child.on("error", (error) => { output += String(error); });
+        child.on("close", (status) => resolve({ status, output }));
+      }),
+    };
+    child.on("message", () => { handle.ready = true; });
+    children.push(handle);
+  }
+  const [a, b] = children;
+  try {
+    if (a === undefined || b === undefined) throw new Error("two credential writers are required");
+    await waitUntil("both credential writers to boot", () => a.ready && b.ready, 10_000);
+    a.child.send("go");
+    await waitUntil("first writer's credential read", () => existsSync(`${a.barrier}.read`), 5_000);
+    b.child.send("go");
+    await waitUntil("second writer's read or lock wait", () =>
+      existsSync(`${b.barrier}.read`) || existsSync(`${b.barrier}.waiting`), 1_500);
+    if (existsSync(`${b.barrier}.read`)) {
+      // An unlocked writer publishes while the first holds the older snapshot.
+      writeFileSync(`${b.barrier}.release`, "");
+      const finished = await b.done;
+      expect(finished.status, finished.output).toBe(0);
+    }
+    writeFileSync(`${a.barrier}.release`, "");
+    const firstResult = await a.done;
+    expect(firstResult.status, firstResult.output).toBe(0);
+    writeFileSync(`${b.barrier}.release`, "");
+    const secondResult = await b.done;
+    expect(secondResult.status, secondResult.output).toBe(0);
+  } finally {
+    for (const { child } of children) if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    await Promise.all(children.map(({ done }) => done));
+  }
+}
+
 describe("hub login store", () => {
   it("preflights an absent store without creating a credential or signing secret", () => {
     const box = sandbox();
@@ -59,7 +183,7 @@ describe("hub login store", () => {
     expect(readHubLogins(box.env).state).toBe("missing");
   });
 
-  it("stores at mode 0600 while keeping the binding, signing secret and unknown fields", () => {
+  it("stores at mode 0600 while keeping the binding, signing secret and unknown fields", async () => {
     const box = sandbox({
       userConfig: { hubUrl: "wss://hub.example.test/ws", workspace: WORKSPACE },
       credentials: { signingSecret: SECRET_ON_FILE, future: { opaque: true } },
@@ -69,7 +193,7 @@ describe("hub login store", () => {
     const before = readFileSync(path, "utf8");
     preflightHubLoginStore(box.env);
     expect(readFileSync(path, "utf8")).toBe(before);
-    expect(writeHubLogin(HUB, login(), box.env)).toBe(false);
+    expect(await writeHubLogin(HUB, login(), box.env)).toBe(false);
     const stored = JSON.parse(readFileSync(path, "utf8"));
     expect(stored).toEqual({
       signingSecret: SECRET_ON_FILE,
@@ -85,7 +209,7 @@ describe("hub login store", () => {
     expect(JSON.stringify(resolveConfig({ env: box.env }))).not.toContain(login().credential.key);
   });
 
-  it("replaces and removes only the selected login, keeping malformed and future entries", () => {
+  it("replaces and removes only the selected login, keeping malformed and future entries", async () => {
     const other = login();
     other.identity.githubUsername = "other-user";
     const unreadable = { credential: { key: "broken" } };
@@ -98,18 +222,87 @@ describe("hub login store", () => {
     } });
     const next = login();
     next.credential.record.deviceId = "eeeeeeee-5555-4555-8555-555555555555";
-    expect(writeHubLogin(HUB, next, box.env)).toBe(true);
+    expect(await writeHubLogin(HUB, next, box.env)).toBe(true);
     expect(readHubLogins(box.env).logins).toEqual({ [HUB]: next, [OTHER_HUB]: other });
     expect(readHubLogins(box.env).unreadableHubs).toEqual(["https://broken.example.test"]);
-    expect(removeHubLogin(HUB, box.env)).toBe(true);
-    expect(removeHubLogin(HUB, box.env)).toBe(false);
+    expect(await removeHubLogin(HUB, box.env)).toBe(true);
+    expect(await removeHubLogin(HUB, box.env)).toBe(false);
     expect(JSON.parse(readFileSync(credentialsPath(box.env), "utf8"))).toEqual({
       signingSecret: SECRET_ON_FILE,
       hubLogins: { [OTHER_HUB]: other, "https://broken.example.test": unreadable, future: { version: 2 } },
     });
   });
 
-  it("stores only the public identity, credential record and key from collection", () => {
+  it("keeps both logins when independent hub writers overlap", async () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET_ON_FILE, future: { opaque: true } } });
+    const other = login();
+    other.identity.githubUsername = "other-user";
+    await interleaveWriters(box,
+      { command: "write", origin: HUB, login: login() },
+      { command: "write", origin: OTHER_HUB, login: other });
+    expect(JSON.parse(readFileSync(credentialsPath(box.env), "utf8"))).toEqual({
+      signingSecret: SECRET_ON_FILE, future: { opaque: true },
+      hubLogins: { [HUB]: login(), [OTHER_HUB]: other },
+    });
+  });
+
+  it("does not restore a login deleted by an independent logout", async () => {
+    const box = sandbox({ credentials: {
+      signingSecret: SECRET_ON_FILE, future: { opaque: true }, hubLogins: { [HUB]: login() },
+    } });
+    await interleaveWriters(box,
+      { command: "write", origin: OTHER_HUB, login: login() },
+      { command: "remove", origin: HUB });
+    expect(JSON.parse(readFileSync(credentialsPath(box.env), "utf8"))).toEqual({
+      signingSecret: SECRET_ON_FILE, future: { opaque: true }, hubLogins: { [OTHER_HUB]: login() },
+    });
+  });
+
+  it("keeps a concurrent remote signing-secret update and unrelated credential fields", async () => {
+    const box = sandbox({ credentials: {
+      signingSecret: SECRET_ON_FILE, future: { opaque: true }, hubLogins: { [OTHER_HUB]: login() },
+    } });
+    await interleaveWriters(box,
+      { command: "write", origin: HUB, login: login() },
+      { command: "remote", secret: SECRET_IN_ENV });
+    expect(JSON.parse(readFileSync(credentialsPath(box.env), "utf8"))).toEqual({
+      signingSecret: SECRET_IN_ENV, future: { opaque: true },
+      hubLogins: { [HUB]: login(), [OTHER_HUB]: login() },
+    });
+    expect(JSON.parse(readFileSync(userConfigPath(box.env), "utf8")).hubUrl).toBe("wss://new.example.test/ws");
+    expect(readdirSync(dirname(credentialsPath(box.env)))).toEqual(["config.json", "credentials.json"]);
+  });
+
+  it("leaves stored bytes and another writer's lock intact when its bounded wait expires", async () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET_ON_FILE, hubLogins: { [HUB]: login() } } });
+    const path = credentialsPath(box.env);
+    const before = readFileSync(path, "utf8");
+    const holder = await acquireInitLock(box.env);
+    try {
+      await expect(writeHubLogin(OTHER_HUB, login(), box.env)).rejects.toThrow(/ub auth login/);
+      expect(readFileSync(path, "utf8")).toBe(before);
+      expect(readFileSync(holder.path, "utf8")).toBe(`${process.pid}\n`);
+    } finally {
+      holder.release();
+    }
+    expect(existsSync(initLockPath(box.env))).toBe(false);
+  });
+
+  it("does not store a collected login interrupted while waiting for another writer", async () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET_ON_FILE, hubLogins: { [HUB]: login() } } });
+    const path = credentialsPath(box.env);
+    const before = readFileSync(path, "utf8");
+    const holder = await acquireInitLock(box.env);
+    const interrupted = new AbortController();
+    const writing = writeHubLogin(OTHER_HUB, login(), box.env, interrupted.signal);
+    interrupted.abort();
+    holder.release();
+    await expect(writing).rejects.toMatchObject({ name: "AbortError" });
+    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(existsSync(initLockPath(box.env))).toBe(false);
+  });
+
+  it("stores only the public identity, credential record and key from collection", async () => {
     const box = sandbox();
     const value = login();
     const extra = {
@@ -123,11 +316,11 @@ describe("hub login store", () => {
       },
     };
     expect(isHubLogin(extra)).toBe(true);
-    writeHubLogin(HUB, extra, box.env);
+    await writeHubLogin(HUB, extra, box.env);
     expect(JSON.parse(readFileSync(credentialsPath(box.env), "utf8"))).toEqual({ hubLogins: { [HUB]: value } });
   });
 
-  it.each([0o644, 0o640, 0o606])("refuses mode %o for reads and mutations without repairing it", (mode) => {
+  it.each([0o644, 0o640, 0o606])("refuses mode %o for reads and mutations without repairing it", async (mode) => {
     const box = sandbox({ credentials: { signingSecret: SECRET_ON_FILE, hubLogins: { [HUB]: login() } }, credentialsMode: mode });
     const path = credentialsPath(box.env);
     const before = readFileSync(path, "utf8");
@@ -136,11 +329,9 @@ describe("hub login store", () => {
     expect(state.logins).toEqual({});
     expect(state.diagnostic).toContain(`chmod 600 ${path}`);
     expect(JSON.stringify(state)).not.toContain(login().credential.key);
-    for (const mutate of [
-      () => preflightHubLoginStore(box.env),
-      () => writeHubLogin(HUB, login(), box.env),
-      () => removeHubLogin(HUB, box.env),
-    ]) expect(mutate).toThrow(`chmod 600 ${path}`);
+    expect(() => preflightHubLoginStore(box.env)).toThrow(`chmod 600 ${path}`);
+    await expect(writeHubLogin(HUB, login(), box.env)).rejects.toThrow(`chmod 600 ${path}`);
+    await expect(removeHubLogin(HUB, box.env)).rejects.toThrow(`chmod 600 ${path}`);
     expect(readFileSync(path, "utf8")).toBe(before);
     expect(lstatSync(path).mode & 0o777).toBe(mode);
   });
@@ -150,7 +341,7 @@ describe("hub login store", () => {
     { credentials: [] },
     { credentials: { hubLogins: [] } },
     { credentials: { hubLogins: null } },
-  ])("refuses unreadable stores without revealing or overwriting their contents", (files) => {
+  ])("refuses unreadable stores without revealing or overwriting their contents", async (files) => {
     const box = sandbox(files);
     const path = credentialsPath(box.env);
     const before = readFileSync(path, "utf8");
@@ -159,12 +350,12 @@ describe("hub login store", () => {
     expect(result.logins).toEqual({});
     expect(JSON.stringify(result)).not.toContain("secret-that-must-not-leak");
     expect(() => preflightHubLoginStore(box.env)).toThrow(/credential store/);
-    expect(() => writeHubLogin(HUB, login(), box.env)).toThrow(/credential store/);
-    expect(() => removeHubLogin(HUB, box.env)).toThrow(/credential store/);
+    await expect(writeHubLogin(HUB, login(), box.env)).rejects.toThrow(/credential store/);
+    await expect(removeHubLogin(HUB, box.env)).rejects.toThrow(/credential store/);
     expect(readFileSync(path, "utf8")).toBe(before);
   });
 
-  it("refuses symlinks and directories without touching their targets", () => {
+  it("refuses symlinks and directories without touching their targets", async () => {
     const box = sandbox();
     const path = credentialsPath(box.env);
     const target = join(box.cwd, "owner-file.json");
@@ -173,8 +364,8 @@ describe("hub login store", () => {
     symlinkSync(target, path);
     expect(readHubLogins(box.env).state).toBe("refused");
     expect(() => preflightHubLoginStore(box.env)).toThrow(/regular file you own/);
-    expect(() => writeHubLogin(HUB, login(), box.env)).toThrow(/regular file you own/);
-    expect(() => removeHubLogin(HUB, box.env)).toThrow(/regular file you own/);
+    await expect(writeHubLogin(HUB, login(), box.env)).rejects.toThrow(/regular file you own/);
+    await expect(removeHubLogin(HUB, box.env)).rejects.toThrow(/regular file you own/);
     expect(lstatSync(path).isSymbolicLink()).toBe(true);
     expect(readFileSync(target, "utf8")).toBe(JSON.stringify({ hubLogins: { [HUB]: login() } }));
 
@@ -198,19 +389,22 @@ describe("hub login store", () => {
     }
   });
 
-  it("keeps the earlier login when publication fails and does not leak the new key", () => {
+  it("keeps the earlier login when publication fails and does not leak the new key", async () => {
     const box = sandbox({ credentials: { signingSecret: SECRET_ON_FILE, hubLogins: { [HUB]: login() } } });
     const path = credentialsPath(box.env);
     const before = readFileSync(path, "utf8");
     const next = login();
     next.credential.key = Buffer.alloc(32, 23).toString("base64url");
     vi.spyOn(safeWrite, "publishOwnerOnly").mockImplementation(() => { throw new Error(next.credential.key); });
-    expect(() => writeHubLogin(HUB, next, box.env)).toThrow(/could not write credential store/);
-    try { writeHubLogin(HUB, next, box.env); } catch (error) {
+    await expect(writeHubLogin(HUB, next, box.env)).rejects.toThrow(/could not write credential store/);
+    try { await writeHubLogin(HUB, next, box.env); } catch (error) {
       expect(String(error)).not.toContain(next.credential.key);
       expect(String(error)).not.toContain(SECRET_ON_FILE);
     }
     expect(readFileSync(path, "utf8")).toBe(before);
+    const nextWriter = tryAcquireInitLock(box.env);
+    expect(nextWriter).not.toBeNull();
+    nextWriter?.release();
   });
 });
 

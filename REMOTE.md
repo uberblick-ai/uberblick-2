@@ -237,7 +237,8 @@ keeps hub access until revoked through device management. Credentials live in
 the owner-only `credentials.json` store, separate from `config.json`; these
 commands never change the machine's hub or workspace binding. A new login
 replaces the stored device only after completion and does not revoke the old
-one. Sign-in does not create a browser session.
+one. Concurrent logins and logout preserve other hubs' logins, the signing
+secret and unrelated credential fields. Sign-in does not create a browser session.
 The hub permits 100 active attempts, independently of finished attempts. Terminal
 statuses expire no later than fifteen minutes after the attempt's expiry; at
 most 100 are retained when new attempts start, evicting oldest requests first. Evicted or restarted

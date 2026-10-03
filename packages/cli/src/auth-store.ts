@@ -6,6 +6,7 @@
 import { lstatSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { credentialsPath, readCredentials } from "./config.js";
+import { acquireInitLock } from "./init-lock.js";
 import { publishOwnerOnly, writeTempBeside } from "./safe-write.js";
 
 export interface StoredHubLogin {
@@ -193,26 +194,42 @@ function projectLoginFields(login: StoredHubLogin): StoredHubLogin {
 }
 
 /** Replace only after collection succeeds; the prior device is not revoked. */
-export function writeHubLogin(
+export async function writeHubLogin(
   origin: string,
   login: StoredHubLogin,
   env: NodeJS.ProcessEnv = process.env,
-): boolean {
+  signal?: AbortSignal,
+): Promise<boolean> {
   if (!authOrigin(origin) || !isHubLogin(login)) throw new Error("cannot store an invalid hub login");
-  const store = editableStore(env);
-  const entries = (store.raw?.hubLogins ?? {}) as Record<string, unknown>;
-  const replaced = Object.hasOwn(entries, origin);
-  publish(store, { ...entries, [origin]: projectLoginFields(login) }, "ub auth login");
-  return replaced;
+  signal?.throwIfAborted();
+  // Share the configuration writers' lock, and read only after acquiring it:
+  // atomic publication alone can lose another login or a signing-secret update.
+  // Browser approval and network waits never hold this lock.
+  const lock = await acquireInitLock(env, { command: "ub auth login" });
+  try {
+    signal?.throwIfAborted();
+    const store = editableStore(env);
+    const entries = (store.raw?.hubLogins ?? {}) as Record<string, unknown>;
+    const replaced = Object.hasOwn(entries, origin);
+    publish(store, { ...entries, [origin]: projectLoginFields(login) }, "ub auth login");
+    return replaced;
+  } finally {
+    lock.release();
+  }
 }
 
 /** Remove only this machine's selected login. This never contacts the hub. */
-export function removeHubLogin(origin: string, env: NodeJS.ProcessEnv = process.env): boolean {
+export async function removeHubLogin(origin: string, env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
   if (!authOrigin(origin)) throw new Error("cannot remove a login for an invalid hub origin");
-  const store = editableStore(env);
-  const entries = { ...(store.raw?.hubLogins as Record<string, unknown> | undefined) };
-  if (!Object.hasOwn(entries, origin)) return false;
-  delete entries[origin];
-  publish(store, entries, "ub auth logout");
-  return true;
+  const lock = await acquireInitLock(env, { command: "ub auth logout" });
+  try {
+    const store = editableStore(env);
+    const entries = { ...(store.raw?.hubLogins as Record<string, unknown> | undefined) };
+    if (!Object.hasOwn(entries, origin)) return false;
+    delete entries[origin];
+    publish(store, entries, "ub auth logout");
+    return true;
+  } finally {
+    lock.release();
+  }
 }

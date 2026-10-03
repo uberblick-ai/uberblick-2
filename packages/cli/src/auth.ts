@@ -76,9 +76,12 @@ interface Selection {
 
 function selectHub(hub: string | undefined, io: Io): Selection | number {
   const { config, warnings } = readUserConfig();
-  for (const warning of warnings) io.err(`ub auth: ${warning}\n`);
+  const reportWarnings = () => {
+    for (const warning of warnings) io.err(`ub auth: ${warning}\n`);
+  };
   const selected = hub ?? config.hubUrl;
   if (selected === undefined) {
+    reportWarnings();
     io.err("ub auth: no hub given and none bound. Local-only work needs no login. Give a hub to `ub auth login <hub>`.\n");
     return 1;
   }
@@ -87,10 +90,12 @@ function selectHub(hub: string | undefined, io: Io): Selection | number {
     origin = authenticationOrigin(selected);
   } catch {
     // Never echo an operand: it may be a pasted secret or a credential URL.
+    reportWarnings();
     io.err("ub auth: invalid hub; use a bare host, http(s) address or ws(s) endpoint without credentials, query or fragment.\n");
     return 2;
   }
   io.out(`Hub: ${origin}\n`);
+  reportWarnings();
   let bound = false;
   if (config.hubUrl !== undefined) {
     try { bound = authenticationOrigin(config.hubUrl) === origin; } catch { /* Invalid binding is never rewritten. */ }
@@ -140,9 +145,9 @@ function status(selection: Selection, io: Io): number {
   return needsWorkspaceLogin(selection, login, io) ? 1 : 0;
 }
 
-function logout(selection: Selection, io: Io): number {
+async function logout(selection: Selection, io: Io): Promise<number> {
   try {
-    const removed = removeHubLogin(selection.origin);
+    const removed = await removeHubLogin(selection.origin);
     io.out(removed ? "Removed this machine's stored login.\n" : "No login stored for this hub.\n");
     io.out("The device keeps its hub access until revoked through device management. Logout revokes nothing.\n");
     return 0;
@@ -172,6 +177,7 @@ function seconds(value: unknown, allowZero = false): value is number {
 async function post(
   origin: string, route: "start" | "collect" | "cancel", body: object,
   signal: AbortSignal, timeoutMs: number,
+  received?: (result: Record<string, unknown>) => void,
 ): Promise<Record<string, unknown>> {
   const response = await fetch(`${origin}/auth/github/${route}`, {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -205,9 +211,11 @@ async function post(
   try { result = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch {
     throw invalidResponse(true);
   }
-  if (!object(result) || typeof result.status !== "string") {
+  if (!object(result)) {
     throw invalidResponse();
   }
+  received?.(result);
+  if (typeof result.status !== "string") throw invalidResponse();
   const allowed = route === "start"
     ? ["pending", "failed", "busy", "not-configured", "invalid-request"]
     : ["pending", "complete", "denied", "expired", "abandoned", "failed", "collected", "unknown-request", "not-configured", "invalid-request"];
@@ -252,17 +260,22 @@ async function login(selection: Selection, io: Io): Promise<number> {
   try {
     // A start interrupted before its reply has no collection secret to cancel
     // with. Finish this bounded read so a late reply can still be abandoned.
-    const started = await post(selection.origin, "start", {}, new AbortController().signal, REQUEST_MS);
+    const started = await post(selection.origin, "start", {}, new AbortController().signal, REQUEST_MS, (result) => {
+      // Valid authority permits cleanup even if the envelope or public fields
+      // are malformed. Never display any of the private start fields.
+      if (typeof result.requestId === "string" && UUID.test(result.requestId) &&
+          typeof result.collectionSecret === "string" && /^[A-Za-z0-9_-]{43}$/.test(result.collectionSecret)) {
+        attempt = { requestId: result.requestId, collectionSecret: result.collectionSecret };
+      }
+    });
     if (started.status !== "pending") terminal(started);
-    if (typeof started.requestId !== "string" || !UUID.test(started.requestId) ||
-        typeof started.collectionSecret !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(started.collectionSecret) ||
+    if (attempt === undefined ||
         started.verificationUri !== "https://github.com/login/device" ||
         typeof started.userCode !== "string" || !/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(started.userCode) ||
         !seconds(started.expiresIn, true) || started.expiresIn > MAX_LIFETIME_SECONDS ||
         !seconds(started.interval) || started.interval > MAX_LIFETIME_SECONDS) {
       throw new SignInFailure("the hub returned an invalid GitHub sign-in response; update the hub");
     }
-    attempt = { requestId: started.requestId, collectionSecret: started.collectionSecret };
     deadline = performance.now() + started.expiresIn * 1000;
     if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
     io.out(`Approve in a browser: ${started.verificationUri}\nCode: ${started.userCode}\nWaiting for GitHub approval…\n`);
@@ -283,7 +296,8 @@ async function login(selection: Selection, io: Io): Promise<number> {
       }
       if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
       let replaced: boolean;
-      try { replaced = writeHubLogin(selection.origin, credential); } catch (error) {
+      try { replaced = await writeHubLogin(selection.origin, credential, process.env, interrupted.signal); } catch (error) {
+        if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
         io.err(`ub auth: could not store login for ${selection.origin}: ${error instanceof Error ? error.message : "credential store write failed"}. The issued device remains on the hub; revoke it through device management if needed.\n`);
         return 1;
       }
@@ -337,5 +351,5 @@ export async function authCommand(argv: string[], io: Io): Promise<number> {
   if (typeof selection === "number") return selection;
   if (sub === "login") return await login(selection, io);
   if (sub === "status") return status(selection, io);
-  return logout(selection, io);
+  return await logout(selection, io);
 }
