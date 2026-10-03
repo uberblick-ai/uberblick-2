@@ -392,6 +392,7 @@ export function BlockMenu({
         anchor={path === "gutter" ? gutterButton : undefined}
         open={open}
         onDismiss={dismiss}
+        onFieldEscape={() => handleKey("Escape")}
         listKey={list}
         listId={listId}
         label="Block types"

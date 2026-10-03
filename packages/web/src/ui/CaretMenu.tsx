@@ -34,6 +34,7 @@ export function CaretMenu({
   choose,
   empty,
   children,
+  onFieldEscape,
   listKey,
 }: {
   editor: Editor;
@@ -42,6 +43,7 @@ export function CaretMenu({
   anchor?: RefObject<HTMLElement | null> | undefined;
   open: boolean;
   onDismiss: () => void;
+  onFieldEscape?: () => void;
   listId: string;
   listKey: string;
   label: string;
@@ -99,8 +101,13 @@ export function CaretMenu({
         // Prose focus is deliberately outside the portalled card.
         onFocusOutside={(event) => event.preventDefault()}
         onEscapeKeyDown={(event) => {
-          // Let Radix dismiss unless Escape belongs to the input method.
-          if (event.isComposing || event.keyCode === 229 || editor.view.composing) event.preventDefault();
+          // Radix owns the document's capture listener. Suppress its default
+          // dismissal, then send prose Escape through the public PM prop chain
+          // too. A prevented native event alone would never reach PM's input.
+          event.preventDefault();
+          if (event.isComposing || event.keyCode === 229 || editor.view.composing) return;
+          if (anchor) onFieldEscape?.();
+          else editor.view.someProp("handleKeyDown", (handler) => handler(editor.view, event));
         }}
       >
         {children}
