@@ -26,6 +26,7 @@ import {
   editBlock,
   getDirectoryEntry,
   initDoc,
+  setDescription,
   setKind,
   setStatus,
   setTags,
@@ -143,12 +144,14 @@ describe("directory stamps from the web", () => {
     vi.setSystemTime(T0 + 1_000);
     setTitle(doc, "After");
     expect(getDirectoryEntry(directory, UUID)?.title).toBe("Stale");
+    expect(getDirectoryEntry(directory, UUID)?.createdAt).toBeUndefined();
 
     vi.setSystemTime(T0 + 5_000);
     writable = true;
     for (const listener of listeners) listener();
     expect(getDirectoryEntry(directory, UUID)).toMatchObject({
       title: "After",
+      createdAt: T0 + 5_000,
       updatedAt: T0 + 1_000,
     });
     stop();
@@ -216,7 +219,12 @@ describe("directory stamps from the web", () => {
     expect(getDirectoryEntry(directory, UUID)).toBeNull();
     synchronized = true;
     for (const listener of listeners) listener();
-    expect(getDirectoryEntry(directory, UUID)?.title).toBe("Publish after sync");
+    expect(getDirectoryEntry(directory, UUID)).toEqual({
+      uuid: UUID,
+      title: "Publish after sync",
+      tags: [],
+      createdAt: T0,
+    });
     stop();
   });
 
@@ -316,6 +324,133 @@ describe("directory stamps from the web", () => {
       tags: ["reference"],
       updatedAt: T0 + 1_000,
     });
+  });
+
+  it("bumps updatedAt immediately on an authored description change", () => {
+    const client = rig("Described");
+
+    vi.setSystemTime(T0 + 1_000);
+    setDescription(client.doc, "New description");
+    expect(stub(client)).toMatchObject({
+      description: "New description",
+      createdAt: T0,
+      updatedAt: T0 + 1_000,
+    });
+    expect(client.crossed()).toBe(1);
+  });
+
+  it("repairs description alone on attach and arrived updates without stamping", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, {
+      uuid: UUID,
+      title: "Described",
+      description: "Current description",
+    });
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, {
+      uuid: UUID,
+      title: "Described",
+      description: "Stale description",
+      createdAt: T0,
+      updatedAt: T0,
+    });
+    const peer = peerOf(directory);
+    let crossed = 0;
+    peer.on("update", () => {
+      crossed += 1;
+    });
+    vi.setSystemTime(T0 + WINDOW * 3);
+    const stop = watchDocumentStub(doc, directory);
+
+    expect(getDirectoryEntry(peer, UUID)).toMatchObject({
+      description: "Current description",
+      createdAt: T0,
+      updatedAt: T0,
+    });
+    expect(crossed).toBe(1);
+
+    const remote = peerOf(doc);
+    setDescription(remote, "Arrived description");
+    expect(getDirectoryEntry(peer, UUID)).toMatchObject({
+      description: "Arrived description",
+      createdAt: T0,
+      updatedAt: T0,
+    });
+    expect(crossed).toBe(2);
+
+    setDescription(remote, "");
+    expect(getDirectoryEntry(peer, UUID)?.description).toBeUndefined();
+    expect(getDirectoryEntry(peer, UUID)?.updatedAt).toBe(T0);
+    expect(crossed).toBe(3);
+
+    // Blank and absent agree, so observing content writes publishes nothing.
+    appendBlock(remote, { type: "paragraph", text: "Arrived content" });
+    expect(crossed).toBe(3);
+    stop();
+  });
+
+  it("backfills only createdAt on attach and preserves it through later repairs", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Legacy" });
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, {
+      uuid: UUID,
+      title: "Legacy",
+      updatedAt: T0,
+    });
+    const peer = peerOf(directory);
+    let crossed = 0;
+    peer.on("update", () => {
+      crossed += 1;
+    });
+
+    vi.setSystemTime(T0 + WINDOW * 3);
+    const stop = watchDocumentStub(doc, directory);
+    expect(getDirectoryEntry(peer, UUID)).toMatchObject({
+      createdAt: T0 + WINDOW * 3,
+      updatedAt: T0,
+    });
+    expect(crossed).toBe(1);
+
+    vi.setSystemTime(T0 + WINDOW * 4);
+    const remote = peerOf(doc);
+    setTitle(remote, "Arrived title");
+    expect(getDirectoryEntry(peer, UUID)).toMatchObject({
+      title: "Arrived title",
+      createdAt: T0 + WINDOW * 3,
+      updatedAt: T0,
+    });
+    setTitle(doc, "Authored title");
+    expect(getDirectoryEntry(peer, UUID)).toMatchObject({
+      title: "Authored title",
+      createdAt: T0 + WINDOW * 3,
+      updatedAt: T0 + WINDOW * 4,
+    });
+    expect(crossed).toBe(3);
+    stop();
+  });
+
+  it("does not backfill a tombstone missing createdAt", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Archived" });
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Archived" });
+    tombstoneDirectoryEntry(directory, UUID);
+    const peer = peerOf(directory);
+    let crossed = 0;
+    peer.on("update", () => {
+      crossed += 1;
+    });
+    const stop = watchDocumentStub(doc, directory);
+    setDescription(doc, "Authored after archive");
+    expect(getDirectoryEntry(peer, UUID)).toEqual({
+      uuid: UUID,
+      title: "Archived",
+      tags: [],
+      deleted: true,
+    });
+    expect(crossed).toBe(0);
+    stop();
   });
 
   it("repairs a stub that disagrees with the document on connect, without stamping", () => {
