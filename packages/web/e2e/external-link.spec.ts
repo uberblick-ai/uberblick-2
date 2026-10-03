@@ -64,8 +64,8 @@ test("editable primary, Ctrl and Cmd clicks open an isolated tab without changin
   const link = page.locator(".ub-editor a.ub-link");
   for (const modifiers of [[], ["Control"], ["Meta"]] as const) {
     await test.step(`${modifiers.join("+") || "Plain"} primary click`, async () => {
-      // Each is a fresh single gesture, rather than a rapid double/triple click
-      // that ProseMirror (correctly) treats as text selection.
+      // Each is a fresh single gesture. The first press of a double/triple
+      // click follows the link before later presses select text.
       await page.reload();
       await expect(link).toBeVisible();
       await expectPopup(page, () => link.click({ modifiers: [...modifiers] }));

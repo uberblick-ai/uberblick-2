@@ -1,4 +1,4 @@
-/** Follow external links without treating pointer selection as activation. */
+/** Follow external links while preserving drag and Shift-click selection. */
 
 import { Extension } from "@tiptap/core";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
