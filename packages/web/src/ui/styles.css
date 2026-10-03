@@ -1458,10 +1458,9 @@ body {
    The toggle appears, and opening it brings the rail back *over* the prose
    instead of taking a column the window does not have. */
 @media (max-width: 1100px) {
-  /* The rail is an overlay here, so its reserved gap is released. With the
-     sidebar still open, keep the pane's original compact edge inset; the
-     deliberate 4rem page inset above remains the more specific collapsed
-     state. */
+  /* At the threads rail's own breakpoint, release its reserved gap and keep
+     the compact document inset. SidebarProvider selects sidebar presentation
+     independently. */
   .ub-document-pane {
     --pane-document-inset: 1rem;
     --document-rail-gap: 1rem;
@@ -1475,14 +1474,6 @@ body {
 
   .ub-threads-toggle {
     display: inline-flex;
-  }
-
-  .ub-pane-threads-toggle {
-    position: sticky;
-    top: 0;
-    z-index: 4;
-    align-self: flex-end;
-    margin-bottom: 0.25rem;
   }
 }
 
