@@ -59,12 +59,28 @@ until a human adopts it — the rule the agent workflow already states for
 product choices, extended to every decision record. No individual is named as
 the decider: on a team, whoever holds the authority in that workspace decides.
 
-**Open point — enforcement.** Today an agent can call `set_status decided`
-through MCP, and awareness identity is self-asserted, so "a human decided" is a
-convention, not a guarantee. Recommendation: MCP keeps setting `decided` only
-when recording a human's answer that the record itself cites (who, when, where),
-and the hard boundary — `decided` writable only by an authenticated human —
-arrives with per-user credentials rather than as a half-trust mechanism now.
+**Recording a decision through MCP is allowed** (owner, 2026-10-03): an agent
+may set `decided` when it records a human's answer, and the record cites that
+answer (who, when, where).
+
+**Identity comes with GitHub sign-in.** The hub's GitHub device flow already
+identifies a durable GitHub account (a hub principal) and issues one device
+credential for that account's existing workspace memberships; the live hub and
+`ub open` do not yet admit with it, so MCP still uses the shared secret. Once
+admission switches to device credentials, every MCP process on a device carries
+the identity of whoever signed that device in — agents on a person's machine
+act under that person's GitHub identity. Two consequences:
+
+- The identity says *whose credential* recorded the decision, not whether a
+  person or an agent made the call. "A human decides" stays a rule agents obey
+  on a person's device; it is not something the hub can tell apart.
+- What the hub *can* enforce is the agents' own identity: a device signed in as
+  an agent account (today `uberblick-agent`) is refused `decided`, so an
+  unattended agent cannot settle a decision. The decider is recorded from the
+  credential's principal, never from a self-asserted name.
+
+Until device-credential admission ships, "a human decided" is a convention
+backed by the citation in the record.
 
 ### 3. Chains: one topic, several records, bound by `supersedes`
 
@@ -98,8 +114,12 @@ Consequences:
   the "needs a decision" signal of principle 7.
 - Abandoning a reconsideration is archiving the open record; the earlier
   decision is in force again with no other state to change.
-- Two live records superseding the same record is a **fork**. It is reported as
-  a conflict, never resolved silently by timestamps.
+- Two live records superseding the same record is a **fork**. By default the
+  record's age decides (owner, 2026-10-03): the newest `decided` record by
+  creation time is in force, the other becomes history, and the fork stays
+  visible with `include_superseded`. Creation times come from the writing
+  replica's clock, so a skewed clock can pick the older record; that is
+  accepted until a requirement says otherwise.
 - A superseded record keeps status `decided`; "superseded" is derived from the
   chain, so nobody has to remember to edit the old record.
 
