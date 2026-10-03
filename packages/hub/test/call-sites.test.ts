@@ -74,6 +74,10 @@ describe("token minting sites", () => {
     "packages/hub/test/credential-compatibility.test.ts",
     "packages/hub/test/credential-registry.test.ts",
     "packages/hub/test/credential.test.ts",
+    // Collected sign-in credentials, including restart verification and
+    // composed admission; bounded lifetime and issued credential kid.
+    "packages/hub/test/github-sign-in-admission.test.ts",
+    "packages/hub/test/github-sign-in.test.ts",
     "packages/hub/test/helpers.ts",
     "packages/hub/test/membership-registry.test.ts",
     "packages/hub/test/token.test.ts",

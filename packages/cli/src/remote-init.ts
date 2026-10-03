@@ -867,6 +867,8 @@ export async function remoteInitCommand(
   // Over stdin: the secret is never an argument, on either side.
   // resolveConfig's workspace grammar is a strict subset of the compose
   // script's JSON-interpolation charset, pinned by the companion contract test.
+  // The host updater preserves its operator-owned GitHub app setting under the
+  // checkout lock; this machine supplies only the four init-managed values.
   const envPayload = `# Written by \`ub remote init\`. Untracked, so updates never touch it.\nTAILSCALE_HOST=${magicDns}\nTAILSCALE_IP=${address}\nHUB_AUTH_TOKEN=${secret}\nWEB_WORKSPACES=${webWorkspace}\n`;
 
   if (existing) {

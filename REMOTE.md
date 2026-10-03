@@ -3,10 +3,10 @@
 This deployment runs one hub and one prebuilt web client on a Linux host that
 is already in a private Tailscale network. Caddy serves the single-page app,
 serves the client's runtime configuration at `/uberblick-config.json`, proxies
-`/ws` to the hub, and asks the host's Tailscale daemon for the HTTPS
+`/ws` and `/auth/*` to the hub, and asks the host's Tailscale daemon for the HTTPS
 certificate. The hub is not published directly.
 
-> the host serves the shared write-token signing secret to the app, in `/uberblick-config.json` — anyone who can fetch that document has full read-write. This deployment is supported only on a private Tailscale network until server-minted sessions exist; an unguessable public hostname is not a security boundary.
+> The host serves the shared write-token signing secret to the app in `/uberblick-config.json`; anyone who can fetch that document has full read-write. Keep this deployment on a private Tailscale network while live clients still use that shared secret. GitHub sign-in issues separate device credentials but does not change live admission. An unguessable public hostname is not a security boundary.
 
 The access-control boundary and broader-access requirements are described in
 the corpus Configuration and auth (62c70b7c-6e4c-40a4-a6bb-a7edbee08360).
@@ -147,6 +147,10 @@ configuration refuses non-zero. A second checkout on the same host remains free
 to deploy itself, and a host that cannot take a lock at all refuses non-zero
 rather than reporting an update it never ran as success.
 
+Both an update and an init re-run preserve the host's `HUB_GITHUB_CLIENT_ID`.
+The re-run reads that setting under the checkout lock rather than copying it
+from the machine running init.
+
 **When to update:** when a merged change is one you want live — a fix you are
 waiting on, a feature you are about to demonstrate, a deployment you are about
 to verify. Deploy while you are present to watch it, never as the last thing
@@ -169,6 +173,72 @@ one bad commit from wedging the host with its containers on the old code.
 `git reset --hard` discards host-local edits to **tracked** files, deliberately —
 the host mirrors `main` and is not a place to edit — and prints what it
 discarded. The host's `.env` is untracked and survives; nothing runs `git clean`.
+
+## Enable GitHub sign-in
+
+Each hub operator registers their own **GitHub App** on github.com. Follow
+[GitHub's registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app):
+
+1. Open your account or organization's **Settings → Developer settings → GitHub
+   Apps → New GitHub App**. Choose a unique name that people will recognize
+   during approval, and set the homepage to `https://<TAILSCALE_HOST>/`.
+2. Under **Identifying and authorizing users**, enable **Device Flow**. Keep
+   user-token expiration enabled. Leave the callback URL empty and leave
+   **Request user authorization (OAuth) during installation** off.
+3. Disable the webhook's **Active** checkbox. Leave repository, organization and
+   account permissions at their defaults with no additional access. Subscribe
+   to no events.
+4. Choose **Any account** for the app's installation availability and create
+   it. This makes the app public so people outside its owner can authorize it;
+   see [GitHub's app visibility rules](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/making-a-github-app-public-or-private).
+5. Copy **Client ID** from the app's settings page, then add this one line to
+   the remote checkout's `.env` on the host:
+
+   ```dotenv
+   HUB_GITHUB_CLIENT_ID=Iv23AbCdEF0123456789
+   ```
+
+   Replace the example with your actual client ID (the legacy `Iv1.` form or the newer
+   alphanumeric `Iv23…` form). The numeric **App ID** is a different value.
+
+The hub uses [GitHub's device flow](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app#using-the-device-flow-to-generate-a-user-access-token).
+It needs no client secret, private key or callback URL. Only the client ID goes
+to the hub container; no GitHub configuration is served to browsers or compiled
+into the web bundle. After saving `.env`, recreate the hub from that checkout:
+
+```sh
+sh remote-compose.sh up --detach hub
+```
+
+Omitting the setting, or leaving it empty, disables sign-in with a distinct
+`not-configured` response. A malformed client ID prevents hub startup and names
+`HUB_GITHUB_CLIENT_ID`; GitHub refusing or being unreachable fails only the
+attempt in progress. Local-only work and `ub open` need no GitHub app.
+Failed attempts emit `hub.github.sign-in.failed` in the hub's stderr JSON log,
+with the failing step, a fixed code and the upstream HTTP status when available.
+No GitHub token, response body or upstream exception is logged. Check the app's
+Device Flow setting and client ID when the code reports `device_flow_disabled`
+or `incorrect_client_credentials`.
+
+The sign-in interface is `POST /auth/github/start`, `POST /auth/github/collect`
+and `POST /auth/github/cancel`. Starting returns a GitHub approval URL, short
+code, bounded lifetime and a private collection secret. A device displays the
+URL and code; the person approves on GitHub in any browser. Only that device's
+request ID and collection secret can collect its credential, once. Keep the
+collection secret private; the displayed code alone cannot collect anything.
+Cancellation abandons the attempt. The hub reads the authorized public account
+identity and discards GitHub's token; it accepts no supplied GitHub token or
+identity. This interface does not add CLI login commands or a browser session.
+The hub permits 100 active attempts, independently of finished attempts. Terminal
+statuses expire no later than fifteen minutes after the attempt's expiry; at
+most 100 are retained when new attempts start, evicting oldest requests first. Evicted or restarted
+requests return `unknown-request`.
+
+Sign-in identifies the durable GitHub account and issues one Uberblick device
+credential for its existing workspace memberships. It grants no membership.
+These credentials are not accepted by the live hub or `ub open` yet; configuring
+sign-in never activates credential admission. Existing clients continue using
+the shared signing secret and the private tailnet boundary.
 
 ## What the command does, by hand
 
@@ -196,9 +266,9 @@ Mode `0600`, because that file holds the signing secret — `ub remote init`
 writes it under `umask 077` and chmods it for exactly this reason.
 
 Then edit `.env`. Its keys are the ones `docker-compose.yml` and
-`remote.env.example` name, and there are no others: four required, plus optional
-`WEB_HUB_URL` (see
-[Pointing the client at another hub](#pointing-the-client-at-another-hub)).
+`remote.env.example` name: four required, plus optional `WEB_HUB_URL` (see
+[Pointing the client at another hub](#pointing-the-client-at-another-hub)) and
+`HUB_GITHUB_CLIENT_ID` (see [Enable GitHub sign-in](#enable-github-sign-in)).
 
 - `TAILSCALE_HOST` is the host's full `*.ts.net` MagicDNS name, with no scheme
   or trailing slash.
@@ -477,13 +547,15 @@ exports, and Compose interpolates the whole model for every subcommand, so a bar
 
 Every MCP server holds the **entire** workspace and hydrates from its own
 append-only update log; `_directory` and `_sidebar` are synced documents like
-any other, and the hub keeps no non-synced tables today. So the *content* is
+any other. So the *content* is
 restorable without a backup at all: stand up an empty hub, let one machine
 reconnect, and the corpus comes back off that replica.
 
 What no replica gives you is **point-in-time recovery** — yesterday's text of a
 document somebody has since mangled, in a system where every mangling replicates
-within a second. That is the backup's job, and the only job it has here.
+within a second. Backups also preserve the hub's private principal, credential
+and membership registries in `hub.sqlite`. Client replicas cannot restore
+those records; restoring an older backup also restores its older access state.
 
 **Retention and encryption at rest are the owner's**, deliberately: how many of
 these files to keep, where they live, whether they are encrypted or copied off

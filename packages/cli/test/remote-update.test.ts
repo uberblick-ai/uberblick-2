@@ -50,7 +50,9 @@ const GIT_ENV: NodeJS.ProcessEnv = {
 };
 
 /** The host's `.env`, which the updater must never touch. */
-const HOST_ENV = "TAILSCALE_HOST=box.tailnet.ts.net\nHUB_AUTH_TOKEN=a-secret\n";
+const GITHUB_SETTING = "HUB_GITHUB_CLIENT_ID=Iv23AbCdEF0123456789\n";
+const HOST_ENV =
+  `TAILSCALE_HOST=box.tailnet.ts.net\nHUB_AUTH_TOKEN=a-secret\n${GITHUB_SETTING}`;
 const RERUN_ENV =
   "TAILSCALE_HOST=box.tailnet.ts.net\nHUB_AUTH_TOKEN=replaced-secret\n";
 
@@ -273,7 +275,7 @@ async function startHeldInitRerun(
 }
 
 describe("remote-update.sh", () => {
-  it("deploys an init re-run's own env under the checkout lock", () => {
+  it("deploys an init re-run's env under the lock, preserving the host's GitHub app", () => {
     const fix = fixture();
     const next = push(fix, { "marker.txt": "two\n" });
 
@@ -282,9 +284,34 @@ describe("remote-update.sh", () => {
     expect(ran.status).toBe(0);
     expect(ran.stdout).toContain("uberblick-init-rerun: applied");
     expect(builds(fix)).toEqual(["up --build --detach"]);
-    expect(readFileSync(join(fix.checkout, ".env"), "utf8")).toBe(RERUN_ENV);
+    expect(readFileSync(join(fix.checkout, ".env"), "utf8")).toBe(
+      RERUN_ENV + GITHUB_SETTING,
+    );
     expect(readFileSync(join(fix.checkout, "marker.txt"), "utf8")).toBe("two\n");
     expect(deployedRef(fix)).toBe(next);
+  });
+
+  it("leaves sign-in unconfigured when an init re-run has no host GitHub app", () => {
+    const fix = fixture();
+    writeFileSync(
+      join(fix.checkout, ".env"),
+      "TAILSCALE_HOST=box.tailnet.ts.net\nHUB_AUTH_TOKEN=a-secret\n",
+      "utf8",
+    );
+
+    expect(initRerun(fix).status).toBe(0);
+    expect(readFileSync(join(fix.checkout, ".env"), "utf8")).toBe(RERUN_ENV);
+  });
+
+  it("preserves the operator's quoted and exported GitHub setting", () => {
+    const fix = fixture();
+    const app = "  export HUB_GITHUB_CLIENT_ID='Iv1.abcdef0123456789'\n";
+    writeFileSync(join(fix.checkout, ".env"), HOST_ENV + app, "utf8");
+
+    expect(initRerun(fix).status).toBe(0);
+    expect(readFileSync(join(fix.checkout, ".env"), "utf8")).toBe(
+      RERUN_ENV + GITHUB_SETTING + app,
+    );
   });
 
   it("leaves the deployed ref unchanged when an init re-run build fails", () => {
@@ -327,7 +354,9 @@ describe("remote-update.sh", () => {
 
     expect(await first.release()).toBe(0);
     expect(builds(fix)).toEqual(["up --build --detach"]);
-    expect(readFileSync(join(fix.checkout, ".env"), "utf8")).toBe(RERUN_ENV);
+    expect(readFileSync(join(fix.checkout, ".env"), "utf8")).toBe(
+      RERUN_ENV + GITHUB_SETTING,
+    );
   });
 
   it("lets an init re-run deploy a second checkout while the first is locked", async () => {

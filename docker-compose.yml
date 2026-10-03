@@ -7,6 +7,9 @@ services:
       target: hub
     environment:
       HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
+      # Optional operator-owned GitHub App for device sign-in. It reaches only
+      # the hub, never the served browser configuration or the web build.
+      HUB_GITHUB_CLIENT_ID: "${HUB_GITHUB_CLIENT_ID:-}"
     restart: unless-stopped
     stop_grace_period: 30s
     volumes:

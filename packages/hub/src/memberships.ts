@@ -52,12 +52,14 @@ function validateRole(role: MembershipRole): void {
  * and management must share this instance so removal reaches its subscribers.
  * Checks and each single-statement mutation stay synchronous on the hub's one
  * database connection, so another operation cannot interleave between them.
- * The live hub does not construct or install this authority yet.
+ * Configured live sign-in reads this registry without granting memberships;
+ * live credential and membership admission await the client cutover.
  */
 export class MembershipRegistry {
   private readonly insert: StatementSync;
   private readonly selectRole: StatementSync;
   private readonly selectMembers: StatementSync;
+  private readonly selectWorkspaces: StatementSync;
   private readonly countAdmins: StatementSync;
   private readonly updateRole: StatementSync;
   private readonly deleteMember: StatementSync;
@@ -77,6 +79,10 @@ export class MembershipRegistry {
     this.selectMembers = db.prepare(`
       SELECT principal_id, role FROM hub_memberships
       WHERE workspace_id = $workspaceId ORDER BY principal_id
+    `);
+    this.selectWorkspaces = db.prepare(`
+      SELECT workspace_id FROM hub_memberships
+      WHERE principal_id = $principalId ORDER BY workspace_id
     `);
     this.countAdmins = db.prepare(`
       SELECT COUNT(*) AS count FROM hub_memberships
@@ -108,6 +114,11 @@ export class MembershipRegistry {
   roleFor(workspaceId: string, principalId: string): MembershipRole | null {
     validateIdentity(workspaceId, principalId);
     return (this.selectRole.get({ workspaceId, principalId })?.role as MembershipRole | undefined) ?? null;
+  }
+
+  /** Internal issuance snapshot; no attribute of GitHub can grant access. */
+  workspacesFor(principalId: string): string[] {
+    return this.selectWorkspaces.all({ principalId }).map((row) => row.workspace_id as string);
   }
 
   /** Reusable by invitation creation and other workspace access management. */

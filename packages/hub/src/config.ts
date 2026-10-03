@@ -7,8 +7,8 @@
  * addresses creep in. `PORT` defaults to 1234 and `HUB_HOST` to 127.0.0.1 —
  * the two address-ish defaults in the repo.
  *
- * The loopback default is the security model, not a convenience: the hub's only
- * credential is a single dev secret shared by every client, so a wildcard bind
+ * The loopback default is the security model, not a convenience: live room
+ * admission uses a single dev secret shared by every client, so a wildcard bind
  * would offer the whole LAN a hub that trusts anyone holding it. A hosted
  * deployment opts in with `HUB_HOST=0.0.0.0`.
  *
@@ -25,6 +25,7 @@
  */
 
 import type { HubLogger } from "./log.js";
+import type { GithubSignInConfig } from "./github-sign-in.js";
 import type { StorageOptions } from "./storage.js";
 import { resolveStorage } from "./storage.js";
 
@@ -77,6 +78,8 @@ export interface HubConfig {
   databasePath?: string;
   /** HMAC secret tokens are signed with (`HUB_AUTH_TOKEN`). Required. */
   authSecret: string;
+  /** Optional remote GitHub sign-in; never changes room admission. */
+  github?: GithubSignInConfig;
   log?: HubLogger;
   /**
    * How long `onStoreDocument` is debounced (ms). Hocuspocus' own defaults
@@ -156,10 +159,18 @@ function parsePort(raw: string | undefined): number {
   return port;
 }
 
+/** Public app identifiers, distinct from an App ID or OAuth App client ID. */
+export function validateGithubClientId(clientId: string): void {
+  if (typeof clientId !== "string" || !/^(?:Iv1\.[a-fA-F0-9]{16}|Iv23[A-Za-z0-9]{16})$/.test(clientId)) {
+    throw new Error("HUB_GITHUB_CLIENT_ID must be a GitHub App client ID (Iv1. followed by 16 hex digits, or Iv23 followed by 16 alphanumeric characters)");
+  }
+}
+
 /**
  * Build a config from the environment.
  *
  * @throws when `HUB_AUTH_TOKEN` is missing or `PORT` is not a valid port.
+ * `createHub` validates GitHub configuration before opening the database.
  */
 export function resolveHubConfig(
   env: NodeJS.ProcessEnv = process.env,
@@ -173,11 +184,13 @@ export function resolveHubConfig(
   }
 
   const host = env.HUB_HOST?.trim();
+  const githubClientId = env.HUB_GITHUB_CLIENT_ID;
 
   return {
     port: parsePort(env.PORT),
     address: host === undefined || host === "" ? DEFAULT_HOST : host,
     databasePath: hubDatabasePath(env),
     authSecret,
+    ...(githubClientId === undefined || githubClientId === "" ? {} : { github: { clientId: githubClientId } }),
   };
 }
