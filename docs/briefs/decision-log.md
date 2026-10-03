@@ -145,6 +145,27 @@ stub only if filtering by issue ("which decision covers #1125?") is wanted.
 The Editorial contract's ban on issue and PR numbers applies to Regular
 Documents; it gains an explicit note that decision `refs` are the exception.
 
+## Re-implementation: no legacy owed
+
+Decision records may be re-implemented from scratch (owner, 2026-10-03). Like
+the rest of the pre-launch product, no migration, compatibility window or
+legacy detection is owed:
+
+- The `meta.supersedes` key, the stub fields, the `decisions` root's entry
+  shape, the MCP arguments (`governs`, `supersedes`) and their refusals may be
+  redefined wherever a cleaner shape is simpler; nothing must keep reading the
+  old one.
+- The `Reconsidering` gate is deleted outright, not deprecated.
+- The six existing decision records are re-created or re-stated by hand under
+  the new shape, with chains set where one record replaces another (*Keep the
+  coding-agent runner in the separate ub-agents tool* supersedes *Pipeline
+  ownership for ub launch*). A record that is not one decision — *Deferred
+  designs and their triggers* is a catalog of many — is split or becomes an
+  ordinary document.
+- An implementation may therefore take the build order below in fewer steps
+  when that is simpler, as long as each pull request stays reviewable in one
+  sitting.
+
 ## What changes, and where
 
 | Change | Code | Corpus and instructions |
