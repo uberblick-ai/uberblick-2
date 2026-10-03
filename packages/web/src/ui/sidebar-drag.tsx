@@ -176,7 +176,7 @@ export function SidebarDragProvider({
       }}
     >
       <Instructions.Provider value={instructionsId}>
-        <p id={instructionsId} className="sr-only">
+        <p id={instructionsId} hidden>
           Press Enter to open the document or toggle the group. Press Space to pick up the row.
           While dragging, use the arrow keys to move, Space or Enter to drop, or Escape to cancel.
         </p>
