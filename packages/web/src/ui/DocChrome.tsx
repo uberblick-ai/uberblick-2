@@ -71,7 +71,7 @@ const TAG_SEARCH_THRESHOLD = 10;
 /** A magnifier, so the field reads as a search before anything is typed. */
 function TagSearchIcon(): ReactElement {
   return (
-    <svg className="ub-tag-search-icon" viewBox="0 0 16 16" aria-hidden="true">
+    <svg className="ub-tag-search-icon block size-3.5 shrink-0 text-muted-foreground" viewBox="0 0 16 16" aria-hidden="true">
       <circle cx="6.75" cy="6.75" r="4.25" fill="none" stroke="currentColor" strokeWidth="1.3" />
       <path
         d="M9.9 9.9 13.5 13.5"
@@ -241,7 +241,7 @@ function TagStrip({
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="ub-tag-picker-panel"
+        className="ub-tag-picker-panel w-[min(20rem,calc(100vw_-_2rem))]! overflow-hidden p-0!"
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           focusPanelEntry();
@@ -252,13 +252,13 @@ function TagStrip({
         }}
       >
         {showSearch && (
-          <div className="ub-tag-search-wrap">
-            <span className="ub-tag-search-field">
+          <div className="ub-tag-search-wrap border-b border-border p-2">
+            <span className="ub-tag-search-field flex items-center gap-[0.4rem] rounded-(--radius-sm) border border-(--sidebar-input) bg-background px-2 py-[0.35rem] text-foreground focus-within:outline-2 focus-within:outline-(--ring) focus-within:-outline-offset-1">
               <TagSearchIcon />
               <input
                 ref={search}
                 type="search"
-                className="ub-tag-search"
+                className="ub-tag-search min-w-0 flex-auto border-0 bg-transparent p-0 text-inherit [font:inherit] placeholder:text-muted-foreground placeholder:opacity-100 focus-visible:outline-none"
                 value={query}
                 placeholder="Search tags"
                 aria-label="Search tags"
@@ -278,7 +278,7 @@ function TagStrip({
         )}
         <div
           id={listId}
-          className="ub-tag-options"
+          className="ub-tag-options max-h-56 overflow-y-auto p-[0.35rem]"
           role="listbox"
           aria-multiselectable="true"
           aria-label="Available tags"
@@ -290,7 +290,7 @@ function TagStrip({
                 optionRefs.current[index] = element;
               }}
               type="button"
-              className="ub-tag-option"
+              className="ub-tag-option flex w-full cursor-pointer items-center gap-[0.45rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.45rem] py-[0.4rem] text-left text-popover-foreground [font:inherit] hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
               role="option"
               aria-selected={selected.has(entry.id)}
               onClick={() => toggle(entry)}
@@ -310,17 +310,17 @@ function TagStrip({
                 }
               }}
             >
-              <span className="ub-tag-check" aria-hidden="true">
+              <span className="ub-tag-check inline-flex size-4 shrink-0 items-center justify-center rounded-[0.2rem] border border-(--sidebar-muted-foreground)" aria-hidden="true">
                 {selected.has(entry.id) ? "✓" : ""}
               </span>
               <span>{entry.name}</span>
               {entry.state === "retired" && (
-                <span className="ub-tag-retired">retired</span>
+                <span className="ub-tag-retired ml-auto text-muted-foreground">retired</span>
               )}
             </button>
           ))}
           {filtered.length === 0 && (
-            <p className="ub-tag-empty">
+            <p className="ub-tag-empty m-0 px-2 py-[0.65rem] text-muted-foreground">
               {options.length === 0 ? "No tags available." : "No matching tags."}
             </p>
           )}
@@ -592,7 +592,7 @@ function DocumentActions({
           >
             <DropdownMenuItem
               disabled={onTogglePin === null}
-              className={pinned ? "ub-action-pinned" : ""}
+              className={pinned ? "ub-action-pinned text-(--brand-ink)!" : ""}
               onSelect={() => onTogglePin?.()}
             >
               {onTogglePin === null
@@ -615,7 +615,8 @@ function DocumentActions({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               aria-disabled={onArchive === null}
-              className="ub-action-danger"
+              variant="destructive"
+              className="ub-action-danger text-[light-dark(oklch(0.51_0.20_27.325),var(--destructive))]!"
               onSelect={(event) => {
                 if (onArchive === null) {
                   event.preventDefault();

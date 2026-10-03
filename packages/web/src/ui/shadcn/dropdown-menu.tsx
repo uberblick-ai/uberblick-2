@@ -6,6 +6,7 @@
  * Upstream also ships checkbox items, radio groups and submenus; they are not
  * here because nothing asks for them yet, and each would drag in an icon
  * dependency for its indicator. Add them when a screen needs them.
+ * The upstream destructive item variant is retained for lifecycle actions.
  *
  * The enter/exit animations are dropped for the same reason as in `popover.tsx`
  * (`tw-animate-css` is a dependency for a fade). `data-highlighted` is Radix's
@@ -61,14 +62,19 @@ function DropdownMenuContent({
 
 function DropdownMenuItem({
   className,
+  variant = "default",
   ...props
-}: ComponentProps<typeof DropdownMenuPrimitive.Item>): ReactElement {
+}: ComponentProps<typeof DropdownMenuPrimitive.Item> & {
+  variant?: "default" | "destructive";
+}): ReactElement {
   return (
     <DropdownMenuPrimitive.Item
       data-slot="dropdown-menu-item"
+      data-variant={variant}
       className={cn(
         "relative flex cursor-pointer select-none items-center gap-2 rounded-(--radius-sm) px-2 py-1.5 outline-hidden",
         "data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground",
+        "data-[variant=destructive]:text-destructive data-[variant=destructive]:data-[highlighted]:text-destructive",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         className,
       )}

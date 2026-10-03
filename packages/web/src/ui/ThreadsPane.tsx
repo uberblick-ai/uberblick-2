@@ -13,7 +13,7 @@
  * focuses the card. Both directions are the same `ThreadFocus`, held by the app
  * shell, because the two ends live in different panes.
  *
- * Resolved threads leave the count and move below it, collapsed and dimmed.
+ * Resolved threads leave the count and move below it, collapsed and labelled.
  * They are never dropped: a conversation someone has already had is the reason
  * the text reads the way it does now.
  *
@@ -63,16 +63,16 @@ function Comment({
 }): ReactElement {
   const { label, dateTime, title } = commentTimestamp(comment.createdAt, now);
   return (
-    <span className="ub-thread-comment">
-      <span className="ub-thread-byline">
-        <span className="ub-thread-author">{comment.author}</span>
+    <span className="ub-thread-comment flex flex-col">
+      <span className="ub-thread-byline flex gap-[0.35rem] text-[0.7rem] text-(--muted-foreground)">
+        <span className="ub-thread-author font-medium text-foreground">{comment.author}</span>
         {/* No `dateTime` when the stored value is not a date: React drops the
             attribute, and the label still shows what the document holds. */}
         <time dateTime={dateTime} title={title}>
           {label}
         </time>
       </span>
-      <span className="ub-thread-text">{comment.text}</span>
+      <span className="ub-thread-text whitespace-pre-wrap">{comment.text}</span>
     </span>
   );
 }
@@ -116,27 +116,36 @@ function ThreadCard({
     <li id={threadCardId(thread.id)} className="ub-thread-card">
       <button
         type="button"
-        className={`ub-thread${focused ? " ub-thread-focused" : ""}${thread.orphaned ? " ub-thread-orphaned" : ""}${thread.resolved ? " ub-thread-resolved" : ""}`}
+        // Resolved and orphaned cards keep their labels and collapse state;
+        // opacity would also dim their enabled text below its contrast floor.
+        className={`ub-thread flex w-full cursor-pointer flex-col gap-[0.35rem] rounded-(--radius-sm) border border-l-2 border-(--border) px-[0.6rem] py-2 text-left [font:inherit] hover:border-l-brand ${focused ? "ub-thread-focused border-l-brand bg-(--brand-subtle)" : "bg-card"} text-card-foreground${thread.orphaned ? " ub-thread-orphaned" : ""}${thread.resolved ? " ub-thread-resolved" : ""}`}
         aria-current={focused ? "true" : undefined}
         aria-expanded={thread.resolved ? !collapsed : undefined}
         onClick={onSelect}
       >
-        <span className="ub-thread-head">
-          <span className="ub-thread-ref">{thread.blockRef}</span>
-          {thread.orphaned && <span className="ub-chip ub-chip-orphaned">orphaned</span>}
-          {thread.resolved && <span className="ub-chip">resolved</span>}
+        <span className="ub-thread-head flex items-center gap-[0.35rem]">
+          {/* The one auto margin keeps both state chips together at the edge. */}
+          <span className="ub-thread-ref mr-auto font-(family-name:--font-mono) text-[0.7rem] tracking-[0.02em] text-(--muted-foreground)">{thread.blockRef}</span>
+          {thread.orphaned && (
+            // The subtle warning fill disappears on a focused amber ground.
+            <span className={`ub-chip ub-chip-orphaned rounded-(--radius-sm) px-[0.3rem] text-[0.65rem] tracking-[0.04em] uppercase ${focused ? "bg-(--status-warning) text-(--brand-foreground)" : "bg-(--status-warning-subtle) text-foreground"}`}>
+              orphaned
+            </span>
+          )}
+          {thread.resolved && <span className="ub-chip rounded-(--radius-sm) bg-(--card-accent) px-[0.3rem] text-[0.65rem] tracking-[0.04em] text-secondary-foreground uppercase">resolved</span>}
         </span>
         {thread.orphaned ? (
           // The range is gone, so there is nothing to quote. Say so, and say
           // where it was — the conversation itself is right below, untouched.
-          <span className="ub-thread-gone">
+          <span className="ub-thread-gone text-[0.75rem] text-(--muted-foreground)">
             annotated range deleted from {thread.blockRef}
           </span>
         ) : (
-          <span className="ub-thread-excerpt">{thread.excerpt}</span>
+          // Quote marks are chrome; the excerpt itself stays verbatim.
+          <span className="ub-thread-excerpt border-l-2 border-(--border) pl-[0.4rem] text-foreground italic before:content-['“'] after:content-['”']">{thread.excerpt}</span>
         )}
         {collapsed ? (
-          <span className="ub-thread-replies">
+          <span className="ub-thread-replies text-[0.7rem] text-(--muted-foreground)">
             {thread.comments.length}{" "}
             {thread.comments.length === 1 ? "comment" : "comments"} — show
           </span>
@@ -146,7 +155,7 @@ function ThreadCard({
           ))
         )}
         {!collapsed && thread.replyCount > 0 && (
-          <span className="ub-thread-replies">
+          <span className="ub-thread-replies text-[0.7rem] text-(--muted-foreground)">
             {thread.replyCount} {thread.replyCount === 1 ? "reply" : "replies"}
           </span>
         )}
@@ -169,7 +178,7 @@ function ThreadCard({
             onCancel={onReplyClose}
           />
         ) : (
-          <div className="ub-thread-actions">
+          <div className="ub-thread-actions flex gap-1 pt-[0.3rem] pl-[0.6rem]">
             {!thread.resolved && (
               <button type="button" className="ub-tool" onClick={onReplyOpen}>
                 Reply
@@ -399,16 +408,16 @@ export function ThreadsPane({
     <section className="ub-threads" aria-label="Threads">
       {/* The count is the open threads: a rail that keeps counting settled
           conversations stops telling you anything about the document. */}
-      <p className="ub-rail-head">
+      <p className="ub-rail-head mt-0 mr-0 mb-[0.4rem] ml-0 text-[0.7rem] tracking-[0.06em] text-(--muted-foreground) uppercase">
         Threads <span className="ub-muted">{unresolved.length}</span>
       </p>
-      <ul>{unresolved.map(card)}</ul>
+      <ul className="m-0 flex list-none flex-col gap-2 p-0">{unresolved.map(card)}</ul>
       {resolved.length > 0 && (
         <>
-          <p className="ub-rail-head ub-rail-subhead">
+          <p className="ub-rail-head mt-[0.9rem] mr-0 mb-[0.4rem] ml-0 text-[0.7rem] tracking-[0.06em] text-(--muted-foreground) uppercase">
             Resolved <span className="ub-muted">{resolved.length}</span>
           </p>
-          <ul>{resolved.map(card)}</ul>
+          <ul className="m-0 flex list-none flex-col gap-2 p-0">{resolved.map(card)}</ul>
         </>
       )}
     </section>
