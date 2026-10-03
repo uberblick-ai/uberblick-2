@@ -59,6 +59,9 @@
 @source "./Sidebar.tsx";
 @source "./App.tsx";
 @source "./ThreadsPane.tsx";
+@source "./BlockMenu.tsx";
+@source "./CaretMenu.tsx";
+@source "./MentionMenu.tsx";
 @source "./WorkspaceSettings.tsx";
 @source "./WorkspaceSwitcher.tsx";
 

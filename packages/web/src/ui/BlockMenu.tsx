@@ -7,29 +7,10 @@
  * transactions live in `editor/block-menu.ts`; what this file owns is pixels,
  * focus and keys.
  *
- * Three decisions worth knowing:
- *
- * - **No Tiptap suggestion plugin.** `@tiptap/suggestion` is a package of its
- *   own and is not in the lockfile, so using it would mean a new runtime
- *   dependency — an architectural decision this issue does not carry. The
- *   trigger is instead read off the editor state every transaction
- *   (`slashTriggerAt`), which is less machinery than the plugin would be: no
- *   decoration, no plugin state, nothing to keep in step with an undo.
- *
- * - **Keys are taken in the capture phase, on the editor host.** While the slash
- *   menu is open, ↑/↓/Enter/Esc belong to the menu, not to ProseMirror. A
- *   capture listener on `.ub-editor` — an ancestor of the contenteditable — sees
- *   them first and stops them there, so ProseMirror never splits a block under
- *   an Enter that meant "insert this one". Everything else falls through and
- *   filters the list by editing the document, which is what keeps the typed
- *   `/query` visible in the prose and undoable as text. A composing keystroke is
- *   never the menu's, whatever it says — `useCompositionGuard` in
- *   `ui/caret-menu.ts` owns that, shared with the `@` picker.
- *
- * - **The gutter is reserved, never inserted.** `.ub-column` carries a permanent
- *   left padding and the button is absolutely positioned inside it, so
- *   revealing it changes opacity and nothing else. A `+` that pushed the prose
- *   sideways on hover would make every block twitch as the pointer crossed it.
+ * ProseMirror owns composition and menu keys; the shared CaretMenu uses
+ * Floating UI placement and native-click dismissal. Trigger state and picks
+ * remain the model's.
+ * The gutter is reserved rather than inserted, so hover never moves prose.
  *
  * The menu is local UI, and the document does not change until an entry is
  * picked — but the document underneath it is not. A peer can delete or move the
@@ -38,7 +19,7 @@
  * close rather than act on a block that has gone.
  */
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement, RefObject } from "react";
 import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
@@ -52,12 +33,11 @@ import {
   triggerHint,
 } from "../editor/block-menu.js";
 import type { BlockMenuEntry, SlashTrigger } from "../editor/block-menu.js";
-import { CARET_MENU_OFFSET, pointAtCaret, useCompositionGuard } from "./caret-menu.js";
-import type { KeySource, Point } from "./caret-menu.js";
+import { useCaretMenuKeys } from "./caret-menu.js";
+import { CaretMenu, useCaretMenuIds } from "./CaretMenu.js";
 
 interface SlashSession {
   trigger: SlashTrigger;
-  point: Point;
 }
 
 /**
@@ -146,9 +126,10 @@ export function BlockMenu({
   const [gutter, setGutter] = useState<Hover | null>(null);
   const [gutterQuery, setGutterQuery] = useState("");
   /** The highlighted entry, and the list it was highlighted in. */
-  const [highlight, setHighlight] = useState<{ list: string; index: number }>({
+  const [highlight, setHighlight] = useState<{ list: string; index: number; keyboard: boolean }>({
     list: "",
     index: 0,
+    keyboard: false,
   });
   /**
    * Esc, remembered for as long as the session it dismissed. Cleared the moment
@@ -157,33 +138,9 @@ export function BlockMenu({
    * alone, which is what Esc meant.
    */
   const dismissed = useRef(false);
-  const card = useRef<HTMLDivElement | null>(null);
+  const gutterButton = useRef<HTMLButtonElement | null>(null);
   /** The gutter menu's search field, when one is open — a composition surface. */
   const search = useRef<HTMLInputElement | null>(null);
-  /** The entries' scroll container: the palette is taller than its viewport. */
-  const listBox = useRef<HTMLDivElement | null>(null);
-
-  /**
-   * Which of the menu's two typing surfaces holds `target`, if either does. The
-   * prose and the gutter's search field are both inside the frame, and both are
-   * typed into with an input method.
-   */
-  const sourceOf = useCallback(
-    (target: EventTarget | null): KeySource | null => {
-      if (!(target instanceof Node)) return null;
-      if (editor.view.dom.contains(target)) return "editor";
-      const field = search.current;
-      if (field !== null && (field === target || field.contains(target))) {
-        return "search";
-      }
-      return null;
-    },
-    [editor],
-  );
-
-  /** Whether the menu may act on this keystroke — see `ui/caret-menu.ts`. */
-  const menuOwnsKey = useCompositionGuard(editor, host, sourceOf);
-
   // Two questions with two different answers.
   //
   // Whether a session *stays* open is asked of the state, on every transaction:
@@ -212,7 +169,7 @@ export function BlockMenu({
         current === null &&
         (transaction === null || !opensSlashSession(transaction, trigger))
           ? null
-          : { trigger, point: pointAtCaret(editor, host.current) },
+          : { trigger },
       );
     };
     read(null);
@@ -222,7 +179,7 @@ export function BlockMenu({
     return () => {
       editor.off("transaction", onTransaction);
     };
-  }, [editor, host]);
+  }, [editor]);
 
   // Hover, for the gutter button. Tracked on the ProseMirror root so the button
   // itself — which is outside it — never counts as leaving the block, and
@@ -269,43 +226,20 @@ export function BlockMenu({
   // entry it is already on: returning the same state is how React is told there
   // is nothing to render.
   const highlightAt = useCallback(
-    (index: number): void =>
+    (index: number, keyboard = false): void =>
       setHighlight((current) =>
-        current.list === list && current.index === index ? current : { list, index },
+        current.list === list && current.index === index && current.keyboard === keyboard
+          ? current
+          : { list, index, keyboard },
       ),
     [list],
   );
-
-  /**
-   * Bring the entry at `index` fully into the list's viewport, moving the list
-   * by the least it takes and moving nothing else.
-   *
-   * The arrow keys are the only caller. A pointer needs no help — the entry it
-   * highlights is the one it is already on — and scrolling under a resting hand
-   * would slide a different entry beneath it.
-   *
-   * Read straight off the DOM rather than from measured entry heights: the
-   * entries are separated by group headings, so their offsets are not a
-   * multiple of anything. Called before React re-renders, which is soon enough
-   * — the highlight is a background and a border colour, so nothing about to be
-   * painted moves the box being measured.
-   */
-  const reveal = useCallback((index: number): void => {
-    const box = listBox.current;
-    if (box === null) return;
-    const entry = box.querySelectorAll<HTMLElement>('[role="option"]')[index];
-    if (entry === undefined) return;
-    const view = box.getBoundingClientRect();
-    const rect = entry.getBoundingClientRect();
-    if (rect.top < view.top) box.scrollTop -= view.top - rect.top;
-    else if (rect.bottom > view.bottom) box.scrollTop += rect.bottom - view.bottom;
-  }, []);
 
   // A closed menu keeps no highlight, so the next one opens on its first entry
   // — which is the entry a list scrolled back to the top is showing. Remembering
   // an index instead would reopen the menu highlighting something off screen.
   useEffect(() => {
-    if (!open) setHighlight({ list: "", index: 0 });
+    if (!open) setHighlight({ list: "", index: 0, keyboard: false });
   }, [open]);
 
   const closeGutter = useCallback((): void => {
@@ -382,10 +316,9 @@ export function BlockMenu({
     (delta: number): void => {
       if (entries.length === 0) return;
       const next = (active + delta + entries.length) % entries.length;
-      highlightAt(next);
-      reveal(next);
+      highlightAt(next, true);
     },
-    [entries.length, active, highlightAt, reveal],
+    [entries.length, active, highlightAt],
   );
 
   /** The keys the menu owns while it is open. Returns false for the rest. */
@@ -418,44 +351,18 @@ export function BlockMenu({
     [step, choose, entries, active, gutter, closeGutter, editor],
   );
 
-  // Slash mode types into the document, so the keys the menu owns have to be
-  // taken before ProseMirror sees them — see the module comment.
-  useEffect(() => {
-    if (path !== "slash" || !open) return;
-    const target = editor.view.dom.parentElement ?? editor.view.dom;
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (!menuOwnsKey(event, "editor")) return;
-      if (!handleKey(event.key)) return;
-      event.preventDefault();
-      event.stopPropagation();
-    };
-    target.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      target.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [editor, path, open, handleKey, menuOwnsKey]);
-
-  // A click anywhere else dismisses the gutter menu, the way every menu does.
-  useEffect(() => {
-    if (gutter === null) return;
-    const onMouseDown = (event: MouseEvent): void => {
-      const target = event.target;
-      if (target instanceof Node && card.current?.contains(target) === true) return;
-      closeGutter();
-    };
-    document.addEventListener("mousedown", onMouseDown);
-    return () => {
-      document.removeEventListener("mousedown", onMouseDown);
-    };
-  }, [gutter, closeGutter]);
+  const { listId, activeId } = useCaretMenuIds(active);
+  useCaretMenuKeys(editor, path === "slash" && open ? handleKey : null, listId, activeId);
+  const dismiss = (): void => {
+    if (gutter !== null) closeGutter();
+    else {
+      dismissed.current = true;
+      setSlash(null);
+    }
+  };
 
   const anchor = gutter ?? hover;
   const visible = anchor !== null;
-  const point: Point =
-    gutter !== null
-      ? { top: gutter.top + BUTTON_SIZE + CARET_MENU_OFFSET, left: 0 }
-      : (slash?.point ?? { top: 0, left: 0 });
-
   return (
     <>
       {/* Always mounted, so revealing it is a change of opacity and nothing
@@ -463,6 +370,7 @@ export function BlockMenu({
           menu is the slash, not a button nobody can see. */}
       <button
         type="button"
+        ref={gutterButton}
         className={visible ? "ub-gutter-add ub-gutter-add-on" : "ub-gutter-add"}
         style={{ top: `${anchor?.top ?? 0}px` }}
         aria-label="Insert block below"
@@ -479,102 +387,50 @@ export function BlockMenu({
       >
         +
       </button>
-      {open && (
-        <div
-          className="ub-blockmenu"
-          ref={card}
-          style={{ top: `${point.top}px`, left: `${point.left}px` }}
-        >
-          {path === "gutter" && (
-            <input
-              ref={search}
-              className="ub-blockmenu-search"
-              placeholder="Search blocks…"
-              aria-label="Search blocks"
-              value={gutterQuery}
-              // The menu was opened by a deliberate click and filtering is what
-              // it is for, so the field takes focus rather than asking for a
-              // second gesture. Esc gives focus back to the prose.
-              // biome-ignore lint/a11y/noAutofocus: see above.
-              autoFocus
-              onChange={(event) => setGutterQuery(event.target.value)}
-              onKeyDown={(event) => {
-                // The field takes typed text, so it has an IME to stay out of
-                // the way of just as much as the prose does.
-                if (!menuOwnsKey(event.nativeEvent, "search")) return;
-                if (!handleKey(event.key)) return;
-                event.preventDefault();
-                event.stopPropagation();
-              }}
-            />
-          )}
-          {entries.length === 0 ? (
-            <p className="ub-blockmenu-empty ub-muted">No blocks match.</p>
-          ) : (
-            // A listbox of buttons rather than a list of them: an `option` has
-            // to be a child of its `listbox`, so a <ul>/<li> scaffold between
-            // the two would break the role it is there to carry.
-            //
-            // Keyed by the list it is showing, so a different query gets a
-            // different element: the highlight goes back to the first entry and
-            // a scroll offset that described the entries before it goes with
-            // it, rather than surviving into a list they are not in.
-            <div
-              key={list}
-              className="ub-blockmenu-list"
-              role="listbox"
-              aria-label="Block types"
-              ref={listBox}
-            >
-              {entries.map((entry, position) => (
-                <Fragment key={entry.id}>
-                  {/* A heading before the first entry of each group. The
-                      registry is in display order, so this is a look at the
-                      entry before rather than a grouping pass.
-
-                      Presentational, because a `listbox` owns options and
-                      nothing else: a heading announced as a child of one is a
-                      broken list, not extra context. Nothing is lost by hiding
-                      it — "Heading 2" and "Mermaid" say what they are without
-                      "Text" and "Source" over them, and the grouping is there
-                      for the eye scanning the column. */}
-                  {entries[position - 1]?.group !== entry.group && (
-                    <p className="ub-blockmenu-group" role="presentation">
-                      {entry.group}
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={position === active}
-                    className={
-                      position === active
-                        ? "ub-blockmenu-entry ub-blockmenu-on"
-                        : "ub-blockmenu-entry"
-                    }
-                    // Same reason as the gutter button: picking an entry must
-                    // not move the caret out of the block being converted.
-                    onMouseDown={(event) => event.preventDefault()}
-                    // `mousemove`, not `mouseenter`: an entry the keyboard
-                    // scrolled under a resting hand is entered too, and taking
-                    // that for a choice would undo the keystroke that caused
-                    // it. Only a hand that moves is choosing.
-                    onMouseMove={() => highlightAt(position)}
-                    onClick={() => choose(entry)}
-                  >
-                    <span className="ub-blockmenu-label">{entry.label}</span>
-                    {entry.trigger !== null && (
-                      <span className="ub-blockmenu-hint">
-                        {triggerHint(entry)}
-                      </span>
-                    )}
-                  </button>
-                </Fragment>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      <CaretMenu
+        editor={editor}
+        host={host}
+        anchor={path === "gutter" ? gutterButton : undefined}
+        open={open}
+        onDismiss={dismiss}
+        listKey={list}
+        listId={listId}
+        label="Block types"
+        options={entries.map((entry) => ({
+          id: entry.id, label: entry.label, group: entry.group,
+          hint: entry.trigger === null ? undefined : triggerHint(entry),
+        }))}
+        active={active}
+        reveal={highlight.list === list && highlight.keyboard}
+        highlightAt={highlightAt}
+        choose={(index) => choose(entries[index])}
+        empty="No blocks match."
+      >
+        {path === "gutter" && (
+          <input
+            ref={search}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={open}
+            aria-controls={entries.length > 0 ? listId : undefined}
+            aria-activedescendant={activeId}
+            className="mb-[0.3rem] w-full shrink-0 rounded-(--radius-sm) border border-input bg-background px-[0.4rem] py-[0.3rem] text-[0.85rem] text-foreground [font-family:inherit] [@media(pointer:coarse)]:text-base"
+            placeholder="Search blocks…"
+            aria-label="Search blocks"
+            value={gutterQuery}
+            // Deliberately opening the gutter menu starts its search.
+            // biome-ignore lint/a11y/noAutofocus: this field is the opened menu's control.
+            autoFocus
+            onChange={(event) => setGutterQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+              if (!handleKey(event.key)) return;
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          />
+        )}
+      </CaretMenu>
     </>
   );
 }

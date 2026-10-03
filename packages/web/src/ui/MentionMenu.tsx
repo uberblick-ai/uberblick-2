@@ -4,12 +4,8 @@
  *
  * The model — when an `@` is a mention, what it offers, and the edit behind
  * picking an entry — is `editor/mention-menu.ts`; what this file owns is pixels,
- * focus and keys. It is the block menu's twin and deliberately looks like it:
- * the same card, the same highlight, the same capture-phase key handling and the
- * same input-method guard (`ui/caret-menu.ts`), because a reader who has learned
- * one of the two menus has learned both.
- *
- * Three things are its own.
+ * focus and keys. The shared CaretMenu uses Floating UI and ProseMirror's
+ * native key handling for both menus.
  *
  * - **Nothing matching keeps the card open.** The block menu closes on an empty
  *   result, because a slash query nothing matches is a reader writing prose. An
@@ -24,12 +20,6 @@
  *   re-reads when the directory changes, so a document arriving mid-session
  *   joins the list.
  *
- * - **A click outside dismisses, like every menu.** The block menu's slash
- *   session needs no such handler — its query is the whole block, so any click
- *   moves the caret out of it and closes the session by itself. An `@` sits
- *   inside a sentence, and a click landing further along that same sentence
- *   would leave the trigger valid and the card hanging over prose the reader has
- *   moved on from.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -44,12 +34,11 @@ import {
 } from "../editor/mention-menu.js";
 import type { MentionTrigger } from "../editor/mention-menu.js";
 import type { DocLinkContext } from "../editor/doc-links.js";
-import { pointAtCaret, useCompositionGuard } from "./caret-menu.js";
-import type { KeySource, Point } from "./caret-menu.js";
+import { useCaretMenuKeys } from "./caret-menu.js";
+import { CaretMenu, useCaretMenuIds } from "./CaretMenu.js";
 
 interface MentionSession {
   trigger: MentionTrigger;
-  point: Point;
 }
 
 export function MentionMenu({
@@ -59,7 +48,7 @@ export function MentionMenu({
   openDocId,
 }: {
   editor: Editor;
-  /** The positioned element the card is placed inside — `.ub-editor-frame`. */
+  /** The editor frame, used to find the pane's collision boundary. */
   host: RefObject<HTMLElement | null>;
   /**
    * The directory this workspace's references resolve against. Null in an editor
@@ -72,9 +61,10 @@ export function MentionMenu({
 }): ReactElement | null {
   const [session, setSession] = useState<MentionSession | null>(null);
   /** The highlighted entry, and the list it was highlighted in. */
-  const [highlight, setHighlight] = useState<{ list: string; index: number }>({
+  const [highlight, setHighlight] = useState<{ list: string; index: number; keyboard: boolean }>({
     list: "",
     index: 0,
+    keyboard: false,
   });
   /**
    * Esc, remembered for as long as the session it dismissed — and set by a click
@@ -83,17 +73,8 @@ export function MentionMenu({
    * typing on after Esc leaves the text alone.
    */
   const dismissed = useRef(false);
-  const card = useRef<HTMLDivElement | null>(null);
   /** Bumped when the directory changes, so an open card re-reads its candidates. */
   const [directoryTick, setDirectoryTick] = useState(0);
-
-  /** The picker has one typing surface: the prose it is anchored in. */
-  const sourceOf = useCallback(
-    (target: EventTarget | null): KeySource | null =>
-      target instanceof Node && editor.view.dom.contains(target) ? "editor" : null,
-    [editor],
-  );
-  const menuOwnsKey = useCompositionGuard(editor, host, sourceOf);
 
   // The session is derived from the state on every transaction and opened by
   // the transaction — the same two questions, with the same two answers, as the
@@ -115,7 +96,7 @@ export function MentionMenu({
         return;
       }
       setSession((current) => {
-        const here = { trigger, point: pointAtCaret(editor, host.current) };
+        const here = { trigger };
         if (current === null) {
           return transaction !== null && opensMentionSession(transaction, trigger)
             ? here
@@ -139,7 +120,7 @@ export function MentionMenu({
     return () => {
       editor.off("transaction", onTransaction);
     };
-  }, [editor, host, docLinks]);
+  }, [editor, docLinks]);
 
   // A document arriving while the card is open belongs on the list. Subscribed
   // only while there is a card to update.
@@ -161,7 +142,12 @@ export function MentionMenu({
   const active = entries.length === 0 ? -1 : Math.min(chosen, entries.length - 1);
 
   const highlightAt = useCallback(
-    (index: number): void => setHighlight({ list, index }),
+    (index: number, keyboard = false): void =>
+      setHighlight((current) =>
+        current.list === list && current.index === index && current.keyboard === keyboard
+          ? current
+          : { list, index, keyboard },
+      ),
     [list],
   );
 
@@ -182,7 +168,7 @@ export function MentionMenu({
   const step = useCallback(
     (delta: number): void => {
       if (entries.length === 0) return;
-      highlightAt((active + delta + entries.length) % entries.length);
+      highlightAt((active + delta + entries.length) % entries.length, true);
     },
     [entries.length, active, highlightAt],
   );
@@ -217,76 +203,27 @@ export function MentionMenu({
     [step, choose, entries, active],
   );
 
-  // Taken before ProseMirror sees them, so an Enter that meant "this document"
-  // never splits the paragraph it was typed in.
-  useEffect(() => {
-    if (!open) return;
-    const target = editor.view.dom.parentElement ?? editor.view.dom;
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (!menuOwnsKey(event, "editor")) return;
-      if (!handleKey(event.key)) return;
-      event.preventDefault();
-      event.stopPropagation();
-    };
-    target.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      target.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [editor, open, handleKey, menuOwnsKey]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: Event): void => {
-      const target = event.target;
-      if (target instanceof Node && card.current?.contains(target) === true) return;
-      dismissed.current = true;
-      setSession(null);
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-    };
-  }, [open]);
-
-  if (!open || session === null) return null;
+  const { listId, activeId } = useCaretMenuIds(active);
+  useCaretMenuKeys(editor, open ? handleKey : null, listId, activeId);
 
   return (
-    <div
-      className="ub-blockmenu ub-mentionmenu"
-      ref={card}
-      style={{ top: `${session.point.top}px`, left: `${session.point.left}px` }}
-    >
-      {entries.length === 0 ? (
-        // "This page", not "the workspace": a directory that has not synced
-        // knows of no documents, and claiming there are none would be a claim
-        // this client cannot make (see `shell/DocumentList.tsx`).
-        <p className="ub-blockmenu-empty ub-muted">
-          No document this page knows matches.
-        </p>
-      ) : (
-        <div className="ub-blockmenu-list" role="listbox" aria-label="Documents">
-          {entries.map((entry, position) => (
-            <button
-              key={entry.docId}
-              type="button"
-              role="option"
-              aria-selected={position === active}
-              className={
-                position === active
-                  ? "ub-blockmenu-entry ub-blockmenu-on"
-                  : "ub-blockmenu-entry"
-              }
-              // The caret stays in the sentence being written until an entry is
-              // picked; the pick itself is what moves it.
-              onMouseDown={(event) => event.preventDefault()}
-              onMouseEnter={() => highlightAt(position)}
-              onClick={() => choose(entry.docId)}
-            >
-              <span className="ub-blockmenu-label">{entry.label}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    <CaretMenu
+      editor={editor}
+      host={host}
+      open={open}
+      onDismiss={() => {
+        dismissed.current = true;
+        setSession(null);
+      }}
+      listKey={list}
+      listId={listId}
+      label="Documents"
+      options={entries.map((entry) => ({ id: entry.docId, label: entry.label }))}
+      active={active}
+      reveal={highlight.list === list && highlight.keyboard}
+      highlightAt={highlightAt}
+      choose={(index) => choose(entries[index]?.docId)}
+      empty="No document this page knows matches."
+    />
   );
 }

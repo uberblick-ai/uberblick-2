@@ -9,6 +9,7 @@ import type { Schema } from "@tiptap/pm/model";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { BlockIds } from "./block-ids.js";
+import { CaretMenuKeys } from "./caret-menu.js";
 import { Collaboration } from "./collaboration.js";
 import { CommentAnchors } from "./comment-anchors.js";
 import { DocLinks } from "./doc-links.js";
@@ -63,6 +64,9 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // node and mark set alone. After `BlockIds`, because a rule names the block
     // it converts by the id that plugin assigns.
     BlockInputRules,
+    // Installed once: reconfiguring plugins on menu mount destroys collaboration
+    // views (including its UndoManager). The UI only registers live handlers.
+    CaretMenuKeys,
     // Code colouring is derived from source text and its language attribute as
     // inline decorations. It is behaviour, never another stored mark.
     CodeHighlighting,

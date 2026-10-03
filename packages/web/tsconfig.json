@@ -17,6 +17,7 @@
     "dev-config-document.ts",
     "vite.config.ts",
     "playwright.config.ts",
-    "playwright.external-link.config.ts"
+    "playwright.external-link.config.ts",
+    "playwright.menu.config.ts"
   ]
 }

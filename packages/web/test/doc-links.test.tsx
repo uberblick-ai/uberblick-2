@@ -451,6 +451,9 @@ describe("an unwritable document room", () => {
       expect(title?.readOnly).toBe(true);
       expect(host.querySelector(".ub-tag-add")).toBeNull();
       expect(host.querySelector(".ub-editor [contenteditable=true]")).toBeNull();
+      expect(
+        host.querySelector('.ub-editor [role="textbox"]')?.getAttribute("aria-readonly"),
+      ).toBe("true");
       expect(host.querySelector(".ub-status")?.textContent).toContain("not saved");
 
       const setter = Object.getOwnPropertyDescriptor(

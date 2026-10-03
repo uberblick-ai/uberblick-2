@@ -449,6 +449,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(prose(host)?.textContent).toContain("still every byte of it");
     // Read-only, and no chrome left that would write around it.
     expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
+    expect(prose(host)?.getAttribute("aria-readonly")).toBe("true");
     expect(host.querySelector<HTMLInputElement>(".ub-title")?.readOnly).toBe(true);
     expect(host.querySelector(".ub-gutter-add")).toBeNull();
 
@@ -456,6 +457,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     act(() => restoreButton(host)?.click());
     expect(banner(host)).toBeNull();
     expect(prose(host)?.getAttribute("contenteditable")).toBe("true");
+    expect(prose(host)?.getAttribute("aria-readonly")).toBe("false");
     expect(host.querySelector<HTMLInputElement>(".ub-title")?.readOnly).toBe(false);
     expect(host.querySelector(".ub-gutter-add")).not.toBeNull();
     // Lifted on the *other* client too, which is what "reappears in listings"
@@ -470,6 +472,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(banner(host)).not.toBeNull();
     expect(prose(host)).toBe(bound);
     expect(bound?.getAttribute("contenteditable")).toBe("false");
+    expect(bound?.getAttribute("aria-readonly")).toBe("true");
     expect(host.querySelector(".ub-gutter-add")).toBeNull();
 
     // The title's *write* is guarded, not just its field. `readOnly` is a
