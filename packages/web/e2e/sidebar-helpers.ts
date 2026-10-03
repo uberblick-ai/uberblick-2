@@ -1,14 +1,11 @@
 import { expect } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
+import { createDoc } from "./app-helpers.js";
 
 /** Make a document and pin it — the sidebar lists what is pinned, and only that. */
 export async function createPinnedDoc(page: Page, title: string): Promise<void> {
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
-  await page.locator(".ub-title").fill(title);
+  await createDoc(page, title, { pin: true });
   const actions = page.getByRole("button", { name: "Document actions" });
-  await actions.click();
-  await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
   await actions.click();
   await expect(
     page.getByRole("menuitem", { name: "Unpin from sidebar" }),

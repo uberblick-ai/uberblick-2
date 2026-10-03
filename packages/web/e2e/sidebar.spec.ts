@@ -1,53 +1,11 @@
 /** Browser layout, composed drawer input, and docked motion. */
 
 import { expect, test } from "@playwright/test";
-import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
+import { docTitle, setupHarness } from "./app-helpers.js";
+import type { Locator, Page } from "@playwright/test";
 import { createPinnedDoc, dragOnto } from "./sidebar-helpers.js";
-import { startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
 
-test.describe.configure({ mode: "serial" });
-
-let started: Harness | null = null;
-const contexts: BrowserContext[] = [];
-
-function harness(): Harness {
-  if (started === null) {
-    throw new Error("e2e: the harness is not running — its bootstrap failed");
-  }
-  return started;
-}
-
-test.beforeAll(async () => {
-  started = await startHarness();
-});
-
-test.afterEach(async () => {
-  for (const context of contexts.splice(0)) await context.close();
-});
-
-test.afterAll(async () => {
-  const running = started;
-  started = null;
-  await running?.stop();
-});
-
-/** A fresh context: its own awareness identity and its own tab. */
-async function openApp(browser: Browser, hasTouch = false): Promise<Page> {
-  const context = await browser.newContext({ hasTouch });
-  contexts.push(context);
-  const page = await context.newPage();
-  await page.goto(harness().appUrl);
-  await expect(page.locator(".ub-list-head")).toBeVisible();
-  // Initial chrome renders before configuration selects the canonical route.
-  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
-  return page;
-}
-
-/** Unique per run: every test in the file shares one workspace. */
-function docTitle(label: string): string {
-  return `${label}-${Math.random().toString(36).slice(2, 8)}`;
-}
+const { openApp } = setupHarness({ app: { readySelector: ".ub-list-head" } });
 
 /** The titles the sidebar lists, top to bottom. */
 function pinnedTitles(page: Page): Locator {
@@ -56,6 +14,7 @@ function pinnedTitles(page: Page): Locator {
 
 test("the docked sidebar shares the pane's top edge and transfers focus", async ({ browser }) => {
   const page = await openApp(browser);
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
   const path = new URL(page.url()).pathname;
   const sidebar = page.locator(".ub-list");
   const pane = page.locator(".ub-pane");
@@ -88,6 +47,7 @@ async function openDrawer(page: Page, settings = false): Promise<void> {
 
 test("narrowing hands sidebar focus to the opener and preserves pane focus", async ({ browser }) => {
   const page = await openApp(browser);
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
   const paneControl = page.locator(".ub-pane").getByRole("button", { name: "Working", exact: true });
   await page.setViewportSize({ width: 1400, height: 832 });
   await paneControl.focus();
@@ -142,6 +102,7 @@ async function expectPaneClearsOpener(page: Page): Promise<{ left: number; width
 
 test("phone, iPad and MacBook widths keep the drawer and pane controls inside the viewport", async ({ browser }) => {
   const page = await openApp(browser);
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
   for (const settings of [false, true]) {
@@ -228,6 +189,7 @@ test("desktop edges and document inset move together in both directions", async 
   browser,
 }) => {
   const page = await openApp(browser);
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
   for (const width of [1280, 1400]) {
@@ -267,6 +229,7 @@ test("collapse isolates contents and portals immediately, and rapid reversal kee
   browser,
 }) => {
   const page = await openApp(browser);
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
   const sidebar = page.locator(".ub-list");
   const restore = page.getByRole("button", { name: "Show document list" });
   // A portalled menu must also retire when its owning sidebar closes.
@@ -325,6 +288,7 @@ test("collapse isolates contents and portals immediately, and rapid reversal kee
 
 test("reduced motion keeps docked toggles immediate", async ({ browser }) => {
   const page = await openApp(browser);
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
@@ -343,6 +307,8 @@ test("a drag reorders the sidebar, and the other browser sees the new order", as
   const second = docTitle("second");
 
   const [a, b] = await Promise.all([openApp(browser), openApp(browser)]);
+  await expect(a.getByRole("button", { name: "+ new doc" })).toBeEnabled();
+  await expect(b.getByRole("button", { name: "+ new doc" })).toBeEnabled();
   await createPinnedDoc(a, first);
   await createPinnedDoc(a, second);
   await expect(pinnedTitles(a)).toHaveText([first, second]);
@@ -359,7 +325,8 @@ test("a drag reorders the sidebar, and the other browser sees the new order", as
 });
 
 test("the drawer's menus, group editing and pointer, keyboard and touch sorting work with a hidden docked preference", async ({ browser }) => {
-  const page = await openApp(browser, true);
+  const page = await openApp(browser, "/", { contextOptions: { hasTouch: true } });
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
   const first = docTitle("drawer-first");
   const second = docTitle("drawer-second");
   await createPinnedDoc(page, first);

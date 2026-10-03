@@ -15,45 +15,15 @@
  */
 
 import { expect, test } from "@playwright/test";
-import type { Browser, BrowserContext, Page } from "@playwright/test";
-import { placeCaret, startHarness } from "./harness.js";
-import type { Harness } from "./harness.js";
+import { AGENT_CURSOR_GRACE_MS } from "../src/editor/collaboration.js";
+import { createDoc, docTitle, setupHarness } from "./app-helpers.js";
+import { placeCaret } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
 
-test.describe.configure({ mode: "serial" });
-
-/**
- * How long the caret has to stay after the edit for a person to read it.
- *
- * The grace is 30 s (#407) and it starts when the session *leaves*, which is
- * later than the write this is measured from — by however long the child takes
- * to exit and the hub takes to broadcast the departure. Asserting at a full 30 s
- * would therefore be asserting at the instant of expiry, with only that unknown
- * as margin; 25 s is comfortably inside the grace and nowhere near the five
- * seconds this used to be, which had expired twenty seconds earlier.
- */
+// Keep the original readable-period proof inside the unchanged production grace.
 const READABLE_MS = 25_000;
-
-/**
- * How long an expiry is allowed to take before the test calls it a failure.
- *
- * Longer than the grace itself, for the same reason the wait above is shorter:
- * the clock starts at a departure this test does not get to observe. A timeout
- * equal to the grace would race it and report a caret that outlived its session
- * by half a second as one that never expires.
- */
-const EXPIRY_MS = 45_000;
-
-let started: Harness | null = null;
+const { harness, openApp } = setupHarness({ app: { upstream: true, readySelector: ".ub-list-head" } });
 let mcpAgent: McpAgent | null = null;
-const contexts: BrowserContext[] = [];
-
-function harness(): Harness {
-  if (started === null) {
-    throw new Error("e2e: the harness is not running — its bootstrap failed");
-  }
-  return started;
-}
 
 function agent(): McpAgent {
   if (mcpAgent === null) {
@@ -63,7 +33,6 @@ function agent(): McpAgent {
 }
 
 test.beforeAll(async () => {
-  started = await startHarness();
   mcpAgent = new McpAgent({
     workspace: harness().workspace,
     hubUrl: harness().hubUrl,
@@ -73,68 +42,15 @@ test.beforeAll(async () => {
 });
 
 test.afterEach(async () => {
-  // The sessions first: a test that failed mid-session must not leave a real
-  // server process running against the harness's hub. `close` is idempotent,
-  // so the ordinary path having closed them already costs nothing.
+  // A test that failed mid-session must close its real server processes too.
+  // `close` is idempotent, including after the ordinary departure path.
   await mcpAgent?.closeSessions();
-  for (const context of contexts.splice(0)) await context.close();
 });
 
 test.afterAll(async () => {
-  const running = started;
-  started = null;
   await mcpAgent?.close();
   mcpAgent = null;
-  await running?.stop();
 });
-
-async function openApp(browser: Browser): Promise<Page> {
-  const context = await browser.newContext();
-  contexts.push(context);
-  // This proof is specifically the upstream MCP-awareness path. `ub open`'s
-  // local/upstream awareness relay is #753, so keep both participants on the
-  // upstream until that separate bridge exists.
-  await context.route("**/uberblick-config.json", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        hubUrl: harness().hubUrl,
-        workspaces: [harness().workspace],
-        hubAuthToken: harness().authSecret,
-      }),
-    });
-  });
-  const page = await context.newPage();
-  await page.goto(harness().appUrl);
-  await expect(page.locator(".ub-list-head")).toBeVisible();
-  return page;
-}
-
-function editor(page: Page) {
-  return page.locator(".ub-editor .ProseMirror");
-}
-
-/**
- * Create a document, type into it, and answer with its uuid — which the
- * address carries, `/<workspace>/<uuid>`, and which is what an agent works by.
- */
-async function createDoc(page: Page, text: string): Promise<string> {
-  const before = new URL(page.url()).pathname;
-  await page.getByRole("button", { name: "+ new doc" }).click();
-  await expect.poll(() => new URL(page.url()).pathname).not.toBe(before);
-  await expect(editor(page)).toBeVisible();
-
-  const uuid = new URL(page.url()).pathname.split("/")[2] ?? "";
-  if (uuid === "") throw new Error("e2e: no document uuid in the address");
-
-  await page
-    .locator(".ub-title")
-    .fill(`attribution-${Math.random().toString(36).slice(2, 8)}`);
-  await placeCaret(page);
-  await page.keyboard.type(text, { delay: 15 });
-  return uuid;
-}
 
 /** What `get_doc` answers with, as far as writing one block needs. */
 interface DocPayload {
@@ -143,14 +59,14 @@ interface DocPayload {
 
 /**
  * The path the issue is about: initialize, rewrite one block, read the
- * response, exit. Answers with the instant the write returned — everything
- * after it is the grace period being measured.
+ * response, exit. The browser observes the real departure before its own clock
+ * advances; the MCP process and hub stay on real time.
  */
 async function writeAndLeave(
   clientInfo: { name: string; title?: string },
   uuid: string,
   newText: string,
-): Promise<number> {
+): Promise<void> {
   const session = agent().open(clientInfo);
   try {
     const doc = await session.call<DocPayload>("get_doc", { uuid });
@@ -163,7 +79,6 @@ async function writeAndLeave(
       new_text: newText,
       rev: block.rev,
     });
-    return Date.now();
   } finally {
     // In a `finally`, because a session that failed half way through is still
     // a running server process — and the closing is the very thing under test.
@@ -174,18 +89,22 @@ async function writeAndLeave(
 test("a short-lived MCP client's caret stays long enough to be read, labelled and then gone", async ({
   browser,
 }) => {
-  // Two real server processes start inside this test, each loading TypeScript
-  // through tsx; the default per-test budget is for browser work alone.
-  test.setTimeout(180_000);
-
-  const page = await openApp(browser);
-  const uuid = await createDoc(page, "watch this");
+  let socketCloses = 0;
+  const page = await openApp(browser, "/", {
+    beforeNavigate: async (loading) => {
+      loading.on("websocket", (socket) => socket.on("close", () => { socketCloses += 1; }));
+      await loading.clock.install();
+    },
+  });
+  const uuid = await createDoc(page, docTitle("attribution"));
+  await placeCaret(page);
+  await page.keyboard.type("watch this", { delay: 15 });
 
   const cursor = page.locator(".ub-editor .ProseMirror-yjs-cursor");
   const label = cursor.locator("div");
 
   // 1. The session name wins over the client name.
-  const wroteAt = await writeAndLeave(
+  await writeAndLeave(
     { name: "Codex", title: "Uberblick Coordinator Agent" },
     uuid,
     "watch this — written by an agent that has already gone",
@@ -221,16 +140,16 @@ test("a short-lived MCP client's caret stays long enough to be read, labelled an
   await page.locator(".ub-sync-toggle").click();
   await expect(label).toBeVisible();
 
-  // ...and it is still on screen — labelled — twenty-five seconds after the
-  // write returned, which is the whole point: a person gets to see who wrote,
-  // for as long as a connected agent's cursor would have stayed.
-  const remaining = READABLE_MS - (Date.now() - wroteAt);
-  if (remaining > 0) await page.waitForTimeout(remaining);
+  // The bundle's production timer runs under the page clock. Keep every
+  // intermediate timer callback (including provider heartbeats) running, so a
+  // reconnect cannot stand in for the caret expiring on its own.
+  await page.clock.runFor(READABLE_MS);
   await expect(label).toHaveText("Uberblick Coordinator Agent");
   await expect(label).toBeVisible();
 
-  // It expires on its own. Nothing has to be clicked, and nothing survives.
-  await expect(cursor).toHaveCount(0, { timeout: EXPIRY_MS });
+  await page.clock.runFor(AGENT_CURSOR_GRACE_MS - READABLE_MS + 1);
+  await expect(cursor).toHaveCount(0);
+  expect(socketCloses).toBe(0);
 
   // 2. No usable title: the client's own name is what a reader gets.
   await writeAndLeave(
@@ -240,5 +159,20 @@ test("a short-lived MCP client's caret stays long enough to be read, labelled an
   );
   await expect(label).toHaveText("Codex");
   await expect(label).toBeVisible();
-  await expect(cursor).toHaveCount(0, { timeout: EXPIRY_MS });
+  // Also observe this session's actual departure, then defend the same
+  // labelled retention and automatic expiry for the client-name fallback.
+  await page.locator(".ub-user-card").click();
+  await expect(page.locator(".ub-panel-fact", { hasText: "MCP connections" })).toContainText("0");
+  await page.keyboard.press("Escape");
+  await page.locator(".ub-sync-toggle").click();
+  await expect(presence).toContainText("Nobody else is in this room.");
+  await expect(presence.getByText("Codex", { exact: true })).toHaveCount(0);
+  await page.locator(".ub-sync-toggle").click();
+  await expect(label).toBeVisible();
+  await page.clock.runFor(READABLE_MS);
+  await expect(label).toHaveText("Codex");
+  await expect(label).toBeVisible();
+  await page.clock.runFor(AGENT_CURSOR_GRACE_MS - READABLE_MS + 1);
+  await expect(cursor).toHaveCount(0);
+  expect(socketCloses).toBe(0);
 });

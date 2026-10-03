@@ -1,26 +1,21 @@
 /** Native sidebar geometry and input: clipping an oversized scroller is not a fix. */
-import { expect, test as base } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
-import { startHarness } from "./harness.js";
+import { setupHarness } from "./app-helpers.js";
 import { createPinnedDoc } from "./sidebar-helpers.js";
 
-const test = base.extend<{ app: Page }>({
-  app: async ({ browser }, use) => {
-    const running = await startHarness();
-    const context = await browser.newContext();
-    const errors: string[] = [];
-    try {
-      const page = await context.newPage();
-      page.on("pageerror", (error) => errors.push(error.message));
-      await page.goto(running.appUrl);
-      await expect(page.locator(".ub-list-head")).toBeVisible();
-      await use(page);
-      expect(errors).toEqual([]);
-    } finally {
-      await context.close();
-      await running.stop();
-    }
-  },
+const { harness } = setupHarness({ scope: "test" });
+let errors: string[] = [];
+
+test.beforeEach(async ({ page }) => {
+  errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(harness().appUrl);
+  await expect(page.locator(".ub-list-head")).toBeVisible();
+});
+
+test.afterEach(() => {
+  expect(errors).toEqual([]);
 });
 
 const activePane = (page: Page): Locator => page.locator(".ub-sidebar-pane:not([inert])");
@@ -63,7 +58,10 @@ async function expectHorizontalFit(page: Page): Promise<void> {
 }
 
 async function horizontalWheel(page: Page): Promise<void> {
-  const box = await activePane(page).boundingBox();
+  const pane = activePane(page);
+  await expect(pane).toBeVisible();
+  await settleSidebar(page);
+  const box = await pane.boundingBox();
   if (box === null) throw new Error("e2e: missing sidebar pane");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   for (const delta of [240, -240]) {
@@ -93,7 +91,7 @@ async function addGroup(page: Page, name: string): Promise<void> {
   await expect(page.locator(".ub-group-label").filter({ hasText: name })).toBeVisible();
 }
 
-test("empty and long-label sidebars fit supported widths and breakpoint edges in both modes", async ({ app: page }) => {
+test("empty and long-label sidebars fit supported widths and breakpoint edges in both modes", async ({ page }) => {
   for (const content of ["empty", "long labels"]) {
     if (content === "long labels") {
       await page.setViewportSize({ width: 1280, height: 832 });
@@ -159,7 +157,7 @@ test("empty and long-label sidebars fit supported widths and breakpoint edges in
   }
 });
 
-test("edge-held drags never pan sideways and a tall sidebar still scrolls vertically", async ({ app: page }) => {
+test("edge-held drags never pan sideways and a tall sidebar still scrolls vertically", async ({ page }) => {
   for (let index = 0; index < 18; index += 1) await createPinnedDoc(page, `Document ${index}`);
 
   for (const width of [320, 768, 1280]) {
