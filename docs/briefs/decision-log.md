@@ -224,7 +224,7 @@ record; that is the failure this rule avoids.
 
 ### 4. In force and pending
 
-For each topic, considering only live (non-archived) decision records:
+For each live topic, considering every record except `rejected` and `withdrawn` ones:
 
 | Answer | Rule |
 | --- | --- |
@@ -246,8 +246,8 @@ Consequences:
 - A topic with only an open record has nothing in force and lists as open —
   the "needs a decision" signal of principle 7.
 - A person declining a reconsideration sets it `rejected`; the earlier
-  decision stays in force. Its author dropping it before anyone answers is
-  archiving it, which shows as *withdrawn*.
+  decision stays in force. Its author dropping it before anyone answers sets
+  it `withdrawn`. Neither is archived: both stay in the history.
 - More than one maximal `decided` record is a **conflict** for a person to
   resolve; it is never resolved by creation time or any other timestamp. A
   person resolves it by rejecting maximal records until one remains.
@@ -266,7 +266,7 @@ exactly one outcome a reader can see without opening it:
 | **In force** | The current answer. | Derived (section 4) |
 | **Superseded** | Was in force; replaced by the named later record. | Derived from `supersedes` |
 | **Rejected** | Proposed — a first stance, a reconsideration or one side of a conflict — and a person declined it. | Status `rejected` |
-| **Withdrawn** | Proposed and dropped by its author before anyone answered. | Archived while `open` |
+| **Withdrawn** | Proposed and dropped by its author before anyone answered. | Status `withdrawn` |
 | **In conflict** | One of several competing decided records; waits for a person to keep one. | Derived (section 4) |
 | **Open** | Proposed and waiting for a person. | Status `open` |
 
@@ -278,8 +278,20 @@ reader sees where the discussion happened before opening anything.
 Each row also says who decided or approved it, and when; a confirmed agent
 stance reads *confirmed by \<person\>*. There is no summary such as "changed
 twice": the outcomes are the summary. A decision record's status set therefore
-becomes `open | decided | rejected`; `rejected` records count for neither
-in force nor pending, and stay readable in the history for their reasoning.
+becomes `open | decided | rejected | withdrawn`; `rejected` and `withdrawn`
+records count for neither in force nor pending, and stay readable in the
+history for their reasoning.
+
+**History is immutable; only a whole topic is archived** (owner, 2026-10-03).
+No individual decision record is ever archived, restored or deleted, so
+nothing can silently bring an earlier answer back into force. Archiving
+applies to a whole topic that no longer matters: `archive_doc` on any record of
+a topic archives every record in it, and `restore_doc` restores them all,
+reported per room in the existing partial-write shape. An archived topic
+leaves listings and its product document's decision log, and its records stay
+readable by uuid and fully read-only. Retiring a decision while keeping the
+topic is a superseding record that says so (for example *Lease renewal: no
+longer applies*), approved by a person.
 
 **Reading an earlier record.** Every history row opens that record in the same
 decision view as the current one, read-only. It must be unmistakable that this
@@ -293,8 +305,8 @@ the history list. When the topic has neither a record in force nor one being
 decided — a rejected or withdrawn first proposal — the banner says so and the
 action is omitted. A superseded or rejected record is never edited, so the
 view offers no editing; comments stay possible on it, so someone can ask about
-old reasoning where it was written. A withdrawn record is archived, and
-archived documents stay fully read-only, comments included. Because
+old reasoning where it was written. Only an archived topic is fully
+read-only, comments included. Because
 a record stays short (section 1), reading an old one shows the reasoning at a
 glance, and its links lead to the issue or pull request that holds the
 detail.
@@ -339,8 +351,8 @@ Default behavior:
   unfiltered graph. A `status` or `tag` predicate matches a topic when any of
   its live records matches; the row still shows the topic's resolved answer.
   With `include_superseded`, predicates apply to individual records instead.
-  `include_deleted` adds archived records to history rows; it never changes
-  what is in force.
+  `include_deleted` adds archived topics; archiving never changes what is in
+  force within a topic, because records are never archived one by one.
 - `get_doc` on a decision returns its predecessors and, when superseded, the
   record that superseded it.
 - `get_doc` on a requirement returns its derived decision log: one entry per
