@@ -367,12 +367,12 @@ test("a touch swipe scrolls from a row, while a held drag keeps native scrolling
   const names = Array.from({ length: 16 }, (_, index) => `Document ${index}`);
   for (const name of names) await createPinnedDoc(a, name);
   await expect(titles(b, "Pinned")).toHaveText(names);
-  const pane = a.locator(".ub-sidebar-pane:not([inert])");
+  const pane = a.locator('.ub-sidebar-pane:not([inert]) [data-slot="sidebar-content"]');
   await pane.evaluate((element) => { element.scrollTop = 0; });
   // Pick actual visible rows: navigation above the pins can change height.
   // Leave room for the 120px swipe and stay clear of drag edge auto-scroll.
   const visibleNames = await titles(a, "Pinned").evaluateAll((buttons) => {
-    const bounds = buttons[0]?.closest(".ub-sidebar-pane")?.getBoundingClientRect();
+    const bounds = buttons[0]?.closest('[data-slot="sidebar-content"]')?.getBoundingClientRect();
     if (!bounds) throw new Error("Missing touch scroll pane");
     const top = Math.max(bounds.top, 0);
     const bottom = Math.min(bounds.bottom, window.innerHeight);

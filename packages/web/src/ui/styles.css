@@ -525,7 +525,7 @@ body {
    The transparent border is load-bearing: the open row gains a 1px edge below,
    and reserving it here is what stops selection from nudging every row. */
 .ub-list-head button,
-.ub-list li:not(.ub-pin-row) button:not(.ub-nav-soon),
+.ub-list .ub-nav li button:not(.ub-nav-soon),
 .ub-settings-entry,
 .ub-group-add {
   display: flex;
@@ -550,7 +550,7 @@ body {
    placeholder rows say the same thing with `aria-disabled`, because they stay
    focusable (#483), and they are declined here for the same reason. */
 .ub-list-head button:hover:not(:disabled),
-.ub-list li:not(.ub-pin-row) button:not(.ub-nav-soon):hover:not(:disabled, [aria-disabled="true"]),
+.ub-list .ub-nav li button:not(.ub-nav-soon):hover:not(:disabled, [aria-disabled="true"]),
 .ub-settings-entry:hover,
 .ub-group-add:hover:not(:disabled) {
   background: var(--sidebar-accent);
@@ -561,7 +561,7 @@ body {
    class and the All-docs entry by `aria-current`, which meant two rules painting
    one state — and only one of them told a screen reader anything. Now the
    attribute is the state, and the rule is one. */
-.ub-list li:not(.ub-pin-row) button:not(.ub-nav-soon)[aria-current="page"] {
+.ub-list .ub-nav li button:not(.ub-nav-soon)[aria-current="page"] {
   background: var(--sidebar-accent);
   border-color: var(--sidebar-selected-border);
   color: var(--sidebar-foreground);
@@ -579,7 +579,7 @@ body {
   padding: 0;
 }
 
-.ub-list li:not(.ub-pin-row) button:not(.ub-nav-soon) {
+.ub-list .ub-nav li button:not(.ub-nav-soon) {
   width: 100%;
 }
 
@@ -629,16 +629,6 @@ body {
 
 .ub-empty {
   padding: 0.4rem;
-}
-
-/* The sidebar's footer (#176). `margin-top: auto` in the column pushes it to
-   the bottom while the list is short, and lets it follow the list down once
-   there are more documents than fit — a footer pinned over scrolling content
-   would need a second scroll container for no gain. */
-.ub-list-foot {
-  margin-top: auto;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--sidebar-border);
 }
 
 .ub-settings-entry {

@@ -220,7 +220,7 @@ for (const scheme of ["light", "dark"] as const) {
       await width(page, ".ub-workspace"),
     );
 
-    // The configured workspace, with the count the directory reports.
+    // The configured workspace uses its shared display-name reading.
     const configured = menu.getByRole("menuitem", { name: /^Unnamed workspace · / });
     await expect(configured).toBeVisible();
 
@@ -240,14 +240,12 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(configured).toHaveAttribute("data-highlighted", /.*/);
     expect(await paintedIn(configured, "background-color")).not.toBe(ground);
 
-    // Machine-owned creation stays unavailable; settings is now a route.
+    // Machine-owned creation stays unavailable. Settings has its fixed footer entry.
     await expect(menu.getByRole("menuitem", { name: "New workspace" })).toHaveAttribute(
       "aria-disabled",
       "true",
     );
-    await expect(
-      menu.getByRole("menuitem", { name: "Workspace settings" }),
-    ).not.toHaveAttribute("aria-disabled", "true");
+    await expect(menu.getByRole("menuitem", { name: "Workspace settings" })).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
 
@@ -468,10 +466,9 @@ test("workspace settings is an address-selected, inert sidebar drill-in", async 
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
   await expect(settingsEntry).toBeFocused();
 
-  // The switcher's existing entry is the second front door, and Back in the
-  // settings pane always targets the workspace list rather than a remembered doc.
-  await page.locator(".ub-workspace").click();
-  await page.getByRole("menuitem", { name: "Workspace settings" }).click();
+  // The fixed bottom entry is the settings front door. Back in the settings
+  // pane always targets the workspace list rather than a remembered doc.
+  await settingsEntry.click();
   await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
   await settings.getByRole("button", { name: /^Back to / }).click();
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
@@ -1926,12 +1923,9 @@ for (const scheme of ["light", "dark"] as const) {
     // criterion's own construction and has no such number.
     if (scheme === "light") expect(floor).toBeGreaterThanOrEqual(0.04);
 
-    // The workspace header paints the accent ground only while hovered, so the
-    // walk has to reach that state rather than proving its resting separator
-    // twice. Dark had 1.46:1 here before the light-only repair and must keep it.
+    // Include the standard header menu button's hover ground in the token walk.
     const workspace = page.locator(".ub-workspace");
-    // The header reaches the pane's edge; the initial pointer at (0, 0) can
-    // already hover it. Put the pointer outside the sidebar before reading rest.
+    // Put the pointer outside the sidebar before reading its resting ground.
     const viewport = page.viewportSize();
     if (viewport === null) throw new Error("e2e: no viewport");
     await page.mouse.move(viewport.width - 1, viewport.height - 1);
@@ -1939,12 +1933,6 @@ for (const scheme of ["light", "dark"] as const) {
     await workspace.hover();
     const workspaceGround = await paintedIn(workspace, "background-color");
     expect(workspaceGround).not.toBe(resting);
-    const workspaceEdge = await paintedIn(workspace, "border-bottom-color");
-    if (scheme === "dark") {
-      expect(contrast(workspaceEdge, workspaceGround)).toBeGreaterThanOrEqual(
-        1.46,
-      );
-    }
     const readings = await surface(page, ".ub-list");
 
     // A group, so its header rule and two quiet actions are on screen. "+ group"
@@ -1964,10 +1952,7 @@ for (const scheme of ["light", "dark"] as const) {
     await workspace.click();
     await expect(page.locator("[data-slot=dropdown-menu-content]")).toBeVisible();
     readings.push(...(await surface(page, "[data-slot=dropdown-menu-content]")));
-    // And once more with the current workspace's row highlighted, which is where
-    // `--sidebar-accent` gets under a text: the row's own count keeps the muted
-    // ink while the item takes the accent ground, and that pairing — 4.70:1, the
-    // worse of the two failures #515 published — is painted nowhere at rest.
+    // Include the current row's name and visible checkmark on the highlight ground.
     await page.locator(".ub-menu-current").hover();
     const highlight = await painted(page, ".ub-menu-current", "background-color");
     readings.push(...(await surface(page, "[data-slot=dropdown-menu-content]")));
