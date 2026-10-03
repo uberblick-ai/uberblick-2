@@ -31,7 +31,7 @@ const UNKNOWN = "—";
 
 function Fact({ label, children }: { label: string; children: ReactNode }): ReactElement {
   return (
-    <div className="flex items-baseline justify-between gap-2 border-b border-solid border-(--border) py-3 first:pt-0 last:border-b-0 last:pb-0">
+    <div className="flex items-baseline justify-between gap-2 border-b border-(--border) py-3 first:pt-0 last:border-b-0 last:pb-0">
       <dt className="text-sm">{label}</dt>
       <dd className="m-0 max-w-[70%] font-(family-name:--font-mono) text-sm text-right wrap-anywhere">
         {children}
@@ -71,7 +71,7 @@ function GeneralSettings({
         <h1 id="ub-settings-title" className="mt-0 mb-4 text-2xl font-medium">
           General
         </h1>
-        <div className="rounded-(--radius) border border-solid border-(--border) bg-card p-4 text-card-foreground">
+        <div className="rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
           <dl className="m-0 grid" data-settings-facts>
             <Fact label="Workspace UUID">{workspace.uuid}</Fact>
             <Fact label="Address segment">{workspace.segment}</Fact>
@@ -173,7 +173,7 @@ function TagSettings({
           <h1 id="ub-settings-title" className="mt-0 mb-4 text-2xl font-medium">
             Tags
           </h1>
-          <div className="rounded-(--radius) border border-solid border-(--border) bg-card p-4 text-card-foreground">
+          <div className="rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
             <p className="m-0 text-sm" role="status">
               Waiting for the tag catalog…
             </p>
@@ -244,7 +244,7 @@ function TagSettings({
           {items.map((entry, at) => (
             <li
               key={entry.id}
-              className="flex items-center justify-between gap-3 rounded-(--radius-sm) border border-solid border-(--border) p-2 text-sm"
+              className="flex items-center justify-between gap-3 rounded-(--radius-sm) border border-(--border) p-2 text-sm"
             >
               <span className="min-w-0 wrap-anywhere">{entry.name}</span>
               <Button
@@ -271,7 +271,7 @@ function TagSettings({
         <h1 id="ub-settings-title" className="mt-0 mb-4 text-2xl font-medium">
           Tags
         </h1>
-        <div className="flex flex-col gap-4 rounded-(--radius) border border-solid border-(--border) bg-card p-4 text-card-foreground">
+        <div className="flex flex-col gap-4 rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
           <form className="flex flex-col gap-2" onSubmit={create}>
             <label htmlFor="ub-new-tag" className="text-sm font-medium">Create a tag</label>
             <div className="flex gap-2">
@@ -304,7 +304,7 @@ function TagSettings({
             <p
               className={
                 feedback.kind === "error"
-                  ? "m-0 rounded-(--radius-sm) border border-solid border-destructive p-2 text-sm"
+                  ? "m-0 rounded-(--radius-sm) border border-destructive p-2 text-sm"
                   : "m-0 text-sm"
               }
               role={feedback.kind === "error" ? "alert" : "status"}

@@ -10,7 +10,7 @@ import { cn } from "./cn.js";
 const variants = {
   default: "bg-primary text-primary-foreground hover:enabled:bg-primary/90",
   secondary: "bg-secondary text-secondary-foreground hover:enabled:bg-secondary/80",
-  outline: "border border-solid border-(--border) bg-background text-foreground hover:enabled:bg-accent hover:enabled:text-accent-foreground",
+  outline: "border border-(--border) bg-background text-foreground hover:enabled:bg-accent hover:enabled:text-accent-foreground",
 };
 
 const sizes = {
@@ -34,7 +34,7 @@ function Button({
       data-variant={variant}
       data-size={size}
       className={cn(
-        "inline-flex shrink-0 items-center justify-center gap-2 rounded-(--radius-sm) text-sm font-medium whitespace-nowrap transition-colors min-h-6 min-w-6 pointer-coarse:min-h-11 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border aria-invalid:border-solid aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
+        "inline-flex shrink-0 items-center justify-center gap-2 rounded-(--radius-sm) text-sm font-medium whitespace-nowrap transition-colors min-h-6 min-w-6 pointer-coarse:min-h-11 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
         variants[variant],
         sizes[size],
         className,
