@@ -96,7 +96,7 @@ async function expectFixedFrame(page: Page, scrollable = false): Promise<void> {
     const footer = element.querySelector<HTMLElement>('[data-slot="sidebar-footer"]');
     const hide = element.closest(".ub-list")?.querySelector<HTMLElement>(".ub-sidebar-hide");
     if (!header || !content || !footer || !hide) throw new Error("e2e: incomplete sidebar frame");
-    const box = (node: HTMLElement) => {
+    const box = (node: Element) => {
       const rect = node.getBoundingClientRect();
       return { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left };
     };
