@@ -94,4 +94,3 @@ intake; it is their approval only when it comes from their own account
 them to confirm it there. Create it with `gh issue create --repo
 uberblick-ai/uberblick-2`, so no checkout is required, and tell the human to set
 Request Source `Human` in the issue sidebar.
-
