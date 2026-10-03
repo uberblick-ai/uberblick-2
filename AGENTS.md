@@ -59,7 +59,7 @@ A run is given one issue or pull request and ends with one named outcome from
 its role file. The loop that starts runs and turns outcomes into the label
 changes in `.agents/roles/README.md` and handoff records is
 [ub-agents](https://github.com/uberblick-ai/ub-agents), a separate tool configured
-by `ub-agent.yaml`; roles never move workflow labels, claim work or start the
+by `ub-agents.yaml`; roles never move workflow labels, claim work or start the
 agent review themselves.
 
 ## Read for the action

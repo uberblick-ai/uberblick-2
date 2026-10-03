@@ -53,7 +53,7 @@ is there. The person who answers replaces it with the label that should run
 next — `needs-preparation` on an issue, `needs-changes` on a pull request —
 unless the answer calls for another.
 
-`ub-agent.yaml` declares these label transitions and the queue policy in
+`ub-agents.yaml` declares these label transitions and the queue policy in
 `.github/ISSUE_SPEC.md` for ub-agents to apply.
 
 ## Escalate what is not yours to decide
@@ -100,7 +100,7 @@ last". Preserve literal text and newlines. Confirm scratch-file writes
 succeeded before posting; noclobber can leave stale content.
 
 Each run uses fresh private scratch outside the worktree, namespaced by its run
-id: put `$UB_AGENT_RUN` in the name of every temp directory you create. Never
+id: put `$UB_AGENTS_RUN` in the name of every temp directory you create. Never
 share scratch or treat it as durable state. The project cleanup hook covers only
 private-worktree runs (implementer and PR reviewer). Scratch from shared
 operator-checkout runs (issue preparer, issue reviewer and integrator), and that

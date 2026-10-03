@@ -50,6 +50,6 @@ playwright-report/
 .vite/
 
 # agent-local state; .claude/skills/ is versioned
-.ub-agent/
+.ub-agents/
 .claude/worktrees/
 .claude/settings.local.json
