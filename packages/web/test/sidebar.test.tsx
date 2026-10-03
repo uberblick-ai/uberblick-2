@@ -60,7 +60,7 @@ const LIVE: RoomStatus = {
 };
 
 /**
- * What every stubbed room reports. Offline unless a test sets it before the
+ * What every stubbed room reports. Live unless a test sets it before the
  * rooms are made, which is how the directory line's readings are exercised
  * (#448); reset after each test with the rooms that were handed it.
  */
@@ -77,7 +77,7 @@ function room(name: string): RoomConnection {
     provider: { awareness: null },
     status: roomStatus,
     onStatusChange: (listener: (next: RoomStatus) => void) => {
-      listener(roomStatus);
+      listener(connection.status);
       return () => {};
     },
   } as unknown as RoomConnection;
@@ -785,6 +785,86 @@ describe("the sidebar's directory line reads a refusal", () => {
   });
 });
 
+describe("pinning waits for the current sidebar state", () => {
+  it.each([false, true])(
+    "disables list pins before sync (previously received: %s)",
+    async (hasReceivedServerState) => {
+      seedDirectory();
+      const sidebar = room(sidebarRoom(WORKSPACE));
+      sidebar.status = { ...LIVE, synced: false, hasReceivedServerState };
+      const host = await openApp(`/${WORKSPACE}`);
+      const writes = vi.fn();
+      sidebar.ydoc.on("update", () => writes());
+      const pin = host.querySelector<HTMLButtonElement>(".ub-docs-pin");
+
+      expect(pin?.disabled).toBe(true);
+      expect(pin?.getAttribute("aria-label")).toContain(
+        "unavailable while sidebar is not ready to write",
+      );
+      expect(pin?.title).toContain("sidebar is not ready to write");
+      act(() => pin?.click());
+      expect(writes).not.toHaveBeenCalled();
+      expect(stored(sidebar.ydoc)).toEqual([]);
+      // Group creation retains its admission-only gate.
+      expect(host.querySelector<HTMLButtonElement>(".ub-group-add")?.disabled).toBe(false);
+    },
+  );
+
+  it.each([false, true])(
+    "disables the open document's pin before sync (previously received: %s)",
+    async (hasReceivedServerState) => {
+      seedDirectory();
+      const doc = room(roomForDoc(WORKSPACE, THREE)).ydoc;
+      initDoc(doc, { uuid: THREE, title: "Sync" });
+      const sidebar = room(sidebarRoom(WORKSPACE));
+      sidebar.status = { ...LIVE, synced: false, hasReceivedServerState };
+      const host = await openApp(`/${WORKSPACE}/${THREE}`);
+      const writes = vi.fn();
+      sidebar.ydoc.on("update", () => writes());
+      openActions(host);
+      const pin = documentAction("Pin unavailable — sidebar is not ready to write");
+
+      expect(pin?.getAttribute("aria-disabled")).toBe("true");
+      act(() => pin?.click());
+      expect(writes).not.toHaveBeenCalled();
+      expect(stored(sidebar.ydoc)).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["list", false], ["list", true],
+    ["document", false], ["document", true],
+  ] as const)(
+    "refuses a stale %s gesture at click time (pinned: %s)",
+    async (surface, pinned) => {
+      seedDirectory();
+      const doc = room(roomForDoc(WORKSPACE, ONE)).ydoc;
+      initDoc(doc, { uuid: ONE, title: "Overview" });
+      const sidebar = room(sidebarRoom(WORKSPACE));
+      if (pinned) pinDoc(sidebar.ydoc, createGroup(sidebar.ydoc, "Reading"), ONE);
+      const peer = peerOf(sidebar.ydoc);
+      const before = stored(peer);
+      const host = await openApp(`/${WORKSPACE}${surface === "document" ? `/${ONE}` : ""}`);
+      if (surface === "document") openActions(host);
+      const pin = surface === "list"
+        ? host.querySelector<HTMLButtonElement>(".ub-docs-pin")
+        : documentAction(pinned ? "Unpin from sidebar" : "Pin to sidebar");
+      expect(pin).toBeTruthy();
+      expect(pin?.getAttribute("aria-disabled")).not.toBe("true");
+      expect(pin?.hasAttribute("disabled")).toBe(false);
+      const writes = vi.fn();
+      sidebar.ydoc.on("update", () => writes());
+
+      // No notification: the rendered gesture stays enabled while the live
+      // connection has lost sync, as can happen between paint and activation.
+      sidebar.status = { ...LIVE, synced: false };
+      act(() => pin?.click());
+      expect(writes).not.toHaveBeenCalled();
+      expect(stored(peer)).toEqual(before);
+    },
+  );
+});
+
 describe("unwritable workspace rooms", () => {
   it("makes directory creation and sidebar curation unavailable", async () => {
     roomStatus = { ...LIVE, connected: false, synced: false, writable: false };
@@ -802,7 +882,7 @@ describe("unwritable workspace rooms", () => {
     const listPin = host.querySelector<HTMLButtonElement>(".ub-docs-pin");
     expect(listPin?.disabled).toBe(true);
     expect(listPin?.getAttribute("aria-label")).toContain(
-      "unavailable while sidebar is read-only",
+      "unavailable while sidebar is not ready to write",
     );
     expect(host.querySelector(".ub-sidebar-unwritable")?.textContent).toContain(
       "Sidebar changes unavailable",
@@ -826,7 +906,7 @@ describe("unwritable workspace rooms", () => {
 
     openActions(host);
     expect(
-      documentAction("Pin unavailable — sidebar is read-only"),
+      documentAction("Pin unavailable — sidebar is not ready to write"),
     ).not.toBeUndefined();
   });
 });
