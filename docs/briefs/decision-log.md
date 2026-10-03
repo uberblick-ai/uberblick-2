@@ -54,7 +54,7 @@ decision record carries the topic, the decision, the reasons that still bind,
 and the guidance for later work — a few short paragraphs, readable in a
 minute. Evidence, investigation, measurements, the full weighing of
 alternatives and implementation notes belong in the issue or pull request the
-record links through `refs` (section 8). A reader who needs the depth follows
+record links to (section 8). A reader who needs the depth follows
 the link; a record that grows past a screen has GitHub material in it.
 
 A "Reconsidering" section is **optional**. Write one when a real revival
@@ -174,7 +174,6 @@ its `meta`, and cached in its directory stub:
 | `governs` | The product document (requirement) this decision shapes. |
 | `topic` | The topic id shared by every record about the same topic: the uuid of the topic's first record, copied forward when a successor is created. |
 | `supersedes` | The record this one replaces, if any. Written once, never changed. |
-| `refs` | GitHub issues and pull requests (section 8). |
 
 The per-requirement `decisions` array is dropped. A product document's decision
 log is **derived**: the decisions whose stub `governs` it, grouped by `topic`.
@@ -263,12 +262,12 @@ the history list. A superseded or
 rejected record is never edited, so the view offers no editing; comments stay
 possible, so someone can ask about old reasoning where it was written. Because
 a record stays short (section 1), reading an old one shows the reasoning at a
-glance, and its `refs` lead to the issue or pull request that holds the
+glance, and its links lead to the issue or pull request that holds the
 detail.
 
 ### 5. Efficient discovery from the directory stub
 
-The directory stub caches `governs`, `topic`, `supersedes`, `refs` and a
+The directory stub caches `governs`, `topic`, `supersedes` and a
 `commentCount` (the number of comments across the record's threads) beside
 `kind` and `status`, under the same rule as those fields: the document is
 authoritative, every stub writer states it rather than carrying it forward, and
@@ -305,12 +304,21 @@ same way. No new label field.
 
 ### 8. Links to pull requests and issues
 
-A decision may reference the GitHub issues and pull requests that raised or
-implement it, through a structured `refs` metadata array of `owner/repo#n`
-references, validated on write, returned by `get_doc`, and cached in the stub
-so a listing can be filtered by issue ("which decision covers #1125?").
+**Plain links in the document, GitHub references derived** (owner,
+2026-10-03). A record links the issues and pull requests that raised or
+implement it as ordinary links in its text — by convention a short *Links*
+list at the end of the page — with no separate metadata field. When the
+derived index processes a record, it extracts every link that points to a
+GitHub issue or pull request and stores it beside the record, so "which
+decision covers #1125?" is a cheap lookup like search. The text stays the one
+source; nothing is written twice or kept in sync.
+
+The reverse direction needs no field either: work built on an open decision
+says so in its issue or pull request (*built on open decision: \<topic\>*),
+and the same derived lookup finds it when a reversal needs its rework list.
+
 The Editorial contract's ban on issue and PR numbers applies to Regular
-Documents; it gains an explicit note that decision `refs` are the exception.
+Documents; it gains an explicit note that decision records may link them.
 
 ## Design work
 
@@ -378,7 +386,7 @@ legacy detection is owed:
 
 - The requirement's `decisions` root is removed, so a document returns to
   three fixed roots. The `meta` keys, stub fields, MCP arguments (`governs`,
-  `supersedes`, and the new `topic` and `refs`) and their refusals may be
+  `supersedes`, and the new `topic`) and their refusals may be
   redefined wherever a cleaner shape is simpler; nothing must keep reading the
   old one.
 - The `Reconsidering` gate is deleted outright, not deprecated.
@@ -400,7 +408,7 @@ legacy detection is owed:
 | Optional Reconsidering | `packages/mcp-server/src/tools.ts` (`hasRevivalTrigger` and both callers, tool descriptions), `failures.ts`, tests in `test/descriptions.test.ts`, `test/archive.test.ts` | Editorial contract, MCP interface contract, `.agents/protocols/issue-shaping.md` |
 | Agent initial stance, human-approved changes, agent-decided marker, when to record | `set_status` / `create_doc` (marker, approval of a successor), tool descriptions | Editorial contract, Decision logs guide, agent workflow, role contracts (challenge stops affected work) |
 | Links on the record (`governs`, `topic`, `supersedes`) cached in the stub; derived decision log; topics, chains and default listing | `packages/schema/src/doc.ts` (drop the `decisions` root), `packages/schema/src/directory.ts`, stub writers in web and MCP, `create_doc`, `list_docs`, `get_doc` | Document model, MCP interface contract, Decision logs guide |
-| `refs` | `packages/schema/src/doc.ts`, stub, MCP create/read | Document model, MCP interface contract, Editorial contract note |
+| GitHub links derived from record text | derived index in `packages/mcp-server` (extract GitHub issue/PR links from link marks), a lookup by issue or PR | MCP interface contract, Editorial contract note |
 
 ## Build order
 
@@ -413,7 +421,8 @@ Each step is one independently mergeable pull request.
 2. Topic and decision wording, optional Reconsidering (gate removed), and the
    agent-stance / human-approval rules with the agent-decided marker, and the
    when-to-record test, across code, descriptions, corpus and role contracts.
-3. The `refs` field.
+3. The derived index of GitHub links in decision records, with a lookup by
+   issue or pull request.
 
 4. Design the web surface (section "Design work"), reviewed by a person.
 5. Build the web surface from the reviewed design, split into issues by
