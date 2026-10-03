@@ -325,6 +325,7 @@ topics, chains, agent stances and conflicts.
 | --- | --- |
 | Decision log on a product document | A fixed section after the body, one row per topic, oldest topic first. Each row: topic title, current answer, and a state — Open, Decided, Decided by agent, Reconsideration open, Conflict. |
 | Decision view | One decision record read, edited and commented in context, over the still-visible product document. |
+| Reconsider | Starting a reconsideration turns the open decision view into the new draft record in place — never a dialog on top of a dialog. The draft is one ordinary document, seeded with a short outline (proposed decision, why, options) the author may rewrite or delete; no form fields. The record being reconsidered stays visible beside it. |
 | Approve and change | Confirming an agent-decided record, approving or rejecting a reconsideration, and resolving a conflict — the only human-gated actions, so they must be obvious and hard to trigger by accident. |
 | History | A topic's records newest first, each ending in its outcome (section 4a) with who, when and its comment count; every row clickable into a read-only, visibly older view of that record with a banner naming its outcome and a one-tap **Go to the current decision** (in force, or being decided). |
 | Needs attention | One list across the workspace of open topics, agent-decided records awaiting review, and conflicts (principle 7) — where a person answers many small decisions quickly. |
@@ -332,6 +333,9 @@ topics, chains, agent stances and conflicts.
 | Built-on marker | How an issue or pull request built on an open decision is visible from the decision, so a reversal finds its rework. |
 
 ### Constraints
+
+- One layer: the decision view is the only dialog; every step inside it (reading history, drafting a reconsideration) replaces its content rather than stacking another dialog (owner, 2026-10-03).
+- A record's text is one Yjs document with ordinary blocks, never split into form fields (owner, 2026-10-03).
 
 - Off-the-shelf first: shadcn/ui components on Tailwind, reusing what the web
   already ships (`ui/shadcn/dialog.tsx`, `sheet.tsx`, `popover.tsx`,
