@@ -10,13 +10,15 @@ import { cn } from "./cn.js";
 const variants = {
   default: "bg-primary text-primary-foreground hover:enabled:bg-primary/90",
   secondary: "bg-secondary text-secondary-foreground hover:enabled:bg-secondary/80",
+  selection: "relative cursor-pointer border border-transparent bg-transparent leading-none text-card-foreground hover:enabled:border-(--border) hover:enabled:bg-(--card-accent) hover:enabled:text-card-foreground focus-visible:border-(--border) focus-visible:bg-(--card-accent) pointer-coarse:min-w-11 data-[state=on]:border-brand data-[state=on]:bg-(--brand-subtle) data-[state=mixed]:border-dashed data-[state=mixed]:border-(--muted-foreground) data-[state=on]:after:content-['✓'] data-[state=mixed]:after:content-['−'] after:absolute after:top-0 after:right-[0.1rem] after:text-[0.55rem] after:leading-none data-[emphasis]:border-brand data-[emphasis]:bg-(--brand-subtle)",
   outline: "border border-(--border) bg-background text-foreground hover:enabled:bg-accent hover:enabled:text-accent-foreground",
 };
 
 const sizes = {
-  default: "h-9 px-4 py-2",
-  sm: "h-8 px-3 py-1",
-  icon: "size-9 pointer-coarse:min-w-11",
+  selection: "h-auto min-h-[1.8rem] min-w-[1.8rem] px-[0.4rem] py-[0.15rem] text-[0.72rem] pointer-coarse:min-w-11",
+  default: "h-9 px-4 py-2 text-sm",
+  sm: "h-8 px-3 py-1 text-sm",
+  icon: "size-9 text-sm pointer-coarse:min-w-11",
 };
 
 function Button({
@@ -34,7 +36,7 @@ function Button({
       data-variant={variant}
       data-size={size}
       className={cn(
-        "inline-flex shrink-0 items-center justify-center gap-2 rounded-(--radius-sm) text-sm font-medium whitespace-nowrap transition-colors min-h-6 min-w-6 pointer-coarse:min-h-11 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
+        "inline-flex shrink-0 items-center justify-center gap-2 rounded-(--radius-sm) font-medium whitespace-nowrap transition-colors min-h-6 min-w-6 pointer-coarse:min-h-11 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
         variants[variant],
         sizes[size],
         className,

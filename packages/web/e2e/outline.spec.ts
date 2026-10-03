@@ -231,7 +231,7 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     await page.locator(".ub-editor .ub-paragraph").last().click();
     await page.keyboard.type("annotate me");
     await page.keyboard.press("Shift+Home");
-    await page.locator(".ub-composer-open").click();
+    await page.getByRole("button", { name: "Comment", exact: true }).click();
     await page.getByPlaceholder(/Comment as/).fill("a thread");
     await page.keyboard.press("Enter");
     await page.keyboard.press("Escape");
@@ -276,14 +276,14 @@ for (const width of [390, 820, 1024]) {
       await page.locator(".ub-editor .ub-paragraph").first().click();
       await page.keyboard.press("Home");
       await page.keyboard.press("Shift+End");
-      await page.locator(".ub-composer-open").click();
+      await page.getByRole("button", { name: "Comment", exact: true }).click();
       await page.getByPlaceholder(/Comment as/).fill("first conversation");
       await page.keyboard.press("Enter");
 
       await page.locator(".ub-editor .ub-paragraph").last().click();
       await page.keyboard.press("Home");
       await page.keyboard.press("Shift+End");
-      await page.locator(".ub-composer-open").click();
+      await page.getByRole("button", { name: "Comment", exact: true }).click();
       await page.getByPlaceholder(/Comment as/).fill("second conversation");
       await page.keyboard.press("Enter");
       await expect(page.locator(".ub-thread")).toHaveCount(2);
@@ -353,7 +353,7 @@ test("touch reveals a low thread in the sheet while its close control stays in v
       await page.keyboard.press("Home");
       await page.keyboard.press("Shift+End");
       await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(anchor);
-      await page.locator(".ub-composer-open").click();
+      await page.getByRole("button", { name: "Comment", exact: true }).click();
       await page.getByPlaceholder(/Comment as/).fill(`conversation ${index + 1}`);
       await page.keyboard.press("Enter");
       // Creating a comment returns focus through Tiptap's next animation frame.

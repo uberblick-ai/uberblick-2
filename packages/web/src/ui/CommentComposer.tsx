@@ -9,8 +9,10 @@
  * foreign-content panes never mount it.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode, RefObject } from "react";
+import { createPortal } from "react-dom";
+import { autoUpdate, computePosition, flip, hide, inline, offset, shift, size } from "@floating-ui/dom";
 import type * as Y from "yjs";
 import {
   AnnotationRangeError,
@@ -24,17 +26,12 @@ import { commentTargetOf } from "../editor/selection.js";
 import type { CommentTarget } from "../editor/selection.js";
 import { CommentForm } from "./CommentForm.js";
 import { blockRefLabel } from "./threads.js";
+import { Button } from "./shadcn/button.js";
+import { Input } from "./shadcn/input.js";
 
 type FlagMark = "bold" | "italic" | "strike" | "inlineCode";
 type MarkState = "off" | "mixed" | "on";
 type Mode = "toolbar" | "link" | "comment";
-
-interface Point {
-  top: number;
-  left: number;
-  placement: "above" | "below";
-  visible: boolean;
-}
 
 interface MarkReading {
   state: MarkState;
@@ -42,16 +39,9 @@ interface MarkReading {
   href: string | null;
 }
 
-interface Draft extends Point {
+interface Draft {
   target: CommentTarget;
   marks: Record<FlagMark, MarkReading> & { link: MarkReading };
-}
-
-interface Rect {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
 }
 
 /** The range a target names, as a value two reads can be compared by. */
@@ -59,124 +49,19 @@ function rangeOf(target: CommentTarget): string {
   return `${target.blockId}:${target.start}:${target.end}`;
 }
 
-const OFFSET = 6;
-
-/** The visible part of the editor pane; the window is the test/fallback case. */
-function availableRect(host: HTMLElement): Rect {
-  const pane = host.closest(".ub-pane");
-  const paneRect = pane?.getBoundingClientRect();
-  const viewport: Rect = {
-    top: 0,
-    right: window.innerWidth,
-    bottom: window.innerHeight,
-    left: 0,
-  };
-  if (paneRect === undefined || paneRect.width === 0 || paneRect.height === 0) {
-    return viewport;
-  }
-  return {
-    top: Math.max(viewport.top, paneRect.top),
-    right: Math.min(viewport.right, paneRect.right),
-    bottom: Math.min(viewport.bottom, paneRect.bottom),
-    left: Math.max(viewport.left, paneRect.left),
-  };
-}
-
-/** Intersect a client rect with the visible pane, or drop an invisible one. */
-function clipped(rect: Rect, available: Rect): Rect | null {
-  const visible = {
-    top: Math.max(rect.top, available.top),
-    right: Math.min(rect.right, available.right),
-    bottom: Math.min(rect.bottom, available.bottom),
-    left: Math.max(rect.left, available.left),
-  };
-  return visible.right > visible.left && visible.bottom > visible.top
-    ? visible
-    : null;
-}
-
-/** The browser-painted selection, reduced to the part a reader can see. */
-function visibleSelectionRect(editor: Editor, available: Rect): Rect | null {
+/** Read the editor's stored range even while a link or comment field has focus. */
+function selectionRange(editor: Editor): Range | null {
   const { from, to } = editor.state.selection;
   try {
     const start = editor.view.domAtPos(from);
     const end = editor.view.domAtPos(to);
-    const range = document.createRange();
+    const range = editor.view.dom.ownerDocument.createRange();
     range.setStart(start.node, start.offset);
     range.setEnd(end.node, end.offset);
-    const rects = [...range.getClientRects()]
-      .map((rect) => clipped(rect, available))
-      .filter((rect): rect is Rect => rect !== null);
-    if (rects.length > 0) {
-      return {
-        top: Math.min(...rects.map((rect) => rect.top)),
-        right: Math.max(...rects.map((rect) => rect.right)),
-        bottom: Math.max(...rects.map((rect) => rect.bottom)),
-        left: Math.min(...rects.map((rect) => rect.left)),
-      };
-    }
+    return range;
   } catch {
     return null;
   }
-  return null;
-}
-
-/**
- * Position a measured card inside the visible pane. Above is the ordinary
- * placement; when that does not fit, below wins instead of covering the text.
- */
-function pointAt(
-  editor: Editor,
-  host: HTMLElement | null,
-  floating: HTMLElement | null,
-  mode: Mode,
-): Point {
-  if (host === null) {
-    return { top: 0, left: 0, placement: "below", visible: true };
-  }
-  const hostRect = host.getBoundingClientRect();
-  // jsdom has no layout; keeping the card at the origin lets component tests
-  // exercise the behavior without pretending zero-sized geometry is offscreen.
-  if (hostRect.width === 0 && hostRect.height === 0) {
-    return { top: 0, left: 0, placement: "below", visible: true };
-  }
-
-  const available = availableRect(host);
-  const selection = visibleSelectionRect(editor, available);
-  if (selection === null) {
-    return { top: 0, left: 0, placement: "below", visible: false };
-  }
-
-  const width = floating?.offsetWidth ?? (mode === "comment" ? 320 : 360);
-  const height = floating?.offsetHeight ?? (mode === "comment" ? 180 : 34);
-  const fitsAbove = selection.top - OFFSET - height >= available.top;
-  const fitsBelow = selection.bottom + OFFSET + height <= available.bottom;
-  let placement: Point["placement"];
-  let viewportTop: number;
-  if (fitsAbove) {
-    placement = "above";
-    viewportTop = selection.top - OFFSET - height;
-  } else if (fitsBelow) {
-    placement = "below";
-    viewportTop = selection.bottom + OFFSET;
-  } else {
-    const roomAbove = selection.top - available.top;
-    const roomBelow = available.bottom - selection.bottom;
-    placement = roomBelow >= roomAbove ? "below" : "above";
-    viewportTop = placement === "below" ? available.bottom - height : available.top;
-  }
-
-  const centre = (selection.left + selection.right) / 2;
-  const viewportLeft = Math.max(
-    available.left,
-    Math.min(centre - width / 2, available.right - width),
-  );
-  return {
-    top: viewportTop - hostRect.top,
-    left: viewportLeft - hostRect.left,
-    placement,
-    visible: true,
-  };
 }
 
 /** How much of the current selection carries `name`, plus its one URL if any. */
@@ -290,9 +175,11 @@ function FormatButton({
   onClick: () => void;
 }): ReactElement {
   return (
-    <button
+    <Button
       type="button"
-      className="ub-selection-tool"
+      variant="selection"
+      size="selection"
+      data-selection-tool
       data-state={state}
       aria-label={label}
       aria-pressed={pressed(state)}
@@ -300,7 +187,7 @@ function FormatButton({
       onClick={onClick}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -327,6 +214,7 @@ export function CommentComposer({
   const [mode, setMode] = useState<Mode>("toolbar");
   const [href, setHref] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [touch, setTouch] = useState(false);
   const range = useRef<string | null>(null);
   const dismissed = useRef<string | null>(null);
   const composing = useRef(false);
@@ -340,7 +228,7 @@ export function CommentComposer({
     // Capture once: the editor can destroy its view before React runs this
     // component's passive cleanup during a route or fallback transition.
     const editorDom = editor.view.dom;
-    const hostDom = host.current;
+    const ownerDocument = editorDom.ownerDocument;
     const read = (): void => {
       if (composing.current) return;
       const target = commentTargetOf(editor, ydoc);
@@ -374,7 +262,6 @@ export function CommentComposer({
       }
       setDraft({
         target,
-        ...pointAt(editor, host.current, floating.current, modeNow.current),
         marks: {
           bold: markReading(editor, "bold"),
           italic: markReading(editor, "italic"),
@@ -386,6 +273,8 @@ export function CommentComposer({
     };
     const dismiss = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || draftNow.current === null) return;
+      const path = event.composedPath();
+      if (!path.includes(editorDom) && !(floating.current && path.includes(floating.current))) return;
       // This listener runs before the fields. A composing Escape belongs to
       // the input method, so leave the active form and draft intact.
       if (event.isComposing || event.keyCode === 229) return;
@@ -411,37 +300,96 @@ export function CommentComposer({
       composing.current = false;
       read();
     };
+    const pointer = (event: PointerEvent): void => {
+      setTouch(event.pointerType === "touch");
+    };
+    const keyboard = (event: KeyboardEvent): void => {
+      if (/^(Arrow|Home|End|Page)/.test(event.key) ||
+          (event.key.toLowerCase() === "a" && (event.metaKey || event.ctrlKey))) {
+        setTouch(false);
+      }
+    };
     read();
     editor.on("transaction", read);
     editorDom.addEventListener("compositionstart", startComposition);
     editorDom.addEventListener("compositionend", endComposition);
-    editorDom.addEventListener("keydown", dismiss, true);
-    hostDom?.addEventListener("keydown", dismiss, true);
-    window.addEventListener("resize", read);
-    window.addEventListener("scroll", read, true);
+    editorDom.addEventListener("pointerdown", pointer);
+    editorDom.addEventListener("keydown", keyboard);
+    ownerDocument.addEventListener("keydown", dismiss, true);
     return () => {
       editor.off("transaction", read);
       editorDom.removeEventListener("compositionstart", startComposition);
       editorDom.removeEventListener("compositionend", endComposition);
-      editorDom.removeEventListener("keydown", dismiss, true);
-      hostDom?.removeEventListener("keydown", dismiss, true);
-      window.removeEventListener("resize", read);
-      window.removeEventListener("scroll", read, true);
+      editorDom.removeEventListener("pointerdown", pointer);
+      editorDom.removeEventListener("keydown", keyboard);
+      ownerDocument.removeEventListener("keydown", dismiss, true);
     };
-  }, [editor, ydoc, host]);
+  }, [editor, ydoc]);
 
-  // Opening a field changes the card's size; position the measured shape, not
-  // the toolbar dimensions from the preceding render.
-  useLayoutEffect(() => {
-    setDraft((current) =>
-      current === null
-        ? null
-        : {
-            ...current,
-            ...pointAt(editor, host.current, floating.current, mode),
-          },
-    );
-  }, [editor, host, mode]);
+  const open = draft !== null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mode changes the mounted card's shape; measure it again immediately when a field opens or closes.
+  useEffect(() => {
+    const element = floating.current;
+    if (!open || !element) return;
+    const boundary = host.current?.closest<HTMLElement>(".ub-pane") ?? undefined;
+    const reference = {
+      contextElement: editor.view.dom,
+      getBoundingClientRect: (): DOMRect =>
+        selectionRange(editor)?.getBoundingClientRect?.() ?? new DOMRect(),
+      getClientRects: (): DOMRect[] =>
+        Array.from(selectionRange(editor)?.getClientRects?.() ?? []),
+    };
+    const collision = { boundary, padding: 6 };
+    let disposed = false;
+    const update = async (): Promise<void> => {
+      const position = await computePosition(reference, element, {
+        strategy: "fixed",
+        placement: touch ? "bottom" : "top",
+        middleware: [
+          inline(), offset(touch ? 12 : 6),
+          // A short final line needs a sideways shift, not a side change.
+          flip({ ...collision, crossAxis: false }),
+          shift({ ...collision, crossAxis: true }),
+          size({
+            ...collision,
+            apply: ({ availableWidth, availableHeight }) => {
+              if (disposed) return;
+              Object.assign(element.style, {
+                maxWidth: `${Math.max(0, availableWidth)}px`,
+                maxHeight: `${Math.max(0, availableHeight)}px`,
+              });
+            },
+          }),
+          hide({ boundary }),
+        ],
+      });
+      if (disposed) return;
+      const focused = element.contains(element.ownerDocument.activeElement);
+      // A focused field stays reachable even if Safari scrolls its selection
+      // out of view as the keyboard opens. Floating UI clips to visualViewport.
+      const visible = focused || !position.middlewareData.hide?.referenceHidden;
+      Object.assign(element.style, {
+        left: `${position.x}px`, top: `${position.y}px`,
+        visibility: visible ? "visible" : "hidden",
+        pointerEvents: visible ? "auto" : "none",
+      });
+      element.dataset.placement = position.placement === "top" ? "above" : "below";
+      const field = element.ownerDocument.activeElement;
+      if (focused && field instanceof HTMLElement) {
+        const bounds = element.getBoundingClientRect();
+        const control = field.getBoundingClientRect();
+        if (control.top < bounds.top || control.bottom > bounds.bottom) {
+          // Let the browser reveal the focused field in the card's own scroll
+          // area when a keyboard resize leaves less room for the comment.
+          field.scrollIntoView({ block: "nearest", inline: "nearest" });
+        }
+      }
+    };
+    // Range geometry also moves after edits and font/layout changes. autoUpdate
+    // owns pane and visual viewport scroll/resize, including keyboard changes.
+    const stop = autoUpdate(reference, element, update, { animationFrame: true });
+    return () => { disposed = true; stop(); };
+  }, [editor, host, open, mode, touch]);
 
   if (draft === null) return null;
   const { target } = draft;
@@ -479,35 +427,22 @@ export function CommentComposer({
     setMode("comment");
   };
 
-  const className = [
-    "ub-composer",
-    mode === "comment" ? "" : "ub-selection-menu",
-    mode === "toolbar" && !prose ? "ub-comment-only-menu" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  return (
+  return createPortal(
     <div
       ref={floating}
-      className={className}
-      data-placement={draft.placement}
-      style={{
-        top: `${draft.top}px`,
-        left: `${draft.left}px`,
-        visibility: draft.visible ? "visible" : "hidden",
-        pointerEvents: draft.visible ? "auto" : "none",
-      }}
+      data-slot="selection-composer"
+      data-input={touch ? "touch" : "fine"}
+      className={`ub-composer fixed top-0 left-0 z-50 flex overflow-auto text-card-foreground shadow-(--shadow-float) data-[input=touch]:[&_[data-selection-tool]]:min-h-11 data-[input=touch]:[&_[data-selection-tool]]:min-w-11 data-[input=touch]:[&_input]:min-h-11 data-[input=touch]:[&_input]:text-base ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) border-l-2 border-l-brand bg-card px-[0.6rem] py-2 text-[0.85rem]" : mode === "toolbar" && !prose ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-[calc(var(--radius-sm)+2px)] border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}
     >
       {mode === "comment" ? (
         <>
-          <p className="ub-composer-head">
-            <span className="ub-thread-ref">{blockRef}</span>
+          <p className="m-0 flex items-center gap-[0.35rem]">
+            <span className="mr-auto font-(family-name:--font-mono) text-[0.7rem] tracking-[0.02em] text-(--muted-foreground)">{blockRef}</span>
             {target.clamped && (
-              <span className="ub-chip ub-chip-orphaned">first block only</span>
+              <span data-slot="selection-clamp" className="rounded-(--radius-sm) bg-(--status-warning-subtle) px-[0.3rem] text-[0.65rem] tracking-[0.04em] text-foreground uppercase">first block only</span>
             )}
           </p>
-          <p className="ub-thread-excerpt">{target.text}</p>
+          <p data-slot="selection-excerpt" className="border-l-2 border-(--border) pl-[0.4rem] text-[0.8rem] text-foreground italic before:content-['“'] after:content-['”']">{target.text}</p>
           <CommentForm
             placeholder={`Comment as ${author}…`}
             submitLabel="Comment"
@@ -519,7 +454,7 @@ export function CommentComposer({
         </>
       ) : mode === "link" && prose ? (
         <form
-          className="ub-selection-link"
+          className="flex min-w-0 flex-wrap items-center gap-[0.15rem]"
           aria-label="External link"
           onSubmit={(event) => {
             event.preventDefault();
@@ -535,10 +470,9 @@ export function CommentComposer({
             close();
           }}
         >
-          <input
-            // biome-ignore lint/a11y/noAutofocus: the field exists only after the writer asks for it.
+          <Input
             autoFocus
-            className="ub-selection-link-input"
+            className="flex-1 basis-32"
             aria-label="External link URL"
             aria-invalid={error === null ? undefined : true}
             placeholder="https://example.com"
@@ -548,26 +482,31 @@ export function CommentComposer({
               setError(null);
             }}
           />
-          <button
+          <Button
             type="button"
-            className="ub-selection-tool"
+            variant="selection"
+            size="selection"
+            data-selection-tool
             onPointerDown={(event) => event.preventDefault()}
             onClick={close}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="submit"
-            className="ub-selection-tool ub-selection-apply"
+            variant="selection"
+            size="selection"
+            data-selection-tool
+            data-emphasis
             onPointerDown={(event) => event.preventDefault()}
           >
             Apply
-          </button>
-          {error !== null && <span className="ub-selection-error">{error}</span>}
+          </Button>
+          {error !== null && <span role="alert" className="max-w-44 text-[0.68rem] leading-[1.2] text-destructive">{error}</span>}
         </form>
       ) : prose ? (
         <div
-          className="ub-selection-toolbar"
+          className="flex flex-wrap items-center gap-[0.15rem]"
           role="toolbar"
           aria-label="Text formatting and comment"
         >
@@ -599,9 +538,11 @@ export function CommentComposer({
           >
             <code aria-hidden="true">&lt;/&gt;</code>
           </FormatButton>
-          <button
+          <Button
             type="button"
-            className="ub-selection-tool"
+            variant="selection"
+            size="selection"
+            data-selection-tool
             aria-label="External link"
             onPointerDown={(event) => event.preventDefault()}
             onClick={() => {
@@ -611,28 +552,33 @@ export function CommentComposer({
             }}
           >
             Link
-          </button>
-          <span className="ub-selection-separator" aria-hidden="true" />
-          <button
+          </Button>
+          <span className="mx-[0.2rem] h-4 w-px bg-(--border)" aria-hidden="true" />
+          <Button
             type="button"
-            className="ub-selection-tool ub-composer-open"
+            variant="selection"
+            size="selection"
+            data-selection-tool
             aria-label="Comment"
             onPointerDown={(event) => event.preventDefault()}
             onClick={openComment}
           >
             Comment
-          </button>
+          </Button>
         </div>
       ) : (
-        <button
+        <Button
           type="button"
-          className="ub-tool ub-composer-open ub-comment-only"
+          variant="secondary"
+          size="selection"
+          data-selection-tool
           onPointerDown={(event) => event.preventDefault()}
           onClick={openComment}
         >
           Comment on {blockRef}
-        </button>
+        </Button>
       )}
-    </div>
+    </div>,
+    editor.view.dom.ownerDocument.body,
   );
 }

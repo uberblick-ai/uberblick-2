@@ -141,7 +141,7 @@ test("the measured toolbar flips below at the viewport edge and follows scrollin
   if (paneBox === null) throw new Error("e2e: editor pane has no box");
   await dragSelection(page, paragraph, paneBox.y + 18);
 
-  const card = page.locator(".ub-selection-menu");
+  const card = page.locator('[data-slot="selection-composer"]');
   await expect(card).toBeVisible();
   await expect(card).toHaveAttribute("data-placement", "below");
   const selected = await selectionRect(page);
@@ -181,10 +181,10 @@ test("touch activation preserves the range and IME composition suspends the chro
   await expect(page.locator(".ub-paragraph strong")).toContainText(selected);
 
   await editor.dispatchEvent("compositionstart", { data: "へ" });
-  await expect(page.locator(".ub-selection-menu")).toHaveCount(0);
+  await expect(page.locator('[data-slot="selection-composer"]')).toHaveCount(0);
   expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe(
     selected,
   );
   await editor.dispatchEvent("compositionend", { data: "へ" });
-  await expect(page.locator(".ub-selection-menu")).toBeVisible();
+  await expect(page.locator('[data-slot="selection-composer"]')).toBeVisible();
 });

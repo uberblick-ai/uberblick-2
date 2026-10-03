@@ -66,7 +66,7 @@ test("hovering a block reveals the gutter + without moving the prose", async ({
   await openDoc(page, "hover me");
 
   const block = blocks(page).first();
-  const button = page.locator(".ub-gutter-add");
+  const button = page.getByRole("button", { name: "Insert block below", includeHidden: true });
   // Away from the prose: the caret was placed with a click, which leaves the
   // pointer inside the block it clicked.
   await page.mouse.move(0, 0);
@@ -111,7 +111,7 @@ async function humanWalk(
       from.x + (to.x - from.x) * progress,
       from.y + (to.y - from.y) * progress,
     );
-    await expect(page.locator(".ub-gutter-add")).toHaveClass(/\bub-gutter-add-on\b/);
+    await expect(page.getByRole("button", { name: "Insert block below" })).toHaveCSS("opacity", "1");
   }
 }
 
@@ -139,7 +139,7 @@ test("the pointer can walk from the prose onto the gutter + and press it", async
     document.documentElement.style.zoom = "125%";
   });
 
-  const button = page.locator(".ub-gutter-add");
+  const button = page.getByRole("button", { name: "Insert block below", includeHidden: true });
   const block = blocks(page).first();
   const prose = await block.boundingBox();
   if (prose === null) throw new Error("e2e: the first block has no box");
@@ -229,7 +229,7 @@ test("the gutter + inserts the chosen block below, with the caret in it", async 
   await openDoc(page, "first");
 
   await blocks(page).first().hover();
-  await page.locator(".ub-gutter-add").click();
+  await page.getByRole("button", { name: "Insert block below" }).click();
   await page.getByRole("option", { name: "Heading 2" }).click();
 
   await expect(blocks(page)).toHaveCount(2);
@@ -395,7 +395,7 @@ test("the gutter menu reveals with the keyboard, and scrolls for no pointer", as
 }) => {
   await openDoc(page, "first");
   await blocks(page).first().hover();
-  await page.locator(".ub-gutter-add").click();
+  await page.getByRole("button", { name: "Insert block below" }).click();
 
   const start = await listGeometry(page);
   const search = page.getByRole("combobox", { name: "Search blocks" });

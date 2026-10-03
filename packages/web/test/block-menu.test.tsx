@@ -26,7 +26,7 @@
  * the prose" claim is checked in the browser (`e2e/block-menu.spec.ts`).
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import * as Y from "yjs";
@@ -78,7 +78,7 @@ interface Mounted {
  * frame itself would have React clear the frame's children and detach the editor.
  * The card is a React portal, so queries also include document.body.
  */
-function mountMenu(ydoc: Y.Doc): Mounted {
+function mountMenu(ydoc: Y.Doc, initiallyFocused = false): Mounted {
   const { editor, element } = mountEditor(ydoc);
   const frame = document.createElement("div");
   document.body.appendChild(frame);
@@ -87,6 +87,7 @@ function mountMenu(ydoc: Y.Doc): Mounted {
   frame.appendChild(container);
   const root = createRoot(container);
   act(() => {
+    if (initiallyFocused) editor.view.focus();
     root.render(<BlockMenu editor={editor} host={{ current: frame }} />);
   });
 
@@ -594,14 +595,14 @@ describe("the gutter menu", () => {
     const block = mounted.editor.view.dom.children[index];
     if (block === undefined) throw new Error(`no block ${index}`);
     act(() => {
-      block.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+      block.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerType: "mouse" }));
     });
   }
 
   /** Hover a block, then click the `+` its gutter reveals. */
   function openGutterMenu(mounted: Mounted, index: number): void {
     hoverBlock(mounted, index);
-    const button = mounted.query<HTMLButtonElement>(".ub-gutter-add-on");
+    const button = mounted.query<HTMLButtonElement>('[aria-label="Insert block below"][aria-hidden="false"]');
     if (button === null) throw new Error("the gutter button stayed hidden");
     act(() => button.click());
   }
@@ -614,14 +615,137 @@ describe("the gutter menu", () => {
     act(() => entry.click());
   }
 
+  /** Pointer identity comes from the event, including on a mixed-input iPad. */
+  function touchCaret(mounted: Mounted, index: number): void {
+    const block = mounted.editor.view.dom.children[index];
+    if (block === undefined) throw new Error(`no block ${index}`);
+    act(() => {
+      block.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }));
+      mounted.editor.view.focus();
+    });
+    caret(mounted.editor, index, 0);
+  }
+
+  function visibleButton(mounted: Mounted): HTMLButtonElement | null {
+    return mounted.query('[aria-label="Insert block below"][aria-hidden="false"]');
+  }
+
+  it("offers an existing caret on a coarse pointer before the first touch and lets mouse hover take over", () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)" }));
+    const { ydoc } = docWith([{ type: "paragraph", text: "First" }]);
+    const mounted = mountMenu(ydoc, true);
+    try {
+      expect(visibleButton(mounted)).not.toBeNull();
+
+      // The same iPad can switch to its trackpad: after a real mouse move an
+      // edit drops the hover hint rather than following the caret as touch does.
+      hoverBlock(mounted, 0);
+      act(() => {
+        mounted.editor.commands.insertContentAt(1, "x");
+      });
+      expect(visibleButton(mounted)).toBeNull();
+      hoverBlock(mounted, 0);
+      expect(visibleButton(mounted)).not.toBeNull();
+    } finally {
+      mounted.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("follows a touch caret and inserts below its current block after an edit", () => {
+    const { ydoc, ids } = docWith([
+      { type: "paragraph", text: "First" },
+      { type: "paragraph", text: "Second" },
+    ]);
+    const peer = peerOf(ydoc);
+    const mounted = mountMenu(ydoc);
+    try {
+      touchCaret(mounted, 0);
+      expect(visibleButton(mounted)).not.toBeNull();
+      caret(mounted.editor, 1, 2);
+      fromPeer(() => {
+        deleteBlock(peer, ids[0] ?? "");
+      });
+      const button = visibleButton(mounted);
+      if (button === null) throw new Error("the touch caret lost its gutter button");
+      act(() => button.click());
+      pick(mounted, "Code");
+
+      expect(getBlocks(ydoc).map((block) => [block.type, block.text])).toEqual([
+        ["paragraph", "Second"], ["code", ""],
+      ]);
+      expect(visibleButton(mounted)).not.toBeNull();
+      soundIds(ydoc);
+    } finally {
+      mounted.unmount();
+      peer.destroy();
+    }
+  });
+
+  it("hides for a touch range or absent caret and ignores compatibility mouse events", () => {
+    const { ydoc } = docWith([{ type: "paragraph", text: "First" }]);
+    const mounted = mountMenu(ydoc);
+    try {
+      touchCaret(mounted, 0);
+      expect(visibleButton(mounted)).not.toBeNull();
+      act(() => {
+        mounted.editor.commands.setTextSelection({ from: 1, to: 4 });
+        mounted.editor.view.dom.firstElementChild?.dispatchEvent(
+          new MouseEvent("mousemove", { bubbles: true }),
+        );
+      });
+      expect(visibleButton(mounted)).toBeNull();
+
+      caret(mounted.editor, 0, 0);
+      expect(visibleButton(mounted)).not.toBeNull();
+      act(() => mounted.editor.view.dom.blur());
+      expect(visibleButton(mounted)).toBeNull();
+
+      // A real trackpad move still reveals the hovered block after touch.
+      hoverBlock(mounted, 0);
+      expect(visibleButton(mounted)).not.toBeNull();
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("keeps the touch target through blur and pointerup until its delayed native click", async () => {
+    const { ydoc } = docWith([{ type: "paragraph", text: "First" }]);
+    const mounted = mountMenu(ydoc);
+    try {
+      touchCaret(mounted, 0);
+      const button = visibleButton(mounted);
+      if (button === null) throw new Error("no touch button");
+      await act(async () => {
+        button.dispatchEvent(new PointerEvent("pointerdown", {
+          bubbles: true, cancelable: true, pointerType: "touch",
+        }));
+        mounted.editor.view.dom.blur();
+        button.dispatchEvent(new PointerEvent("pointerup", {
+          bubbles: true, pointerType: "touch",
+        }));
+        // iOS can deliver the compatibility click in a later task. Losing
+        // focus or reaching the next task must not remove its touch target.
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+      });
+      expect(visibleButton(mounted)).toBe(button);
+      act(() => button.click());
+      expect(mounted.query('[role="combobox"][aria-label="Search blocks"]')).not.toBeNull();
+      pick(mounted, "Mermaid");
+      expect(getBlocks(ydoc).map((block) => block.type)).toEqual(["paragraph", "mermaid"]);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
   it("stays hidden until a block is hovered", () => {
     const { ydoc } = docWith([{ type: "paragraph", text: "First" }]);
     const mounted = mountMenu(ydoc);
     try {
       // Mounted from the start — revealing it is a class change, never a
       // reflow — but not offered to the pointer or the tab order.
-      expect(mounted.query(".ub-gutter-add")).not.toBeNull();
-      expect(mounted.query(".ub-gutter-add-on")).toBeNull();
+      expect(mounted.query('[aria-label="Insert block below"]')).not.toBeNull();
+      expect(mounted.query('[aria-label="Insert block below"][aria-hidden="false"]')).toBeNull();
       expect(mounted.query('[data-slot="caret-menu-content"]')).toBeNull();
     } finally {
       mounted.unmount();
@@ -641,15 +765,15 @@ describe("the gutter menu", () => {
     const mounted = mountMenu(ydoc);
     try {
       hoverBlock(mounted, 0);
-      expect(mounted.query(".ub-gutter-add-on")).not.toBeNull();
+      expect(mounted.query('[aria-label="Insert block below"][aria-hidden="false"]')).not.toBeNull();
 
       act(() => {
         mounted.editor.commands.insertContentAt(1, "x");
       });
-      expect(mounted.query(".ub-gutter-add-on")).toBeNull();
+      expect(mounted.query('[aria-label="Insert block below"][aria-hidden="false"]')).toBeNull();
 
       hoverBlock(mounted, 0);
-      expect(mounted.query(".ub-gutter-add-on")).not.toBeNull();
+      expect(mounted.query('[aria-label="Insert block below"][aria-hidden="false"]')).not.toBeNull();
     } finally {
       mounted.unmount();
     }
@@ -676,7 +800,7 @@ describe("the gutter menu", () => {
       });
 
       expect(mounted.query('[data-slot="caret-menu-content"]')).toBeNull();
-      expect(mounted.query(".ub-gutter-add-on")).toBeNull();
+      expect(mounted.query('[aria-label="Insert block below"][aria-hidden="false"]')).toBeNull();
       // The surviving block is untouched: nothing was inserted anywhere.
       expect(getBlocks(ydoc).map((block) => [block.id, block.text])).toEqual([
         [ids[1], "Second"],

@@ -27,7 +27,7 @@ test("code tokens follow the appearance while language and Enter stay live", asy
 
   const first = page.locator(".ub-editor .ProseMirror > *").first();
   await first.hover();
-  await page.locator(".ub-gutter-add").click();
+  await page.getByRole("button", { name: "Insert block below" }).click();
   await page.getByRole("option", { name: "Code" }).click();
   await page.keyboard.type("const answer = 42;", { delay: 15 });
 
