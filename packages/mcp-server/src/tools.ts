@@ -46,11 +46,13 @@ import {
   MAX_TLDR_LENGTH,
   REQUIREMENT_STATUSES,
   assignDocumentTags,
-  addDecision,
   addComment,
   appendBlock,
   canonicalDocumentUuid,
   createAnnotation,
+  decisionDirectoryFields,
+  decisionRelations,
+  decisionTopicArchived,
   deleteBlock,
   editBlock,
   exportMarkdown,
@@ -70,6 +72,7 @@ import {
   readDecisions,
   readDocumentTags,
   resolveTagAssignments,
+  resolveDecisionTopics,
   resolveAnnotationRange,
   restoreDirectoryEntry,
   setAnnotationResolved,
@@ -90,6 +93,7 @@ import type {
   BlockInput,
   DirectoryEntry,
   DocumentKind,
+  DecisionTopicResolution,
   DocumentStatus,
   HeadingLevel,
   InlineMarkSet,
@@ -162,13 +166,12 @@ const ARCHIVE_IS_LAST_WRITE_WINS =
   "seen it, which is not the same as holding against every concurrent one. When it matters which way it went, re-read " +
   "with list_docs and `include_deleted: true`; for a decision, also pass a matching `kind`, `status` or `tag` predicate.";
 
-/** The single-document boundary shared by both lifecycle tools. */
-const DECISION_LOG_LIFECYCLES_ARE_INDEPENDENT =
-  "Document lifecycles are independent across a requirement's decision log: archive_doc or restore_doc writes " +
-  "lifecycle state only for the uuid passed. It does not archive, restore or edit any decision that document " +
-  "references, and it does not edit any requirement that references the document; a requirement's decision log " +
-  "can still report whether the target is available. Call archive_doc or restore_doc separately for each related " +
-  "document whose lifecycle should change.";
+/** Topic lifecycle is independent of its governing document. */
+const DECISION_TOPIC_LIFECYCLE =
+  "For a decision, this acts on every record in its topic. Only the first record's directory tombstone " +
+  "decides whether the topic is archived; individual tombstones never change resolution. No individual " +
+  "decision record can be archived or restored. It does not change the governing requirement, and archiving " +
+  "a requirement does not archive its decision topics.";
 
 /**
  * What an archive costs a writer, in the words an agent reads.
@@ -360,12 +363,14 @@ const LIFECYCLE_RECORDS_STATE =
   "execution: that authority comes from the owner's recorded GitHub decision.";
 
 const DECISION_EDGES =
-  "A document's `decisions` are an ordered log resolved from its decision slot. Their UUIDs are also derived " +
-  "outbound edges in `links`. A decision's immutable `supersedes` reference is another derived edge, so " +
-  "backlinks on the earlier decision exposes its successors without editing it. `set_links` still replaces only " +
-  "the curated link array with exactly what it is given, so passing get_doc's effective `links` back to it stores " +
-  "any decision UUIDs there too; get_doc " +
-  "deduplicates the resulting edge.";
+  "A requirement's `decisions` are a derived, oldest-topic-first log resolved entirely from directory stubs. " +
+  "Each decision carries its own `governs`, immutable `topic` and immutable `supersedes`. `governs` and " +
+  "`supersedes` are derived outbound edges in the decision's effective `links`: backlinks on a requirement " +
+  "finds its decisions, and backlinks on a predecessor finds its direct successors without editing those documents. A decision read returns every " +
+  "predecessor, every direct successor with its status, and its topic's resolution. Conflicts name every " +
+  "maximal decided record and have nothing in force; no successor is selected as the replacement. " +
+  "`set_links` still replaces only the curated link array; passing get_doc's effective `links` back to it " +
+  "stores those UUIDs there too, and get_doc deduplicates the resulting edges.";
 
 function firstStatus(kind: DocumentKind): DocumentStatus {
   return kind === "requirement"
@@ -609,8 +614,8 @@ const CREATE_DOC_PLACEMENT =
 
 /** What `create_doc` says about touching its rooms, in the words an agent reads. */
 const CREATE_DOC_DURABILITY =
-  "This call writes up to four independently persisted rooms — the document, the directory, the governed " +
-  "requirement when `governs` is present, and the sidebar when you place it — so it reports them one by one. " +
+  "This call writes up to three independently persisted rooms — the document, the directory, and the " +
+  "sidebar when you place it — so it reports them one by one. The governing requirement is never written. " +
   "`rooms` lists every room it touched with its own `applied` and `synced`; the top-level `synced` is the AND over " +
   "all of them and is never true while one is still pending. It is NOT transactional: there is no rollback and " +
   "no remote atomicity. If the local update log refuses a write part-way, the call fails with `persistence_failed` " +
@@ -630,10 +635,6 @@ const RECOVERY: Record<string, string> & { other: string } = {
   sidebar:
     "The document and its directory stub are durable; only the sidebar placement is missing. Restart the MCP " +
     "server, then pin_doc with this uuid and the same group id to finish it.",
-  requirement:
-    "The decision and its directory stub are durable, but the requirement it governs does not reference it. " +
-    "Restart the MCP server, then read both with get_doc. If the requirement still has no such decision, use " +
-    "archive_doc on this uuid to retire the orphan; do NOT call create_doc again as recovery for this call.",
   other:
     "The log refused a write to a room this call does not own — another document syncing while it ran. Restart " +
     "the MCP server, then check with list_docs — for a decision, with a matching `kind`, `status` or `tag` " +
@@ -655,17 +656,6 @@ const ARCHIVE_RECOVERY: Record<string, string> & { other: string } = {
     "the MCP server, then check with list_docs — `include_deleted: true` — and get_sidebar what the rooms in " +
     "`completed` left behind.",
 };
-
-const REQUIREMENT_DIRECTORY_RECOVERY =
-  "The decision, its directory stub and the governed requirement update are durable; a later directory append " +
-  "was refused, usually the requirement's follow-up stub repair. Restart the MCP server, then read the requirement " +
-  "and this uuid with get_doc. When `decisions` contains this uuid, the create succeeded — do NOT call create_doc " +
-  "again.";
-
-const DECISION_DIRECTORY_RECOVERY =
-  "The decision's own room is durable, but it has no directory stub and the governed requirement does not " +
-  "reference it. Restart the MCP server, then get_doc with this uuid to republish its stub. Use archive_doc on " +
-  "this uuid to retire the orphan; do NOT call create_doc again as recovery for this call.";
 
 /**
  * `annotate`'s two shapes, stated once for the boundary and for `tools/list`.
@@ -903,7 +893,7 @@ export function registerTools(
    * hosted-auth era.
    */
   const requireWritableDoc = (uuid: string): Replica => {
-    if (getDirectoryEntry(replicas.directory().doc, uuid)?.deleted === true) {
+    if (decisionTopicArchived(replicas.directory().doc, uuid)) {
       throw new ToolError(
         "doc_archived",
         `Document ${uuid} is archived — restore_doc to edit`,
@@ -924,6 +914,27 @@ export function registerTools(
 
   /** The settings doc is the one catalog authority every tag path resolves. */
   const tagCatalog = () => replicas.settings().doc;
+
+  const decisionEntryJson = (entry: DirectoryEntry) => ({
+    ...entry, tags: readDirectoryTags(entry, tagCatalog()),
+    ...(entry.kind === "decision" ? { deleted: decisionTopicArchived(replicas.directory().doc, entry.uuid) } : {}),
+    description: entry.description ?? null,
+  });
+  const topicJson = (topic: DecisionTopicResolution) => ({
+    topic: topic.topic,
+    inForce: topic.inForce === null ? null : decisionEntryJson(topic.inForce),
+    pending: topic.pending.map(decisionEntryJson),
+    conflicts: topic.conflicts.map(decisionEntryJson),
+    archived: topic.archived,
+  });
+  const decisionReadJson = (uuid: string) => {
+    const { predecessors, successors, resolution } = decisionRelations(replicas.directory().doc, uuid);
+    return {
+      predecessors: predecessors.map(decisionEntryJson),
+      successors: successors.map(decisionEntryJson),
+      resolution: resolution === null ? null : { ...decisionEntryJson(resolution.representative), ...topicJson(resolution) },
+    };
+  };
 
   /** A document's assignments in the public id/name/state shape. */
   const documentTags = (replica: Replica) =>
@@ -1167,10 +1178,11 @@ export function registerTools(
         "without `kind`, or a status owned by the other kind, is refused before a document is created. " +
         LIFECYCLE_RECORDS_STATE +
         " A decision may pass `governs`, the UUID of a live, hydrated requirement in this replica. The decision " +
-        "is made durable before its UUID is appended to that requirement's ordered decision log; any other use " +
+        "stores `governs` in its own metadata; the requirement's decision log is derived from directory stubs. Any other use " +
         "of `governs` is refused before a UUID is allocated or a room is written. " +
         "A decision may also pass `supersedes`, the UUID of a readable, hydrated decision it replaces. The " +
-        "reference is immutable, is returned by get_doc, and is a derived link: backlinks on the earlier " +
+        "reference is immutable, and its predecessor's topic is copied forward; a first record uses its own UUID as topic. " +
+        "`topic` is never an input. Supersession is returned by get_doc and is a derived link: backlinks on the earlier " +
         "decision exposes every successor without editing that earlier document. A non-decision target or a " +
         "self-reference is refused before any room is written. " +
         "A decision created with `status: decided` must seed the record of what would reopen it: a heading whose " +
@@ -1197,7 +1209,7 @@ export function registerTools(
           governs: uuidArg
             .optional()
             .describe(
-              "Requirement UUID whose ordered decision log receives this new decision. Accepted only with `kind: decision`.",
+              "Requirement UUID this decision governs, stored on the decision. Accepted only with `kind: decision`.",
             ),
           supersedes: uuidArg
             .optional()
@@ -1281,7 +1293,7 @@ export function registerTools(
 
       // Resolved before a uuid exists, because this is the one part of the call
       // that can still be all-or-nothing: an unknown group must fail having
-      // created nothing. Everything after it is four independently persisted
+      // created nothing. Everything after it is three independently persisted
       // rooms, reported one by one.
       const group =
         sidebar === undefined
@@ -1334,9 +1346,6 @@ export function registerTools(
       const purposeOf = (room: string): string => {
         if (room === replica.room) return "document";
         if (room === directory.room) return "directory";
-        if (requirement !== null && room === requirement.room) {
-          return "requirement";
-        }
         if (room === sidebarReplica.room) return "sidebar";
         return "other";
       };
@@ -1346,12 +1355,7 @@ export function registerTools(
         "create_doc",
         uuid,
         purposeOf,
-        (purpose, failedAt) =>
-          purpose === "requirement" && failedAt === "directory"
-            ? REQUIREMENT_DIRECTORY_RECOVERY
-            : requirement !== null && failedAt === "directory"
-              ? DECISION_DIRECTORY_RECOVERY
-              : (RECOVERY[failedAt] ?? RECOVERY.other),
+        (_purpose, failedAt) => RECOVERY[failedAt] ?? RECOVERY.other,
       );
 
       stage("document", replica, () => {
@@ -1366,6 +1370,10 @@ export function registerTools(
             uuid,
             title,
             description,
+            ...(governs === undefined ? {} : { governs }),
+            ...(lifecycle?.kind === "decision"
+              ? { topic: superseded === null ? uuid : (getMeta(superseded.doc).topic ?? getMeta(superseded.doc).uuid) }
+              : {}),
             ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
           });
           // The same schema-owned catalog boundary set_tags uses. Validation
@@ -1394,16 +1402,11 @@ export function registerTools(
           description,
           ...(tags === undefined ? {} : { tags: tagIds }),
           ...(lifecycle === null ? {} : lifecycle),
+          ...decisionDirectoryFields(replica.doc),
           createdAt: now,
           updatedAt: now,
         });
       });
-
-      if (requirement !== null) {
-        stage("requirement", requirement, () => {
-          addDecision(requirement.doc, uuid);
-        });
-      }
 
       let placement: SidebarPlacement | null = null;
       if (group !== null && sidebar !== undefined) {
@@ -1456,6 +1459,7 @@ export function registerTools(
         tags: documentTags(replica),
         ...(lifecycle === null ? {} : lifecycle),
         ...(governs === undefined ? {} : { governs }),
+        ...(lifecycle?.kind === "decision" ? { topic: getMeta(replica.doc).topic } : {}),
         ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
         blocks: blocksJson(replica),
         ...(placement === null ? {} : { sidebar: placement }),
@@ -1496,7 +1500,8 @@ export function registerTools(
         ...meta,
         tags: documentTags(replica),
         room: replica.room,
-        decisions: readDecisions(replica.doc, replicas.directory().doc),
+        decisions: readDecisions(replica.doc, replicas.directory().doc).map(topic => ({ ...decisionEntryJson(topic.representative), ...topicJson(topic) })),
+        ...(meta.kind === "decision" ? decisionReadJson(uuid) : {}),
         blocks: blocksJson(replica),
         annotations: listAnnotations(replica.doc).map((annotation) =>
           annotationJson(replica, annotation),
@@ -1515,7 +1520,10 @@ export function registerTools(
         "Documents in the workspace, from the synced directory document — never from locally observed creations. " +
         "The unfiltered orientation listing omits `kind: \"decision\"` records. Pass any `kind`, `status` or `tag` " +
         "predicate to ask for its exact matches, including matching decisions; `kind: \"decision\"` lists decision " +
-        "records. `include_deleted` admits tombstones but is not a predicate and does not lift the default omission, " +
+        "topics with one row per topic. Each row presents the record in force, else a pending record, else the first record, " +
+        "and names all pending records and all conflicting maximal decided records. `inForce: null` means no answer is in force. " +
+        "A status or tag predicate matches a topic if any live record matches, while resolution still uses its whole graph. " +
+        "`include_superseded: true` returns every record with predicates applied per record. `include_deleted` admits archived topics but is not a predicate and does not lift the default omission, " +
         "so an archived decision needs it together with a matching predicate. A fresh replica can list the whole " +
         "corpus once the directory room has synced.\n\n" +
         "`description` is the document's own one-or-two-sentence description, cached in the stub so this listing " +
@@ -1544,32 +1552,40 @@ export function registerTools(
         kind: documentKindArg.optional().describe("Only documents of this kind."),
         status: documentStatusArg.optional().describe("Only documents at this lifecycle state."),
         include_deleted: z.boolean().optional(),
+        include_superseded: z.boolean().optional().describe("Return every decision record instead of one row per topic."),
       }),
     },
-    guarded("list_docs", async ({ tag, kind, status, include_deleted }) => {
+    guarded("list_docs", async ({ tag, kind, status, include_deleted, include_superseded }) => {
       await replicas.settle();
       const hasPredicate = tag !== undefined || kind !== undefined || status !== undefined;
       const catalog = tagCatalog();
       const tagId = tag === undefined ? null : resolveTagFilter(replicas, tag);
-      const entries = listDirectory(replicas.directory().doc, {
-        includeDeleted: include_deleted ?? false,
-      }).filter(
-        (entry) => {
-          const assignments = readDirectoryTags(entry, catalog);
-          return (
-            (hasPredicate || entry.kind !== "decision") &&
-            (tagId === null ||
-              assignments.some((assignment) => assignment.id === tagId)) &&
-            (kind === undefined || entry.kind === kind) &&
-            (status === undefined || entry.status === status)
-          );
-        },
-      );
+      const directory = replicas.directory().doc;
+      const entries = listDirectory(directory, { includeDeleted: true });
+      const matches = (entry: DirectoryEntry): boolean => {
+        const assignments = readDirectoryTags(entry, catalog);
+        return (tagId === null || assignments.some((assignment) => assignment.id === tagId)) &&
+          (kind === undefined || entry.kind === kind) &&
+          (status === undefined || entry.status === status);
+      };
+      const documents = entries.filter(entry => entry.kind !== "decision" &&
+        (include_deleted || !entry.deleted) && matches(entry));
+      const topics = resolveDecisionTopics(entries);
+      const decisionRows = !hasPredicate ? [] : include_superseded
+        ? topics.filter(topic => include_deleted || !topic.archived)
+          .flatMap(topic => topic.records.filter(matches).map(entry => ({ ...entry, deleted: topic.archived })))
+        : topics.filter(topic => (include_deleted || !topic.archived) &&
+          (kind === undefined || kind === "decision") &&
+          ((tagId === null && status === undefined) || topic.records.some(entry =>
+            entry.status !== "rejected" && entry.status !== "withdrawn" && matches(entry))))
+          .map(topic => ({ ...topic.representative, deleted: topic.archived, ...topicJson(topic) }));
       // Derived, never stored: the sidebar doc is the one place a pin lives.
       const pinned = pinnedUuids(replicas);
       return json({
         workspace: replicas.config.workspaceId,
-        docs: entries.map((entry) => ({
+        docs: [...documents, ...decisionRows]
+          .sort((a, b) => a.title.localeCompare(b.title) || a.uuid.localeCompare(b.uuid))
+          .map((entry) => ({
           ...entry,
           tags: readDirectoryTags(entry, catalog),
           // Always present, null when absent: an agent scanning this listing
@@ -1894,7 +1910,8 @@ export function registerTools(
       description:
         "Replace the person-facing TL;DR wholesale with one or two sentences of plain English, or pass null to " +
         "clear it. It is independent of the agent-facing description: writing either leaves the other untouched. " +
-        "The value lives only in the document metadata — discovery, search and Markdown do not carry it.\n\n" +
+        "The value lives in document metadata; decision stubs also cache it as the decision line for discovery. " +
+        "Ordinary document stubs, search and Markdown do not carry it.\n\n" +
         "An empty or whitespace-only string is refused rather than treated as a clear, and an overlong value is " +
         `refused rather than truncated. The shared limit is ${MAX_TLDR_LENGTH} characters.\n\n` +
         ARCHIVED_IS_READ_ONLY +
@@ -2075,7 +2092,7 @@ export function registerTools(
         "NOT transactional: there is no rollback and no remote atomicity. If the local update log refuses the unpin, " +
         "the call fails with `persistence_failed` carrying the `uuid`, the rooms already `completed`, the `failed` " +
         "room, `rolledBack: false` and a recovery line — never as a completed archive.\n\n" +
-        DECISION_LOG_LIFECYCLES_ARE_INDEPENDENT +
+        DECISION_TOPIC_LIFECYCLE +
         "\n\n" +
         "What the tombstone does cost is writing: while it stands the document is read-only, and every mutating tool " +
         "refuses it with `doc_archived`. restore_doc is the way back, and the only mutation an archived document " +
@@ -2097,6 +2114,7 @@ export function registerTools(
       const directory = replicas.directory();
       const sidebarReplica = replicas.sidebar();
       const title = titleFor(uuid, stub);
+      const affected = resolveDecisionTopics(directory.doc).find(topic => topic.records.some(record => record.uuid === uuid))?.records.map(record => record.uuid) ?? [uuid];
       const { completed, stage } = roomStages(
         replicas,
         "archive_doc",
@@ -2130,11 +2148,14 @@ export function registerTools(
       // is therefore always a room this call wrote, and `rooms` always names
       // it.
       stage("sidebar", sidebarReplica, () => {
-        unpinDocIncludingUnseen(sidebarReplica.doc, uuid);
+        sidebarReplica.doc.transact(() => {
+          for (const recordUuid of affected) unpinDocIncludingUnseen(sidebarReplica.doc, recordUuid);
+        });
       });
       return json({
         uuid,
         title,
+        records: affected,
         archived: true,
         // What the call asserts, not what it found: this replica hid every pin
         // it could see, whether or not it was holding one, so there is no
@@ -2146,7 +2167,7 @@ export function registerTools(
         // Withdrawing a document needs no copy of it, so hydration cannot make
         // this false — but a store that refused the write can, and then the
         // uuid stays queued for a later retry rather than being reported done.
-        indexed: replicas.indexReconciled(uuid),
+        indexed: affected.every(recordUuid => replicas.indexReconciled(recordUuid)),
         ...durabilityAcross(directory, completed),
       });
     }),
@@ -2166,7 +2187,7 @@ export function registerTools(
         "Restoring one that is not archived leaves its archive state alone, but is not quite a no-op: the directory " +
         "entry is a cache of the document's own metadata, and this trues it up, so a stub that had drifted is " +
         "repaired in passing.\n\n" +
-        DECISION_LOG_LIFECYCLES_ARE_INDEPENDENT +
+        DECISION_TOPIC_LIFECYCLE +
         "\n\n" +
         "Check `indexed`. It is true when this replica holds the document itself and has just re-derived its search " +
         "rows — the usual case. It is false in two: when this replica knows the document only from the directory, and " +
@@ -2185,22 +2206,34 @@ export function registerTools(
       briefing.require();
       const stub = requireStub(uuid);
       const directory = replicas.directory();
-      restoreDirectoryEntry(directory.doc, uuid);
+      let affected: string[] = [];
+      const { completed, stage } = roomStages(
+        replicas, "restore_doc", uuid,
+        room => room === directory.room ? "directory" : "other",
+        () => "Restart the MCP server, then restore_doc with this UUID again. Read include_deleted listings to verify the topic's visibility.",
+      );
+      stage("directory", directory, () => {
+        directory.doc.transact(() => {
+          affected = restoreDirectoryEntry(directory.doc, uuid);
+          for (const recordUuid of affected) replicas.republishStub(recordUuid);
+        });
+      });
       // A rename or a retag that landed while the document was archived never
-      // reached its stub, because stub repair skips tombstoned entries. Catch
+      // reached its stub for an ordinary document, because repair skips those
+      // tombstones. Decision stub fields keep healing while archived. Catch
       // the directory up here, or the document comes back under the metadata it
       // was archived with while search answers from the newer.
       //
       // Hydration is what makes re-indexing possible; it is not proof that it
       // happened. Both have to hold, and the store gets the last word — read
       // after the republish, whose own directory write reconciles again.
-      const hydrated = replicas.republishStub(uuid);
       return json({
         uuid,
         title: titleFor(uuid, stub),
+        records: affected,
         archived: false,
-        indexed: hydrated && replicas.indexReconciled(uuid),
-        ...durability(directory),
+        indexed: affected.every(recordUuid => replicas.hydrated(recordUuid) && replicas.indexReconciled(recordUuid)),
+        ...durabilityAcross(directory, completed),
       });
     }),
   );
@@ -2376,6 +2409,7 @@ export function registerTools(
         uuid,
         markdown: exportMarkdown(replica.doc, {
           tagCatalog: tagCatalog(),
+          directory: replicas.directory().doc,
           ...(frontmatter === undefined ? {} : { frontmatter }),
           ...(annotations === undefined ? {} : { annotations }),
         }),

@@ -4,7 +4,6 @@ import type { Block } from "../src/index.js";
 import {
   ANNOTATIONS_KEY,
   BLOCKS_KEY,
-  DECISIONS_KEY,
   META_KEY,
   BlockNotFoundError,
   InvalidDocumentLifecycleError,
@@ -48,7 +47,7 @@ function seeded(): Y.Doc {
 }
 
 describe("document round-trip", () => {
-  it("initialises metadata and materialises the four roots", () => {
+  it("initialises metadata and materialises the three roots", () => {
     const doc = seeded();
     expect(getMeta(doc)).toEqual({
       uuid: UUID,
@@ -61,7 +60,6 @@ describe("document round-trip", () => {
     expect([...doc.share.keys()].sort()).toEqual([
       ANNOTATIONS_KEY,
       BLOCKS_KEY,
-      DECISIONS_KEY,
       META_KEY,
     ]);
   });
@@ -189,6 +187,7 @@ describe("document round-trip", () => {
       changelogSuggestion: "Nothing a user can see changed here.",
       kind: "decision",
       status: "open",
+      topic: UUID,
       links: [target],
     });
 
@@ -210,6 +209,8 @@ describe("document round-trip", () => {
       ["requirement", "done"],
       ["decision", "open"],
       ["decision", "decided"],
+      ["decision", "rejected"],
+      ["decision", "withdrawn"],
     ] as const;
     for (const [kind, status] of legal) {
       const doc = seeded();

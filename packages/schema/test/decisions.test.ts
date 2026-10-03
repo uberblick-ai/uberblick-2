@@ -1,444 +1,269 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import type { DecisionStatus } from "../src/index.js";
 import {
-  InvalidDecisionReferenceError,
   InvalidSupersedesReferenceError,
-  addDecision,
+  addComment,
   appendBlock,
+  createAnnotation,
+  deleteBlock,
+  setAnnotationResolved,
+  decisionDirectoryFields,
+  decisionRelations,
+  decisionTopicArchived,
+  directoryStubDiffers,
   exportMarkdown,
-  getDecisionsArray,
+  getDirectoryEntry,
+  getDirectoryMap,
   getMeta,
-  importMarkdown,
+  getMetaMap,
   initDoc,
+  listDirectory,
   readDecisions,
-  removeDecision,
-  reorderDecisions,
+  resolveDecisionTopics,
+  restoreDirectoryEntry,
   setKind,
   setLinks,
+  setStatus,
+  setTldr,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "../src/index.js";
+import type { DirectoryUpsert } from "../src/index.js";
 import { syncDocs } from "./helpers.js";
 
 const REQUIREMENT = "11111111-1111-4111-8111-111111111111";
-const SLUGS = "22222222-2222-4222-8222-222222222222";
-const TOKENS = "33333333-3333-4333-8333-333333333333";
-const ROOMS = "44444444-4444-4444-8444-444444444444";
+const A = "22222222-2222-4222-8222-222222222222";
+const B = "33333333-3333-4333-8333-333333333333";
+const C = "44444444-4444-4444-8444-444444444444";
+const D = "55555555-5555-4555-8555-555555555555";
+const E = "66666666-6666-4666-8666-666666666666";
 
-/** A requirement document with one paragraph and an empty decision log. */
-function requirement(): Y.Doc {
+function record(uuid = A, supersedes?: string, topic = A): Y.Doc {
   const doc = new Y.Doc();
-  initDoc(doc, {
-    uuid: REQUIREMENT,
-    title: "Workspace identity",
-    tags: ["product"],
-  });
-  appendBlock(doc, { type: "paragraph", text: "A workspace id is a uuid." });
+  initDoc(doc, { uuid, title: "A choice", governs: REQUIREMENT, topic, ...(supersedes === undefined ? {} : { supersedes }) });
+  setKind(doc, "decision");
+  setStatus(doc, "decided");
   return doc;
 }
 
-/** A directory holding a live stub per uuid given, each `kind: decision`. */
-function directory(
-  entries: Array<{ uuid: string; title: string; status?: DecisionStatus }>,
-): Y.Doc {
-  const dir = new Y.Doc();
-  for (const entry of entries) {
-    upsertDirectoryEntry(dir, {
-      uuid: entry.uuid,
-      title: entry.title,
-      tags: ["decision"],
-      kind: "decision",
-      ...(entry.status === undefined ? {} : { status: entry.status }),
-    });
-  }
-  return dir;
+function stub(directory: Y.Doc, uuid: string, fields: Partial<DirectoryUpsert> = {}): void {
+  upsertDirectoryEntry(directory, { uuid, title: uuid, kind: "decision", topic: A, status: "decided", ...fields });
 }
 
-function uuids(doc: Y.Doc): string[] {
-  return readDecisions(doc).map((reference) => reference.uuid);
+function ids(records: readonly { uuid: string }[]): string[] { return records.map((entry) => entry.uuid); }
+
+function fork(): Y.Doc {
+  const directory = new Y.Doc();
+  stub(directory, A, { governs: REQUIREMENT, createdAt: 10 });
+  stub(directory, B, { supersedes: A, createdAt: 20 });
+  stub(directory, C, { supersedes: A, createdAt: 9999 });
+  stub(directory, D, { supersedes: B, createdAt: 1 });
+  return directory;
 }
 
-describe("the decision log", () => {
-  it("appends references and reads them back in insertion order", () => {
-    const doc = requirement();
-    addDecision(doc, SLUGS);
-    addDecision(doc, TOKENS);
-    addDecision(doc, ROOMS);
-
-    expect(uuids(doc)).toEqual([SLUGS, TOKENS, ROOMS]);
+describe("decision metadata and caches", () => {
+  it("stores own links and fixes both topic and predecessor at creation", () => {
+    const doc = record(B, A);
+    setLinks(doc, [REQUIREMENT.toUpperCase(), REQUIREMENT, E, A.toUpperCase()]);
+    expect(getMeta(doc)).toMatchObject({ topic: A, governs: REQUIREMENT, supersedes: A, links: [REQUIREMENT, E, A] });
+    initDoc(doc, { uuid: B, title: "Same", supersedes: A, topic: A });
+    initDoc(doc, { uuid: B, title: "Same", supersedes: A });
+    expect(getMeta(doc).topic).toBe(A);
+    expect(() => initDoc(doc, { uuid: B, title: "Wrong", supersedes: C, topic: A })).toThrow(InvalidSupersedesReferenceError);
+    expect(() => initDoc(doc, { uuid: B, title: "Wrong", supersedes: A, topic: C })).toThrow(/immutable/);
+    expect(getMeta(doc).title).toBe("Same");
+    const fresh = new Y.Doc();
+    expect(() => initDoc(fresh, { uuid: B, title: "Missing copied topic", supersedes: A })).toThrow(/copy the predecessor/);
+    expect(getMetaMap(fresh).size).toBe(0);
+    const first = record();
+    expect(getMeta(first).topic).toBe(A);
+    expect(() => initDoc(first, { uuid: A, title: "Wrong", supersedes: B })).toThrow(InvalidSupersedesReferenceError);
+    expect(() => initDoc(first, { uuid: B, title: "Wrong" })).toThrow(/immutable/);
   });
 
-  it("canonicalizes an upper-cased uuid rather than storing a second identity", () => {
-    const doc = requirement();
-    addDecision(doc, SLUGS.toUpperCase());
-
-    expect(uuids(doc)).toEqual([SLUGS]);
-    expect(() => addDecision(doc, SLUGS)).toThrow(
-      InvalidDecisionReferenceError,
-    );
+  it("adopted decisions use their own identity as topic, tolerating foreign values", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: A, title: "Adopted" });
+    setKind(doc, "decision");
+    setStatus(doc, "withdrawn");
+    const meta = getMetaMap(doc);
+    meta.set("topic", "not-a-uuid");
+    meta.set("governs", 42);
+    meta.set("supersedes", A);
+    meta.set("agentStance", "yes");
+    meta.set("decidedBy", " ");
+    meta.set("decidedAt", 42);
+    expect(getMeta(doc)).toMatchObject({ topic: A, status: "withdrawn" });
+    expect(getMeta(doc)).not.toHaveProperty("supersedes");
+    expect(getMeta(doc)).not.toHaveProperty("agentStance");
+    expect(getMeta(doc)).not.toHaveProperty("decidedBy");
+    expect(getMeta(doc)).not.toHaveProperty("decidedAt");
   });
 
-  it("adds the canonical graph edge atomically without disturbing other links", () => {
-    const doc = requirement();
-    setLinks(doc, [ROOMS, SLUGS.toUpperCase(), SLUGS]);
-    let updates = 0;
-    doc.on("update", () => {
-      updates += 1;
-    });
-
-    addDecision(doc, SLUGS);
-
-    expect(uuids(doc)).toEqual([SLUGS]);
-    expect(getMeta(doc).links).toEqual([ROOMS, SLUGS]);
-    expect(updates).toBe(1);
+  it("caches all decision fields and counts comments across resolved and orphaned threads", () => {
+    const doc = record(B, A);
+    setTldr(doc, "Use durable rooms.");
+    const meta = getMetaMap(doc);
+    meta.set("agentStance", false);
+    meta.set("decidedBy", "a-person");
+    meta.set("decidedAt", "2026-10-03T12:00:00Z");
+    const block = appendBlock(doc, { type: "paragraph", text: "Reasoning" });
+    const thread = createAnnotation(doc, block, 0, 3, "a-person", "One");
+    addComment(doc, thread.id, "another-person", "Two");
+    const resolved = createAnnotation(doc, block, 3, 6, "a-person", "Three");
+    setAnnotationResolved(doc, resolved.id, true);
+    deleteBlock(doc, block);
+    const fields = decisionDirectoryFields(doc);
+    expect(fields).toEqual({ governs: REQUIREMENT, topic: A, supersedes: A, tldr: "Use durable rooms.", agentStance: false, decidedBy: "a-person", decidedAt: "2026-10-03T12:00:00Z", commentCount: 3 });
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, { ...getMeta(doc), description: getMeta(doc).description ?? "", ...fields });
+    expect(directoryStubDiffers(getDirectoryEntry(directory, B), getMeta(doc), fields)).toBe(false);
+    addComment(doc, thread.id, "a-person", "Four");
+    expect(directoryStubDiffers(getDirectoryEntry(directory, B), getMeta(doc), decisionDirectoryFields(doc))).toBe(true);
   });
 
-  it("stores one immutable supersession reference as a derived graph edge", () => {
-    const decision = new Y.Doc();
-    initDoc(decision, {
-      uuid: TOKENS,
-      title: "Token format",
-      supersedes: SLUGS.toUpperCase(),
-    });
-    setKind(decision, "decision");
-
-    expect(getMeta(decision)).toMatchObject({
-      uuid: TOKENS,
-      supersedes: SLUGS,
-      links: [SLUGS],
-    });
-    // Re-initialising with the same reference is idempotent, while replacing
-    // it is refused before title or metadata changes.
-    initDoc(decision, {
-      uuid: TOKENS,
-      title: "Token format",
-      supersedes: SLUGS,
-    });
-    expect(() =>
-      initDoc(decision, {
-        uuid: TOKENS,
-        title: "Changed while refusing",
-        supersedes: ROOMS,
-      }),
-    ).toThrow(InvalidSupersedesReferenceError);
-    expect(getMeta(decision)).toMatchObject({
-      title: "Token format",
-      supersedes: SLUGS,
-      links: [SLUGS],
-    });
+  it("preserves omitted fields across upserts and topic archive/restore, and repairs clears", () => {
+    const doc = record(B, A);
+    setTldr(doc, "The answer.");
+    getMetaMap(doc).set("agentStance", true);
+    const directory = new Y.Doc();
+    stub(directory, A);
+    upsertDirectoryEntry(directory, { ...getMeta(doc), description: getMeta(doc).description ?? "", ...decisionDirectoryFields(doc) });
+    const before = getDirectoryEntry(directory, B)!;
+    upsertDirectoryEntry(directory, { uuid: B, title: "Renamed" });
+    tombstoneDirectoryEntry(directory, B);
+    restoreDirectoryEntry(directory, A);
+    expect(getDirectoryEntry(directory, B)).toEqual({ ...before, title: "Renamed" });
+    getMetaMap(doc).set("agentStance", null);
+    setTldr(doc, null);
+    expect(directoryStubDiffers(getDirectoryEntry(directory, B), getMeta(doc), decisionDirectoryFields(doc))).toBe(true);
+    upsertDirectoryEntry(directory, { ...getMeta(doc), description: getMeta(doc).description ?? "", ...decisionDirectoryFields(doc) });
+    expect(getDirectoryEntry(directory, B)).not.toHaveProperty("agentStance");
+    expect(getDirectoryEntry(directory, B)).not.toHaveProperty("tldr");
+    expect(directoryStubDiffers(getDirectoryEntry(directory, B), getMeta(doc), decisionDirectoryFields(doc))).toBe(false);
   });
 
-  it("refuses a supersession self-reference before writing metadata", () => {
-    const decision = new Y.Doc();
-
-    let thrown: unknown;
-    try {
-      initDoc(decision, {
-        uuid: SLUGS,
-        title: "Self",
-        supersedes: SLUGS,
-      });
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toBeInstanceOf(InvalidSupersedesReferenceError);
-    expect((thrown as InvalidSupersedesReferenceError).reason).toBe(
-      "self-reference",
-    );
-    expect(getMeta(decision).uuid).toBe("");
+  it("converges a foreign whitespace TL;DR instead of repeatedly repairing it", () => {
+    const doc = record();
+    getMetaMap(doc).set("tldr", "   ");
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, { ...getMeta(doc), description: "", ...decisionDirectoryFields(doc) });
+    expect(getDirectoryEntry(directory, A)?.tldr).toBe("   ");
+    expect(directoryStubDiffers(getDirectoryEntry(directory, A), getMeta(doc), decisionDirectoryFields(doc))).toBe(false);
   });
 
-  it("refuses a non-uuid, a reserved room name and a duplicate, storing nothing", () => {
-    const doc = requirement();
-    addDecision(doc, SLUGS);
-
-    for (const value of ["Slug is display", "_directory", "not-a-uuid"]) {
-      let thrown: unknown;
-      try {
-        addDecision(doc, value);
-      } catch (error) {
-        thrown = error;
-      }
-      expect(thrown).toBeInstanceOf(InvalidDecisionReferenceError);
-      expect((thrown as InvalidDecisionReferenceError).reason).toBe(
-        "not-a-document",
-      );
-    }
-
-    let duplicate: unknown;
-    try {
-      addDecision(doc, SLUGS);
-    } catch (error) {
-      duplicate = error;
-    }
-    expect(duplicate).toBeInstanceOf(InvalidDecisionReferenceError);
-    expect((duplicate as InvalidDecisionReferenceError).reason).toBe(
-      "duplicate",
-    );
-
-    // Every refusal happened before any write: the log still holds exactly the
-    // one reference that was legally added.
-    expect(getDecisionsArray(doc).toArray()).toEqual([SLUGS]);
-  });
-
-  it("removes exactly one reference and leaves the referenced document alone", () => {
-    const doc = requirement();
-    addDecision(doc, SLUGS);
-    addDecision(doc, TOKENS);
-
-    const decision = new Y.Doc();
-    initDoc(decision, { uuid: SLUGS, title: "Slug is display" });
-    appendBlock(decision, { type: "paragraph", text: "uuid is identity." });
-    const before = Y.encodeStateAsUpdate(decision);
-
-    removeDecision(doc, SLUGS);
-
-    expect(uuids(doc)).toEqual([TOKENS]);
-    expect(Y.encodeStateAsUpdate(decision)).toEqual(before);
-  });
-
-  it("moves a reference, and a concurrent add on a second replica survives the merge", () => {
-    const a = requirement();
-    addDecision(a, SLUGS);
-    addDecision(a, TOKENS);
-    const b = new Y.Doc();
-    syncDocs(a, b);
-
-    // Neither replica sees the other's write until the merge below. This is the
-    // test that fails if the array held decision entries rather than uuids: the
-    // reorder would clone-and-destroy the moved element, taking the concurrent
-    // write with it.
-    reorderDecisions(a, TOKENS, 0);
-    addDecision(b, ROOMS);
-    syncDocs(a, b);
-
-    expect(uuids(a)).toEqual([TOKENS, SLUGS, ROOMS]);
-    expect(uuids(b)).toEqual(uuids(a));
-  });
-
-  it("converges when two replicas reorder the same reference concurrently", () => {
-    const a = requirement();
-    addDecision(a, SLUGS);
-    addDecision(a, TOKENS);
-    addDecision(a, ROOMS);
-    const b = new Y.Doc();
-    syncDocs(a, b);
-
-    reorderDecisions(a, ROOMS, 0);
-    reorderDecisions(b, ROOMS, 1);
-    syncDocs(a, b);
-
-    // A move is a delete plus an insert, so the deletes commute and both
-    // inserts survive: storage holds the uuid twice on purpose. The read rule
-    // is what makes both replicas answer the same, and it is a position rather
-    // than a timestamp, so the winner does not depend on integration order.
-    expect(getDecisionsArray(a).toArray()).toEqual(
-      getDecisionsArray(b).toArray(),
-    );
-    expect(
-      getDecisionsArray(a).toArray().filter((uuid) => uuid === ROOMS),
-    ).toHaveLength(2);
-    expect(uuids(a)).toEqual(uuids(b));
-    expect(uuids(a)).toHaveLength(3);
-  });
-
-  it("keeps a removal hidden when it races a reorder, then permits a deliberate re-add", () => {
-    const a = requirement();
-    addDecision(a, SLUGS);
-    addDecision(a, TOKENS);
-    const b = new Y.Doc();
-    syncDocs(a, b);
-
-    removeDecision(a, SLUGS);
-    reorderDecisions(b, SLUGS, 1);
-    syncDocs(a, b);
-
-    expect(uuids(a)).toEqual([TOKENS]);
-    expect(uuids(b)).toEqual([TOKENS]);
-
-    addDecision(a, SLUGS);
-    syncDocs(a, b);
-    expect(uuids(a)).toEqual([TOKENS, SLUGS]);
-    expect(uuids(b)).toEqual([TOKENS, SLUGS]);
-
-    reorderDecisions(a, SLUGS, 0);
-    syncDocs(a, b);
-    expect(uuids(a)).toEqual([SLUGS, TOKENS]);
-    expect(uuids(b)).toEqual([SLUGS, TOKENS]);
-  });
-
-  it("lets a deliberate re-add append after an unseen stale reorder", () => {
-    const a = requirement();
-    addDecision(a, SLUGS);
-    addDecision(a, TOKENS);
-    const b = new Y.Doc();
-    syncDocs(a, b);
-
-    removeDecision(a, SLUGS);
-    addDecision(a, SLUGS);
-    reorderDecisions(b, SLUGS, 0);
-    syncDocs(a, b);
-
-    expect(uuids(a)).toEqual([TOKENS, SLUGS]);
-    expect(uuids(b)).toEqual([TOKENS, SLUGS]);
-  });
-
-  it("keeps decision graph edges through curated-link replacement", () => {
-    const doc = requirement();
-    addDecision(doc, SLUGS);
-
-    setLinks(doc, [ROOMS]);
-
-    expect(getMeta(doc).links).toEqual([ROOMS, SLUGS]);
-  });
-
-  it("converges decision and curated edges from concurrent writers", () => {
-    const a = requirement();
-    const b = new Y.Doc();
-    syncDocs(a, b);
-
-    addDecision(a, SLUGS);
-    setLinks(b, [ROOMS]);
-    syncDocs(a, b);
-
-    expect(getMeta(a).links).toEqual([ROOMS, SLUGS]);
-    expect(getMeta(b).links).toEqual([ROOMS, SLUGS]);
-  });
-
-  it("keeps a reference whose document is missing or archived, flagged unavailable", () => {
-    const doc = requirement();
-    addDecision(doc, SLUGS);
-    addDecision(doc, TOKENS);
-    addDecision(doc, ROOMS);
-
-    const dir = directory([
-      { uuid: SLUGS, title: "Slug is display", status: "decided" },
-      { uuid: TOKENS, title: "Room-token audience", status: "open" },
-    ]);
-    tombstoneDirectoryEntry(dir, TOKENS);
-
-    expect(readDecisions(doc, dir)).toEqual([
-      {
-        uuid: SLUGS,
-        title: "Slug is display",
-        status: "decided",
-        available: true,
-      },
-      {
-        uuid: TOKENS,
-        title: "Room-token audience",
-        status: "open",
-        available: false,
-      },
-      { uuid: ROOMS, title: null, status: null, available: false },
-    ]);
+  it("keeps decision-only cache fields out of ordinary and requirement stubs", () => {
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, { uuid: A, title: "Ordinary", topic: A, governs: REQUIREMENT, tldr: "No", agentStance: true, commentCount: 10 });
+    upsertDirectoryEntry(directory, { uuid: B, title: "Product", kind: "requirement", topic: A, commentCount: 10 });
+    expect(getDirectoryEntry(directory, A)).toEqual({ uuid: A, title: "Ordinary", tags: [] });
+    expect(getDirectoryEntry(directory, B)).toEqual({ uuid: B, title: "Product", tags: [], kind: "requirement" });
+    getDirectoryMap(directory).set(C, { title: "Malformed", kind: "decision", topic: false, commentCount: -1, decidedBy: {}, agentStance: "true" });
+    expect(getDirectoryEntry(directory, C)).toEqual({ uuid: C, title: "Malformed", tags: [], kind: "decision" });
   });
 });
 
-describe("the decision log in markdown", () => {
-  it("emits the stored order with each entry's state, and no section when empty", () => {
-    const doc = requirement();
-    const plain = exportMarkdown(doc);
-    expect(plain).not.toContain("## Decisions");
-
-    addDecision(doc, TOKENS);
-    addDecision(doc, SLUGS);
-    const dir = directory([
-      { uuid: SLUGS, title: "Slug is display", status: "decided" },
-      { uuid: TOKENS, title: "Room-token audience", status: "open" },
-      { uuid: ROOMS, title: "Unreferenced" },
-    ]);
-
-    const markdown = exportMarkdown(doc, { directory: dir });
-
-    // The rest of the document is untouched: the section is appended whole.
-    expect(markdown).toBe(
-      [
-        plain.trimEnd(),
-        "",
-        "## Decisions",
-        "",
-        "<!-- decisions: references to decision documents, in stored order. " +
-          "Importing this file does not restore them. -->",
-        "",
-        `- ${TOKENS} — Room-token audience — open`,
-        `- ${SLUGS} — Slug is display — decided`,
-        "",
-      ].join("\n"),
-    );
+describe("stubs-only topic resolution", () => {
+  it("preserves the B/C/D fork and resolves through rejected intermediates without timestamp winners", () => {
+    const directory = fork();
+    const topic = resolveDecisionTopics(directory)[0]!;
+    expect(topic.inForce).toBeNull();
+    expect(ids(topic.conflicts).sort()).toEqual([C, D]);
+    expect(topic.representative.uuid).toBe(A);
+    expect(ids(topic.superseded).sort()).toEqual([A, B]);
+    stub(directory, B, { supersedes: A, status: "rejected" });
+    expect(ids(resolveDecisionTopics(directory)[0]!.conflicts).sort()).toEqual([C, D]);
+    stub(directory, C, { supersedes: A, status: "withdrawn" });
+    expect(resolveDecisionTopics(directory)[0]!.inForce?.uuid).toBe(D);
+    expect(ids(resolveDecisionTopics(directory)[0]!.rejected)).toEqual([B]);
+    expect(ids(resolveDecisionTopics(directory)[0]!.withdrawn)).toEqual([C]);
+    const relation = decisionRelations(directory, A);
+    expect(ids(relation.successors).sort()).toEqual([B, C]);
+    expect(relation.successors.map((entry) => entry.status)).toEqual(["rejected", "withdrawn"]);
+    expect(ids(decisionRelations(directory, D).predecessors)).toEqual([B, A]);
   });
 
-  it("does not claim a reference is unavailable when it was given no directory", () => {
-    const doc = requirement();
-    addDecision(doc, SLUGS);
-
-    const markdown = exportMarkdown(doc);
-
-    expect(markdown).toContain(`- ${SLUGS}\n`);
-    expect(markdown).not.toContain("(unavailable)");
+  it("keeps the earlier answer while reconsiderations are open, and pending excludes superseded proposals", () => {
+    const directory = new Y.Doc();
+    stub(directory, A);
+    stub(directory, B, { status: "open", supersedes: A });
+    stub(directory, C, { status: "open", supersedes: A });
+    stub(directory, D, { status: "open", supersedes: B });
+    expect(resolveDecisionTopics(directory)[0]!.inForce?.uuid).toBe(A);
+    expect(ids(resolveDecisionTopics(directory)[0]!.pending).sort()).toEqual([C, D]);
+    stub(directory, D, { status: "withdrawn", supersedes: B });
+    expect(ids(resolveDecisionTopics(directory)[0]!.pending).sort()).toEqual([B, C]);
   });
 
-  it("folds line breaks and renders a title as literal inline markdown", () => {
-    const doc = requirement();
-    addDecision(doc, SLUGS);
-    const dir = directory([
-      {
-        uuid: SLUGS,
-        title:
-          "Decision\n## Injected *bold* [link](https://example.com) `code` _em_ ~~strike~~",
-        status: "decided",
-      },
-    ]);
-
-    const markdown = exportMarkdown(doc, { directory: dir });
-    const rows = markdown
-      .split("\n")
-      .filter((line) => line.startsWith(`- ${SLUGS}`));
-
-    expect(rows).toEqual([
-      `- ${SLUGS} — ` +
-        "Decision ## Injected \\*bold\\* \\[link](https://example.com) " +
-        "\\`code\\` \\_em\\_ \\~\\~strike\\~\\~ — decided",
-    ]);
-    expect(markdown).not.toMatch(/^## Injected/m);
+  it("reports nothing in force for only-open, rejected or withdrawn topics", () => {
+    const directory = new Y.Doc();
+    stub(directory, A, { status: "rejected" });
+    stub(directory, B, { topic: B, status: "withdrawn" });
+    stub(directory, C, { topic: C, status: "open" });
+    const topics = resolveDecisionTopics(directory);
+    expect(topics.map((topic) => topic.inForce)).toEqual([null, null, null]);
+    expect(topics.map((topic) => topic.representative.uuid)).toEqual([A, B, C]);
   });
 
-  it("does not reconstruct the slot on import, and says so in the export", () => {
-    const doc = requirement();
-    addDecision(doc, SLUGS);
-    const dir = directory([{ uuid: SLUGS, title: "Slug is display" }]);
-
-    const markdown = exportMarkdown(doc, { directory: dir });
-    expect(markdown).toContain("Importing this file does not restore them.");
-
-    const imported = importMarkdown(markdown);
-    const rebuilt = new Y.Doc();
-    initDoc(rebuilt, { uuid: imported.uuid ?? "", title: imported.title });
-    for (const block of imported.blocks) appendBlock(rebuilt, block);
-
-    expect(readDecisions(rebuilt)).toEqual([]);
-    // The section came back as ordinary prose — the documented loss path.
-    expect(imported.blocks.at(-1)?.text).toContain(SLUGS);
+  it("terminates foreign cycles and never joins topics through a cross-topic predecessor", () => {
+    const directory = new Y.Doc();
+    stub(directory, A, { supersedes: B });
+    stub(directory, B, { supersedes: A });
+    stub(directory, C, { topic: C, supersedes: A });
+    const topics = resolveDecisionTopics(directory);
+    expect(topics[0]!.inForce).toBeNull();
+    expect(ids(topics[0]!.superseded)).toEqual([A, B]);
+    expect(topics[1]!.inForce?.uuid).toBe(C);
+    expect(ids(decisionRelations(directory, A).predecessors)).toEqual([B]);
   });
-});
 
-describe("a client that never opens the slot", () => {
-  it("preserves it across an edit-and-sync cycle", () => {
-    const author = requirement();
-    addDecision(author, SLUGS);
-    addDecision(author, TOKENS);
+  it("uses first-record archive authority even with partial and concurrent mirrors", () => {
+    const directory = fork();
+    // Foreign partial archive: newest record is tombstoned, authority remains live.
+    const d = getDirectoryMap(directory).get(D) as Record<string, unknown>;
+    getDirectoryMap(directory).set(D, { ...d, deleted: true });
+    expect(ids(listDirectory(directory))).toContain(D);
+    expect(resolveDecisionTopics(directory)[0]!.archived).toBe(false);
+    expect(decisionTopicArchived(directory, D)).toBe(false);
+    const resolution = ids(resolveDecisionTopics(directory)[0]!.conflicts);
+    expect(tombstoneDirectoryEntry(directory, B)).toEqual([A, B, C, D]);
+    expect(listDirectory(directory)).toEqual([]);
+    expect(ids(resolveDecisionTopics(directory)[0]!.conflicts)).toEqual(resolution);
+    expect(decisionTopicArchived(directory, D)).toBe(true);
+    expect(restoreDirectoryEntry(directory, C)).toEqual([A, B, C, D]);
+    expect(listDirectory(directory)).toHaveLength(4);
+    const other = new Y.Doc(); syncDocs(directory, other);
+    tombstoneDirectoryEntry(directory, D);
+    restoreDirectoryEntry(other, B);
+    syncDocs(directory, other);
+    expect(resolveDecisionTopics(directory)).toEqual(resolveDecisionTopics(other));
+    expect(ids(resolveDecisionTopics(directory)[0]!.conflicts)).toEqual(resolution);
+  });
 
-    // A replica that only ever touches `meta` and `blocks` — root types are
-    // independent, so it neither reads nor rewrites the decision log.
-    const older = new Y.Doc();
-    syncDocs(author, older);
-    appendBlock(older, { type: "paragraph", text: "Edited elsewhere." });
-    syncDocs(author, older);
+  it("archives even a foreign topic whose first record stub is missing", () => {
+    const directory = new Y.Doc();
+    stub(directory, B, { supersedes: A });
+    expect(resolveDecisionTopics(directory)[0]!.archived).toBe(false);
+    tombstoneDirectoryEntry(directory, B);
+    expect(decisionTopicArchived(directory, B)).toBe(true);
+    expect(resolveDecisionTopics(directory)[0]!.archived).toBe(true);
+    expect(listDirectory(directory)).toEqual([]);
+  });
 
-    expect(uuids(older)).toEqual([SLUGS, TOKENS]);
-    expect(uuids(author)).toEqual([SLUGS, TOKENS]);
-    expect(exportMarkdown(author)).toContain("Edited elsewhere.");
+  it("derives a requirement log and Markdown from any governing history record, oldest topics first", () => {
+    const directory = fork();
+    stub(directory, E, { topic: E, governs: REQUIREMENT, status: "open", createdAt: 0 });
+    const requirement = new Y.Doc();
+    initDoc(requirement, { uuid: REQUIREMENT, title: "Product" }); setKind(requirement, "requirement");
+    // Even a stale foreign legacy root cannot influence a read or export.
+    requirement.getArray("decisions").insert(0, [D]);
+    expect(readDecisions(requirement, directory).map((topic) => topic.topic)).toEqual([E, A]);
+    const markdown = exportMarkdown(requirement, { frontmatter: false, directory });
+    expect(markdown).toContain(`${A} — ${A} — nothing in force; conflict:`);
+    expect(markdown).toContain(`${E} — ${E} — nothing in force; pending: ${E}`);
+    tombstoneDirectoryEntry(directory, B);
+    expect(readDecisions(requirement, directory).map((topic) => topic.topic)).toEqual([E]);
+    expect(exportMarkdown(requirement, { frontmatter: false, directory })).not.toContain(`- ${A}`);
+    expect(readDecisions(requirement)).toEqual([]);
   });
 });

@@ -12,8 +12,8 @@ import {
 } from "react";
 import * as Y from "yjs";
 import {
+  decisionTopicArchived,
   getBlocksFragment,
-  getDirectoryEntry,
   getDirectoryMap,
   getMeta,
   getMetaMap,
@@ -164,7 +164,11 @@ export function useDirectory(
     }
     const { ydoc } = connection;
     const map = getDirectoryMap(ydoc);
-    const read = (): void => setEntries(listDirectory(ydoc, { includeDeleted }));
+    const read = (): void => setEntries(listDirectory(ydoc, { includeDeleted }).map(
+      (entry) => entry.kind === "decision"
+        ? { ...entry, deleted: decisionTopicArchived(ydoc, entry.uuid) }
+        : entry,
+    ));
     read();
     map.observe(read);
     return () => map.unobserve(read);
@@ -201,7 +205,8 @@ export function useSidebar(connection: RoomConnection | null): SidebarGroup[] {
 }
 
 /**
- * Whether the directory tombstones this document, live.
+ * Whether the directory archives this document, live. For decisions, only the
+ * topic's first-record tombstone has authority, including partial writes.
  *
  * The directory stub is the source of the archived flag — the document itself
  * holds no such state — so this reads the same entry `list_docs` and
@@ -238,7 +243,7 @@ export function useArchived(
   );
   const read = useCallback(() => {
     if (directory === null || uuid === null) return false;
-    return getDirectoryEntry(directory.ydoc, uuid)?.deleted === true;
+    return decisionTopicArchived(directory.ydoc, uuid);
   }, [directory, uuid]);
   return useSyncExternalStore(subscribe, read);
 }

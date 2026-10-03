@@ -37,7 +37,7 @@
  *
  * **What counts as agreement.** {@link docFingerprint} covers the whole
  * schema-owned surface — meta, blocks, the inline marks on them, the ordered
- * decisions slot, and the annotations map — because `Block.rev` alone covers
+ * and the annotations map — because `Block.rev` alone covers
  * type, text and attributes and would let a remote missing every bold run and
  * every comment thread pass.
  * Alongside it, state vectors are compared directly, which catches any struct
@@ -64,7 +64,6 @@ import {
   getMeta,
   listAnnotationRanges,
   listDirectory,
-  readDecisions,
   roomForDoc,
 } from "@uberblick/schema";
 import { Awareness } from "y-protocols/awareness";
@@ -197,9 +196,9 @@ function canonical(value: unknown): unknown {
 /**
  * A content hash of one document, over everything the schema puts in it.
  *
- * Meta, the ordered blocks, the inline marks on those blocks, the ordered
- * decision references, and the annotations map — which is the whole documented
- * layout (`meta`, `blocks`, `decisions`, `annotations`), so nothing a document
+ * Meta, the ordered blocks, the inline marks on those blocks,
+ * and the annotations map — which is the whole documented
+ * layout (`meta`, `blocks`, `annotations`), so nothing a document
  * can carry is outside this.
  *
  * **Meta is hashed as `getMeta` returns it, not as a list of fields named
@@ -243,7 +242,6 @@ export function docFingerprint(doc: Y.Doc): string {
       tags: [...meta.tags].sort(),
       links: [...meta.links].sort(),
     }),
-    decisions: readDecisions(doc).map((reference) => reference.uuid),
     blocks: getBlocks(doc).map((block) => ({
       id: block.id,
       rev: block.rev,
