@@ -1674,6 +1674,10 @@ for (const scheme of ["light", "dark"] as const) {
     await thread.click();
     await page.getByRole("button", { name: "Reopen" }).click();
     await page.getByRole("button", { name: "Close threads" }).click();
+    // The pointer-opened drawer returns focus to the toggle asynchronously.
+    // Wait for that return before placing the caret so it cannot take the
+    // selection and deletion keys back from the editor.
+    await expect(handle).toBeFocused();
     await placeCaret(page);
     await page.keyboard.press("Shift+Home");
     await page.keyboard.press("Backspace");
