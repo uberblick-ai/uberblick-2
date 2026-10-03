@@ -34,6 +34,9 @@ test.afterAll(async () => {
 async function openDoc(page: Page, text: string): Promise<void> {
   if (started === null) throw new Error("e2e: the harness is not running");
   await page.goto(started.appUrl);
+  if ((page.viewportSize()?.width ?? 1280) < 1280) {
+    await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  }
   await expect(page.locator(".ub-list-head")).toBeVisible();
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
@@ -148,9 +151,7 @@ test("the measured toolbar flips below at the viewport edge and follows scrollin
 }) => {
   await page.setViewportSize({ width: 520, height: 360 });
   await openDoc(page, "scrolling prose ".repeat(350));
-  await page.getByRole("button", { name: "Hide document list" }).click();
-  await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
-  await expect(page.locator(".ub-list")).toHaveAttribute("aria-hidden", "true");
+  await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
   const pane = page.locator(".ub-pane");
   const paragraph = page.locator(".ub-paragraph").first();
   await pane.evaluate((element) => {

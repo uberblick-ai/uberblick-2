@@ -35,6 +35,9 @@ test.afterAll(async () => {
 
 async function openDocument(page: Page): Promise<void> {
   await page.goto(harness().appUrl);
+  if ((page.viewportSize()?.width ?? 1280) < 1280) {
+    await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  }
   await expect(page.locator(".ub-list-head")).toBeVisible();
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
@@ -230,8 +233,6 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     await page.setViewportSize({ width: 720, height: 540 });
     await openDocument(page);
     await typeHeading(page, 1, "Touch target");
-    await page.getByRole("button", { name: "Hide document list" }).tap();
-
     const trigger = page.getByRole("button", { name: "Contents 1" });
     const panel = page.getByRole("menu", { name: "Contents 1" });
     await trigger.tap();
