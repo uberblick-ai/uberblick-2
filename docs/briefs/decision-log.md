@@ -77,6 +77,16 @@ Settled 2026-10-03:
   An agent may open the successor and argue for it; it stays `open` until a
   person answers. Approval may be given in the web or through MCP, where the
   agent records the human's answer and the record cites it (who, when, where).
+- **A decided record is read-only** (owner, 2026-10-03). Once a record is
+  `decided`, every write surface — MCP block and metadata tools and the web
+  editor — refuses changes to its text and decision line; comments stay open.
+  Any change, a wording fix included, goes through Reconsider as a new record
+  a person approves. Recording a person's answer stores the fingerprint of the
+  content they approved (the existing document fingerprint). Because a
+  read-only rule is enforced per replica, an edit made offline before the
+  decision can still merge afterwards; when the content's fingerprint no
+  longer matches the approved one, the record shows *changed after approval*
+  and lists as needing a person, who either re-approves it or reconsiders.
 - **A challenge stops the affected work.** When an agent's work runs against a
   decided record it believes is wrong, it does not work around it: it opens a
   successor stating the challenge, and stops the work that depends on that
