@@ -129,8 +129,14 @@ when any of these is true:
 When in doubt, an agent records nothing new and mentions the choice in its pull
 request; a reviewer or a person can promote it to a decision record later.
 
-**Open question — reviewers.** Whether a reviewer drafts a record when a pull
-request settles something that passes this test, rather than only flagging it. One
+**Reviewers flag; implementers write** (owner, 2026-10-03, on the
+recommendation). When a pull request settles something that passes this test
+without a record, the reviewer raises it as a finding rather than drafting the
+record. The implementer, who holds the reasoning, writes the record in the same
+pull request (agent-decided, or open on a boundary topic), and the reviewer
+verifies it like any other correction. The reviewer stays independent of the
+record it judges, and the record is written by whoever knows why the choice
+was made. One
 topic per record: a record that collects many choices (*Deferred designs and
 their triggers*) is a catalog, not a decision.
 
