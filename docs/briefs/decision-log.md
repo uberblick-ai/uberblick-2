@@ -76,10 +76,23 @@ Settled 2026-10-03:
 - No individual is named as the decider: on a team, whoever holds the
   authority in that workspace approves.
 
-Proposed, to confirm: a topic that crosses the agent workflow's boundary table
-(product direction and UX, principles and guarantees, resources and
-commitments, agent authority) starts `open` even as a first record, because
-those choices are a person's from the outset.
+- **Boundary topics start open** (owner, 2026-10-03). A topic that crosses the
+  agent workflow's boundary table (product direction and UX, principles and
+  guarantees, resources and commitments, agent authority) starts `open` even as
+  a first record, with the agent's recommendation, because those choices are a
+  person's.
+- **Open does not mean blocked.** Work proceeds on the recommendation while the
+  record is open; the record names the work built on it, so a reversal knows
+  what to redo. Reversal costs extra work, accepted to avoid slowing delivery.
+  The exception is an open topic whose reversal would be costly to undo even
+  before launch — security, privacy or data-preservation guarantees, recurring
+  cost or an external commitment, and expanded agent authority: those stop the
+  affected work until a person answers. This narrows the workflow's "at a
+  boundary, pause only affected work" to those cases, and the agent workflow
+  document changes with it.
+- **Opening a topic and challenging a decision differ.** A new open topic
+  proceeds on its recommendation; a challenge to a `decided` record stops the
+  work that depends on it, as above.
 
 ### 2a. When to record a decision, and when it is overkill
 
