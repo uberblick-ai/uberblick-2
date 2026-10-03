@@ -30,14 +30,29 @@ export interface FormattedTimestamp {
   title?: string;
 }
 
+function timestampDate(value: string | number): Date | null {
+  const date = new Date(typeof value === "number" ? value : Date.parse(value));
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+/** The exact local date and time used by hover previews and sync details. */
+export function formatExactTimestamp(
+  value: string | number,
+): FormattedTimestamp | null {
+  const date = timestampDate(value);
+  return date === null
+    ? null
+    : { label: DATE_TIME_FORMAT.format(date), dateTime: date.toISOString() };
+}
+
 /** One visible timestamp rule for every web surface. */
 export function formatTimestamp(
   value: string | number,
   now: number = Date.now(),
 ): FormattedTimestamp | null {
-  const at = typeof value === "number" ? value : Date.parse(value);
-  const date = new Date(at);
-  if (!Number.isFinite(date.getTime())) return null;
+  const date = timestampDate(value);
+  if (date === null) return null;
+  const at = date.getTime();
 
   const dateTime = date.toISOString();
   const age = Math.max(0, now - at);

@@ -19,9 +19,15 @@ test.afterEach(() => {
 });
 
 const activePane = (page: Page): Locator => page.locator(".ub-sidebar-pane:not([inert])");
+const activeContent = (page: Page): Locator => activePane(page).locator('[data-slot="sidebar-content"]');
 
 async function openSidebar(page: Page, settings = false): Promise<void> {
-  if ((page.viewportSize()?.width ?? 1280) >= 1280) return;
+  if ((page.viewportSize()?.width ?? 1280) >= 1280) {
+    // The media query updates React after the viewport API returns. Wait for
+    // the docked surface before reading its frame around the breakpoint.
+    await expect(page.locator('[data-slot="sidebar"] .ub-list')).toBeVisible();
+    return;
+  }
   if (await page.getByRole("dialog", { name: "Sidebar", exact: true }).count() === 0) {
     await page.getByRole("button", { name: settings ? "Show sidebar" : "Show document list", exact: true }).click();
   }
@@ -58,7 +64,7 @@ async function expectHorizontalFit(page: Page): Promise<void> {
 }
 
 async function horizontalWheel(page: Page): Promise<void> {
-  const pane = activePane(page);
+  const pane = activeContent(page);
   await expect(pane).toBeVisible();
   await settleSidebar(page);
   const box = await pane.boundingBox();
@@ -67,7 +73,7 @@ async function horizontalWheel(page: Page): Promise<void> {
   for (const delta of [240, -240]) {
     // mouse.wheel returns before the renderer consumes the native event.
     // Wait for its wheel event and two frames before observing the offset.
-    await activePane(page).evaluate((pane) => {
+    await pane.evaluate((pane) => {
       pane.dataset.wheelConsumed = "false";
       pane.addEventListener("wheel", () => {
         requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -76,9 +82,59 @@ async function horizontalWheel(page: Page): Promise<void> {
       }, { once: true });
     });
     await page.mouse.wheel(delta, 0);
-    await expect(activePane(page)).toHaveAttribute("data-wheel-consumed", "true");
+    await expect(pane).toHaveAttribute("data-wheel-consumed", "true");
     await expectHorizontalFit(page);
   }
+}
+
+/** The product frame holds its controls around the only vertical scrollport. */
+async function expectFixedFrame(page: Page, scrollable = false): Promise<void> {
+  const pane = activePane(page);
+  const read = async () => pane.evaluate((element) => {
+    const header = element.querySelector<HTMLElement>('[data-slot="sidebar-header"]');
+    const content = element.querySelector<HTMLElement>('[data-slot="sidebar-content"]');
+    const footer = element.querySelector<HTMLElement>('[data-slot="sidebar-footer"]');
+    const hide = element.closest(".ub-list")?.querySelector<HTMLElement>(".ub-sidebar-hide");
+    if (!header || !content || !footer || !hide) throw new Error("e2e: incomplete sidebar frame");
+    const box = (node: Element) => {
+      const rect = node.getBoundingClientRect();
+      return { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left };
+    };
+    const bounds = box(element);
+    const hideBox = box(hide);
+    const covered = [...header.querySelectorAll<HTMLElement>(".ub-workspace-name, .ub-workspace-caret, .ub-settings-back")]
+      .filter((control) => {
+        const rect = box(control);
+        return rect.left < hideBox.right && rect.right > hideBox.left
+          && rect.top < hideBox.bottom && rect.bottom > hideBox.top;
+      }).map((control) => control.className);
+    const outside = [...header.querySelectorAll<HTMLElement>("button"), ...footer.querySelectorAll<HTMLElement>("button")]
+      .filter((control) => {
+        const rect = box(control);
+        return rect.top < bounds.top || rect.bottom > bounds.bottom
+          || rect.left < bounds.left || rect.right > bounds.right;
+      }).map((control) => control.className);
+    return { header: box(header), content: box(content), footer: box(footer), bounds, covered, outside,
+      paneTop: element.scrollTop, contentTop: content.scrollTop };
+  });
+  await activeContent(page).evaluate((content) => { content.scrollTop = 0; });
+  const before = await read();
+  expect(before.covered).toEqual([]);
+  expect(before.outside).toEqual([]);
+  expect(before.header.top).toBeGreaterThanOrEqual(before.bounds.top);
+  expect(before.header.bottom).toBeLessThanOrEqual(before.content.top);
+  expect(before.content.bottom).toBeLessThanOrEqual(before.footer.top);
+  expect(before.footer.bottom).toBeLessThanOrEqual(before.bounds.bottom);
+  await activeContent(page).evaluate(async (content) => {
+    content.scrollTop = content.scrollHeight;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
+  const after = await read();
+  expect(after.header).toEqual(before.header);
+  expect(after.footer).toEqual(before.footer);
+  expect(after.paneTop).toBe(0);
+  expect(after.outside).toEqual([]);
+  if (scrollable) expect(after.contentTop).toBeGreaterThan(0);
 }
 
 async function addGroup(page: Page, name: string): Promise<void> {
@@ -97,15 +153,17 @@ test("empty and long-label sidebars fit supported widths and breakpoint edges in
       await page.setViewportSize({ width: 1280, height: 832 });
       await createPinnedDoc(page, "A document title long enough to truncate within its sidebar row ".repeat(3));
       await createPinnedDoc(page, "unbreakable".repeat(25));
+      for (let index = 0; index < 14; index += 1) await createPinnedDoc(page, `Frame document ${index}`);
       await addGroup(page, "A group name long enough to truncate within its heading ".repeat(3));
       await addGroup(page, "unbreakablegroup".repeat(25));
     }
     for (const width of [320, 375, 744, 768, 932, 1024, 1279, 1280, 1366, 1470]) {
       await test.step(`${content} at ${width}px`, async () => {
-        await page.setViewportSize({ width, height: 832 });
+        await page.setViewportSize({ width, height: content === "empty" ? 832 : 500 });
         await openSidebar(page);
         await settleSidebar(page);
         await expectHorizontalFit(page);
+        await expectFixedFrame(page, content === "long labels");
         await horizontalWheel(page);
         const pane = activePane(page);
         // The header, rows and hover-revealed group actions must fit as
@@ -125,6 +183,7 @@ test("empty and long-label sidebars fit supported widths and breakpoint edges in
         await openSidebar(page, true);
         await expect(page.locator(".ub-list")).toHaveAttribute("data-mode", "settings");
         await settleSidebar(page);
+        await expectFixedFrame(page);
         await horizontalWheel(page);
         await page.locator(".ub-settings-back").click();
         await openSidebar(page);
@@ -164,7 +223,7 @@ test("edge-held drags never pan sideways and a tall sidebar still scrolls vertic
     await page.setViewportSize({ width, height: 500 });
     await openSidebar(page);
     await settleSidebar(page);
-    const pane = activePane(page);
+    const pane = activeContent(page);
     await pane.evaluate((element) => { element.scrollTop = 0; });
     await pane.hover();
     await page.mouse.wheel(0, 240);

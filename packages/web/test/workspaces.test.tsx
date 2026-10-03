@@ -99,11 +99,7 @@ function Probe({ configured }: { configured: readonly string[] }): ReactElement 
       workspaces={workspaceList(configured, current)}
       current={current}
       names={NAMES}
-      docs={0}
       onSwitch={(segment) => navigate(`/${segment}`)}
-      onOpenSettings={() => {
-        if (current !== null) navigate(`/${current.segment}/settings`);
-      }}
     />
   );
 }
@@ -137,7 +133,7 @@ function items(): HTMLElement[] {
 function offered(): string[] {
   return items()
     .filter((item) => item.querySelector(".ub-menu-text") !== null)
-    .map((item) => item.textContent ?? "");
+    .map((item) => item.querySelector(".ub-menu-text")?.textContent ?? "");
 }
 
 /** jsdom has neither, and Radix's floating surface uses both. */
@@ -164,7 +160,11 @@ describe("switching workspace is navigating to it", () => {
 
     expect(trigger(host).textContent).toContain("Uberblick");
     open(host);
-    expect(offered()).toEqual(["Uberblick0 docs", "Product Research"]);
+    expect(offered()).toEqual(["Uberblick", "Product Research"]);
+    expect(items().filter((item) => item.getAttribute("aria-current") === "true"))
+      .toHaveLength(1);
+    expect(items()[0]?.getAttribute("aria-current")).toBe("true");
+    expect(items()[1]?.hasAttribute("aria-current")).toBe(false);
 
     act(() => {
       items().find((item) => item.textContent === "Product Research")?.click();
@@ -201,15 +201,14 @@ describe("switching workspace is navigating to it", () => {
     });
     // Unconfigured, and still on the menu — with the configured one beside it.
     open(host);
-    expect(offered()).toEqual(["Uberblick", "Product Research0 docs"]);
+    expect(offered()).toEqual(["Uberblick", "Product Research"]);
 
     act(() => root.unmount());
     host.remove();
   });
 
   it("names the workspace it is at when that is the only one there is", () => {
-    // A menu of one still opens — it is also where the workspace-management
-    // items live (#74) — but the reader is told where they are without it.
+    // A menu of one still opens, and the reader is told where they are without it.
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
@@ -217,7 +216,7 @@ describe("switching workspace is navigating to it", () => {
 
     expect(trigger(host).textContent).toContain("Uberblick");
     open(host);
-    expect(offered()).toEqual(["Uberblick0 docs"]);
+    expect(offered()).toEqual(["Uberblick"]);
 
     act(() => root.unmount());
     host.remove();

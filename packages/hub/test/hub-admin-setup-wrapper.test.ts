@@ -16,7 +16,7 @@ afterAll(() => {
 });
 
 function run(args: string[], exitCode = 0, terminal = false) {
-  const directory = mkdtempSync(join(tmpdir(), `uberblick-${process.env.UB_AGENT_RUN ?? "test"}-admin-wrapper-`));
+  const directory = mkdtempSync(join(tmpdir(), `uberblick-${process.env.UB_AGENTS_RUN ?? "test"}-admin-wrapper-`));
   directories.push(directory);
   copyFileSync(SCRIPT, join(directory, "hub-admin-setup.sh"));
   const capture = join(directory, "compose-arguments");

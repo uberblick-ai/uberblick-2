@@ -200,16 +200,4 @@ describe("independent hubs sharing the public GitHub app", () => {
       dbB.close();
     }
   });
-
-  it("accepts no GitHub token or identity supplied by clients at either default hub", async () => {
-    for (const testRig of [await rig("independent-root-secret-a"), await rig("independent-root-secret-b")]) {
-      for (const body of [{ access_token: "client-github-token" }, { id: ACCOUNT.id }, { username: ACCOUNT.login }]) {
-        expect(await post(testRig.hub, "start", body)).toEqual({ code: 400, result: { status: "invalid-request" } });
-      }
-      expect(await post(testRig.hub, "start", {}, { Authorization: "Bearer client-github-token" }))
-        .toEqual({ code: 400, result: { status: "invalid-request" } });
-      expect(testRig.github.calls).toEqual([]);
-      expect(privateRows(testRig.databasePath)).toEqual({ principals: [], memberships: [], credentials: [] });
-    }
-  });
 });

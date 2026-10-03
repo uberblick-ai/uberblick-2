@@ -38,7 +38,7 @@ import { useSortable } from "@dnd-kit/react/sortable";
 import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { useDroppable } from "@dnd-kit/react";
 import { SidebarDragProvider, sidebarRowSensors, useSidebarDragInstructions, useSidebarRowClickGuard } from "./sidebar-drag.js";
-import { Sidebar as SidebarFrame, SIDEBAR_TOGGLE_CLASSES, useSidebar } from "./shadcn/sidebar.js";
+import { Sidebar as SidebarFrame, SidebarHeader, SidebarContent as SidebarScrollContent, SidebarFooter, SIDEBAR_TOGGLE_CLASSES, useSidebar } from "./shadcn/sidebar.js";
 import { Input } from "./shadcn/input.js";
 import { UserMenu } from "./UserMenu.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
@@ -51,10 +51,8 @@ const FIRST_GROUP_NAME = "Pinned";
 /** What `+ group` creates, before the reader types over it. */
 const NEW_GROUP_NAME = "New group";
 
-// The inset belongs inside each scroll pane: the workspace header's negative
-// margins then reach the pane's edges without creating a horizontal scroll range.
-// Both modes share a grid cell and keep their own vertical scroll position.
-const SIDEBAR_PANE_CLASSES = "ub-sidebar-pane [grid-area:1/1] min-w-0 min-h-0 flex flex-col overflow-y-auto p-2 transition-[transform,opacity] duration-[180ms] ease-[ease] motion-reduce:transition-none motion-reduce:duration-0 [&[inert]]:pointer-events-none [&[inert]_*]:pointer-events-none [&>*]:flex-none";
+// Both modes share a grid cell; only each mode's middle content scrolls.
+const SIDEBAR_PANE_CLASSES = "ub-sidebar-pane [grid-area:1/1] min-w-0 min-h-0 flex flex-col transition-[transform,opacity] duration-[180ms] ease-[ease] motion-reduce:transition-none motion-reduce:duration-0 [&[inert]]:pointer-events-none [&[inert]_*]:pointer-events-none";
 
 /** Per-group collapse preference, persisted per browser like the sidebar's own. */
 function groupCollapsedKey(groupId: string): string {
@@ -97,12 +95,6 @@ type SidebarProps = {
   sidebar: RoomConnection | null;
   /** The sidebar as `readSidebar` reports it, live. */
   groups: SidebarGroup[];
-  /**
-   * The workspace's documents, for the count the switcher prints (#74) — the
-   * live ones, which is what that number means. Titles come from a second
-   * reading of the same directory that keeps the tombstones; see `stubs`.
-   */
-  entries: DirectoryEntry[];
   /** The workspaces the switcher offers — see `workspaceList`. */
   workspaces: readonly Workspace[];
   /** The workspace the address names, or null when it names none. */
@@ -176,7 +168,6 @@ function SidebarContent({
   connection,
   sidebar,
   groups,
-  entries,
   workspaces,
   workspace,
   workspaceNames,
@@ -212,7 +203,7 @@ function SidebarContent({
   const [renaming, setRenaming] = useState<{ id: string; fresh: boolean } | null>(null);
   /**
    * The directory stub behind each pinned uuid — tombstones included, which is
-   * the whole point of reading the directory again rather than using `entries`.
+   * why this reader includes stubs that ordinary document listings omit.
    *
    * The sidebar is the one reader that names documents by uuid instead of
    * listing them, so it is the one reader that still has something to draw
@@ -294,89 +285,88 @@ function SidebarContent({
           aria-hidden={settingsOpen || collapsed}
           inert={settingsOpen || collapsed}
         >
-          {/* The workspace, across the top of the column it is the workspace of
-              (#74). Above the head rather than in it: the head is about this
-              workspace's documents, and the switcher is about which workspace. */}
-          <WorkspaceSwitcher
-            workspaces={workspaces}
-            current={workspace}
-            names={workspaceNames}
-            onOpenChange={onWorkspaceMenuOpenChange}
-            docs={entries.length}
-            onSwitch={onSwitchWorkspace}
-            onOpenSettings={() => onOpenSettings("general")}
-            active={!settingsOpen && !collapsed}
-          />
-          <div className="ub-list-head">
+          <SidebarHeader className={drawer ? undefined : "pr-6"}>
+            <WorkspaceSwitcher
+              workspaces={workspaces}
+              current={workspace}
+              names={workspaceNames}
+              onOpenChange={onWorkspaceMenuOpenChange}
+              onSwitch={onSwitchWorkspace}
+              active={!settingsOpen && !collapsed}
+            />
+          </SidebarHeader>
+          <SidebarScrollContent className="px-2 pb-2 [&>*]:shrink-0">
+            <div className="ub-list-head">
+              <button
+                type="button"
+                onClick={onCreate}
+                disabled={!status.writable}
+                title={
+                  status.writable
+                    ? undefined
+                    : "New document unavailable while the directory is read-only"
+                }
+              >
+                {status.writable ? "+ new doc" : "new doc unavailable"}
+              </button>
+              {/* A refusal takes this line's word, because the three readings below
+                  all describe a connection that is working or coming back and none of
+                  them is true of a page the hub will not admit (#448). The ordinary
+                  readings stay exactly as they were — uncalmed, and saying
+                  "directory", since this line is about the directory room. */}
+              <span className="ub-muted">
+                {reading.detail !== null
+                  ? reading.word
+                  : status.connected
+                    ? status.synced
+                      ? "directory synced"
+                      : "syncing…"
+                    : "offline"}
+              </span>
+            </div>
+            <Navigation allOpen={allOpen} onOpenAll={onOpenAll} />
+            {!sidebarWritable && (
+              <p className="ub-muted ub-sidebar-unwritable">
+                Sidebar changes unavailable while offline.
+              </p>
+            )}
+            {groups.length === 0 && (
+              <p className="ub-muted ub-empty">
+                Nothing pinned yet. Pin the open document from its Document actions
+                menu.
+              </p>
+            )}
+            {groups.map((group, index) => (
+                <GroupSection
+                  key={group.id}
+                  index={index}
+                  group={group}
+                  ydoc={ydoc}
+                  labels={labels}
+                  selected={selected}
+                  onSelect={onSelect}
+                  canWrite={canWriteSidebar}
+                  editing={renaming?.id === group.id}
+                  onEdit={() => setRenaming({ id: group.id, fresh: false })}
+                  onCancel={cancelRename}
+                  onCommit={(name) => commitRename(group.id, name)}
+                />
+            ))}
             <button
               type="button"
-              onClick={onCreate}
-              disabled={!status.writable}
+              className="ub-group-add"
+              onClick={addGroup}
+              disabled={ydoc === null}
               title={
-                status.writable
-                  ? undefined
-                  : "New document unavailable while the directory is read-only"
+                ydoc === null
+                  ? "Group changes unavailable while the sidebar is offline"
+                  : undefined
               }
             >
-              {status.writable ? "+ new doc" : "new doc unavailable"}
+              + group
             </button>
-            {/* A refusal takes this line's word, because the three readings below
-                all describe a connection that is working or coming back and none of
-                them is true of a page the hub will not admit (#448). The ordinary
-                readings stay exactly as they were — uncalmed, and saying
-                "directory", since this line is about the directory room. */}
-            <span className="ub-muted">
-              {reading.detail !== null
-                ? reading.word
-                : status.connected
-                  ? status.synced
-                    ? "directory synced"
-                    : "syncing…"
-                  : "offline"}
-            </span>
-          </div>
-          <Navigation allOpen={allOpen} onOpenAll={onOpenAll} />
-          {!sidebarWritable && (
-            <p className="ub-muted ub-sidebar-unwritable">
-              Sidebar changes unavailable while offline.
-            </p>
-          )}
-          {groups.length === 0 && (
-            <p className="ub-muted ub-empty">
-              Nothing pinned yet. Pin the open document from its Document actions
-              menu.
-            </p>
-          )}
-          {groups.map((group, index) => (
-              <GroupSection
-                key={group.id}
-                index={index}
-                group={group}
-                ydoc={ydoc}
-                labels={labels}
-                selected={selected}
-                onSelect={onSelect}
-                canWrite={canWriteSidebar}
-                editing={renaming?.id === group.id}
-                onEdit={() => setRenaming({ id: group.id, fresh: false })}
-                onCancel={cancelRename}
-                onCommit={(name) => commitRename(group.id, name)}
-              />
-          ))}
-          <button
-            type="button"
-            className="ub-group-add"
-            onClick={addGroup}
-            disabled={ydoc === null}
-            title={
-              ydoc === null
-                ? "Group changes unavailable while the sidebar is offline"
-                : undefined
-            }
-          >
-            + group
-          </button>
-          <div className="ub-list-foot">
+          </SidebarScrollContent>
+          <SidebarFooter className="border-t border-sidebar-border">
             {workspace !== null && (
               <button
                 type="button"
@@ -391,9 +381,10 @@ function SidebarContent({
             {!settingsOpen && !collapsed && (
               <UserMenu identity={identity} agentSessions={agentSessions} />
             )}
-          </div>
+          </SidebarFooter>
         </nav>
         <SettingsNavigation
+          drawer={drawer}
           workspaceLabel={workspace === null ? "workspace" : workspaceLabel(workspace, workspaceNames ?? new Map(), workspaces)}
           identity={identity}
           agentSessions={agentSessions}
@@ -410,6 +401,7 @@ function SidebarContent({
 
 /** The navigation pane that replaces the document sidebar in settings mode. */
 function SettingsNavigation({
+  drawer,
   workspaceLabel: label,
   identity,
   agentSessions,
@@ -418,6 +410,7 @@ function SettingsNavigation({
   onSelect,
   onBack,
 }: {
+  drawer: boolean;
   workspaceLabel: string;
   identity: AwarenessUser;
   agentSessions: number;
@@ -433,47 +426,51 @@ function SettingsNavigation({
       aria-hidden={!active}
       inert={!active}
     >
-      <button
-        type="button"
-        className="ub-settings-back mb-2 flex min-h-8.5 pointer-coarse:min-h-11 w-full items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left text-sm font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
-        data-swap-focus
-        onClick={onBack}
-      >
-        <span className="grid size-7 shrink-0 place-items-center rounded-(--radius-sm) bg-(--brand-subtle) text-(--brand) [&_svg]:size-4" aria-hidden="true">
-          <BackIcon />
-        </span>
-        <span className="min-w-0 truncate">
-          Back to {label}
-        </span>
-      </button>
-      <section className="ub-nav ub-settings-nav">
-        <p className="ub-nav-label">Workspace settings</p>
-        <ul>
-          <li>
-            <button
-              type="button"
-              aria-current={page === "general" ? "page" : undefined}
-              onClick={() => onSelect("general")}
-            >
-              <GearIcon />
-              General
-            </button>
-          </li>
-          <li>
-            <button
-              type="button"
-              aria-current={page === "tags" ? "page" : undefined}
-              onClick={() => onSelect("tags")}
-            >
-              <TagIcon />
-              Tags
-            </button>
-          </li>
-        </ul>
-      </section>
-      <div className="ub-list-foot">
+      <SidebarHeader className={drawer ? undefined : "pr-6"}>
+        <button
+          type="button"
+          className="ub-settings-back flex min-h-8.5 pointer-coarse:min-h-11 w-full items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left text-sm font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
+          data-swap-focus
+          onClick={onBack}
+        >
+          <span className="grid size-7 shrink-0 place-items-center rounded-(--radius-sm) bg-(--brand-subtle) text-(--brand) [&_svg]:size-4" aria-hidden="true">
+            <BackIcon />
+          </span>
+          <span className="min-w-0 truncate">
+            Back to {label}
+          </span>
+        </button>
+      </SidebarHeader>
+      <SidebarScrollContent className="px-2 pb-2 [&>*]:shrink-0">
+        <section className="ub-nav ub-settings-nav">
+          <p className="ub-nav-label">Workspace settings</p>
+          <ul>
+            <li>
+              <button
+                type="button"
+                aria-current={page === "general" ? "page" : undefined}
+                onClick={() => onSelect("general")}
+              >
+                <GearIcon />
+                General
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                aria-current={page === "tags" ? "page" : undefined}
+                onClick={() => onSelect("tags")}
+              >
+                <TagIcon />
+                Tags
+              </button>
+            </li>
+          </ul>
+        </section>
+      </SidebarScrollContent>
+      <SidebarFooter className="border-t border-sidebar-border">
         {active && <UserMenu identity={identity} agentSessions={agentSessions} />}
-      </div>
+      </SidebarFooter>
     </nav>
   );
 }
@@ -535,9 +532,16 @@ function Soon({
 }): ReactElement {
   return (
     <li>
-      <button type="button" aria-disabled="true" title="Coming soon">
+      <button
+        type="button"
+        className="ub-nav-soon flex min-h-8.5 w-full cursor-default items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] text-sm text-(--sidebar-muted-foreground)"
+        aria-disabled="true"
+      >
         {icon}
-        {children}
+        <span>
+          {children}{" "}
+          <span className="block text-[11px]">Coming soon</span>
+        </span>
       </button>
     </li>
   );
@@ -565,7 +569,7 @@ function GridIcon(): ReactElement {
 
 function DashboardIcon(): ReactElement {
   return (
-    <svg className="ub-nav-icon" viewBox="0 0 16 16" aria-hidden="true">
+    <svg className="block size-4 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
       <path
         d="M2.5 13.5h11 M5 13.5V8 M8 13.5V3.5 M11 13.5V10"
         fill="none"
@@ -579,7 +583,7 @@ function DashboardIcon(): ReactElement {
 
 function ChecklistIcon(): ReactElement {
   return (
-    <svg className="ub-nav-icon" viewBox="0 0 16 16" aria-hidden="true">
+    <svg className="block size-4 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
       <path
         d="M2.5 4.8 L4 6.3 L6.5 3.3 M8.5 5h5 M2.5 10.8 L4 12.3 L6.5 9.3 M8.5 11h5"
         fill="none"

@@ -51,6 +51,7 @@ async function startHubProcess(databasePath: string): Promise<HubProcess> {
       HUB_AUTH_TOKEN: TEST_SECRET,
       HUB_DB_PATH: databasePath,
       HUB_HOST: "127.0.0.1",
+      HUB_GITHUB_CLIENT_ID: "",
       PORT: "0",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -112,6 +113,20 @@ it("stores a debounced edit on SIGTERM and serves it after a restart", async () 
 
   const first = await startHubProcess(databasePath);
   running.push(first);
+
+  // The standalone process configures sign-in by default. Collecting an
+  // unknown request proves the wiring without starting a GitHub device flow.
+  const collect = await fetch(`http://127.0.0.1:${first.port}/auth/github/collect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      requestId: "00000000-0000-4000-8000-000000000001",
+      collectionSecret: "x".repeat(43),
+    }),
+    signal: AbortSignal.timeout(3000),
+  });
+  expect(collect.status).toBe(404);
+  expect(await collect.json()).toEqual({ status: "unknown-request" });
 
   const writer = createClient({
     port: first.port,

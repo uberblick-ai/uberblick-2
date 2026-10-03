@@ -14,7 +14,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
+import { act, useCallback, useState } from "react";
 import type { ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
@@ -22,6 +22,7 @@ import * as Y from "yjs";
 import { Awareness, removeAwarenessStates } from "y-protocols/awareness";
 import { appendBlock, getBlocksFragment, initDoc, insertBlock } from "@uberblick/schema";
 import { SyncPanel } from "../src/ui/SyncPanel.js";
+import { StatusLine } from "../src/ui/EditorPane.js";
 import { usePresence } from "../src/ui/hooks.js";
 import type { HubEndpoint } from "../src/config.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
@@ -133,11 +134,13 @@ function Panel({
   fix,
   endpoint = ENDPOINT,
   hubAcked,
+  lastUpdated,
   onClose = () => {},
 }: {
   fix: Fixture;
   endpoint?: HubEndpoint | null;
   hubAcked?: boolean | null | undefined;
+  lastUpdated?: number | undefined;
   onClose?: () => void;
 }): ReactElement {
   const presence = usePresence(fix.connection);
@@ -147,6 +150,7 @@ function Panel({
       presence={presence}
       endpoint={endpoint}
       hubAcked={hubAcked}
+      lastUpdated={lastUpdated}
       onClose={onClose}
     />
   );
@@ -156,6 +160,7 @@ function mount(
   fix: Fixture,
   endpoint: HubEndpoint | null = ENDPOINT,
   hubAcked?: boolean | null | undefined,
+  lastUpdated?: number | undefined,
 ): { host: HTMLElement; root: Root } {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
@@ -164,7 +169,12 @@ function mount(
   const root = createRoot(host);
   act(() =>
     root.render(
-      <Panel fix={fix} endpoint={endpoint} hubAcked={hubAcked} />,
+      <Panel
+        fix={fix}
+        endpoint={endpoint}
+        hubAcked={hubAcked}
+        lastUpdated={lastUpdated}
+      />,
     ),
   );
   // Past every settle window, so the state word is what a reader sees rather
@@ -199,9 +209,136 @@ function presentNow(host: HTMLElement): string[] {
   );
 }
 
+/** The room-paired stamp output the shell connects to the details panel. */
+function TimestampSurfaces({
+  connection,
+  stamp,
+  open,
+}: {
+  connection: RoomConnection;
+  stamp: number | undefined;
+  open: boolean;
+}): ReactElement {
+  const [shown, setShown] = useState<{
+    room: string;
+    value: number | undefined;
+  } | null>(null);
+  const report = useCallback((room: string, value: number | undefined) => {
+    setShown({ room, value });
+  }, []);
+  return (
+    <>
+      <StatusLine
+        connection={connection}
+        presence={[]}
+        lastUpdated={stamp}
+        onLastUpdatedChange={report}
+      />
+      {open && (
+        <SyncPanel
+          connection={connection}
+          presence={[]}
+          endpoint={ENDPOINT}
+          lastUpdated={shown?.room === connection.room ? shown.value : undefined}
+          onClose={() => {}}
+        />
+      )}
+    </>
+  );
+}
+
 describe("the sync panel renders the state this client holds", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("gives the status line's edit stamp an exact local time at every age", () => {
+    vi.useFakeTimers();
+    const exact = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+    for (const stamp of [
+      Date.now() - 20 * 60_000,
+      Date.now() - 90 * 24 * 60 * 60_000,
+    ]) {
+      const { host, root } = mount(fixture(), ENDPOINT, undefined, stamp);
+      try {
+        expect(facts(host)["Last updated"]).toBe(exact.format(stamp));
+        expect(
+          host.querySelector(".ub-sync-facts time")?.getAttribute("datetime"),
+        ).toBe(new Date(stamp).toISOString());
+      } finally {
+        act(() => root.unmount());
+        host.remove();
+      }
+    }
+  });
+
+  it("has no Last updated row without a usable displayed stamp", () => {
+    vi.useFakeTimers();
+    for (const stamp of [undefined, Number.NaN, Infinity, Number.MAX_VALUE]) {
+      const { host, root } = mount(fixture(), ENDPOINT, undefined, stamp);
+      try {
+        expect(facts(host)["Last updated"]).toBeUndefined();
+      } finally {
+        act(() => root.unmount());
+        host.remove();
+      }
+    }
+  });
+
+  it("mirrors the shown age immediately on panel open and clears it on room change", () => {
+    vi.useFakeTimers();
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+    const first = fixture();
+    const second = fixture();
+    second.connection = {
+      ...second.connection,
+      room: `${WORKSPACE}/another-document`,
+    };
+    const stamp = Date.now() - 20 * 60_000;
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const render = (
+      connection: RoomConnection,
+      open: boolean,
+      value: number | undefined = stamp,
+    ): void => {
+      act(() => root.render(
+        <TimestampSurfaces connection={connection} stamp={value} open={open} />,
+      ));
+    };
+    try {
+      render(first.connection, true);
+      expect(host.querySelector(".ub-last-updated")).toBeNull();
+      expect(facts(host)["Last updated"]).toBeUndefined();
+      act(() => void vi.advanceTimersByTime(300));
+      expect(facts(host)["Last updated"]).toBe(
+        host.querySelector(".ub-last-updated time")?.getAttribute("title"),
+      );
+      render(first.connection, false);
+      render(first.connection, true);
+      // The panel's own sync word has a fresh settle window, but the age
+      // already visible in the status line remains available immediately.
+      expect(facts(host).State).toBe("—");
+      expect(facts(host)["Last updated"]).toBe(
+        host.querySelector(".ub-last-updated time")?.getAttribute("title"),
+      );
+      render(second.connection, true);
+      expect(host.querySelector(".ub-last-updated")).toBeNull();
+      expect(facts(host)["Last updated"]).toBeUndefined();
+      act(() => void vi.advanceTimersByTime(300));
+      expect(facts(host)["Last updated"]).toBeDefined();
+      render(second.connection, true, Number.NaN);
+      expect(host.querySelector(".ub-last-updated")).toBeNull();
+      expect(facts(host)["Last updated"]).toBeUndefined();
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
   });
 
   it("makes no room-status claim while the requested connection is absent", () => {
@@ -412,11 +549,15 @@ describe("the sync panel renders the state this client holds", () => {
   it("lists both sessions, with the caret's block only where there is one", () => {
     vi.useFakeTimers();
     const fix = fixture();
-    publish(fix, AGENT_CLIENT, { name: "Claude · demo agent", color: "#7b5ec7" }, 1);
+    const agent =
+      "Claude · documentation agent reviewing the complete production corpus";
+    const person =
+      "Alexandria Montgomery · Engineering collaboration session on the production workspace";
+    publish(fix, AGENT_CLIENT, { name: agent, color: "#7b5ec7" }, 1);
     publish(
       fix,
       HUMAN_CLIENT,
-      { name: "loitering otter", color: "#0c853d" },
+      { name: person, color: "#0c853d" },
       null,
       WEB_MARKER,
     );
@@ -424,10 +565,10 @@ describe("the sync panel renders the state this client holds", () => {
     try {
       // Sorted by client id, so the list does not reorder itself under a reader.
       expect(presentNow(host)).toEqual([
-        "Claude · demo agent block 2",
+        `${agent} block 2`,
         // No cursor published: the row is still drawn, and says nothing about
         // where — a block number nobody could point at would be an invention.
-        "loitering otter",
+        person,
       ]);
       // Avatar plus name, each in its own presence colour — the one its cursor
       // carries in the prose (#494).
@@ -436,7 +577,7 @@ describe("the sync panel renders the state this client holds", () => {
         avatars.map((avatar) => [avatar.textContent, avatar.style.borderColor]),
       ).toEqual([
         ["C🤖", "rgb(123, 94, 199)"],
-        ["L", "rgb(12, 133, 61)"],
+        ["A", "rgb(12, 133, 61)"],
       ]);
       // Announced once: the visible name is the row's accessible name, and the
       // avatar in front of it is decoration. A labelled avatar here would make

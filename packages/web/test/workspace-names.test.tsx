@@ -54,7 +54,7 @@ function Probe({ current, connection, menuOpen = false, onSwitch = () => {} }: {
   onSwitch?: (segment: string) => void;
 }) {
   const names = useWorkspaceNames([ONE, TWO], current.uuid, connection, IDENTITY, menuOpen);
-  return <WorkspaceSwitcher workspaces={[ONE, TWO]} current={current} names={names} docs={0} onSwitch={onSwitch} onOpenSettings={() => {}} />;
+  return <WorkspaceSwitcher workspaces={[ONE, TWO]} current={current} names={names} onSwitch={onSwitch} />;
 }
 function render(element: React.ReactElement): HTMLElement {
   if (mounted === null) {
@@ -104,8 +104,14 @@ it("uses distinct neutral labels while names are absent or unreadable, including
   held.rooms.set(two.room, two);
   const host = render(<Probe current={ONE} connection={one} menuOpen />);
   expect(host.querySelector(".ub-workspace-name")?.textContent).toBe("Unnamed workspace · 6f4c8a51");
+  expect(host.textContent).not.toContain(ONE.uuid);
+  expect(host.textContent).not.toContain(ONE.segment);
   open(host);
   expect(entries().map((entry) => entry.querySelector(".ub-menu-text")?.textContent)).toEqual(["Unnamed workspace · 6f4c8a51", "Unnamed workspace · b2d9e4c7"]);
+  for (const workspace of [ONE, TWO]) {
+    expect(entries().map((entry) => entry.textContent).join(" ")).not.toContain(workspace.uuid);
+    expect(entries().map((entry) => entry.textContent).join(" ")).not.toContain(workspace.segment);
+  }
   one.ydoc.destroy();
 });
 

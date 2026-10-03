@@ -136,6 +136,7 @@ export function RoutePane({
   catalogConnection = null,
   archived,
   updatedAt,
+  onLastUpdatedChange,
   docLinks,
   pinned = false,
   onTogglePin = null,
@@ -191,6 +192,9 @@ export function RoutePane({
   archived: boolean;
   /** The selected directory stub's edit-freshness hint, when it has one. */
   updatedAt?: number | undefined;
+  onLastUpdatedChange?:
+    | ((room: string, value: number | undefined) => void)
+    | undefined;
   /** What an inline document reference resolves against — see {@link EditorPane}. */
   docLinks: DocLinkContext | null;
   /** Sidebar curation and lifecycle actions for the live document. */
@@ -279,6 +283,7 @@ export function RoutePane({
               presence={presence}
               endpoint={endpoint}
               hubAcked={hubAcked}
+              onLastUpdatedChange={onLastUpdatedChange}
               syncOpen={syncOpen}
               onToggleSync={onToggleSync}
             />
@@ -307,6 +312,7 @@ export function RoutePane({
       catalogConnection={catalogConnection}
       archived={archived}
       updatedAt={updatedAt}
+      onLastUpdatedChange={onLastUpdatedChange}
       docLinks={docLinks}
       pinned={pinned}
       onTogglePin={onTogglePin}
@@ -570,6 +576,23 @@ export function App(): ReactElement {
    * no open document has no global replacement control, so it has no room here.
    */
   const chromeRoom = selected === null ? null : doc;
+  // Read the timestamp segment the status line actually displays, preserving
+  // its existing initial settle window and clearing stale reports by room.
+  const [shownLastUpdated, setShownLastUpdated] = useState<{
+    room: string;
+    value: number;
+  } | null>(null);
+  const onLastUpdatedChange = useCallback(
+    (room: string, value: number | undefined) => {
+      setShownLastUpdated((previous) => {
+        if (value === undefined) return previous?.room === room ? null : previous;
+        return previous?.room === room && previous.value === value
+          ? previous
+          : { room, value };
+      });
+    },
+    [],
+  );
   const hubAcked = useServingRoomStatus(
     documentSearch,
     chromeRoom?.room ?? null,
@@ -953,7 +976,6 @@ export function App(): ReactElement {
           connection={directory}
           sidebar={sidebar}
           groups={sidebarGroups}
-          entries={entries}
           workspaces={workspaces}
           workspace={workspace}
           workspaceNames={workspaceNames}
@@ -1021,6 +1043,7 @@ export function App(): ReactElement {
             catalogConnection={catalog}
             archived={archived}
             updatedAt={selectedDirectoryEntry?.updatedAt}
+            onLastUpdatedChange={onLastUpdatedChange}
             docLinks={docLinks}
             pinned={pinned}
             onTogglePin={
@@ -1086,6 +1109,12 @@ export function App(): ReactElement {
             presence={presence}
             endpoint={statusEndpoint}
             hubAcked={serving === null ? undefined : hubAcked}
+            lastUpdated={
+              shownLastUpdated !== null &&
+              shownLastUpdated.room === chromeRoom?.room
+                ? shownLastUpdated.value
+                : undefined
+            }
             onClose={closeSync}
           />
         )}

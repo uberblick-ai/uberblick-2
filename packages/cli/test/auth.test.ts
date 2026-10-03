@@ -220,7 +220,7 @@ describe("ub auth local selection and command surface", () => {
       expect(help.stderr).toBe("");
       if (args[1] === "login") {
         expect(help.stdout).toContain("GitHub's approval page shows the app's name, not the hub.");
-        expect(help.stdout).toMatch(/Approve only a\nlogin you started for the displayed hub/);
+        expect(help.stdout.replace(/\s+/g, " ")).toContain("Approve only a login you started for the displayed hub");
       }
     }
     for (const args of [["auth", "unknown"], ["auth", "login", "--json"], ["auth", "logout", "a", "b"]]) {

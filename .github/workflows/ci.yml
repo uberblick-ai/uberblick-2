@@ -87,7 +87,7 @@ jobs:
           while IFS= read -r -d '' path; do
             found_path=true
             case "$path" in
-              .agents/*|AGENTS.md|CLAUDE.md|.claude/*|.codex/*|.github/ISSUE_SPEC.md|.github/ISSUE_TEMPLATE/*|ub-agent.yaml|docs/*)
+              .agents/*|AGENTS.md|CLAUDE.md|.claude/*|.codex/*|.github/ISSUE_SPEC.md|.github/ISSUE_TEMPLATE/*|ub-agents.yaml|docs/*)
                 ;;
               *.md|*.markdown)
                 # Only root Markdown is documentation by path alone.

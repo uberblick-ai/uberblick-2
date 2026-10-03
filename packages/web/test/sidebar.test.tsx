@@ -239,10 +239,10 @@ function press(element: Element | null, key: string): void {
 }
 
 /** The landmarks the sidebar column is made of, in the order they are drawn. */
-const LANDMARKS = ["ub-list-head", "ub-nav", "ub-empty", "ub-group", "ub-list-foot"];
+const LANDMARKS = ["ub-list-head", "ub-nav", "ub-empty", "ub-group"];
 
 function columnOrder(host: HTMLElement): string[] {
-  const list = host.querySelector(".ub-document-sidebar");
+  const list = host.querySelector('.ub-document-sidebar [data-slot="sidebar-content"]');
   return [...(list?.children ?? [])].flatMap((child) =>
     LANDMARKS.filter((mark) => child.classList.contains(mark)),
   );
@@ -717,16 +717,15 @@ describe("the sidebar's fixed navigation", () => {
       "ub-list-head",
       "ub-nav",
       "ub-empty",
-      "ub-list-foot",
     ]);
     expect(navRows(host).map((row) => row.textContent)).toEqual([
       "All docs",
-      "Dashboard",
-      "Product requirements",
+      "Dashboard Coming soon",
+      "Product requirements Coming soon",
     ]);
 
     // A pin arrives and the groups appear under it; the section has not moved,
-    // and the footer it left holds the user card alone.
+    // and the footer keeps the settings entry and user card.
     act(() => {
       const sidebar = sidebarDoc();
       pinDoc(sidebar, createGroup(sidebar, "Reading"), ONE);
@@ -735,10 +734,10 @@ describe("the sidebar's fixed navigation", () => {
       "ub-list-head",
       "ub-nav",
       "ub-group",
-      "ub-list-foot",
     ]);
-    expect(host.querySelector(".ub-list-foot .ub-all-open-entry")).toBeNull();
-    expect(host.querySelector(".ub-list-foot .ub-user-card")).not.toBeNull();
+    expect(host.querySelector('[data-slot="sidebar-footer"] .ub-all-open-entry')).toBeNull();
+    expect(host.querySelector('[data-slot="sidebar-footer"] .ub-settings-entry')).not.toBeNull();
+    expect(host.querySelector('[data-slot="sidebar-footer"] .ub-user-card')).not.toBeNull();
 
     // Chrome, not curation: nothing in it can be dragged, and no drag of any
     // kind can land in it.
@@ -758,9 +757,9 @@ describe("the sidebar's fixed navigation", () => {
       "true",
       "true",
     ]);
-    expect(soon.map((row) => row.getAttribute("title"))).toEqual([
-      "Coming soon",
-      "Coming soon",
+    expect(soon.map((row) => row.textContent)).toEqual([
+      "Dashboard Coming soon",
+      "Product requirements Coming soon",
     ]);
 
     for (const row of soon) {

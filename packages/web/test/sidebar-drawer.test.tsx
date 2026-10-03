@@ -190,7 +190,7 @@ async function openDrawer(settings = false): Promise<void> {
 }
 
 async function openWorkspaceMenu(): Promise<void> {
-  const button = sidebarButton('[aria-label="Workspace"]');
+  const button = sidebarButton(".ub-workspace");
   await act(async () => {
     button.focus();
     button.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -245,7 +245,6 @@ const destinations = [
   { choice: "All docs", selector: ".ub-all-open-entry", path: `/${WORKSPACE}/all` },
   { choice: "+ new doc", selector: ".ub-list-head button", path: null },
   { choice: "Workspace settings", selector: ".ub-settings-entry", path: `/${WORKSPACE}/settings` },
-  { choice: "Workspace settings from the menu", menu: "Workspace settings", path: `/${WORKSPACE}/settings` },
   { choice: "another workspace", menu: `Unnamed workspace · ${OTHER_WORKSPACE.slice(0, 8)}`, path: `/${OTHER_WORKSPACE}` },
   { choice: "General", settings: true, selector: '.ub-settings-nav button[aria-current="page"]', path: `/${WORKSPACE}/settings` },
   { choice: "Tags", settings: true, selector: ".ub-settings-nav li:last-child button", path: `/${WORKSPACE}/settings/tags` },

@@ -104,7 +104,7 @@ interface TestRig {
 
 async function rig(options: { databasePath?: string; configured?: boolean; onGrant?: () => void } = {}): Promise<TestRig> {
   const directory = options.databasePath === undefined
-    ? mkdtempSync(join(tmpdir(), `ub-${process.env.UB_AGENT_RUN ?? "admin-setup"}-`)) : undefined;
+    ? mkdtempSync(join(tmpdir(), `ub-${process.env.UB_AGENTS_RUN ?? "admin-setup"}-`)) : undefined;
   if (directory !== undefined) directories.push(directory);
   const database = new HubDatabase(options.databasePath ?? join(directory!, "hub.sqlite"), () => {});
   database.open();
@@ -188,7 +188,7 @@ afterEach(async () => {
 
 describe("host-only first-admin setup", () => {
   it.each(["insecure-directory", "symlink-directory", "occupied-path"])("refuses %s rather than exposing or replacing control", async (obstruction) => {
-    const directory = mkdtempSync(join(tmpdir(), `ub-${process.env.UB_AGENT_RUN ?? "admin-setup"}-`));
+    const directory = mkdtempSync(join(tmpdir(), `ub-${process.env.UB_AGENTS_RUN ?? "admin-setup"}-`));
     directories.push(directory);
     const databasePath = join(directory, "hub.sqlite");
     const privateDirectory = `${databasePath}.admin`;
@@ -215,7 +215,7 @@ describe("host-only first-admin setup", () => {
   });
 
   it("replaces a socket left by a killed process and serves setup", async () => {
-    const directory = mkdtempSync(join(tmpdir(), `ub-${process.env.UB_AGENT_RUN ?? "admin-setup"}-`));
+    const directory = mkdtempSync(join(tmpdir(), `ub-${process.env.UB_AGENTS_RUN ?? "admin-setup"}-`));
     directories.push(directory);
     const databasePath = join(directory, "hub.sqlite");
     mkdirSync(`${databasePath}.admin`, { mode: 0o700 });

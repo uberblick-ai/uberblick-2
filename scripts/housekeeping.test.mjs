@@ -25,7 +25,7 @@ function fixture(t) {
 	// there, which is why every worktree case failed on Darwin.
 	const base = realpathSync(
 		mkdtempSync(
-			join(tmpdir(), `housekeeping-${process.env.UB_AGENT_RUN ?? "local"}-`),
+			join(tmpdir(), `housekeeping-${process.env.UB_AGENTS_RUN ?? "local"}-`),
 		),
 	);
 	t.after(() => rmSync(base, { recursive: true, force: true }));

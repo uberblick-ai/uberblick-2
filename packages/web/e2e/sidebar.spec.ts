@@ -233,7 +233,7 @@ test("collapse isolates contents and portals immediately, and rapid reversal kee
   const sidebar = page.locator(".ub-list");
   const restore = page.getByRole("button", { name: "Show document list" });
   // A portalled menu must also retire when its owning sidebar closes.
-  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await page.getByRole("button", { name: /^Unnamed workspace · / }).click();
   await expect(page.locator(".ub-workspace-menu")).toBeVisible();
   await page.evaluate(async () => {
     document.querySelector<HTMLButtonElement>(".ub-sidebar-hide")?.click();
@@ -336,7 +336,7 @@ test("the drawer's menus, group editing and pointer, keyboard and touch sorting 
   await openDrawer(page);
   const drawer = page.getByRole("dialog", { name: "Sidebar", exact: true });
 
-  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await page.getByRole("button", { name: /^Unnamed workspace · / }).click();
   await expect(page.locator(".ub-workspace-menu")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(drawer).toBeVisible();

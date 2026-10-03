@@ -15,7 +15,7 @@ let fixtureUrl = "";
 const contexts: BrowserContext[] = [];
 
 test.beforeAll(async () => {
-  scratch = mkdtempSync(join(tmpdir(), `uberblick-controls-${process.env.UB_AGENT_RUN ?? "local"}-`));
+  scratch = mkdtempSync(join(tmpdir(), `uberblick-controls-${process.env.UB_AGENTS_RUN ?? "local"}-`));
   const configFile = join(packageRoot, "vite.config.ts");
   await build({
     configFile,

@@ -2,17 +2,16 @@
  * The sidebar's two anchored menus (#74): what they say, and what choosing
  * something in them actually changes.
  *
- * Both are driven from stubbed state — a doc count, an identity, a session
+ * Both are driven from stubbed state — workspace names, an identity, a session
  * count — because that is what the components are: a rendering of state the
  * shell already holds. What is worth pinning here is everything a reader could
  * be lied to about.
  *
- * - The switcher renders *configuration*, not accounts: the workspace it is in
- *   with a count that follows the directory, the settings destination enabled,
- *   and machine-owned workspace creation present but disabled.
- * - Each end draws an identity tile (#482) carrying a first character, and the
- *   header's hover carries the whole segment the name truncates. Where the
- *   address names no workspace, neither the letter nor the count is invented.
+ * - The switcher names the current workspace accessibly, marks the current
+ *   menu row and keeps machine-owned workspace creation disabled. Settings
+ *   remain outside its menu, and neither surface shows a document count.
+ * - The workspace marker is decorative; the user card retains its identity
+ *   tile. An address with no workspace keeps the neutral reading and no marker.
  * - A presence colour, once chosen, is what the client publishes — and is still
  *   what it publishes after a reload. Whether peers *see* it is a claim about
  *   awareness, and lives in `presence-color.test.ts`.
@@ -132,53 +131,54 @@ describe("the workspace switcher renders configuration", () => {
   }
 
   function switcher(
-    docs: number,
     current: Workspace | null = WORKSPACE,
-    onOpenSettings: () => void = () => {},
     active = true,
+    onOpenChange?: (open: boolean) => void,
   ): ReactElement {
     return (
       <WorkspaceSwitcher
         workspaces={[WORKSPACE]}
         current={current}
         names={new Map([[WORKSPACE.uuid, "Uberblick"]])}
-        docs={docs}
         onSwitch={() => {}}
-        onOpenSettings={onOpenSettings}
         active={active}
+        onOpenChange={onOpenChange}
       />
     );
   }
 
-  it("shows the workspace with a doc count that follows the directory", () => {
-    const view = mount(switcher(2));
+  it("names the workspace accessibly without a document-count subtitle", () => {
+    const view = mount(switcher());
     const trigger = view.host.querySelector(".ub-workspace");
     expect(trigger?.textContent).toContain("Uberblick");
-    expect(trigger?.textContent).toContain("2 docs");
-
-    // The count is the directory's, live — a document created elsewhere moves it
-    // without anybody reopening the menu.
-    view.render(switcher(3));
-    expect(view.host.querySelector(".ub-workspace")?.textContent).toContain("3 docs");
-    // English, not a bare number: one document is "1 doc".
-    view.render(switcher(1));
-    expect(view.host.querySelector(".ub-workspace")?.textContent).toContain("1 doc");
+    // The native button gets its accessible name from the visible name. No
+    // overriding label may replace that name with the old generic "Workspace".
+    expect(trigger?.tagName).toBe("BUTTON");
+    expect(trigger?.hasAttribute("aria-label")).toBe(false);
+    expect(trigger?.hasAttribute("aria-labelledby")).toBe(false);
+    expect(trigger?.querySelector(".ub-workspace-count")).toBeNull();
+    expect(trigger?.textContent).not.toMatch(/\d+ docs?/);
 
     open(view);
     const current = panel("[data-slot=dropdown-menu-item][aria-current=true]")[0];
-    expect(current?.textContent).toBe("Uberblick1 doc");
+    expect(current?.querySelector(".ub-menu-text")?.textContent).toBe("Uberblick");
+    expect(current?.querySelector(".ub-workspace-current")?.textContent).toBe("✓");
+    expect(current?.querySelector(".ub-workspace-current")?.getAttribute("aria-hidden"))
+      .toBe("true");
+    expect(panel("[data-slot=dropdown-menu-content]")[0]?.textContent).not.toMatch(/\d+ docs?/);
     view.unmount();
   });
 
-  it("names the workspace with a tile, a hover title, and nothing invented when there is none", () => {
-    // Bare and decorated routes have the same shared name and initial.
+  it("uses a decorative marker for bare and decorated routes, and none without a workspace", () => {
+    // Bare and decorated routes have the same shared name.
     const bare: Workspace = { uuid: WORKSPACE.uuid, segment: WORKSPACE.uuid };
     for (const workspace of [WORKSPACE, bare]) {
-      const view = mount(switcher(2, workspace));
+      const view = mount(switcher(workspace));
       const trigger = view.host.querySelector(".ub-workspace");
-      expect(trigger?.querySelector(".ub-workspace-tile")?.textContent).toBe(
-        "U",
-      );
+      const marker = trigger?.querySelector(".ub-workspace-marker");
+      expect(marker?.getAttribute("aria-hidden")).toBe("true");
+      expect(marker?.textContent).toBe("");
+      expect(trigger?.querySelector(".ub-workspace-tile")).toBeNull();
       // The name truncates, so its whole value is available on the title.
       expect(trigger?.querySelector(".ub-workspace-name")?.getAttribute("title")).toBe(
         "Uberblick",
@@ -186,40 +186,39 @@ describe("the workspace switcher renders configuration", () => {
       view.unmount();
     }
 
-    // No workspace, nothing invented: a letter and a count for a workspace that
-    // is not there would both be made up.
-    const none = mount(switcher(2, null));
+    const none = mount(switcher(null));
     const trigger = none.host.querySelector(".ub-workspace");
-    expect(trigger?.querySelector(".ub-workspace-tile")).toBe(null);
+    expect(trigger?.querySelector(".ub-workspace-marker")).toBe(null);
     expect(trigger?.querySelector(".ub-workspace-count")).toBe(null);
     expect(trigger?.querySelector(".ub-workspace-name")?.textContent).toBe("no workspace");
     expect(trigger?.querySelector(".ub-workspace-name")?.hasAttribute("title")).toBe(false);
     expect(trigger?.querySelector(".ub-workspace-caret")).not.toBe(null);
+    expect(trigger?.querySelector(".ub-workspace-caret")?.getAttribute("aria-hidden"))
+      .toBe("true");
     open(none);
-    const settings = panel("[data-slot=dropdown-menu-item]").find(
-      (item) => item.textContent === "Workspace settings",
-    );
-    expect(settings?.hasAttribute("data-disabled")).toBe(true);
+    expect(panel("[data-slot=dropdown-menu-item][aria-current=true]")).toHaveLength(0);
     none.unmount();
   });
 
   it("closes its portalled menu when the document pane becomes inactive", () => {
-    const view = mount(switcher(0));
+    const onOpenChange = vi.fn();
+    const view = mount(switcher(WORKSPACE, true, onOpenChange));
     open(view);
     expect(panel("[data-slot=dropdown-menu-content]")).toHaveLength(1);
+    expect(onOpenChange).toHaveBeenLastCalledWith(true);
 
-    view.render(switcher(0, WORKSPACE, () => {}, false));
+    view.render(switcher(WORKSPACE, false, onOpenChange));
     expect(panel("[data-slot=dropdown-menu-content]")).toHaveLength(0);
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
 
     // Returning to the document pane must not revive the old open state.
-    view.render(switcher(0));
+    view.render(switcher(WORKSPACE, true, onOpenChange));
     expect(panel("[data-slot=dropdown-menu-content]")).toHaveLength(0);
     view.unmount();
   });
 
-  it("keeps machine-owned creation disabled and opens workspace settings", () => {
-    const onOpenSettings = vi.fn();
-    const view = mount(switcher(0, WORKSPACE, onOpenSettings));
+  it("keeps machine-owned creation disabled and offers no settings action", () => {
+    const view = mount(switcher());
     open(view);
     const disabled = panel("[data-slot=dropdown-menu-item][data-disabled]").map(
       (item) => item.textContent,
@@ -228,9 +227,7 @@ describe("the workspace switcher renders configuration", () => {
     const settings = panel("[data-slot=dropdown-menu-item]").find(
       (item) => item.textContent === "Workspace settings",
     );
-    expect(settings?.hasAttribute("data-disabled")).toBe(false);
-    click(settings);
-    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(settings).toBeUndefined();
     view.unmount();
   });
 });
