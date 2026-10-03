@@ -42,6 +42,7 @@ import { Sidebar as SidebarFrame, SIDEBAR_TOGGLE_CLASSES, useSidebar } from "./s
 import { Input } from "./shadcn/input.js";
 import { UserMenu } from "./UserMenu.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
+import { workspaceLabel } from "./workspace-names.js";
 import type { SettingsPage, Workspace } from "./route.js";
 
 /** The group a pin lands in when the sidebar has none yet. */
@@ -106,6 +107,8 @@ type SidebarProps = {
   workspaces: readonly Workspace[];
   /** The workspace the address names, or null when it names none. */
   workspace: Workspace | null;
+  workspaceNames?: ReadonlyMap<string, string | null>;
+  onWorkspaceMenuOpenChange?: (open: boolean) => void;
   /** Go to a workspace. Switching is navigating; see `WorkspaceSwitcher`. */
   onSwitchWorkspace: (segment: string) => void;
   /** This tab's awareness identity — what the user card is about. */
@@ -176,6 +179,8 @@ function SidebarContent({
   entries,
   workspaces,
   workspace,
+  workspaceNames,
+  onWorkspaceMenuOpenChange,
   onSwitchWorkspace,
   identity,
   agentSessions,
@@ -295,6 +300,8 @@ function SidebarContent({
           <WorkspaceSwitcher
             workspaces={workspaces}
             current={workspace}
+            names={workspaceNames}
+            onOpenChange={onWorkspaceMenuOpenChange}
             docs={entries.length}
             onSwitch={onSwitchWorkspace}
             onOpenSettings={() => onOpenSettings("general")}
@@ -387,7 +394,7 @@ function SidebarContent({
           </div>
         </nav>
         <SettingsNavigation
-          workspace={workspace}
+          workspaceLabel={workspace === null ? "workspace" : workspaceLabel(workspace, workspaceNames ?? new Map(), workspaces)}
           identity={identity}
           agentSessions={agentSessions}
           active={settingsOpen && !collapsed}
@@ -403,7 +410,7 @@ function SidebarContent({
 
 /** The navigation pane that replaces the document sidebar in settings mode. */
 function SettingsNavigation({
-  workspace,
+  workspaceLabel: label,
   identity,
   agentSessions,
   active,
@@ -411,7 +418,7 @@ function SettingsNavigation({
   onSelect,
   onBack,
 }: {
-  workspace: Workspace | null;
+  workspaceLabel: string;
   identity: AwarenessUser;
   agentSessions: number;
   active: boolean;
@@ -428,15 +435,15 @@ function SettingsNavigation({
     >
       <button
         type="button"
-        className="ub-settings-back"
+        className="ub-settings-back mb-2 flex min-h-8.5 pointer-coarse:min-h-11 w-full items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left text-sm text-(--sidebar-row-foreground) cursor-pointer hover:bg-sidebar-accent hover:text-sidebar-foreground"
         data-swap-focus
         onClick={onBack}
       >
-        <span className="ub-settings-back-tile" aria-hidden="true">
+        <span className="grid size-7 shrink-0 place-items-center rounded-(--radius-sm) bg-(--brand-subtle) text-(--brand) [&_svg]:size-4" aria-hidden="true">
           <BackIcon />
         </span>
-        <span className="ub-settings-back-label">
-          Back to {workspace?.segment ?? "workspace"}
+        <span className="min-w-0 truncate">
+          Back to {label}
         </span>
       </button>
       <section className="ub-nav ub-settings-nav">

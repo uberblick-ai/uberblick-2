@@ -141,6 +141,7 @@ describe("the workspace switcher renders configuration", () => {
       <WorkspaceSwitcher
         workspaces={[WORKSPACE]}
         current={current}
+        names={new Map([[WORKSPACE.uuid, "Uberblick"]])}
         docs={docs}
         onSwitch={() => {}}
         onOpenSettings={onOpenSettings}
@@ -152,7 +153,7 @@ describe("the workspace switcher renders configuration", () => {
   it("shows the workspace with a doc count that follows the directory", () => {
     const view = mount(switcher(2));
     const trigger = view.host.querySelector(".ub-workspace");
-    expect(trigger?.textContent).toContain(WORKSPACE.segment);
+    expect(trigger?.textContent).toContain("Uberblick");
     expect(trigger?.textContent).toContain("2 docs");
 
     // The count is the directory's, live — a document created elsewhere moves it
@@ -165,23 +166,22 @@ describe("the workspace switcher renders configuration", () => {
 
     open(view);
     const current = panel("[data-slot=dropdown-menu-item][aria-current=true]")[0];
-    expect(current?.textContent).toBe(`${WORKSPACE.segment}1 doc`);
+    expect(current?.textContent).toBe("Uberblick1 doc");
     view.unmount();
   });
 
   it("names the workspace with a tile, a hover title, and nothing invented when there is none", () => {
-    // The tile is the segment's own first character, so a bare uuid gets its
-    // first hex digit rather than a placeholder mark (#482).
+    // Bare and decorated routes have the same shared name and initial.
     const bare: Workspace = { uuid: WORKSPACE.uuid, segment: WORKSPACE.uuid };
     for (const workspace of [WORKSPACE, bare]) {
       const view = mount(switcher(2, workspace));
       const trigger = view.host.querySelector(".ub-workspace");
       expect(trigger?.querySelector(".ub-workspace-tile")?.textContent).toBe(
-        workspace.segment[0]?.toUpperCase(),
+        "U",
       );
-      // The name truncates, so the whole segment has to be reachable somewhere.
+      // The name truncates, so its whole value is available on the title.
       expect(trigger?.querySelector(".ub-workspace-name")?.getAttribute("title")).toBe(
-        workspace.segment,
+        "Uberblick",
       );
       view.unmount();
     }
@@ -194,7 +194,7 @@ describe("the workspace switcher renders configuration", () => {
     expect(trigger?.querySelector(".ub-workspace-count")).toBe(null);
     expect(trigger?.querySelector(".ub-workspace-name")?.textContent).toBe("no workspace");
     expect(trigger?.querySelector(".ub-workspace-name")?.hasAttribute("title")).toBe(false);
-    expect(trigger?.querySelector(".ub-menu-caret")).not.toBe(null);
+    expect(trigger?.querySelector(".ub-workspace-caret")).not.toBe(null);
     open(none);
     const settings = panel("[data-slot=dropdown-menu-item]").find(
       (item) => item.textContent === "Workspace settings",

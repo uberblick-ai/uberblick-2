@@ -6,10 +6,11 @@
  * development signing secret for the local hub when nobody else supplies one.
  *
  * **The workspace.** A workspace id is a uuid, and this is where one comes
- * from: with none in force, `ub init` generates it and asks only for an
- * optional display slug, storing `<slug>-<uuid>` (or the bare uuid when the
- * answer is empty). With one in force it is offered as the default, so a second
- * run changes nothing. Two first-time runs at once settle on one workspace
+ * from: with none in force, `ub init` generates it and asks for an optional
+ * shared workspace name. An ASCII slug derived from the name decorates the
+ * UUID; the name itself lives in the synced settings room. With one in force
+ * it is offered as the default, so a second run changes nothing. Two first-time
+ * runs at once settle on one workspace
  * rather than two: a uuid a run generated is a proposal, and whichever run
  * publishes second adopts the one already on disk. Nothing guesses a workspace
  * anywhere else — the MCP server refuses to start without one.
@@ -57,8 +58,8 @@
  * workspace, one trusted user, multiple clients and machines; no login and no
  * tenant isolation.
  *
- * **No TTY required.** Every question has a flag, `--yes` takes every default,
- * and a non-interactive stdin behaves like `--yes` rather than blocking — which
+ * **No TTY required.** `--yes` takes every default, and a non-interactive stdin
+ * behaves like `--yes` rather than blocking — which
  * is what makes `mise run setup -- --yes` an unattended bootstrap.
  */
 
@@ -67,7 +68,8 @@ import { userInfo } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
-import { parseWorkspaceId } from "@uberblick/schema";
+import { storeWorkspaceName } from "@uberblick/mcp-server";
+import { parseWorkspaceId, validateWorkspaceName } from "@uberblick/schema";
 import { findCheckoutRoot } from "./checkout.js";
 import {
   claimSigningSecret,
@@ -188,6 +190,12 @@ stored, and the starter documents are there by the time this returns — nothing
 syncs in the background afterwards. Given none, nothing is dialled and the
 workspace is local to this machine.
 
+When creating a workspace interactively, the optional workspace name is shared
+with its replicas. It must be 1–64 characters after trimming, with no control
+or format characters. An empty answer, --yes, or non-interactive stdin leaves
+it unnamed. Rename it later in Workspace Settings → General. The UUID remains
+its identity, with a cosmetic ASCII slug derived from a name when possible.
+
 operands:
   [hub-url]          the hub to create this workspace on. A bare host or an
                      https:// address is read as the deployed wss://<host>/ws;
@@ -208,7 +216,8 @@ options:
   --color <#rrggbb>  awareness cursor colour, 6-digit hex (default: one of the
                      eight the web client uses, picked for you)
   --workspace <id>   the workspace to work in, as <uuid> or <slug>-<uuid>
-                     (default: a fresh uuid, with the slug asked for)
+                     (default: a fresh uuid, with an optional name asked for)
+                     joining by id never writes or infers a workspace name
   --mcp, --no-mcp    whether to end by printing the MCP client snippet to paste
                      — the question this ends on, answered up front. It prints;
                      registering a client is \`ub mcp install\`
@@ -345,12 +354,11 @@ function credentialRefusal(
 }
 
 /**
- * A workspace for a machine that has none: a fresh uuid, plus an optional slug
- * to read it by.
+ * A workspace for a machine that has none: a fresh UUID and optional shared name.
  *
  * The uuid is generated, never asked for — it is an identity, and there is
- * nothing for a person to decide about it. The slug is the only question, it is
- * cosmetic, and an empty answer is a real answer: the id is then the bare uuid.
+ * nothing for a person to decide about it. An empty name is a real answer:
+ * the workspace remains unnamed and its address is the bare UUID.
  * `--workspace` skips the question and is taken as given (and validated with
  * everything else below), because somebody joining an existing workspace
  * already has its id.
@@ -358,20 +366,28 @@ function credentialRefusal(
 async function newWorkspace(
   rl: ReturnType<typeof createInterface> | null,
   flag: string | undefined,
-): Promise<string> {
+): Promise<{ id: string; name: string | null }> {
   if (flag !== undefined) {
-    return flag;
+    return { id: flag, name: null };
   }
   const uuid = randomUUID();
   if (rl === null) {
-    return uuid;
+    return { id: uuid, name: null };
   }
-  const slug = trimmed(
+  const answer = trimmed(
     await rl.question(
-      `workspace name (optional, for display; the id is ${uuid}): `,
+      `workspace name (optional; the id is ${uuid}): `,
     ),
   );
-  return slug === null ? uuid : `${slug}-${uuid}`;
+  if (answer === null) return { id: uuid, name: null };
+  const name = validateWorkspaceName(answer);
+  const slug = name
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return { id: slug === "" ? uuid : `${slug}-${uuid}`, name };
 }
 
 export async function initCommand(
@@ -486,6 +502,7 @@ export async function initCommand(
   let name: string;
   let color: string;
   let workspace: string;
+  let workspaceName: string | null = null;
   try {
     name = await ask(
       rl,
@@ -499,11 +516,17 @@ export async function initCommand(
       flags.color,
       existing.config.color ?? colorFor(name),
     );
-    workspace =
-      inForceWorkspace === null
-        ? await newWorkspace(rl, flags.workspace)
-        : // One in force is the offered default, so a second run changes nothing.
-          await ask(rl, "workspace", flags.workspace, inForceWorkspace);
+    if (inForceWorkspace === null) {
+      const proposed = await newWorkspace(rl, flags.workspace);
+      workspace = proposed.id;
+      workspaceName = proposed.name;
+    } else {
+      // One in force is the offered default, so a second run changes nothing.
+      workspace = await ask(rl, "workspace", flags.workspace, inForceWorkspace);
+    }
+  } catch (error) {
+    io.err(`ub init: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 2;
   } finally {
     rl?.close();
   }
@@ -688,6 +711,7 @@ export async function initCommand(
       // report fail somewhere less obvious.
       parseWorkspaceId(settled, `"workspace" in ${userConfigPath()}`);
       workspace = settled;
+      workspaceName = null;
     }
     configPath = writeUserConfig({
       ...current.raw,
@@ -744,6 +768,23 @@ export async function initCommand(
     persistedWorkspace = readUserConfig().config.workspace ?? workspace;
     if (secret !== null && persisted.signingSecret !== null) {
       secret = persisted.signingSecret;
+    }
+    // Only a generated UUID this run actually claimed owns its prompted name.
+    // Store it before releasing the file lock: an adopting init can never
+    // publish or seed this workspace ahead of its name. Starter seeding is
+    // optional and may lose its separate lock or fail, so it cannot own this
+    // required durable write.
+    if (generatingWorkspace && workspaceName !== null) {
+      try {
+        const nameEnv = { ...resolved.env, WORKSPACE_ID: workspace };
+        storeWorkspaceName(resolveMcpConfig(nameEnv), workspaceName);
+      } catch (error) {
+        io.err(
+          `ub init: could not store the workspace name: ${error instanceof Error ? error.message : String(error)}. ` +
+            "This machine is configured; name the workspace in Workspace Settings → General.\n",
+        );
+        return 1;
+      }
     }
   } finally {
     lock.release();

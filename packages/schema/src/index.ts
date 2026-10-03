@@ -132,6 +132,14 @@ export { parseWorkspaceId } from "./workspace.js";
 export type { WorkspaceId } from "./workspace.js";
 
 export {
+  MAX_WORKSPACE_NAME_LENGTH,
+  WORKSPACE_SETTINGS_KEY,
+  getWorkspaceName,
+  setWorkspaceName,
+  validateWorkspaceName,
+} from "./workspace-settings.js";
+
+export {
   SIDEBAR_FLAGS_KEY,
   SIDEBAR_GROUPS_KEY,
   SIDEBAR_ORDER_KEY,

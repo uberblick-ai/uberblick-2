@@ -108,6 +108,11 @@ function ws(): string {
   return harness().workspace;
 }
 
+/** These fixtures are unnamed; their short UUID distinguishes the menu rows. */
+function unnamedLabel(segment: string): string {
+  return `Unnamed workspace · ${segment.slice(-36, -28)}`;
+}
+
 /**
  * A new document, titled and listed. Its uuid comes from the address bar.
  *
@@ -362,7 +367,7 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
     4,
   );
 
-  await page.getByRole("menuitem", { name: harness().secondWorkspace }).click();
+  await page.getByRole("menuitem", { name: unnamedLabel(harness().secondWorkspace) }).click();
   await expect(page).toHaveURL(new RegExp(`/${harness().secondWorkspace}$`));
   // Synced *and* empty — the difference between a corpus this hub kept to
   // itself and a directory that simply had not arrived yet.
@@ -374,7 +379,7 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
 
   // And back: the first workspace is exactly where it was left.
   await page.locator(".ub-workspace").click();
-  await page.getByRole("menuitem", { name: ws() }).click();
+  await page.getByRole("menuitem", { name: unnamedLabel(ws()) }).click();
   await expect(page).toHaveURL(new RegExp(`/${ws()}$`));
   await expect(docButton(page, title)).toBeVisible();
 });
@@ -413,7 +418,7 @@ test("the served configuration names the workspaces, and the build's define is o
   await page.locator(".ub-workspace").click();
   for (const workspace of served) {
     await expect(
-      page.getByRole("menuitem", { name: workspace as string }),
+      page.getByRole("menuitem", { name: unnamedLabel(workspace as string) }),
     ).toBeVisible();
   }
   await page.keyboard.press("Escape");
@@ -446,7 +451,7 @@ test("the served configuration names the workspaces, and the build's define is o
 
   // And the menu navigates, exactly as it does for a configured build.
   await page.locator(".ub-workspace").click();
-  await page.getByRole("menuitem", { name: served[1] as string }).click();
+  await page.getByRole("menuitem", { name: unnamedLabel(served[1] as string) }).click();
   await expect(page).toHaveURL(new RegExp(`/${served[1]}$`));
 });
 

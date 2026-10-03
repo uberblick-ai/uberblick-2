@@ -590,7 +590,7 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     expect(document.activeElement).toBe(
       settings.querySelector(".ub-settings-back"),
     );
-    expect(settings.textContent).toContain(`Back to ${WORKSPACE}`);
+    expect(settings.textContent).toContain(`Back to Unnamed workspace · ${WORKSPACE.slice(0, 8)}`);
     expect(settings.querySelector(".ub-nav-label")?.textContent).toBe(
       "Workspace settings",
     );
@@ -790,8 +790,8 @@ describe("unwritable workspace rooms", () => {
     roomStatus = { ...LIVE, connected: false, synced: false, writable: false };
     seedDirectory();
     createGroup(sidebarDoc(), "Reading");
-    const before = rooms.size;
     const host = await openApp(`/${WORKSPACE}`);
+    const before = rooms.size;
 
     const create = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => button.textContent?.includes("new doc"),

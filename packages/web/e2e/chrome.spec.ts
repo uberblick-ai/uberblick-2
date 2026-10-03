@@ -257,7 +257,7 @@ for (const scheme of ["light", "dark"] as const) {
     );
 
     // The configured workspace, with the count the directory reports.
-    const configured = menu.getByRole("menuitem", { name: harness().workspace });
+    const configured = menu.getByRole("menuitem", { name: /^Unnamed workspace · / });
     await expect(configured).toBeVisible();
 
     // And an item on that surface stays visible when it is the one being

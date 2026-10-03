@@ -12,6 +12,7 @@ import {
   restoreTagCatalogEntry,
   retireTagCatalogEntry,
   seedTagCatalog,
+  setWorkspaceName,
   settingsRoom,
 } from "@uberblick/schema";
 import type { TagCatalogEntry } from "@uberblick/schema";
@@ -25,6 +26,7 @@ import { Button } from "./shadcn/button.js";
 import { Input } from "./shadcn/input.js";
 import { statusReading } from "./status-reading.js";
 import { useTagCatalog } from "./tags.js";
+import { useWorkspaceName } from "./workspace-names.js";
 
 /** What a SyncPanel-style fact reads as before this client knows it. */
 const UNKNOWN = "—";
@@ -49,11 +51,13 @@ function GeneralSettings({
   workspace,
   endpoint,
   connection,
+  catalogConnection,
   agentSessions,
 }: {
   workspace: Workspace;
   endpoint: HubEndpoint | null;
   connection: RoomConnection | null;
+  catalogConnection: RoomConnection | null;
   agentSessions: number;
 }): ReactElement {
   const status = useRoomStatus(connection);
@@ -71,6 +75,7 @@ function GeneralSettings({
         <h1 id="ub-settings-title" className="mt-0 mb-4 text-2xl font-medium">
           General
         </h1>
+        <WorkspaceNameForm key={workspace.uuid} workspace={workspace} connection={catalogConnection} />
         <div className="rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
           <dl className="m-0 grid" data-settings-facts>
             <Fact label="Workspace UUID">{workspace.uuid}</Fact>
@@ -97,6 +102,77 @@ function GeneralSettings({
 }
 
 type Feedback = { kind: "error" | "success"; text: string };
+
+function WorkspaceNameForm({
+  workspace,
+  connection,
+}: {
+  workspace: Workspace;
+  connection: RoomConnection | null;
+}): ReactElement {
+  const status = useRoomStatus(connection);
+  const sharedName = useWorkspaceName(connection);
+  const arrived = connection?.room === settingsRoom(workspace.uuid) && status.hasReceivedServerState;
+  const currentName = arrived ? sharedName : null;
+  const [draft, setDraft] = useState(currentName ?? "");
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const writable = arrived && status.writable;
+
+  useEffect(() => {
+    setDraft(currentName ?? "");
+  }, [currentName]);
+
+  const save = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (
+      connection === null ||
+      connection.room !== settingsRoom(workspace.uuid) ||
+      !connection.status.hasReceivedServerState ||
+      !connection.status.writable
+    ) {
+      setFeedback({ kind: "error", text: "Reconnect before renaming the workspace." });
+      return;
+    }
+    try {
+      const name = setWorkspaceName(connection.ydoc, draft);
+      setDraft(name);
+      setFeedback({ kind: "success", text: `Saved “${name}”.` });
+    } catch (error) {
+      setFeedback({ kind: "error", text: error instanceof Error ? error.message : "The workspace name is invalid." });
+    }
+  };
+
+  return (
+    <div className="mb-4 flex flex-col gap-3 rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
+      <form className="flex flex-col gap-2" onSubmit={save}>
+        <label htmlFor="ub-workspace-name" className="text-sm font-medium">Workspace name</label>
+        <div className="flex gap-2">
+          <Input
+            id="ub-workspace-name"
+            className="flex-1"
+            value={draft}
+            placeholder="Unnamed workspace"
+            disabled={!writable}
+            aria-invalid={feedback?.kind === "error"}
+            aria-describedby="ub-workspace-name-help"
+            onChange={(event) => {
+              setDraft(event.currentTarget.value);
+              setFeedback(null);
+            }}
+          />
+          <Button type="submit" disabled={!writable}>Save</Button>
+        </div>
+        <p id="ub-workspace-name-help" className="m-0 text-sm">
+          Use 1–64 characters, with no control or format characters. Spaces at the ends are removed.
+        </p>
+      </form>
+      {!writable && <p className="m-0 text-sm" role="status">
+        {arrived ? "Workspace renaming is unavailable while this page is disconnected." : "Waiting for workspace settings…"}
+      </p>}
+      {feedback !== null && <p className="m-0 text-sm" role={feedback.kind === "error" ? "alert" : "status"}>{feedback.text}</p>}
+    </div>
+  );
+}
 
 function TagSettings({
   workspace,
@@ -344,6 +420,7 @@ export function WorkspaceSettings({
       workspace={workspace}
       endpoint={endpoint}
       connection={connection}
+      catalogConnection={catalogConnection}
       agentSessions={agentSessions}
     />
   );

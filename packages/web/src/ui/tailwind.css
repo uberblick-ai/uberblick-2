@@ -60,6 +60,7 @@
 @source "./App.tsx";
 @source "./ThreadsPane.tsx";
 @source "./WorkspaceSettings.tsx";
+@source "./WorkspaceSwitcher.tsx";
 
 /* The bridge. Left side: what shadcn's markup asks for. Right side: what this
    product already is. No colour is defined here. The sidebar mappings serve

@@ -1,4 +1,4 @@
-/** Workspace tag curation through the real browser, serving replica, and hub. */
+/** Workspace settings through the real browser, serving replica, and hub. */
 
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
@@ -27,6 +27,67 @@ test.afterAll(async () => {
   const running = started;
   started = null;
   await running?.stop();
+});
+
+test("a workspace rename reaches another page live and preserves its document links", async ({
+  browser,
+}) => {
+  const settingsPath = `/${harness().workspace}/settings`;
+  const open = async (): Promise<Page> => {
+    const context = await browser.newContext();
+    contexts.push(context);
+    const page = await context.newPage();
+    await page.goto(new URL(settingsPath, harness().appUrl).href);
+    await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+    return page;
+  };
+  const first = await open();
+  const second = await open();
+  const name = first.getByLabel("Workspace name");
+  const save = first.getByRole("button", { name: "Save", exact: true });
+
+  await name.fill("Product Research");
+  await save.click();
+  await expect(second.getByLabel("Workspace name")).toHaveValue("Product Research");
+  await expect(second.getByRole("button", { name: "Back to Product Research", exact: true })).toBeVisible();
+
+  await second.getByRole("button", { name: "Back to Product Research", exact: true }).click();
+  await second.getByRole("button", { name: "+ new doc" }).click();
+  await expect(second.locator(".ub-title")).toHaveValue("Untitled");
+  await second.locator(".ub-title").fill("Workspace rename links");
+  await expect(second.locator(".ub-status-word--saved")).toHaveText("saved here");
+  const documentId = new URL(second.url()).pathname.split("/").at(-1);
+  const oldNamePath = `/product-research-${harness().workspaceUuid}/${documentId}`;
+  await second.goto(new URL(oldNamePath, harness().appUrl).href);
+  await expect(second.locator(".ub-title")).toHaveValue("Workspace rename links");
+
+  await name.fill("Field Notes");
+  await save.click();
+  await expect(second.locator(".ub-workspace-name")).toHaveText("Field Notes");
+  await expect(second).toHaveURL(new URL(oldNamePath, harness().appUrl).href);
+  await second.locator(".ub-workspace").click();
+  await expect(second.getByRole("menuitem", { name: /^Field Notes/ })).toBeVisible();
+  await second.keyboard.press("Escape");
+
+  // A rename changes shared display state; each configured spelling and the
+  // bare identity still opens the same document, including the previous name.
+  await expect(first).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  const facts = first.locator("[data-settings-facts]");
+  await expect(facts.locator('div:has(> dt:text-is("Workspace UUID")) > dd')).toHaveText(
+    harness().workspaceUuid,
+  );
+  await expect(facts.locator('div:has(> dt:text-is("Address segment")) > dd')).toHaveText(
+    harness().workspace,
+  );
+  for (const segment of [
+    `product-research-${harness().workspaceUuid}`,
+    harness().workspaceUuid,
+    harness().workspace,
+  ]) {
+    await second.goto(new URL(`/${segment}/${documentId}`, harness().appUrl).href);
+    await expect(second.locator(".ub-title")).toHaveValue("Workspace rename links");
+    await expect(second.locator(".ub-workspace-name")).toHaveText("Field Notes");
+  }
 });
 
 test("Tags settings is address-selected and its catalog changes converge", async ({

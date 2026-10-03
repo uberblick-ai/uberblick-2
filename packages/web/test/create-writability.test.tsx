@@ -11,6 +11,7 @@ import {
   getMeta,
   parseRoom,
   sidebarRoom,
+  settingsRoom,
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
@@ -117,7 +118,8 @@ it("writes neither room until the new room is admitted", async () => {
   const pending = [...rooms.values()].find(
     ({ connection }) =>
       connection.room !== directoryRoom(WORKSPACE) &&
-      connection.room !== sidebarRoom(WORKSPACE),
+      connection.room !== sidebarRoom(WORKSPACE) &&
+      connection.room !== settingsRoom(WORKSPACE),
   );
   if (pending === undefined) throw new Error("new room was not acquired");
   const uuid = parseRoom(pending.connection.room).uuid;
@@ -149,7 +151,8 @@ it("cancels a deferred create when the reader leaves its room", async () => {
   const pending = [...rooms.values()].find(
     ({ connection }) =>
       connection.room !== directoryRoom(WORKSPACE) &&
-      connection.room !== sidebarRoom(WORKSPACE),
+      connection.room !== sidebarRoom(WORKSPACE) &&
+      connection.room !== settingsRoom(WORKSPACE),
   );
   if (pending === undefined) throw new Error("new room was not acquired");
   const uuid = parseRoom(pending.connection.room).uuid;
@@ -188,7 +191,8 @@ it.each(["document", "directory"] as const)(
     const pending = [...rooms.values()].find(
       ({ connection }) =>
         connection.room !== directoryRoom(WORKSPACE) &&
-        connection.room !== sidebarRoom(WORKSPACE),
+        connection.room !== sidebarRoom(WORKSPACE) &&
+        connection.room !== settingsRoom(WORKSPACE),
     );
     if (pending === undefined) throw new Error("new room was not acquired");
     await act(async () => {

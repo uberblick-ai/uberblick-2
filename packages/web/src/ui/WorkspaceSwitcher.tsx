@@ -23,9 +23,8 @@
  * could do it. Workspace settings is navigation now that the client has that
  * address, and uses the same route-driven selection as switching workspaces.
  *
- * The surface is the vendored shadcn menu. Its remaining `.ub-*` styling moves
- * to utilities when this surface is next changed, under Web UI system's
- * Styling rule. See `ui/tailwind.css` for the current cascade and token bridge.
+ * The surface is the vendored shadcn menu, with utilities preserving its
+ * established layout. Names come from shared settings, keyed by UUID.
  */
 
 import { useEffect, useState } from "react";
@@ -40,6 +39,9 @@ import {
   DropdownMenuTrigger,
 } from "./shadcn/dropdown-menu.js";
 import type { Workspace } from "./route.js";
+import { workspaceLabel } from "./workspace-names.js";
+
+const NO_NAMES: ReadonlyMap<string, string | null> = new Map();
 
 /** "3 docs", and "1 doc" — the count is chrome, so it should read as English. */
 function docCountLabel(docs: number): string {
@@ -49,15 +51,19 @@ function docCountLabel(docs: number): string {
 export function WorkspaceSwitcher({
   workspaces,
   current,
+  names = NO_NAMES,
   docs,
   onSwitch,
   onOpenSettings,
   active = true,
+  onOpenChange,
 }: {
   /** What to offer, already validated and deduplicated — see `workspaceList`. */
   workspaces: readonly Workspace[];
   /** The workspace the address names, or null when it names none. */
   current: Workspace | null;
+  /** Live readings from each workspace's shared settings room. */
+  names?: ReadonlyMap<string, string | null> | undefined;
   /**
    * How many documents the open workspace holds, live from the directory. Only
    * the open one has a number: the other workspaces' directories are rooms this
@@ -70,6 +76,8 @@ export function WorkspaceSwitcher({
   onOpenSettings: () => void;
   /** Whether the document-sidebar pane that owns this portalled menu is live. */
   active?: boolean;
+  /** Acquire other workspaces' name readings only while their menu is open. */
+  onOpenChange?: ((open: boolean) => void) | undefined;
 }): ReactElement {
   const [open, setOpen] = useState(false);
 
@@ -78,47 +86,49 @@ export function WorkspaceSwitcher({
   useEffect(() => {
     if (!active) setOpen(false);
   }, [active]);
+  useEffect(() => {
+    onOpenChange?.(active && open);
+    return () => onOpenChange?.(false);
+  }, [active, open, onOpenChange]);
+  const currentLabel = current === null ? "no workspace" : workspaceLabel(current, names, workspaces);
 
   return (
     <DropdownMenu open={active && open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <button type="button" className="ub-workspace" aria-label="Workspace">
+        <button type="button" className="ub-workspace -mx-2 -mt-2 mb-2 flex w-[calc(100%+1rem)] min-h-6 pointer-coarse:min-h-11 items-center gap-2 border-0 border-b border-(--sidebar-border) bg-transparent p-2 text-left font-inherit text-inherit cursor-pointer hover:border-b-[light-dark(var(--sidebar),var(--sidebar-border))] hover:bg-sidebar-accent hover:text-accent-foreground" aria-label="Workspace">
           {/* Hidden like the user card's tile: a letter announced beside the
               name it repeats is the name read twice. */}
           {current !== null && (
-            <span className="ub-identity-tile ub-workspace-tile" aria-hidden="true">
-              {initialOf(current.segment)}
+            <span className="ub-workspace-tile flex size-7 shrink-0 items-center justify-center rounded-(--radius-sm) bg-(--brand) text-[0.8rem] leading-none font-medium text-(--brand-foreground) select-none" aria-hidden="true">
+              {initialOf(currentLabel)}
             </span>
           )}
-          <span className="ub-workspace-identity">
-            {/* The name truncates, and a segment can be a bare uuid — so the
-                whole of it is on the hover. */}
-            <span className="ub-workspace-name" title={current?.segment}>
-              {/* As the address spells it: the slug is what a person reads. */}
-              {current === null ? "no workspace" : current.segment}
+          <span className="flex min-w-0 flex-1 flex-col gap-[0.1rem]">
+            <span className="ub-workspace-name min-w-0 truncate text-[0.8rem]" title={current === null ? undefined : currentLabel}>
+              {currentLabel}
             </span>
             {current !== null && (
-              <span className="ub-workspace-count">{docCountLabel(docs)}</span>
+              <span className="ub-workspace-count text-[11px] font-medium tracking-[0.12em] text-(--sidebar-group-label) uppercase">{docCountLabel(docs)}</span>
             )}
           </span>
-          <span className="ub-menu-caret" aria-hidden="true">
+          <span className="ub-workspace-caret text-[0.7rem] text-(--sidebar-muted-foreground)" aria-hidden="true">
             ▾
           </span>
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="ub-workspace-menu">
+      <DropdownMenuContent align="start" className="ub-workspace-menu w-(--radix-dropdown-menu-trigger-width)">
         <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
         {workspaces.map((workspace) => {
           const here = workspace.uuid === current?.uuid;
           return (
             <DropdownMenuItem
               key={workspace.uuid}
-              className={here ? "ub-menu-current" : undefined}
+              className={here ? "ub-menu-current text-(--brand-ink)" : undefined}
               aria-current={here ? "true" : undefined}
               onSelect={() => onSwitch(workspace.segment)}
             >
-              <span className="ub-menu-text">{workspace.segment}</span>
-              {here && <span className="ub-menu-value">{docCountLabel(docs)}</span>}
+              <span className="ub-menu-text min-w-0 flex-1 truncate text-[0.8rem]">{workspaceLabel(workspace, names, workspaces)}</span>
+              {here && <span className="text-xs text-(--sidebar-muted-foreground)">{docCountLabel(docs)}</span>}
             </DropdownMenuItem>
           );
         })}

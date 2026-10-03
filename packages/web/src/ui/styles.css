@@ -420,7 +420,6 @@ body {
    typed, not an identifier, and it now reads as a small-caps section label. */
 .ub-list-head .ub-muted,
 .ub-status,
-.ub-workspace-name,
 .ub-foreign-list {
   font-family: var(--font-mono);
 }
@@ -533,7 +532,6 @@ body {
 .ub-list li button,
 .ub-drag-handle,
 .ub-settings-entry,
-.ub-settings-back,
 .ub-group-add {
   display: flex;
   align-items: center;
@@ -559,7 +557,6 @@ body {
 .ub-list-head button:hover:not(:disabled),
 .ub-list li button:hover:not(:disabled, [aria-disabled="true"]),
 .ub-settings-entry:hover,
-.ub-settings-back:hover,
 .ub-group-add:hover:not(:disabled) {
   background: var(--sidebar-accent);
   color: var(--sidebar-foreground);
@@ -663,36 +660,8 @@ body {
   border-top: 1px solid var(--sidebar-border);
 }
 
-.ub-settings-entry,
-.ub-settings-back {
+.ub-settings-entry {
   width: 100%;
-}
-
-.ub-settings-back {
-  margin-bottom: 0.5rem;
-}
-
-.ub-settings-back-tile {
-  width: 1.75rem;
-  height: 1.75rem;
-  flex: none;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-sm);
-  background: var(--brand-subtle);
-  color: var(--brand);
-}
-
-.ub-settings-back-tile svg {
-  width: 16px;
-  height: 16px;
-}
-
-.ub-settings-back-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .ub-settings-nav {
@@ -709,89 +678,9 @@ body {
    here matches a class *on* the menu or inside it. None of them reaches down
    from `.ub-app`, and none of them can. */
 
-/* The workspace, across the top of the sidebar. Full-bleed: it pulls back
-   through the column's padding so its underline meets both edges, which is
-   what makes it read as the sidebar's own header rather than as a control
-   sitting inside it. */
-.ub-workspace {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: calc(100% + 1rem);
-  margin: -0.5rem -0.5rem 0.5rem;
-  padding: 0.5rem;
-  border: 0;
-  border-bottom: 1px solid var(--sidebar-border);
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.ub-workspace:hover {
-  border-bottom-color: light-dark(var(--sidebar), var(--sidebar-border));
-  background: var(--sidebar-accent);
-  color: var(--accent-foreground);
-}
-
-/* The name over its count (#482): two lines, one identity. The column is what
-   takes the width the tile and the caret leave, so the name inside it can
-   truncate against something. */
-.ub-workspace-identity {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  /* Tight: the subtitle belongs to the name above it, not beside it. */
-  gap: 0.1rem;
-}
-
-/* A segment can be a bare uuid, so it truncates rather than pushing the tile
-   and the caret out of the column. The whole of it is on this element's
-   `title` — see WorkspaceSwitcher. */
-.ub-workspace-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.8rem;
-}
-
-/* #481's section-label style: on the second line the count is a subtitle
-   under the name rather than a value beside it. `text-transform` is paint, so
-   the text is still the "2 docs" / "1 doc" the component wrote. */
-.ub-workspace-count {
-  color: var(--sidebar-group-label);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
 .ub-menu-caret {
   color: var(--sidebar-muted-foreground);
   font-size: 0.7rem;
-}
-
-/* Opens across the column it is the header of — Radix publishes the trigger's
-   width, so the two cannot drift apart. */
-.ub-workspace-menu {
-  width: var(--radix-dropdown-menu-trigger-width);
-}
-
-/* An item's own label takes the row, and truncates rather than widening it. */
-.ub-menu-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ub-workspace-menu .ub-menu-text {
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
 }
 
 /* The user card: the footer's row shape, plus the tile that carries this
@@ -839,11 +728,6 @@ body {
   user-select: none;
 }
 
-.ub-workspace-tile {
-  background: var(--brand);
-  color: var(--brand-foreground);
-}
-
 /* Filled with the presence colour, which the component writes inline because
    that palette is `#rrggbb` literals rather than tokens (identity.ts). The ink
    is the token those eight hues were picked for: white, ≥4.69:1 on every one
@@ -860,15 +744,6 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.ub-menu-value {
-  color: var(--sidebar-muted-foreground);
-  font-size: 0.75rem;
-}
-
-.ub-menu-current {
-  color: var(--brand-ink);
 }
 
 /* The user panel: three stacked sections, each a label over its controls. */

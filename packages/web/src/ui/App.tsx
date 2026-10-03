@@ -52,6 +52,7 @@ import { OutlinePane } from "./OutlinePane.js";
 import { SyncPanel } from "./SyncPanel.js";
 import { ThreadsPane } from "./ThreadsPane.js";
 import { WorkspaceSettings } from "./WorkspaceSettings.js";
+import { useWorkspaceNames } from "./workspace-names.js";
 import { focusThread } from "./threads.js";
 import type { SelectThread, ThreadFocus, ThreadView } from "./threads.js";
 import { useServingRoomStatus } from "./serving-status.js";
@@ -530,8 +531,7 @@ export function App(): ReactElement {
   );
   const catalog = useRoom(
     hubReady &&
-      workspace !== null &&
-      (selected !== null || (route.kind === "settings" && route.page === "tags"))
+      workspace !== null
       ? settingsRoom(workspace.uuid)
       : null,
     identity,
@@ -691,6 +691,8 @@ export function App(): ReactElement {
    * changed — and the work is splitting a short string.
    */
   const workspaces = workspaceList(configured, workspace);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const workspaceNames = useWorkspaceNames(workspaces, workspaceUuid, catalog, identity, workspaceMenuOpen);
   const onSwitchWorkspace = useCallback(
     // A workspace's list, not a document: two corpora share no uuid, so
     // carrying the open document across would be a link to nowhere.
@@ -946,6 +948,8 @@ export function App(): ReactElement {
           entries={entries}
           workspaces={workspaces}
           workspace={workspace}
+          workspaceNames={workspaceNames}
+          onWorkspaceMenuOpenChange={setWorkspaceMenuOpen}
           onSwitchWorkspace={onSwitchWorkspace}
           identity={identity}
           agentSessions={agentSessions}
