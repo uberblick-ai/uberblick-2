@@ -3,15 +3,17 @@
  *
  * Each check answers one question somebody would otherwise answer by finding,
  * reading and translating prose: is a workspace configured, is a signing secret
- * usable, can the database be written, does a hub answer, is this machine's
- * clock close enough to the hub's, do the endpoint and the hub's port agree,
+ * usable, can the database be written, did the live update log refuse a write,
+ * does a hub answer, is this machine's clock close enough to the hub's,
+ * do the endpoint and the hub's port agree,
  * who holds the port, is any MCP client wired up. Three of the
  * hub-side failures present identically as "offline" in the web UI, which is
  * the reason this command exists — it names the cause and the fix.
  *
- * **It diagnoses; it never repairs.** Nothing here writes a file, creates a
- * directory or opens the database. A failed check names the command that would
- * repair it and stops there.
+ * **It diagnoses; it never repairs.** The persistence check opens only an
+ * existing database and takes the same live replica reading as `ub status`.
+ * Receiving hub updates can append to that log; nothing creates an absent
+ * database, configuration file or directory. A failed check names the recovery.
  *
  * **The wording is the Install and run document's**, whose "If it fails"
  * section is the specification for the hub, port and credential checks. It is
@@ -38,7 +40,7 @@ import {
   CLOCK_SKEW_SECONDS,
   MAX_TOKEN_LIFETIME_SECONDS,
 } from "@uberblick/hub/token";
-import { AUTH_REJECTED, SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { AUTH_REJECTED, protocolSkew } from "@uberblick/hub/protocol";
 import type { McpConfig } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "./budget.js";
 import type { ResolvedConfig } from "./config.js";
@@ -48,17 +50,17 @@ import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import type { Scope } from "./mcp-config.js";
 import { DEFAULT_ENTRY, TARGETS, presence, targetFile } from "./mcp-config.js";
-import type { Endpoint, HubReach } from "./probes.js";
+import type { Endpoint, HubProbe } from "./probes.js";
 import {
   dialHost,
   endpointOf,
   hubBind,
   isLocalHost,
-  probeHub,
+  probeHubState,
   probeHubClock,
   probePort,
 } from "./probes.js";
-import { ORIGIN_LABELS } from "./status.js";
+import { ORIGIN_LABELS, readSyncStatus } from "./status.js";
 import { cliVersion } from "./version.js";
 
 /** Stable strings: `--json` prints them and a script will branch on them. */
@@ -221,6 +223,80 @@ function databaseCheck(config: McpConfig | null): Check {
   );
 }
 
+// --- live persistence --------------------------------------------------------
+
+const PERSISTENCE_RECOVERY =
+  "restore the store's ability to accept writes, then run `ub doctor` again; " +
+  "restart any fail-stopped MCP server, then re-read before writing again — " +
+  "the refused append never became durable in this local log";
+
+async function persistenceCheck(config: McpConfig | null): Promise<Check> {
+  if (config === null) {
+    return skipped(
+      "persistence",
+      "no workspace configured, so no live reading can be taken",
+    );
+  }
+  // The replica factory normally creates its store. Diagnosis must not turn a
+  // missing store into a healthy empty one, or create its parent directories.
+  try {
+    if (!statSync(config.databasePath).isFile()) {
+      return fail(
+        "persistence",
+        `${config.databasePath} is not a database file`,
+        "point UBERBLICK_DB at this workspace's existing database",
+      );
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return skipped(
+        "persistence",
+        `${config.databasePath} does not exist yet, so no live reading was taken`,
+      );
+    }
+    return fail(
+      "persistence",
+      `${config.databasePath}: cannot inspect the store (${message(error)})`,
+      "restore access to this workspace's database, then run `ub doctor` again",
+    );
+  }
+
+  try {
+    const reading = await readSyncStatus(config);
+    if (reading.persistence !== null) {
+      return fail(
+        "persistence",
+        `${reading.persistence.room}: the update log refused a write (${reading.persistence.message})`,
+        PERSISTENCE_RECOVERY,
+      );
+    }
+    if (reading.hub.status === "quarantined") {
+      return fail(
+        "persistence",
+        "this replica was quarantined after a refused update-log write",
+        PERSISTENCE_RECOVERY,
+      );
+    }
+    if (reading.hub.status === "connecting") {
+      return skipped(
+        "persistence",
+        "the live reading ended while the hub was still connecting; its state is not yet known",
+        "run `ub doctor` again once the hub has answered",
+      );
+    }
+    return pass(
+      "persistence",
+      "the live replica reading completed without a refused update-log write",
+    );
+  } catch (error) {
+    return fail(
+      "persistence",
+      `${config.databasePath}: could not take the live reading (${message(error)})`,
+      "restore access to a valid database for this workspace, then run `ub doctor` again",
+    );
+  }
+}
+
 // --- hub, port, bind ---------------------------------------------------------
 
 /**
@@ -229,20 +305,20 @@ function databaseCheck(config: McpConfig | null): Check {
  * second connection would only say the same thing more slowly.
  */
 function hubProber(config: McpConfig): Dial {
-  const seen = new Map<string, Promise<HubReach>>();
+  const seen = new Map<string, Promise<HubProbe>>();
   return (url) => {
     const known = seen.get(url);
     if (known !== undefined) {
       return known;
     }
-    const probe = probeHub(config, url);
+    const probe = probeHubState(config, url);
     seen.set(url, probe);
     return probe;
   };
 }
 
 /** What both hub checks are handed: an endpoint in, what a client found out. */
-type Dial = (url: string) => Promise<HubReach>;
+type Dial = (url: string) => Promise<HubProbe>;
 
 async function hubCheck(
   config: McpConfig | null,
@@ -262,7 +338,8 @@ async function hubCheck(
   // hub on this machine is one `ub open` away; a remote one is somebody's
   // deployment, which this command can neither start nor pretend to.
   const local = endpoint !== null && isLocalHost(endpoint.host);
-  const status = await dial(config.hubUrl);
+  const hub = await dial(config.hubUrl);
+  const status = hub.status;
   if (status === "connected") {
     return pass("hub", `${config.hubUrl} answered and served the directory room`);
   }
@@ -278,19 +355,27 @@ async function hubCheck(
     return fail(
       "hub",
       `${config.hubUrl} refused the signing secret`,
-      `${AUTH_REJECTED}. Give the hub and this machine the same secret — \`ub status\` says which layer this one came from — and read the clock check below, because a clock far enough out of step is refused the same way`,
+      `${AUTH_REJECTED}. Give the hub and this machine the same secret — the credential check above names this machine's layer — and read the clock check below, because a clock far enough out of step is refused the same way`,
     );
   }
   if (status === "update-required") {
-    // Not a credential problem and not a reachability one: the hub refuses the
-    // connection before the token, so nothing this machine can be given fixes
-    // it. Which side is old takes both integers, and a `Dial` carries only a
-    // status — so this names ours and sends the reader to `ub status`, which
-    // holds the whole `HubState` and prints both.
+    // A version refusal always carries the hub's integer. Compose the remedy
+    // locally rather than rendering an authentication server's arbitrary text.
+    const versions =
+      hub.hubProtocolVersion === undefined
+        ? `this client speaks sync protocol ${hub.protocolVersion}; the hub's version was not reported`
+        : protocolSkew(hub.hubProtocolVersion, hub.protocolVersion);
     return fail(
       "hub",
-      `${config.hubUrl} refuses this machine: it speaks a different sync protocol than this build's ${SYNC_PROTOCOL_VERSION}`,
-      "`ub status` names the hub's version beside this one and says which side is older; update that side — a hub and a client on different sync protocols exchange nothing at all, so no credential and no retry changes this",
+      `${config.hubUrl}: ${versions}`,
+      "update the older side, then restart this client — a hub and a client on different sync protocols exchange nothing at all, so no credential and no retry changes this",
+    );
+  }
+  if (status === "quarantined") {
+    return fail(
+      "hub",
+      "this replica was cut off the wire after the update log refused a write",
+      PERSISTENCE_RECOVERY,
     );
   }
   if (status === "unsettled") {
@@ -463,7 +548,7 @@ async function bindCheck(
   // When the clients dial the port the hub binds — the healthy arrangement —
   // this is the endpoint the reachability check already dialled, and the prober
   // hands back that answer instead of opening a second connection to say it.
-  const status = await dial(
+  const { status } = await dial(
     bind.port === endpoint.port
       ? config.hubUrl
       : `ws://${dialHost(bind.host)}:${bind.port}`,
@@ -588,12 +673,17 @@ export async function doctorReport(
   const endpoint = config === null ? null : endpointOf(config.hubUrl);
   // Both hub checks take their config first, so a null one never dials.
   const dial: Dial =
-    config === null ? async () => "disabled" : hubProber(config);
+    config === null
+      ? async () => {
+          throw new Error("no workspace configured");
+        }
+      : hubProber(config);
 
   const checks: Check[] = [
     workspaceCheck(resolvedEnv, resolved, config, error),
     credentialCheck(resolved, resolvedEnv),
     databaseCheck(config),
+    await persistenceCheck(config),
     await hubCheck(config, endpoint, dial),
     await clockCheck(config),
     portCheck(config, endpoint, resolvedEnv),
@@ -643,10 +733,11 @@ export const DOCTOR_OPTIONS = {
 export const DOCTOR_HELP = `usage: ub doctor [--json]
 
 Check the local stack against its known failure modes — configuration, the
-signing secret and its file mode, the database, whether the hub is reachable
-and agrees with this machine's clock, and the MCP client configs
-\`ub mcp install\` targets. Reads only; it fixes nothing and names what to run
-instead.
+signing secret and its file mode, the database and a live update-log reading,
+whether the hub is reachable and agrees with this machine's clock, and the MCP
+client configs \`ub mcp install\` targets. Diagnoses, never repairs. The live
+reading opens an existing database and may receive hub updates; it never creates an absent
+database, configuration file or directory. Failures name their recovery.
 
 options:
   --json            the same checks as JSON on stdout, for a script to read

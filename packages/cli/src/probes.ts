@@ -38,6 +38,9 @@ import { budget } from "./budget.js";
  */
 export type HubReach = HubState["status"] | "unsettled";
 
+/** Keep the protocol versions and locally composed reason for diagnostics. */
+export type HubProbe = Omit<HubState, "status"> & { status: HubReach };
+
 /**
  * Dial an endpoint as a real client would and report what happened.
  *
@@ -50,11 +53,21 @@ export async function probeHub(
   config: McpConfig,
   hubUrl: string = config.hubUrl,
 ): Promise<HubReach> {
+  return (await probeHubState(config, hubUrl)).status;
+}
+
+export async function probeHubState(
+  config: McpConfig,
+  hubUrl: string = config.hubUrl,
+): Promise<HubProbe> {
   const corpus = await inspectRemote({ ...config, hubUrl });
   const status = corpus.hub.status;
   // `complete` is false exactly when the directory room never went quiet. A
   // connection that could not finish reading it is not a reachable hub.
-  return status === "connected" && !corpus.complete ? "unsettled" : status;
+  return {
+    ...corpus.hub,
+    status: status === "connected" && !corpus.complete ? "unsettled" : status,
+  };
 }
 
 export type PortState =

@@ -358,8 +358,8 @@ ub init            # identity, workspace, signing secret
 ub init <hub-url>  # the same, with the new workspace created on that hub
 ub update          # update this copy — Homebrew, or a checkout on main
 ub open            # serve the web app and a hub, and open the browser
-ub status          # workspace, hub, credential, sync state
-ub status --json   # the same, as one JSON object
+ub status          # workspace, hub, connection, pending work, local log, failures
+ub status --json   # full report, including rooms, configuration and storage paths
 ub workspace       # the workspace in force, and which layer chose it
 ub workspace list  # workspaces this machine has a database for
 ub workspace use   # make a workspace this machine's default
@@ -463,10 +463,10 @@ so setting `XDG_CONFIG_HOME` alone leaves the databases under
 requires. There is nothing to detect and nothing that can fail, so resolution
 cannot throw and no command has an opinion about which layout is in force.
 
-`ub status` names the data root; `ub status --json` carries a `storage` object
-with every resolved path — the directories and database files, never the
-credential. `HUB_DB_PATH` and `UBERBLICK_DB` name a database file outright and
-outrank all of it, which is what this checkout's mise tasks use:
+`ub status --json` carries a `storage` object with every resolved path — the
+directories and database files, never the credential. `HUB_DB_PATH` and
+`UBERBLICK_DB` name a database file outright and outrank all of it, which is what
+this checkout's mise tasks use:
 `[env] HUB_DB_PATH` points at a checkout-local file, so `mise run hub` never
 opens a packaged install's database.
 
@@ -580,9 +580,9 @@ pnpm, no age key, no secrets — copies the working tree in, and runs
 with `--network none`, `scripts/fue-assert.mjs` checks what a new user was
 promised:
 
-- `ub status` exits 0, names the workspace `ub init` just generated, and reports
-  a signing secret — the `fnox --if-missing warn` path, which is every
-  contributor's path.
+- `ub status` exits 0 and names the workspace `ub init` just generated, and
+  `ub status --json` reports a signing secret — the `fnox --if-missing warn`
+  path, which is every contributor's path.
 - `list_docs` answers over `ub mcp serve`, spoken as a real client speaks it:
   newline-delimited JSON-RPC on stdio. An empty corpus passes; so does one with
   starter documents in it.

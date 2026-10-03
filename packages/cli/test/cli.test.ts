@@ -7,6 +7,7 @@
  * in the `ub mcp serve` path is a corrupted protocol session.
  */
 
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox } from "./helpers.js";
@@ -55,10 +56,21 @@ describe("ub status", () => {
     // The one value with no default. A guessed workspace would open a corpus
     // nobody chose, so the answer is the command that creates one.
     const run = runUb(["status"], sandbox());
-    expect(run.status).not.toBe(0);
+    expect(run.status).toBe(1);
     expect(run.stdout).toBe("");
     expect(run.stderr).toMatch(/WORKSPACE_ID/);
     expect(run.stderr).toMatch(/ub init/);
+  });
+
+  it("exits 1 with its error instead of an overview when the status read fails", () => {
+    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    const database = join(box.cwd, "broken.sqlite");
+    writeFileSync(database, "this is not a SQLite database");
+
+    const run = runUb(["status"], box, { UBERBLICK_DB: database });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toMatch(/database/);
   });
 
   it("shows a decorated workspace as typed, and the uuid it resolves to", () => {
@@ -103,18 +115,30 @@ describe("ub status", () => {
     expect(report.credentialPresent).toBe(false);
     expect(report.credentialSource).toBeNull();
     expect(report.hub.status).toBe("disabled");
+    expect(report.hub.url).toBeNull();
     expect(report.version).toMatch(/^\d+\.\d+\.\d+/);
     // Sync state per attached room. The directory doc exists from boot.
     expect(Array.isArray(report.rooms)).toBe(true);
     expect(report.rooms[0].room).toBe(`${WORKSPACE}/_directory`);
     expect(report.rooms[0]).toHaveProperty("synced");
+    expect(report.rooms[0].appliedSeq).toEqual(expect.any(Number));
     // The rooms behind `unsyncedChanges`, not just the count: durable local work
     // the hub has not acknowledged is the one thing this report must not hide.
     expect(Array.isArray(report.pendingRooms)).toBe(true);
     expect(report.pendingRooms.length).toBe(report.unsyncedChanges);
+    expect(report.inFlightUpdates).toBe(0);
+    expect(report.logEntries).toEqual(expect.any(Number));
+    expect(report.persistence).toBeNull();
+    expect(report.storage).toEqual({
+      layout: "xdg",
+      config: join(box.configHome, "uberblick", "config.json"),
+      data: join(box.dataHome, "uberblick"),
+      hub: join(box.dataHome, "uberblick", "hub.sqlite"),
+      workspace: report.databasePath,
+    });
   });
 
-  it("reports a configured credential without printing it", () => {
+  it("keeps credential detail in JSON without printing the secret", () => {
     const secret = "cli-test-signing-secret-3f9a1c";
     const box = sandbox({
       credentials: { signingSecret: secret },
@@ -124,7 +148,7 @@ describe("ub status", () => {
 
     const human = runUb(["status"], box);
     expect(human.status).toBe(0);
-    expect(human.stdout).toMatch(/credential\s+configured \(credentials file\)/);
+    expect(human.stdout).not.toMatch(/credential/);
 
     const json = runUb(["status", "--json"], box);
     const report = JSON.parse(json.stdout);

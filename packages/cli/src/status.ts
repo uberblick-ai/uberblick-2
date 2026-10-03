@@ -19,7 +19,7 @@
 import { parseArgs } from "node:util";
 import { hubDatabasePath } from "@uberblick/hub/config";
 import { collectSyncStatus, createMcpServer } from "@uberblick/mcp-server";
-import type { SyncStatus } from "@uberblick/mcp-server";
+import type { McpConfig, SyncStatus } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "./budget.js";
 import type { CredentialOrigin, Origin, ShadowedLayer } from "./config.js";
 import { resolveConfig } from "./config.js";
@@ -104,6 +104,16 @@ export const ORIGIN_LABELS: Record<Origin, string> = {
   default: "built-in default",
 };
 
+/** The live diagnostic reading, shared with `ub doctor`. Always releases it. */
+export async function readSyncStatus(config: McpConfig): Promise<SyncStatus> {
+  const instance = createMcpServer(config);
+  try {
+    return await collectSyncStatus(instance.replicas);
+  } finally {
+    await instance.close();
+  }
+}
+
 /** Collect the report without printing it. Exported for tests. */
 export async function statusReport(
   options: { env?: NodeJS.ProcessEnv } = {},
@@ -113,47 +123,42 @@ export async function statusReport(
   // error it is: there is no default to fall back to, and `ub init` is named in
   // the message.
   const config = resolveMcpConfig(resolved.env);
-  const instance = createMcpServer(config);
-  try {
-    const sync = await collectSyncStatus(instance.replicas);
-    return {
-      warnings: resolved.warnings,
-      report: {
-        version: cliVersion(),
-        workspace: resolved.env.WORKSPACE_ID ?? config.workspaceId,
-        workspaceUuid: config.workspaceId,
-        hubUrl: config.hubUrl,
-        databasePath: config.databasePath,
-        credentialPresent: config.authSecret !== null,
-        credentialSource: resolved.origins.credential,
-        sources: {
-          workspace: resolved.origins.workspace,
-          hubUrl: resolved.origins.hubUrl,
-        },
-        ...(resolved.shadowed.length === 0
-          ? {}
-          : { shadowed: resolved.shadowed }),
-        hub: sync.hub,
-        rooms: sync.rooms,
-        unsyncedChanges: sync.unsyncedChanges,
-        pendingRooms: sync.pendingRooms,
-        inFlightUpdates: sync.inFlightUpdates,
-        logEntries: sync.logEntries,
-        persistence: sync.persistence,
-        storage: {
-          layout: "xdg",
-          config: resolved.paths.userConfig,
-          data: resolved.storage.dataDir,
-          // Asked of the hub package, so that what this reports and what a hub
-          // started here would open cannot drift apart.
-          hub: hubDatabasePath(resolved.env),
-          workspace: config.databasePath,
-        },
+  const sync = await readSyncStatus(config);
+  return {
+    warnings: resolved.warnings,
+    report: {
+      version: cliVersion(),
+      workspace: resolved.env.WORKSPACE_ID ?? config.workspaceId,
+      workspaceUuid: config.workspaceId,
+      hubUrl: config.hubUrl,
+      databasePath: config.databasePath,
+      credentialPresent: config.authSecret !== null,
+      credentialSource: resolved.origins.credential,
+      sources: {
+        workspace: resolved.origins.workspace,
+        hubUrl: resolved.origins.hubUrl,
       },
-    };
-  } finally {
-    await instance.close();
-  }
+      ...(resolved.shadowed.length === 0
+        ? {}
+        : { shadowed: resolved.shadowed }),
+      hub: sync.hub,
+      rooms: sync.rooms,
+      unsyncedChanges: sync.unsyncedChanges,
+      pendingRooms: sync.pendingRooms,
+      inFlightUpdates: sync.inFlightUpdates,
+      logEntries: sync.logEntries,
+      persistence: sync.persistence,
+      storage: {
+        layout: "xdg",
+        config: resolved.paths.userConfig,
+        data: resolved.storage.dataDir,
+        // Asked of the hub package, so that what this reports and what a hub
+        // started here would open cannot drift apart.
+        hub: hubDatabasePath(resolved.env),
+        workspace: config.databasePath,
+      },
+    },
+  };
 }
 
 function plural(count: number, noun: string): string {
@@ -166,66 +171,38 @@ function field(name: string, value: string): string {
 
 export function renderStatus(report: StatusReport): string {
   const hub = report.hub;
-  const reason = hub.reason === undefined ? "" : ` — ${hub.reason}`;
-  const credential = report.credentialPresent
-    ? `configured (${report.credentialSource})`
-    : "none — local-only, no hub sync";
+  const hubFailure =
+    hub.status === "auth-failed" ||
+    hub.status === "update-required" ||
+    hub.status === "hub-down" ||
+    (hub.status === "quarantined" && report.persistence === null);
+  const failureCount = Number(report.persistence !== null) + Number(hubFailure);
 
   let text = `uberblick ${report.version}\n`;
-  text += field(
-    "workspace",
-    `${report.workspace} (${ORIGIN_LABELS[report.sources.workspace]})`,
-  );
+  text += field("workspace", report.workspace);
   // Only when the spelling hides it. The slug is display; the uuid is what
   // rooms, tokens and the database are keyed by, and what to quote to somebody
   // else.
   if (report.workspaceUuid !== report.workspace) {
     text += field("uuid", report.workspaceUuid);
   }
-  text += field(
-    "hub",
-    `${report.hubUrl} (${ORIGIN_LABELS[report.sources.hubUrl]})`,
-  );
-  text += field("sync", `${hub.status}${reason}`);
-  // "credential", not "token": HUB_AUTH_TOKEN is the secret tokens are signed
-  // with, and the two words must not blur into each other.
-  text += field("credential", credential);
-  // Only when something disagrees. The line above it says what is in force;
-  // this one says what that overrode, which is the question `ub status` could
-  // not answer while it reported the winner alone.
-  for (const shadowed of report.shadowed ?? []) {
-    text += field(
-      "shadowed",
-      `${shadowed.setting} in ${shadowed.layer} — the environment is in force`,
-    );
-  }
-  text += field("database", report.databasePath);
-  // The data root, named once: everything durable is under it, and "where is my
-  // data" is the question this line exists to answer.
-  text += field("storage", report.storage.data);
+  text += field("hub", report.hubUrl);
+  text += field("connection", hub.status);
   // Two counts in two units, as `sync_status` reports them: rooms, and provider
   // sync messages. They are not expected to agree.
   text += field(
     "pending",
-    `${plural(report.unsyncedChanges, "room")} unsynced, ` +
-      `${plural(report.inFlightUpdates, "sync message")} unacked, ` +
-      `${report.logEntries} log entries`,
+    `${plural(report.unsyncedChanges, "room")} with unacknowledged local changes, ` +
+      `${plural(report.inFlightUpdates, "sync message")} unacknowledged`,
   );
-  // Naming the rooms under the count: "3 rooms unsynced" is an alarm, and the
-  // next question is always which ones.
-  for (const pending of report.pendingRooms) {
-    text += `  ${pending.room}  waiting on seq ${pending.seq}\n`;
-  }
-
-  if (report.persistence !== null) {
-    text += field("persistence", `FAILED: ${report.persistence.message}`);
-  }
-
   text += field("rooms", `${plural(report.rooms.length, "room")} attached`);
-  for (const room of report.rooms) {
-    const synced = room.synced ? "synced" : "not synced";
-    text += `  ${room.room}  applied seq ${room.appliedSeq}  ${synced}\n`;
-  }
+  text += field("local log", `${plural(report.logEntries, "update record")} stored`);
+  const failures =
+    hub.status === "connecting" && failureCount === 0
+      ? "hub state not yet known"
+      : `${plural(failureCount, "detected failure")}${failureCount === 0 ? "" : " — run `ub doctor`"}` +
+        (hub.status === "connecting" ? "; hub state not yet known" : "");
+  text += field("failures", failures);
   return text;
 }
 
@@ -236,17 +213,18 @@ export const STATUS_OPTIONS = {
 
 export const STATUS_HELP = `usage: ub status [--json]
 
-What this directory resolves to right now: the workspace and which layer chose
-it, any layer that named something different and lost, the hub endpoint, whether
-a signing secret is configured, the local database and the sync state of every
-room attached to it. Reads only — nothing here changes any configuration.
+Overview of this machine's workspace, configured hub endpoint, connection state,
+pending rooms and sync messages, attached rooms, records stored in the local log and
+detected failures. Connection does not mean the hub acknowledged every change.
+Run \`ub doctor\` for failure details and recovery guidance. Nothing here changes
+any configuration.
 
 options:
-  --json            the same report as JSON on stdout, for a script to read
+  --json            full report as JSON, including rooms, configuration and paths
   -h, --help        show this help
 
-The signing secret is never printed; the report says only whether one is there
-and where it came from.
+The JSON report includes configuration sources and credential presence; the
+signing secret is never printed. Warnings remain on stderr.
 `;
 
 export async function statusCommand(
