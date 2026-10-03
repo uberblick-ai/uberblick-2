@@ -1579,7 +1579,7 @@ for (const scheme of ["light", "dark"] as const) {
     const menu = page.getByRole("listbox", { name: "Block types" });
     await expect(menu).toBeVisible();
     const card = await paintedIn(
-      page.locator('[data-slot="popover-content"]').filter({ has: menu }),
+      page.locator('[data-slot="caret-menu-content"]').filter({ has: menu }),
       "background-color",
     );
     const entry = await paintedIn(

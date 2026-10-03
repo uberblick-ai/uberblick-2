@@ -28,6 +28,7 @@ export const CaretMenuKeys = Extension.create<Record<string, never>, CaretMenuSt
     return [new Plugin({
       props: {
         handleKeyDown: (_view, event) => {
+          if (event.isComposing || event.keyCode === 229) return false;
           for (const menu of menus) {
             if (menu.handleKey?.(event.key)) return true;
           }

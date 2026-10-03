@@ -7,8 +7,9 @@
  * transactions live in `editor/block-menu.ts`; what this file owns is pixels,
  * focus and keys.
  *
- * ProseMirror owns composition and menu keys; the shared CaretMenu composes
- * Popover placement and dismissal. Trigger state and picks remain the model's.
+ * ProseMirror owns composition and menu keys; the shared CaretMenu uses
+ * Floating UI placement and native-click dismissal. Trigger state and picks
+ * remain the model's.
  * The gutter is reserved rather than inserted, so hover never moves prose.
  *
  * The menu is local UI, and the document does not change until an entry is
@@ -392,7 +393,6 @@ export function BlockMenu({
         anchor={path === "gutter" ? gutterButton : undefined}
         open={open}
         onDismiss={dismiss}
-        onFieldEscape={() => handleKey("Escape")}
         listKey={list}
         listId={listId}
         label="Block types"

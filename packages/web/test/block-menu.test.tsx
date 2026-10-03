@@ -76,7 +76,7 @@ interface Mounted {
  *
  * The React root gets a container beside the editor host: rendering into the
  * frame itself would have React clear the frame's children and detach the editor.
- * The card is a Popover portal, so queries also include document.body.
+ * The card is a React portal, so queries also include document.body.
  */
 function mountMenu(ydoc: Y.Doc): Mounted {
   const { editor, element } = mountEditor(ydoc);
@@ -374,7 +374,7 @@ describe("the slash menu", () => {
       expect(blocks[0]).toMatchObject({ id: ids[0], type: "heading", level: 2 });
       expect(blocks[0]?.text).toBe("");
       expect(soundIds(ydoc)).toEqual([ids[0]]);
-      expect(query('[data-slot="popover-content"]')).toBeNull();
+      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
 
       // One gesture, one undo step: the block is a paragraph holding "/he"
       // again, not a heading holding it.
@@ -397,15 +397,15 @@ describe("the slash menu", () => {
     try {
       caret(editor, 0, 0);
       type(editor, "/co");
-      expect(query('[data-slot="popover-content"]')).not.toBeNull();
+      expect(query('[data-slot="caret-menu-content"]')).not.toBeNull();
 
       press("Escape");
-      expect(query('[data-slot="popover-content"]')).toBeNull();
+      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
       expect(getBlocks(ydoc)[0]).toMatchObject({ type: "paragraph", text: "/co" });
 
       // Dismissed for this session only: typing on keeps the menu shut…
       type(editor, "de");
-      expect(query('[data-slot="popover-content"]')).toBeNull();
+      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
       expect(getBlocks(ydoc)[0]?.text).toBe("/code");
 
       // …and clearing the block opens it again on the next slash.
@@ -414,7 +414,7 @@ describe("the slash menu", () => {
       });
       caret(editor, 0, 0);
       type(editor, "/");
-      expect(query('[data-slot="popover-content"]')).not.toBeNull();
+      expect(query('[data-slot="caret-menu-content"]')).not.toBeNull();
     } finally {
       unmount();
     }
@@ -434,18 +434,18 @@ describe("the slash menu", () => {
     const { editor, query, unmount } = mountMenu(ydoc);
     try {
       caret(editor, 0, 3);
-      expect(query('[data-slot="popover-content"]')).toBeNull();
+      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
 
       // Typing on in it does not open one either: the block was not empty
       // before this keystroke, so the slash is text somebody wrote.
       type(editor, "d");
-      expect(query('[data-slot="popover-content"]')).toBeNull();
+      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
       expect(getBlocks(ydoc)[0]?.text).toBe("/cod");
 
       // The empty block below is where a slash *is* a command.
       caret(editor, 1, 0);
       type(editor, "/co");
-      expect(query('[data-slot="popover-content"]')).not.toBeNull();
+      expect(query('[data-slot="caret-menu-content"]')).not.toBeNull();
     } finally {
       unmount();
     }
@@ -471,7 +471,7 @@ describe("the slash menu", () => {
       });
       expect(getBlocks(ydoc)[0]?.text).toBe("/cod");
       expect(slashTriggerAt(editor)).toMatchObject({ query: "cod" });
-      expect(query('[data-slot="popover-content"]')).toBeNull();
+      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
 
       // A paste that happens to be a slash command is content, not a command.
       act(() => {
@@ -481,13 +481,13 @@ describe("the slash menu", () => {
         );
       });
       expect(getBlocks(ydoc)[0]?.text).toBe("/code");
-      expect(query('[data-slot="popover-content"]')).toBeNull();
+      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
 
       // And an undo that restores a slash-looking block is not a request either.
       act(() => {
         editor.commands.keyboardShortcut("Mod-z");
       });
-      expect(query('[data-slot="popover-content"]')).toBeNull();
+      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
     } finally {
       unmount();
       peer.destroy();
@@ -536,14 +536,14 @@ describe("the slash menu", () => {
       type(editor, "/he");
       const trigger = slashTriggerAt(editor);
       expect(trigger).not.toBeNull();
-      expect(query('[data-slot="popover-content"]')).not.toBeNull();
+      expect(query('[data-slot="caret-menu-content"]')).not.toBeNull();
 
       fromPeer(() => {
         deleteBlock(peer, ids[0] ?? "");
       });
 
       // The session went with the block, so the menu is closed…
-      expect(query('[data-slot="popover-content"]')).toBeNull();
+      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
       // …and the command refuses the trigger it was holding, rather than
       // deleting the content of whatever now sits at that position.
       expect(
@@ -574,7 +574,7 @@ describe("the slash menu", () => {
     try {
       caret(editor, 0, 0);
       type(editor, "/nope");
-      expect(query('[data-slot="popover-content"]')).toBeNull();
+      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
       expect(editor.view.dom.hasAttribute("aria-activedescendant")).toBe(false);
       expect(editor.view.dom.hasAttribute("aria-controls")).toBe(false);
 
@@ -622,7 +622,7 @@ describe("the gutter menu", () => {
       // reflow — but not offered to the pointer or the tab order.
       expect(mounted.query(".ub-gutter-add")).not.toBeNull();
       expect(mounted.query(".ub-gutter-add-on")).toBeNull();
-      expect(mounted.query('[data-slot="popover-content"]')).toBeNull();
+      expect(mounted.query('[data-slot="caret-menu-content"]')).toBeNull();
     } finally {
       mounted.unmount();
     }
@@ -669,13 +669,13 @@ describe("the gutter menu", () => {
     const mounted = mountMenu(ydoc);
     try {
       openGutterMenu(mounted, 0);
-      expect(mounted.query('[data-slot="popover-content"]')).not.toBeNull();
+      expect(mounted.query('[data-slot="caret-menu-content"]')).not.toBeNull();
 
       fromPeer(() => {
         deleteBlock(peer, ids[0] ?? "");
       });
 
-      expect(mounted.query('[data-slot="popover-content"]')).toBeNull();
+      expect(mounted.query('[data-slot="caret-menu-content"]')).toBeNull();
       expect(mounted.query(".ub-gutter-add-on")).toBeNull();
       // The surviving block is untouched: nothing was inserted anywhere.
       expect(getBlocks(ydoc).map((block) => [block.id, block.text])).toEqual([
@@ -712,7 +712,7 @@ describe("the gutter menu", () => {
       fromPeer(() => {
         deleteBlock(peer, ids[0] ?? "");
       });
-      expect(mounted.query('[data-slot="popover-content"]')).not.toBeNull();
+      expect(mounted.query('[data-slot="caret-menu-content"]')).not.toBeNull();
 
       pick(mounted, "Mermaid");
 
@@ -749,7 +749,7 @@ describe("the gutter menu", () => {
       // The old blocks keep their ids; the new one gets one of its own.
       const after = soundIds(ydoc);
       expect([after[0], after[2]]).toEqual(ids);
-      expect(mounted.query('[data-slot="popover-content"]')).toBeNull();
+      expect(mounted.query('[data-slot="caret-menu-content"]')).toBeNull();
 
       // The caret is inside the new block, so the reader can just type.
       const { $head } = mounted.editor.state.selection;
@@ -844,7 +844,7 @@ describe("the gutter menu", () => {
           }),
         );
       });
-      expect(mounted.query('[data-slot="popover-content"]')).toBeNull();
+      expect(mounted.query('[data-slot="caret-menu-content"]')).toBeNull();
       expect(getBlocks(ydoc).map((block) => block.id)).toEqual(ids);
     } finally {
       mounted.unmount();

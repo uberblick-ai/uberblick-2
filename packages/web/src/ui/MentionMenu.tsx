@@ -4,7 +4,7 @@
  *
  * The model — when an `@` is a mention, what it offers, and the edit behind
  * picking an entry — is `editor/mention-menu.ts`; what this file owns is pixels,
- * focus and keys. The shared CaretMenu composes Popover and ProseMirror's
+ * focus and keys. The shared CaretMenu uses Floating UI and ProseMirror's
  * native key handling for both menus.
  *
  * - **Nothing matching keeps the card open.** The block menu closes on an empty

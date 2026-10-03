@@ -21,7 +21,7 @@ function menu(page: Page, name = "Block types"): Locator {
   return page.getByRole("listbox", { name });
 }
 function card(page: Page, name = "Block types"): Locator {
-  return page.locator('[data-slot="popover-content"]').filter({ has: menu(page, name) });
+  return page.locator('[data-slot="caret-menu-content"]').filter({ has: menu(page, name) });
 }
 
 async function createDoc(page: Page, title: string): Promise<void> {
@@ -162,7 +162,86 @@ for (const width of [375, 744, 932, 1280, 1366, 1470]) {
   });
 }
 
-test("an outside touch scroll keeps the menu open; a tap dismisses slash and @ until a fresh trigger", async ({
+test("a short pane bounds all three cards and scrolls their lists internally", async ({ page }) => {
+  await openDoc(page);
+  for (let index = 0; index < 8; index += 1) {
+    await createDoc(page, `height-target1067 ${index}`);
+  }
+  await createDoc(page, "short pane writing");
+  const target = await longDocument(page);
+  await page.setViewportSize({ width: 375, height: 320 });
+  await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
+
+  for (const surface of ["slash", "gutter", "mention"] as const) {
+    const name = surface === "mention" ? "Documents" : "Block types";
+    await focusBlock(target);
+    if (surface === "gutter") {
+      await target.hover();
+      await page.getByRole("button", { name: "Insert block below" }).click();
+    } else {
+      await page.keyboard.type(surface === "slash" ? "/" : "@height-target1067");
+    }
+    await alignBlock(target, 42);
+    await staysInsidePane(page, name);
+    await expect.poll(() => menu(page, name).evaluate((element) =>
+      element.clientHeight > 0 && element.scrollHeight > element.clientHeight,
+    )).toBe(true);
+    await menu(page, name).hover();
+    await page.mouse.wheel(0, 200);
+    await expect.poll(() => menu(page, name).evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await staysInsidePane(page, name);
+    await page.keyboard.press("Escape");
+    await expect(menu(page, name)).toHaveCount(0);
+    if (surface === "slash") await page.keyboard.press("Backspace");
+  }
+});
+
+test("composing Escape stays native on slash, gutter search and @; ordinary Escape closes and focuses prose", async ({ page }) => {
+  await openDoc(page);
+  await createDoc(page, "escape-target1067");
+  for (const surface of ["slash", "gutter", "mention"] as const) {
+    await createDoc(page, `Escape ${surface}`);
+    const name = surface === "mention" ? "Documents" : "Block types";
+    const control = surface === "gutter"
+      ? page.getByRole("combobox", { name: "Search blocks" })
+      : prose(page);
+    if (surface === "gutter") {
+      await prose(page).locator(":scope > p").first().hover();
+      await page.getByRole("button", { name: "Insert block below" }).click();
+      await control.fill("he");
+    } else {
+      await page.keyboard.type(surface === "slash" ? "/he" : "@escape-target1067");
+    }
+    await expect(menu(page, name)).toBeVisible();
+    await expect(control).toBeFocused();
+
+    // Cancelable events traverse the browser's real key listeners. This proves
+    // our wiring leaves both composition signals untouched, not native IME behavior.
+    for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+      const result = await control.evaluate((element, signal) => {
+        const focus = document.activeElement;
+        const event = new KeyboardEvent("keydown", {
+          key: "Escape", code: "Escape", bubbles: true, cancelable: true, ...signal,
+        });
+        const unprevented = element.dispatchEvent(event);
+        return {
+          unprevented,
+          defaultPrevented: event.defaultPrevented,
+          focusRetained: document.activeElement === focus,
+        };
+      }, composition);
+      expect(result).toEqual({ unprevented: true, defaultPrevented: false, focusRetained: true });
+      await expect(menu(page, name)).toBeVisible();
+      await expect(control).toBeFocused();
+    }
+
+    await page.keyboard.press("Escape");
+    await expect(menu(page, name)).toHaveCount(0);
+    await expect(prose(page)).toBeFocused();
+  }
+});
+
+test("outside touch scroll preserves menus; taps and clicks dismiss, and fresh triggers restore slash and @", async ({
   browser, browserName,
 }) => {
   test.skip(browserName !== "chromium", "native touch-move automation requires Chromium's input protocol");
@@ -228,6 +307,18 @@ test("an outside touch scroll keeps the menu open; a tap dismisses slash and @ u
     await menu(page, "Documents").getByRole("option", { name: "touch-target1067", exact: true }).tap();
     await expect(menu(page, "Documents")).toHaveCount(0);
     await expect(heading.getByRole("link", { name: "touch-target1067" })).toBeVisible();
+
+    // The click opening the gutter must retain its focused search. Both a
+    // subsequent outside tap and an outside mouse click then dismiss it.
+    for (const outside of ["tap", "click"] as const) {
+      await heading.hover();
+      await page.getByRole("button", { name: "Insert block below" }).click();
+      await expect(menu(page)).toBeVisible();
+      await expect(page.getByRole("combobox", { name: "Search blocks" })).toBeFocused();
+      if (outside === "tap") await page.touchscreen.tap(point.x, point.y);
+      else await page.mouse.click(point.x, point.y);
+      await expect(menu(page)).toHaveCount(0);
+    }
     await session.detach();
   } finally {
     await context.close();

@@ -35,11 +35,8 @@ function PopoverContent({
   className,
   align = "center",
   sideOffset = 6,
-  variant = "default",
   ...props
-}: ComponentProps<typeof PopoverPrimitive.Content> & {
-  variant?: "default" | "caret-menu";
-}): ReactElement {
+}: ComponentProps<typeof PopoverPrimitive.Content>): ReactElement {
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content
@@ -47,10 +44,7 @@ function PopoverContent({
         align={align}
         sideOffset={sideOffset}
         className={cn(
-          "z-50 rounded-(--radius) shadow-(--shadow-float) outline-hidden",
-          variant === "caret-menu"
-            ? "flex w-[17rem] max-w-(--radix-popover-content-available-width) max-h-(--radix-popover-content-available-height) flex-col overflow-hidden border border-(--border) bg-card p-[0.3rem] text-card-foreground"
-            : "w-72 border border-border bg-popover p-3 text-[0.85rem] text-popover-foreground",
+          "z-50 w-72 rounded-(--radius) border border-border bg-popover p-3 text-[0.85rem] text-popover-foreground shadow-(--shadow-float) outline-hidden",
           className,
         )}
         {...props}

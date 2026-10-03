@@ -126,7 +126,7 @@ function mountPicker(ydoc: Y.Doc, context: DocLinkContext): Mounted {
   };
   return {
     editor,
-    card: () => document.body.querySelector('[data-slot="popover-content"]'),
+    card: () => document.body.querySelector('[data-slot="caret-menu-content"]'),
     labels: () =>
       [...document.body.querySelectorAll('[role="option"]')].map(
         (node) => node.getAttribute("aria-label") ?? "",
