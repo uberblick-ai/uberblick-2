@@ -130,7 +130,7 @@ async function settle(gesture: () => void): Promise<void> {
 
 /** The confirming key may arrive either side of compositionend. */
 function composingKey(
-  field: HTMLTextAreaElement,
+  field: HTMLTextAreaElement | HTMLInputElement,
   key: string,
   afterCompositionEnd: boolean,
 ): void {
@@ -513,6 +513,36 @@ describe("the prose selection toolbar", () => {
       ).toMatchObject({
         docLink: { docId: "11111111-2222-3333-4444-555555555555" },
       });
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it.each([
+    ["before compositionend", false],
+    ["after compositionend", true],
+  ] as const)("keeps a composing Escape %s in the link field, then returns to the toolbar", (_order, afterCompositionEnd) => {
+    const { ydoc } = annotatedDoc();
+    const view = mountComposer(ydoc);
+    try {
+      select(view.editor, 1, 4, 15);
+      const before = snapshotFragment(ydoc);
+      act(() => tool(view, "External link").click());
+      linkValue(view, "https://example.com/日本語");
+      const field = view.query<HTMLInputElement>(".ub-selection-link-input")!;
+
+      composingKey(field, "Escape", afterCompositionEnd);
+      expect(view.query(".ub-selection-link-input")).toBe(field);
+      expect(field.value).toBe("https://example.com/日本語");
+      expect(document.activeElement).toBe(field);
+      expect(snapshotFragment(ydoc)).toEqual(before);
+
+      act(() => field.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Escape", bubbles: true, cancelable: true,
+      })));
+      expect(view.query(".ub-selection-link-input")).toBeNull();
+      expect(view.query(".ub-selection-toolbar")).not.toBeNull();
+      expect(snapshotFragment(ydoc)).toEqual(before);
     } finally {
       view.unmount();
     }

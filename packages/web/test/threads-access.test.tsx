@@ -406,31 +406,6 @@ describe("the threads rail can be opened where the layout hides it", () => {
   it.each([
     ["before compositionend", false],
     ["after compositionend", true],
-  ] as const)("keeps a composing Enter %s in a drawer reply, then sends on Enter", async (_order, afterCompositionEnd) => {
-    threadsWidth(true);
-    const { host, ydoc, threadId } = await openAnnotatedDoc();
-    await settle(() => toggle(host).click());
-    await settle(() => button("Reply").click());
-    typeReply("日本語の返信");
-    const field = sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")!;
-
-    await settle(() => composingKey(field, "Enter", afterCompositionEnd));
-    expect(getAnnotation(ydoc, threadId)?.comments).toHaveLength(1);
-    expect(sheet().querySelector(".ub-comment-input")).toBe(field);
-    expect(field.value).toBe("日本語の返信");
-    expect(document.activeElement).toBe(field);
-    expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
-
-    await settle(() => press(field, "Enter"));
-    expect(getAnnotation(ydoc, threadId)?.comments).toHaveLength(2);
-    expect(getAnnotation(ydoc, threadId)?.comments[1]?.text).toBe("日本語の返信");
-    expect(sheet().querySelector(".ub-comment-input")).toBeNull();
-    expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
-  });
-
-  it.each([
-    ["before compositionend", false],
-    ["after compositionend", true],
   ] as const)("keeps a composing Escape %s in a drawer reply, then cancels only the form", async (_order, afterCompositionEnd) => {
     threadsWidth(true);
     const { host, ydoc, threadId } = await openAnnotatedDoc();

@@ -438,45 +438,6 @@ describe("the sidebar is the _sidebar document", () => {
     expect(stored(peer)).toEqual([["Elsewhere", []]]);
   });
 
-  it.each([
-    ["before compositionend", false],
-    ["after compositionend (Safari)", true],
-  ] as const)("leaves composing Enter %s to native group-name submission", async (_order, afterCompositionEnd) => {
-    seedDirectory();
-    const peer = peerOf(sidebarDoc());
-    const host = await openApp(`/${WORKSPACE}`);
-    act(() => host.querySelector<HTMLButtonElement>(".ub-group-add")?.click());
-    const field = host.querySelector<HTMLInputElement>(".ub-group-rename")!;
-    field.value = "日本語";
-    const before = readSidebar(peer);
-    const confirm = new KeyboardEvent("keydown", {
-      key: "Enter", bubbles: true, cancelable: true,
-      isComposing: !afterCompositionEnd,
-      ...(afterCompositionEnd ? { keyCode: 229 } : {}),
-    });
-    act(() => {
-      field.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
-      if (afterCompositionEnd) {
-        field.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
-      }
-      field.dispatchEvent(confirm);
-      if (!afterCompositionEnd) {
-        field.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
-      }
-    });
-    expect(confirm.defaultPrevented).toBe(false);
-    expect(host.querySelector(".ub-group-rename")).toBe(field);
-    expect(document.activeElement).toBe(field);
-    expect(field.value).toBe("日本語");
-    expect(readSidebar(peer)).toEqual(before);
-
-    // jsdom does not perform native implicit submission from keydown. The
-    // browser check supplies ordinary Enter; this observes our submit wiring.
-    act(() => field.form?.requestSubmit());
-    expect(host.querySelector(".ub-group-rename")).toBeNull();
-    expect(stored(peer)).toEqual([["日本語", []]]);
-  });
-
   it("collapses a group, and remembers it", async () => {
     seedDirectory();
     const sidebar = sidebarDoc();

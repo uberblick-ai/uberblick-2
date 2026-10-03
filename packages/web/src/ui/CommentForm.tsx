@@ -65,7 +65,9 @@ export function CommentForm({
     <div className="ub-comment-form">
       <Textarea
         ref={field}
-        className="ub-comment-input resize-y"
+        // Keep the floating card's measured height stable above its selection.
+        // Replies in the rail can grow and resize with their content.
+        className="ub-comment-input resize-y in-[.ub-composer]:max-h-16 in-[.ub-composer]:resize-none"
         rows={2}
         // New-comment composers focus on opening; reply forms can also remount
         // on a resize, so their pane owns the initial focus gesture instead.
