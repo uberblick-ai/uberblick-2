@@ -66,6 +66,10 @@
 @source "./WorkspaceSwitcher.tsx";
 @source "./OutlinePane.tsx";
 @source "./DocChrome.tsx";
+@source "./EditorPane.tsx";
+@source "../shell/DocumentList.tsx";
+@source "./PeerCluster.tsx";
+@source "./SyncPanel.tsx";
 
 /* The bridge. Left side: what shadcn's markup asks for. Right side: what this
    product already is. No colour is defined here. The sidebar mappings serve

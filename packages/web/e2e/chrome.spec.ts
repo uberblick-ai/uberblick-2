@@ -1287,10 +1287,11 @@ test("the document collaborator cluster stays compact and jumps once without mov
     }
     expect(secondCircle.left).toBeLessThan(firstCircle.right);
     await visible.first().focus();
-    await expect(visible.first().locator(".ub-peer-tooltip")).toHaveCSS(
-      "opacity",
-      "1",
+    const tooltip = page.getByRole("tooltip");
+    await expect(tooltip).toContainText(
+      (await visible.first().getAttribute("aria-label"))?.split(" · ").slice(0, 2).join(" · ") ?? "",
     );
+    await expect(page.locator('[data-slot="tooltip-content"]')).toBeVisible();
     await expect(visible.first()).toHaveCSS("outline-width", "2px");
 
     const orderBefore = await visible.evaluateAll((controls) =>

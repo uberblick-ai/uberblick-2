@@ -721,8 +721,8 @@ describe("the sidebar's fixed navigation", () => {
     ]);
     expect(navRows(host).map((row) => row.textContent)).toEqual([
       "All docs",
-      "Dashboard",
-      "Product requirements",
+      "Dashboard Coming soon",
+      "Product requirements Coming soon",
     ]);
 
     // A pin arrives and the groups appear under it; the section has not moved,
@@ -758,9 +758,9 @@ describe("the sidebar's fixed navigation", () => {
       "true",
       "true",
     ]);
-    expect(soon.map((row) => row.getAttribute("title"))).toEqual([
-      "Coming soon",
-      "Coming soon",
+    expect(soon.map((row) => row.textContent)).toEqual([
+      "Dashboard Coming soon",
+      "Product requirements Coming soon",
     ]);
 
     for (const row of soon) {

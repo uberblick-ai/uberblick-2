@@ -855,8 +855,9 @@ describe("the filter", () => {
     // answer either — no unavailable state, no lag or cap caveat.
     expect(field.labels?.[0]?.textContent).toBe("Filter this list by title");
     expect(field.placeholder).toBe("Filter by title");
+    // Pin availability is a separate reading of the sidebar's write state.
     expect(host.textContent).not.toMatch(
-      /unavailable|document text|lag|first \d+ matches|Loading/i,
+      /document text|lag|first \d+ matches|Loading/i,
     );
 
     await act(async () => typeInto(field, "overview"));
@@ -972,6 +973,7 @@ describe("the sidebar entry", () => {
     const sidebarPeer = peerOf(sidebarDoc());
 
     const host = await openApp(allPath(WORKSPACE));
+    expect(host.querySelector(".ub-docs-pin-unavailable")).toBeNull();
     const pin = (): HTMLButtonElement | null =>
       host.querySelector<HTMLButtonElement>(".ub-docs-pin");
     expect(pin()?.getAttribute("aria-pressed")).toBe("false");
@@ -986,6 +988,36 @@ describe("the sidebar entry", () => {
     await act(async () => pin()?.click());
     expect(readSidebar(sidebarPeer).map((group) => group.docs)).toEqual([[]]);
     expect(pin()?.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it.each([
+    ["offline", { connected: false, writable: false }],
+    ["connected read-only", { writable: false }],
+    ["not yet synced", { synced: false }],
+  ] as const)("visibly explains disabled pin controls while the sidebar is %s", async (_state, patch) => {
+    upsertDirectoryEntry(directoryDoc(), { uuid: ONE, title: "Overview" });
+    const name = sidebarRoom(WORKSPACE);
+    const connection = room(name);
+    const status = { ...LIVE, ...patch };
+    rooms.set(name, {
+      ...connection,
+      status,
+      onStatusChange: (listener: (next: RoomStatus) => void) => {
+        listener(status);
+        return () => {};
+      },
+    });
+
+    const host = await openApp(allPath(WORKSPACE));
+    const reason = host.querySelector(".ub-docs-pin-unavailable");
+    const pin = host.querySelector<HTMLButtonElement>(".ub-docs-pin");
+    expect(reason?.textContent).toContain(
+      "Pin changes unavailable while the sidebar is not ready to write.",
+    );
+    expect(pin?.disabled).toBe(true);
+    expect(pin?.getAttribute("aria-describedby")).toBe(reason?.id);
+    await act(async () => pin?.click());
+    expect(readSidebar(connection.ydoc)).toEqual([]);
   });
 });
 

@@ -428,6 +428,31 @@ describe("an archived document is readable, says so, and offers one way back", (
     });
   }
 
+  it("visibly explains unavailable Restore for offline and connected read-only directories", async () => {
+    const directoryName = directoryRoom(WORKSPACE);
+    const directory = room(directoryName).ydoc;
+    const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
+    initDoc(ydoc, { uuid: UUID, title: "Retired protocol" });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired protocol" });
+    tombstoneDirectoryEntry(directory, UUID);
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+
+    expect(host.querySelector(".ub-restore-unavailable")).toBeNull();
+    for (const connected of [true, false]) {
+      emitStatus(directoryName, { writable: false, connected });
+      expect(restoreButton(host)?.disabled).toBe(true);
+      expect(host.querySelector(".ub-restore-unavailable")?.textContent).toContain(
+        "Restore is unavailable while the directory is not ready to write.",
+      );
+      act(() => restoreButton(host)?.click());
+      expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
+    }
+
+    emitStatus(directoryName, { writable: true, connected: true });
+    expect(restoreButton(host)?.disabled).toBe(false);
+    expect(host.querySelector(".ub-restore-unavailable")).toBeNull();
+  });
+
   it("follows the directory tombstone in both directions, under an open pane", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
