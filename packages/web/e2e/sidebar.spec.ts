@@ -86,6 +86,28 @@ async function openDrawer(page: Page, settings = false): Promise<void> {
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
 }
 
+test("narrowing hands sidebar focus to the opener and preserves pane focus", async ({ browser }) => {
+  const page = await openApp(browser);
+  const paneControl = page.locator(".ub-pane").getByRole("button", { name: "Working", exact: true });
+  await page.setViewportSize({ width: 1400, height: 832 });
+  await paneControl.focus();
+  await page.setViewportSize({ width: 820, height: 832 });
+  await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
+  await expect(paneControl).toBeFocused();
+
+  for (const settings of [false, true]) {
+    await page.setViewportSize({ width: 1400, height: 832 });
+    if (settings) {
+      await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+    }
+    await page.getByRole("button", { name: settings ? "Hide sidebar" : "Hide document list", exact: true }).focus();
+    await page.setViewportSize({ width: 820, height: 832 });
+    await expect(page.getByRole("button", { name: settings ? "Show sidebar" : "Show document list", exact: true })).toBeFocused();
+    await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
+  }
+});
+
 async function expectPaneClearsOpener(page: Page): Promise<{ left: number; width: number }> {
   await page.locator(".ub-body").evaluate(async (body) => {
     await Promise.all(body.getAnimations({ subtree: true }).filter((animation) => animation instanceof CSSTransition).map((animation) => animation.finished.catch(() => undefined)));

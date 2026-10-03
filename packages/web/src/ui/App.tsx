@@ -377,10 +377,17 @@ export function App(): ReactElement {
     () => window.matchMedia?.(NARROW_LAYOUT_QUERY).matches ?? false,
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const hideSidebar = useRef<HTMLButtonElement | null>(null);
+  const restoreSidebar = useRef<HTMLButtonElement | null>(null);
+  const focusAfterNarrowing = useRef(false);
   useEffect(() => {
     const query = window.matchMedia?.(NARROW_LAYOUT_QUERY);
     if (query === undefined) return;
     const update = (): void => {
+      // Capture focus before switching branches unmounts the docked sidebar.
+      focusAfterNarrowing.current = query.matches && hideSidebar.current
+        ?.closest('[data-slot="sidebar-container"]')
+        ?.contains(document.activeElement) === true;
       setNarrowSidebar(query.matches);
       setSidebarOpen(false);
     };
@@ -388,10 +395,13 @@ export function App(): ReactElement {
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   }, []);
+  useEffect(() => {
+    if (!narrowSidebar || !focusAfterNarrowing.current) return;
+    focusAfterNarrowing.current = false;
+    restoreSidebar.current?.focus();
+  }, [narrowSidebar]);
   const closeSidebarDrawer = useCallback(() => setSidebarOpen(false), []);
   const [collapsed, setCollapsed] = useStoredFlag(SIDEBAR_COLLAPSED_KEY, false);
-  const hideSidebar = useRef<HTMLButtonElement | null>(null);
-  const restoreSidebar = useRef<HTMLButtonElement | null>(null);
   const previousCollapsed = useRef(collapsed);
 
   // Collapsing makes the control that received the gesture inert. Move focus to
