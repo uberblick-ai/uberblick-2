@@ -58,7 +58,7 @@
  * stay one hover away, and the machine value in `dateTime`.
  */
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
@@ -249,7 +249,7 @@ function ChangedStamp({
 
 function PinIcon({ active }: { active: boolean }): ReactElement {
   return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" className="ub-docs-pin-icon">
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="ub-docs-pin-icon block size-4">
       <path
         d="M9 3h6l-1 6 3 3v2h-4v7l-2-2v-5H7v-2l3-3-1-6Z"
         fill={active ? "currentColor" : "none"}
@@ -278,10 +278,11 @@ export function DocumentList({
   /** The sidebar as it stands: which group, if any, a row is pinned in. */
   groups: readonly SidebarGroup[];
   onSelect: (uuid: string) => void;
-  /** Pin or unpin a row, or null when there is no sidebar room to write to. */
+  /** Pin or unpin a row, or null until the sidebar is writable and synced. */
   onTogglePin: ((uuid: string) => void) | null;
 }): ReactElement {
   const status = useRoomStatus(connection);
+  const pinUnavailableId = useId();
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<Mode>("working");
   /**
@@ -350,6 +351,11 @@ export function DocumentList({
             onChange={(event) => setQuery(event.currentTarget.value)}
           />
         </label>
+        {onTogglePin === null && rows.length > 0 && (
+          <p id={pinUnavailableId} className="ub-docs-pin-unavailable mb-2 mt-0 text-xs text-(--muted-foreground)">
+            Pin changes unavailable while the sidebar is not ready to write.
+          </p>
+        )}
         <table className="ub-docs-table">
           <colgroup>
             <col />
@@ -446,8 +452,9 @@ export function DocumentList({
                   <td className="ub-docs-pin-cell">
                     <button
                       type="button"
-                      className="ub-docs-pin"
+                      className="ub-docs-pin cursor-pointer rounded-(--radius-sm) border-0 bg-transparent p-1 font-[inherit] text-(--muted-foreground) opacity-0 [.ub-docs-row:hover_&]:opacity-100 [.ub-docs-row:focus-within_&]:opacity-100 aria-pressed:opacity-100 [&:hover]:text-(--foreground)"
                       disabled={onTogglePin === null}
+                      aria-describedby={onTogglePin === null ? pinUnavailableId : undefined}
                       aria-pressed={groupOf.has(entry.uuid)}
                       aria-label={
                         onTogglePin === null

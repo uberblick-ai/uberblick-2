@@ -845,7 +845,7 @@ describe("the filter", () => {
         entries={[entry({ uuid: ONE, title: "Overview" })]}
         groups={[]}
         onSelect={() => {}}
-        onTogglePin={null}
+        onTogglePin={() => {}}
       />,
     );
     const field = filter(host);
@@ -893,12 +893,14 @@ describe("an empty list", () => {
     // otherwise be told it has none.
     const waiting = await open(false, []);
     expect(waiting.querySelector("table.ub-docs-table")).not.toBeNull();
+    expect(waiting.querySelector(".ub-docs-pin-unavailable")).toBeNull();
     expect(waiting.querySelector(".ub-docs-empty")?.textContent).toContain(
       "has not synced",
     );
     unmount();
 
     const synced = await open(true, []);
+    expect(synced.querySelector(".ub-docs-pin-unavailable")).toBeNull();
     expect(synced.querySelector(".ub-docs-empty")?.textContent).toBe(
       "No documents in this workspace yet.",
     );
@@ -972,6 +974,7 @@ describe("the sidebar entry", () => {
     const sidebarPeer = peerOf(sidebarDoc());
 
     const host = await openApp(allPath(WORKSPACE));
+    expect(host.querySelector(".ub-docs-pin-unavailable")).toBeNull();
     const pin = (): HTMLButtonElement | null =>
       host.querySelector<HTMLButtonElement>(".ub-docs-pin");
     expect(pin()?.getAttribute("aria-pressed")).toBe("false");
@@ -986,6 +989,36 @@ describe("the sidebar entry", () => {
     await act(async () => pin()?.click());
     expect(readSidebar(sidebarPeer).map((group) => group.docs)).toEqual([[]]);
     expect(pin()?.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it.each([
+    ["offline", { connected: false, writable: false }],
+    ["connected read-only", { writable: false }],
+    ["not yet synced", { synced: false }],
+  ] as const)("visibly explains disabled pin controls while the sidebar is %s", async (_state, patch) => {
+    upsertDirectoryEntry(directoryDoc(), { uuid: ONE, title: "Overview" });
+    const name = sidebarRoom(WORKSPACE);
+    const connection = room(name);
+    const status = { ...LIVE, ...patch };
+    rooms.set(name, {
+      ...connection,
+      status,
+      onStatusChange: (listener: (next: RoomStatus) => void) => {
+        listener(status);
+        return () => {};
+      },
+    });
+
+    const host = await openApp(allPath(WORKSPACE));
+    const reason = host.querySelector(".ub-docs-pin-unavailable");
+    const pin = host.querySelector<HTMLButtonElement>(".ub-docs-pin");
+    expect(reason?.textContent).toContain(
+      "Pin changes unavailable while the sidebar is not ready to write.",
+    );
+    expect(pin?.disabled).toBe(true);
+    expect(pin?.getAttribute("aria-describedby")).toBe(reason?.id);
+    await act(async () => pin?.click());
+    expect(readSidebar(connection.ydoc)).toEqual([]);
   });
 });
 

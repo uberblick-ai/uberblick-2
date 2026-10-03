@@ -535,9 +535,16 @@ function Soon({
 }): ReactElement {
   return (
     <li>
-      <button type="button" aria-disabled="true" title="Coming soon">
+      <button
+        type="button"
+        className="ub-nav-soon flex min-h-8.5 w-full cursor-default items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] text-sm text-(--sidebar-muted-foreground)"
+        aria-disabled="true"
+      >
         {icon}
-        {children}
+        <span>
+          {children}{" "}
+          <span className="block text-[11px]">Coming soon</span>
+        </span>
       </button>
     </li>
   );
@@ -565,7 +572,7 @@ function GridIcon(): ReactElement {
 
 function DashboardIcon(): ReactElement {
   return (
-    <svg className="ub-nav-icon" viewBox="0 0 16 16" aria-hidden="true">
+    <svg className="block size-4 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
       <path
         d="M2.5 13.5h11 M5 13.5V8 M8 13.5V3.5 M11 13.5V10"
         fill="none"
@@ -579,7 +586,7 @@ function DashboardIcon(): ReactElement {
 
 function ChecklistIcon(): ReactElement {
   return (
-    <svg className="ub-nav-icon" viewBox="0 0 16 16" aria-hidden="true">
+    <svg className="block size-4 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
       <path
         d="M2.5 4.8 L4 6.3 L6.5 3.3 M8.5 5h5 M2.5 10.8 L4 12.3 L6.5 9.3 M8.5 11h5"
         fill="none"
