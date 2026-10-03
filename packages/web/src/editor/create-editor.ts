@@ -13,6 +13,7 @@ import { Collaboration } from "./collaboration.js";
 import { CommentAnchors } from "./comment-anchors.js";
 import { DocLinks } from "./doc-links.js";
 import type { DocLinkContext } from "./doc-links.js";
+import { ExternalLinks } from "./external-links.js";
 import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
 import { paletteExtensions } from "./nodes.js";
@@ -81,6 +82,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // mark itself is schema, declared once in `marks.ts`, because
     // `uberblickSchema` above is one object for the whole process.
     DocLinks.configure({ context: options.docLinks ?? null }),
+    ExternalLinks,
     // The annotation mark's live half: resolved state sits beside the blocks
     // fragment in the Y.Doc, so a mark view reads it without storing it twice.
     CommentAnchors.configure({ ydoc: options.fragment.doc }),
