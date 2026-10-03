@@ -110,10 +110,9 @@ for (const width of [375, 744, 932, 1280, 1366, 1470]) {
     await createDoc(page, "menu writing");
     const target = await longDocument(page);
     await page.setViewportSize({ width, height: 620 });
-    // The current narrow layout shows the sidebar by default. Closing through
-    // its own control exposes the prose, without changing any layout CSS.
-    const hideSidebar = page.locator(".ub-sidebar-hide");
-    if (await hideSidebar.isVisible()) await hideSidebar.click();
+    // The narrow drawer starts closed. Wait for resizing to replace the
+    // docked sidebar rather than clicking its disappearing toggle.
+    await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
     await focusBlock(target);
     await page.keyboard.type("/");
     await alignBlock(target, 42);
@@ -175,8 +174,7 @@ test("an outside touch scroll keeps the menu open; a tap dismisses slash and @ u
     await createDoc(page, "touch writing");
     const target = await longDocument(page);
     await page.setViewportSize({ width: 375, height: 667 });
-    const hideSidebar = page.locator(".ub-sidebar-hide");
-    if (await hideSidebar.isVisible()) await hideSidebar.click();
+    await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
     await focusBlock(target);
     await page.keyboard.type("/");
     await alignBlock(target, 100);
