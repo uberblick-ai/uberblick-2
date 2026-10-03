@@ -471,25 +471,6 @@ body {
   line-height: 1;
 }
 
-/* The threads drawer's handle (#101). `display: none` here and `inline-flex`
-   inside the narrow media query below: above 1100px the rail is a column beside
-   the prose, and a button that opens what is already open says nothing. */
-.ub-threads-toggle {
-  display: none;
-  align-items: center;
-  gap: 0.35rem;
-  font: inherit;
-  font-size: 0.75rem;
-  line-height: 1.6;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.1rem 0.55rem;
-  background: var(--card-accent);
-  color: var(--secondary-foreground);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
 .ub-list-head {
   display: flex;
   align-items: center;
@@ -963,17 +944,6 @@ body {
 
 /* ---- document contents and the independent threads rail ---- */
 
-/* A compact sibling of the scrolling document pane: the body itself does not
-   scroll, so the trigger keeps this inset while the document moves beside it.
-   It reserves only its own button width, and nothing when the derived outline
-   is empty. */
-.ub-outline {
-  align-self: flex-start;
-  flex: none;
-  margin-block-start: 0.75rem;
-  margin-inline-end: 0.75rem;
-}
-
 .ub-outline-trigger {
   display: inline-flex;
   align-items: center;
@@ -1003,30 +973,6 @@ body {
 .ub-outline-trigger:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
-}
-
-/* Below this the three panes stop fitting; the rail is the one that goes — and
-   with it the only way to read a thread, which is what the drawer is for (#101).
-   The toggle appears, and opening it brings the rail back *over* the prose
-   instead of taking a column the window does not have. */
-@media (max-width: 1100px) {
-  /* At the threads rail's own breakpoint, release its reserved gap and keep
-     the compact document inset. SidebarProvider selects sidebar presentation
-     independently. */
-  .ub-document-pane {
-    --pane-document-inset: 1rem;
-    --document-rail-gap: 1rem;
-  }
-
-  /* The drawer occupies this edge. Do not leave a covered trigger in the Tab
-     order, and OutlinePane closes its portal when the same state turns on. */
-  .ub-outline-obscured {
-    display: none;
-  }
-
-  .ub-threads-toggle {
-    display: inline-flex;
-  }
 }
 
 @media (max-width: 767px) {

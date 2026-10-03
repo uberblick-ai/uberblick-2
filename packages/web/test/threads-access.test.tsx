@@ -89,7 +89,7 @@ function threadsWidth(narrow: boolean): { change: (next: boolean) => Promise<voi
   const listeners = new Set<(event: MediaQueryListEvent) => void>();
   const media = {
     get matches() { return matches; },
-    media: "(max-width: 1100px)",
+    media: "(width < 80rem)",
     addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
       listeners.add(listener);
     },
