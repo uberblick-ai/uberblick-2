@@ -7,8 +7,12 @@ services:
       target: hub
     environment:
       HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
-      # Optional operator-owned GitHub App for device sign-in. It reaches only
-      # the hub, never the served browser configuration or the web build.
+      # Unset/empty uses public Uberblick Login: no app registration is needed.
+      # Optionally set your own Device Flow app to control its settings/budget;
+      # init re-runs and updates preserve it. Remove and recreate to use the
+      # default again. See REMOTE.md for app settings and shared limits. GitHub
+      # names the app, not the hub; setup codes go only to the intended admin.
+      # This reaches only the hub, never browser configuration or the web build.
       HUB_GITHUB_CLIENT_ID: "${HUB_GITHUB_CLIENT_ID:-}"
     restart: unless-stopped
     stop_grace_period: 30s
