@@ -62,6 +62,26 @@ async function selectionRect(page: Page) {
   });
 }
 
+async function controlCenter(control: Locator) {
+  const box = await control.boundingBox();
+  if (box === null) throw new Error("e2e: selection control has no box");
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+async function expectModalOverControl(
+  page: Page,
+  point: { x: number; y: number },
+  slot: "sheet" | "dialog",
+): Promise<void> {
+  await expect.poll(() => page.evaluate(({ point, slot }) => {
+    const hit = document.elementFromPoint(point.x, point.y);
+    return {
+      modal: Boolean(hit?.closest(`[data-slot="${slot}-content"], [data-slot="${slot}-overlay"]`)),
+      composer: Boolean(hit?.closest('[data-slot="selection-composer"]')),
+    };
+  }, { point, slot })).toEqual({ modal: true, composer: false });
+}
+
 test("a human selection keeps its range through pointer, keyboard, link and comment actions", async ({
   page,
 }) => {
@@ -116,14 +136,39 @@ test("a human selection keeps its range through pointer, keyboard, link and comm
   await page.getByRole("button", { name: "Strikethrough" }).click();
   await expect(paragraph.locator("s")).toContainText(selected);
 
-  // Read-only is a live transition, not merely an initial condition.
+  // The confirmation must cover the selected toolbar before archiving makes
+  // the document read-only and removes it.
+  const coveredControl = await controlCenter(page.getByRole("button", { name: "Bold", exact: true }));
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
+  await expect(page.getByRole("alertdialog")).toBeVisible();
+  await expectModalOverControl(page, coveredControl, "dialog");
   await page.getByRole("alertdialog").getByRole("button", {
     name: "Archive document",
   }).click();
   await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
   await expect(toolbar).toHaveCount(0);
+});
+
+test("the iPhone sidebar drawer covers a selected toolbar and receives its pointer hits", async ({
+  browser,
+}) => {
+  const context = trackContext(await browser.newContext({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 390, height: 844 },
+  }));
+  const page = await context.newPage();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openDoc(page, "selected words behind the sidebar");
+  await page.keyboard.press("Shift+Home");
+  const bold = page.getByRole("button", { name: "Bold", exact: true });
+  await expect(bold).toBeVisible();
+  const coveredControl = await controlCenter(bold);
+
+  await page.getByRole("button", { name: "Show document list", exact: true }).tap();
+  await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
+  await expectModalOverControl(page, coveredControl, "sheet");
 });
 
 test("the measured toolbar flips below at the viewport edge and follows scrolling", async ({

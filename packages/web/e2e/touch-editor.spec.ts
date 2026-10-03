@@ -287,6 +287,37 @@ test("focused link and comment fields follow visual viewport resize and scroll w
   expect(field.y + field.height).toBeLessThanOrEqual(keyboardHeight + 1);
 });
 
+test("selection chrome follows a peer edit within a line without an editor resize", async ({ browser }) => {
+  const context = trackContext(await browser.newContext({ viewport: { width: 1280, height: 800 } }));
+  const page = await context.newPage();
+  await openDoc(page, ["preface selected end"]);
+  const paragraph = editor(page).locator(":scope > p").first();
+  await paragraph.evaluate((element) => {
+    const text = element.firstChild;
+    if (!(text instanceof Text)) throw new Error("e2e: missing prose text");
+    const range = document.createRange();
+    range.setStart(text, 8);
+    range.setEnd(text, 16);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await expect(card(page)).toBeVisible();
+  const before = await card(page).boundingBox();
+  const blockBefore = await paragraph.boundingBox();
+  if (before === null || blockBefore === null) throw new Error("e2e: missing selection geometry");
+
+  // A range can move inside one line while ResizeObserver sees the same editor
+  // box. Transactions must refresh its virtual reference without frame polling.
+  const peer = await context.newPage();
+  await peer.goto(page.url());
+  await placeCaret(peer, "start");
+  await peer.keyboard.insertText("moving prefix ");
+  await expect(paragraph).toHaveText("moving prefix preface selected end");
+  expect(await paragraph.boundingBox()).toEqual(blockBefore);
+  await expect.poll(async () => (await card(page).boundingBox())?.x ?? before.x).toBeGreaterThan(before.x + 10);
+});
+
 test("a code selection has a 44px Comment-only affordance below it on touch", async ({ browser }, info) => {
   const page = await touchPage(browser, info);
   await openDoc(page, [""]);

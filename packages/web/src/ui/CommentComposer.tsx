@@ -391,10 +391,11 @@ export function CommentComposer({
         }
       }
     };
-    // Range geometry also moves after edits and font/layout changes. autoUpdate
-    // owns pane and visual viewport scroll/resize, including keyboard changes.
-    const stop = autoUpdate(reference, element, update, { animationFrame: true });
-    return () => { disposed = true; stop(); };
+    // Transactions move the range within the editor even without resizing it.
+    // autoUpdate owns layout, pane and visual viewport scroll/resize.
+    editor.on("transaction", update);
+    const stop = autoUpdate(reference, element, update);
+    return () => { disposed = true; editor.off("transaction", update); stop(); };
   }, [editor, host, open, mode, touch]);
 
   if (draft === null) return null;
@@ -438,7 +439,7 @@ export function CommentComposer({
       ref={floating}
       data-slot="selection-composer"
       data-input={touch ? "touch" : "fine"}
-      className={`ub-composer fixed top-0 left-0 z-50 flex overflow-auto text-card-foreground shadow-(--shadow-float) data-[input=touch]:[&_[data-selection-tool]]:min-h-11 data-[input=touch]:[&_[data-selection-tool]]:min-w-11 data-[input=touch]:[&_input]:min-h-11 data-[input=touch]:[&_input]:text-base [@media(any-pointer:coarse)]:[&_[data-selection-tool]]:min-h-11 [@media(any-pointer:coarse)]:[&_[data-selection-tool]]:min-w-11 [@media(any-pointer:coarse)]:[&_input]:min-h-11 [@media(any-pointer:coarse)]:[&_input]:text-base ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) border-l-2 border-l-brand bg-card px-[0.6rem] py-2 text-[0.85rem]" : mode === "toolbar" && !prose ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-[calc(var(--radius-sm)+2px)] border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}
+      className={`ub-composer fixed top-0 left-0 z-5 flex overflow-auto text-card-foreground shadow-(--shadow-float) ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) border-l-2 border-l-brand bg-card px-[0.6rem] py-2 text-[0.85rem]" : mode === "toolbar" && !prose ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-[calc(var(--radius-sm)+2px)] border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}
     >
       {mode === "comment" ? (
         <>
