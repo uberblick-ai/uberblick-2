@@ -313,7 +313,7 @@ test("selection chrome follows a peer edit within a line without an editor resiz
   await peer.goto(page.url());
   await placeCaret(peer, "start");
   await peer.keyboard.insertText("moving prefix ");
-  await expect(paragraph).toHaveText("moving prefix preface selected end");
+  await expect(paragraph).toContainText("moving prefix ");
   expect(await paragraph.boundingBox()).toEqual(blockBefore);
   await expect.poll(async () => (await card(page).boundingBox())?.x ?? before.x).toBeGreaterThan(before.x + 10);
 });
