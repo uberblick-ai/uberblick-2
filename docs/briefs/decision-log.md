@@ -28,7 +28,7 @@ asks for the decisions in force must get one answer per topic — the current on
 
 - A **decision record** is its own document with `kind = decision`, status
   `open` or `decided`, ordinary blocks, and the ordinary comment threads. This
-  stays.
+  stays, with `rejected` added to the status set (section 4a).
 - A requirement's **decision log** is a fixed `decisions` root on the
   requirement: an ordered array of decision uuids, appended when a decision is
   raised with `governs`. **This is dropped** (section 3).
@@ -215,15 +215,43 @@ Consequences:
   *reconsideration open: \<uuid\>*.
 - A topic with only an open record has nothing in force and lists as open —
   the "needs a decision" signal of principle 7.
-- Abandoning a reconsideration is archiving the open record; the earlier
-  decision is in force again with no other state to change.
+- A person declining a reconsideration sets it `rejected`; the earlier
+  decision stays in force. Its author dropping it before anyone answers is
+  archiving it, which shows as *withdrawn*.
 - Two live `decided` records superseding the same record is a **fork**. The
   topic shows a **conflict** for a person to resolve, listing both records; it
   is never resolved by creation time or any other timestamp. A person resolves
-  it by archiving one, or by deciding a new record that supersedes the record
-  they keep.
+  it by rejecting one of the two.
 - A superseded record keeps status `decided`; "superseded" is derived from the
   chain, so nobody has to remember to edit the old record.
+
+### 4a. Every record in a topic's history ends with an outcome
+
+A topic's history is a list of its records, oldest first, and each one ends in
+exactly one outcome a reader can see without opening it:
+
+| Outcome | Meaning | Source |
+| --- | --- | --- |
+| **In force** | The current answer. | Derived (section 4) |
+| **Superseded** | Was in force; replaced by the named later record. | Derived from `supersedes` |
+| **Rejected** | Proposed — a first stance, a reconsideration or one side of a conflict — and a person declined it. | Status `rejected` |
+| **Withdrawn** | Proposed and dropped by its author before anyone answered. | Archived while `open` |
+| **Open** | Proposed and waiting for a person. | Status `open` |
+
+Each row also says who decided or approved it, and when; a confirmed agent
+stance reads *confirmed by \<person\>*. There is no summary such as "changed
+twice": the outcomes are the summary. A decision record's status set therefore
+becomes `open | decided | rejected`; `rejected` records count for neither
+in force nor pending, and stay readable in the history for their reasoning.
+
+**Reading an earlier record.** Every history row opens that record in the same
+decision view as the current one, read-only, with its outcome and its successor
+named at the top and a way back to the current answer. A superseded or
+rejected record is never edited, so the view offers no editing; comments stay
+possible, so someone can ask about old reasoning where it was written. Because
+a record stays short (section 1), reading an old one shows the reasoning at a
+glance, and its `refs` lead to the issue or pull request that holds the
+detail.
 
 ### 5. Efficient discovery from the directory stub
 
@@ -282,7 +310,7 @@ topics, chains, agent stances and conflicts.
 | Decision log on a product document | A fixed section after the body, one row per topic, oldest topic first. Each row: topic title, current answer, and a state — Open, Decided, Decided by agent, Reconsideration open, Conflict. |
 | Decision view | One decision record read, edited and commented in context, over the still-visible product document. |
 | Approve and change | Confirming an agent-decided record, approving or rejecting a reconsideration, and resolving a conflict — the only human-gated actions, so they must be obvious and hard to trigger by accident. |
-| History | A topic's chain: superseded records, who decided each and when, reachable from the current answer without crowding it. |
+| History | A topic's records oldest first, each ending in its outcome (section 4a) with who and when; every row clickable into a read-only view of that record, with a way back to the current answer. |
 | Needs attention | One list across the workspace of open topics, agent-decided records awaiting review, and conflicts (principle 7) — where a person answers many small decisions quickly. |
 | Decisions in the document list | The existing *Decisions* mode in `shell/DocumentList.tsx`, showing one row per topic by default. |
 | Built-on marker | How an issue or pull request built on an open decision is visible from the decision, so a reversal finds its rework. |
