@@ -75,13 +75,28 @@ test("editable primary, Ctrl and Cmd clicks open an isolated tab without changin
   await page.reload();
   await expect(editor(page)).toHaveText(TEXT);
   await expect(link).toHaveAttribute("href", TARGET);
+
+  // In read-only prose, Shift extends an existing native range; a fresh pane
+  // has no caret or range to extend. Select outside the anchor first.
+  await archiveDoc(page);
+  const paragraph = page.locator(".ub-editor .ub-paragraph").first();
+  const start = await textPoint(paragraph, 0);
+  const end = await textPoint(paragraph, 5);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 12 });
+  await page.mouse.up();
+  expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).not.toBe("");
+  await link.click({ modifiers: ["Shift"] });
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? "")).toMatch(/^before e/);
+  expect(page.context().pages()).toHaveLength(1);
 });
 
-async function linkPoint(link: Locator, offset: number): Promise<{ x: number; y: number }> {
-  return link.evaluate((element, index) => {
+async function textPoint(target: Locator, offset: number): Promise<{ x: number; y: number }> {
+  return target.evaluate((element, index) => {
     const text = element.firstChild;
     if (text === null || text.nodeType !== Node.TEXT_NODE) {
-      throw new Error("e2e: the link fixture has no text node");
+      throw new Error("e2e: the prose fixture has no text node");
     }
     const range = document.createRange();
     range.setStart(text, index);
@@ -105,8 +120,8 @@ test("dragging and Shift-clicking a link select text, and the toolbar still edit
   // fresh editor selection rather than a toolbar field's retained focus.
   await page.reload();
   await expect(link).toBeVisible();
-  const start = await linkPoint(link, 1);
-  const end = await linkPoint(link, 13);
+  const start = await textPoint(link, 1);
+  const end = await textPoint(link, 13);
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
   await page.mouse.move(end.x, end.y, { steps: 12 });
@@ -145,6 +160,13 @@ async function expectNoSelectedThread(page: Page): Promise<void> {
   await expect(page.getByRole("dialog", { name: "Threads", exact: true })).toHaveCount(0);
 }
 
+async function archiveDoc(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Document actions" }).click();
+  await page.getByRole("menuitem", { name: "Archive document" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Archive document" }).click();
+  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+}
+
 test("a link inside a comment wins in editable and read-only panes; other thread gestures still select", async ({ page }) => {
   await openDoc(page);
   await commentSentence(page);
@@ -164,16 +186,7 @@ test("a link inside a comment wins in editable and read-only panes; other thread
   await expect(page.locator('.ub-thread[aria-current="true"]')).toHaveCount(1);
   await page.reload();
 
-  await page.getByRole("button", { name: "Document actions" }).click();
-  await page.getByRole("menuitem", { name: "Archive document" }).click();
-  await page.getByRole("alertdialog").getByRole("button", { name: "Archive document" }).click();
-  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-  await page.reload();
-  await expect(link).toBeVisible();
-  await link.click({ modifiers: ["Shift"] });
-  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? "")).toMatch(/^before e/);
-  expect(page.context().pages()).toHaveLength(1);
-  await expectNoSelectedThread(page);
+  await archiveDoc(page);
   await page.reload();
   await expectPopup(page, () => link.click());
   await expectNoSelectedThread(page);
