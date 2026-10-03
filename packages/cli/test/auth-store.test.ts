@@ -65,7 +65,7 @@ type Mutation = { command: "write"; origin: string; login: StoredHubLogin }
  * rather than depending on two short file operations happening to overlap.
  */
 async function interleaveWriters(box: Sandbox, first: Mutation, second: Mutation): Promise<void> {
-  const scratch = join(box.cwd, `auth-writers-${process.env.UB_AGENT_RUN ?? "test"}`);
+  const scratch = join(box.cwd, `auth-writers-${process.env.UB_AGENTS_RUN ?? "test"}`);
   mkdirSync(scratch);
   const worker = join(scratch, "writer.mjs");
   writeFileSync(worker, `
