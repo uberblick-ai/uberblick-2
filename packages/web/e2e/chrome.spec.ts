@@ -1582,10 +1582,14 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
     await placeCaret(page);
     await page.keyboard.type("/", { delay: 15 });
-    await expect(page.locator(".ub-blockmenu")).toBeVisible();
-    const card = await painted(page, ".ub-blockmenu", "background-color");
+    const menu = page.getByRole("listbox", { name: "Block types" });
+    await expect(menu).toBeVisible();
+    const card = await paintedIn(
+      page.locator('[data-slot="popover-content"]').filter({ has: menu }),
+      "background-color",
+    );
     const entry = await paintedIn(
-      page.locator(".ub-blockmenu-on"),
+      menu.getByRole("option", { selected: true }),
       "background-color",
     );
     expect(separation(entry, card)).toBeGreaterThanOrEqual(

@@ -59,7 +59,8 @@ function blocks(page: Page) {
 /** An element's box inside the positioned frame that owns the block menu. */
 async function frameGeometry(locator: Locator) {
   return locator.evaluate((element) => {
-    const frame = element.closest(".ub-editor-frame");
+    const frame = element.closest(".ub-editor-frame") ??
+      element.ownerDocument.querySelector(".ub-editor-frame");
     if (!(frame instanceof HTMLElement)) {
       throw new Error("e2e: block-menu geometry has no editor frame");
     }
@@ -261,12 +262,12 @@ test(
     await page.keyboard.type("/he", { delay: 15 });
     // Scoped to the menu: the sidebar's workspace switcher is a `<select>`,
     // and its options carry the same role.
-    await expect(page.locator(".ub-blockmenu").getByRole("option")).toHaveCount(3);
+    await expect(page.getByRole("listbox", { name: "Block types" }).getByRole("option")).toHaveCount(3);
 
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Enter");
 
-    await expect(page.locator(".ub-blockmenu")).toHaveCount(0);
+    await expect(page.getByRole("listbox", { name: "Block types" })).toHaveCount(0);
     await expect(blocks(page)).toHaveCount(2);
     expect(await blocks(page).nth(1).evaluate((node) => node.tagName)).toBe("H2");
     // The slash was consumed, not saved.
@@ -279,7 +280,7 @@ test(
 
 /** The list's viewport and every entry in it, measured in one pass. */
 async function listGeometry(page: Page) {
-  return page.locator(".ub-blockmenu-list").evaluate((box) => {
+  return page.getByRole("listbox", { name: "Block types" }).evaluate((box) => {
     const view = box.getBoundingClientRect();
     return {
       scrollTop: box.scrollTop,
@@ -333,7 +334,7 @@ test("arrow keys keep the highlighted block type in view, and move nothing else"
   expect(start.entries[start.entries.length - 1]?.bottom).toBeGreaterThan(start.bottom);
   expect(start.scrollTop).toBe(0);
 
-  const card = page.locator(".ub-blockmenu");
+  const card = page.getByRole("listbox", { name: "Block types" });
   const cardBefore = await frameGeometry(card);
   const proseBefore = await frameGeometry(blocks(page).first());
   const focusBefore = await page.evaluate(() => document.activeElement?.className ?? "");
@@ -382,7 +383,7 @@ test("arrow keys keep the highlighted block type in view, and move nothing else"
   // And a menu opened again starts at the top, rather than wearing the scroll
   // the last one ended on.
   await page.keyboard.press("Escape");
-  await expect(page.locator(".ub-blockmenu")).toHaveCount(0);
+  await expect(page.getByRole("listbox", { name: "Block types" })).toHaveCount(0);
   await page.keyboard.press("Backspace");
   await page.keyboard.type("/", { delay: 15 });
   const reopened = await listGeometry(page);
@@ -403,12 +404,12 @@ test("the gutter menu reveals with the keyboard, and scrolls for no pointer", as
   await page.locator(".ub-gutter-add").click();
 
   const start = await listGeometry(page);
-  const search = page.locator(".ub-blockmenu-search");
+  const search = page.getByRole("combobox", { name: "Search blocks" });
   await expect(search).toBeFocused();
 
   /** The middle of an entry's visible part, in page coordinates. */
   async function over(entry: Geometry["entries"][number], view: Geometry) {
-    const box = await page.locator(".ub-blockmenu-list").boundingBox();
+    const box = await page.getByRole("listbox", { name: "Block types" }).boundingBox();
     if (box === null) throw new Error("e2e: the list has no box");
     return {
       x: box.x + box.width / 2,

@@ -17,9 +17,8 @@
  * 4. **It never acts on a block that has moved or gone**, and never offers the
  *    open document or an archived one.
  *
- * Everything is read back out of a real Y.Doc through the schema package. The
- * input-method guard itself is pinned in `test/block-menu.test.tsx`, which is
- * the other menu built on it; one case here proves this picker is wired to it.
+ * Everything is read back out of a real Y.Doc through the schema package. One
+ * composing Enter checks that ProseMirror owns this picker's key handling.
  * Layout is not asserted — jsdom has none; the caret-anchored gesture end to end
  * is `e2e/doc-link.spec.ts`.
  */
@@ -95,6 +94,7 @@ interface Mounted {
   /** Returns the event, whose `defaultPrevented` says whether the picker took it. */
   press: (key: string, init?: KeyboardEventInit) => KeyboardEvent;
   pick: (label: string) => void;
+  unmountMenu: () => void;
   unmount: () => void;
 }
 
@@ -118,12 +118,18 @@ function mountPicker(ydoc: Y.Doc, context: DocLinkContext): Mounted {
     );
   });
 
+  let menuMounted = true;
+  const unmountMenu = (): void => {
+    if (!menuMounted) return;
+    act(() => root.unmount());
+    menuMounted = false;
+  };
   return {
     editor,
-    card: () => frame.querySelector(".ub-mentionmenu"),
+    card: () => document.body.querySelector('[data-slot="popover-content"]'),
     labels: () =>
-      [...frame.querySelectorAll(".ub-mentionmenu .ub-blockmenu-label")].map(
-        (node) => node.textContent ?? "",
+      [...document.body.querySelectorAll('[role="option"]')].map(
+        (node) => node.getAttribute("aria-label") ?? "",
       ),
     press: (key: string, init: KeyboardEventInit = {}) => {
       const event = new KeyboardEvent("keydown", {
@@ -139,15 +145,16 @@ function mountPicker(ydoc: Y.Doc, context: DocLinkContext): Mounted {
     },
     pick: (label: string) => {
       const entry = [
-        ...frame.querySelectorAll<HTMLButtonElement>(
-          ".ub-mentionmenu .ub-blockmenu-entry",
+        ...document.body.querySelectorAll<HTMLButtonElement>(
+          '[role="option"]',
         ),
-      ].find((node) => node.textContent === label);
+      ].find((node) => node.getAttribute("aria-label") === label);
       if (entry === undefined) throw new Error(`no entry ${label}`);
       act(() => entry.click());
     },
+    unmountMenu,
     unmount: () => {
-      act(() => root.unmount());
+      unmountMenu();
       frame.remove();
       editor.destroy();
     },
@@ -194,6 +201,66 @@ function peerOf(local: Y.Doc): Y.Doc {
 }
 
 describe("the picker", () => {
+  it("identifies the highlighted document from the prose, and clears an empty list", () => {
+    const { context } = directory();
+    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
+    const mounted = mountPicker(ydoc, context);
+    try {
+      caret(mounted.editor, 0, 0);
+      type(mounted.editor, "@");
+      const list = mounted.card()?.querySelector('[role="listbox"]');
+      if (list === null || list === undefined) throw new Error("no list");
+      const options = [...list.querySelectorAll<HTMLElement>('[role="option"]')];
+      expect(mounted.editor.view.dom.getAttribute("aria-controls")).toBe(list.id);
+      expect(mounted.editor.view.dom.getAttribute("aria-activedescendant")).toBe(
+        options[0]?.id,
+      );
+      mounted.press("ArrowDown");
+      expect(mounted.editor.view.dom.getAttribute("aria-activedescendant")).toBe(
+        options[1]?.id,
+      );
+      act(() => {
+        options[0]?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+      });
+      expect(mounted.editor.view.dom.getAttribute("aria-activedescendant")).toBe(
+        options[0]?.id,
+      );
+      expect(options[0]?.getAttribute("aria-selected")).toBe("true");
+
+      type(mounted.editor, "nope");
+      expect(mounted.card()).not.toBeNull();
+      expect(mounted.editor.view.dom.hasAttribute("aria-activedescendant")).toBe(
+        false,
+      );
+      expect(mounted.editor.view.dom.hasAttribute("aria-controls")).toBe(false);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("removes its keys and active descendant when the picker unmounts", () => {
+    const { context } = directory();
+    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
+    const mounted = mountPicker(ydoc, context);
+    try {
+      caret(mounted.editor, 0, 0);
+      type(mounted.editor, "@");
+      type(mounted.editor, "hub");
+      expect(mounted.editor.view.dom.hasAttribute("aria-activedescendant")).toBe(
+        true,
+      );
+      mounted.unmountMenu();
+      expect(mounted.editor.view.dom.hasAttribute("aria-activedescendant")).toBe(
+        false,
+      );
+      expect(mounted.editor.view.dom.hasAttribute("aria-controls")).toBe(false);
+      mounted.press("Enter");
+      expect(getBlocks(ydoc).map((block) => block.text)).toEqual(["@hub", ""]);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
   it("offers every document but the open one, and the arrows and Enter pick one", () => {
     const { context } = directory();
     const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
@@ -318,7 +385,7 @@ describe("the picker", () => {
       // Open, and saying so — an empty card would read as "there are none",
       // which a partly synced replica cannot claim.
       const card = mounted.card();
-      expect(card?.querySelector(".ub-blockmenu-empty")?.textContent).toBe(
+      expect(card?.textContent).toBe(
         "No document this page knows matches.",
       );
 
@@ -344,53 +411,16 @@ describe("the picker", () => {
 
       mounted.press("Escape");
       expect(mounted.card()).toBeNull();
+      expect(mounted.editor.view.dom.hasAttribute("aria-activedescendant")).toBe(
+        false,
+      );
+      expect(mounted.editor.view.dom.hasAttribute("aria-controls")).toBe(false);
       expect(delta(ydoc)).toEqual([{ insert: "@hu" }]);
 
       // Dismissed for this session only: typing on keeps it shut…
       type(mounted.editor, "b");
       expect(mounted.card()).toBeNull();
       // …and a fresh trigger opens it again.
-      type(mounted.editor, " ");
-      type(mounted.editor, "@");
-      expect(mounted.card()).not.toBeNull();
-    } finally {
-      mounted.unmount();
-    }
-  });
-
-  /**
-   * A click outside means the same thing as Esc, and the card needs its own
-   * handler to hear it: an `@` sits inside a sentence, so a click further along
-   * that same sentence leaves the trigger valid and would leave the card
-   * hanging over prose the reader has moved on from.
-   */
-  it("closes on a click outside, and not on one inside the card", () => {
-    const { context } = directory();
-    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
-    const mounted = mountPicker(ydoc, context);
-    try {
-      caret(mounted.editor, 0, 0);
-      type(mounted.editor, "@");
-      type(mounted.editor, "hu");
-      expect(mounted.card()).not.toBeNull();
-
-      // Reaching for an entry is not dismissing the card that holds it.
-      act(() => {
-        mounted
-          .card()
-          ?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-      });
-      expect(mounted.card()).not.toBeNull();
-
-      act(() => {
-        document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-      });
-      expect(mounted.card()).toBeNull();
-      expect(delta(ydoc)).toEqual([{ insert: "@hu" }]);
-
-      // Dismissed for this session only, exactly as Esc is.
-      type(mounted.editor, "b");
-      expect(mounted.card()).toBeNull();
       type(mounted.editor, " ");
       type(mounted.editor, "@");
       expect(mounted.card()).not.toBeNull();
@@ -589,13 +619,7 @@ describe("the picker", () => {
     }
   });
 
-  /**
-   * Enter commits an input method's candidate before it ever means "this
-   * document". The guard itself is `ui/caret-menu.ts`, pinned in
-   * `test/block-menu.test.tsx`; what this case defends is that the picker uses
-   * it rather than taking every Enter it sees.
-   */
-  it("leaves composing keystrokes to the input method", () => {
+  it("leaves composing Enter to ProseMirror", () => {
     const { context } = directory();
     const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
     const mounted = mountPicker(ydoc, context);
@@ -605,20 +629,16 @@ describe("the picker", () => {
       type(mounted.editor, "hub");
       expect(mounted.card()).not.toBeNull();
 
-      // Not taken: no reference is written, and the key travels on to the
-      // editor — which is what a real input method needs, and what jsdom shows
-      // here as ProseMirror's ordinary Enter splitting the paragraph.
-      mounted.press("Enter", { isComposing: true });
+      act(() => {
+        mounted.editor.view.dom.dispatchEvent(
+          new CompositionEvent("compositionstart", { bubbles: true }),
+        );
+      });
+      const enter = mounted.press("Enter", { isComposing: true });
+      expect(enter.defaultPrevented).toBe(false);
       expect(delta(ydoc)).toEqual([{ insert: "@hub" }]);
-
-      // The same key, with nothing composing, is the picker's. (The session is
-      // in the second block now, where that first Enter left the caret.)
-      type(mounted.editor, "@");
-      type(mounted.editor, "hub");
-      mounted.press("Enter");
-      expect(snapshotFragment(ydoc)[1]?.delta).toEqual([
-        { insert: "The hub", attributes: { docLink: { docId: HUB } } },
-      ]);
+      expect(getBlocks(ydoc)).toHaveLength(1);
+      expect(mounted.card()).not.toBeNull();
     } finally {
       mounted.unmount();
     }

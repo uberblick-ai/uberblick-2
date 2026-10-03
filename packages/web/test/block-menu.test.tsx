@@ -67,20 +67,16 @@ interface Mounted {
    * it or let it through to ProseMirror.
    */
   press: (key: string, init?: KeyboardEventInit) => KeyboardEvent;
-  /** An input method finishing a composition in the prose. */
-  endComposition: () => void;
+  unmountMenu: () => void;
   unmount: () => void;
 }
 
 /**
  * An editor with the menu mounted over it, the way `EditorPane` wires them.
  *
- * The shape matters, not just the props: the frame stands in for
- * `.ub-editor-frame` and has to be a real ancestor of the ProseMirror DOM,
- * because that is how the menu hears keys (capture phase) and compositions
- * (bubbling) from the prose. So the React root gets a container of its own
- * beside the editor host — rendering into the frame itself would have React
- * clear the frame's children and quietly detach the editor from it.
+ * The React root gets a container beside the editor host: rendering into the
+ * frame itself would have React clear the frame's children and detach the editor.
+ * The card is a Popover portal, so queries also include document.body.
  */
 function mountMenu(ydoc: Y.Doc): Mounted {
   const { editor, element } = mountEditor(ydoc);
@@ -95,15 +91,21 @@ function mountMenu(ydoc: Y.Doc): Mounted {
   });
 
   const query = <T extends Element>(selector: string): T | null =>
-    frame.querySelector<T>(selector);
+    document.body.querySelector<T>(selector);
+  let menuMounted = true;
+  const unmountMenu = (): void => {
+    if (!menuMounted) return;
+    act(() => root.unmount());
+    menuMounted = false;
+  };
   return {
     editor,
     ydoc,
     frame,
     query,
     entryLabels: () =>
-      [...frame.querySelectorAll(".ub-blockmenu-label")].map(
-        (node) => node.textContent ?? "",
+      [...document.body.querySelectorAll('[role="option"]')].map(
+        (node) => node.getAttribute("aria-label") ?? "",
       ),
     press: (key: string, init: KeyboardEventInit = {}) => {
       const event = new KeyboardEvent("keydown", {
@@ -117,15 +119,9 @@ function mountMenu(ydoc: Y.Doc): Mounted {
       });
       return event;
     },
-    endComposition: () => {
-      act(() => {
-        editor.view.dom.dispatchEvent(
-          new CompositionEvent("compositionend", { bubbles: true, data: "へ" }),
-        );
-      });
-    },
+    unmountMenu,
     unmount: () => {
-      act(() => root.unmount());
+      unmountMenu();
       frame.remove();
       editor.destroy();
     },
@@ -212,11 +208,11 @@ describe("the registry", () => {
    */
   it("renders a listbox whose every announced child is an option", () => {
     const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
-    const { editor, frame, unmount } = mountMenu(ydoc);
+    const { editor, query, unmount } = mountMenu(ydoc);
     try {
       caret(editor, 0, 0);
       type(editor, "/");
-      const list = frame.querySelector(".ub-blockmenu-list");
+      const list = query('[role="listbox"]');
       if (list === null) throw new Error("no list");
       expect(list.getAttribute("role")).toBe("listbox");
 
@@ -291,6 +287,67 @@ describe("the slash trigger", () => {
 });
 
 describe("the slash menu", () => {
+  it("identifies the highlighted option from the prose until the menu closes", () => {
+    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
+    const { editor, query, press, unmount } = mountMenu(ydoc);
+    try {
+      caret(editor, 0, 0);
+      type(editor, "/");
+      const list = query('[role="listbox"]');
+      if (list === null) throw new Error("no list");
+      const options = [...list.querySelectorAll<HTMLElement>('[role="option"]')];
+      expect(new Set(options.map((option) => option.id)).size).toBe(options.length);
+      expect(options.every((option) => option.id !== "")).toBe(true);
+      expect(editor.view.dom.getAttribute("aria-controls")).toBe(list.id);
+      expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(
+        options[0]?.id,
+      );
+
+      press("ArrowDown");
+      expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(
+        options[1]?.id,
+      );
+      press("ArrowUp");
+      expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(
+        options[0]?.id,
+      );
+      act(() => {
+        options[2]?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+      });
+      expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(
+        options[2]?.id,
+      );
+      expect(options[2]?.getAttribute("aria-selected")).toBe("true");
+
+      press("Escape");
+      expect(editor.view.dom.hasAttribute("aria-activedescendant")).toBe(false);
+      expect(editor.view.dom.hasAttribute("aria-controls")).toBe(false);
+    } finally {
+      unmount();
+    }
+  });
+
+  it("removes its keys and active descendant when the menu unmounts", () => {
+    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
+    const { editor, press, unmountMenu, unmount } = mountMenu(ydoc);
+    try {
+      caret(editor, 0, 0);
+      type(editor, "/he");
+      expect(editor.view.dom.hasAttribute("aria-activedescendant")).toBe(true);
+
+      unmountMenu();
+      expect(editor.view.dom.hasAttribute("aria-activedescendant")).toBe(false);
+      expect(editor.view.dom.hasAttribute("aria-controls")).toBe(false);
+      press("Enter");
+      expect(getBlocks(ydoc).map((block) => [block.type, block.text])).toEqual([
+        ["paragraph", "/he"],
+        ["paragraph", ""],
+      ]);
+    } finally {
+      unmount();
+    }
+  });
+
   it("filters as you type, converts on Enter, and keeps the block id", () => {
     const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
     const { editor, entryLabels, press, query, unmount } = mountMenu(ydoc);
@@ -317,7 +374,7 @@ describe("the slash menu", () => {
       expect(blocks[0]).toMatchObject({ id: ids[0], type: "heading", level: 2 });
       expect(blocks[0]?.text).toBe("");
       expect(soundIds(ydoc)).toEqual([ids[0]]);
-      expect(query(".ub-blockmenu")).toBeNull();
+      expect(query('[data-slot="popover-content"]')).toBeNull();
 
       // One gesture, one undo step: the block is a paragraph holding "/he"
       // again, not a heading holding it.
@@ -340,15 +397,15 @@ describe("the slash menu", () => {
     try {
       caret(editor, 0, 0);
       type(editor, "/co");
-      expect(query(".ub-blockmenu")).not.toBeNull();
+      expect(query('[data-slot="popover-content"]')).not.toBeNull();
 
       press("Escape");
-      expect(query(".ub-blockmenu")).toBeNull();
+      expect(query('[data-slot="popover-content"]')).toBeNull();
       expect(getBlocks(ydoc)[0]).toMatchObject({ type: "paragraph", text: "/co" });
 
       // Dismissed for this session only: typing on keeps the menu shut…
       type(editor, "de");
-      expect(query(".ub-blockmenu")).toBeNull();
+      expect(query('[data-slot="popover-content"]')).toBeNull();
       expect(getBlocks(ydoc)[0]?.text).toBe("/code");
 
       // …and clearing the block opens it again on the next slash.
@@ -357,7 +414,7 @@ describe("the slash menu", () => {
       });
       caret(editor, 0, 0);
       type(editor, "/");
-      expect(query(".ub-blockmenu")).not.toBeNull();
+      expect(query('[data-slot="popover-content"]')).not.toBeNull();
     } finally {
       unmount();
     }
@@ -377,18 +434,18 @@ describe("the slash menu", () => {
     const { editor, query, unmount } = mountMenu(ydoc);
     try {
       caret(editor, 0, 3);
-      expect(query(".ub-blockmenu")).toBeNull();
+      expect(query('[data-slot="popover-content"]')).toBeNull();
 
       // Typing on in it does not open one either: the block was not empty
       // before this keystroke, so the slash is text somebody wrote.
       type(editor, "d");
-      expect(query(".ub-blockmenu")).toBeNull();
+      expect(query('[data-slot="popover-content"]')).toBeNull();
       expect(getBlocks(ydoc)[0]?.text).toBe("/cod");
 
       // The empty block below is where a slash *is* a command.
       caret(editor, 1, 0);
       type(editor, "/co");
-      expect(query(".ub-blockmenu")).not.toBeNull();
+      expect(query('[data-slot="popover-content"]')).not.toBeNull();
     } finally {
       unmount();
     }
@@ -414,7 +471,7 @@ describe("the slash menu", () => {
       });
       expect(getBlocks(ydoc)[0]?.text).toBe("/cod");
       expect(slashTriggerAt(editor)).toMatchObject({ query: "cod" });
-      expect(query(".ub-blockmenu")).toBeNull();
+      expect(query('[data-slot="popover-content"]')).toBeNull();
 
       // A paste that happens to be a slash command is content, not a command.
       act(() => {
@@ -424,147 +481,38 @@ describe("the slash menu", () => {
         );
       });
       expect(getBlocks(ydoc)[0]?.text).toBe("/code");
-      expect(query(".ub-blockmenu")).toBeNull();
+      expect(query('[data-slot="popover-content"]')).toBeNull();
 
       // And an undo that restores a slash-looking block is not a request either.
       act(() => {
         editor.commands.keyboardShortcut("Mod-z");
       });
-      expect(query(".ub-blockmenu")).toBeNull();
+      expect(query('[data-slot="popover-content"]')).toBeNull();
     } finally {
       unmount();
       peer.destroy();
     }
   });
 
-  /**
-   * Typing Japanese, Chinese or Korean runs Enter and the arrows through the
-   * IME's candidate list first. A menu that took those keys would make the
-   * composition unfinishable inside a slash session — so a composing keystroke
-   * is not the menu's to take, even while it is open.
-   */
-  it("leaves composing keystrokes to the input method", () => {
+  it("leaves composing Enter to ProseMirror", () => {
     const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
     const { editor, press, query, unmount } = mountMenu(ydoc);
     try {
       caret(editor, 0, 0);
       type(editor, "/he");
-      expect(query(".ub-blockmenu")).not.toBeNull();
+      expect(query('[role="listbox"]')).not.toBeNull();
 
-      // The menu does not take it: nothing is converted, and the key travels
-      // on past the menu to the editor — which is what a real IME needs, and
-      // what jsdom shows here as ProseMirror's ordinary Enter (a browser's
-      // ProseMirror would ignore it too, being mid-composition).
-      press("Enter", { isComposing: true });
-      expect(getBlocks(ydoc).some((block) => block.type === "heading")).toBe(false);
-      expect(getBlocks(ydoc).map((block) => block.text)).toEqual(["/he", ""]);
-      expect(getBlocks(ydoc)[0]).toMatchObject({ id: ids[0], type: "paragraph" });
-
-      // The same key, with nothing composing, is the menu's.
-      type(editor, "/he");
-      press("Enter");
-      expect(getBlocks(ydoc)[1]).toMatchObject({ type: "heading", text: "" });
-    } finally {
-      unmount();
-    }
-  });
-
-  /**
-   * Safari's ordering, which no flag on the event describes: `compositionend`
-   * arrives *before* the Enter that committed the candidate, and that Enter says
-   * `isComposing: false` with ProseMirror's own flag already cleared. Taking it
-   * would convert the block a reader was still typing into.
-   *
-   * The browser gate is ProseMirror's own (`/Apple Computer/` on the vendor
-   * string), and jsdom presents exactly that — asserted here, so a future jsdom
-   * that stops doing so fails loudly instead of quietly retiring this case.
-   * What the two orderings actually turn on is the sequence below.
-   */
-  it("leaves an unconfirmed composition's next key to the editor", () => {
-    expect(navigator.vendor).toMatch(/Apple Computer/);
-    const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
-    const { editor, press, endComposition, unmount } = mountMenu(ydoc);
-    try {
-      caret(editor, 0, 0);
-      type(editor, "/he");
-
-      // compositionend with no commit key before it: the commit is still owed,
-      // and it will arrive wearing no mark of one.
-      endComposition();
-      press("Enter");
-      expect(getBlocks(ydoc).some((block) => block.type === "heading")).toBe(false);
-      expect(getBlocks(ydoc)[0]).toMatchObject({ id: ids[0], type: "paragraph" });
-
-      // The memory is one-shot: the *next* Enter is the menu's again. (The
-      // first one reached ProseMirror and split the block, so the session is in
-      // the second one now.)
-      type(editor, "/he");
-      press("Enter");
-      expect(getBlocks(ydoc)[1]).toMatchObject({ type: "heading", text: "" });
-    } finally {
-      unmount();
-    }
-  });
-
-  /**
-   * The other ordering, and the reason the tail has to be scoped: Chrome and
-   * Firefox deliver the committing Enter *before* `compositionend`. The guard
-   * has already declined that Enter as composing, so nothing is owed — and a
-   * reader who then presses Enter to pick an entry must get their entry, not a
-   * split paragraph.
-   */
-  it("keeps the next key when the composition's commit already came through", () => {
-    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
-    const { editor, press, endComposition, unmount } = mountMenu(ydoc);
-    try {
-      caret(editor, 0, 0);
-      type(editor, "/he");
-
-      // The Chrome/Firefox sequence: the committing Enter arrives while still
-      // composing — declined by the guard — and the composition ends after it.
-      // (In a browser ProseMirror ignores that keydown as well; jsdom has no
-      // composition to ignore, so it splits the block, which is harmless here.)
-      press("Enter", { isComposing: true });
-      endComposition();
-
-      // Straight on to a session and a deliberate Enter, well inside the tail's
-      // window. Nothing is owed to the IME, so this Enter is the menu's — an
-      // over-armed tail would hand it to ProseMirror and split the paragraph
-      // the reader was converting.
-      type(editor, "/he");
-      press("Enter");
-      expect(getBlocks(ydoc).map((block) => [block.type, block.text])).toEqual([
-        ["paragraph", "/he"],
-        ["heading", ""],
-      ]);
-    } finally {
-      unmount();
-    }
-  });
-
-  /**
-   * A composition that ends somewhere else in the frame owes this menu nothing —
-   * the tail is scoped to the surface its own session is typed into.
-   */
-  it("ignores a composition that ended outside the prose", () => {
-    const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
-    const mounted = mountMenu(ydoc);
-    const { editor, press, unmount } = mounted;
-    try {
-      caret(editor, 0, 0);
-      type(editor, "/he");
-
-      // Some other control inside the frame finishes a composition.
-      const elsewhere = document.createElement("input");
-      mounted.frame.appendChild(elsewhere);
       act(() => {
-        elsewhere.dispatchEvent(
-          new CompositionEvent("compositionend", { bubbles: true, data: "へ" }),
+        editor.view.dom.dispatchEvent(
+          new CompositionEvent("compositionstart", { bubbles: true }),
         );
       });
-
-      press("Enter");
-      expect(getBlocks(ydoc)[0]).toMatchObject({ id: ids[0], type: "heading" });
+      const enter = press("Enter", { isComposing: true });
+      expect(enter.defaultPrevented).toBe(false);
+      expect(getBlocks(ydoc)).toEqual([
+        expect.objectContaining({ id: ids[0], type: "paragraph", text: "/he" }),
+      ]);
+      expect(query('[role="listbox"]')).not.toBeNull();
     } finally {
       unmount();
     }
@@ -588,14 +536,14 @@ describe("the slash menu", () => {
       type(editor, "/he");
       const trigger = slashTriggerAt(editor);
       expect(trigger).not.toBeNull();
-      expect(query(".ub-blockmenu")).not.toBeNull();
+      expect(query('[data-slot="popover-content"]')).not.toBeNull();
 
       fromPeer(() => {
         deleteBlock(peer, ids[0] ?? "");
       });
 
       // The session went with the block, so the menu is closed…
-      expect(query(".ub-blockmenu")).toBeNull();
+      expect(query('[data-slot="popover-content"]')).toBeNull();
       // …and the command refuses the trigger it was holding, rather than
       // deleting the content of whatever now sits at that position.
       expect(
@@ -626,7 +574,9 @@ describe("the slash menu", () => {
     try {
       caret(editor, 0, 0);
       type(editor, "/nope");
-      expect(query(".ub-blockmenu")).toBeNull();
+      expect(query('[data-slot="popover-content"]')).toBeNull();
+      expect(editor.view.dom.hasAttribute("aria-activedescendant")).toBe(false);
+      expect(editor.view.dom.hasAttribute("aria-controls")).toBe(false);
 
       // Nothing intercepts the key, so ProseMirror splits the block.
       press("Enter");
@@ -658,8 +608,8 @@ describe("the gutter menu", () => {
 
   function pick(mounted: Mounted, label: string): void {
     const entry = [
-      ...mounted.frame.querySelectorAll<HTMLButtonElement>(".ub-blockmenu-entry"),
-    ].find((node) => node.textContent?.startsWith(label) === true);
+      ...mounted.frame.ownerDocument.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    ].find((node) => node.getAttribute("aria-label") === label);
     if (entry === undefined) throw new Error(`no entry ${label}`);
     act(() => entry.click());
   }
@@ -672,7 +622,7 @@ describe("the gutter menu", () => {
       // reflow — but not offered to the pointer or the tab order.
       expect(mounted.query(".ub-gutter-add")).not.toBeNull();
       expect(mounted.query(".ub-gutter-add-on")).toBeNull();
-      expect(mounted.query(".ub-blockmenu")).toBeNull();
+      expect(mounted.query('[data-slot="popover-content"]')).toBeNull();
     } finally {
       mounted.unmount();
     }
@@ -719,13 +669,13 @@ describe("the gutter menu", () => {
     const mounted = mountMenu(ydoc);
     try {
       openGutterMenu(mounted, 0);
-      expect(mounted.query(".ub-blockmenu")).not.toBeNull();
+      expect(mounted.query('[data-slot="popover-content"]')).not.toBeNull();
 
       fromPeer(() => {
         deleteBlock(peer, ids[0] ?? "");
       });
 
-      expect(mounted.query(".ub-blockmenu")).toBeNull();
+      expect(mounted.query('[data-slot="popover-content"]')).toBeNull();
       expect(mounted.query(".ub-gutter-add-on")).toBeNull();
       // The surviving block is untouched: nothing was inserted anywhere.
       expect(getBlocks(ydoc).map((block) => [block.id, block.text])).toEqual([
@@ -762,7 +712,7 @@ describe("the gutter menu", () => {
       fromPeer(() => {
         deleteBlock(peer, ids[0] ?? "");
       });
-      expect(mounted.query(".ub-blockmenu")).not.toBeNull();
+      expect(mounted.query('[data-slot="popover-content"]')).not.toBeNull();
 
       pick(mounted, "Mermaid");
 
@@ -799,7 +749,7 @@ describe("the gutter menu", () => {
       // The old blocks keep their ids; the new one gets one of its own.
       const after = soundIds(ydoc);
       expect([after[0], after[2]]).toEqual(ids);
-      expect(mounted.query(".ub-blockmenu")).toBeNull();
+      expect(mounted.query('[data-slot="popover-content"]')).toBeNull();
 
       // The caret is inside the new block, so the reader can just type.
       const { $head } = mounted.editor.state.selection;
@@ -873,7 +823,7 @@ describe("the gutter menu", () => {
     const mounted = mountMenu(ydoc);
     try {
       openGutterMenu(mounted, 0);
-      const field = mounted.query<HTMLInputElement>(".ub-blockmenu-search");
+      const field = mounted.query<HTMLInputElement>('[role="combobox"]');
       if (field === null) throw new Error("no search field");
 
       act(() => {
@@ -894,8 +844,62 @@ describe("the gutter menu", () => {
           }),
         );
       });
-      expect(mounted.query(".ub-blockmenu")).toBeNull();
+      expect(mounted.query('[data-slot="popover-content"]')).toBeNull();
       expect(getBlocks(ydoc).map((block) => block.id)).toEqual(ids);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("identifies the highlighted option from its focused search field", () => {
+    const { ydoc } = docWith([{ type: "paragraph", text: "Only" }]);
+    const mounted = mountMenu(ydoc);
+    try {
+      openGutterMenu(mounted, 0);
+      const field = mounted.query<HTMLInputElement>('[role="combobox"]');
+      const list = mounted.query('[role="listbox"]');
+      if (field === null || list === null) throw new Error("no search or list");
+      const options = [...list.querySelectorAll<HTMLElement>('[role="option"]')];
+      expect(document.activeElement).toBe(field);
+      expect(field.getAttribute("aria-controls")).toBe(list.id);
+      expect(field.getAttribute("aria-activedescendant")).toBe(options[0]?.id);
+      act(() => {
+        field.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      });
+      expect(field.getAttribute("aria-activedescendant")).toBe(options[1]?.id);
+      act(() => {
+        options[2]?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+      });
+      expect(field.getAttribute("aria-activedescendant")).toBe(options[2]?.id);
+      expect(mounted.editor.view.dom.hasAttribute("aria-activedescendant")).toBe(
+        false,
+      );
+
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, "nope");
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      expect(field.hasAttribute("aria-activedescendant")).toBe(false);
+      expect(field.hasAttribute("aria-controls")).toBe(false);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it("leaves composing Enter in the search field to the input method", () => {
+    const { ydoc, ids } = docWith([{ type: "paragraph", text: "Only" }]);
+    const mounted = mountMenu(ydoc);
+    try {
+      openGutterMenu(mounted, 0);
+      const field = mounted.query<HTMLInputElement>('[role="combobox"]');
+      if (field === null) throw new Error("no search");
+      const enter = new KeyboardEvent("keydown", {
+        key: "Enter", bubbles: true, cancelable: true, isComposing: true,
+      });
+      act(() => field.dispatchEvent(enter));
+      expect(enter.defaultPrevented).toBe(false);
+      expect(getBlocks(ydoc).map((block) => block.id)).toEqual(ids);
+      expect(mounted.query('[role="listbox"]')).not.toBeNull();
     } finally {
       mounted.unmount();
     }

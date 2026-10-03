@@ -16,6 +16,7 @@
     "e2e/**/*.tsx",
     "dev-config-document.ts",
     "vite.config.ts",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "playwright.menu.config.ts"
   ]
 }

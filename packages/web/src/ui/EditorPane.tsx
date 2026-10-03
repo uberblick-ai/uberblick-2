@@ -770,9 +770,8 @@ function BoundEditor({
           canWrite={() => connection.status.writable}
         />
       )}
-      {/* The composer and the block menu are positioned against this frame, not
-          against the editor itself: ProseMirror owns every child of
-          `.ub-editor`. */}
+      {/* The composer and gutter button use this frame; the menus find the
+          enclosing pane from it. ProseMirror owns every child of `.ub-editor`. */}
       <div className="ub-editor-frame" ref={frame}>
         <div className="ub-editor" ref={host} />
         {/* Both are ways of writing to the document, so an archived document

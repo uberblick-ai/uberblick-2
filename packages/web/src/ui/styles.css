@@ -2504,7 +2504,7 @@ body {
    file defines: an undefined custom property makes the background `transparent`
    and the text `canvastext`, so a destructive confirmation was read through the
    page it covered. `--card` is the pair the other plain-CSS floating panels
-   take (`.ub-composer`, `.ub-blockmenu`); the sidebar's ground belongs to
+   take (`.ub-composer`, the caret menus); the sidebar's ground belongs to
    surfaces that belong to that column (#480), and a modal centred over the
    whole page does not. */
 .ub-confirm {
@@ -3721,94 +3721,6 @@ h3.ub-heading {
   background: var(--secondary);
   border-color: var(--border);
   color: var(--foreground);
-}
-
-/* The menu itself. One card for both entry paths — anchored at the caret for a
-   slash, under the `+` for the gutter — so there is one thing to style and one
-   thing to read. */
-.ub-blockmenu {
-  position: absolute;
-  z-index: 6;
-  width: 17rem;
-  max-width: 100%;
-  padding: 0.3rem;
-  background: var(--card);
-  color: var(--card-foreground);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  /* The same lift as the comment composer — both are cards floating over the
-     prose, and two different shadows would read as two different surfaces. */
-  box-shadow: var(--shadow-float);
-}
-
-.ub-blockmenu-search {
-  font: inherit;
-  font-size: 0.85rem;
-  width: 100%;
-  margin-bottom: 0.3rem;
-  padding: 0.3rem 0.4rem;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-sm);
-  background: var(--background);
-  color: var(--foreground);
-}
-
-.ub-blockmenu-list {
-  max-height: 17rem;
-  overflow-y: auto;
-}
-
-/* The group heading. Mono and quiet: it is a label, not an entry. */
-.ub-blockmenu-group {
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted-foreground);
-  margin: 0.35rem 0 0.15rem;
-  padding: 0 0.4rem;
-}
-
-.ub-blockmenu-entry {
-  font: inherit;
-  font-size: 0.9rem;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.3rem 0.4rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--foreground);
-  text-align: left;
-  cursor: pointer;
-}
-
-/* The highlight follows the keyboard and the pointer alike, so it is one class
-   rather than a `:hover` rule that could disagree with the arrow keys. */
-.ub-blockmenu-on {
-  background: var(--card-accent);
-  border-color: var(--border);
-  color: var(--accent-foreground);
-}
-
-.ub-blockmenu-label {
-  flex: 1;
-  min-width: 0;
-}
-
-/* The shortcut column: the token that picks this entry out of a query. Mono,
-   because it is literal text. */
-.ub-blockmenu-hint {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--muted-foreground);
-}
-
-.ub-blockmenu-empty {
-  margin: 0;
-  padding: 0.4rem;
 }
 
 /* ---- the document list (#118, #406, #441) ---------------------------------

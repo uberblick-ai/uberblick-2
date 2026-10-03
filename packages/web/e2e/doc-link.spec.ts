@@ -148,9 +148,9 @@ test("the @ picker offers a synced document and writes the same reference", asyn
   await placeCaret(page);
   await page.keyboard.type("see @pick");
 
-  const picker = page.locator(".ub-mentionmenu");
+  const picker = page.getByRole("listbox", { name: "Documents" });
   await expect(picker).toBeVisible();
-  const rows = picker.locator(".ub-blockmenu-entry");
+  const rows = picker.getByRole("option");
   await expect(rows).toHaveCount(2);
   // The card is measured against a live layout, which jsdom does not have: it
   // sits below the caret's line and to the right of the frame's edge, past the

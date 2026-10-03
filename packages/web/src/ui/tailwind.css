@@ -57,6 +57,9 @@
 @source "./shadcn";
 @source "./Sidebar.tsx";
 @source "./ThreadsPane.tsx";
+@source "./BlockMenu.tsx";
+@source "./CaretMenu.tsx";
+@source "./MentionMenu.tsx";
 @source "./WorkspaceSettings.tsx";
 
 /* The bridge. Left side: what shadcn's markup asks for. Right side: what this
