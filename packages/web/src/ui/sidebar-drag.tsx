@@ -1,14 +1,51 @@
 /** dnd-kit owns gestures and visual sorting; Yjs owns the committed order. */
-import { useCallback, useEffect, useRef } from "react";
-import type { ReactElement, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useRef } from "react";
+import type { MouseEvent, ReactElement, ReactNode } from "react";
 import { DragDropProvider } from "@dnd-kit/react";
 import type { DragDropManager, DragStartEvent, DragOverEvent, DragEndEvent } from "@dnd-kit/react";
 import { isSortable } from "@dnd-kit/react/sortable";
-import { Accessibility } from "@dnd-kit/dom";
+import { Accessibility, KeyboardSensor, PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
+import { announce, cleanup } from "@atlaskit/pragmatic-drag-and-drop-live-region";
 import { OptimisticSortingPlugin } from "@dnd-kit/dom/sortable";
 import { moveDoc, moveGroup, readSidebar } from "@uberblick/schema";
 import type * as Y from "yjs";
 import type { RoomConnection } from "../collab/rooms.js";
+
+// The row is both the activator and a navigation/disclosure button. A mouse
+// hold must never pick it up; touch must leave early swipes to native scrolling.
+export const sidebarRowSensors = [
+  PointerSensor.configure({
+    activationConstraints: (event) => event.pointerType === "touch"
+      ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 5 })]
+      : [new PointerActivationConstraints.Distance({ value: 5 })],
+  }),
+  KeyboardSensor.configure({
+    keyboardCodes: { ...KeyboardSensor.defaults.keyboardCodes, start: ["Space"] },
+  }),
+];
+
+const Instructions = createContext<string | undefined>(undefined);
+export function useSidebarDragInstructions(): string | undefined {
+  return useContext(Instructions);
+}
+
+const RowClickGuard = createContext<{
+  onPointerDownCapture: () => void;
+  onKeyDownCapture: () => void;
+  onClickCapture: (event: MouseEvent<HTMLButtonElement>) => void;
+} | undefined>(undefined);
+export function useSidebarRowClickGuard() {
+  return useContext(RowClickGuard);
+}
+
+function endAnnouncement({ canceled, operation: { source, target } }: DragEndEvent): string {
+  const label = source?.data.label ?? "item";
+  if (canceled || !target) return `Cancelled moving ${label}.`;
+  if (isSortable(source) && source.id === target.id && source.index === source.initialIndex) {
+    return `Kept ${label} in place.`;
+  }
+  return `Moved ${label}.`;
+}
 
 type SidebarDrop =
   | { kind: "group"; id: string; index: number }
@@ -67,8 +104,27 @@ export function SidebarDragProvider({
   onDraggingChange?: (active: boolean) => void;
   children: ReactNode;
 }): ReactElement {
+  const instructionsId = useId();
   const dragging = useRef<DragDropManager | null>(null);
+  const touchDrag = useRef(false);
   const initialOrder = useRef<string | null>(null);
+  // dnd-kit removes its click guard at pointerup, before a stationary touch's
+  // native click. Keep this handoff armed through drop/cancel, without timers.
+  const resetRowClickGuard = (): void => {
+    // Escape during a touch drag belongs to that gesture, not the next one.
+    if (dragging.current === null) touchDrag.current = false;
+  };
+  const rowClickGuard = {
+    onPointerDownCapture: resetRowClickGuard,
+    onKeyDownCapture: resetRowClickGuard,
+    onClickCapture: (event: MouseEvent<HTMLButtonElement>): void => {
+      // Keyboard and assistive activations have no pointer click count.
+      if (!touchDrag.current || event.detail === 0) return;
+      touchDrag.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+  };
   const cancel = useCallback((): void => {
     dragging.current?.actions.stop({ canceled: true });
     onDraggingChange?.(false);
@@ -94,36 +150,38 @@ export function SidebarDragProvider({
   useEffect(() => {
     if (!active) cancel();
   }, [active, cancel]);
+  useEffect(() => cleanup, []);
 
   return (
     <DragDropProvider
       plugins={(defaults) => [
         SidebarSortingPlugin,
-        ...defaults,
-        Accessibility.configure({
-          announcements: {
-            dragstart: ({ operation: { source } }: DragStartEvent) => `Moving ${source?.data.label ?? "item"}.`,
-            dragover: ({ operation: { target } }: DragOverEvent) => target ? `Over ${target.data.label ?? "item"}.` : "No drop target. Release to cancel.",
-            dragend: ({ canceled, operation: { source, target } }: DragEndEvent) => {
-              const label = source?.data.label ?? "item";
-              if (canceled || !target) return `Cancelled moving ${label}.`;
-              if (isSortable(source) && source.id === target.id && source.index === source.initialIndex) {
-                return `Kept ${label} in place.`;
-              }
-              return `Moved ${label}.`;
-            },
-          },
-        }),
+        // This plugin unconditionally turns its activator into a pressed/
+        // disabled draggable. Native row buttons keep their own semantics;
+        // the live-region helper emits the same product announcements.
+        ...defaults.filter((plugin) => plugin !== Accessibility),
       ]}
       onBeforeDragStart={(event) => {
         if (!active || connection?.status.writable !== true) event.preventDefault();
       }}
-      onDragStart={(_event, manager) => {
+      onDragStart={(event: DragStartEvent, manager) => {
+        const activator = event.operation.activatorEvent;
+        if (activator && "pointerType" in activator && activator.pointerType === "touch") {
+          touchDrag.current = true;
+        }
+        announce(`Moving ${event.operation.source?.data.label ?? "item"}.`);
         dragging.current = manager;
         onDraggingChange?.(true);
         initialOrder.current = connection === null ? null : order(connection.ydoc);
       }}
+      onDragOver={({ operation: { source, target } }: DragOverEvent) => {
+        // The initial collision is the row itself, not a newly chosen position.
+        // Keep the pickup instruction instead of replacing it with "Over" itself.
+        if (source?.id === target?.id) return;
+        announce(target ? `Over ${target.data.label ?? "item"}.` : "No drop target. Release to cancel.");
+      }}
       onDragEnd={(event) => {
+        announce(endAnnouncement(event));
         dragging.current = null;
         onDraggingChange?.(false);
         const expectedOrder = initialOrder.current;
@@ -148,7 +206,13 @@ export function SidebarDragProvider({
         }
       }}
     >
-      {children}
+      <Instructions.Provider value={instructionsId}>
+        <p id={instructionsId} hidden>
+          Press Enter to open the document or toggle the group. Press Space to pick up the row.
+          While dragging, use the arrow keys to move, Space or Enter to drop, or Escape to cancel.
+        </p>
+        <RowClickGuard.Provider value={rowClickGuard}>{children}</RowClickGuard.Provider>
+      </Instructions.Provider>
     </DragDropProvider>
   );
 }

@@ -258,6 +258,52 @@ function navRows(host: HTMLElement): HTMLButtonElement[] {
 }
 
 describe("the sidebar is the _sidebar document", () => {
+  it.each([true, false])(
+    "keeps row navigation and disclosure semantics when sidebar writable is %s",
+    async (writable) => {
+      seedDirectory();
+      const doc = room(roomForDoc(WORKSPACE, ONE)).ydoc;
+      initDoc(doc, { uuid: ONE, title: "Overview" });
+      const sidebar = room(sidebarRoom(WORKSPACE));
+      const reading = createGroup(sidebar.ydoc, "Reading");
+      pinDoc(sidebar.ydoc, reading, ONE);
+      pinDoc(sidebar.ydoc, reading, TWO);
+      sidebar.status = { ...LIVE, writable };
+      const peer = peerOf(sidebar.ydoc);
+      const host = await openApp(`/${WORKSPACE}/${ONE}`);
+      const [current, other] = rows(host, 0);
+      const toggle = groupToggle(host, 0);
+
+      // The same native buttons open/toggle and pick up the row. Sortability
+      // must not turn their resting state into a pressed or disabled control,
+      // even while the sidebar room cannot accept reordering writes.
+      expect(current).toBeInstanceOf(HTMLButtonElement);
+      expect(current?.textContent).toBe("Overview");
+      expect(current?.getAttribute("aria-current")).toBe("page");
+      expect(other?.getAttribute("aria-current")).toBeNull();
+      expect(toggle).toBeInstanceOf(HTMLButtonElement);
+      expect(toggle?.textContent).toBe("Reading");
+      expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+      for (const button of [current, other, toggle]) {
+        expect(button?.disabled).toBe(false);
+        expect(button?.getAttribute("role")).toBeNull();
+        expect(button?.hasAttribute("aria-pressed")).toBe(false);
+        expect(button?.hasAttribute("aria-grabbed")).toBe(false);
+        expect(button?.hasAttribute("aria-disabled")).toBe(false);
+      }
+      expect(host.querySelectorAll('.ub-drag-handle, [aria-label^="Move document"], [aria-label^="Move group"]')).toHaveLength(0);
+
+      act(() => toggle?.click());
+      expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+      act(() => toggle?.click());
+      act(() => other?.click());
+      expect(window.location.pathname).toBe(`/${WORKSPACE}/${TWO}`);
+      expect(rows(host, 0)[1]?.getAttribute("aria-current")).toBe("page");
+      expect(rows(host, 0)[0]?.getAttribute("aria-current")).toBeNull();
+      expect(stored(peer)).toEqual([["Reading", [ONE, TWO]]]);
+    },
+  );
+
   it("renders stored order and live moves from another replica", async () => {
     seedDirectory();
     const sidebar = sidebarDoc();
@@ -398,6 +444,15 @@ describe("the sidebar is the _sidebar document", () => {
     const field = host.querySelector<HTMLInputElement>(".ub-group-rename");
     expect(field).not.toBeNull();
     expect(document.activeElement).toBe(field);
+    // Replacing the sortable heading with a field must not make its section
+    // an inherited disabled/pressed control containing editable descendants.
+    for (const element of [field, field?.closest(".ub-group")]) {
+      expect(element?.hasAttribute("aria-disabled")).toBe(false);
+      expect(element?.hasAttribute("aria-pressed")).toBe(false);
+      expect(element?.hasAttribute("aria-grabbed")).toBe(false);
+      expect(element?.getAttribute("role")).toBeNull();
+    }
+    expect(field?.disabled).toBe(false);
 
     act(() => {
       if (field !== null) field.value = "Reading";
@@ -549,9 +604,7 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     // The controls, draggable rows and drop targets remain mounted for the CSS
     // transition, but every one is beneath the inert boundary for its whole
     // duration — transform and opacity are never the interaction boundary.
-    const reachable = offscreen.querySelectorAll(
-      "button, input, .ub-drag-handle",
-    );
+    const reachable = offscreen.querySelectorAll("button, input");
     expect(reachable.length).toBeGreaterThan(0);
     for (const node of reachable) expect(node.closest("[inert]")).toBe(offscreen);
   }
@@ -691,7 +744,6 @@ describe("the sidebar's fixed navigation", () => {
     // kind can land in it.
     const nav = host.querySelector(".ub-nav");
     expect(nav?.querySelectorAll("[draggable]")).toHaveLength(0);
-    expect(nav?.querySelectorAll(".ub-drag-handle")).toHaveLength(0);
   });
 
   it("shows the two destinations it does not have as unavailable, not as links", async () => {

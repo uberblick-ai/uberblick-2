@@ -12,8 +12,8 @@
  * operation with two front doors — and the re-render is an observer over the
  * same Y.Doc, so either writer's change is live in every client.
  *
- * dnd-kit owns pointer/touch/keyboard gestures, sorting feedback and announcements.
- * Separate handles leave navigation and disclosure controls unchanged. Shared
+ * dnd-kit owns pointer/touch/keyboard gestures, sorting feedback and focus.
+ * Rows keep their navigation and disclosure clicks alongside dragging. Shared
  * order changes cancel a drag; only a successful drop commits through the schema.
  */
 
@@ -37,7 +37,7 @@ import { statusReading } from "./status-reading.js";
 import { useSortable } from "@dnd-kit/react/sortable";
 import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { useDroppable } from "@dnd-kit/react";
-import { SidebarDragProvider } from "./sidebar-drag.js";
+import { SidebarDragProvider, sidebarRowSensors, useSidebarDragInstructions, useSidebarRowClickGuard } from "./sidebar-drag.js";
 import { Sidebar as SidebarFrame, SIDEBAR_TOGGLE_CLASSES, useSidebar } from "./shadcn/sidebar.js";
 import { Input } from "./shadcn/input.js";
 import { UserMenu } from "./UserMenu.js";
@@ -729,9 +729,12 @@ function GroupSection({
     type: "group",
     accept: "group",
     plugins: [SortableKeyboardPlugin],
+    sensors: sidebarRowSensors,
     disabled: ydoc === null || editing,
     data: { kind: "group", id: group.id, label: `group ${group.name}` },
   });
+  const instructions = useSidebarDragInstructions();
+  const rowClickGuard = useSidebarRowClickGuard();
   const [collapsed, setCollapsed] = useStoredFlag(groupCollapsedKey(group.id), false);
   const append = useDroppable({
     id: `append:${group.id}`,
@@ -760,7 +763,7 @@ function GroupSection({
 
   return (
     <section className="ub-group" ref={sortable.ref}>
-      <div className="ub-group-head" ref={append.ref} data-drop-target={append.isDropTarget}>
+      <div className="ub-group-head data-[drop-target=true]:bg-(--sidebar-accent)" ref={append.ref} data-drop-target={append.isDropTarget}>
         {editing ? (
           <form
             className="mx-[0.4rem] my-1 flex-1 min-w-0"
@@ -791,7 +794,10 @@ function GroupSection({
         ) : (
           <button
             type="button"
-            className="ub-group-toggle"
+            {...rowClickGuard}
+            className="ub-group-toggle flex flex-1 min-w-0 items-center gap-1 rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 text-left font-[inherit] text-[11px] font-medium tracking-[0.12em] uppercase text-(--sidebar-group-label) cursor-pointer select-none [-webkit-touch-callout:none] hover:text-sidebar-foreground"
+            ref={sortable.handleRef}
+            aria-describedby={ydoc === null ? undefined : instructions}
             aria-expanded={!collapsed}
             onClick={() => setCollapsed(!collapsed)}
           >
@@ -800,13 +806,6 @@ function GroupSection({
             <span className="ub-group-rule" aria-hidden="true" />
           </button>
         )}
-        {/* Keep the handle mounted during rename/read-only so dnd-kit never
-            applies inherited aria-disabled to the whole group container. */}
-        <button type="button" className="ub-drag-handle" ref={sortable.handleRef}
-          disabled={ydoc === null || editing}
-          aria-label={`Move group ${group.name}`} title="Move group">
-          <span aria-hidden="true">⠿</span>
-        </button>
         {!editing && ydoc !== null && (
           <>
             <button
@@ -866,18 +865,20 @@ function PinnedRow({ uuid, index, group, entry, selected, onSelect, disabled }: 
   const sortable = useSortable({
     id: `doc:${uuid}`, index, group, type: "doc", accept: "doc", disabled,
     plugins: [SortableKeyboardPlugin],
+    sensors: sidebarRowSensors,
     data: { kind: "doc", id: uuid, label: pinTitle(uuid, entry) },
   });
+  const instructions = useSidebarDragInstructions();
+  const rowClickGuard = useSidebarRowClickGuard();
   return (
-    <li className="ub-pin-row" ref={sortable.ref} data-drop-target={sortable.isDropTarget && !sortable.isDragSource}>
+    <li className="ub-pin-row flex items-center data-[drop-target=true]:bg-(--sidebar-accent)" ref={sortable.ref} data-drop-target={sortable.isDropTarget && !sortable.isDragSource}>
       <button type="button" aria-current={uuid === selected ? "page" : undefined}
+        {...rowClickGuard}
+        className="flex flex-1 min-w-0 w-full min-h-8.5 items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] text-sm text-(--sidebar-row-foreground) cursor-pointer select-none [-webkit-touch-callout:none] hover:bg-(--sidebar-accent) hover:text-sidebar-foreground aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium"
+        ref={sortable.handleRef} aria-describedby={disabled ? undefined : instructions}
         onClick={() => onSelect(uuid)} title={pinTitle(uuid, entry)}>
         <DocumentIcon />
         <span className="ub-pin-label"><PinLabel uuid={uuid} entry={entry} /></span>
-      </button>
-      <button type="button" className="ub-drag-handle" ref={sortable.handleRef}
-        disabled={disabled} aria-label={`Move document ${pinTitle(uuid, entry)}`} title="Move document">
-        <span aria-hidden="true">⠿</span>
       </button>
     </li>
   );

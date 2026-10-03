@@ -108,13 +108,13 @@ test("empty and long-label sidebars fit supported widths and breakpoint edges in
         await expectHorizontalFit(page);
         await horizontalWheel(page);
         const pane = activePane(page);
-        // The header, handles and hover-revealed group actions must fit as
+        // The header, rows and hover-revealed group actions must fit as
         // boxes, rather than becoming invisible under an overflow rule.
         if (content === "long labels") await pane.locator(".ub-group-head").last().hover();
         const outside = await pane.evaluate((element) => {
           const bounds = element.getBoundingClientRect();
           return [...element.querySelectorAll<HTMLElement>(
-            ".ub-workspace, .ub-drag-handle, .ub-group-act, .ub-settings-entry, .ub-user-card",
+            ".ub-workspace, .ub-pin-row > button, .ub-group-toggle, .ub-group-act, .ub-settings-entry, .ub-user-card",
           )].filter((control) => {
             const box = control.getBoundingClientRect();
             return box.left < bounds.left || box.right > bounds.right;
@@ -142,7 +142,7 @@ test("empty and long-label sidebars fit supported widths and breakpoint edges in
     const hide = page.getByRole("button", { name: width < 1280 ? "Close document list" : "Hide document list", exact: true });
     const box = await hide.boundingBox();
     if (box === null) throw new Error("e2e: missing close control");
-    await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2);
+    await hide.click({ position: { x: box.width * 0.75, y: box.height / 2 } });
     if (width < 1280) {
       await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
     } else {
@@ -173,14 +173,14 @@ test("edge-held drags never pan sideways and a tall sidebar still scrolls vertic
 
     for (const edge of ["right", "left"] as const) {
       await pane.evaluate((element) => { element.scrollTop = 0; });
-      const source = pane.locator(".ub-pin-row .ub-drag-handle").first();
+      const source = pane.locator(".ub-pin-row > button:first-child").first();
       const from = await source.boundingBox();
       const bounds = await pane.boundingBox();
       if (from === null || bounds === null) throw new Error("e2e: missing drag source or pane");
       await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
       await page.mouse.down();
       await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2 - 8);
-      await expect(source).toHaveAttribute("aria-pressed", "true");
+      await expect(source.locator('xpath=ancestor::*[@data-dnd-dragging="true"][1]')).toHaveCount(1);
       await page.mouse.move(edge === "right" ? bounds.x + bounds.width - 1 : bounds.x + 1,
         bounds.y + bounds.height - 5, { steps: 12 });
       // Reaching the bottom edge also proves the dnd-kit auto-scroller still
