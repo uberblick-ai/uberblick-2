@@ -10,6 +10,7 @@
  * reason to run it by hand.
  */
 
+import { authCommand } from "./auth.js";
 import { doctorCommand } from "./doctor.js";
 import { envCommand } from "./env.js";
 import { initCommand } from "./init.js";
@@ -39,6 +40,7 @@ commands:
   doctor [--json]        check the local stack against its known failure modes
   workspace [command]    which workspace is in force, and how to change it
   remote [command]       the endpoint documents sync with, and the one-time bridge
+  auth <command>         sign in to a remote hub and manage this machine's login
   mcp <command>          register uberblick with an MCP client
   env -- <command...>    run a command with uberblick's configuration in its
                          environment
@@ -98,6 +100,9 @@ export async function runCli(
   }
   if (command === "remote") {
     return await remoteCommand(rest, io);
+  }
+  if (command === "auth") {
+    return await authCommand(rest, io);
   }
   if (command === "env") {
     return await envCommand(rest, io);
