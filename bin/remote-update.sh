@@ -26,14 +26,14 @@ case "${1-}" in
   "") ;;
   --remote-init-rerun) mode=remote-init-rerun ;;
   *)
-    printf 'usage: sh remote-update.sh [--remote-init-rerun]\n' >&2
+    printf 'usage: sh bin/remote-update.sh [--remote-init-rerun]\n' >&2
     exit 2
     ;;
 esac
 
 set -eu
 
-checkout=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+checkout=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 deployed_ref=refs/uberblick/deployed
 
 # The lock is the checkout directory itself, because one checkout is exactly
@@ -102,7 +102,7 @@ if [ "$mode" = remote-init-rerun ]; then
   git fetch --quiet origin main || exit 102
   git merge --ff-only origin/main || exit 102
   mv "$staged_env" .env || exit 103
-  sh remote-compose.sh up --build --detach || exit 104
+  sh bin/remote-compose.sh up --build --detach || exit 104
   git update-ref "$deployed_ref" HEAD || exit 105
   # Private proof consumed by `ub remote init`; an older updater cannot emit it
   # and therefore cannot turn an ignored configuration payload into success.
@@ -133,7 +133,7 @@ printf 'uberblick-update: deploying %s (deployed: %s)\n' "$target" "${deployed:-
 # code it started with; the new version takes over on the next run.
 git reset --hard --quiet "$target"
 
-sh remote-compose.sh up --build --detach
+sh bin/remote-compose.sh up --build --detach
 
 # Only now, and only because the build exited 0.
 git update-ref "$deployed_ref" "$target"

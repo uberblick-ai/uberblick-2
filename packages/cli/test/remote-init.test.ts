@@ -231,7 +231,7 @@ function init(rig: Harness, args: string[] = [TARGET]): Promise<number> {
 
 describe("ub remote init", () => {
   it("keeps every accepted workspace spelling inside the compose charset", () => {
-    // remote-compose.sh interpolates this value into JSON, so schema's accepted
+    // bin/remote-compose.sh interpolates this value into JSON, so schema's accepted
     // grammar must remain a subset of its explicit deployment rule.
     const composeWebWorkspaces = /^[A-Za-z0-9,-]+$/;
     const accepted = [
@@ -277,7 +277,7 @@ describe("ub remote init", () => {
         `WEB_WORKSPACES=${WORKSPACE}\n`,
     );
     expect(stepFor(rig, "uberblick:up").args.join("\n")).toContain(
-      "sh remote-compose.sh up --build --detach",
+      "sh bin/remote-compose.sh up --build --detach",
     );
     // The title carries a fingerprint, so two hosts called `box` never alias.
     const added = rig.steps().find((step) => step.args[1] === "deploy-key") as Step;
@@ -512,7 +512,7 @@ describe("ub remote init", () => {
     expect(labels.join("\n")).not.toContain("uberblick:env");
     expect(labels.join("\n")).not.toContain("uberblick:up");
     expect(stepFor(rig, "uberblick:init-rerun").args.join("\n")).toContain(
-      "sh remote-update.sh --remote-init-rerun",
+      "sh bin/remote-update.sh --remote-init-rerun",
     );
     expect(stepFor(rig, "uberblick:init-rerun").stdin).toContain(
       `HUB_AUTH_TOKEN=${SECRET}`,
@@ -668,7 +668,7 @@ describe("ub remote update", () => {
     });
     expect(await remoteUpdateCommand([TARGET], rig.io, { env: rig.env })).toBe(0);
     expect(rig.out()).toContain("up to date at abc123");
-    expect(stepFor(rig, "uberblick:update").args.join("\n")).toContain("sh remote-update.sh");
+    expect(stepFor(rig, "uberblick:update").args.join("\n")).toContain("sh bin/remote-update.sh");
   });
 
   it("fails when the host's updater fails", async () => {

@@ -7,7 +7,7 @@
  * Nothing is copied by hand.
  *
  * **Nothing is deployed *from* here.** The host clones `main` from GitHub and
- * is updated by running `remote-update.sh` in that checkout — never on its own,
+ * is updated by running `bin/remote-update.sh` in that checkout — never on its own,
  * only when somebody runs it. Deploying this machine's checkout was considered
  * and rejected: with more than one user it deploys whichever version somebody
  * happened to have.
@@ -66,7 +66,7 @@ const KEY_PATH = "~/.ssh/uberblick-deploy";
  */
 const SSH_COMMAND = `ssh -i ${KEY_PATH} -o IdentitiesOnly=yes`;
 
-/** The character set `remote-compose.sh` enforces on the deployed secret. */
+/** The character set `bin/remote-compose.sh` enforces on the deployed secret. */
 const SAFE_SECRET = /^[A-Za-z0-9._-]+$/;
 
 const HOSTNAME = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
@@ -96,8 +96,8 @@ the served app holds the credential.
 export const REMOTE_UPDATE_HELP = `usage: ub remote update <ssh-target> [--dir <path>]
 
 Deploy origin/main onto a host \`ub remote init\` already stood up, now. It runs
-that checkout's own \`remote-update.sh\`, so the deploy steps are the version the
-host is running rather than this machine's copy. Nothing updates on a timer.
+that checkout's own \`bin/remote-update.sh\`, so the deploy steps are the version
+the host is running rather than this machine's copy. Nothing updates on a timer.
 
 operands:
   <ssh-target>       where to reach the host over SSH, such as uberblick@host
@@ -251,7 +251,7 @@ function upScript(dir: string): string {
   return `# uberblick:up
 set -eu
 cd ${hostPath(dir)}
-sh remote-compose.sh up --build --detach
+sh bin/remote-compose.sh up --build --detach
 git update-ref refs/uberblick/deployed HEAD
 `;
 }
@@ -259,7 +259,7 @@ git update-ref refs/uberblick/deployed HEAD
 function logsScript(dir: string): string {
   return `# uberblick:logs
 cd ${hostPath(dir)}
-sh remote-compose.sh logs --tail=50 hub caddy
+sh bin/remote-compose.sh logs --tail=50 hub caddy
 `;
 }
 
@@ -267,7 +267,7 @@ function updateScript(dir: string): string {
   return `# uberblick:update
 set -eu
 cd ${hostPath(dir)}
-sh remote-update.sh
+sh bin/remote-update.sh
 `;
 }
 
@@ -276,7 +276,7 @@ function initRerunScript(dir: string): string {
   return `# uberblick:init-rerun
 set -eu
 cd ${hostPath(dir)}
-sh remote-update.sh --remote-init-rerun
+sh bin/remote-update.sh --remote-init-rerun
 `;
 }
 
@@ -422,7 +422,7 @@ function parseFacts(text: string): Facts {
   return facts;
 }
 
-/** Compose 2.6 is the minimum `remote-compose.sh` accepts; check it early. */
+/** Compose 2.6 is the minimum `bin/remote-compose.sh` accepts; check it early. */
 function composeTooOld(version: string): boolean {
   const [major, minor] = version.replace(/^v/, "").split(".");
   const first = Number(major);
@@ -684,7 +684,7 @@ export async function remoteInitCommand(
   if (!SAFE_SECRET.test(secret)) {
     io.err(
       "ub remote init: the configured signing secret contains characters " +
-        "`remote-compose.sh` refuses (only A-Z a-z 0-9 . _ - are safe, because " +
+        "`bin/remote-compose.sh` refuses (only A-Z a-z 0-9 . _ - are safe, because " +
         "the shell and Compose parse `.env` differently). Regenerate it before " +
         "deploying.\n",
     );
@@ -928,7 +928,7 @@ export async function remoteInitCommand(
     io.err(`ub remote: building and starting the stack on ${flags.target}…\n`);
     const up = ssh(flags.target, upScript(flags.dir), { env });
     if (up.status !== 0) {
-      io.err(`ub remote init: ${failed("sh remote-compose.sh up", up)}.\n`);
+      io.err(`ub remote init: ${failed("sh bin/remote-compose.sh up", up)}.\n`);
       io.err(ssh(flags.target, logsScript(flags.dir), { env }).stdout);
       io.err("Nothing was persisted here.\n");
       return 1;
@@ -1039,7 +1039,7 @@ export async function remoteUpdateCommand(
 
   const env = deps.env ?? process.env;
   // The host's own updater, which is versioned in the checkout it deploys, so
-  // this and a by-hand `sh remote-update.sh` can never drift apart. Its `flock`
+  // this and a by-hand `sh bin/remote-update.sh` can never drift apart. Its `flock`
   // is what keeps two deliberate runs from colliding.
   const ran = ssh(flags.target, updateScript(flags.dir), { env });
   if (ran.stdout !== "") io.out(ran.stdout);

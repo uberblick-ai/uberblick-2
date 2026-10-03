@@ -4,7 +4,7 @@
 set -eu
 
 usage() {
-  printf 'usage: sh hub-admin-setup.sh <workspace-uuid>\n       sh hub-admin-setup.sh status <setup-uuid>\n'
+  printf 'usage: sh bin/hub-admin-setup.sh <workspace-uuid>\n       sh bin/hub-admin-setup.sh status <setup-uuid>\n'
 }
 
 case "${1-}" in
@@ -20,13 +20,13 @@ case "${1-}" in
     ;;
 esac
 
-checkout=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+checkout=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$checkout"
 
 # Compose exec does not forward host signals. With terminal input, use its
 # container TTY so Ctrl-C reaches the command and it can report cancellation.
 set -- hub packages/hub/node_modules/.bin/tsx packages/hub/src/admin-setup-command.ts "$@"
 if [ -t 0 ]; then
-  exec sh remote-compose.sh exec "$@"
+  exec sh bin/remote-compose.sh exec "$@"
 fi
-exec sh remote-compose.sh exec -T "$@"
+exec sh bin/remote-compose.sh exec -T "$@"

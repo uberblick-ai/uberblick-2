@@ -1,11 +1,11 @@
 /**
- * `hub-backup.sh` and `hub-restore.sh`, run for real.
+ * `bin/hub-backup.sh` and `bin/hub-restore.sh`, run for real.
  *
  * These two scripts are the only thing standing between a bad day and a lost
  * corpus, so the properties worth defending are the refusals: a backup must not
  * be written when the hub's shutdown flush failed, and a restore must not touch
  * the volume for a file it has not read. Neither survives being mocked, so the
- * scripts are run as themselves against a stub `remote-compose.sh` — the wrapper
+ * scripts are run as themselves against a stub `bin/remote-compose.sh` — the wrapper
  * is the only thing a checkout ever drives Docker through, which is exactly why
  * it is the seam (`remote-update.test.ts` uses the same one). No Docker runs
  * here.
@@ -128,15 +128,16 @@ function fixture(): Fixture {
   const volume = join(checkout, "volume");
   mkdirSync(volume, { recursive: true });
 
-  writeFileSync(join(checkout, "remote-compose.sh"), COMPOSE_STUB, { mode: 0o755 });
+  mkdirSync(join(checkout, "bin"));
+  writeFileSync(join(checkout, "bin", "remote-compose.sh"), COMPOSE_STUB, { mode: 0o755 });
   // The real scripts, verbatim — the files under test.
   for (const script of ["hub-backup.sh", "hub-restore.sh"]) {
-    copyFileSync(join(REPO_ROOT, script), join(checkout, script));
+    copyFileSync(join(REPO_ROOT, "bin", script), join(checkout, "bin", script));
   }
 
-  const bin = join(checkout, "bin");
-  mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, "chown"), CHOWN_STUB, { mode: 0o755 });
+  const stubs = join(checkout, "stubs");
+  mkdirSync(stubs, { recursive: true });
+  writeFileSync(join(stubs, "chown"), CHOWN_STUB, { mode: 0o755 });
 
   return {
     checkout,
@@ -148,7 +149,7 @@ function fixture(): Fixture {
       UB_TEST_VOLUME: volume,
       UB_TEST_VERIFY_DB: join(checkout, "verify.sqlite"),
       UB_TEST_NODE_DIR: dirname(process.execPath),
-      UB_TEST_BIN: bin,
+      UB_TEST_BIN: stubs,
     },
   };
 }
@@ -188,7 +189,7 @@ function hubDatabase(path: string, rows: number, privateTables = false): void {
 }
 
 function run(fix: Fixture, script: string, args: string[]): SpawnSyncReturns<string> {
-  return spawnSync("sh", [join(fix.checkout, script), ...args], {
+  return spawnSync("sh", [join(fix.checkout, "bin", script), ...args], {
     cwd: fix.checkout,
     encoding: "utf8",
     env: fix.env,
@@ -211,7 +212,7 @@ function mode(path: string): string {
   return (statSync(path).mode & 0o777).toString(8);
 }
 
-describe("hub-backup.sh", () => {
+describe("bin/hub-backup.sh", () => {
   it("stops, reads the exit code, copies and starts again — at mode 0600", () => {
     const fix = fixture();
     hubDatabase(join(fix.volume, "hub.sqlite"), 3);
@@ -315,7 +316,7 @@ describe("hub-backup.sh", () => {
   });
 });
 
-describe("hub-restore.sh", () => {
+describe("bin/hub-restore.sh", () => {
   it("refuses a backup that is not there, without stopping the hub", () => {
     const fix = fixture();
     const ran = run(fix, "hub-restore.sh", [join(fix.checkout, "absent.sqlite")]);
@@ -444,7 +445,7 @@ describe("hub-restore.sh", () => {
 
     expect(ran.status).not.toBe(0);
     expect(ran.stderr).toContain("rollback journal");
-    expect(ran.stderr).toContain("sh remote-compose.sh up --detach hub");
+    expect(ran.stderr).toContain("sh bin/remote-compose.sh up --detach hub");
     expect(readFileSync(live)).toEqual(liveBefore);
     expect(readFileSync(journal)).toEqual(journalBefore);
     // Nothing was copied and nothing was placed; the hub is running again.

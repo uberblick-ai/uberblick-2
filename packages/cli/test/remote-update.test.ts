@@ -1,5 +1,5 @@
 /**
- * `remote-update.sh`, run for real.
+ * `bin/remote-update.sh`, run for real.
  *
  * The script is what makes the host follow `main` unattended, so the properties
  * worth defending are the ones nobody is watching when they fail: a build that
@@ -7,7 +7,7 @@
  * build at once, and a commit that rewrites the updater must not tear the run
  * that is applying it in half. None of that survives being mocked, so these
  * tests give the real script a real git repository — a local bare "origin", a
- * clone standing in for the host's checkout — and a stub `remote-compose.sh`
+ * clone standing in for the host's checkout — and a stub `bin/remote-compose.sh`
  * committed where the real one lives, which is the only thing a checkout ever
  * invokes docker through.
  *
@@ -95,9 +95,10 @@ function fixture(): Fixture {
 
   const work = join(root, "work");
   git(root, "clone", "--quiet", bare, work);
-  writeFileSync(join(work, "remote-compose.sh"), COMPOSE_STUB, "utf8");
+  mkdirSync(join(work, "bin"));
+  writeFileSync(join(work, "bin", "remote-compose.sh"), COMPOSE_STUB, "utf8");
   // The real updater, verbatim — the file under test.
-  copyFileSync(join(REPO_ROOT, "remote-update.sh"), join(work, "remote-update.sh"));
+  copyFileSync(join(REPO_ROOT, "bin", "remote-update.sh"), join(work, "bin", "remote-update.sh"));
   writeFileSync(join(work, "marker.txt"), "one\n", "utf8");
   git(work, "add", "-A");
   git(work, "commit", "--quiet", "-m", "one");
@@ -146,7 +147,7 @@ function session(fix: Fixture, name: string): string {
 }
 
 function update(fix: Fixture, extra: NodeJS.ProcessEnv = {}): SpawnSyncReturns<string> {
-  return spawnSync("sh", [join(fix.checkout, "remote-update.sh")], {
+  return spawnSync("sh", [join(fix.checkout, "bin", "remote-update.sh")], {
     cwd: fix.checkout,
     encoding: "utf8",
     env: updateEnv(fix, extra),
@@ -161,7 +162,7 @@ function initRerun(
 ): SpawnSyncReturns<string> {
   return spawnSync(
     "sh",
-    [join(fix.checkout, "remote-update.sh"), "--remote-init-rerun"],
+    [join(fix.checkout, "bin", "remote-update.sh"), "--remote-init-rerun"],
     {
       cwd: fix.checkout,
       encoding: "utf8",
@@ -225,7 +226,7 @@ async function startHeldBuild(
 ): Promise<{ release: () => Promise<number | null> }> {
   const hold = join(fix.root, "hold");
   writeFileSync(hold, "", "utf8");
-  const run = spawn("sh", [join(fix.checkout, "remote-update.sh")], {
+  const run = spawn("sh", [join(fix.checkout, "bin", "remote-update.sh")], {
     cwd: fix.checkout,
     env: updateEnv(fix, { ...extra, UB_TEST_COMPOSE_HOLD: hold }),
   });
@@ -252,7 +253,7 @@ async function startHeldInitRerun(
   writeFileSync(hold, "", "utf8");
   const run = spawn(
     "sh",
-    [join(fix.checkout, "remote-update.sh"), "--remote-init-rerun"],
+    [join(fix.checkout, "bin", "remote-update.sh"), "--remote-init-rerun"],
     {
       cwd: fix.checkout,
       env: updateEnv(fix, { UB_TEST_COMPOSE_HOLD: hold }),
@@ -274,7 +275,7 @@ async function startHeldInitRerun(
   };
 }
 
-describe("remote-update.sh", () => {
+describe("bin/remote-update.sh", () => {
   it("deploys an init re-run's env under the lock, preserving the host's GitHub app", () => {
     const fix = fixture();
     const next = push(fix, { "marker.txt": "two\n" });
@@ -516,13 +517,13 @@ describe("remote-update.sh", () => {
   it("completes a run whose commit rewrites the updater itself", () => {
     const fix = fixture();
     const rewritten = "#!/bin/sh\nexit 42\n";
-    const next = push(fix, { "remote-update.sh": rewritten });
+    const next = push(fix, { "bin/remote-update.sh": rewritten });
 
     const ran = update(fix);
     expect(ran.status).toBe(0);
     expect(ran.stdout).toContain(`deployed ${next}`);
     expect(builds(fix)).toEqual(["up --build --detach"]);
-    expect(readFileSync(join(fix.checkout, "remote-update.sh"), "utf8")).toBe(rewritten);
+    expect(readFileSync(join(fix.checkout, "bin", "remote-update.sh"), "utf8")).toBe(rewritten);
   });
 
   it("keeps the host's .env byte for byte, and names what the reset discarded", () => {

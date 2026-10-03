@@ -35,7 +35,7 @@ given, before you deploy.
   the user to the `docker` group (and opening a new session).
 - **Docker Engine, with Docker Compose 2.6.0 or newer.** Compose 5 satisfies it
   too; `docker compose version --short` is what both the probe and
-  `remote-compose.sh` read. The build secrets and the environment-backed secret
+  `bin/remote-compose.sh` read. The build secrets and the environment-backed secret
   source that first set this floor are gone with #426; what the compose file
   still uses beyond long-standing Compose v2 features is the top-level project
   `name`. The floor stays at 2.6 because that is the oldest version this
@@ -55,7 +55,7 @@ given, before you deploy.
 - **TCP port 443 free on the host's Tailscale IPv4 address** — *not probed*
   either. Compose publishes `<TAILSCALE_IP>:443`, and Docker binds that port
   *before* the container starts, so an address already in use fails
-  `sh remote-compose.sh up` outright with the daemon's bind error. Read that
+  `sh bin/remote-compose.sh up` outright with the daemon's bind error. Read that
   error, not the logs: Caddy never ran, so `logs caddy` is empty and says
   nothing.
 
@@ -104,7 +104,7 @@ hand:
    `HUB_AUTH_TOKEN` from your local signing secret, and `WEB_WORKSPACES` with
    this machine's resolved workspace uuid — **over stdin**. The secret is never
    an argument on either side, never echoed, and never reaches a shell history.
-5. Runs `sh remote-compose.sh up --build --detach`, then verifies from your
+5. Runs `sh bin/remote-compose.sh up --build --detach`, then verifies from your
    machine: it polls `https://<host>/` for up to 90 seconds — the first request
    is what makes Tailscale issue the certificate, so an immediate check is a
    false negative — and confirms `/ws` upgrades to a WebSocket. A failure exits
@@ -137,7 +137,7 @@ One command, from your own machine, run by you or by an agent session over SSH:
 ub remote update uberblick@box.tailnet.ts.net
 ```
 
-It runs `remote-update.sh` in the host's checkout — the same script you would
+It runs `bin/remote-update.sh` in the host's checkout — the same script you would
 run by hand there — and reports either "up to date" or the commit it moved to.
 A `flock` on the checkout keeps every deployment of an existing checkout — this
 script or an `ub remote init` re-run, whichever sessions or users they run as —
@@ -207,7 +207,7 @@ to the hub container; no GitHub configuration is served to browsers or compiled
 into the web bundle. After saving `.env`, recreate the hub from that checkout:
 
 ```sh
-sh remote-compose.sh up --detach hub
+sh bin/remote-compose.sh up --detach hub
 ```
 
 Omitting the setting, or leaving it empty, disables sign-in with a distinct
@@ -279,7 +279,7 @@ After [enabling GitHub sign-in](#enable-github-sign-in), run setup in the
 repository checkout **on the hub host**, for example over SSH:
 
 ```sh
-sh hub-admin-setup.sh <workspace-uuid>
+sh bin/hub-admin-setup.sh <workspace-uuid>
 ```
 
 Name exactly one bare workspace UUID. For an existing workspace, use the UUID
@@ -299,7 +299,7 @@ already held documents for that workspace. The hub logs the committed grant.
 Approval expires within fifteen minutes.
 
 Host access is the authority for this operation. The script runs a command in
-the running hub container through `remote-compose.sh`; the command connects to
+the running hub container through `bin/remote-compose.sh`; the command connects to
 a private Unix socket beside the hub database. No deployment HTTP or WebSocket
 route can start setup, complete it or retrieve its result. A shared signing
 secret, device credential or supplied GitHub token cannot authorize setup.
@@ -348,14 +348,14 @@ Losing the result does **not** establish that nothing changed. Reconnect to
 the host checkout and use the setup ID printed by the original command:
 
 ```sh
-sh hub-admin-setup.sh status <setup-uuid>
+sh bin/hub-admin-setup.sh status <setup-uuid>
 ```
 
 The committed receipt is private hub data and survives a hub restart. This
 lookup retrieves what that setup committed without granting or changing
 anything. An unknown result never proves that nothing changed: for example,
 a database restore can replace the recorded history. Check the hub's grant
-logs with `sh remote-compose.sh logs hub` and the applicable backups when the
+logs with `sh bin/remote-compose.sh logs hub` and the applicable backups when the
 receipt is unavailable. Do not interpret a connection failure or an unknown
 result as permission to replace an administrator.
 
@@ -414,7 +414,7 @@ Then edit `.env`. Its keys are the ones `docker-compose.yml` and
   for, optionally decorated with a display slug (`<slug>-<uuid>`). Left at the
   placeholder, the root address has nothing to open and says so — document links
   still work, and the switcher shows only the workspace the address names. The
-  value may contain only letters, digits, `,` and `-`; `remote-compose.sh`
+  value may contain only letters, digits, `,` and `-`; `bin/remote-compose.sh`
   refuses anything else, because the list is substituted into the JSON
   configuration document and a quote there could inject a second `hubUrl` that
   retargets every browser. That refusal is the guarantee: no quote and no
@@ -430,7 +430,7 @@ Then edit `.env`. Its keys are the ones `docker-compose.yml` and
   clients that will sync to this hub. On a trusted machine with the repository's
   age key, `fnox get HUB_AUTH_TOKEN` prints that value so it can be transferred
   to the host's ignored `.env`. Never copy the age key to the host. The secret
-  must consist only of letters, digits, `.`, `_`, and `-`; `remote-compose.sh`
+  must consist only of letters, digits, `.`, `_`, and `-`; `bin/remote-compose.sh`
   refuses other characters because the shell and Compose parse `.env`
   differently — and because the value is substituted into the JSON
   configuration document Caddy serves, where a quote could inject further keys.
@@ -445,10 +445,10 @@ Validate the configuration without rendering its secret values, build the web
 bundle, and start both services:
 
 ```sh
-sh remote-compose.sh config --quiet
-sh remote-compose.sh up --build --detach
-sh remote-compose.sh ps
-sh remote-compose.sh logs --tail=100 hub caddy
+sh bin/remote-compose.sh config --quiet
+sh bin/remote-compose.sh up --build --detach
+sh bin/remote-compose.sh ps
+sh bin/remote-compose.sh logs --tail=100 hub caddy
 ```
 
 Two things say the deployment is up, and they are what `ub remote init` checks
@@ -466,7 +466,7 @@ curl -sS -o /dev/null -D - https://<TAILSCALE_HOST>/ws \
 
 `200` from the first, `101 Switching Protocols` from the second. A `502` on
 `/ws` is Caddy up and the hub down — expected while the hub is stopped for a
-backup, and otherwise a job for `sh remote-compose.sh logs hub`.
+backup, and otherwise a job for `sh bin/remote-compose.sh logs hub`.
 
 Then open `https://<TAILSCALE_HOST>` from a second computer on the same tailnet.
 It opens the first workspace in `WEB_WORKSPACES`. In the browser developer tools,
@@ -477,7 +477,7 @@ request means the document did not arrive and the client fell back to the values
 compiled into the bundle. That document is a credential — do not paste it
 anywhere. If the status line reads "no hub token", the document arrived without
 `hubAuthToken`: check that the deployment commands went through
-`remote-compose.sh`. The client logs one line naming both sources in force,
+`bin/remote-compose.sh`. The client logs one line naming both sources in force,
 which is the fastest way to tell a served value from a fallback. The directory
 should hydrate after the socket connects.
 
@@ -494,14 +494,14 @@ secret at all. Caddy renders that document from the `HUB_URL`, `WORKSPACES` and
 `HUB_AUTH_TOKEN` it is given, which `docker-compose.yml` fills from
 `WEB_HUB_URL` and `WEB_WORKSPACES` in `.env` — the first defaulting to
 `wss://<TAILSCALE_HOST>/ws`, the second to empty — and from the checked secret
-`remote-compose.sh` exports.
+`bin/remote-compose.sh` exports.
 
 So retargeting the client, or changing which workspaces it offers, is an edit to
 that document, not a rebuild — set the value in `.env` and recreate the Caddy
 container:
 
 ```sh
-sh remote-compose.sh up --detach caddy
+sh bin/remote-compose.sh up --detach caddy
 ```
 
 The document is served with `Cache-Control: no-store`, so the next page load
@@ -518,7 +518,7 @@ browser cache or fallback secret, and the client re-reads the document on its
 next connect attempt rather than giving up for the life of the tab.
 
 Rotating the secret is the same edit: set it in `.env` and recreate the two
-containers with `sh remote-compose.sh up --detach`. It is no longer a rebuild —
+containers with `sh bin/remote-compose.sh up --detach`. It is no longer a rebuild —
 the bundle carries no secret (#426) — but every open tab keeps minting with the
 one it was served until it is reloaded.
 
@@ -546,11 +546,11 @@ name/color if prompted.
    A's network. Confirm both browsers converge to the same text and neither
    edit disappears.
 4. **Hub restart durability:** make one more edit and wait until it appears on
-   both computers. On the host run `sh remote-compose.sh restart hub`, then
+   both computers. On the host run `sh bin/remote-compose.sh restart hub`, then
    reload B. Confirm the document and the last edit remain.
 5. **Named-volume durability:** record a distinctive document title, then run
-   `sh remote-compose.sh down` followed by
-   `sh remote-compose.sh up --detach`. Reload B and confirm the title remains
+   `sh bin/remote-compose.sh down` followed by
+   `sh bin/remote-compose.sh up --detach`. Reload B and confirm the title remains
    and the directory hydrates. Do not pass `--volumes` to `down`; that flag
    intentionally deletes the named SQLite volume.
 
@@ -561,10 +561,10 @@ they are not replaced by the repository's local test suite.
 ## Operations
 
 ```sh
-sh remote-compose.sh logs --follow hub caddy
-sh remote-compose.sh restart hub
-sh remote-compose.sh down
-sh remote-compose.sh up --detach
+sh bin/remote-compose.sh logs --follow hub caddy
+sh bin/remote-compose.sh restart hub
+sh bin/remote-compose.sh down
+sh bin/remote-compose.sh up --detach
 ```
 
 Deploying a new commit is [its own runbook](#updating-the-host--deliberately).
@@ -581,16 +581,16 @@ systemctl --user list-timers --all | grep uberblick   # expect no output
 
 The hub handles Compose's `SIGTERM` by flushing pending document updates before
 it exits. SQLite is `/data/hub.sqlite` in the `hub-data` named volume, so normal
-container replacement and `sh remote-compose.sh down` preserve it.
+container replacement and `sh bin/remote-compose.sh down` preserve it.
 
 ### Backing the hub up
 
 ```sh
-sh hub-backup.sh ~/uberblick-hub-$(date +%Y-%m-%d).sqlite
+sh bin/hub-backup.sh ~/uberblick-hub-$(date +%Y-%m-%d).sqlite
 ```
 
-In the host's checkout, beside `remote-compose.sh`. It **stops the hub, copies,
-and starts it again** — and the stop is the point, not an inconvenience.
+Run it in the host's checkout. It **stops the hub, copies, and starts it
+again** — and the stop is the point, not an inconvenience.
 Hocuspocus debounces the store (2s, at most 10s; the hub leaves both at their
 defaults), so a document edited a moment ago may exist only in the hub's memory.
 The only flush an operator can reach is a shutdown: `SIGTERM` makes the hub
@@ -627,7 +627,7 @@ backups when you would take a deploy, not mid-sentence for somebody.
 ### Restoring one
 
 ```sh
-sh hub-restore.sh ~/uberblick-hub-2026-08-28.sqlite
+sh bin/hub-restore.sh ~/uberblick-hub-2026-08-28.sqlite
 ```
 
 **Verified before anything is touched.** A restore runs on somebody's worst day,
@@ -664,9 +664,9 @@ Clearing it is one line, and SQLite does the work: a journal is recovered on the
 next clean open.
 
 ```sh
-sh remote-compose.sh up --detach hub
-sh remote-compose.sh stop hub
-sh hub-restore.sh ~/uberblick-hub-2026-08-28.sqlite
+sh bin/remote-compose.sh up --detach hub
+sh bin/remote-compose.sh stop hub
+sh bin/hub-restore.sh ~/uberblick-hub-2026-08-28.sqlite
 ```
 
 A hub that exited non-zero but left no journal is not blocked — that is often
@@ -677,7 +677,7 @@ just as well as over an existing one, which is the case the drill on #404
 exercises: `down --volumes`, `up`, restore, and a fresh client with empty local
 state enumerating and reading the pre-backup corpus.
 
-Both scripts drive Compose only through `sh remote-compose.sh`. That is not
+Both scripts drive Compose only through `sh bin/remote-compose.sh`. That is not
 style: `docker-compose.yml` gates Caddy's secret on a variable only the wrapper
 exports, and Compose interpolates the whole model for every subcommand, so a bare
 `docker compose stop hub` fails on this host.

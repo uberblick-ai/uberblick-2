@@ -21,7 +21,7 @@
 	#
 	# All three values land *inside* a JSON string, so a quote or a backslash in
 	# any of them would close it and append further keys — a second `hubUrl` wins
-	# on parse and retargets every browser. `remote-compose.sh` refuses such a
+	# on parse and retargets every browser. `bin/remote-compose.sh` refuses such a
 	# `WEB_WORKSPACES` or `HUB_AUTH_TOKEN` before it reaches this file, and the
 	# client refuses a document that names a key twice; neither is the whole
 	# guard on its own.

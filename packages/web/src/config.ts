@@ -381,7 +381,7 @@ function readDocument(
   // The deployed document is a template with values substituted into it (see
   // the Caddyfile), so a value carrying a quote could close its string and
   // append `,"hubUrl":"wss://elsewhere"` — which `JSON.parse` would then keep,
-  // last occurrence winning. The *guarantee* against that is `remote-compose.sh`
+  // last occurrence winning. The *guarantee* against that is `bin/remote-compose.sh`
   // refusing any `WEB_WORKSPACES` or `HUB_AUTH_TOKEN` outside a safe alphabet:
   // no quote and no backslash ever reaches the body, so no escape can be
   // written into it.

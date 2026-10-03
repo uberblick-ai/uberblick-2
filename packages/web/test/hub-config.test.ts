@@ -356,7 +356,7 @@ describe("the workspaces it names", () => {
     // with values substituted into it, so a value carrying a quote could close
     // its string and append a second `hubUrl` — and `JSON.parse` keeps the last
     // occurrence, pointing every browser at a hub of somebody else's choosing.
-    // What makes that impossible is `remote-compose.sh` refusing any value that
+    // What makes that impossible is `bin/remote-compose.sh` refusing any value that
     // could close a string; this pins the client's own best-effort refusal of
     // the plainly spelled case. It reads raw JSON spelling, so an escaped key
     // would pass — which is not worth a tokenizer, because writing escapes into
@@ -538,7 +538,7 @@ describe("the deployments that serve it", () => {
     // renders it refuses anything that could close that string and append a
     // second `hubUrl`. The client refuses such a document too, but this is
     // where the value is stopped before it is ever served.
-    const wrapper = readFileSync(resolve(repoRoot, "remote-compose.sh"), "utf8");
+    const wrapper = readFileSync(resolve(repoRoot, "bin", "remote-compose.sh"), "utf8");
     expect(wrapper).toContain("WEB_WORKSPACES");
     expect(wrapper).toContain("*[!A-Za-z0-9,-]*)");
     expect(wrapper).toContain("*[!A-Za-z0-9._-]*)");
@@ -590,7 +590,7 @@ describe("the deployments that serve it", () => {
       for (const [name, value] of Object.entries(injecting)) {
         const run = spawnSync(
           "/bin/sh",
-          [resolve(repoRoot, "remote-compose.sh"), "config"],
+          [resolve(repoRoot, "bin", "remote-compose.sh"), "config"],
           {
             cwd: empty,
             env: { PATH: empty, HUB_AUTH_TOKEN: "safe-secret", [name]: value },
