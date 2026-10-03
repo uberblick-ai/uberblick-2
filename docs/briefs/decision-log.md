@@ -23,17 +23,19 @@ reconsidered, and decided another way (short leases that renew). An agent that
 asks for the decisions in force must get one answer per topic — the current one
 — and must be able to reach the history only when it asks for it.
 
-## What already exists (and stays)
+## What exists today
 
 - A **decision record** is its own document with `kind = decision`, status
-  `open` or `decided`, ordinary blocks, and the ordinary comment threads.
-- A requirement's **decision log** is the fixed `decisions` root: an ordered
-  array of decision uuids, appended when a decision is raised with `governs`.
+  `open` or `decided`, ordinary blocks, and the ordinary comment threads. This
+  stays.
+- A requirement's **decision log** is a fixed `decisions` root on the
+  requirement: an ordered array of decision uuids, appended when a decision is
+  raised with `governs`. **This is dropped** (section 3).
 - A decision may name the decision it replaces with **`supersedes`**, written
   once at creation in the successor's `meta` and never changed. The superseded
-  record is never edited; backlinks on it expose its successors.
+  record is never edited; backlinks on it expose its successors. This stays.
 - The unfiltered `list_docs` omits decisions; any `kind`, `status` or `tag`
-  predicate includes them.
+  predicate includes them. This stays.
 
 ## The settled design
 
@@ -74,21 +76,45 @@ act under that person's GitHub identity. Two consequences:
 - The identity says *whose credential* recorded the decision, not whether a
   person or an agent made the call. "A human decides" stays a rule agents obey
   on a person's device; it is not something the hub can tell apart.
-- What the hub *can* enforce is the agents' own identity: a device signed in as
-  an agent account (today `uberblick-agent`) is refused `decided`, so an
-  unattended agent cannot settle a decision. The decider is recorded from the
-  credential's principal, never from a self-asserted name.
+- The decider is recorded from the credential's principal, never from a
+  self-asserted name.
+
+**Open question — agent accounts.** The hub could enforce the agents' own
+identity: refuse `decided` from a device signed in as an agent account (today
+`uberblick-agent`), so an unattended agent cannot settle a decision. Proposed,
+not yet answered by the owner.
 
 Until device-credential admission ships, "a human decided" is a convention
 backed by the citation in the record.
 
-### 3. Chains: one topic, several records, bound by `supersedes`
+### 3. All links live on the decision record
+
+Every relationship a decision has is stored on the decision record itself, in
+its `meta`, and cached in its directory stub:
+
+| Link | Meaning |
+| --- | --- |
+| `governs` | The product document (requirement) this decision shapes. |
+| `topic` | The topic id shared by every record about the same topic: the uuid of the topic's first record, copied forward when a successor is created. |
+| `supersedes` | The record this one replaces, if any. Written once, never changed. |
+| `refs` | GitHub issues and pull requests (section 8). |
+
+The per-requirement `decisions` array is dropped. A product document's decision
+log is **derived**: the decisions whose stub `governs` it, grouped by `topic`.
+Nothing on the requirement has to be written when a decision is raised,
+reconsidered or archived, so the requirement and its decisions can never
+disagree about membership.
+
+**Order of the log is topic age, oldest first** (owner, 2026-10-03): topics are
+listed by the creation time of their first record. Reconsidering a topic keeps
+its place. This default holds until a requirement asks for another order.
+
+### Chains: one topic, several records
 
 Reconsidering a decided topic creates a **new record** that supersedes the old
-one; the old record is never rewritten. A topic's history is the chain of
-records linked by `supersedes`. There is no parent or topic object: the chain's
-shared title names the topic, and a separate topic document is deferred until
-the chain view proves insufficient.
+one and carries the same `topic`; the old record is never rewritten. A topic's
+history is its chain of records, linked by `supersedes` and grouped by `topic`.
+The topic needs no document of its own: the chain's shared title names it.
 
 One record per point in time keeps each record short and its reasoning intact.
 The alternative — one record accumulating revision paragraphs — is what
@@ -97,11 +123,11 @@ record; that is the failure this rule avoids.
 
 ### 4. In force and pending
 
-For each chain, considering only live (non-archived) decision records:
+For each topic, considering only live (non-archived) decision records:
 
 | Answer | Rule |
 | --- | --- |
-| **In force** | The newest `decided` record in the chain. This is what agents follow. |
+| **In force** | The `decided` record that no live `decided` record supersedes — the latest by chain order, never by timestamp. This is what agents follow. |
 | **Pending** | An `open` record at the head of the chain, if any: the topic is being reconsidered, or has never been settled. |
 | **Superseded** | Every `decided` record that a later live `decided` record supersedes. History only. |
 
@@ -114,36 +140,36 @@ Consequences:
   the "needs a decision" signal of principle 7.
 - Abandoning a reconsideration is archiving the open record; the earlier
   decision is in force again with no other state to change.
-- Two live records superseding the same record is a **fork**. By default the
-  record's age decides (owner, 2026-10-03): the newest `decided` record by
-  creation time is in force, the other becomes history, and the fork stays
-  visible with `include_superseded`. Creation times come from the writing
-  replica's clock, so a skewed clock can pick the older record; that is
-  accepted until a requirement says otherwise.
+- Two live `decided` records superseding the same record is a **fork**. The
+  topic shows a **conflict** for a person to resolve, listing both records; it
+  is never resolved by creation time or any other timestamp. A person resolves
+  it by archiving one, or by deciding a new record that supersedes the record
+  they keep.
 - A superseded record keeps status `decided`; "superseded" is derived from the
   chain, so nobody has to remember to edit the old record.
 
-### 5. Efficient discovery: `supersedes` in the directory stub
+### 5. Efficient discovery from the directory stub
 
-The directory stub caches `supersedes` beside `kind` and `status`, under the
-same rule as those fields: the document is authoritative, every stub writer
-states it rather than carrying it forward, and repair converges the cache.
+The directory stub caches `governs`, `topic`, `supersedes` and `refs` beside
+`kind` and `status`, under the same rule as those fields: the document is
+authoritative, every stub writer states it rather than carrying it forward, and
+repair converges the cache.
 
 With that, every answer above comes from the directory alone — one synced
 document already in memory, one pass over its stubs, no decision room opened.
-A parent-id would cost the same once cached; `supersedes` wins because it needs
-no new concept and makes forks visible.
+`topic` makes grouping one key lookup; `supersedes` orders a chain and exposes
+forks.
 
 Default behavior:
 
-- `list_docs kind=decision` returns **one row per chain**: the record in force
-  if there is one, otherwise the open record, with any pending successor named
-  on the row.
+- `list_docs kind=decision` returns **one row per topic**: the record in force
+  if there is one, otherwise the open record, with any pending successor or
+  conflict named on the row.
 - `include_superseded: true` returns every record, history included.
 - `get_doc` on a decision returns its predecessors and, when superseded, the
   record that superseded it.
-- A requirement's decision log resolves each entry to its chain's current
-  answer the same way, and marks entries that are history.
+- `get_doc` on a requirement returns its derived decision log: one entry per
+  topic, oldest topic first, each resolved to its current answer the same way.
 
 ### 6. Discussion through the standard comments
 
@@ -160,8 +186,8 @@ same way. No new label field.
 
 A decision may reference the GitHub issues and pull requests that raised or
 implement it, through a structured `refs` metadata array of `owner/repo#n`
-references, validated on write and returned by `get_doc`. It is cached in the
-stub only if filtering by issue ("which decision covers #1125?") is wanted.
+references, validated on write, returned by `get_doc`, and cached in the stub
+so a listing can be filtered by issue ("which decision covers #1125?").
 The Editorial contract's ban on issue and PR numbers applies to Regular
 Documents; it gains an explicit note that decision `refs` are the exception.
 
@@ -171,8 +197,9 @@ Decision records may be re-implemented from scratch (owner, 2026-10-03). Like
 the rest of the pre-launch product, no migration, compatibility window or
 legacy detection is owed:
 
-- The `meta.supersedes` key, the stub fields, the `decisions` root's entry
-  shape, the MCP arguments (`governs`, `supersedes`) and their refusals may be
+- The requirement's `decisions` root is removed, so a document returns to
+  three fixed roots. The `meta` keys, stub fields, MCP arguments (`governs`,
+  `supersedes`, and the new `topic` and `refs`) and their refusals may be
   redefined wherever a cleaner shape is simpler; nothing must keep reading the
   old one.
 - The `Reconsidering` gate is deleted outright, not deprecated.
@@ -193,16 +220,17 @@ legacy detection is owed:
 | Topic wording | — | Editorial contract (Decision template), Decision logs guide |
 | Optional Reconsidering | `packages/mcp-server/src/tools.ts` (`hasRevivalTrigger` and both callers, tool descriptions), `failures.ts`, tests in `test/descriptions.test.ts`, `test/archive.test.ts` | Editorial contract, MCP interface contract, `.agents/protocols/issue-shaping.md` |
 | Only a human decides | tool descriptions for `set_status` / `create_doc` | Editorial contract, Decision logs guide, agent workflow |
-| `supersedes` in the stub, chains, default listing | `packages/schema/src/directory.ts`, stub writers in web and MCP, `list_docs`, `get_doc` | Document model, MCP interface contract |
-| `refs` | `packages/schema/src/doc.ts`, MCP create/read | Document model, MCP interface contract, Editorial contract note |
+| Links on the record (`governs`, `topic`, `supersedes`) cached in the stub; derived decision log; topics, chains and default listing | `packages/schema/src/doc.ts` (drop the `decisions` root), `packages/schema/src/directory.ts`, stub writers in web and MCP, `create_doc`, `list_docs`, `get_doc` | Document model, MCP interface contract, Decision logs guide |
+| `refs` | `packages/schema/src/doc.ts`, stub, MCP create/read | Document model, MCP interface contract, Editorial contract note |
 
 ## Build order
 
 Each step is one independently mergeable pull request.
 
-1. Cache `supersedes` in the directory stub; derive in force, pending,
-   superseded and forks; make one-row-per-chain the default decision listing,
-   with `include_superseded`.
+1. Store `governs`, `topic` and `supersedes` on the decision record and cache
+   them in the directory stub; drop the `decisions` root; derive the decision
+   log (oldest topic first), in force, pending, superseded and conflicts; make
+   one-row-per-topic the default decision listing, with `include_superseded`.
 2. Topic and decision wording, optional Reconsidering (gate removed), and the
    "only a human decides" wording, across code descriptions and corpus.
 3. The `refs` field.
@@ -220,4 +248,5 @@ Read live on 2026-10-03; none of these is fixed by this brief.
   kind, so the decision filter misses it.
 - Four of the six decision records lack a Reconsidering section; with the gate
   removed that is no longer a defect.
-- No requirement's decision log holds any entry yet.
+- No requirement's decision log holds any entry yet, so dropping the
+  `decisions` root loses nothing.
