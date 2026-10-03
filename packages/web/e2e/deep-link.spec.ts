@@ -362,14 +362,14 @@ test("a rebound local-serving document stays visible without blocking the page",
   const context = await browser.newContext();
   trackContext(context);
   await context.route("**/uberblick-config.json", async (route) => {
+    // Keep the production local endpoint and browser key. Rebound is the only
+    // fixture fact here; the hub's signing secret is not local admission.
+    const served = await (await route.fetch()).json();
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        hubUrl: harness().appUrl.replace(/^http:/, "ws:").replace(/\/$/, ""),
-        workspaces: [ws()],
-        hubAuthToken: harness().authSecret,
-        remoteHubUrl: harness().hubUrl,
+        ...served,
         rebound: true,
       }),
     });
