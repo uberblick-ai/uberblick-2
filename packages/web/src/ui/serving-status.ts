@@ -22,23 +22,27 @@ const SERVING_STATUS_CADENCE = {
 interface RoomAnswer {
   client: DocumentSearchClient;
   room: string;
-  status: ServingRoomStatus | null;
+  hubAcked: boolean | null;
+  notSharedReason: NotSharedReason | null;
 }
 
 export interface ServingRoomStatus {
-  hubAcked: boolean;
+  hubAcked: boolean | null;
   notSharedReason: NotSharedReason | null;
 }
 
 /**
  * Poll the local serving endpoint for one room.
  *
- * Null is part of the contract: no client, no room, a failed or malformed
- * request, or an answer that omits this room makes no upstream claim. The
- * answer is keyed by both client and room before it is returned, so a render
- * after either changes cannot expose the previous mode's value while the
- * effect cleanup catches up. Abort plus the `active` guard keeps a late answer
- * from an old room from becoming current.
+ * No client or room returns null. A failed or malformed request, or an answer
+ * that omits this room, returns a null acknowledgement and makes no upstream
+ * claim. The acknowledgement is keyed by both client and room before it is
+ * returned, so a render after either changes cannot expose the previous mode's
+ * value while the effect cleanup catches up. Abort plus the `active` guard
+ * keeps a late answer from an old room from becoming current.
+ * The reason describes the serving run, not a room: keep its last answer for
+ * this client through room changes and failed polls. A successful response
+ * replaces it even when the response omits the current room.
  *
  * The usable boolean follows the same calm cadence as the room connection:
  * brief pending windows do not strobe while someone types, good news waits for
@@ -51,14 +55,14 @@ export function useServingRoomStatus(
   const [answer, setAnswer] = useState<RoomAnswer | null>(null);
   const current =
     answer !== null && answer.client === client && answer.room === room
-      ? answer.status
+      ? answer.hubAcked
       : null;
   const source = useMemo(
     () => (client === null || client === undefined || room === null ? null : {}),
     [client, room],
   );
   const calm = useCalmSyncState(
-    current?.hubAcked === true ? "synced" : "syncing",
+    current === true ? "synced" : "syncing",
     current === null ? null : source,
     SERVING_STATUS_CADENCE,
   );
@@ -88,17 +92,17 @@ export function useServingRoomStatus(
         setAnswer({
           client,
           room,
-          status:
-            status.rooms[room] === undefined
-              ? null
-              : {
-                  hubAcked: status.rooms[room].hubAcked,
-                  notSharedReason: status.notSharedReason ?? null,
-                },
+          hubAcked: status.rooms[room]?.hubAcked ?? null,
+          notSharedReason: status.notSharedReason ?? null,
         });
       } catch {
         if (!active) return;
-        setAnswer({ client, room, status: null });
+        setAnswer((previous) => ({
+          client,
+          room,
+          hubAcked: null,
+          notSharedReason: previous?.client === client ? previous.notSharedReason : null,
+        }));
       } finally {
         if (timeout !== undefined) clearTimeout(timeout);
         if (inFlight === request) inFlight = null;
@@ -116,9 +120,9 @@ export function useServingRoomStatus(
     };
   }, [client, room]);
 
-  if (current === null || calm === null) return null;
+  if (client === null || client === undefined || room === null) return null;
   return {
-    hubAcked: calm === "synced",
-    notSharedReason: current.notSharedReason,
+    hubAcked: current === null || calm === null ? null : calm === "synced",
+    notSharedReason: answer?.client === client ? answer.notSharedReason : null,
   };
 }

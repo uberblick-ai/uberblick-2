@@ -387,7 +387,7 @@ export function StatusLine({
     ) : (
       <button
         type="button"
-        className={`ub-status-sync ub-sync-toggle${facts.hubDetail === null ? "" : " min-w-0 max-w-full flex-wrap"}`}
+        className={`ub-status-sync ub-sync-toggle${hubAcked === undefined ? "" : " min-w-0 max-w-full flex-wrap"}`}
         aria-expanded={syncOpen}
         aria-controls="ub-sync-panel"
         aria-label={
@@ -435,27 +435,37 @@ export function StatusLine({
   // A refusal replaces the rest of the line rather than decorating it: the
   // backlog and peer strip are about a connection that is working or returning.
   return (
-    <div className={`ub-status flex min-w-0 items-center gap-2 text-[0.8rem]/[1.2] min-h-[calc(28px+0.7rem+1px)] text-[var(--muted-foreground)] py-[0.35rem] border-b border-[var(--border)] mb-3${facts.hubDetail === null ? "" : " flex-wrap"}`}>
-      {syncReading}
-      {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
-      {!blank && saveNote}
-      {!blank && updatedReading}
-      {!blank &&
-        reading.detail === null &&
-        state !== "synced" &&
-        status.unsyncedChanges > 0 && (
-          <span className="ub-pending">
-            {backlogLabel(status.unsyncedChanges)}
-          </span>
-        )}
-      {/* Circles, not name pills (#494): the strip is the constrained surface,
-          and a row of words pushes the status line around as sessions come and
-          go. The detail a name carried is on the avatar's hover instead — which
-          is why this is the presence reading and not `usePeers`: the block a
-          caret sits in is resolved once, in `readPresence`. */}
-      {reading.detail === null && peerStrip}
-      {facts.hubDetail !== null && (
-        <span className="ub-muted min-w-0 basis-full">{facts.hubDetail}</span>
+    <div className="ub-status min-w-0 text-[0.8rem]/[1.2] text-[var(--muted-foreground)] py-[0.35rem] border-b border-[var(--border)] mb-3">
+      <div className="flex min-w-0 min-h-7 items-center gap-2">
+        {syncReading}
+        {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
+        {!blank && saveNote}
+        {!blank && updatedReading}
+        {!blank &&
+          reading.detail === null &&
+          state !== "synced" &&
+          status.unsyncedChanges > 0 && (
+            <span className="ub-pending">
+              {backlogLabel(status.unsyncedChanges)}
+            </span>
+          )}
+        {/* Circles, not name pills (#494): the strip is the constrained surface,
+            and a row of words pushes the status line around as sessions come and
+            go. The detail a name carried is on the avatar's hover instead — which
+            is why this is the presence reading and not `usePeers`: the block a
+            caret sits in is resolved once, in `readPresence`. */}
+        {reading.detail === null && peerStrip}
+      </div>
+      {/* Reserve the full wrapping line even before the first status answer,
+          through room changes, failed polls and refusals. Visibility changes
+          ink only; the readings row and prose keep their geometry. */}
+      {hubAcked !== undefined && (
+        <div
+          className={`ub-status-reason ub-muted min-w-0 mt-2${facts.hubDetail === null ? " invisible" : ""}`}
+          aria-hidden={facts.hubDetail === null}
+        >
+          {facts.hubDetail ?? "this machine has no credentials for its hub"}
+        </div>
       )}
     </div>
   );

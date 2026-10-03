@@ -405,12 +405,14 @@ describe("the locally served document's two sync facts", () => {
       ),
     );
     act(() => void vi.advanceTimersByTime(5_000));
+    const visible = host.cloneNode(true) as HTMLElement;
+    for (const hidden of visible.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
     const answer = {
       words: [...host.querySelectorAll(".ub-status-word")].map(
         (word) => word.textContent ?? "",
       ),
       label: host.querySelector(".ub-sync-toggle")?.getAttribute("aria-label") ?? null,
-      text: host.textContent ?? "",
+      text: visible.textContent ?? "",
     };
     act(() => root.unmount());
     host.remove();
@@ -451,7 +453,9 @@ describe("the locally served document's two sync facts", () => {
     expect(localOnly.words).toEqual(["saved here", "not shared with hub"]);
     expect(localOnly.text).toContain("this machine has no credentials for its hub");
     expect(localOnly.label).toContain("this machine has no credentials for its hub");
-    expect(localLine(null, {}, "no-hub-credentials").text).not.toContain("credentials");
+    const blank = localLine(null, {}, "no-hub-credentials");
+    expect(blank.words).toEqual(["saved here", ""]);
+    expect(blank.text).toContain("this machine has no credentials for its hub");
     expect(localLine(false, { storeRefused: true }, "no-hub-credentials").words).toEqual(["edit refused"]);
     expect(localLine(false, { writable: false }, "no-hub-credentials").text).not.toContain("credentials");
   });

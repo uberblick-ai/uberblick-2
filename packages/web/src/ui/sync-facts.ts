@@ -12,7 +12,7 @@ export interface DocumentSyncFacts {
   /** The upstream acknowledgement reading. Null means unknown, never false. */
   hub: string | null;
   hubTone: SyncState | null;
-  /** The cause for a current not-shared reading, independent of local saving. */
+  /** The serving run's last answered cause, independent of room acknowledgement. */
   hubDetail: string | null;
   /** Whether this is the locally served two-fact presentation. */
   twoFact: boolean;
@@ -56,7 +56,7 @@ export function documentSyncFacts(
         : state === "syncing"
           ? "saving here…"
           : reading.word;
-  const localOnly = notSharedReason !== null && hubAcked !== null && state !== null;
+  const localOnly = notSharedReason !== null;
   const hub =
     state === null || hubAcked === null
       ? null

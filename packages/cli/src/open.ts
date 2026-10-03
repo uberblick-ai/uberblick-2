@@ -752,15 +752,13 @@ function resolvedConfigDocument(resolved: ReturnType<typeof resolveConfig>): str
 }
 
 /**
- * The per-request source of the configuration document, with the one guarantee
- * a reader of two files needs: it never serves a torn pair.
+ * The per-request source of the unbound configuration document. It refreshes
+ * the hub endpoint and publishes no workspace or browser key.
  *
  * `ub init`, `ub remote join` and `ub workspace use` publish `credentials.json`
  * and `config.json` as separate atomic writes, holding `.init.lock` across both.
- * Each file is therefore whole whenever it is read, but the *pair* is only
- * consistent outside that window — a read interleaved with the write can pick up
- * the new secret beside the old endpoint, which is a document that authenticates
- * against a hub nobody configured.
+ * Each file is therefore whole whenever it is read. This source uses the same
+ * lock so its resolution sees a completed configuration publication.
  *
  * So each refresh tries to take the same lock without waiting. While a writer
  * holds it, the last accepted document is served immediately. When the reader
@@ -769,8 +767,8 @@ function resolvedConfigDocument(resolved: ReturnType<typeof resolveConfig>): str
  *
  * Only an *active* write falls back like that. A completed removal, or a
  * `credentials.json` refused for its mode, resolves normally and is served
- * normally — {@link resolveConfig}'s own semantics, not a cache pretending a
- * deleted secret is still there.
+ * normally — {@link resolveConfig}'s own semantics, not a persistent cache of
+ * the old configuration.
  */
 function configSource(env: NodeJS.ProcessEnv, initial: string): () => string {
   let accepted = initial;
