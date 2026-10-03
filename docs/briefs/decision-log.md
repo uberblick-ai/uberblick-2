@@ -5,9 +5,10 @@ issues listed under "Build order". It replaces the 2026-08-28 draft and its
 review rounds, which remain in git history. Settled in conversation with the
 owner on 2026-10-03; the corpus state it starts from was read live that day.
 
-Uberblick is meant for teams. Wherever this brief says a decision is made, it is
-made by **a human** — any person with the authority to decide in that
-workspace — never by an agent, and never by one named person.
+Uberblick is meant for teams. Agents may take the initial stance on a topic,
+but every change to a decision is approved by **a human** — any person with the
+authority to decide in that workspace — never by an agent, and never by one
+named person.
 
 ## The problem
 
@@ -53,17 +54,64 @@ trigger is known; do not invent one to satisfy a gate. The `set_status` /
 `create_doc` refusal that requires an exact `Reconsidering` heading before
 `decided` is removed.
 
-### 2. Only a human decides
+### 2. Agents take the initial stance; humans approve changes
 
-Agents may raise a decision, draft its options and a recommendation, and record
-a human's answer. They never decide. A comment or edit by an agent is evidence
-until a human adopts it — the rule the agent workflow already states for
-product choices, extended to every decision record. No individual is named as
-the decider: on a team, whoever holds the authority in that workspace decides.
+Settled 2026-10-03:
 
-**Recording a decision through MCP is allowed** (owner, 2026-10-03): an agent
-may set `decided` when it records a human's answer, and the record cites that
-answer (who, when, where).
+- **Agents may create a record and take the initial stance.** When an agent
+  meets something that should be recorded (section 2a), it creates the topic's
+  first record and may record its stance as `decided`, with its reasoning. The
+  record is marked as **agent-decided**, and agent-decided records are listed
+  for people to review (principle 7). A human confirms one by approving it,
+  which clears the marker, or changes it through a superseding record.
+- **Every change needs human approval.** Superseding a decided record — any
+  change to the answer in force — takes effect only when a human approves it.
+  An agent may open the successor and argue for it; it stays `open` until a
+  person answers. Approval may be given in the web or through MCP, where the
+  agent records the human's answer and the record cites it (who, when, where).
+- **A challenge stops the affected work.** When an agent's work runs against a
+  decided record it believes is wrong, it does not work around it: it opens a
+  successor stating the challenge, and stops the work that depends on that
+  decision until a human answers. Independent work continues.
+- No individual is named as the decider: on a team, whoever holds the
+  authority in that workspace approves.
+
+Proposed, to confirm: a topic that crosses the agent workflow's boundary table
+(product direction and UX, principles and guarantees, resources and
+commitments, agent authority) starts `open` even as a first record, because
+those choices are a person's from the outset.
+
+### 2a. When to record a decision, and when it is overkill
+
+Record a decision when **all three** hold:
+
+1. **It outlives its task.** The choice still binds something after the issue
+   that raised it closes (the boundary the Editorial contract already draws).
+2. **Someone could reasonably choose otherwise.** There were real
+   alternatives, and a fresh agent or teammate without the reasoning might pick
+   a different one.
+3. **Choosing otherwise later would be a mistake, not a preference.** The
+   quick test: if a fresh agent made the opposite choice next month, would it
+   be a bug or a regression someone has to undo?
+
+It is overkill — keep it in the issue, the pull request, or a code comment —
+when any of these is true:
+
+- The choice dies with the task: local to one issue or pull request, binding
+  nothing after it merges.
+- Something already decides it: an existing decision record, a corpus
+  document, a linter or formatter, or an established convention in the code.
+  Link to that source instead.
+- It is cheap to reverse and binds nothing downstream: naming inside one
+  module, an internal helper's shape, a test layout.
+- It describes current behavior rather than a choice between alternatives.
+  That belongs in the Regular Document that owns the behavior; a decision
+  records why one option was chosen over another.
+
+When in doubt, an agent records nothing new and mentions the choice in its pull
+request; a reviewer or a person can promote it to a decision record later. One
+topic per record: a record that collects many choices (*Deferred designs and
+their triggers*) is a catalog, not a decision.
 
 **Identity comes with GitHub sign-in.** The hub's GitHub device flow already
 identifies a durable GitHub account (a hub principal) and issues one device
@@ -74,18 +122,16 @@ the identity of whoever signed that device in — agents on a person's machine
 act under that person's GitHub identity. Two consequences:
 
 - The identity says *whose credential* recorded the decision, not whether a
-  person or an agent made the call. "A human decides" stays a rule agents obey
-  on a person's device; it is not something the hub can tell apart.
+  person or an agent made the call. On a person's device, "changes need a
+  human" stays a rule agents obey; the hub cannot tell the two apart there.
 - The decider is recorded from the credential's principal, never from a
   self-asserted name.
 
-**Open question — agent accounts.** The hub could enforce the agents' own
-identity: refuse `decided` from a device signed in as an agent account (today
-`uberblick-agent`), so an unattended agent cannot settle a decision. Proposed,
-not yet answered by the owner.
-
-Until device-credential admission ships, "a human decided" is a convention
-backed by the citation in the record.
+With the identity in hand, the hub can tell an agent account (today
+`uberblick-agent`) from a person's, so agent-decided marking and the rule that
+changes need a human can be enforced for agent accounts rather than trusted.
+Until device-credential admission ships, both are conventions backed by the
+citation in the record.
 
 ### 3. All links live on the decision record
 
@@ -219,7 +265,7 @@ legacy detection is owed:
 | --- | --- | --- |
 | Topic wording | — | Editorial contract (Decision template), Decision logs guide |
 | Optional Reconsidering | `packages/mcp-server/src/tools.ts` (`hasRevivalTrigger` and both callers, tool descriptions), `failures.ts`, tests in `test/descriptions.test.ts`, `test/archive.test.ts` | Editorial contract, MCP interface contract, `.agents/protocols/issue-shaping.md` |
-| Only a human decides | tool descriptions for `set_status` / `create_doc` | Editorial contract, Decision logs guide, agent workflow |
+| Agent initial stance, human-approved changes, agent-decided marker, when to record | `set_status` / `create_doc` (marker, approval of a successor), tool descriptions | Editorial contract, Decision logs guide, agent workflow, role contracts (challenge stops affected work) |
 | Links on the record (`governs`, `topic`, `supersedes`) cached in the stub; derived decision log; topics, chains and default listing | `packages/schema/src/doc.ts` (drop the `decisions` root), `packages/schema/src/directory.ts`, stub writers in web and MCP, `create_doc`, `list_docs`, `get_doc` | Document model, MCP interface contract, Decision logs guide |
 | `refs` | `packages/schema/src/doc.ts`, stub, MCP create/read | Document model, MCP interface contract, Editorial contract note |
 
@@ -232,7 +278,8 @@ Each step is one independently mergeable pull request.
    log (oldest topic first), in force, pending, superseded and conflicts; make
    one-row-per-topic the default decision listing, with `include_superseded`.
 2. Topic and decision wording, optional Reconsidering (gate removed), and the
-   "only a human decides" wording, across code descriptions and corpus.
+   agent-stance / human-approval rules with the agent-decided marker, and the
+   when-to-record test, across code, descriptions, corpus and role contracts.
 3. The `refs` field.
 
 The web rendering of the decision log — reading and editing a decision inside
