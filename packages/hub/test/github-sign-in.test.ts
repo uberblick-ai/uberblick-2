@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveHubConfig } from "../src/config.js";
+import { resolveHubConfig, resolveRemoteHubConfig, SHARED_GITHUB_CLIENT_ID } from "../src/config.js";
 import { CredentialRegistry } from "../src/credentials.js";
 import type { SignInCollection } from "../src/github-sign-in.js";
 import type { HubLogRecord } from "../src/log.js";
@@ -318,6 +318,25 @@ describe("bounded device requests", () => {
 });
 
 describe("optional GitHub configuration", () => {
+  it.each([undefined, ""])("uses the shared app for remote deployments with client ID %s", async (clientId) => {
+    const github = new GithubFake();
+    const config = resolveRemoteHubConfig({ HUB_AUTH_TOKEN: TEST_SECRET, HUB_GITHUB_CLIENT_ID: clientId });
+    expect(config.github).toEqual({ clientId: SHARED_GITHUB_CLIENT_ID });
+    const hub = await startHub({ ...config, databasePath: tempDatabasePath(), port: 0,
+      github: { ...config.github!, fetch: github.fetch, now: () => github.time } });
+    hubs.push(hub);
+    const request = await start(hub);
+    expect([...github.calls[0]!.body]).toEqual([["client_id", SHARED_GITHUB_CLIENT_ID]]);
+    expect(await post(hub, "cancel", request)).toMatchObject({ result: { status: "abandoned" } });
+  });
+
+  it("uses an operator app and returns to the default when the setting is removed", () => {
+    const env = { HUB_AUTH_TOKEN: TEST_SECRET, HUB_GITHUB_CLIENT_ID: CLIENT_ID } as NodeJS.ProcessEnv;
+    expect(resolveRemoteHubConfig(env).github).toEqual({ clientId: CLIENT_ID });
+    delete env.HUB_GITHUB_CLIENT_ID;
+    expect(resolveRemoteHubConfig(env).github).toEqual({ clientId: SHARED_GITHUB_CLIENT_ID });
+  });
+
   it("does not configure GitHub by default and refuses every sign-in endpoint distinctly", async () => {
     const hub = await startHub();
     hubs.push(hub);
@@ -333,6 +352,7 @@ describe("optional GitHub configuration", () => {
   it("names invalid or missing client ID without echoing its value, before listening", async () => {
     for (const clientId of [" ", "OAuth-client", "Iv23.short", TEST_SECRET]) {
       await expect(startHub(resolveHubConfig({ HUB_AUTH_TOKEN: "secret", HUB_GITHUB_CLIENT_ID: clientId }))).rejects.toThrow(/HUB_GITHUB_CLIENT_ID/);
+      await expect(startHub(resolveRemoteHubConfig({ HUB_AUTH_TOKEN: "secret", HUB_GITHUB_CLIENT_ID: clientId }))).rejects.toThrow(/HUB_GITHUB_CLIENT_ID/);
     }
     await expect(startHub({ github: {} as { clientId: string } })).rejects.toThrow(/HUB_GITHUB_CLIENT_ID/);
     try { await startHub({ github: { clientId: TEST_SECRET } }); }

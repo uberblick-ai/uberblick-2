@@ -30,6 +30,8 @@ Sign in to the given hub, or the hub bound in this machine's config.json.
 The hub can be a bare host, an http(s) address or a ws(s) endpoint.
 Approve the displayed GitHub URL and code in a browser on any machine;
 this command completes automatically and never asks for keyboard input.
+GitHub's approval page shows the app's name, not the hub. Approve only a
+login you started for the displayed hub; the app does not vouch for it.
 Store the issued device credential privately on this machine. Sync does
 not use this login yet. A replacement does not revoke the previous device.
 Local-only work needs no login. The machine's binding stays unchanged.
@@ -278,7 +280,8 @@ async function login(selection: Selection, io: Io): Promise<number> {
     }
     deadline = performance.now() + started.expiresIn * 1000;
     if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
-    io.out(`Approve in a browser: ${started.verificationUri}\nCode: ${started.userCode}\nWaiting for GitHub approval…\n`);
+    io.out(`GitHub sign-in for ${selection.origin}\nApprove in a browser: ${started.verificationUri}\nCode: ${started.userCode}\n`);
+    io.out(`GitHub's approval page shows the app's name, not the hub.\nApprove only if you started this login for ${selection.origin}; the app does not vouch for this hub.\nWaiting for GitHub approval…\n`);
     let interval = started.interval;
     for (;;) {
       const remaining = deadline - performance.now();

@@ -33,6 +33,9 @@ import { resolveStorage } from "./storage.js";
 export const DEFAULT_PORT = 1234;
 export const DEFAULT_HOST = "127.0.0.1";
 
+/** Public Uberblick Login GitHub App; device flow needs no client secret. */
+export const SHARED_GITHUB_CLIENT_ID = "Iv23liLW6D5SqP77El3z";
+
 /**
  * How many documents one websocket may have in flight through authentication.
  *
@@ -193,4 +196,17 @@ export function resolveHubConfig(
     authSecret,
     ...(githubClientId === undefined || githubClientId === "" ? {} : { github: { clientId: githubClientId } }),
   };
+}
+
+/**
+ * The standalone hub process used by remote deployments offers GitHub sign-in
+ * without operator setup. Embedded hubs, including `ub open`, keep the
+ * explicit-only configuration of `resolveHubConfig`.
+ */
+export function resolveRemoteHubConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): HubConfig {
+  const config = resolveHubConfig(env);
+  config.github ??= { clientId: SHARED_GITHUB_CLIENT_ID };
+  return config;
 }

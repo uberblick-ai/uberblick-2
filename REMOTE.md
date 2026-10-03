@@ -174,9 +174,38 @@ one bad commit from wedging the host with its containers on the old code.
 the host mirrors `main` and is not a place to edit — and prints what it
 discarded. The host's `.env` is untracked and survives; nothing runs `git clean`.
 
-## Enable GitHub sign-in
+## GitHub sign-in
 
-Each hub operator registers their own **GitHub App** on github.com. Follow
+Remote hubs offer GitHub sign-in through the public
+[Uberblick Login](https://github.com/apps/uberblick-login) GitHub App, owned by
+uberblick-ai, by default. You do not need to register an app or copy a client ID:
+leave `HUB_GITHUB_CLIENT_ID` unset or empty in the host's `.env`. This applies to
+`ub remote init`, `ub remote update` and the Compose recipe below.
+
+Each hub runs [GitHub's device flow](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app#using-the-device-flow-to-generate-a-user-access-token)
+directly with GitHub, using only the public client ID and no scope. It needs no
+client secret, private key or callback URL, and no Uberblick-operated service is
+in the path. No GitHub configuration is served to browsers or compiled into the
+web bundle. Sharing the app shares no hub authority: principals, memberships,
+device credentials and revocation belong to each hub alone.
+
+GitHub's approval page shows the app name, **Uberblick Login**, for every hub on
+the default. It neither identifies nor vouches for the hub. `ub auth login`
+displays the selected hub's origin next to the URL and code: approve only a login
+you started for that hub. Give a first-admin setup code only to the intended
+administrator, because the account approving it receives the grant.
+
+A malformed `HUB_GITHUB_CLIENT_ID` prevents hub startup and names that setting;
+it never falls back to the shared app. GitHub refusing or being unreachable
+fails only the attempt in progress. Local-only work never contacts GitHub. The
+hub started by `ub open` retains explicit-only sign-in: it offers it only when
+`HUB_GITHUB_CLIENT_ID` is set to a valid app client ID.
+
+### Use an operator-owned app
+
+Choose your own GitHub App when you want to control its approval name and
+settings, or keep your hubs apart from the shared app's device-flow budget and
+availability. Follow
 [GitHub's registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app):
 
 1. Open your account or organization's **Settings → Developer settings → GitHub
@@ -201,19 +230,65 @@ Each hub operator registers their own **GitHub App** on github.com. Follow
    Replace the example with your actual client ID (the legacy `Iv1.` form or the newer
    alphanumeric `Iv23…` form). The numeric **App ID** is a different value.
 
-The hub uses [GitHub's device flow](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app#using-the-device-flow-to-generate-a-user-access-token).
-It needs no client secret, private key or callback URL. Only the client ID goes
-to the hub container; no GitHub configuration is served to browsers or compiled
-into the web bundle. After saving `.env`, recreate the hub from that checkout:
+Only the client ID goes to the hub container. Both `ub remote init` re-runs and
+`ub remote update` preserve this host setting. After saving `.env`, recreate the
+hub from that checkout:
 
 ```sh
 sh remote-compose.sh up --detach hub
 ```
 
-Omitting the setting, or leaving it empty, disables sign-in with a distinct
-`not-configured` response. A malformed client ID prevents hub startup and names
-`HUB_GITHUB_CLIENT_ID`; GitHub refusing or being unreachable fails only the
-attempt in progress. Local-only work and `ub open` need no GitHub app.
+To return to Uberblick Login, remove the line or leave its value empty and
+recreate the hub with the same command. An update that redeploys the hub also
+applies the change; an "up to date" update does not recreate containers. Check
+that the host shell does not still export the override when you recreate it.
+
+### Shared app limits and controls
+
+These GitHub limits include both ordinary login and first-admin setup:
+
+- [Device flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#rate-limits-for-the-device-flow)
+  permits 50 verification-code submissions per hour per application, shared by
+  every hub using Uberblick Login. An operator-owned app has its own budget;
+  hubs sharing that app still share it. Token polling must follow GitHub's
+  returned interval; `slow_down` adds five seconds. A separate app does not
+  remove this polling rule.
+- [Secondary rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#about-secondary-rate-limits)
+  include 2,000 OAuth access-token requests per hour for GitHub Apps and OAuth
+  apps, plus abuse controls that can change without notice. GitHub does not
+  specify the accounting key for that ceiling there, so a separate app is no
+  guarantee against it. Repeated violations can cause the integration to be
+  banned, affecting every hub using it.
+- Reading `/user` uses the
+  [user's REST API budget](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#primary-rate-limit-for-authenticated-users):
+  normally 5,000 requests per hour, combined with that person's other GitHub
+  Apps, OAuth apps and personal access tokens. The documented Enterprise Cloud
+  exception can raise it. An operator-owned app does not give each hub or token
+  a separate user budget. The hub discards GitHub tokens after reading identity.
+- The app owner controls its
+  [Device Flow, name and permissions](https://docs.github.com/en/apps/maintaining-github-apps/modifying-a-github-app-registration),
+  [visibility](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/making-a-github-app-public-or-private)
+  and [user-token expiration](https://docs.github.com/en/apps/maintaining-github-apps/activating-optional-features-for-github-apps).
+  Disabling Device Flow or making the app private can prevent new sign-ins;
+  extra permissions can change approval prompts. These changes affect every
+  default hub. An operator-owned app puts those choices under your control.
+- [Deleting the app](https://docs.github.com/en/apps/maintaining-github-apps/deleting-a-github-app),
+  or [GitHub suspending its API access](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service#h-api-terms),
+  can stop new sign-ins at every default hub. An operator-owned app avoids
+  dependence on Uberblick Login's availability, while remaining subject to
+  GitHub's controls.
+- [Revoking GitHub App authorization](https://docs.github.com/en/apps/using-github-apps/reviewing-and-revoking-authorization-of-github-apps)
+  revokes that person's GitHub tokens for the shared app across hubs. They can
+  authorize it again for a later login. This does not revoke already-issued
+  Uberblick credentials; each hub owns that revocation. An operator-owned app
+  separates its GitHub authorization from Uberblick Login.
+
+GitHub documents the ten-token and ten-sign-in-per-hour rules specifically for
+[OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/rate-limits-for-oauth-apps#rate-limits-for-signing-in-users);
+those are not documented GitHub App limits.
+
+### Complete sign-in
+
 Failed attempts emit `hub.github.sign-in.failed` in the hub's stderr JSON log,
 with the failing step, a fixed code and the upstream HTTP status when available.
 No GitHub token, response body or upstream exception is logged. Check the app's
@@ -275,7 +350,7 @@ the shared signing secret and the private tailnet boundary.
 
 ## Establish a workspace's first administrator
 
-After [enabling GitHub sign-in](#enable-github-sign-in), run setup in the
+With [GitHub sign-in](#github-sign-in) available by default, run setup in the
 repository checkout **on the hub host**, for example over SSH:
 
 ```sh
@@ -293,6 +368,8 @@ The command prints a setup ID, GitHub's approval URL and a short code. Keep
 the ID for checking the result, and keep the code private: the GitHub account
 that approves **that code** becomes the administrator. Open the URL in a
 browser on any machine, sign in to the intended account and approve the code.
+Give the code only to the intended administrator. GitHub's page names the app,
+not the hub, and does not identify or vouch for the setup's hub or workspace.
 The hub host needs no browser. The command waits for approval and reports the
 GitHub login and durable account ID, the named workspace, and whether the hub
 already held documents for that workspace. The hub logs the committed grant.
@@ -325,8 +402,7 @@ anyone there; access management belongs to that workspace's admins.
 
 Setup also leaves live sync admission unchanged: the live hub and `ub open`
 still use the shared signing secret. Setup activates no credential or
-membership admission, and local-only work needs none of it. A hub without
-GitHub configuration refuses setup distinctly as `not-configured`.
+membership admission, and local-only work needs none of it.
 
 ### Cancellation and a missing result
 
@@ -404,7 +480,8 @@ writes it under `umask 077` and chmods it for exactly this reason.
 Then edit `.env`. Its keys are the ones `docker-compose.yml` and
 `remote.env.example` name: four required, plus optional `WEB_HUB_URL` (see
 [Pointing the client at another hub](#pointing-the-client-at-another-hub)) and
-`HUB_GITHUB_CLIENT_ID` (see [Enable GitHub sign-in](#enable-github-sign-in)).
+`HUB_GITHUB_CLIENT_ID` only to use an operator-owned app (see
+[GitHub sign-in](#github-sign-in)); leaving it unset or empty uses Uberblick Login.
 
 - `TAILSCALE_HOST` is the host's full `*.ts.net` MagicDNS name, with no scheme
   or trailing slash.

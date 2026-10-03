@@ -291,7 +291,7 @@ describe("remote-update.sh", () => {
     expect(deployedRef(fix)).toBe(next);
   });
 
-  it("leaves sign-in unconfigured when an init re-run has no host GitHub app", () => {
+  it("leaves app selection to the hub default when an init re-run has no operator app", () => {
     const fix = fixture();
     writeFileSync(
       join(fix.checkout, ".env"),
@@ -408,6 +408,7 @@ describe("remote-update.sh", () => {
     expect(builds(fix)).toEqual(["up --build --detach"]);
     expect(deployedRef(fix)).toBe(next);
     expect(readFileSync(join(fix.checkout, "marker.txt"), "utf8")).toBe("two\n");
+    expect(readFileSync(join(fix.checkout, ".env"), "utf8")).toBe(HOST_ENV);
   });
 
   /**
