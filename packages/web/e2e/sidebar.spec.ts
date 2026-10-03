@@ -39,6 +39,8 @@ async function openApp(browser: Browser, hasTouch = false): Promise<Page> {
   const page = await context.newPage();
   await page.goto(harness().appUrl);
   await expect(page.locator(".ub-list-head")).toBeVisible();
+  // Initial chrome renders before configuration selects the canonical route.
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
   return page;
 }
 
