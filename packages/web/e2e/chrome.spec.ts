@@ -2797,6 +2797,34 @@ for (const scheme of ["light", "dark"] as const) {
       const floor = scheme === "light" ? separation(edge, ground) : contrast(edge, ground);
       const check = async (root: string) => {
         expect(await painted(page, root, "background-color")).toBe(ground);
+        // The cascade constraint is stronger than today's colour ratios: no
+        // unlayered product paint may override a vendored panel state later.
+        const overrides = await page.locator(root).evaluate((panel) => {
+          const elements = [panel, ...panel.querySelectorAll("*")];
+          const found: string[] = [];
+          const inspect = (rules: CSSRuleList): void => {
+            for (const rule of rules) {
+              if (rule.cssText.startsWith("@layer")) continue;
+              if (rule instanceof CSSMediaRule && !matchMedia(rule.conditionText).matches) continue;
+              if (rule instanceof CSSSupportsRule && !CSS.supports(rule.conditionText)) continue;
+              if (rule instanceof CSSStyleRule) {
+                const selector = rule.selectorText.replace(/::(?:before|after|placeholder|marker)\b/g, "");
+                if (!elements.some((element) => element.matches(selector))) continue;
+                const paint = [...rule.style].filter((property) =>
+                  property === "color" || property === "fill" || property === "stroke" ||
+                  property.startsWith("background") || property.startsWith("border") ||
+                  property.startsWith("outline"),
+                );
+                if (paint.length > 0) found.push(`${rule.selectorText}: ${paint.join(", ")}`);
+              } else if ("cssRules" in rule) {
+                inspect((rule as CSSGroupingRule).cssRules);
+              }
+            }
+          };
+          for (const sheet of document.styleSheets) inspect(sheet.cssRules);
+          return found;
+        });
+        expect(overrides, "unlayered paint inside the panel").toEqual([]);
         const text = await renderedText(page, root);
         expect(text.length).toBeGreaterThan(0);
         for (const reading of text) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
@@ -2805,6 +2833,16 @@ for (const scheme of ["light", "dark"] as const) {
           const strength = scheme === "light"
             ? await strokeSeparation(page, reading.colour, reading.ground) : contrast(reading.colour, reading.ground);
           expect(strength, JSON.stringify(reading)).toBeGreaterThanOrEqual(floor);
+        }
+        // Borders alone miss the search icon's neutral SVG strokes.
+        for (const shape of await page.locator(`${root} svg [stroke]`).all()) {
+          const ink = await paintedIn(shape, "stroke");
+          if (ink === "none" || oklab(ink).chroma > accentChroma) continue;
+          for (const under of await groundsUnder(page, shape)) {
+            const strength = scheme === "light"
+              ? await strokeSeparation(page, ink, under) : contrast(ink, under);
+            expect(strength, `SVG ${ink} on ${under}`).toBeGreaterThanOrEqual(floor);
+          }
         }
       };
       const contents = page.getByRole("button", { name: "Contents 2" });
