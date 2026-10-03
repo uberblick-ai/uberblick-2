@@ -1,9 +1,10 @@
 /**
  * Two properties the type system cannot state, checked by reading the source.
  *
- * 1. **The registry and credential admission stay hub-only.** Clients receive
+ * 1. **Credential and membership authorities stay hub-only.** Clients receive
  *    independent random keys; the legacy root cannot derive them. No client
- *    may import the authority that issues, verifies or revokes credentials.
+ *    may import the authority that issues, verifies or revokes credentials,
+ *    or grants and manages workspace memberships.
  * 2. **Every place that mints a token is enumerated.** That the three claims are
  *    passed at all is a compile-time guarantee — `TokenRequest` makes `typ`,
  *    `kid` and `lifetimeSeconds` required — so this checks the one thing the
@@ -51,9 +52,9 @@ function mentioning(needle: string): string[] {
     .filter((path) => readFileSync(`${REPO}${path}`, "utf8").includes(needle));
 }
 
-describe("credential authority is hub-only", () => {
+describe("credential and membership authority is hub-only", () => {
   it("is named nowhere outside packages/hub", () => {
-    for (const name of ["CredentialRegistry", "CredentialAdmission"]) {
+    for (const name of ["CredentialRegistry", "CredentialAdmission", "MembershipRegistry"]) {
       expect(mentioning(name).filter((path) => !path.startsWith("packages/hub/"))).toEqual([]);
     }
   });
