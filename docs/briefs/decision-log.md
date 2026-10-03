@@ -137,10 +137,12 @@ when any of these is true:
 When in doubt, an agent records nothing new and mentions the choice in its pull
 request; a reviewer or a person can promote it to a decision record later.
 
-**Reviewers draft the record** (owner, 2026-10-03). When a pull request
-settles something that passes this test without a record, the reviewer drafts
-it — the agent's first stance, or `open` on a boundary topic — for a person to
-confirm. The pull request is not held for that confirmation. One
+**Reviewers flag; implementers write** (owner, 2026-10-03). When a pull
+request settles something that passes this test without a record, the reviewer
+raises it as a finding instead of drafting the record. The implementer, who
+holds the reasoning, writes the record in the same pull request — an initial
+stance, or `open` on a boundary topic — and the reviewer verifies it like any
+other correction. The pull request is not held for a person's confirmation. One
 topic per record: a record that collects many choices (*Deferred designs and
 their triggers*) is a catalog, not a decision.
 
@@ -382,7 +384,7 @@ remains available as an integration reference.
 
 Every agent rule in this brief — taking an initial stance, raising a
 reconsideration, stopping work on a challenge, marking work *built on open
-decision*, reviewers drafting records, the when-to-record test — is written
+decision*, reviewers flagging missing records, the when-to-record test — is written
 into **uberblick-2's own instruction files**, never into ub-agents (owner,
 2026-10-03). ub-agents runs roles and applies the label changes a project
 declares; it knows nothing about Uberblick, decision records or this corpus,
@@ -394,7 +396,7 @@ is sample content only.
 | When to record; initial stance; boundary topics start open | `.agents/protocols/delivery-policy.md`, `.agents/roles/implementer.md` |
 | Proceed on an open decision's recommendation; *built on open decision* line; major-impact steps wait | `.agents/roles/implementer.md`, `.github/ISSUE_SPEC.md` |
 | A challenge stops the dependent work | `.agents/roles/implementer.md`, `.agents/roles/issue-preparer.md` |
-| Reviewers draft missing records | `.agents/roles/reviewer.md`, `.agents/protocols/review-protocol.md` |
+| Reviewers flag missing records; implementers write them | `.agents/roles/reviewer.md`, `.agents/protocols/review-protocol.md`, `.agents/roles/implementer.md` |
 | Preparers cite relevant decisions in the reading guide | `.agents/protocols/issue-preparation.md` |
 | Shaping raises decisions as records rather than issue text | `.agents/protocols/issue-shaping.md` |
 
