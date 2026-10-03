@@ -139,6 +139,7 @@ test("empty and long-label sidebars fit supported widths and breakpoint edges in
   for (const width of [320, 1280]) {
     await page.setViewportSize({ width, height: 832 });
     await openSidebar(page);
+    await settleSidebar(page);
     const hide = page.getByRole("button", { name: width < 1280 ? "Close document list" : "Hide document list", exact: true });
     const box = await hide.boundingBox();
     if (box === null) throw new Error("e2e: missing close control");
