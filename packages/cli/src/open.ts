@@ -27,14 +27,14 @@
  *    both, never a silent bind of a socket nobody will connect to.
  *
  * 3. **It serves #91's configuration document** at {@link CONFIG_PATH}, with
- *    the local browser endpoint, frozen startup workspace/signing secret, and
- *    upstream endpoint in it and
+ *    the local browser endpoint, frozen workspace, independent browser key and
+ *    upstream endpoint, with
  *    `Cache-Control: no-store` on it, matched *ahead* of the SPA fallback. That
  *    document is what lets one prebuilt bundle target any hub; the fallback
  *    answering it with the app's own HTML is precisely the production failure
  *    #91 exists to remove. A serving run freezes its binding at startup so the
  *    browser and silent replica cannot split identities; later binding changes
- *    add `rebound: true` until restart. Unbound/no-credential serving retains
+ *    add `rebound: true` until restart. Unbound serving retains
  *    #449's per-request resolution because it owns no replica identity.
  *
  * 4. **It never serves a blank page.** With no bundle and no toolchain it exits
@@ -65,8 +65,8 @@
  * **What a build is handed** (#426, #512): this command's resolved
  * configuration with `HUB_AUTH_TOKEN` taken out of it, on both paths, by
  * {@link buildEnvironment}. Nothing here puts a signing secret into a build,
- * because the bundle has needed none since the secret moved into the document
- * this command serves. That is a statement about *this* command and not about
+ * because the bundle carries no authentication material. The served document
+ * now carries only a loopback browser key. This describes this command, not
  * everything downstream of it: `mise run build-web` is
  * `fnox exec … -- ub env -- pnpm …`, so the task puts a decrypted secret back
  * into its own child, which is the task's business and unchanged by this. What
@@ -113,6 +113,7 @@ import {
 } from "@uberblick/mcp-server";
 import { buildLockPath } from "./build-lock.js";
 import { budget, resolveMcpConfig } from "./budget.js";
+import { localBrowserKey } from "./browser-key.js";
 import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import { isInstallPayload } from "./installation.js";
@@ -683,8 +684,8 @@ function fileFor(root: string, pathname: string): string {
  *
  * Serialization only. {@link configSource} supplies live direct-serving
  * values; {@link servingConfigSource} supplies a frozen local/upstream pair and
- * the live `rebound` diagnostic. Empty secret when there is none — the client
- * then says it cannot authenticate rather than pretending it can.
+ * the live `rebound` diagnostic. Only the loopback browser key may be served;
+ * an unbound process has no key to give the page.
  */
 export function configDocument(
   hubUrl: string,
@@ -747,7 +748,7 @@ function currentConfigDocument(env: NodeJS.ProcessEnv): string {
 
 function resolvedConfigDocument(resolved: ReturnType<typeof resolveConfig>): string {
   const binding = bindingOf(resolved);
-  return configDocument(binding.hubUrl, binding.workspace, binding.hubAuthToken);
+  return configDocument(binding.hubUrl, null, "");
 }
 
 /**
@@ -795,12 +796,13 @@ function servingConfigSource(
   env: NodeJS.ProcessEnv,
   startup: ReturnType<typeof resolveConfig>,
   localHubUrl: string,
+  browserKey: string,
 ): () => string {
   const binding = bindingOf(startup);
   let accepted = configDocument(
     localHubUrl,
     binding.workspace,
-    binding.hubAuthToken,
+    browserKey,
     { remoteHubUrl: binding.hubUrl, rebound: false },
   );
   return () => {
@@ -811,7 +813,7 @@ function servingConfigSource(
       accepted = configDocument(
         localHubUrl,
         binding.workspace,
-        binding.hubAuthToken,
+        browserKey,
         { remoteHubUrl: binding.hubUrl, rebound: !sameBinding(binding, current) },
       );
       return accepted;
@@ -856,10 +858,10 @@ type ApiAuthenticator = (authMessage: string) => Promise<boolean>;
 type ApiStatus = () => ServingSyncStatus;
 
 async function createApiAuthenticator(
-  authSecret: string,
+  browserKey: string,
   workspaceId: string,
 ): Promise<ApiAuthenticator> {
-  const rootKey = await importRootSecret(authSecret);
+  const key = await importRootSecret(browserKey);
   return async (authMessage) => {
     const envelope = readAuthEnvelope(authMessage);
     if (
@@ -868,7 +870,7 @@ async function createApiAuthenticator(
     ) {
       return false;
     }
-    const claims = await verifyToken(rootKey, envelope.token);
+    const claims = await verifyToken(key, envelope.token);
     return !(
       claims === null ||
       claims.workspace !== workspaceId ||
@@ -1636,18 +1638,20 @@ export async function openCommand(
   const localHubUrl = `ws://${WEB_HOST}:${options.port}`;
   try {
     const mcpConfig = workspace === null ? null : resolveMcpConfig(env);
-    if (mcpConfig !== null && mcpConfig.authSecret !== null) {
+    if (mcpConfig !== null) {
       const engine = await createMcpEngine(mcpConfig, { serving: true });
       owned.engine = engine;
       owned.engineMonitor = monitorEngine(engine);
+      const browserKey = localBrowserKey(mcpConfig.workspaceId, startupEnv);
       const authenticateApi = await createApiAuthenticator(
-        mcpConfig.authSecret,
+        browserKey,
         mcpConfig.workspaceId,
       );
       const document = servingConfigSource(
         startupEnv,
         initial.resolved,
         localHubUrl,
+        browserKey,
       );
       const observedServedRooms = new Set<string>();
       let collectingServedRooms: Set<string> | null = null;
@@ -1673,7 +1677,7 @@ export async function openCommand(
       localServer = await createLocalBrowserServer({
         port: options.port,
         workspaceId: mcpConfig.workspaceId,
-        authSecret: mcpConfig.authSecret,
+        browserKey,
         expectedOrigin: servedUrl.origin,
         readRoom: (room, afterSeq) => {
           (collectingServedRooms ?? observedServedRooms).add(room);
@@ -1714,8 +1718,7 @@ export async function openCommand(
       owned.localServer = localServer;
       owned.stopEngineRefresh = engine.onRefresh(() => localServer.refresh());
     } else {
-      // The unbound and no-credential paths keep serving the bundle directly;
-      // there is no workspace-local server a browser could authenticate to.
+      // An unbound run serves only the bundle: there is no workspace or key.
       const server = serveBundle(
         expectedHost,
         plan.dir,

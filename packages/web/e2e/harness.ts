@@ -108,9 +108,10 @@ function openEnvironment(runDir: string, bundleDir: string): NodeJS.ProcessEnv {
 async function startOpen(
   runDir: string,
   bundleDir: string,
+  fixedPort?: number,
 ): Promise<{ child: ChildProcessWithoutNullStreams; appUrl: string }> {
   for (let attempt = 1; attempt <= OPEN_ATTEMPTS; attempt += 1) {
-    const port = await freePort();
+    const port = fixedPort ?? await freePort();
     const child = spawn(process.execPath, [UB, "open", "--no-browser", "--port", String(port)], {
       cwd: runDir,
       env: openEnvironment(runDir, bundleDir),
@@ -147,7 +148,7 @@ async function startOpen(
       return { child, appUrl: `http://127.0.0.1:${port}/` };
     }
     await stopChild(child);
-    if (outcome === "exit" && stderr.includes(`port ${port} is in use`) && attempt < OPEN_ATTEMPTS) {
+    if (fixedPort === undefined && outcome === "exit" && stderr.includes(`port ${port} is in use`) && attempt < OPEN_ATTEMPTS) {
       continue;
     }
     throw new Error(
@@ -200,6 +201,8 @@ export interface Harness {
   startHub(): Promise<void>;
   /** Flush and stop upstream, leaving `ub open` and the browser alone. */
   stopHub(): Promise<void>;
+  /** Restart local serving on the same address after changing hub credentials. */
+  restartOpen(options: { authenticated: boolean }): Promise<void>;
   /** Tear everything down: hub, dev server, temp database. */
   stop(): Promise<void>;
 }
@@ -293,7 +296,7 @@ export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Pro
 }
 
 export async function startHarness(): Promise<Harness> {
-  const runDir = mkdtempSync(join(tmpdir(), "uberblick-e2e-"));
+  const runDir = mkdtempSync(join(tmpdir(), `uberblick-e2e-${process.env.UB_AGENTS_RUN ?? "local"}-`));
   const bundleDir = join(runDir, "bundle");
   // Fresh and decorated per harness: room keys stay isolated, while `/`
   // exercises the spelling a person would actually configure.
@@ -365,6 +368,21 @@ export async function startHarness(): Promise<Harness> {
         hub = await createHub({ ...config, port });
       },
       stopHub,
+      async restartOpen({ authenticated }) {
+        const child = open;
+        open = null;
+        if (child !== null) await stopChild(child);
+        if (authenticated) {
+          writeFileSync(credentials, `${JSON.stringify({ signingSecret: SECRET }, null, 2)}\n`, {
+            mode: 0o600,
+          });
+          chmodSync(credentials, 0o600);
+        } else {
+          rmSync(credentials, { force: true });
+        }
+        const restarted = await startOpen(runDir, bundleDir, Number(new URL(appUrl).port));
+        open = restarted.child;
+      },
       async stop() {
         // Every step is best-effort and the temp directory goes last, in a
         // `finally`: a hub or serving process that fails to shut down cleanly must

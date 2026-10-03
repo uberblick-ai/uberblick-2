@@ -79,6 +79,8 @@ describe("token minting sites", () => {
     "packages/hub/test/github-sign-in-admission.test.ts",
     "packages/hub/test/github-sign-in.test.ts",
     "packages/hub/test/helpers.ts",
+    // Local browser admission refuses independently signed device credentials.
+    "packages/hub/test/local-browser-server.test.ts",
     "packages/hub/test/membership-registry.test.ts",
     "packages/hub/test/token.test.ts",
     "packages/mcp-server/src/sync.ts",

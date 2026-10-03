@@ -27,6 +27,7 @@ import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
 import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
+import type { NotSharedReason } from "../shell/document-search.js";
 import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
 import type { SyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
@@ -294,6 +295,7 @@ export function StatusLine({
   onLastUpdatedChange,
   endpoint = null,
   hubAcked,
+  notSharedReason = null,
   syncOpen = false,
   onToggleSync,
   onActivatePresence,
@@ -319,6 +321,7 @@ export function StatusLine({
   endpoint?: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
   hubAcked?: boolean | null | undefined;
+  notSharedReason?: NotSharedReason | null;
   /** The reading is the details-panel trigger when this callback is present. */
   syncOpen?: boolean;
   onToggleSync?: (() => void) | undefined;
@@ -329,7 +332,7 @@ export function StatusLine({
   const raw = rawSyncState(status);
   const state = useCalmSyncState(raw, connection);
   const reading = statusReading(status, state ?? raw);
-  const facts = documentSyncFacts(status, state, reading, hubAcked);
+  const facts = documentSyncFacts(status, state, reading, hubAcked, notSharedReason);
   const saveNote =
     !status.writable && reading.detail === null ? (
       <span className="ub-muted ub-not-saved">not saved</span>
@@ -372,7 +375,7 @@ export function StatusLine({
     endpoint === null || (hubAcked !== undefined && !facts.twoFact)
       ? null
       : `${endpoint.url ?? "unknown"} (${endpointSourceLabel(endpoint.source)})`;
-  const factLabel = [facts.primary, facts.hub].filter(
+  const factLabel = [facts.primary, facts.hub, facts.hubDetail].filter(
     (value): value is string => value !== null,
   );
   const syncReading =
@@ -435,6 +438,7 @@ export function StatusLine({
     <div className="ub-status">
       {syncReading}
       {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
+      {facts.hubDetail !== null && <span className="ub-muted">{facts.hubDetail}</span>}
       {!blank && saveNote}
       {!blank && updatedReading}
       {!blank &&
@@ -870,6 +874,7 @@ export function EditorPane({
   onSelectThread,
   endpoint = null,
   hubAcked,
+  notSharedReason = null,
   threads = [],
   threadsOpen = false,
   onToggleThreads,
@@ -920,6 +925,7 @@ export function EditorPane({
   endpoint?: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
   hubAcked?: boolean | null | undefined;
+  notSharedReason?: NotSharedReason | null;
   threads?: readonly ThreadView[];
   threadsOpen?: boolean;
   onToggleThreads?: (() => void) | undefined;
@@ -1020,6 +1026,7 @@ export function EditorPane({
           onLastUpdatedChange={onLastUpdatedChange}
           endpoint={endpoint}
           hubAcked={hubAcked}
+          notSharedReason={notSharedReason}
           syncOpen={syncOpen}
           onToggleSync={onToggleSync}
           onActivatePresence={revealPresence}

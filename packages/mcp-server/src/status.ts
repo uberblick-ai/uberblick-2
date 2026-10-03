@@ -45,6 +45,8 @@ export interface ServedRoomSyncStatus {
 }
 
 export interface ServingSyncStatus {
+  /** Why durable local edits cannot currently be shared upstream. */
+  notSharedReason: "no-hub-credentials" | null;
   /** The full replica completed this hub handshake and its attach drain. */
   caughtUp: boolean;
   /** Only rooms currently loaded by the in-process browser server. */
@@ -55,6 +57,7 @@ function unavailableServingStatus(
   servedRooms: readonly string[],
 ): ServingSyncStatus {
   return {
+    notSharedReason: null,
     caughtUp: false,
     rooms: Object.fromEntries(
       servedRooms.map((room) => [room, { hubAcked: false }]),
@@ -84,7 +87,8 @@ export function collectServingSyncStatus(
     attached.map(({ room, lastSeq }) => ({ room, throughSeq: lastSeq })),
   );
   const pending = new Set(store.pendingRooms.map(({ room }) => room));
-  const connected = engine.replicas.sync.state().status === "connected";
+  const hubStatus = engine.replicas.sync.state().status;
+  const connected = hubStatus === "connected";
   const acknowledged = new Map(
     attached.map((replica) => [
       replica.room,
@@ -102,6 +106,7 @@ export function collectServingSyncStatus(
   );
 
   return {
+    notSharedReason: hubStatus === "disabled" ? "no-hub-credentials" : null,
     caughtUp:
       connected &&
       !engine.replicas.sync.isDraining() &&

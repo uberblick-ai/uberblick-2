@@ -54,7 +54,11 @@ function Reading({
 }) {
   const reading = useServingRoomStatus(api, room);
   return (
-    <output>{reading === null ? "unknown" : reading ? "yes" : "no"}</output>
+    <output>
+      {reading === null
+        ? "unknown"
+        : `${reading.hubAcked ? "yes" : "no"}${reading.notSharedReason === null ? "" : `: ${reading.notSharedReason}`}`}
+    </output>
   );
 }
 
@@ -155,6 +159,38 @@ describe("the locally served room's upstream reading", () => {
     hubAcked = true;
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(host.textContent).toBe("yes");
+    act(() => root.unmount());
+  });
+
+  it("keeps the not-shared reason with its current room answer", async () => {
+    vi.useFakeTimers();
+    let answer: DocumentSearchStatus | Error = {
+      ...status(ROOM_A, false),
+      notSharedReason: "no-hub-credentials",
+    };
+    const api = client(async () => {
+      if (answer instanceof Error) throw answer;
+      return answer;
+    });
+    const { host, root } = mount(api, ROOM_A);
+    await flush();
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_SETTLE_MS));
+    expect(host.textContent).toBe("no: no-hub-credentials");
+
+    answer = {
+      ...status(ROOM_B, false),
+      notSharedReason: "no-hub-credentials",
+    };
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    expect(host.textContent).toBe("unknown");
+
+    answer = status(ROOM_A, true);
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_SETTLE_MS));
+    expect(host.textContent).toBe("yes");
+    answer = new Error("unreachable");
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    expect(host.textContent).toBe("unknown");
     act(() => root.unmount());
   });
 

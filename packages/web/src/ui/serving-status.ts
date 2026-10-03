@@ -1,7 +1,10 @@
 /** The current room's upstream acknowledgement, read from `ub open`. */
 
 import { useEffect, useMemo, useState } from "react";
-import type { DocumentSearchClient } from "../shell/document-search.js";
+import type {
+  DocumentSearchClient,
+  NotSharedReason,
+} from "../shell/document-search.js";
 import { useCalmSyncState } from "./calm.js";
 
 /** Keep the status current without turning every render into an HTTP request. */
@@ -19,7 +22,12 @@ const SERVING_STATUS_CADENCE = {
 interface RoomAnswer {
   client: DocumentSearchClient;
   room: string;
-  hubAcked: boolean | null;
+  status: ServingRoomStatus | null;
+}
+
+export interface ServingRoomStatus {
+  hubAcked: boolean;
+  notSharedReason: NotSharedReason | null;
 }
 
 /**
@@ -39,18 +47,18 @@ interface RoomAnswer {
 export function useServingRoomStatus(
   client: DocumentSearchClient | null | undefined,
   room: string | null,
-): boolean | null {
+): ServingRoomStatus | null {
   const [answer, setAnswer] = useState<RoomAnswer | null>(null);
   const current =
     answer !== null && answer.client === client && answer.room === room
-      ? answer.hubAcked
+      ? answer.status
       : null;
   const source = useMemo(
     () => (client === null || client === undefined || room === null ? null : {}),
     [client, room],
   );
   const calm = useCalmSyncState(
-    current === true ? "synced" : "syncing",
+    current?.hubAcked === true ? "synced" : "syncing",
     current === null ? null : source,
     SERVING_STATUS_CADENCE,
   );
@@ -80,11 +88,17 @@ export function useServingRoomStatus(
         setAnswer({
           client,
           room,
-          hubAcked: status.rooms[room]?.hubAcked ?? null,
+          status:
+            status.rooms[room] === undefined
+              ? null
+              : {
+                  hubAcked: status.rooms[room].hubAcked,
+                  notSharedReason: status.notSharedReason ?? null,
+                },
         });
       } catch {
         if (!active) return;
-        setAnswer({ client, room, hubAcked: null });
+        setAnswer({ client, room, status: null });
       } finally {
         if (timeout !== undefined) clearTimeout(timeout);
         if (inFlight === request) inFlight = null;
@@ -103,5 +117,8 @@ export function useServingRoomStatus(
   }, [client, room]);
 
   if (current === null || calm === null) return null;
-  return calm === "synced";
+  return {
+    hubAcked: calm === "synced",
+    notSharedReason: current.notSharedReason,
+  };
 }

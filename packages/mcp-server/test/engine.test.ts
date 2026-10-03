@@ -236,6 +236,7 @@ describe("transport-free MCP engine", () => {
         engine.store.appendUpdate(room, update as Uint8Array, "local");
       });
       expect(status()).toMatchObject({
+        notSharedReason: null,
         caughtUp: false,
         rooms: { [room]: { hubAcked: false } },
       });

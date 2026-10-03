@@ -48,6 +48,7 @@ import {
 } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
+import { localBrowserKey } from "../src/browser-key.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import type { Io } from "../src/io.js";
 import type { Stop } from "../src/open.js";
@@ -624,6 +625,7 @@ function servingDocumentOf(
 }
 
 async function authMessage(
+  key: string,
   scope: TokenScope = "read-only",
   options: {
     secret?: string;
@@ -632,7 +634,7 @@ async function authMessage(
   } = {},
 ): Promise<string> {
   const token = await mintToken(
-    await importRootSecret(options.secret ?? SECRET),
+    await importRootSecret(options.secret ?? key),
     {
       typ: "room",
       sub: "open-api-test",
@@ -645,11 +647,11 @@ async function authMessage(
   return wrapToken(token, options.protocolVersion ?? SYNC_PROTOCOL_VERSION);
 }
 
-async function forgedAuthMessage(claims: TokenClaims): Promise<string> {
+async function forgedAuthMessage(key: string, claims: TokenClaims): Promise<string> {
   const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
   const signature = await crypto.subtle.sign(
     "HMAC",
-    await importRootSecret(SECRET),
+    await importRootSecret(key),
     new TextEncoder().encode(payload),
   );
   return wrapToken(`${payload}.${Buffer.from(signature).toString("base64url")}`);
@@ -735,22 +737,25 @@ describe("ub open", () => {
 
     // Byte-exact: the path and the shape are #91's contract, and the web
     // client's fallback is silent enough that a wrong document looks like an
-    // offline hub rather than a misconfiguration. The secret is in it since
-    // #426 — the bundle carries none, so a document without it would serve an
-    // app that cannot authenticate.
+    // offline hub rather than a misconfiguration. Its independent key admits
+    // the page only to the local server, never to the upstream hub.
     const document = await get(`${app.url}uberblick-config.json`);
     expect(await document.text()).toBe(
-      servingDocumentOf(app.url, remote, WORKSPACE, SECRET),
+      servingDocumentOf(app.url, remote, WORKSPACE, localBrowserKey(WORKSPACE, box.env)),
     );
     expect(app.stdout()).toContain("remote — nothing started here");
 
     expect((await app.interrupt()).status).toBe(0);
   });
 
-  it("bridges live browser and MCP edits through the shared store while upstream is down", async () => {
+  it.each(["hub-down", "no-credentials"])("bridges durable browser and MCP edits through the shared store (%s)", async (mode) => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
-    const app = await open(box, ["--port", String(await freePort())], env);
+    if (mode === "no-credentials") {
+      rmSync(join(configDir(box), "credentials.json"));
+    }
+    const webPort = await freePort();
+    let app = await open(box, ["--port", String(webPort)], env);
 
     const instance = createMcpServer(
       resolveMcpConfig({
@@ -758,7 +763,7 @@ describe("ub open", () => {
         ...env,
         WORKSPACE_ID: WORKSPACE,
         HUB_URL: FIRST_REMOTE,
-        HUB_AUTH_TOKEN: SECRET,
+        ...(mode === "hub-down" ? { HUB_AUTH_TOKEN: SECRET } : {}),
       }),
     );
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -788,7 +793,7 @@ describe("ub open", () => {
         name: roomForDoc(WORKSPACE, created.uuid),
         document: doc,
         token: wrapToken(
-          await mintToken(await importRootSecret(SECRET), {
+          await mintToken(await importRootSecret(localBrowserKey(WORKSPACE, box.env)), {
             typ: "room",
             sub: "open-test-browser",
             workspace: WORKSPACE,
@@ -813,7 +818,7 @@ describe("ub open", () => {
         name: directoryRoom(WORKSPACE),
         document: directory,
         token: wrapToken(
-          await mintToken(await importRootSecret(SECRET), {
+          await mintToken(await importRootSecret(localBrowserKey(WORKSPACE, box.env)), {
             typ: "room",
             sub: "open-test-directory",
             workspace: WORKSPACE,
@@ -848,6 +853,22 @@ describe("ub open", () => {
         uuid: created.uuid,
       });
       expect(read.blocks[0]?.text).toBe("durable before acknowledgement");
+      const auth = await authMessage(localBrowserKey(WORKSPACE, box.env));
+      const readStatus = async () => await (await fetch(`${app.url}api/status`, {
+        headers: bearer(auth),
+      })).json() as { caughtUp: boolean; notSharedReason: string | null;
+        rooms: Record<string, { hubAcked: boolean }> };
+      expect(await readStatus()).toMatchObject({
+        caughtUp: false,
+        notSharedReason: mode === "no-credentials" ? "no-hub-credentials" : null,
+        rooms: { [roomForDoc(WORKSPACE, created.uuid)]: { hubAcked: false } },
+      });
+      const stored = openStore(instance.store.databasePath);
+      try {
+        expect(stored.prepare("SELECT COUNT(*) AS count FROM pending_rooms").get()?.count)
+          .toBeGreaterThan(0);
+      } finally { stored.close(); }
+
 
       const current = await call<{
         blocks: { id: string; text: string; rev: string }[];
@@ -892,6 +913,45 @@ describe("ub open", () => {
       }
       const creationP95 = [...creationLatencies].sort((a, b) => a - b)[18];
       expect(creationP95, JSON.stringify(creationLatencies)).toBeLessThan(250);
+      if (mode === "no-credentials") {
+        const key = localBrowserKey(WORKSPACE, box.env);
+        const hub = await startHub(box);
+        const hubUrl = `ws://127.0.0.1:${hub.port}`;
+        writeCredentials(box, SECRET);
+        pointAt(box, hubUrl);
+        expect(await (await get(`${app.url}uberblick-config.json`)).json())
+          .toMatchObject({ hubAuthToken: key, rebound: true });
+        expect((await app.interrupt()).status).toBe(0);
+        app = await open(box, ["--port", String(webPort)], env);
+        expect(localBrowserKey(WORKSPACE, box.env)).toBe(key);
+        await waitUntil("pending local-only edits to reach and be acknowledged by the hub", async () => {
+          const status = await readStatus();
+          return status.caughtUp && status.rooms[roomForDoc(WORKSPACE, created.uuid)]?.hubAcked === true;
+        });
+        const remoteDoc = new Y.Doc();
+        const remote = new HocuspocusProvider({
+          url: hubUrl, name: roomForDoc(WORKSPACE, created.uuid), document: remoteDoc,
+          token: await authMessage(SECRET),
+        });
+        try {
+          await waitUntil("a fresh hub peer to read the same pending document", () => remote.isSynced);
+          expect(getBlocks(remoteDoc)[0]?.text).toBe(currentBlock.text);
+          expect(instance.store.pendingRooms()).toEqual([]);
+        } finally { remote.destroy(); remoteDoc.destroy(); }
+
+        // The still-open local providers keep their original key after losing hub auth too.
+        rmSync(join(configDir(box), "credentials.json"));
+        expect((await app.interrupt()).status).toBe(0);
+        app = await open(box, ["--port", String(webPort)], env);
+        await waitUntil("the same browser room to resume local-only after restart", () =>
+          provider?.isSynced === true,
+        );
+        expect(await readStatus()).toMatchObject({
+          notSharedReason: "no-hub-credentials", caughtUp: false,
+          rooms: { [roomForDoc(WORKSPACE, created.uuid)]: { hubAcked: false } },
+        });
+      }
+
     } finally {
       provider?.destroy();
       directoryProvider?.destroy();
@@ -926,7 +986,7 @@ describe("ub open", () => {
       url: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
       name: room,
       document: browserDoc,
-      token,
+      token: await authMessage(localBrowserKey(WORKSPACE, box.env), "read-write"),
       ...{
         WebSocketPolyfill: class extends WebSocket {
           constructor(url: string | URL) {
@@ -1040,7 +1100,7 @@ describe("ub open", () => {
       });
       const content = result.content as { text?: string }[];
       const created = JSON.parse(content[0]?.text ?? "null") as { uuid: string };
-      const auth = await authMessage();
+      const auth = await authMessage(localBrowserKey(WORKSPACE, box.env));
 
       const found = await fetch(`${app.url}api/search?q=offline+badg*`, {
         headers: bearer(auth),
@@ -1114,7 +1174,7 @@ describe("ub open", () => {
       url: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
       name: room,
       document: doc,
-      token: await authMessage(),
+      token: await authMessage(localBrowserKey(WORKSPACE, box.env)),
       ...{
         WebSocketPolyfill: class extends WebSocket {
           constructor(url: string | URL) {
@@ -1125,7 +1185,7 @@ describe("ub open", () => {
         },
       },
     });
-    const auth = await authMessage();
+    const auth = await authMessage(localBrowserKey(WORKSPACE, box.env));
     const readStatus = async (): Promise<{
       response: Response;
       body: { caughtUp: boolean; rooms: Record<string, { hubAcked: boolean }> };
@@ -1155,6 +1215,7 @@ describe("ub open", () => {
       expect(current.response.headers.get("cache-control")).toBe("no-store");
       expect(current.response.headers.get("access-control-allow-origin")).toBeNull();
       expect(current.body).toEqual({
+        notSharedReason: null,
         caughtUp: true,
         rooms: { [room]: { hubAcked: true } },
       });
@@ -1182,24 +1243,25 @@ describe("ub open", () => {
     pointAt(box, FIRST_REMOTE);
     const app = await open(box, ["--port", String(await freePort())], env);
     const now = Math.floor(Date.now() / 1_000);
-    const valid = await authMessage();
+    const valid = await authMessage(localBrowserKey(WORKSPACE, box.env));
     const refused: { name: string; auth?: string; suffix?: string }[] = [
       { name: "missing" },
+      { name: "hub signing secret", auth: await authMessage(SECRET) },
       { name: "malformed", auth: "not-an-envelope" },
-      { name: "bad signature", auth: await authMessage("read-only", { secret: "wrong" }) },
+      { name: "bad signature", auth: await authMessage(localBrowserKey(WORKSPACE, box.env), "read-only", { secret: "wrong" }) },
       {
         name: "protocol mismatch",
-        auth: await authMessage("read-only", {
+        auth: await authMessage(localBrowserKey(WORKSPACE, box.env), "read-only", {
           protocolVersion: SYNC_PROTOCOL_VERSION + 1,
         }),
       },
       {
         name: "other workspace",
-        auth: await authMessage("read-only", { workspace: REBOUND_WORKSPACE }),
+        auth: await authMessage(localBrowserKey(WORKSPACE, box.env), "read-only", { workspace: REBOUND_WORKSPACE }),
       },
       {
         name: "lifetime beyond the ceiling",
-        auth: await forgedAuthMessage({
+        auth: await forgedAuthMessage(localBrowserKey(WORKSPACE, box.env), {
           typ: "room",
           sub: "compromised-minter",
           workspace: WORKSPACE,
@@ -1262,7 +1324,7 @@ describe("ub open", () => {
     const before = await get(url);
     expect(before.headers.get("cache-control")).toBe("no-store");
     expect(await before.text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, SECRET),
+      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, localBrowserKey(WORKSPACE, box.env)),
     );
 
     // `ub remote join` completes while this `ub open` keeps running.
@@ -1275,7 +1337,7 @@ describe("ub open", () => {
     // The live engine keeps its startup identity. A reload is told that the
     // machine moved underneath it, without silently retargeting the replica.
     expect(await (await get(url)).text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, SECRET, true),
+      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, localBrowserKey(WORKSPACE, box.env), true),
     );
 
     expect((await app.interrupt()).status).toBe(0);
@@ -1286,7 +1348,7 @@ describe("ub open", () => {
         restarted.url,
         SECOND_REMOTE,
         REBOUND_WORKSPACE,
-        REBOUND_SECRET,
+        localBrowserKey(REBOUND_WORKSPACE, box.env),
       ),
     );
     expect((await restarted.interrupt()).status).toBe(0);
@@ -1300,7 +1362,7 @@ describe("ub open", () => {
     const url = `${app.url}uberblick-config.json`;
 
     expect(await (await get(url)).text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, SECRET),
+      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, localBrowserKey(WORKSPACE, box.env)),
     );
 
     // A write is in flight after its first publication. Pairing this new secret
@@ -1315,12 +1377,12 @@ describe("ub open", () => {
     const held = await get(url);
     const text = await held.text();
     expect(Date.now() - started).toBeLessThan(1_000);
-    expect(text).toBe(servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, SECRET));
+    expect(text).toBe(servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, localBrowserKey(WORKSPACE, box.env)));
 
     writeBinding(box, SECOND_REMOTE, REBOUND_WORKSPACE);
     lock.release();
     expect(await (await get(url)).text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, SECRET, true),
+      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, localBrowserKey(WORKSPACE, box.env), true),
     );
 
     // Only an *active* write falls back like that. A completed removal is the
@@ -1328,7 +1390,7 @@ describe("ub open", () => {
     // stale so a restart can adopt the removal coherently.
     rmSync(join(configDir(box), "credentials.json"), { force: true });
     expect(await (await get(url)).json()).toMatchObject({
-      hubAuthToken: SECRET,
+      hubAuthToken: localBrowserKey(WORKSPACE, box.env),
       rebound: true,
     });
 
@@ -1358,7 +1420,7 @@ describe("ub open", () => {
 
     const app = await opening;
     expect(await (await get(`${app.url}uberblick-config.json`)).text()).toBe(
-      servingDocumentOf(app.url, SECOND_REMOTE, REBOUND_WORKSPACE, REBOUND_SECRET),
+      servingDocumentOf(app.url, SECOND_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env)),
     );
     expect((await app.interrupt()).status).toBe(0);
   });
@@ -1377,7 +1439,7 @@ describe("ub open", () => {
     const url = `${app.url}uberblick-config.json`;
 
     expect(await (await get(url)).text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, SECRET),
+      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env)),
     );
 
     // The files change underneath, naming a different workspace. The pin still
@@ -1389,7 +1451,7 @@ describe("ub open", () => {
       signingSecret: REBOUND_SECRET,
     });
     expect(await (await get(url)).text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, SECRET, true),
+      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env), true),
     );
 
     expect((await app.interrupt()).status).toBe(0);
@@ -1457,7 +1519,7 @@ describe("ub open", () => {
       url: hubUrl,
       name: room,
       document: remoteDoc,
-      token: await authMessage("read-write"),
+      token: await authMessage(SECRET, "read-write"),
     });
 
     try {
@@ -1533,7 +1595,7 @@ describe("ub open", () => {
     const webPort = await freePort();
     pointAt(box, "wss://hub.example.ts.net/ws");
     const app = await open(box, ["--port", String(webPort)], env);
-    const valid = await authMessage();
+    const valid = await authMessage(localBrowserKey(WORKSPACE, box.env));
     const samples = [
       { path: "uberblick-config.json", host: `rebound.example:${webPort}` },
       { path: "assets/app.js", host: `localhost:${webPort}` },
@@ -2043,14 +2105,17 @@ describe("ub open", () => {
     expect((await app.interrupt()).status).toBe(0);
   });
 
-  it("works with no configuration files at all", async () => {
-    const box = sandbox();
+  it.each([undefined, SECRET])("serves no key when unbound (configured secret: %s)", async (signingSecret) => {
+    const box = sandbox(signingSecret === undefined ? {} : { credentials: { signingSecret } });
+    const hubUrl = signingSecret === undefined ? "ws://localhost:1234" : `ws://127.0.0.1:${await freePort()}`;
+    if (signingSecret !== undefined) pointAt(box, hubUrl);
     const bundle = fixtureBundle(box);
     const webPort = await freePort();
 
     const app = await open(box, ["--port", String(webPort)], {
       UBERBLICK_WEB_DIST: bundle,
       BROWSER: "none",
+      HUB_DB_PATH: join(box.cwd, "unbound-hub.sqlite"),
     });
 
     // No `ub init`, so no workspace and no signing secret: the app is served
@@ -2058,10 +2123,12 @@ describe("ub open", () => {
     // reason no hub was started is said out loud rather than left to look like
     // an offline one.
     expect(await (await get(`${app.url}uberblick-config.json`)).text()).toBe(
-      '{"hubUrl":"ws://localhost:1234","workspaces":[],"hubAuthToken":""}',
+      JSON.stringify({ hubUrl, workspaces: [], hubAuthToken: "" }),
     );
-    expect(app.stdout()).toContain("no signing secret");
+    if (signingSecret === undefined) expect(app.stdout()).toContain("no signing secret");
     expect(app.stdout()).toContain("ub init");
+    expect(app.stdout() + app.stderr()).not.toContain(SECRET);
+    expect(existsSync(join(configDir(box), "browser-keys"))).toBe(false);
 
     const refusedConfig = await getWithHost(
       `${app.url}uberblick-config.json`,

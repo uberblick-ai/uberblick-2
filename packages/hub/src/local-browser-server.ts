@@ -129,7 +129,8 @@ export interface LocalRoomSlice {
 export interface LocalBrowserServerConfig {
   port: number;
   workspaceId: string;
-  authSecret: string;
+  /** Independent local admission key; never the replica's upstream secret. */
+  browserKey: string;
   expectedOrigin: string;
   protocolVersion?: number;
   log?: HubLogger;
@@ -208,8 +209,8 @@ async function listen(server: Server<HubContext>): Promise<void> {
 export async function createLocalBrowserServer(
   config: LocalBrowserServerConfig,
 ): Promise<LocalBrowserServer> {
-  if (config.authSecret === "") {
-    throw new Error("createLocalBrowserServer: authSecret must not be empty");
+  if (config.browserKey === "") {
+    throw new Error("createLocalBrowserServer: browserKey must not be empty");
   }
   const protocolVersion = config.protocolVersion ?? SYNC_PROTOCOL_VERSION;
   if (!isProtocolVersion(protocolVersion)) {
@@ -219,7 +220,7 @@ export async function createLocalBrowserServer(
   }
   const log = config.log ?? stderrLogger;
   const authenticate = await createRoomAuthenticator({
-    authSecret: config.authSecret,
+    authSecret: config.browserKey,
     protocolVersion,
     log,
     servedWorkspace: config.workspaceId,

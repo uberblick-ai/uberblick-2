@@ -43,6 +43,7 @@ import { randomIdentity } from "../collab/identity.js";
 import { createDocLinkContext } from "../editor/doc-links.js";
 import type { DocLinkContext } from "../editor/doc-links.js";
 import type { RoomConnection } from "../collab/rooms.js";
+import type { NotSharedReason } from "../shell/document-search.js";
 import type { RemotePresence } from "./doc-chrome.js";
 import { CopyLink } from "./DocChrome.js";
 import { Sidebar, togglePin } from "./Sidebar.js";
@@ -131,6 +132,7 @@ export function RoutePane({
   presence,
   endpoint = null,
   hubAcked,
+  notSharedReason = null,
   meta,
   author,
   catalogConnection = null,
@@ -178,6 +180,7 @@ export function RoutePane({
   endpoint?: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
   hubAcked?: boolean | null | undefined;
+  notSharedReason?: NotSharedReason | null;
   /**
    * That room's metadata, or null while it has not been read yet. The
    * difference carries a decision: unread is silence, read-and-not-this-document
@@ -283,6 +286,7 @@ export function RoutePane({
               presence={presence}
               endpoint={endpoint}
               hubAcked={hubAcked}
+              notSharedReason={notSharedReason}
               onLastUpdatedChange={onLastUpdatedChange}
               syncOpen={syncOpen}
               onToggleSync={onToggleSync}
@@ -308,6 +312,7 @@ export function RoutePane({
       presence={presence}
       endpoint={endpoint}
       hubAcked={hubAcked}
+      notSharedReason={notSharedReason}
       author={author}
       catalogConnection={catalogConnection}
       archived={archived}
@@ -593,7 +598,7 @@ export function App(): ReactElement {
     },
     [],
   );
-  const hubAcked = useServingRoomStatus(
+  const servingStatus = useServingRoomStatus(
     documentSearch,
     chromeRoom?.room ?? null,
   );
@@ -1038,7 +1043,8 @@ export function App(): ReactElement {
             connection={doc}
             presence={presence}
             endpoint={statusEndpoint}
-            hubAcked={serving === null ? undefined : hubAcked}
+            hubAcked={serving === null ? undefined : servingStatus?.hubAcked ?? null}
+            notSharedReason={servingStatus?.notSharedReason ?? null}
             meta={meta}
             author={identity.name}
             catalogConnection={catalog}
@@ -1109,7 +1115,8 @@ export function App(): ReactElement {
             connection={chromeRoom}
             presence={presence}
             endpoint={statusEndpoint}
-            hubAcked={serving === null ? undefined : hubAcked}
+            hubAcked={serving === null ? undefined : servingStatus?.hubAcked ?? null}
+            notSharedReason={servingStatus?.notSharedReason ?? null}
             lastUpdated={
               shownLastUpdated !== null &&
               shownLastUpdated.room === chromeRoom?.room

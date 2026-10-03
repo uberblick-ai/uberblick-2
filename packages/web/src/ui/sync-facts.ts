@@ -1,6 +1,7 @@
 /** One derivation for the document status line and its details panel. */
 
 import type { RoomStatus } from "../collab/rooms.js";
+import type { NotSharedReason } from "../shell/document-search.js";
 import type { SyncState } from "./calm.js";
 import type { StatusReading } from "./status-reading.js";
 
@@ -11,6 +12,8 @@ export interface DocumentSyncFacts {
   /** The upstream acknowledgement reading. Null means unknown, never false. */
   hub: string | null;
   hubTone: SyncState | null;
+  /** The cause for a current not-shared reading, independent of local saving. */
+  hubDetail: string | null;
   /** Whether this is the locally served two-fact presentation. */
   twoFact: boolean;
 }
@@ -29,6 +32,7 @@ export function documentSyncFacts(
   state: SyncState | null,
   reading: StatusReading,
   hubAcked: boolean | null | undefined,
+  notSharedReason: NotSharedReason | null = null,
 ): DocumentSyncFacts {
   const blank = state === null && reading.detail === null;
   const twoFact =
@@ -39,6 +43,7 @@ export function documentSyncFacts(
       primaryTone: blank ? null : reading.detail === null ? state : reading.tone,
       hub: null,
       hubTone: null,
+      hubDetail: null,
       twoFact: false,
     };
   }
@@ -51,17 +56,21 @@ export function documentSyncFacts(
         : state === "syncing"
           ? "saving here…"
           : reading.word;
+  const localOnly = notSharedReason !== null && hubAcked !== null && state !== null;
   const hub =
     state === null || hubAcked === null
       ? null
-      : hubAcked
+      : localOnly
+        ? "not shared with hub"
+        : hubAcked
         ? "synced with hub"
         : "not synced with hub";
   return {
     primary,
     primaryTone: state,
     hub,
-    hubTone: hubAcked === null ? null : hubAcked ? "synced" : "offline",
+    hubTone: hubAcked === null ? null : localOnly || !hubAcked ? "offline" : "synced",
+    hubDetail: localOnly ? "this machine has no credentials for its hub" : null,
     twoFact: true,
   };
 }
