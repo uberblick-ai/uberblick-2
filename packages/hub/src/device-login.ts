@@ -12,7 +12,7 @@ import { importCredentialKey, mintRequestProof } from "./token.js";
 
 const REQUEST_MS = 10_000;
 const MAX_RESPONSE_BYTES = 65_536;
-/** Shared by rooms and processes, so a failed need cannot churn every connection. */
+/** Retryable outcomes are shared by rooms and processes for this long. */
 export const DEVICE_RENEWAL_COOLDOWN_MS = 30_000;
 
 type FailureStatus = "sign-in-required" | "credential-store-refused" | "credential-store-unreadable"
@@ -196,7 +196,11 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     if (current.status !== "ready") return current;
     if (!needsRenewal(current.login)) return current;
     const cached = readOutcome(path.outcome);
-    if (cached?.fingerprint === fingerprint(current.login) && cached.retryAt > Date.now()) {
+    if (cached?.fingerprint === fingerprint(current.login) &&
+      (cached.retryAt > Date.now() || (cached.status === "renewed" && !current.login.credential.record.workspaces.includes(workspace)))) {
+      // A renewal has already confirmed this credential's missing access.
+      // Only a changed stored credential can change that manual reading;
+      // polling it must not keep retiring other workspaces' connections.
       // A replacement with workspace access is ready for an old refused
       // connection. A refusal of the newly issued credential waits, rather than
       // repeatedly retiring every process's working credential.
@@ -206,10 +210,11 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     }
     const expected = current.login;
     const result = await renew(origin, expected, options.signal);
-    options.signal?.throwIfAborted();
     if (typeof result === "object" && "identity" in result) {
       try {
-        await replaceHubLogin(origin, expected, result, env, options.signal);
+        // Once issued, the old key is retired. Finish bounded, conditional
+        // publication even if the caller stops; login/logout still wins.
+        await replaceHubLogin(origin, expected, result, env);
       } catch {
         options.signal?.throwIfAborted();
         return { status: "credential-store-unreadable", origin, message: "Could not store the renewed device login; check the credential store directory and sign in again if its replacement was lost." };
@@ -220,8 +225,10 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
       // its authority. Use that newer login; its next need may renew it.
       if (!sameCredential(current.login, result)) return current.login.credential.record.workspaces.includes(workspace) ? current : offline(origin);
       publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(result), retryAt: Date.now() + DEVICE_RENEWAL_COOLDOWN_MS, status: "renewed" } satisfies Outcome));
+      options.signal?.throwIfAborted();
       return result.credential.record.workspaces.includes(workspace) ? current : noAccess(origin, workspace);
     }
+    options.signal?.throwIfAborted();
     current = readDeviceLogin(endpoint, workspace, env);
     if (current.status !== "ready") return current;
     if (!sameCredential(current.login, expected)) return current.login.credential.record.workspaces.includes(workspace) ? current : offline(origin);

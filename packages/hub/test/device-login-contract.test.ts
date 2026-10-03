@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { credentialsPath, readHubLogins, writeHubLogin } from "../src/auth-store.js";
 import { DEVICE_RENEWAL_COOLDOWN_MS, ensureDeviceLogin } from "../src/device-login.js";
+import { acquireInitLock } from "../src/init-lock.js";
 import { startDeviceSyncHub } from "./device-sync-hub.js";
 
 const WORKSPACE = randomUUID();
@@ -68,7 +69,7 @@ describe("device renewal response and recovery contracts", () => {
     expect(hub.renewalCount).toBe(1);
   });
 
-  it("discovers a later membership grant once the no-access renewal cooldown ends", async () => {
+  it("keeps confirmed missing access manual until the stored credential changes", async () => {
     const { hub, env } = await setup();
     expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
     const withoutAccess = readHubLogins(env).logins[hub.origin]!;
@@ -76,12 +77,50 @@ describe("device renewal response and recovery contracts", () => {
     expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
     expect(hub.renewalCount).toBe(1);
     expireCooldown();
+    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
+    expect(hub.renewalCount).toBe(1);
+    expect(readHubLogins(env).logins[hub.origin]).toEqual(withoutAccess);
+    const replacement = hub.issue({ workspaces: [WORKSPACE] });
+    await writeHubLogin(hub.origin, replacement, env);
     const recovered = await ensureDeviceLogin(hub.url, WORKSPACE, { env });
     expect(recovered.status).toBe("ready");
     if (recovered.status !== "ready") throw new Error("membership recovery failed");
     expect(recovered.login.credential.record.id).not.toBe(withoutAccess.credential.record.id);
     expect(recovered.login.credential.record.workspaces).toContain(WORKSPACE);
-    expect(hub.renewalCount).toBe(2);
+    expect(hub.renewalCount).toBe(1);
+  });
+
+  it("stores an issued replacement despite cancellation while configuration publication waits", async () => {
+    const { hub, env, login } = await setup();
+    hub.grant(WORKSPACE);
+    const configLock = await acquireInitLock(env);
+    const abort = new AbortController();
+    const fetchResponse = globalThis.fetch;
+    let delivered!: () => void;
+    const responseDelivered = new Promise<void>(resolve => { delivered = resolve; });
+    // Real exchange and complete response, with cancellation at the boundary
+    // between receiving the replacement and publishing it locally.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (...args) => {
+      const response = await fetchResponse(...args);
+      const body = await response.text();
+      abort.abort();
+      delivered();
+      return new Response(body, { status: response.status, headers: response.headers });
+    });
+    const renewal = ensureDeviceLogin(hub.url, WORKSPACE, { env, signal: abort.signal });
+    const cancelled = expect(renewal).rejects.toMatchObject({ name: "AbortError" });
+    try {
+      await responseDelivered;
+      expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
+    } finally {
+      configLock.release();
+    }
+    await cancelled;
+    const stored = readHubLogins(env).logins[hub.origin]!;
+    expect(stored.credential.record.id).not.toBe(login.credential.record.id);
+    expect(stored.credential.record.workspaces).toEqual([WORKSPACE]);
+    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("ready");
+    expect(hub.renewalCount).toBe(1);
   });
 
   it("retries a transient offline renewal after cooldown and preserves the login until issuance", async () => {

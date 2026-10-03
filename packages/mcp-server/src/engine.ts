@@ -94,6 +94,7 @@ export async function createMcpEngine(
     await seedTagCatalogOnce(replicas);
   } catch (error) {
     replicas?.destroy();
+    await replicas?.sync.waitForDeviceWork();
     servingRole?.close();
     store.close();
     throw error;
@@ -199,11 +200,12 @@ export async function createMcpEngine(
     },
     close() {
       if (closePromise !== null) return closePromise;
-      closePromise = Promise.resolve().then(() => {
+      closePromise = Promise.resolve().then(async () => {
         closed = true;
         stopLoop();
         listeners.clear();
         replicas.destroy();
+        await replicas.sync.waitForDeviceWork();
         servingRole?.close();
         store.close();
       });
