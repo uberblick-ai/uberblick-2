@@ -85,10 +85,11 @@ Settled 2026-10-03:
   open record's recommended option, and merging continues. The issue or pull
   request says *built on open decision: \<topic\>, recommended option*, so a
   reversal can find what was built on it. Hardly anything is irreversible, so
-  the line is **major impact**: only a step whose reversal would mean
-  substantial rework across the system waits for a human answer — for example
-  replacing the database (PostgreSQL with MongoDB), a migration that drops
-  data, or a credential or permission change. If a person decides differently, the new
+  the line is **major impact**: only work that would be expensive to reverse
+  waits for a human answer — for example swapping a core technology
+  (PostgreSQL for MongoDB), changing a data format users or other systems
+  depend on, or making users migrate. Releases, data migrations and permission
+  changes are not automatically on that list. If a person decides differently, the new
   decision supersedes the recommendation and a follow-up issue does the
   rework; that rework cost is accepted to avoid slowing delivery. The agent
   workflow's "at a boundary, pause only affected work" narrows to those
