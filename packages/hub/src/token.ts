@@ -28,10 +28,9 @@
  *     never calls this; it mints through `HubSync`.) The ladder that ends this
  *     replaces those three call sites with credential keys.
  *   - {@link importCredentialKey} — the 32 raw bytes a client parsed out of its
- *     credential with {@link parseCredential}. **A client never derives a key**:
- *     it holds bytes and imports them. Only the hub calls
- *     {@link deriveCredentialKey}, because only the hub has the root secret and
- *     the workspace's `keyVersion`.
+ *     credential with {@link parseCredential}. Credential keys are independent
+ *     random bytes issued by the hub's registry; neither the root secret nor
+ *     another device's key can derive them.
  *
  * Why WebCrypto and not `node:crypto`: the same module runs in the browser
  * client and in Node (hub, MCP server), so it must not import a Node builtin.
@@ -42,10 +41,9 @@
  * server or a deployed bundle from before this change must be restarted or
  * redeployed.
  *
- * Known limits (spike): the root secret is a single dev secret shared by every
- * client, and nothing here revokes. The registry that fixes both is the next
- * steps of the workspace-isolation ladder; this module is the wire format they
- * build on.
+ * Live admission still uses the root secret shared by every client. The
+ * credential registry and its admission path are built separately, pending
+ * the coordinated hub and client switch.
  */
 
 import { parseWorkspaceId } from "@uberblick/schema";
@@ -104,7 +102,7 @@ export interface TokenClaims {
   /**
    * Which key signed this, as a lookup hint the hub may read *before* it has
    * verified anything — never as authority. `null` means the root secret; a
-   * credential id means that credential's derived key.
+   * credential id means that credential's independently issued key.
    */
   kid: string | null;
   /** Issued at, whole seconds since the epoch. */
@@ -207,7 +205,7 @@ export async function importRootSecret(secret: string): Promise<CryptoKey> {
 
 /**
  * The credential string's prefix, and the version of everything below it: the
- * derivation string, the base64url key encoding and the checksum. A future
+ * base64url key encoding and the checksum. A future
  * format is `ubc2`, never a reinterpretation of this one.
  */
 const CREDENTIAL_PREFIX = "ubc1";
@@ -219,71 +217,14 @@ const CREDENTIAL_PREFIX = "ubc1";
  */
 const CREDENTIAL_SEPARATOR = ".";
 
-/** HMAC-SHA-256's output, which is what a credential key is. */
+/** A credential key's independent random bytes. */
 const CREDENTIAL_KEY_BYTES = 32;
 
 /** Those 32 bytes as unpadded base64url: one length, one spelling. */
 const CREDENTIAL_KEY_CHARS = 43;
 
-/** A `keyVersion` is 128 random bits in lowercase hex — never a counter. */
-const KEY_VERSION = /^[0-9a-f]{32}$/;
-
 /** A credential id, and the same 8-4-4-4-12 lowercase spelling as a uuid. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-/**
- * **Hub-only.** Derive a credential's signing key from the root secret.
- *
- * ```
- * K_c = HMAC-SHA-256(root, "ub/v1/cred\n" + workspaceUuid + "\n" + keyVersion + "\n" + credId)
- * ```
- *
- * The HMAC *key input* is the UTF-8 bytes of the root secret (exactly
- * {@link importRootSecret}); `K_c` is the 32 raw output bytes. This is the only
- * place that string is spelled.
- *
- * **No client may call this, and none can**: a client holds neither the root
- * secret nor the workspace's `keyVersion`. It receives `K_c` as bytes inside a
- * credential and imports them with {@link importCredentialKey}. A repository
- * check asserts there is no call site outside `packages/hub`.
- *
- * The three variable fields are `\n`-joined and each is format-checked here, so
- * no field can bleed into the next: a `keyVersion` that ended where a `credId`
- * begins would otherwise derive the same key as some other pair.
- *
- * `keyVersion` is deliberately absent from the credential string. The hub reads
- * it from the row addressed by `credId`, so after a rekey the credential fails
- * the verification precondition *and* the re-derived key no longer matches the
- * client's bytes — two independent refusals, one intended.
- */
-export async function deriveCredentialKey(
-  root: string,
-  workspaceUuid: string,
-  keyVersion: string,
-  credId: string,
-): Promise<Uint8Array> {
-  if (!isWorkspace(workspaceUuid)) {
-    throw new Error(
-      "deriveCredentialKey: workspaceUuid must be a workspace uuid, undecorated",
-    );
-  }
-  if (!KEY_VERSION.test(keyVersion)) {
-    throw new Error(
-      "deriveCredentialKey: keyVersion must be 32 lowercase hex digits (128 bits)",
-    );
-  }
-  if (!UUID.test(credId)) {
-    throw new Error("deriveCredentialKey: credId must be a uuid");
-  }
-
-  const info = `ub/v1/cred\n${workspaceUuid}\n${keyVersion}\n${credId}`;
-  const mac = await globalThis.crypto.subtle.sign(
-    "HMAC",
-    await importRootSecret(root),
-    textEncoder.encode(info),
-  );
-  return new Uint8Array(mac);
-}
 
 /**
  * The 32 raw bytes of a credential key as a signing key — what a client does
@@ -351,9 +292,9 @@ export type ParsedCredential = CredentialParts | { invalid: CredentialProblem };
  * `ubc1.<workspace>.<credId>.<key>.<checksum>`.
  *
  * `<key>` is base64url of the 32 raw `K_c` bytes — the holder imports exactly
- * those bytes, which is why it never needs the root secret or the `keyVersion`
- * that produced them. `<checksum>` is {@link crc32Hex} over everything before
- * it.
+ * those bytes. `<workspace>` is a single-workspace boot hint in this format;
+ * the hub registry remains the authority for the credential's workspace set.
+ * `<checksum>` is {@link crc32Hex} over everything before it.
  *
  * Issued by the hub. There is no other writer.
  */
@@ -654,6 +595,52 @@ function logString(value: unknown): string | null {
 
 const UNPARSEABLE: TokenRejection = { failure: "unparseable", identity: null };
 
+interface ParsedToken {
+  payloadPart: string;
+  signature: Uint8Array<ArrayBuffer>;
+  payload: Record<string, unknown>;
+}
+
+/** The same bounded, canonical parsing before key lookup and verification. */
+function parseToken(token: string): ParsedToken | null {
+  if (token.length > MAX_TOKEN_LENGTH) return null;
+  const parts = token.split(SEPARATOR);
+  if (parts.length !== 2) return null;
+  const [payloadPart, signaturePart] = parts;
+  if (!payloadPart || !signaturePart) return null;
+  try {
+    const payload: unknown = JSON.parse(
+      textDecoder.decode(base64urlDecode(payloadPart)),
+    );
+    const signature = base64urlDecode(signaturePart);
+    if (typeof payload !== "object" || payload === null) return null;
+    return { payloadPart, signature, payload: payload as Record<string, unknown> };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read only an unverified key lookup hint. It grants no authority: the caller
+ * still verifies the signature and every claim under the selected key.
+ */
+export function readTokenKeyId(
+  token: string,
+): { kid: string | null } | TokenRejection {
+  const parsed = parseToken(token);
+  if (parsed === null) return UNPARSEABLE;
+  const { kid } = parsed.payload;
+  return isKeyId(kid)
+    ? { kid }
+    : {
+        failure: "unsupported-claims",
+        identity: {
+          typ: logString(parsed.payload.typ),
+          sub: logString(parsed.payload.sub),
+        },
+      };
+}
+
 /**
  * Verify a token, returning its claims or **why it was refused** — the same
  * decision {@link verifyToken} makes, with the reason kept instead of dropped.
@@ -670,36 +657,20 @@ export async function inspectToken(
   key: CryptoKey,
   token: string,
 ): Promise<TokenClaims | TokenRejection> {
-  if (token.length > MAX_TOKEN_LENGTH) {
-    return UNPARSEABLE;
-  }
-  const parts = token.split(SEPARATOR);
-  if (parts.length !== 2) {
-    return UNPARSEABLE;
-  }
-  const [payloadPart, signaturePart] = parts;
-  if (!payloadPart || !signaturePart) {
-    return UNPARSEABLE;
-  }
-
-  let payload: unknown;
+  const parsed = parseToken(token);
+  if (parsed === null) return UNPARSEABLE;
   let signed: boolean;
   try {
-    payload = JSON.parse(textDecoder.decode(base64urlDecode(payloadPart)));
     signed = await globalThis.crypto.subtle.verify(
       "HMAC",
       key,
-      base64urlDecode(signaturePart),
-      textEncoder.encode(payloadPart),
+      parsed.signature,
+      textEncoder.encode(parsed.payloadPart),
     );
   } catch {
     return UNPARSEABLE;
   }
-  if (typeof payload !== "object" || payload === null) {
-    return UNPARSEABLE;
-  }
-
-  const claims = payload as Record<string, unknown>;
+  const claims = parsed.payload;
   const identity: TokenIdentity = {
     typ: logString(claims.typ),
     sub: logString(claims.sub),

@@ -123,7 +123,7 @@ export interface Hub {
 }
 
 /** Query parameters that would carry a token. Their presence is a rejection. */
-const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
+export const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
 /**
  * The header the upgrade hook stamps the direct peer's address into, and the
