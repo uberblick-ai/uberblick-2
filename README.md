@@ -277,13 +277,83 @@ config or with the vendor's own command. That cuts both ways, which is the
 point — a repository quietly moved to another corpus is exactly what the pin is
 there to prevent.
 
-`.mcp.json` in this checkout is exactly that file, and it is generated rather
-than hand-maintained — it is what `ub mcp install claude --print` emits, and a
-test asserts the committed bytes are that snippet. It is deliberately unpinned:
-this repository works in whatever workspace `ub workspace use` last named.
+This repository's MCP entries deliberately select a pinned installed client
+through a host launcher, as described below. The generic `ub mcp install
+claude --print` snippet still uses `ub mcp serve`. The repository entries carry
+no workspace or credential: they follow this machine's selected workspace.
 
-For a standalone smoke test, `mise run mcp` runs the same server in the
-foreground.
+For a standalone smoke test of checkout source, `mise run mcp` runs it in the
+foreground. Use separate candidate configuration and data when the corpus hub
+still runs an older protocol.
+
+### Keep the corpus client independent of the checkout
+
+Mise prepends `node_modules/.bin` inside this checkout. Bare `ub` there executes
+the checkout's CLI source, including in agent workers; it can switch protocols
+when the operator pulls main. Keep the existing corpus installation on its
+compatible installed client while testing a new hub and client separately.
+Merging source does not authorize upgrading that installation.
+
+The repository's `.mcp.json`, `.codex/config.toml` and both ub-agents runtime
+definitions invoke `$HOME/.local/bin/uberblick-corpus-mcp`. It selects a bundled,
+installed snapshot of the pre-switch operator revision
+`b574609cd5d8456a3e11ba10e3d6eeaaf1770d82`, with protocol 1 and the current
+corpus interfaces. The published Homebrew `0.2.0` client has protocol 1 but
+omits current decision tools and authority fields; using it would regress those
+contracts. Its existing installation stays untouched.
+
+Build the pinned snapshot with the existing payload builder, then install it
+and the reviewed launcher **before** the new MCP definitions become active.
+Run this from the reviewed correction checkout. In an agent session the
+temporary source and build output belong in private run scratch:
+
+```sh
+set -eu
+corpus_sha=b574609cd5d8456a3e11ba10e3d6eeaaf1770d82
+corpus_version=0.2.0-corpus.b574609
+corpus_build=$(mktemp -d "${UB_AGENTS_SCRATCH:-${TMPDIR:-$PWD}}/uberblick-corpus-${UB_AGENTS_RUN:-attended}-XXXXXXXX")
+mkdir "$corpus_build/source"
+git archive "$corpus_sha" | tar -x -C "$corpus_build/source"
+mise exec -- pnpm --dir "$corpus_build/source" install --frozen-lockfile
+UBERBLICK_PAYLOAD_OUTPUT_DIR="$corpus_build/output" mise exec -- \
+  node "$corpus_build/source/scripts/build-install-payload.mjs" "$corpus_version"
+corpus_install="$HOME/.local/share/uberblick-corpus-clients/$corpus_sha"
+# Refuse to replace an installation already used by running sessions.
+mkdir -p "$(dirname "$corpus_install")"
+mkdir "$corpus_install"
+tar -xzf "$corpus_build/output/uberblick-$corpus_version.tar.gz" \
+  --strip-components=1 -C "$corpus_install"
+mkdir -p "$HOME/.local/bin"
+install -m 755 bin/corpus-mcp.sh "$HOME/.local/bin/uberblick-corpus-mcp"
+"$HOME/.local/bin/uberblick-corpus-mcp" --check
+rm -rf "$corpus_build"
+```
+
+This local artifact is named `0.2.0-corpus.b574609`; it is not a published
+release. On both supported platforms, the launcher calls that snapshot's
+`bin/ub` in the directory above and verifies the version before starting MCP.
+For another installation directory, set `UB_CORPUS_CLIENT` to its absolute
+executable in the actual launcher environment; the same version is required.
+No pin failure falls back to PATH, a moving Homebrew link or checkout source.
+`--check` prints only the executable and version and reads no workspace or
+credentials. The bundles contain their dependencies and load no checkout code.
+The host still needs Node 26 or newer, as the ordinary installed client does.
+
+Claude workers receive the MCP definition inline, and Codex workers receive
+explicit runtime overrides. This also covers older PR worktrees whose own MCP
+files still name bare `ub`; the host launcher exists outside every checkout.
+The runner reloads configuration at its next execution boundary. Existing
+workers keep their running MCP processes; do not interrupt them for this pin.
+
+Verify the actual MCP child in a newly started worker, including a private
+worktree: it must execute the snapshot's `packages/cli/lib/mcp.mjs`, and
+`sync_status` must report the existing hub and compatible protocol. A login-shell
+`which ub` or the launcher's `--check` alone does not prove worker resolution.
+`tools/list` must include `find_decisions` and the current decision-authority
+schemas. Run existing-installation commands such as `open` with the same
+explicit snapshot executable, rather than bare `ub` inside mise. None of this
+changes the selected workspace, credentials or data directory. [REMOTE.md](REMOTE.md#keep-an-existing-installation-while-testing-a-candidate)
+gives the separate candidate rehearsal and later coordinated upgrade.
 
 ### A second workspace
 
@@ -560,10 +630,9 @@ the coordinated hub/client upgrade order; an old signing secret in the host's
 `.env` grants nothing.
 
 `ub mcp serve` resolves that configuration and runs the MCP server with it, so
-the server keeps its environment-only contract — no flags, no config file — and
-a client's spawn line never has to change again when internals move. This
-checkout's `.mcp.json` is the one place that still names a spawn of its own,
-for the reasons given above, and `ub mcp install claude --print` emits it.
+the server keeps its environment-only contract — no flags, no config file.
+Generic registration uses that command. This repository's MCP definitions
+select the compatible installed client through the corpus launcher above.
 
 ## The first-user proof
 

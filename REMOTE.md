@@ -158,6 +158,13 @@ version recorded by the hub release before choosing it.
 
 ### Upgrade an existing deployment to device credentials
 
+Use this procedure when the operator chooses to upgrade that deployment. A
+source checkout advancing or a candidate passing acceptance does not authorize
+an existing hub upgrade. To keep an existing installation on its current
+protocol while trying a candidate, first
+[pin its corpus client](README.md#keep-the-corpus-client-independent-of-the-checkout)
+and use the [isolated candidate procedure below](#try-a-candidate-on-a-fresh-isolated-hub).
+
 Prepare the old deployment before switching either side:
 
 1. Configure GitHub sign-in on the existing hub (the public Uberblick Login app
@@ -184,6 +191,182 @@ Host-opened browsers, including phones and tablets, have no document access
 until direct web sign-in is available. The supported browser route is
 `ub auth login` followed by `ub open` on a computer. Revocation and membership
 removal stop live sync but cannot erase downloaded data or local edits.
+
+### Keep an existing installation while testing a candidate
+
+Keep each corpus connection on an explicitly installed, compatible client whose
+files live outside the source checkout. The selected package must preserve both
+the existing hub's protocol and the corpus tools the delivery workflow uses;
+finding an older executable on PATH does not prove either. Follow
+[the corpus-client pin procedure](README.md#keep-the-corpus-client-independent-of-the-checkout)
+before new launcher definitions become active, including its actual worker MCP
+check from a private checkout. For an existing `ub open`, use that same explicit
+installed client. Leave the existing hub, bindings, credentials, local stores
+and running workers alone.
+
+Record the installed package identity and the executable that the actual MCP
+launcher starts on each relevant host. A remaining host-side installation or
+pin check is an operational handoff, not completed isolation. Candidate
+acceptance uses a different hub and entirely fresh client state below; a later
+attended upgrade of the existing installation uses the coordinated procedure
+above.
+
+### Try a candidate on a fresh, isolated hub
+
+This attended rehearsal leaves existing hubs, client state and running MCP
+servers alone. Build the hub and its matching client from one reviewed full
+commit. Both run on a new Docker network: the hub binds `0.0.0.0:1234` inside
+its container, and the client dials `ws://candidate-hub:1234`. No host port is
+published. That hostname selects remote device authentication; a client
+dialling `127.0.0.1` or `localhost` would instead select loopback admission.
+
+Start a separate Bash session in a repository checkout. Set `candidate_sha` to
+the exact reviewed candidate, then run the following. Keep this shell open
+until the rehearsal ends; its exit trap removes only the resources it names.
+An agent run uses its private scratch and run id. An attended operator session
+can use its own temporary-directory root.
+
+```bash
+set -euo pipefail
+candidate_sha='<full-reviewed-commit>'
+git cat-file -e "$candidate_sha^{commit}"
+test "$(git rev-parse "$candidate_sha^{commit}")" = "$candidate_sha"
+candidate_root=$(mktemp -d "${UB_AGENTS_SCRATCH:-${TMPDIR:-$PWD}}/uberblick-candidate-${UB_AGENTS_RUN:-attended}-XXXXXXXX")
+candidate_id=$(basename "$candidate_root")
+candidate_network="$candidate_id-network"
+candidate_hub="$candidate_id-hub"
+candidate_hub_data="$candidate_id-hub-data"
+candidate_writer="$candidate_id-writer"
+candidate_reader="$candidate_id-reader"
+candidate_tag="uberblick-candidate:$candidate_sha"
+
+candidate_cleanup() {
+  docker rm --force "$candidate_hub" "$candidate_writer-command" "$candidate_reader-command" \
+    "$candidate_writer-mcp" "$candidate_reader-mcp" >/dev/null 2>&1 || true
+  docker volume rm "$candidate_hub_data" "$candidate_writer" "$candidate_reader" >/dev/null 2>&1 || true
+  docker network rm "$candidate_network" >/dev/null 2>&1 || true
+  rm -rf "$candidate_root"
+}
+trap candidate_cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' HUP TERM
+
+mkdir "$candidate_root/source"
+git archive "$candidate_sha" | tar -x -C "$candidate_root/source"
+docker build --target hub --label "org.opencontainers.image.revision=$candidate_sha" \
+  --tag "$candidate_tag" "$candidate_root/source"
+candidate_image=$(docker image inspect "$candidate_tag" --format '{{.Id}}')
+docker network create "$candidate_network"
+docker volume create "$candidate_hub_data"
+docker volume create "$candidate_writer"
+docker volume create "$candidate_reader"
+docker run --detach --name "$candidate_hub" --network "$candidate_network" \
+  --network-alias candidate-hub \
+  --mount "type=volume,src=$candidate_hub_data,dst=/data" "$candidate_image"
+docker exec "$candidate_hub" node --input-type=module -e '
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    try {
+      const response = await fetch("http://127.0.0.1:1234/auth/claim-state", {
+        signal: AbortSignal.timeout(1_000),
+      });
+      const state = await response.json();
+      if (response.status === 200 && state.unclaimed === true && state.canClaim === true) {
+        console.log("candidate hub ready: fresh and claimable");
+        break;
+      }
+    } catch {}
+    if (Date.now() >= deadline) throw new Error("candidate hub did not become fresh and claimable");
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+'
+docker logs "$candidate_hub"
+
+candidate_client="$candidate_writer"
+candidate_ub() {
+  docker run --rm --interactive --name "$candidate_client-command" --network "$candidate_network" \
+    --mount "type=volume,src=$candidate_client,dst=/data" \
+    --env XDG_CONFIG_HOME=/data/config --env XDG_DATA_HOME=/data/data \
+    --env XDG_CACHE_HOME=/data/cache --workdir /data \
+    --entrypoint node "$candidate_image" /app/packages/cli/bin/ub.mjs "$@"
+}
+candidate_mcp_launcher() {
+  printf '#!/usr/bin/env bash\nexec '
+  printf '%q ' docker run --rm --interactive --name "$1-mcp" --network "$candidate_network" \
+    --mount "type=volume,src=$1,dst=/data" \
+    --env XDG_CONFIG_HOME=/data/config --env XDG_DATA_HOME=/data/data \
+    --env XDG_CACHE_HOME=/data/cache --workdir /data \
+    --entrypoint node "$candidate_image" /app/packages/cli/bin/ub.mjs mcp serve
+  printf '\n'
+}
+candidate_mcp_launcher "$candidate_writer" > "$candidate_root/writer-mcp"
+candidate_mcp_launcher "$candidate_reader" > "$candidate_root/reader-mcp"
+chmod 700 "$candidate_root/writer-mcp" "$candidate_root/reader-mcp"
+candidate_ub auth login ws://candidate-hub:1234
+```
+
+The checkout hub image contains the candidate CLI source and its dependencies,
+so the image id fixes both sides even if a tag moves. The client containers
+mount only their fresh volume, with separate configuration, credentials, data
+and cache roots. No host home, existing credentials, database, deployment
+directory or Docker socket enters them; no signing secret is passed. The
+network still permits the hub's outbound GitHub requests.
+
+Approve only this login's displayed GitHub URL and code. The approval page
+names **Uberblick Login**, while the terminal names
+`http://candidate-hub:1234`. The first completed sign-in claims this fresh hub's
+default workspace. Record its UUID from the successful login; do not reuse the
+corpus workspace UUID. After approval:
+
+```bash
+candidate_workspace='<uuid-reported-by-this-login>'
+candidate_ub remote join "ws://candidate-hub:1234/$candidate_workspace"
+candidate_ub auth status ws://candidate-hub:1234
+candidate_ub status --json
+```
+
+`auth status` is an offline record check. Require the live `status` reading to
+name this endpoint and UUID, report a connected hub with matching protocol,
+and have no pending changes. In a disposable MCP configuration, set the command
+to the absolute path of `$candidate_root/writer-mcp`, with no arguments. This
+launcher supplies the same Docker isolation to `ub mcp serve`. Create one
+clearly synthetic document and retain its returned UUID. Wait for `sync_status`
+to report its changes acknowledged. Close that MCP process before switching the
+volume:
+
+```bash
+candidate_client="$candidate_reader"
+candidate_ub auth login ws://candidate-hub:1234
+candidate_ub remote join "ws://candidate-hub:1234/$candidate_workspace"
+candidate_ub status --json
+```
+
+Approve this second login with the same GitHub account; it obtains its own
+credential for the membership already established by the claim. Change the
+disposable MCP command to `$candidate_root/reader-mcp`, `get_doc` the writer's
+UUID and verify its text. An edit through this reader must also arrive at the
+writer after closing the reader and restarting its `$candidate_root/writer-mcp`
+launcher. Read installed tool schemas first; keep this temporary MCP
+configuration separate from the corpus entries. Never copy a credential from
+one client volume to another.
+
+Record the full candidate SHA, immutable image id, Docker resource names,
+successful GitHub claim and second sign-in, live admission and both document
+directions. Also record actual corpus-launcher resolution against the pinned
+installed client on each relevant host. These are distinct proofs: a candidate
+login does not establish existing-installation isolation, and a pin check does
+not complete a GitHub login. An unattended start or an expired approval is not
+a successful roundtrip. Report any remaining attended approval or host pin as
+an operational handoff before integration; documentation alone establishes
+neither. Existing corpus and development hubs remain on their old version
+until a later attended upgrade is chosen.
+
+Close every candidate MCP process, record the evidence outside the temporary
+source directory, then exit this Bash session to delete its fresh containers,
+volumes and network. The local build image may be retained for another
+rehearsal or removed by its exact tag once unused. Use the normal `ub open`
+and two-computer checks below for a deployment chosen for upgrade; this
+container-only rehearsal exposes no local browser server.
 
 ### Switch an existing checkout host to a release
 
