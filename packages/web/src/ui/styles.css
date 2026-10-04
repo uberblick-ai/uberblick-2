@@ -322,7 +322,6 @@ body {
 
 .ub-list-head,
 .ub-user-card,
-.ub-status,
 .ub-peer-overflow-row,
 .ub-doc-meta,
 .ub-waiting-meta,
@@ -891,20 +890,6 @@ h1.ub-heading {
 .ub-title:focus {
   outline: none;
   border-bottom-color: var(--ring);
-}
-
-.ub-status {
-  font-size: 0.8rem;
-  /* Optional mono readings share this leading so appearing text resizes no row. */
-  line-height: 1.2;
-  /* Reserve the 28px collaborator circle even without peers. The border-box
-     floor also includes this row's vertical padding and bottom rule. */
-  min-height: calc(28px + 0.7rem + 1px);
-  color: var(--muted-foreground);
-  padding: 0.35rem 0;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 0.75rem;
-  min-width: 0;
 }
 
 .ub-status-sync {

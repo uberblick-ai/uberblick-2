@@ -1,6 +1,6 @@
 /** The real protocol boundary `ub open` serves, over loopback and real Yjs. */
 
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import type { Server as NetServer } from "node:net";
 import {
@@ -23,20 +23,26 @@ import {
   STORE_REFUSED_REASON,
 } from "../src/local-browser-server.js";
 import type { HubLogRecord } from "../src/log.js";
+import type { Hub } from "../src/server.js";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "../src/protocol.js";
+import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "../src/token.js";
 import {
   OTHER_WORKSPACE,
-  TEST_SECRET,
   TEXT_KEY,
   WORKSPACE,
   createClient,
+  removeTempDatabases,
   sleep,
-  token,
+  startHub,
+  token as hubToken,
   waitUntil,
   type TestClient,
 } from "./helpers.js";
 
+const TEST_BROWSER_KEY = "independent-local-browser-test-key";
+
 const servers: LocalBrowserServer[] = [];
+const hubs: Hub[] = [];
 const clients: TestClient[] = [];
 const providers: HocuspocusProvider[] = [];
 const websockets: HocuspocusProviderWebsocket[] = [];
@@ -47,11 +53,20 @@ afterEach(async () => {
   for (const provider of providers.splice(0)) provider.destroy();
   for (const websocket of websockets.splice(0)) websocket.destroy();
   for (const server of servers.splice(0)) await server.stop();
+  for (const hub of hubs.splice(0)) await hub.stop();
+  removeTempDatabases();
   for (const replica of replicaAwareness.splice(0)) {
     replica.awareness.destroy();
     replica.doc.destroy();
   }
 });
+
+function browserToken(
+  scope: "read-write" | "read-only" = "read-write",
+  options: { workspace?: string } = {},
+): Promise<string> {
+  return hubToken(scope, { ...options, secret: TEST_BROWSER_KEY });
+}
 
 async function freePort(): Promise<number> {
   const server: NetServer = createServer();
@@ -107,7 +122,7 @@ async function fixture() {
   const server = await createLocalBrowserServer({
     port,
     workspaceId: WORKSPACE,
-    authSecret: TEST_SECRET,
+    browserKey: TEST_BROWSER_KEY,
     expectedOrigin: origin,
     log: (record) => logs.push(record),
     readRoom: (room, afterSeq) => {
@@ -144,7 +159,7 @@ async function fixture() {
     const client = createClient({
       port,
       room,
-      token: await token(scope),
+      token: await browserToken(scope),
       origin,
       reconnectDelayMs: 60_000,
     });
@@ -187,6 +202,44 @@ async function fixture() {
 }
 
 describe("the ub open browser server", () => {
+  it("admits its independent browser key and refuses hub and device keys", async () => {
+    const box = await fixture();
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const writer = await box.connect(room);
+    await writer.synced;
+
+    const deviceToken = await mintToken(await importCredentialKey(randomBytes(32)), {
+      typ: "room",
+      sub: "device-client",
+      workspace: WORKSPACE,
+      scope: "read-write",
+      kid: randomUUID(),
+      lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+    });
+    for (const presented of [await hubToken(), deviceToken]) {
+      const refused = createClient({
+        port: box.port,
+        room,
+        token: presented,
+        origin: box.origin,
+        reconnectDelayMs: 60_000,
+      });
+      clients.push(refused);
+      await expect(refused.denied).resolves.toBe("invalid-token");
+    }
+
+    const hub = await startHub();
+    hubs.push(hub);
+    const refusedByHub = createClient({
+      port: hub.port,
+      room,
+      token: await browserToken(),
+      reconnectDelayMs: 60_000,
+    });
+    clients.push(refusedByHub);
+    await expect(refusedByHub.denied).resolves.toBe("invalid-token");
+  });
+
   it("hydrates from the log and commits the raw update before acknowledging it", async () => {
     const box = await fixture();
     const room = `${WORKSPACE}/${randomUUID()}`;
@@ -467,13 +520,13 @@ describe("the ub open browser server", () => {
     const busy = new HocuspocusProvider({
       websocketProvider: socket,
       name: room,
-      token: wrapToken(await token(), SYNC_PROTOCOL_VERSION),
+      token: wrapToken(await browserToken(), SYNC_PROTOCOL_VERSION),
       document: busyDoc,
     });
     const survivor = new HocuspocusProvider({
       websocketProvider: socket,
       name: survivorRoom,
-      token: wrapToken(await token(), SYNC_PROTOCOL_VERSION),
+      token: wrapToken(await browserToken(), SYNC_PROTOCOL_VERSION),
       document: survivorDoc,
     });
     providers.push(busy, survivor);
@@ -577,7 +630,7 @@ describe("the ub open browser server", () => {
     ]);
   });
 
-  it("reuses hub auth, enforces read-only, and rejects a foreign Origin without throwing", async () => {
+  it("enforces read-only and the served workspace, and rejects a foreign Origin without throwing", async () => {
     const box = await fixture();
     const room = `${WORKSPACE}/${randomUUID()}`;
     const writer = await box.connect(room);
@@ -597,7 +650,7 @@ describe("the ub open browser server", () => {
     const foreignClaim = createClient({
       port: box.port,
       room,
-      token: await token("read-write", { workspace: OTHER_WORKSPACE }),
+      token: await browserToken("read-write", { workspace: OTHER_WORKSPACE }),
       origin: box.origin,
       reconnectDelayMs: 60_000,
     });
@@ -609,14 +662,14 @@ describe("the ub open browser server", () => {
     const foreignStore = createClient({
       port: box.port,
       room: `${OTHER_WORKSPACE}/${randomUUID()}`,
-      token: await token("read-write", { workspace: OTHER_WORKSPACE }),
+      token: await browserToken("read-write", { workspace: OTHER_WORKSPACE }),
       origin: box.origin,
       reconnectDelayMs: 60_000,
     });
     clients.push(foreignStore);
     await expect(foreignStore.denied).resolves.toBe("workspace-mismatch");
 
-    const valid = wrapToken(await token(), SYNC_PROTOCOL_VERSION);
+    const valid = wrapToken(await browserToken(), SYNC_PROTOCOL_VERSION);
     let originRejected!: () => void;
     const rejectedOrigin = new Promise<void>((resolve) => {
       originRejected = resolve;

@@ -1,12 +1,12 @@
 /**
  * Client configuration.
  *
- * The hub endpoint, the workspaces this client offers *and* the signing secret
+ * The hub endpoint, the workspaces this client offers *and* the token-signing key
  * it mints tokens with are resolved at *runtime*, from a JSON document the same
  * origin serves at {@link HUB_CONFIG_PATH}. A bundle reaches users who cannot
  * rebuild it — `ub` serves the web UI — so a value baked at our build time
  * would pin every one of those bundles to one hub, one workspace and one
- * secret. Everything else here is still injected by Vite `define` (see
+ * key. Everything else here is still injected by Vite `define` (see
  * vite.config.ts).
  *
  * The path and the shape are contract, not implementation detail: this module,
@@ -14,7 +14,7 @@
  * `ub open` (#97) all have to agree on them. The document is
  *
  *     {"hubUrl": "wss://host/ws", "workspaces": ["uberblick-<uuid>", "<uuid>"],
- *      "hubAuthToken": "<the hub's signing secret>",
+ *      "hubAuthToken": "<token-signing key>",
  *      "remoteHubUrl": "wss://team-host/ws", "rebound": true}
  *
  * The final two keys are present only when `ub open` is the serving process:
@@ -35,25 +35,22 @@
  * best-effort defence in depth; what guarantees it cannot happen is the deploy
  * wrapper refusing a value that could close a JSON string in the first place.
  *
- * **This document is the credential channel, by design (#426, #410).** An
- * earlier version of this comment said the opposite — that carrying the
- * endpoint and nothing else was what kept it from becoming one. That is
- * deliberately overturned: the secret used to be compiled into the bundle,
- * which pinned every image and every `ub open` build to one hub's secret and is
- * the single reason the image cannot be published. Serving it instead changes
- * *where* the same secret is published, not *whether*: anyone who can fetch
- * this document has full read-write on the workspaces it names. The boundary
- * that makes that acceptable is the tailnet (REMOTE.md) — the
- * owner's own devices and nothing else — and it includes `mise run web`, which
- * serves the owner's own secret to anything that can reach the dev server.
- * Real per-session credentials are the replacement, deferred with #388.
+ * **This document is the credential channel, by design (#426, #410).** For a
+ * remote host or development server, `hubAuthToken` is the hub's signing
+ * secret: anyone who can fetch it has full read-write on the named workspaces
+ * at that hub. The boundary is the private network (REMOTE.md); `mise run web`
+ * also serves that secret to anything that can reach the dev server.
+ * Bound `ub open` instead supplies a stable, independent workspace browser key.
+ * It admits only that workspace's loopback rooms and read API, never the
+ * upstream hub; neither upstream signing secrets nor device credentials are
+ * served. Unbound `ub open` supplies no workspace or key.
  *
  * Configuration invariant: no hardcoded hub addresses anywhere except the in-code
  * fallback default. There are still exactly two, both fallbacks behind the
  * served document: the one vite.config.ts substitutes when HUB_URL is unset in
  * the build environment, and FALLBACK_HUB_URL below, which applies when this
  * module is loaded outside a Vite build and nothing was injected.
- * {@link resolveClientConfig} reports which of the three it used. The secret
+ * {@link resolveClientConfig} reports which of the three it used. The key
  * has no such fallback: a document that does not carry one leaves this client
  * unable to authenticate, and {@link resolveClientConfig} does not memoise that
  * answer. Hub release images disable both endpoint and workspace fallbacks;
@@ -104,8 +101,9 @@ export interface ClientConfig {
   /** No `"fallback"`: there is no in-code workspace, only a build without one. */
   workspacesSource: "document" | "define";
   /**
-   * The hub's signing secret, as the served document supplied it — empty when
-   * it supplied none.
+   * The document's token-signing key: the workspace browser key for `ub open`,
+   * or the upstream signing secret for a remote host or development server.
+   * Empty when the document supplied none.
    *
    * No source field and no built-in alternative: this is the one value with
    * nothing to fall back *to*, so "where did it come from" has one answer and
@@ -239,7 +237,7 @@ const BUILT_IN: ClientConfig = {
   ...BUILT_IN_HUB_URL,
   workspaces: BUILT_IN_WORKSPACES,
   workspacesSource: "define",
-  // Nothing to fall back to: no build injects a secret any more (#426), so a
+  // Nothing to fall back to: no build injects a signing key any more (#426), so a
   // client whose document did not arrive has none.
   hubAuthToken: "",
   localServing: null,
@@ -334,7 +332,7 @@ function usableWorkspaces(
 interface DocumentConfig {
   hubUrl: { url: string } | { rejected: string };
   workspaces: { list: string[]; dropped: number } | { rejected: string };
-  /** Empty when the document named no usable secret. */
+  /** Empty when the document named no usable token-signing key. */
   hubAuthToken: string;
   localServing: LocalServing | { rejected: string } | null;
 }
@@ -399,7 +397,7 @@ function readDocument(
   //
   // Two anchors keep it from firing on a *value* rather than on a key, which
   // since #426 would mean refusing a whole document — the credential in it
-  // included — over the text of an opaque secret. `\s*:` so a value that merely
+  // included — over the text of an opaque key. `\s*:` so a value that merely
   // contains `"hubUrl"` is not taken for a key, and a leading `[^\\]` so one
   // spelling out `,"hubUrl":` is not either: the body parsed as JSON above, so
   // a quote inside a string is written `\"`, while a real key's opening quote
@@ -434,7 +432,7 @@ function readDocument(
         : { rejected: "it has no string hubUrl" },
     workspaces,
     // A non-string is refused rather than coerced, and without a reason: an
-    // unusable secret leaves the client in exactly the state an absent one
+    // unusable key leaves the client in exactly the state an absent one
     // does, and this is the one value whose shape must never reach a
     // diagnostic. What a reader is told is the state, not the document — see
     // `RoomStatus.tokenMissing`.
@@ -543,7 +541,7 @@ let pending: Promise<ClientConfig> | null = null;
  * early as it can, and the hook that gates room acquisition on it joins that
  * same read instead of issuing a second one.
  *
- * **Except when no secret arrived.** With the secret served rather than
+ * **Except when no signing key arrived.** With the key served rather than
  * compiled in (#426), a document that missed its deadline — a proxy holding the
  * request open, a host still starting — used to leave a tab that could never
  * authenticate for as long as it stayed open, because the miss was remembered.
@@ -590,7 +588,9 @@ export function hubUrl(): string {
 }
 
 /**
- * The signing secret in force, for the one caller that mints tokens with it.
+ * The token-signing key in force, for the one caller that mints tokens with it.
+ * It is a local workspace browser key under `ub open`, or an upstream signing
+ * secret when this page connects directly to a hub.
  *
  * Gated exactly like {@link hubUrl}, and for the same reason: it is not known
  * until a `fetch` completes. Empty means the served document carried none —

@@ -75,6 +75,7 @@ describe("serving sync status", () => {
     const { engine, controls } = fakeEngine(store, [{ room, lastSeq: 0 }]);
 
     expect(collectServingSyncStatus(engine, [room])).toEqual({
+      notSharedReason: null,
       caughtUp: true,
       rooms: { [room]: { hubAcked: true } },
     });
@@ -91,6 +92,7 @@ describe("serving sync status", () => {
 
     replica.lastSeq = seq;
     expect(collectServingSyncStatus(engine, [room])).toEqual({
+      notSharedReason: null,
       caughtUp: false,
       rooms: { [room]: { hubAcked: false } },
     });
@@ -105,6 +107,7 @@ describe("serving sync status", () => {
 
     replica.lastSeq = seq;
     expect(collectServingSyncStatus(engine, [room])).toEqual({
+      notSharedReason: null,
       caughtUp: true,
       rooms: { [room]: { hubAcked: true } },
     });
@@ -125,6 +128,7 @@ describe("serving sync status", () => {
 
     controls.draining = true;
     expect(collectServingSyncStatus(engine, [room])).toEqual({
+      notSharedReason: null,
       caughtUp: false,
       rooms: { [room]: { hubAcked: true } },
     });
@@ -132,6 +136,7 @@ describe("serving sync status", () => {
     controls.draining = false;
     controls.connected = false;
     expect(collectServingSyncStatus(engine, [room])).toEqual({
+      notSharedReason: null,
       caughtUp: false,
       rooms: { [room]: { hubAcked: false } },
     });
@@ -139,6 +144,7 @@ describe("serving sync status", () => {
     controls.connected = true;
     controls.refreshRunning = false;
     expect(collectServingSyncStatus(engine, [room])).toEqual({
+      notSharedReason: null,
       caughtUp: false,
       rooms: { [room]: { hubAcked: false } },
     });

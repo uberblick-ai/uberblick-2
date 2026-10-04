@@ -379,7 +379,8 @@ describe("the locally served document's two sync facts", () => {
   function localLine(
     hubAcked: boolean | null,
     patch: Partial<RoomStatus> = {},
-  ): { words: string[]; label: string | null } {
+    notSharedReason: "no-hub-credentials" | null = null,
+  ): { words: string[]; label: string | null; text: string } {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
       true;
     vi.useFakeTimers();
@@ -399,17 +400,21 @@ describe("the locally served document's two sync facts", () => {
             presence={NOBODY}
             endpoint={{ url: "wss://remote.example/ws", source: "document" }}
             hubAcked={hubAcked}
+            notSharedReason={notSharedReason}
             syncDetails
           />
         </Popover>,
       ),
     );
     act(() => void vi.advanceTimersByTime(5_000));
+    const visible = host.cloneNode(true) as HTMLElement;
+    for (const hidden of visible.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
     const answer = {
       words: [...host.querySelectorAll(".ub-status-word")].map(
         (word) => word.textContent ?? "",
       ),
       label: host.querySelector(".ub-sync-toggle")?.getAttribute("aria-label") ?? null,
+      text: visible.textContent ?? "",
     };
     act(() => root.unmount());
     host.remove();
@@ -443,5 +448,17 @@ describe("the locally served document's two sync facts", () => {
     const refused = localLine(true, { writable: false, tokenMissing: true });
     expect(refused.words).toEqual(["no hub token"]);
     expect(refused.label).toBe("Sync details — no hub token");
+  });
+
+  it("names local-only saving and its cause without claiming hub acknowledgement", () => {
+    const localOnly = localLine(false, {}, "no-hub-credentials");
+    expect(localOnly.words).toEqual(["saved here", "not shared with hub"]);
+    expect(localOnly.text).toContain("this machine has no credentials for its hub");
+    expect(localOnly.label).toContain("this machine has no credentials for its hub");
+    const blank = localLine(null, {}, "no-hub-credentials");
+    expect(blank.words).toEqual(["saved here", ""]);
+    expect(blank.text).toContain("this machine has no credentials for its hub");
+    expect(localLine(false, { storeRefused: true }, "no-hub-credentials").words).toEqual(["edit refused"]);
+    expect(localLine(false, { writable: false }, "no-hub-credentials").text).not.toContain("credentials");
   });
 });

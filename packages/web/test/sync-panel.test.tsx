@@ -134,11 +134,13 @@ function Panel({
   fix,
   endpoint = ENDPOINT,
   hubAcked,
+  notSharedReason = null,
   lastUpdated,
 }: {
   fix: Fixture;
   endpoint?: HubEndpoint | null;
   hubAcked?: boolean | null | undefined;
+  notSharedReason?: "no-hub-credentials" | null;
   lastUpdated?: number | undefined;
 }): ReactElement {
   const presence = usePresence(fix.connection);
@@ -148,6 +150,7 @@ function Panel({
       presence={presence}
       endpoint={endpoint}
       hubAcked={hubAcked}
+      notSharedReason={notSharedReason}
       lastUpdated={lastUpdated}
     />
   );
@@ -158,6 +161,7 @@ function mount(
   endpoint: HubEndpoint | null = ENDPOINT,
   hubAcked?: boolean | null | undefined,
   lastUpdated?: number | undefined,
+  notSharedReason: "no-hub-credentials" | null = null,
 ): { host: HTMLElement; root: Root } {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
@@ -171,6 +175,7 @@ function mount(
         endpoint={endpoint}
         hubAcked={hubAcked}
         lastUpdated={lastUpdated}
+        notSharedReason={notSharedReason}
       />,
     ),
   );
@@ -463,6 +468,21 @@ describe("the sync panel renders the state this client holds", () => {
         State: "offline",
       });
       expect(facts(host)["Hub state"]).toBeUndefined();
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("explains why durable local edits are not shared with the hub", () => {
+    vi.useFakeTimers();
+    const { host, root } = mount(fixture(), ENDPOINT, false, undefined, "no-hub-credentials");
+    try {
+      expect(facts(host)).toMatchObject({
+        State: "saved here",
+        "Hub state": "not shared with hub",
+        Reason: "this machine has no credentials for its hub",
+      });
     } finally {
       act(() => root.unmount());
       host.remove();

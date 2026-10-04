@@ -27,6 +27,7 @@ import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
 import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
+import type { NotSharedReason } from "../shell/document-search.js";
 import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
 import type { SyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
@@ -295,6 +296,7 @@ export function StatusLine({
   onLastUpdatedChange,
   endpoint = null,
   hubAcked,
+  notSharedReason = null,
   syncDetails = false,
   onActivatePresence,
 }: {
@@ -319,6 +321,7 @@ export function StatusLine({
   endpoint?: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
   hubAcked?: boolean | null | undefined;
+  notSharedReason?: NotSharedReason | null;
   /** Compose the reading as a trigger within the shell's sync Popover. */
   syncDetails?: boolean;
   /** Reveal one currently resolvable remote caret without following it. */
@@ -328,7 +331,7 @@ export function StatusLine({
   const raw = rawSyncState(status);
   const state = useCalmSyncState(raw, connection);
   const reading = statusReading(status, state ?? raw);
-  const facts = documentSyncFacts(status, state, reading, hubAcked);
+  const facts = documentSyncFacts(status, state, reading, hubAcked, notSharedReason);
   const saveNote =
     !status.writable && reading.detail === null ? (
       <span className="ub-muted ub-not-saved">not saved</span>
@@ -351,27 +354,27 @@ export function StatusLine({
     </span>
   );
   const primary = (
-    <>
+    <span className="inline-flex items-center gap-2">
       {mark(facts.primaryTone)}
       <span
         className={`ub-status-word${facts.twoFact ? " ub-status-word--saved" : ""}`}
       >
         {facts.primary}
       </span>
-    </>
+    </span>
   );
   const hubFact = facts.twoFact ? (
-    <>
+    <span className="inline-flex items-center gap-2">
       {mark(facts.hubTone)}
       <span className="ub-status-word ub-status-word--hub">{facts.hub}</span>
-    </>
+    </span>
   ) : null;
   const blank = facts.primary === null;
   const hub =
     endpoint === null || (hubAcked !== undefined && !facts.twoFact)
       ? null
       : `${endpoint.url ?? "unknown"} (${endpointSourceLabel(endpoint.source)})`;
-  const factLabel = [facts.primary, facts.hub].filter(
+  const factLabel = [facts.primary, facts.hub, facts.hubDetail].filter(
     (value): value is string => value !== null,
   );
   const syncReading =
@@ -384,7 +387,7 @@ export function StatusLine({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="ub-status-sync ub-sync-toggle"
+          className={`ub-status-sync ub-sync-toggle${hubAcked === undefined ? "" : " min-w-0 max-w-full flex-wrap"}`}
           aria-label={
             factLabel.length === 0
               ? hub === null
@@ -430,25 +433,38 @@ export function StatusLine({
   // A refusal replaces the rest of the line rather than decorating it: the
   // backlog and peer strip are about a connection that is working or returning.
   return (
-    <div className="ub-status">
-      {syncReading}
-      {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
-      {!blank && saveNote}
-      {!blank && updatedReading}
-      {!blank &&
-        reading.detail === null &&
-        state !== "synced" &&
-        status.unsyncedChanges > 0 && (
-          <span className="ub-pending">
-            {backlogLabel(status.unsyncedChanges)}
-          </span>
-        )}
-      {/* Circles, not name pills (#494): the strip is the constrained surface,
-          and a row of words pushes the status line around as sessions come and
-          go. The detail a name carried is on the avatar's hover instead — which
-          is why this is the presence reading and not `usePeers`: the block a
-          caret sits in is resolved once, in `readPresence`. */}
-      {reading.detail === null && peerStrip}
+    <div className="ub-status min-w-0 text-[0.8rem]/[1.2] text-[var(--muted-foreground)] py-[0.35rem] border-b border-[var(--border)] mb-3">
+      <div className="flex min-w-0 min-h-7 items-center gap-2">
+        {syncReading}
+        {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
+        {!blank && saveNote}
+        {!blank && updatedReading}
+        {!blank &&
+          reading.detail === null &&
+          state !== "synced" &&
+          status.unsyncedChanges > 0 && (
+            <span className="ub-pending">
+              {backlogLabel(status.unsyncedChanges)}
+            </span>
+          )}
+        {/* Circles, not name pills (#494): the strip is the constrained surface,
+            and a row of words pushes the status line around as sessions come and
+            go. The detail a name carried is on the avatar's hover instead — which
+            is why this is the presence reading and not `usePeers`: the block a
+            caret sits in is resolved once, in `readPresence`. */}
+        {reading.detail === null && peerStrip}
+      </div>
+      {/* Reserve the full wrapping line even before the first status answer,
+          through room changes, failed polls and refusals. Visibility changes
+          ink only; the readings row and prose keep their geometry. */}
+      {hubAcked !== undefined && (
+        <div
+          className={`ub-status-reason ub-muted min-w-0 mt-2${facts.hubDetail === null ? " invisible" : ""}`}
+          aria-hidden={facts.hubDetail === null}
+        >
+          {facts.hubDetail ?? "this machine has no credentials for its hub"}
+        </div>
+      )}
     </div>
   );
 }
@@ -870,6 +886,7 @@ export function EditorPane({
   onSelectThread,
   endpoint = null,
   hubAcked,
+  notSharedReason = null,
   threads = [],
   threadsOpen = false,
   onToggleThreads,
@@ -919,6 +936,7 @@ export function EditorPane({
   endpoint?: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
   hubAcked?: boolean | null | undefined;
+  notSharedReason?: NotSharedReason | null;
   threads?: readonly ThreadView[];
   threadsOpen?: boolean;
   onToggleThreads?: (() => void) | undefined;
@@ -1018,6 +1036,7 @@ export function EditorPane({
           onLastUpdatedChange={onLastUpdatedChange}
           endpoint={endpoint}
           hubAcked={hubAcked}
+          notSharedReason={notSharedReason}
           syncDetails={syncDetails}
           onActivatePresence={revealPresence}
         />

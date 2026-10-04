@@ -1,7 +1,10 @@
 /** The current room's upstream acknowledgement, read from `ub open`. */
 
 import { useEffect, useMemo, useState } from "react";
-import type { DocumentSearchClient } from "../shell/document-search.js";
+import type {
+  DocumentSearchClient,
+  NotSharedReason,
+} from "../shell/document-search.js";
 import { useCalmSyncState } from "./calm.js";
 
 /** Keep the status current without turning every render into an HTTP request. */
@@ -20,17 +23,26 @@ interface RoomAnswer {
   client: DocumentSearchClient;
   room: string;
   hubAcked: boolean | null;
+  notSharedReason: NotSharedReason | null;
+}
+
+export interface ServingRoomStatus {
+  hubAcked: boolean | null;
+  notSharedReason: NotSharedReason | null;
 }
 
 /**
  * Poll the local serving endpoint for one room.
  *
- * Null is part of the contract: no client, no room, a failed or malformed
- * request, or an answer that omits this room makes no upstream claim. The
- * answer is keyed by both client and room before it is returned, so a render
- * after either changes cannot expose the previous mode's value while the
- * effect cleanup catches up. Abort plus the `active` guard keeps a late answer
- * from an old room from becoming current.
+ * No client or room returns null. A failed or malformed request, or an answer
+ * that omits this room, returns a null acknowledgement and makes no upstream
+ * claim. The acknowledgement is keyed by both client and room before it is
+ * returned, so a render after either changes cannot expose the previous mode's
+ * value while the effect cleanup catches up. Abort plus the `active` guard
+ * keeps a late answer from an old room from becoming current.
+ * The reason describes the serving run, not a room: keep its last answer for
+ * this client through room changes and failed polls. A successful response
+ * replaces it even when the response omits the current room.
  *
  * The usable boolean follows the same calm cadence as the room connection:
  * brief pending windows do not strobe while someone types, good news waits for
@@ -39,7 +51,7 @@ interface RoomAnswer {
 export function useServingRoomStatus(
   client: DocumentSearchClient | null | undefined,
   room: string | null,
-): boolean | null {
+): ServingRoomStatus | null {
   const [answer, setAnswer] = useState<RoomAnswer | null>(null);
   const current =
     answer !== null && answer.client === client && answer.room === room
@@ -81,10 +93,16 @@ export function useServingRoomStatus(
           client,
           room,
           hubAcked: status.rooms[room]?.hubAcked ?? null,
+          notSharedReason: status.notSharedReason ?? null,
         });
       } catch {
         if (!active) return;
-        setAnswer({ client, room, hubAcked: null });
+        setAnswer((previous) => ({
+          client,
+          room,
+          hubAcked: null,
+          notSharedReason: previous?.client === client ? previous.notSharedReason : null,
+        }));
       } finally {
         if (timeout !== undefined) clearTimeout(timeout);
         if (inFlight === request) inFlight = null;
@@ -102,6 +120,9 @@ export function useServingRoomStatus(
     };
   }, [client, room]);
 
-  if (current === null || calm === null) return null;
-  return calm === "synced";
+  if (client === null || client === undefined || room === null) return null;
+  return {
+    hubAcked: current === null || calm === null ? null : calm === "synced",
+    notSharedReason: answer?.client === client ? answer.notSharedReason : null,
+  };
 }
