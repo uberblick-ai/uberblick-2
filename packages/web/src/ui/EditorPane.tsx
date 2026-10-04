@@ -387,7 +387,7 @@ export function StatusLine({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className={`ub-status-sync ub-sync-toggle${hubAcked === undefined ? "" : " min-w-0 max-w-full flex-wrap"}`}
+          className={`ub-status-sync ub-sync-toggle inline-flex cursor-pointer items-center gap-2 -my-[0.2rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.3rem] py-[0.2rem] [font:inherit] text-inherit hover:bg-(--card-accent) hover:text-(--secondary-foreground) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1${hubAcked === undefined ? "" : " min-w-0 max-w-full flex-wrap"}`}
           aria-label={
             factLabel.length === 0
               ? hub === null

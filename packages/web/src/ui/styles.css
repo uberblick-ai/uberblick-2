@@ -277,8 +277,7 @@ body {
   font-family: var(--font-mono);
 }
 
-.ub-avatar,
-.ub-peer-control {
+.ub-avatar {
   position: relative;
   box-sizing: border-box;
   width: 28px;
@@ -289,7 +288,6 @@ body {
 
 .ub-avatar,
 .ub-avatar-agent-badge,
-.ub-copy-link,
 .ub-status-mark {
   display: inline-flex;
   align-items: center;
@@ -322,7 +320,6 @@ body {
 
 .ub-list-head,
 .ub-user-card,
-.ub-peer-overflow-row,
 .ub-doc-meta,
 .ub-waiting-meta,
 .ub-tldr-form-meta,
@@ -359,18 +356,11 @@ body {
 .ub-appearance-option,
 .ub-group-act,
 .ub-mention,
-.ub-status-sync,
-.ub-copy-link,
-.ub-peer-control,
-.ub-peer-overflow-row,
-.ub-tags,
-.ub-actions-trigger,
+.ub-tags:not(.ub-tag-picker-trigger),
 .ub-tool,
 .ub-lang,
 .ub-tldr-form textarea,
-.ub-docs-mode,
 .ub-docs-search,
-.ub-docs-sort,
 .ub-docs-open {
   font: inherit;
 }
@@ -384,17 +374,9 @@ body {
 .ub-appearance-option,
 .ub-group-act,
 .ub-mention,
-.ub-status-sync,
-.ub-copy-link,
-.ub-peer-control,
-.ub-peer-overflow-row,
-.ub-tag-picker-trigger,
-.ub-actions-trigger,
 .ub-tool,
 .ub-terminal-toggle,
 .ub-copy,
-.ub-docs-mode,
-.ub-docs-sort,
 .ub-docs-open {
   cursor: pointer;
 }
@@ -510,29 +492,20 @@ body {
 
 .ub-user-card,
 .ub-group-act,
-.ub-status-sync,
-.ub-peer-overflow-row,
-.ub-tag-picker-trigger,
 .ub-terminal-toggle,
 .ub-copy,
-.ub-docs-sort,
 .ub-docs-open,
-.ub-peer-control,
 .ub-title {
   border: 0;
 }
 
 .ub-user-card,
 .ub-appearance-option,
-.ub-status-sync,
-.ub-peer-overflow-row,
-.ub-docs-sort,
 .ub-docs-open {
   color: inherit;
 }
 
 .ub-user-card,
-.ub-peer-overflow-row,
 .ub-docs-open {
   width: 100%;
   border-radius: var(--radius-sm);
@@ -786,28 +759,8 @@ body {
   color: var(--muted-foreground);
 }
 
-.ub-docs-mode:hover,
-.ub-docs-sort:hover,
-.ub-docs-row:hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-
-.ub-copy-link:focus-visible,
-.ub-peer-control:focus-visible,
-.ub-peer-overflow-row:focus-visible,
-.ub-tag-picker-trigger:focus-visible,
-.ub-status-sync:focus-visible,
-.ub-actions-trigger:focus-visible,
 .ub-tldr-form textarea:focus {
   outline: 2px solid var(--ring);
-}
-
-.ub-copy-link:focus-visible,
-.ub-peer-control:focus-visible,
-.ub-peer-overflow-row:focus-visible,
-.ub-tag-picker-trigger:focus-visible {
-  outline-offset: 2px;
 }
 
 @media (max-width: 767px) {
@@ -892,22 +845,6 @@ h1.ub-heading {
   border-bottom-color: var(--ring);
 }
 
-.ub-status-sync {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: -0.2rem 0;
-  padding: 0.2rem 0.3rem;
-  border-radius: var(--radius-sm);
-}
-
-.ub-status-sync:hover {
-  background: var(--card-accent);
-  color: var(--secondary-foreground);
-}
-
-.ub-status-sync:focus-visible,
-.ub-actions-trigger:focus-visible,
 .ub-tldr-form textarea:focus {
   outline-offset: 1px;
 }
@@ -934,38 +871,10 @@ h1.ub-heading {
   flex: none;
 }
 
-/* The control owns its full touch target, so scrolling or adjacent title
-   hit areas cannot clip or borrow it. */
-.ub-copy-link {
-  color: var(--muted-foreground);
-  border: none;
-  padding: 0 0.15rem;
-  /* Reserve 44px and enough width for the waiting-screen label and confirmation. */
-  min-width: max(2.75rem, 6em);
-  min-height: 2.75rem;
-}
-
-.ub-copy-link:hover {
-  color: var(--foreground);
-  text-decoration: underline;
-}
-
-.ub-copy-link:focus-visible,
-.ub-tag-picker-trigger:focus-visible {
-  border-radius: var(--radius-sm);
-}
-
 /* Stretch the identity copy control to the row's reserved target height;
    its confirmation uses the lower half without covering machine facts. */
 .ub-copy-identity {
   align-self: stretch;
-}
-
-.ub-copy-identity .ub-copy-link {
-  /* Contain the confirmation without reaching the adjacent action, including
-     when the revision is hidden on phones. */
-  min-width: 12em;
-  justify-content: flex-start;
 }
 
 /* Keep confirmations out of flow and inside the control, clear of pane
@@ -996,15 +905,9 @@ h1.ub-heading {
 .ub-appearance-option,
 .ub-group-act,
 .ub-title,
-.ub-status-sync,
-.ub-copy-link,
 .ub-copy-identity .ub-copied,
-.ub-peer-overflow-row,
-.ub-tag-picker-trigger,
 .ub-terminal-toggle,
 .ub-copy,
-.ub-docs-mode,
-.ub-docs-sort,
 .ub-docs-open {
   background: none;
 }
@@ -1032,48 +935,11 @@ h1.ub-heading {
   margin-left: auto;
 }
 
-.ub-peer-control {
-  margin: 0;
-  padding: 0;
-  background: var(--background);
-  color: var(--foreground);
-}
-
-.ub-peer-control + .ub-peer-control {
-  margin-left: -6px;
-}
-
-/* Earlier circles paint above overlapping siblings and their badges;
-   hover and focus lift a control above the cluster. */
-.ub-peers > .ub-peer-control:nth-child(1) {
-  z-index: 3;
-}
-
-.ub-peers > .ub-peer-control:nth-child(2) {
-  z-index: 2;
-}
-
-.ub-peers > .ub-peer-control:nth-child(3) {
-  z-index: 1;
-}
-
-.ub-peers > .ub-peer-control:hover,
-.ub-peers > .ub-peer-control:focus-visible {
-  z-index: 4;
-}
-
 /* Small identity initials and overflow counts keep their heavier UI weight. */
-.ub-avatar,
-.ub-peer-more {
+.ub-avatar {
   font-family: var(--font-sans);
   font-size: 0.7rem;
   font-weight: 600;
-}
-
-.ub-peer-more {
-  border: 1px solid var(--border);
-  background: var(--secondary);
-  color: var(--secondary-foreground);
 }
 
 .ub-peer-overflow {
@@ -1085,15 +951,6 @@ h1.ub-heading {
   color: var(--card-foreground);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
   font: 0.8rem/1.2 var(--font-mono);
-}
-
-.ub-peer-overflow-row {
-  min-width: 0;
-  padding: 0.35rem;
-}
-
-.ub-peer-overflow-row:hover {
-  background: var(--card-accent);
 }
 
 .ub-peer-overflow-row .ub-muted {
@@ -1128,7 +985,7 @@ h1.ub-heading {
 
 /* Let the tag strip shrink below its content width so its pills wrap
    without pushing the machine facts outside the row. */
-.ub-tags,
+.ub-tags:not(.ub-tag-picker-trigger),
 .ub-tag-selected {
   display: flex;
   align-items: center;
@@ -1138,14 +995,8 @@ h1.ub-heading {
   flex: 1 1 auto;
 }
 
-.ub-tags {
+.ub-tags:not(.ub-tag-picker-trigger) {
   color: inherit;
-}
-
-/* The pills carry the affordance; their trigger adds no edge or ground. */
-.ub-tag-picker-trigger {
-  padding: 0;
-  text-align: left;
 }
 
 /* `anywhere` lowers min-content width and wraps unbroken catalog names.
@@ -1157,17 +1008,6 @@ h1.ub-heading {
 
 .ub-tag-placeholder {
   white-space: nowrap;
-}
-
-.ub-tag-chevron {
-  flex: none;
-  font-size: 0.65rem;
-  opacity: 0.55;
-}
-
-/* The unbordered trigger uses its chevron for the hover cue. */
-.ub-tag-picker-trigger:hover .ub-tag-chevron {
-  opacity: 1;
 }
 
 .ub-tags-readonly {
@@ -1186,24 +1026,6 @@ h1.ub-heading {
 .ub-document-actions {
   flex: none;
   display: inline-flex;
-}
-
-.ub-actions-trigger {
-  width: 2.75rem;
-  height: 2.75rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted-foreground);
-  font-size: 1.25rem;
-  line-height: 1;
-}
-
-.ub-actions-trigger:hover,
-.ub-actions-trigger[data-state="open"] {
-  border-color: var(--border);
-  color: var(--foreground);
-  background: var(--secondary);
 }
 
 .ub-toolbar {
@@ -1573,7 +1395,12 @@ h3.ub-heading {
   color: var(--terminal-control-ink);
 }
 
-.ub-terminal-toggle:hover,
+@media (hover: hover) {
+  .ub-terminal-toggle:hover {
+    color: var(--terminal-control-hover-ink);
+  }
+}
+
 .ub-terminal-toggle:focus-visible {
   color: var(--terminal-control-hover-ink);
 }
@@ -1963,10 +1790,16 @@ h3.ub-heading {
     color 120ms ease;
 }
 
-.ub-code:hover .ub-copy,
-.ub-mermaid:hover .ub-copy,
-.ub-terminal:hover .ub-copy,
-.ub-copy:hover,
+@media (hover: hover) {
+  .ub-code:hover .ub-copy,
+  .ub-mermaid:hover .ub-copy,
+  .ub-terminal:hover .ub-copy,
+  .ub-copy:hover {
+    opacity: 1;
+    color: var(--foreground);
+  }
+}
+
 .ub-copy:focus-visible {
   opacity: 1;
   color: var(--foreground);
@@ -1978,7 +1811,13 @@ h3.ub-heading {
   opacity: 0.6;
 }
 
-.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing):hover .ub-copy,
+@media (hover: hover) {
+  .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing):hover .ub-copy {
+    color: var(--terminal-control-hover-ink);
+    opacity: 1;
+  }
+}
+
 .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-copy:focus-visible {
   color: var(--terminal-control-hover-ink);
   opacity: 1;
@@ -2025,27 +1864,6 @@ h3.ub-heading {
   width: min(24rem, 100%);
 }
 
-.ub-docs-mode {
-  padding: 0.3rem 0.55rem;
-  border: 1px solid var(--border);
-  border-right: 0;
-  color: var(--muted-foreground);
-}
-
-.ub-docs-mode:first-child {
-  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-}
-
-.ub-docs-mode:last-child {
-  border-right: 1px solid var(--border);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-}
-
-.ub-docs-mode[aria-pressed="true"] {
-  background: var(--brand-subtle);
-  color: var(--brand-ink);
-}
-
 /* The search-label wrapper keeps a full-width box for its input. */
 .ub-docs-search-label {
   display: grid;
@@ -2087,19 +1905,6 @@ h3.ub-heading {
   font-size: 0.8rem;
   font-weight: 500;
   text-align: left;
-}
-
-.ub-docs-sort {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.25rem 0.4rem;
-  border-radius: var(--radius-sm);
-}
-
-.ub-docs-heading-cell--changed .ub-docs-sort {
-  justify-content: flex-end;
 }
 
 .ub-docs-sort-arrow {
