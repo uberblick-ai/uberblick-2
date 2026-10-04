@@ -7,7 +7,7 @@ const SHA = "a".repeat(40);
 const TAG = "hub-v1.2.3";
 function input(overrides = {}) {
   return { tag: TAG, dryRun: false, headSha: SHA, protocolVersion: 1,
-    repository: "uberblick-ai/uberblick-2", eventName: "push", actorType: "User",
+    repository: "uberblick-ai/uberblick-2", eventName: "push", actorType: "User", actorLogin: "bk-one",
     refType: "tag", refName: TAG, tagSha: SHA, workflowSha: SHA, ...overrides };
 }
 function image(revision = SHA) {
@@ -37,7 +37,8 @@ test("hub/client version numbers and tag triggers are disjoint", () => {
 });
 
 test("only a person's matching tag push admits publication", async () => {
-  for (const override of [{actorType: "Bot"}, {eventName: "workflow_dispatch"}, {refType: "branch"},
+  for (const override of [{actorType: "Bot"}, {actorLogin: "uberblick-agent"}, {actorLogin: undefined},
+    {eventName: "workflow_dispatch"}, {refType: "branch"},
     {refName: "v1.2.3"}, {workflowSha: "b".repeat(40)}, {tagSha: "b".repeat(40)}, {repository: "other/repo"}]) {
     const fake = services();
     await assert.rejects(publishHubRelease(input(override), fake), /person's matching/);
@@ -112,6 +113,7 @@ test("workflow has only the human hub tag push trigger and the scoped workflow t
   assert.match(body, /^on:\n {2}push:\n {4}tags:\n {6}- "hub-v/m);
   assert.doesNotMatch(body, /schedule:|workflow_dispatch:|branches:|pull_request:/);
   assert.match(body, /github.event.sender.type == 'User'/);
+  assert.match(body, /github.event.sender.login != 'uberblick-agent'/);
   assert.match(body, /packages: write/);
   assert.match(body, /secrets.GITHUB_TOKEN/);
   assert.doesNotMatch(body, /HOMEBREW_TAP_TOKEN|:latest/);

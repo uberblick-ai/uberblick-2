@@ -41,7 +41,8 @@ export async function publishHubRelease(input, services) {
   if (!/^[0-9a-f]{40}$/.test(input.headSha) || !Number.isSafeInteger(input.protocolVersion) ||
       input.protocolVersion < 1 || input.protocolVersion > 999999) fail("invalid release metadata");
   if (!input.dryRun && (input.repository !== REPOSITORY || input.eventName !== "push" ||
-      input.actorType !== "User" || input.refType !== "tag" || input.refName !== input.tag ||
+      input.actorType !== "User" || !input.actorLogin || input.actorLogin === "uberblick-agent" ||
+      input.refType !== "tag" || input.refName !== input.tag ||
       input.tagSha !== input.headSha || input.workflowSha !== input.headSha)) {
     fail("publishing requires a person's matching GitHub Actions hub tag push at the checked-out commit");
   }
@@ -148,7 +149,8 @@ async function main() {
     const event = dryRun ? null : JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
     await publishHubRelease({ tag, dryRun, headSha, protocolVersion: Number(protocol[1]),
       repository: process.env.GITHUB_REPOSITORY, eventName: process.env.GITHUB_EVENT_NAME,
-      actorType: event?.sender?.type, refType: process.env.GITHUB_REF_TYPE, refName: process.env.GITHUB_REF_NAME,
+      actorType: event?.sender?.type, actorLogin: event?.sender?.login,
+      refType: process.env.GITHUB_REF_TYPE, refName: process.env.GITHUB_REF_NAME,
       tagSha: dryRun ? headSha : run("git", ["rev-parse", `${tag}^{commit}`]), workflowSha: process.env.GITHUB_SHA,
     }, dryRun ? localServices(scratch) : productionServices(scratch));
   } finally {
