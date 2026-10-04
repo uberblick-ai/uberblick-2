@@ -72,6 +72,7 @@ import type { Mark, Schema } from "@tiptap/pm/model";
 import type { MarkView, ViewMutationRecord } from "@tiptap/pm/view";
 import type * as Y from "yjs";
 import {
+  decisionTopicArchived,
   canonicalDocumentUuid,
   getDirectoryEntry,
   getDirectoryMap,
@@ -152,7 +153,9 @@ export function createDocLinkContext(options: {
     lookup(docId: string): DocLinkTarget {
       const entry = directory === null ? null : getDirectoryEntry(directory, docId);
       if (entry === null) return { state: "unresolved", title: null };
-      if (entry.deleted === true) return { state: "archived", title: null };
+      if (directory !== null && decisionTopicArchived(directory, docId)) {
+        return { state: "archived", title: null };
+      }
       return { state: "resolved", title: entry.title === "" ? null : entry.title };
     },
     candidates(): DocLinkCandidate[] {

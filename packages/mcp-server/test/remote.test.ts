@@ -18,17 +18,13 @@
 import {
   COMMENT_MARK,
   addComment,
-  addDecision,
   appendBlock,
   createAnnotation,
-  getDecisionsArray,
   getBlocks,
   getMeta,
   initDoc,
   listAnnotationRanges,
   listAnnotations,
-  readDecisions,
-  reorderDecisions,
   setChangelogSuggestion,
   setDescription,
   setKind,
@@ -250,28 +246,21 @@ describe("docFingerprint", () => {
     expect(docFingerprint(doc)).toBe(docFingerprint(copy));
   });
 
-  it("changes when only the effective decision order changes", () => {
+  it("changes when a decision's own links or approval metadata change", () => {
     const doc = source();
-    addDecision(doc, DECISION_A);
-    addDecision(doc, DECISION_B);
-    addDecision(doc, DECISION_C);
-    const concurrent = replicate(doc);
-
-    reorderDecisions(doc, DECISION_C, 0);
-    reorderDecisions(concurrent, DECISION_C, 1);
-    Y.applyUpdate(doc, Y.encodeStateAsUpdate(concurrent));
-    Y.applyUpdate(concurrent, Y.encodeStateAsUpdate(doc));
-
     const copy = replicate(doc);
-    const decisions = getDecisionsArray(doc);
-    const firstC = decisions.toArray().indexOf(DECISION_C);
-    decisions.delete(firstC, 1);
-
-    expect(readDecisions(doc)).not.toEqual(readDecisions(copy));
-    expect(Y.encodeStateVector(doc)).toEqual(Y.encodeStateVector(copy));
+    doc.getMap("meta").set("kind", "decision");
+    for (const [key, value] of Object.entries({
+      governs: DECISION_A, topic: DECISION_B, supersedes: DECISION_C,
+      agentStance: true, decidedBy: "A person", decidedAt: "2026-10-04T12:00:00Z",
+    })) {
+      const before = docFingerprint(doc);
+      doc.getMap("meta").set(key, value);
+      expect(docFingerprint(doc)).not.toBe(before);
+    }
     expect(docFingerprint(doc)).not.toBe(docFingerprint(copy));
-    expect(isIdentical(compareCorpus([entry(doc)], [entry(copy)]))).toBe(false);
   });
+
 });
 
 describe("compareCorpus", () => {

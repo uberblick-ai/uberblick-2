@@ -196,7 +196,7 @@ export const REQUIREMENT_STATUSES = [
 export type RequirementStatus = (typeof REQUIREMENT_STATUSES)[number];
 
 /** The states of a decision record, in lifecycle order. */
-export const DECISION_STATUSES = ["open", "decided"] as const;
+export const DECISION_STATUSES = ["open", "decided", "rejected", "withdrawn"] as const;
 export type DecisionStatus = (typeof DECISION_STATUSES)[number];
 
 export type DocumentStatus = RequirementStatus | DecisionStatus;
@@ -275,31 +275,42 @@ export interface DocMeta {
   kind?: DocumentKind;
   /** The lifecycle state, present only when it is legal for {@link kind}. */
   status?: DocumentStatus;
+  /** The product document this decision shapes. */
+  governs?: string;
+  /** First record's UUID, shared by this topic; immutable after creation. */
+  topic?: string;
   /** Earlier decision this decision replaces, by immutable document UUID. */
   supersedes?: string;
+  /** Whether the answer records an agent's initial stance. */
+  agentStance?: boolean;
+  /** Person whose answer was recorded. */
+  decidedBy?: string;
+  /** When the answer was recorded, conventionally ISO-8601. */
+  decidedAt?: string;
   /** Outbound links, by target document UUID. Never paths or titles. */
   links: string[];
 }
 
-/**
- * One entry of a document's decision log — a reference to a decision document,
- * resolved against the directory.
- *
- * The reference is the record, so a uuid whose document is missing or archived
- * is still reported, flagged unavailable. Dropping it would forget that the
- * decision governed this document at all, which is the one thing the log exists
- * to remember.
- */
-export interface DecisionReference {
-  /** The referenced document's uuid, lowercase. */
-  uuid: string;
-  /** Its title, from the directory stub. Null when no stub was resolvable. */
-  title: string | null;
-  /** Its cached lifecycle state, null when unknown. */
-  status: DocumentStatus | null;
-  /** True only where the directory carries a live, untombstoned entry. */
-  available: boolean;
+/** The shared, stubs-only answer for a decision topic. */
+export interface DecisionTopicResolution {
+  topic: string;
+  /** First record; absent only where a foreign stub omitted it. */
+  first: DirectoryEntry | null;
+  /** Record in force, otherwise a pending record, otherwise the first record. */
+  representative: DirectoryEntry;
+  inForce: DirectoryEntry | null;
+  pending: DirectoryEntry[];
+  conflicts: DirectoryEntry[];
+  superseded: DirectoryEntry[];
+  rejected: DirectoryEntry[];
+  withdrawn: DirectoryEntry[];
+  records: DirectoryEntry[];
+  /** Only the first record's tombstone controls topic visibility. */
+  archived: boolean;
 }
+
+/** One topic in a requirement's derived decision log. */
+export type DecisionReference = DecisionTopicResolution;
 
 export interface AnnotationComment {
   author: string;
@@ -391,6 +402,15 @@ export interface DirectoryEntry {
   kind?: DocumentKind;
   /** Cached lifecycle state, present only when it is legal for {@link kind}. */
   status?: DocumentStatus;
+  /** Decision-only metadata caches. Other document kinds carry none of these. */
+  governs?: string;
+  topic?: string;
+  supersedes?: string;
+  tldr?: string;
+  agentStance?: boolean;
+  decidedBy?: string;
+  decidedAt?: string;
+  commentCount?: number;
 }
 
 /** One canonical entry in the workspace's tag catalog. */

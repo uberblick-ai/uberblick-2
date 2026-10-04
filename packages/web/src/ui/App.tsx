@@ -18,6 +18,8 @@ import {
 import type { ReactElement } from "react";
 import {
   appendBlock,
+  decisionDirectoryFields,
+  decisionTopicArchived,
   directoryRoom,
   getDirectoryEntry,
   initDoc,
@@ -666,10 +668,11 @@ export function App(): ReactElement {
       return;
     }
     const entry = getDirectoryEntry(directory.ydoc, selected);
-    if (entry === null || entry.deleted === true) return;
+    if (entry === null || decisionTopicArchived(directory.ydoc, selected)) return;
     restoreFocusRoom.current = doc.room;
-    tombstoneDirectoryEntry(directory.ydoc, selected);
-    unpinDoc(sidebar.ydoc, selected);
+    for (const uuid of tombstoneDirectoryEntry(directory.ydoc, selected)) {
+      unpinDoc(sidebar.ydoc, uuid);
+    }
   }, [directory, doc, sidebar, selected]);
 
   /**
@@ -876,6 +879,7 @@ export function App(): ReactElement {
         upsertDirectoryEntry(directory.ydoc, {
           uuid,
           title: "Untitled",
+          ...decisionDirectoryFields(handle.connection.ydoc),
           createdAt,
           updatedAt: createdAt,
         });
@@ -1035,7 +1039,7 @@ export function App(): ReactElement {
               onArchive={
                 selectedDirectoryEntry !== null &&
                 selectedDirectoryEntry !== undefined &&
-                selectedDirectoryEntry.deleted !== true &&
+                !archived &&
                 directoryStatus.writable &&
                 sidebarStatus.writable &&
                 sidebarStatus.synced
