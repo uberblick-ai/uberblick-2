@@ -211,7 +211,7 @@ describe("hub login store", () => {
       path, state: "usable", logins: { [HUB]: login() }, unreadableHubs: [],
     });
     // Issuance and storage do not opt existing commands into credential use.
-    expect(JSON.stringify(resolveConfig({ env: box.env }))).not.toContain(login().credential.key);
+    expect(JSON.stringify(resolveConfig({ env: box.env, cwd: box.cwd }))).not.toContain(login().credential.key);
   });
 
   it("replaces and removes only the selected login, keeping malformed and future entries", async () => {

@@ -100,6 +100,19 @@ async function onHub(
 }
 
 describe("ub init <hub-url>", () => {
+  it("persists an explicit complete choice without borrowing a differing environment binding", async () => {
+    const hub = await startHub();
+    const box = sandbox();
+    const run = await runUbAsync(["init", url(hub), "--workspace", WORKSPACE, "--yes"], box, {
+      HUB_AUTH_TOKEN: SECRET,
+      UB_WORKSPACE_ID: "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64",
+      UB_HUB_URL: "local",
+    });
+    expect(run.status, run.output).toBe(0);
+    expect(config(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: url(hub) });
+    expect(run.stderr).toContain("takes precedence");
+  });
+
   it("creates the workspace on that hub, corpus and all, before it returns", async () => {
     const hub = await startHub();
     const box = sandbox();

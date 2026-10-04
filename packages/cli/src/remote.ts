@@ -48,7 +48,7 @@ export function setRemote(
   options: { workspace?: string | undefined; env?: NodeJS.ProcessEnv; cwd?: string; deviceAdmission?: boolean } = {},
 ): RemotePersistence {
   const env = options.env ?? process.env;
-  const current = resolveProjectBinding({ env, ...(options.cwd === undefined ? {} : { cwd: options.cwd }) });
+  const current = resolveProjectBinding({ env: {}, ...(options.cwd === undefined ? {} : { cwd: options.cwd }) });
   const workspaceId = options.workspace ?? current.binding?.workspaceId;
   if (workspaceId === undefined) throw new Error("a workspace is required before binding a remote hub");
   const path = writeProjectBinding({ workspaceId, hubUrl: url,
@@ -185,7 +185,8 @@ machine’s stored login from \`ub auth login <hub>\`. No \`ub init\` is needed 
 
 It never merges two workspaces and it never seeds. A workspace already on this
 machine under a different id keeps its documents and its \`ub workspace list\`
-entry, and \`ub workspace use <id>\` switches back. A replica this machine
+entry. Switch back with \`ub workspace use <id> --hub <url|local>\`; the join
+report prints the previous complete binding. A replica this machine
 already holds for *this* id is attached, not replaced: it and the remote
 reconcile as CRDTs, so neither side loses anything.
 
@@ -455,11 +456,7 @@ export async function joinCommand(argv: string[], io: Io): Promise<number> {
   // because it does not go away and is not merged — a person who has just been
   // switched out of a workspace holding their documents is owed the sentence
   // that says where those documents are and how to get back to them.
-  const previous = resolved.env.WORKSPACE_ID?.trim();
-  const switched =
-    previous !== undefined &&
-    previous !== "" &&
-    parseWorkspaceId(previous).uuid !== parseWorkspaceId(flags.workspace).uuid;
+  let previous: ReturnType<typeof resolveProjectBinding>["binding"] = null;
   // Serialize project binding writes with init and workspace selection.
   let lock: InitLock;
   try {
@@ -471,6 +468,7 @@ export async function joinCommand(argv: string[], io: Io): Promise<number> {
 
   let persistence: RemotePersistence;
   try {
+    previous = resolveProjectBinding({ env: {} }).binding;
     persistence = setRemote(bridge.target, {
       workspace: flags.workspace,
       deviceAdmission: bridge.base.deviceLogin !== undefined || usesDeviceLogin(bridge.target, bridge.env),
@@ -491,14 +489,15 @@ export async function joinCommand(argv: string[], io: Io): Promise<number> {
       "them.\n";
   }
   note += `\nworkspace     ${flags.workspace}\n`;
-  if (switched) {
+  if (previous !== null && (parseWorkspaceId(previous.workspaceId).uuid !== parseWorkspaceId(flags.workspace).uuid || previous.hubUrl !== flags.endpoint)) {
     // What this machine holds for the old workspace, rather than "its
     // documents": all this knows is that something configured it, which is not
     // evidence of a replica.
     note +=
-      `\n${previous} was not merged into this one and nothing of it was moved. ` +
+      `\n${previous.workspaceId} was not merged into this one and nothing of it was moved. ` +
       "The previous workspace and its documents remain unchanged. " +
-      "`ub workspace list` shows local replicas.\n";
+      "`ub workspace list` shows local replicas.\n" +
+      `Switch back: ub workspace use ${previous.workspaceId} --hub '${(previous.hubUrl ?? "local").replaceAll("'", "'\\''")}'\n`;
   }
   io.out(report("joined", bridge.target, checked.corpus, persistence, takenAt, note));
 
@@ -517,4 +516,3 @@ export async function joinCommand(argv: string[], io: Io): Promise<number> {
 
   return 0;
 }
-

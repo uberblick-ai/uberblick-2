@@ -487,9 +487,14 @@ commands, `ub open`, `ub env` and `ub mcp serve` use one resolver:
    variables work with mise, direnv and per-entry MCP environments.
 2. Otherwise, search from the current directory up to the filesystem root for
    the nearest `.uberblick.json`. An invalid nearest file fails; it never falls
-   through to a parent.
+   through to a parent. A file in a common ancestor intentionally covers its
+   descendants, including a file placed in your home directory. To give a
+   repository its own selection beneath an ancestor binding, create a closer
+   `.uberblick.json` there explicitly; selection commands update the nearest file.
 3. Without either, `ub status` reports **No workspace selected** without opening
    a database. Workspace-dependent commands refuse until a binding is chosen.
+   `ub env -- <command>` can still run non-workspace commands, with no workspace
+   or hub selection exported.
 
 ```json
 {
@@ -498,7 +503,12 @@ commands, `ub open`, `ub env` and `ub mcp serve` use one resolver:
 }
 ```
 
-Use JSON `null` for a local-only hub. A hub address is normalized to its sync
+Use JSON `null` for local operation on this computer. This may connect to the
+embedded loopback development hub when its local signing secret is available;
+it does not configure an external upstream. Without that secret, sync is disabled.
+The JSON status keeps the internal transport endpoint separate from the selected
+binding. The string `"local"` in a project file is rejected; use JSON null.
+A hub address is normalized to its sync
 endpoint; a workspace ID can have a display slug, but only its UUID identifies
 data. The file contains no credentials and may be committed when its selection
 is appropriate for everyone using the project. `ub status` shows the workspace,
@@ -506,11 +516,22 @@ hub and selection source. `ub init`, `ub workspace join` and `ub workspace use`
 update the nearest project file, or create one in the current directory.
 
 **Migration:** legacy `WORKSPACE_ID` / `HUB_URL` inputs and workspace/endpoint
-fields in the user's `config.json` no longer select a workspace. Existing
+fields in the user's `config.json` no longer select a workspace. Legacy environment
+selectors without a complete new pair are refused, even when a project file
+exists, so an old named MCP pin cannot silently open another corpus. Existing
 credentials, identity and document databases remain untouched. Add an explicit
 project file with the existing workspace and hub, or set both new environment
 variables. Existing MCP entries must be updated to include both variables;
 installation reports conflicting entries without overwriting them.
+Plain `ub init` refuses an unbound project with legacy machine selection rather
+than creating a different workspace. Explicitly select the intended pair first.
+After giving existing projects their bindings, finish migration by removing only
+the obsolete `workspace` and `hubUrl` keys from
+`$XDG_CONFIG_HOME/uberblick/config.json` (normally
+`~/.config/uberblick/config.json`). Keep other fields, `credentials.json`, project
+files and databases. New unbound directories can then use `ub init` to create a
+fresh workspace, including starter documents; existing project bindings remain.
+Temporary environment overrides are never implicitly saved by setup commands.
 
 The private `credentials.json` remains owner-only and holds local development
 signing secrets plus separate device logins keyed by hub origin. No credential
@@ -610,6 +631,9 @@ sample before binding; promotion verifies all live documents as well.
 Both commands persist a complete binding in `.uberblick.json`. Existing MCP
 registrations retain their pinned workspace and hub; install a new named entry
 for the new selection. A complete environment binding still takes precedence.
+For a GitHub-enabled hub behind a loopback proxy, the project binding also
+records `hubAdmission: "device"`; installed MCP entries carry `HUB_ADMISSION=device`
+so they continue using the stored login.
 Local-only browser and MCP use need no promotion or GitHub login.
 
 Stored device credentials stay private. `ub open` serves the local replica with

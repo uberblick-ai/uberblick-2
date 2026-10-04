@@ -117,7 +117,6 @@ const PORT_REMEDY =
 // --- workspace ---------------------------------------------------------------
 
 function workspaceCheck(
-  _env: NodeJS.ProcessEnv,
   resolved: ResolvedConfig | null,
   config: McpConfig | null,
   error: string | null,
@@ -690,7 +689,7 @@ export async function doctorReport(
       : hubProber(config);
 
   const checks: Check[] = [
-    workspaceCheck(resolvedEnv, resolved, config, error),
+    workspaceCheck(resolved, config, error),
     credentialCheck(resolved, resolvedEnv, config),
     databaseCheck(config),
     await persistenceCheck(config),

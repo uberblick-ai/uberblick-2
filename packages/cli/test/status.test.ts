@@ -206,7 +206,7 @@ describe("project selection in ub status", () => {
       sources: { workspace: "project config", hubUrl: "project config" },
     });
     const text = runUb(["status"], { ...box, cwd: nested });
-    expect(text.stdout).toMatch(/hub\s+local-only/);
+    expect(text.stdout).toMatch(/hub\s+local \(this computer\)/);
     expect(text.stdout).toContain(projectPath);
   });
 });

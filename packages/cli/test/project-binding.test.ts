@@ -40,6 +40,17 @@ describe("atomic project bindings", () => {
     expect(() => resolveProjectBinding({ env: { ...box.env, ...overrides }, cwd: box.cwd })).toThrow(/Set both UB_WORKSPACE_ID and UB_HUB_URL/);
   });
 
+  it.each([{ WORKSPACE_ID: second }, { HUB_URL: "https://old.example.test" }])("refuses legacy MCP or shell pins instead of adopting another project binding", (legacy) => {
+    const box = sandbox({ projectBinding: { workspaceId: first, hubUrl: null } });
+    expect(() => resolveProjectBinding({ env: { ...box.env, ...legacy }, cwd: box.cwd })).toThrow(/Legacy WORKSPACE_ID/);
+    expect(resolveProjectBinding({ env: { ...box.env, ...legacy, UB_WORKSPACE_ID: second, UB_HUB_URL: "local" }, cwd: box.cwd }).binding).toEqual({ workspaceId: second, hubUrl: null });
+  });
+
+  it.each(["local", "LOCAL", "Local"])("does not interpret the file's local sentinel as a remote hostname", (hubUrl) => {
+    const box = sandbox({ projectBinding: { workspaceId: first, hubUrl } });
+    expect(() => resolveProjectBinding({ env: box.env, cwd: box.cwd })).toThrow(/use JSON null/);
+  });
+
   it("permits a complete explicit override even when the project file is invalid", () => {
     const box = sandbox({ raw: { projectBinding: "invalid" } });
     expect(resolveProjectBinding({ env: { ...box.env, UB_WORKSPACE_ID: second, UB_HUB_URL: "local" }, cwd: box.cwd })).toEqual({ binding: { workspaceId: second, hubUrl: null }, origin: "environment", path: null });

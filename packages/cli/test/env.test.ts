@@ -68,19 +68,31 @@ describe("ub env", () => {
     });
   });
 
-  it("ignores a legacy endpoint instead of combining it with the project binding", () => {
-    const bound = sandbox({
+  it.each([
+    { WORKSPACE_ID: "aaaaaaaa-1111-4111-8111-111111111111" },
+    { HUB_URL: "ws://ambient.invalid:1" },
+  ])("refuses a legacy selection before starting the child: %o", (legacy) => {
+    const box = sandbox({
       projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { signingSecret: SECRET },
     });
-    expect(injected(bound, { HUB_URL: "ws://ambient.invalid:1" }).HUB_URL).toBe(
-      DEAD_HUB_URL,
-    );
+    const run = runUb(["env", "--", process.execPath, "-e", "process.stdout.write('child ran')"], box, legacy);
+    expect(run.status).not.toBe(0);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("Legacy WORKSPACE_ID / HUB_URL");
+    expect(run.stderr).toContain("UB_WORKSPACE_ID and UB_HUB_URL");
+    expect(run.output).not.toContain(SECRET);
+  });
 
-    const local = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
-    expect(injected(local, { HUB_URL: "ws://ambient.invalid:1" }).HUB_URL).toBe(
-      null,
-    );
+  it("accepts a complete new pair even when legacy selection variables are inherited", () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const selected = "aaaaaaaa-1111-4111-8111-111111111111";
+    expect(injected(box, {
+      WORKSPACE_ID: WORKSPACE,
+      HUB_URL: "wss://legacy.example.test/ws",
+      UB_WORKSPACE_ID: selected,
+      UB_HUB_URL: "https://explicit.example.test",
+    })).toEqual({ WORKSPACE_ID: selected, HUB_URL: "wss://explicit.example.test/ws", HUB_AUTH_TOKEN: null });
   });
 
   it("passes a complete environment override as one binding", () => {
@@ -106,12 +118,9 @@ describe("ub env", () => {
     }
   });
 
-  it("does not launch a child using the machine's old default workspace", () => {
+  it("runs a non-workspace child without selecting the machine's old default", () => {
     const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
-    const run = runUb(["env", "--", process.execPath, "-e", "process.stdout.write('child ran')"], box);
-    expect(run.status).not.toBe(0);
-    expect(run.stdout).toBe("");
-    expect(run.stderr).toContain("No workspace selected");
+    expect(injected(box)).toEqual({ WORKSPACE_ID: null, HUB_URL: null, HUB_AUTH_TOKEN: null });
   });
 
   it("has no form that prints the environment", () => {

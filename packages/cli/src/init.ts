@@ -214,7 +214,8 @@ options:
   --color <#rrggbb>  awareness cursor colour, 6-digit hex (default: one of the
                      eight the web client uses, picked for you)
   --workspace <id>   the workspace to work in, as <uuid> or <slug>-<uuid>
-                     (default: the selected workspace, or a fresh local uuid)
+                     (default: the project workspace, or a fresh local uuid)
+                     selecting a different workspace requires an explicit hub
                      required for a remote hub if no workspace is selected;
                      that existing workspace must grant this login membership
                      joining by id never writes or infers a workspace name
@@ -229,7 +230,9 @@ signing secret. What is generated is written to
 $XDG_CONFIG_HOME/uberblick/credentials.json at mode 0600, and is never printed.
 
 The complete UB_WORKSPACE_ID and UB_HUB_URL binding in the environment — a project .mcp.json's pin, or your own
-shell — outranks the complete binding in .uberblick.json, whatever this run settles.
+shell — outranks .uberblick.json for commands, but is never implicitly saved by init.
+If it differs from the project file, first select the project with
+\`ub workspace use <id> --hub <url|local>\`, or pass --workspace and a hub URL together.
 The project file contains only the workspace and hub; identity and credentials
 remain in the private user configuration.
 `;
@@ -401,6 +404,7 @@ export async function initCommand(
   let flags: Flags;
   try {
     flags = parseFlags(argv);
+    if (flags.workspace !== undefined) parseWorkspaceId(flags.workspace, "--workspace");
   } catch (error) {
     io.err(`ub init: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
@@ -414,8 +418,22 @@ export async function initCommand(
   // chose. Null means no workspace anywhere — the case this command exists to
   // end, and the reason the MCP config below is resolved only once one is
   // settled, since resolving it without a workspace is an error by design.
-  const inForceWorkspace = trimmed(resolved.env.WORKSPACE_ID);
+  const selected = resolveProjectBinding({ env: {} });
+  const inForceWorkspace = selected.binding?.workspaceId ?? null;
   const existing = readUserConfig();
+  const effective = resolved.binding;
+  if (resolved.origins.workspace === "environment" &&
+      (effective?.workspaceId !== selected.binding?.workspaceId || effective?.hubUrl !== selected.binding?.hubUrl) &&
+      !(flags.workspace !== undefined && flags.hub !== undefined)) {
+    io.err("ub init: the environment selects a different binding, or has no matching project binding. Nothing was written. Select the intended project explicitly with `ub workspace use <id> --hub <url|local>`, or pass both --workspace <id> and a hub URL. Environment overrides are not saved implicitly.\n");
+    return 1;
+  }
+  if (selected.binding === null && flags.workspace === undefined &&
+      (existing.raw?.workspace !== undefined || existing.raw?.hubUrl !== undefined)) {
+    io.err("ub init: a legacy machine workspace or hub is configured, but this project has no binding. Nothing was written or seeded. Review the old configuration, then explicitly select it with `ub workspace use <workspace-id> --hub <hub-url|local>`; use `ub workspace join <workspace-url>` to hydrate a remote workspace. No legacy URL or credential has been copied.\n");
+    io.err(`To finish migration after selecting the projects you want to keep, remove only the obsolete workspace and hubUrl keys from ${resolved.paths.userConfig}. Preserve the other fields and credentials.json. Then \`ub init\` can create a fresh workspace in an unbound directory.\n`);
+    return 1;
+  }
   // The same problem is reported by each reader; the set keeps it said once.
   const warnings = new Set([...resolved.warnings, ...existing.warnings]);
   // `--workspace` is somebody naming a workspace that already exists somewhere —
@@ -440,7 +458,6 @@ export async function initCommand(
   // workspace stays on the old one with nothing dialling it (#376, #385). So a
   // stored endpoint that is not the one asked for is refused outright, and the
   // refusal names the verb that does move a machine.
-  const selected = resolveProjectBinding();
   const bound = selected.binding?.hubUrl ?? null;
   if (flags.workspace !== undefined && inForceWorkspace !== null &&
       parseWorkspaceId(flags.workspace).uuid !== parseWorkspaceId(inForceWorkspace).uuid &&
@@ -666,7 +683,7 @@ export async function initCommand(
     // command refuses by design, arrived at by a race instead of by an
     // argument. The refusal returns from inside the lock, which the `finally`
     // below releases, and nothing has been written yet at this point.
-    const settledBinding = resolveProjectBinding();
+    const settledBinding = resolveProjectBinding({ env: {} });
     const settledHub = settledBinding.binding?.hubUrl ?? null;
     if (binding !== null && settledHub !== null && settledHub !== binding) {
       io.err(
@@ -874,7 +891,7 @@ export async function initCommand(
       // into the workspace this run had in hand would leave a corpus nothing on
       // this machine points at. A workspace somebody named by id is not this
       // run's to seed either — that is what `--workspace` opting out means.
-      const selectedNow = resolveProjectBinding().binding;
+      const selectedNow = resolveProjectBinding({ env: {} }).binding;
       const configured = selectedNow?.workspaceId ?? null;
       if (configured !== persistedWorkspace || (selectedNow?.hubUrl ?? null) !== hubInForce) {
         warnings.add(
@@ -935,6 +952,10 @@ export async function initCommand(
       "  ub mcp install        wire up an agent's MCP client (claude, codex, cursor)\n";
   }
   io.out(report);
+  if (resolved.origins.workspace === "environment" &&
+      (effective?.workspaceId !== persistedWorkspace || effective.hubUrl !== hubInForce)) {
+    io.err("ub: warning: the environment binding still takes precedence over the project binding just written.\n");
+  }
 
   // The one promise a hub argument adds, checked rather than assumed. Local
   // state stands — the configuration is settled and the documents are durable

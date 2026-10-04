@@ -60,6 +60,7 @@ const RESOLVED_VARIABLES = [
   "WORKSPACE_ID",
   "HUB_URL",
   "HUB_AUTH_TOKEN",
+  "HUB_ADMISSION",
   "UBERBLICK_DB",
   // `ub status` reports the database a hub started here would open, and
   // `ub open` starts one with it — and inside this checkout mise exports it

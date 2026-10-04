@@ -1286,4 +1286,3 @@ Archived documents move with their content and stay archived until restored.
 Merging two independently populated workspaces is not supported: the URL says
 which workspace `join` is about — that one's two replicas reconcile as CRDTs,
 and the others on the machine are left alone.
-

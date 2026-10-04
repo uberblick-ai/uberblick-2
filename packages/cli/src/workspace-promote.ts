@@ -49,7 +49,7 @@ function promotionAttempt(path: string): string {
     let value: unknown;
     try { value = JSON.parse(readFileSync(path, "utf8")); } catch { throw new Error("cannot read saved promotion attempt"); }
     if (value === null || typeof value !== "object" || !("attemptId" in value) ||
-      typeof value.attemptId !== "string" || parseWorkspaceId(value.attemptId).uuid !== value.attemptId) {
+      typeof value.attemptId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.attemptId)) {
       throw new Error("invalid saved promotion attempt; restore its original receipt before retrying");
     }
     return value.attemptId;

@@ -18,7 +18,7 @@
  */
 
 import { runChild } from "./child.js";
-import { resolveConfig, requireBinding } from "./config.js";
+import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 
@@ -26,7 +26,9 @@ export const ENV_HELP = `usage: ub env -- <command> [args...]
 
 Run a command with uberblick's resolved configuration in its environment —
 WORKSPACE_ID and the hub endpoint, exactly as \`ub mcp serve\` hands them to the
-MCP server. The command inherits stdin, stdout and stderr, signals are forwarded to it, and \`ub\` exits with its status.
+MCP server. With no selection, workspace variables are omitted; commands that
+need a workspace must require one themselves. The command inherits stdin, stdout
+and stderr, signals are forwarded to it, and \`ub\` exits with its status.
 
 The \`--\` is required and there is no form that prints the environment: it
 can carry a loopback hub’s signing secret. Remote credentials stay in this
@@ -61,7 +63,6 @@ export async function envCommand(argv: string[], io: Io): Promise<number> {
   }
 
   const resolved = resolveConfig();
-  requireBinding(resolved);
   for (const warning of resolved.warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }

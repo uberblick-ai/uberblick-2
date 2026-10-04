@@ -20,7 +20,7 @@ async function rig(access: boolean) {
   if (access) hub.grant(WORKSPACE);
   const login = hub.issue({ workspaces: access ? [WORKSPACE] : [] });
   const box = sandbox({
-    userConfig: { workspace: WORKSPACE },
+    projectBinding: { workspaceId: WORKSPACE, hubUrl: null },
     credentials: { signingSecret: SECRET, hubLogins: { [authenticationOrigin(endpoint)]: login } },
   });
   box.env.UB_TEST_MAX_WAIT_MS = "1500";
@@ -68,8 +68,8 @@ describe("remote device commands", () => {
   it.each(["missing", "revoked", "no-access"] as const)("keeps binding and documents unchanged under %s refusal, with a distinct next action", async (kind) => {
     const { hub, endpoint, box, login } = await rig(kind !== "no-access");
     if (kind === "revoked") hub.revoke(login.credential.record.id);
-    if (kind === "missing") box.env.XDG_CONFIG_HOME = sandbox({ userConfig: { workspace: WORKSPACE }, credentials: { signingSecret: SECRET } }).configHome;
-    const configFile = join(box.env.XDG_CONFIG_HOME!, "uberblick", "config.json");
+    if (kind === "missing") box.env.XDG_CONFIG_HOME = sandbox({ credentials: { signingSecret: SECRET } }).configHome;
+    const configFile = join(box.cwd, ".uberblick.json");
     const before = readFileSync(configFile);
     for (const args of [["workspace", "join", `${endpoint}/${WORKSPACE}`], ["init", endpoint, "--workspace", WORKSPACE, "--yes"]]) {
       const refused = await runUbAsync(args, box);
@@ -80,7 +80,7 @@ describe("remote device commands", () => {
       expect(existsSync(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`))).toBe(false);
       assertPrivate(refused.output, login.credential.key);
     }
-    await bind(box, endpoint);
+    bind(box, endpoint);
     for (const command of ["status", "doctor"]) {
       const refused = await runUbAsync([command], box);
       expect(refused.output).toContain(kind === "no-access" ? "administrator for access" : "ub auth login");
