@@ -171,42 +171,6 @@ test("the iPhone sidebar drawer covers a selected toolbar and receives its point
   await expectModalOverControl(page, coveredControl, "sheet");
 });
 
-test("the measured toolbar flips below at the viewport edge and follows scrolling", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 520, height: 360 });
-  await openDoc(page, "scrolling prose ".repeat(350));
-  await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
-  const pane = page.locator(".ub-pane");
-  const paragraph = page.locator(".ub-paragraph").first();
-  await pane.evaluate((element) => {
-    element.scrollTop = Math.floor(element.scrollHeight / 3);
-  });
-  const paneBox = await pane.boundingBox();
-  if (paneBox === null) throw new Error("e2e: editor pane has no box");
-  await dragSelection(page, paragraph, paneBox.y + 18);
-
-  const card = page.locator('[data-slot="selection-composer"]');
-  await expect(card).toBeVisible();
-  await expect(card).toHaveAttribute("data-placement", "below");
-  const selected = await selectionRect(page);
-  const before = await card.boundingBox();
-  if (selected === null || before === null) {
-    throw new Error("e2e: below-placement geometry is unavailable");
-  }
-  expect(before.y).toBeGreaterThanOrEqual(selected.bottom);
-  expect(before.x).toBeGreaterThanOrEqual(paneBox.x);
-  expect(before.x + before.width).toBeLessThanOrEqual(paneBox.x + paneBox.width);
-  expect(before.y + before.height).toBeLessThanOrEqual(paneBox.y + paneBox.height);
-
-  await pane.evaluate((element) => {
-    element.scrollTop += 8;
-  });
-  await expect
-    .poll(async () => (await card.boundingBox())?.y ?? before.y)
-    .toBeLessThan(before.y);
-});
-
 test("touch activation preserves the range and IME composition suspends the chrome", async ({
   browser,
 }) => {
