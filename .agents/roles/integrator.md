@@ -29,9 +29,9 @@ ran where `.agents/protocols/review-protocol.md` requires one. A P3 left
 untouched is accepted debt, not a gap. When the `agent` review is missing,
 finish `review`; when its required second round is missing, finish `review`
 listing the finding ids it must verify, which makes it that corrections review.
-When a required Copilot review was never requested, request it (`gh pr edit <N>
---add-reviewer @copilot`) and finish `defer`, so the next run finds its
-remarks; if that run still finds no Copilot review on the head, escalate.
+Apply the current delivery policy when an older handoff requires Copilot:
+its missing, pending, stale-head or unavailable review is not an integration
+stop, and no automatic request or retry is owed.
 Answer each Copilot remark still open in one line — accepted as P3 debt, or
 rejected with the reason — or finish `changes` when one needs a fix.
 
@@ -79,7 +79,9 @@ for a Copilot review that already exists or for a no-comment result.
 
 `merged`, `changes` (naming the failed gate or the remark that needs a fix),
 `review` (naming what the review must cover), `needs-human` (naming the tier-3
-trigger or the question), or `defer` (waiting for a requested Copilot review).
+trigger or the question), or `defer` (a wait allowed by
+`.agents/roles/README.md`, such as pending CI; never solely for optional
+Copilot review).
 
 Last, run the host housekeeping `integration.md` names for isolated-review
 artifacts. Retrospectives go to the integrator board, under the rule in

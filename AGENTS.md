@@ -21,8 +21,9 @@ unresolved choice beyond that authorization.
 ## Project facts
 
 - **Repository:** `uberblick-ai/uberblick-2`, base branch `main` (fetch
-  `origin/main` before grounding). **Owner:** `@bk-one`, mentioned on a
-  question when no other person is better placed to answer it. **Agents'
+  `origin/main` before grounding). **Maintainers:**
+  `@uberblick-ai/maintainers`, mentioned on a question when no other person is
+  better placed to answer it. **Agents'
   account:** `uberblick-agent`; a comment from it is never a person's answer.
 - **Corpus context:** Uberblick project agent workflow
   (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`) for the delivery model; Editorial

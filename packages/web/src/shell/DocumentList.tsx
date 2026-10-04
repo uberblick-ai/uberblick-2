@@ -329,7 +329,7 @@ export function DocumentList({
               <button
                 key={option}
                 type="button"
-                className="ub-docs-mode"
+                className="ub-docs-mode cursor-pointer border border-r-0 border-(--border) bg-transparent px-[0.55rem] py-[0.3rem] [font:inherit] text-(--muted-foreground) first:rounded-[var(--radius-sm)_0_0_var(--radius-sm)] last:rounded-[0_var(--radius-sm)_var(--radius-sm)_0] last:border-r hover:bg-(--accent) hover:text-(--accent-foreground) aria-pressed:bg-(--brand-subtle) aria-pressed:text-(--brand-ink)"
                 aria-pressed={option === mode}
                 onClick={() => setMode(option)}
               >
@@ -373,7 +373,7 @@ export function DocumentList({
                 >
                   <button
                     type="button"
-                    className="ub-docs-sort"
+                    className={`ub-docs-sort flex w-full cursor-pointer items-center gap-[0.3rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 [font:inherit] text-inherit hover:bg-(--accent) hover:text-(--accent-foreground) ${option === "changed" ? "justify-end" : ""}`}
                     onClick={() =>
                       setSort((current) =>
                         current.order === option
@@ -423,7 +423,10 @@ export function DocumentList({
               </tr>
             ) : (
               rows.map((entry) => (
-                <tr key={entry.uuid} className="ub-docs-row">
+                <tr
+                  key={entry.uuid}
+                  className="ub-docs-row hover:bg-(--accent) hover:text-(--accent-foreground)"
+                >
                   <th scope="row" className="ub-docs-title-cell">
                     <button
                       type="button"
@@ -452,7 +455,7 @@ export function DocumentList({
                   <td className="ub-docs-pin-cell">
                     <button
                       type="button"
-                      className="ub-docs-pin cursor-pointer rounded-(--radius-sm) border-0 bg-transparent p-1 font-[inherit] text-(--muted-foreground) opacity-0 [.ub-docs-row:hover_&]:opacity-100 [.ub-docs-row:focus-within_&]:opacity-100 aria-pressed:opacity-100 [&:hover]:text-(--foreground)"
+                      className="ub-docs-pin cursor-pointer rounded-(--radius-sm) border-0 bg-transparent p-1 font-[inherit] text-(--muted-foreground) opacity-0 [@media(hover:none)]:opacity-100 [@media(hover:hover)]:[.ub-docs-row:hover_&]:opacity-100 [.ub-docs-row:focus-within_&]:opacity-100 aria-pressed:opacity-100 hover:text-(--foreground)"
                       disabled={onTogglePin === null}
                       aria-describedby={onTogglePin === null ? pinUnavailableId : undefined}
                       aria-pressed={groupOf.has(entry.uuid)}

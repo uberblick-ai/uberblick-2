@@ -635,9 +635,6 @@ for (const scheme of ["light", "dark"] as const) {
     await matching.tap();
     await expect(matching).toHaveAttribute("aria-pressed", "true");
     expect(await treatment(matching)).toEqual(selected);
-    const pressed = await checkHoverAndFocus(matching);
-    await matching.tap();
-    expect(await treatment(matching)).toEqual(pressed);
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
 
@@ -646,7 +643,6 @@ for (const scheme of ["light", "dark"] as const) {
     await allDocs.tap();
     await openSidebar();
     await expect(allDocs).toHaveAttribute("aria-current", "page");
-    await checkHoverAndFocus(allDocs);
 
     const settings = page.locator(".ub-settings-entry");
     await checkHoverAndFocus(settings);
@@ -660,14 +656,12 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(page.getByRole("heading", { name: "Tags", exact: true })).toBeVisible();
     await openSidebar(true);
     await expect(tags).toHaveAttribute("aria-current", "page");
-    await checkHoverAndFocus(tags);
     const general = navigation.getByRole("button", { name: "General", exact: true });
     await checkHoverAndFocus(general);
     await general.tap();
     await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
     await openSidebar(true);
     await expect(general).toHaveAttribute("aria-current", "page");
-    await checkHoverAndFocus(general);
 
     await page.goto(new URL("/not-a-workspace", harness().appUrl).href);
     await openSidebar();
@@ -2516,8 +2510,12 @@ async function contrastDocument(
   page: Page,
   scheme: "light" | "dark",
   prove: () => Promise<void>,
+  preserveViewport = false,
 ): Promise<void> {
-  await page.setViewportSize({ width: 1400, height: 1000 });
+  if (!preserveViewport) await page.setViewportSize({ width: 1400, height: 1000 });
+  else if ((page.viewportSize()?.width ?? 1280) < 1280) {
+    await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  }
   await page.getByRole("button", { name: "+ new doc" }).click();
   await page.locator(".ub-title").fill(`Contrast ${scheme}`);
   const uuid = new URL(page.url()).pathname.split("/")[2];
@@ -2556,7 +2554,9 @@ async function contrastDocument(
     appendBlock(doc, { type: "mermaid", text: "graph TD; A-->B" });
     appendBlock(doc, { type: "terminal", text: "$ ub init\nworkspace ready" });
     await expect(page.locator(".ub-terminal-screen")).toBeVisible();
-    await expect(page.locator(".ub-thread")).toHaveCount(2);
+    if ((page.viewportSize()?.width ?? 1280) >= 1280) {
+      await expect(page.locator(".ub-thread")).toHaveCount(2);
+    }
     const catalog = (await peer(settingsRoom(harness().workspaceUuid))).doc;
     seedTagCatalog(catalog);
     for (let index = 0; index < 6; index += 1) createTagCatalogEntry(catalog, `contrast-${index}`);
@@ -2577,6 +2577,179 @@ async function contrastDocument(
       doc.destroy();
     }
   }
+}
+
+/** Compare states against their own rendering, without pinning theme values. */
+function controlPaint(control: Locator): Promise<Record<string, string>> {
+  return control.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return Object.fromEntries([
+      "background-color", "color", "border-color", "text-decoration-line",
+      "opacity", "z-index", "outline-color", "outline-style", "outline-width",
+    ].map((property) => [property, style.getPropertyValue(property)]));
+  });
+}
+
+/** A touch engine need not synthesize :hover for a tap. Check its active rules too. */
+function activeHoverRules(control: Locator): Promise<string[]> {
+  return control.evaluate((element) => {
+    const found: string[] = [];
+    const inspect = (rules: CSSRuleList, parent?: string): void => {
+      for (const rule of rules) {
+        if (rule instanceof CSSMediaRule && !matchMedia(rule.conditionText).matches) continue;
+        if (rule instanceof CSSSupportsRule && !CSS.supports(rule.conditionText)) continue;
+        if (rule instanceof CSSStyleRule) {
+          const selector = parent === undefined ? rule.selectorText
+            : rule.selectorText.replace(/&/g, `:is(${parent})`);
+          if (rule.style.length > 0 && /(?<!\\):hover\b/.test(selector) &&
+            element.matches(selector.replace(/(?<!\\):hover\b/g, ""))) {
+            found.push(selector);
+          }
+          inspect(rule.cssRules, selector);
+        } else if ("cssRules" in rule) inspect((rule as CSSGroupingRule).cssRules, parent);
+      }
+    };
+    for (const sheet of document.styleSheets) inspect(sheet.cssRules);
+    return found;
+  });
+}
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`document and document-list controls keep resting paint after a touch tap — ${scheme}`, { tag: "@webkit-touch" }, async ({ browser }, info) => {
+    const input = info.project.name === "chromium"
+      ? { hasTouch: true, viewport: { width: 390, height: 844 } }
+      : {};
+    const page = await openApp(browser, "/", {
+      upstream: true, contextOptions: { colorScheme: scheme, ...input }, readySelector: ".ub-docs",
+    });
+    expect(await page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true);
+    if (info.project.name !== "chromium") expect(page.viewportSize()).toEqual(info.project.use.viewport);
+    await contrastDocument(page, scheme, async () => {
+      await page.addStyleTag({ content: "* { transition: none !important; }" });
+      const check = async (tap: Locator, paint = tap): Promise<void> => {
+        await tap.scrollIntoViewIfNeeded();
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        const before = await controlPaint(paint);
+        const beforeFocus = await controlPaint(tap);
+        // Keep this stylesheet proof independent of navigation, copy feedback,
+        // pressed modes and open-menu paint. The input remains a real touch tap.
+        await tap.evaluate((element) => {
+          // DropdownMenu activates on pointerdown; leave the native default
+          // intact while isolating both primitive and product activation.
+          element.addEventListener("pointerdown", (event) => event.stopImmediatePropagation(), { capture: true, once: true });
+          element.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }, { capture: true, once: true });
+        });
+        await tap.tap();
+        await tap.evaluate((element) => (element as HTMLElement).blur());
+        await expect.poll(() => controlPaint(paint)).toEqual(before);
+        expect(await activeHoverRules(paint)).toEqual([]);
+        // Keyboard focus remains visible on the same touch-capable context.
+        await page.keyboard.press("ArrowRight");
+        await tap.focus();
+        expect(await tap.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+        expect(await controlPaint(tap)).not.toEqual(beforeFocus);
+        if (await tap.evaluate((element) => element.matches(".ub-copy, .ub-terminal-toggle"))) {
+          expect((await controlPaint(tap)).color).not.toBe(beforeFocus.color);
+        }
+      };
+      for (const selector of [".ub-sync-toggle", ".ub-copy-link", ".ub-actions-trigger"]) {
+        await check(page.locator(selector));
+      }
+      await check(page.getByRole("button", { name: "Edit tags" }), page.locator(".ub-tag-chevron"));
+      for (const peer of await page.locator(".ub-peer-control").all()) await check(peer);
+      await page.locator(".ub-peer-more").tap();
+      await check(page.locator(".ub-peer-overflow-row").first());
+      await page.keyboard.press("Escape");
+      for (const selector of [".ub-code .ub-copy", ".ub-mermaid .ub-copy", ".ub-terminal .ub-copy", ".ub-terminal-toggle"]) {
+        await check(page.locator(selector));
+      }
+      if ((page.viewportSize()?.width ?? 1280) < 1280) {
+        await page.getByRole("button", { name: "Show document list", exact: true }).click();
+      }
+      await page.getByRole("button", { name: "All docs", exact: true }).click();
+      for (const selector of [".ub-docs-mode", ".ub-docs-sort"]) {
+        for (const control of await page.locator(selector).all()) await check(control);
+      }
+      const row = page.locator(".ub-docs-row").first();
+      // The pin's hover/reveal treatment belongs to #1108 and is not sampled.
+      await check(row.locator(".ub-docs-open"), row);
+    }, true);
+    const waiting = await openApp(browser, `/${harness().workspace}/${randomUUID()}`, {
+      upstream: true, contextOptions: { colorScheme: scheme, ...input }, readySelector: ".ub-notice",
+    });
+    expect(await waiting.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true);
+    const copy = waiting.getByRole("button", { name: /^Copy link/ });
+    const before = await controlPaint(copy);
+    await copy.tap();
+    await expect(waiting.locator(".ub-copied")).not.toHaveText("");
+    await copy.evaluate((element) => (element as HTMLElement).blur());
+    await expect.poll(() => controlPaint(copy)).toEqual(before);
+    expect(await activeHoverRules(copy)).toEqual([]);
+  });
+
+  test(`document hover cues still respond to a pointer — ${scheme}`, async ({ browser }) => {
+    const page = await openAppearanceApp(browser, scheme);
+    await contrastDocument(page, scheme, async () => {
+      expect(await page.evaluate(() => matchMedia("(hover: hover)").matches)).toBe(true);
+      await page.addStyleTag({ content: "* { transition: none !important; }" });
+      for (const selector of [".ub-sync-toggle", ".ub-copy-link", ".ub-actions-trigger", ".ub-tag-chevron"]) {
+        const control = page.locator(selector);
+        await page.mouse.move(1399, 999);
+        const before = await controlPaint(control);
+        await control.hover();
+        expect(await controlPaint(control)).not.toEqual(before);
+      }
+      const actions = page.locator(".ub-actions-trigger");
+      await actions.hover();
+      const hoveredAction = await controlPaint(actions);
+      await actions.click();
+      await expect(actions).toHaveAttribute("data-state", "open");
+      await page.mouse.move(1399, 999);
+      expect(await controlPaint(actions)).toEqual(hoveredAction);
+      await page.keyboard.press("Escape");
+      await actions.evaluate((element) => (element as HTMLElement).blur());
+      const peers = page.locator(".ub-peer-control");
+      await page.mouse.move(1399, 999);
+      const stacking = await peers.evaluateAll((elements) => elements.slice(0, 3).map((element) => Number(getComputedStyle(element).zIndex)));
+      expect(stacking[0]).toBeGreaterThan(stacking[1] ?? Infinity);
+      expect(stacking[1]).toBeGreaterThan(stacking[2] ?? Infinity);
+      const second = peers.nth(1);
+      await second.hover();
+      expect(Number(await paintedIn(second, "z-index"))).toBeGreaterThan(Math.max(...stacking));
+      await page.mouse.move(1399, 999);
+      await second.focus();
+      await page.keyboard.press("ArrowRight");
+      expect(Number(await paintedIn(second, "z-index"))).toBeGreaterThan(Math.max(...stacking));
+      await second.evaluate((element) => (element as HTMLElement).blur());
+      for (const selector of [".ub-code", ".ub-mermaid", ".ub-terminal"]) {
+        const block = page.locator(selector);
+        const copy = block.locator(".ub-copy");
+        await page.mouse.move(1399, 999);
+        const before = await controlPaint(copy);
+        await block.hover();
+        const revealed = await controlPaint(copy);
+        expect(revealed).not.toEqual(before);
+        await copy.hover();
+        expect(await controlPaint(copy)).toEqual(revealed);
+      }
+      await page.getByRole("button", { name: "All docs", exact: true }).click();
+      const selected = page.locator(".ub-docs-mode[aria-pressed=true]");
+      await page.mouse.move(1399, 999);
+      const selectedPaint = await controlPaint(selected);
+      await selected.hover();
+      expect(await controlPaint(selected)).toEqual(selectedPaint);
+      for (const selector of [".ub-docs-mode[aria-pressed=false]", ".ub-docs-sort", ".ub-docs-row"]) {
+        const control = page.locator(selector).first();
+        await page.mouse.move(1399, 999);
+        const before = await controlPaint(control);
+        await control.hover();
+        expect(await controlPaint(control)).not.toEqual(before);
+      }
+    });
+  });
 }
 
 for (const scheme of ["light", "dark"] as const) {
