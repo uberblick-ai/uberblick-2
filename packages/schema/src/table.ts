@@ -1,7 +1,7 @@
 /** Structured TableKit nodes, with GFM as the agent-facing text projection. */
 import * as Y from "yjs";
 import fastDiff from "fast-diff";
-import { InvalidTableError } from "./errors.js";
+import { InvalidTableError, InvalidTableMappingError, TableMappingRequiredError } from "./errors.js";
 import { readsAsMark } from "./marks.js";
 
 /** A column's alignment, from its delimiter cell. `null` is the default. */
@@ -246,220 +246,108 @@ export function spliceTableCell(cell: Y.XmlElement, value: string): void {
   }
 }
 
-/**
- * Align the complete edit, maximizing unchanged cells before substitutions.
- * Character overlap breaks repeated-value ties, such as Ship becoming Ship2.
- */
-function alignEntries(
-  oldLength: number, newLength: number,
-  matchingCells: (oldIndex: number, newIndex: number) => number,
-  matchingCharacters: (oldIndex: number, newIndex: number) => number,
-  unchanged: (oldIndex: number, newIndex: number) => boolean,
-): Array<number | null> {
-  const result: Array<number | null> = Array<number | null>(newLength).fill(null);
-  let start = 0;
-  while (start < oldLength && start < newLength && unchanged(start, start)) {
-    result[start] = start;
-    start += 1;
+/** Each output position names an old projected position, or a newly created one. */
+export interface TableMapping {
+  rows: Array<number | null>;
+  columns: Array<number | null>;
+}
+
+function validatePositions(positions: Array<number | null>, oldLength: number, newLength: number, name: string): void {
+  if (!Array.isArray(positions) || positions.length !== newLength) {
+    throw new InvalidTableMappingError(`${name} must have one entry per requested ${name === "rows" ? "row" : "column"}`);
   }
-  let oldEnd = oldLength;
-  let newEnd = newLength;
-  while (oldEnd > start && newEnd > start && unchanged(oldEnd - 1, newEnd - 1)) {
-    oldEnd -= 1;
-    newEnd -= 1;
-    result[newEnd] = oldEnd;
+  let previous = -1;
+  for (const position of positions) {
+    if (position === null) continue;
+    if (!Number.isSafeInteger(position) || position < 0 || position >= oldLength || position <= previous) {
+      throw new InvalidTableMappingError(`${name} must contain null or unique, increasing old indices in bounds`);
+    }
+    previous = position;
   }
-  // Fully equal edges need no scoring. In the changed range, score exact
-  // cells cheaply first; character diffs cannot improve a worse cell match.
-  oldLength = oldEnd - start;
-  newLength = newEnd - start;
-  if (oldLength === 0 || newLength === 0) return result;
-  const stride = newLength + 1;
-  const size = (oldLength + 1) * stride;
-  const cells = new Float64Array(size);
-  const suffix = new Float64Array(size);
-  const prefix = new Float64Array(size);
-  for (let oldIndex = oldLength - 1; oldIndex >= 0; oldIndex -= 1) {
-    for (let newIndex = newLength - 1; newIndex >= 0; newIndex -= 1) {
-      const index = oldIndex * stride + newIndex;
-      cells[index] = matchingCells(oldIndex + start, newIndex + start);
-      suffix[index] = Math.max(
-        (cells[index] ?? 0) + (suffix[index + stride + 1] ?? 0),
-        (suffix[index + stride] ?? 0), (suffix[index + 1] ?? 0),
-      );
+}
+
+function tableMapping(oldValues: string[][], newValues: string[][], supplied: TableMapping | undefined): TableMapping {
+  const oldWidth = oldValues[0]?.length ?? 0;
+  const newWidth = newValues[0]?.length ?? 0;
+  if (supplied !== undefined) {
+    if (supplied === null || typeof supplied !== "object") throw new InvalidTableMappingError("rows and columns are required together");
+    validatePositions(supplied.rows, oldValues.length, newValues.length, "rows");
+    validatePositions(supplied.columns, oldWidth, newWidth, "columns");
+    if (supplied.rows[0] !== 0) throw new InvalidTableMappingError("the header row must map to old row 0");
+    return supplied;
+  }
+  if (oldValues.length !== newValues.length || oldWidth !== newWidth) throw new TableMappingRequiredError();
+  let changes = 0;
+  for (let row = 0; row < newValues.length; row += 1) {
+    for (let column = 0; column < newWidth; column += 1) {
+      if (oldValues[row]?.[column] !== newValues[row]?.[column]) changes += 1;
+      if (changes > 1) throw new TableMappingRequiredError();
     }
   }
-  for (let oldIndex = 0; oldIndex < oldLength; oldIndex += 1) {
-    for (let newIndex = 0; newIndex < newLength; newIndex += 1) {
-      const index = oldIndex * stride + newIndex;
-      prefix[index + stride + 1] = Math.max(
-        (prefix[index] ?? 0) + (cells[index] ?? 0), (prefix[index + 1] ?? 0), (prefix[index + stride] ?? 0),
-      );
-    }
-  }
-  const characters = new Float64Array(size).fill(-1);
-  let maxCharacters = 0;
-  for (let oldIndex = 0; oldIndex < oldLength; oldIndex += 1) {
-    for (let newIndex = 0; newIndex < newLength; newIndex += 1) {
-      const index = oldIndex * stride + newIndex;
-      // Only a pair on an optimal exact-cell path can win. This avoids
-      // diffing every pair of rows or columns during a structural edit.
-      if ((prefix[index] ?? 0) + (cells[index] ?? 0) + (suffix[index + stride + 1] ?? 0) !== suffix[0]) continue;
-      characters[index] = matchingCharacters(oldIndex + start, newIndex + start);
-      maxCharacters = Math.max(maxCharacters, (characters[index] ?? 0));
-    }
-  }
-  const scores = new Float64Array(size);
-  const score = (oldIndex: number, newIndex: number): number => scores[oldIndex * stride + newIndex] ?? 0;
-  const pairs = Math.min(oldLength, newLength);
-  const characterWeight = pairs + 1;
-  // A single unchanged cell outweighs all character overlap; one matching
-  // character outweighs all substitutions. Neither can displace a better match.
-  const cellWeight = (pairs * maxCharacters + 1) * characterWeight;
-  const pairScore = (oldIndex: number, newIndex: number): number => {
-    const index = oldIndex * stride + newIndex;
-    if ((characters[index] ?? 0) < 0) return -Infinity;
-    return (cells[index] ?? 0) * cellWeight + (characters[index] ?? 0) * characterWeight + 1;
+  return {
+    rows: oldValues.map((_, row) => row),
+    columns: Array.from({ length: oldWidth }, (_, column) => column),
   };
-  for (let oldIndex = oldLength - 1; oldIndex >= 0; oldIndex -= 1) {
-    for (let newIndex = newLength - 1; newIndex >= 0; newIndex -= 1) {
-      scores[oldIndex * stride + newIndex] = Math.max(
-        pairScore(oldIndex, newIndex) + score(oldIndex + 1, newIndex + 1),
-        score(oldIndex + 1, newIndex), score(oldIndex, newIndex + 1),
-      );
-    }
-  }
-  let oldIndex = 0;
-  let newIndex = 0;
-  while (oldIndex < oldLength && newIndex < newLength) {
-    const paired = pairScore(oldIndex, newIndex) + score(oldIndex + 1, newIndex + 1);
-    if (score(oldIndex, newIndex) === paired) {
-      result[newIndex + start] = oldIndex + start;
-      oldIndex += 1;
-      newIndex += 1;
-    } else if (score(oldIndex, newIndex) === score(oldIndex + 1, newIndex)) oldIndex += 1;
-    else newIndex += 1;
-  }
-  return result;
-}
-
-function matchingCharacters(before: string, after: string): number {
-  if (before === after) return before.length;
-  return fastDiff(before, after).reduce((count, [operation, text]) => operation === 0 ? count + text.length : count, 0);
-}
-
-function countMatchingCharacters(before: readonly string[], after: readonly string[]): number {
-  return after.reduce((count, value, index) => count + matchingCharacters(before[index] ?? "", value), 0);
-}
-
-/** Exact cells in order, without diffing text or scoring column substitutions. */
-function countEqualCells(before: readonly string[], after: readonly string[]): number {
-  const scores = new Uint32Array(after.length + 1);
-  for (const value of before) {
-    let diagonal = 0;
-    for (let column = 0; column < after.length; column += 1) {
-      const previous = (scores[column + 1] ?? 0);
-      scores[column + 1] = Math.max(previous, (scores[column] ?? 0), diagonal + (value === after[column] ? 1 : 0));
-      diagonal = previous;
-    }
-  }
-  return (scores[after.length] ?? 0);
-}
-
-function equalEntries(before: readonly string[], after: readonly string[]): boolean {
-  return before.length === after.length && before.every((value, index) => value === after[index]);
 }
 
 /**
- * Edit the GFM projection without replacing surviving rows, cells or marks.
- * Parsed old/new cells decide what changed: GFM trims whitespace, while the
- * stored cell need not, and comparing the stored string would churn that text.
+ * Edit only the rows and columns whose identities the caller names. Plain GFM
+ * cannot distinguish a renamed survivor from a replacement with equal values.
+ * Parsed cells decide what changed, preserving stored whitespace and marks.
  */
-export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: GfmTable): void {
+export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: GfmTable, mapping?: TableMapping): void {
   if (!isSupportedTable(element)) throw new InvalidTableError();
   const oldValues = [oldTable.header, ...oldTable.rows];
   const newValues = [newTable.header, ...newTable.rows];
+  const { rows: rowMap, columns: columnMap } = tableMapping(oldValues, newValues, mapping);
   const storedRows = element.toArray() as Y.XmlElement[];
   const oldCells = tableRows(element);
-  // Choose one column mapping for the whole edit. Independent per-row
-  // guesses can mistake inserted-column values for surviving status cells.
-  // The header stays fixed; body evidence allows simultaneous row changes.
-  const oldColumns = oldTable.header.map((_, col) => oldTable.rows.map((row) => row[col] ?? ""));
-  const newColumns = newTable.header.map((_, col) => newTable.rows.map((row) => row[col] ?? ""));
-  const columnMap = alignEntries(oldColumns.length, newColumns.length,
-    (oldCol, newCol) => (oldTable.header[oldCol] === newTable.header[newCol] ? 1 : 0) +
-      countEqualCells(oldColumns[oldCol] ?? [], newColumns[newCol] ?? []),
-    (oldCol, newCol) => matchingCharacters(oldTable.header[oldCol] ?? "", newTable.header[newCol] ?? "") +
-      countMatchingCharacters(oldColumns[oldCol] ?? [], newColumns[newCol] ?? []),
-    (oldCol, newCol) => oldTable.header[oldCol] === newTable.header[newCol] &&
-      equalEntries(oldColumns[oldCol] ?? [], newColumns[newCol] ?? []),
-  );
-  const occurrences = (values: readonly string[]): Map<string, number> => {
-    const counts = new Map<string, number>();
-    for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
-    return counts;
-  };
-  const matchedColumns = columnMap.flatMap((oldCol, newCol) => oldCol === null ? [] : [{
-    oldCol, newCol,
-    beforeCounts: occurrences(oldColumns[oldCol] ?? []), afterCounts: occurrences(newColumns[newCol] ?? []),
-  }]);
-  // An unambiguous surviving value anchors its row ahead of repeated statuses.
-  // Otherwise several partial matches can displace a row's unique Task/Notes
-  // when the same edit both removes a row and inserts a replacement.
-  const rowWeight = Math.min(oldTable.rows.length, newTable.rows.length) * matchedColumns.length + 1;
-  const matchRow = (oldRow: number, newRow: number, characters: boolean): number => matchedColumns.reduce((count, { oldCol, newCol, beforeCounts, afterCounts }) => {
-    const before = oldTable.rows[oldRow]?.[oldCol] ?? "";
-    const after = newTable.rows[newRow]?.[newCol] ?? "";
-    if (characters) return count + matchingCharacters(before, after);
-    if (before !== after) return count;
-    return count + 1 + (beforeCounts.get(before) === 1 && afterCounts.get(after) === 1 ? rowWeight : 0);
-  }, 0);
-
-  const rowMap = [0, ...alignEntries(
-    oldTable.rows.length, newTable.rows.length,
-    (oldRow, newRow) => matchRow(oldRow, newRow, false),
-    (oldRow, newRow) => matchRow(oldRow, newRow, true),
-    (oldRow, newRow) => matchedColumns.every(({ oldCol, newCol }) =>
-      oldTable.rows[oldRow]?.[oldCol] === newTable.rows[newRow]?.[newCol],
-    ),
-  ).map((index) => index === null ? null : index + 1)];
-
+  const mappedRows = rowMap.map((oldIndex) => {
+    if (oldIndex === null) return null;
+    const rowElement = storedRows[oldIndex];
+    if (rowElement === undefined) throw new InvalidTableMappingError("mapped row is absent from stored table");
+    return { oldIndex, rowElement, cells: oldCells[oldIndex] ?? [] };
+  });
   const retainedRows = new Set(rowMap);
+  const retainedCols = new Set(columnMap);
+  // All validation precedes the first write: Yjs transactions do not roll back.
   for (let row = storedRows.length - 1; row >= 1; row -= 1) {
     if (!retainedRows.has(row)) element.delete(row, 1);
   }
   for (let row = 0; row < newValues.length; row += 1) {
-    const oldIndex = rowMap[row] ?? null;
+    const mapped = mappedRows[row];
     const newRow = newValues[row] ?? [];
-    if (oldIndex === null) {
+    if (mapped === null || mapped === undefined) {
       element.insert(row, [buildTableRow(newRow, row === 0)]);
       continue;
     }
-    const rowElement = storedRows[oldIndex];
-    const cells = oldCells[oldIndex] ?? [];
-    if (rowElement === undefined) throw new InvalidTableError();
-    const retainedCols = new Set(columnMap);
-    for (let col = cells.length - 1; col >= 0; col -= 1) {
-      if (!retainedCols.has(col)) rowElement.delete(col, 1);
+    const { oldIndex, rowElement, cells } = mapped;
+    for (let column = cells.length - 1; column >= 0; column -= 1) {
+      if (!retainedCols.has(column)) rowElement.delete(column, 1);
     }
     let actualColumn = 0;
-    for (let col = 0; col < newRow.length; col += 1) {
-      const oldCol = columnMap[col] ?? null;
-      const cell = oldCol === null ? undefined : cells[oldCol];
-      const value = newRow[col] ?? "";
-      const previous = oldCol === null ? undefined : oldValues[oldIndex]?.[oldCol] ?? "";
+    for (let column = 0; column < newRow.length; column += 1) {
+      const oldColumn = columnMap[column] ?? null;
+      const cell = oldColumn === null ? undefined : cells[oldColumn];
+      const value = newRow[column] ?? "";
+      const previous = oldColumn === null ? undefined : oldValues[oldIndex]?.[oldColumn] ?? "";
       if (cell === undefined) {
-        // Leave a merge's padded positions virtual unless the edit fills one
-        // or actually changes the table's column structure.
-        if (oldCol !== null && previous === value) continue;
-        // A filled padded position also needs any missing preceding cells.
-        while (actualColumn < col) { rowElement.insert(actualColumn, [buildTableCell("", row === 0)]); actualColumn += 1; }
+        // An untouched projected empty cell stays virtual. A later requested
+        // cell needs preceding positions materialized to keep its column.
+        if (oldColumn !== null && previous === value) continue;
+        while (actualColumn < column) {
+          rowElement.insert(actualColumn, [buildTableCell("", row === 0)]);
+          actualColumn += 1;
+        }
         rowElement.insert(actualColumn, [buildTableCell(value, row === 0)]);
       } else if (previous !== value) {
         spliceTableCell(cell, value);
       }
       actualColumn += 1;
     }
+    // Selecting only virtual padding must retain the supported nonempty row
+    // grammar. Materialize one cell, without repairing the remaining padding.
+    if (actualColumn === 0) rowElement.insert(0, [buildTableCell("", row === 0)]);
   }
 }
 

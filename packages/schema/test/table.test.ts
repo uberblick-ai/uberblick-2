@@ -1,13 +1,14 @@
 import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
 import {
-  InvalidTableError, MarksNotAllowedError, TableAnnotationError,
+  InvalidTableError, InvalidTableMappingError, MarksNotAllowedError, OldTextMismatchError, StaleBlockError, TableAnnotationError, TableMappingRequiredError,
   addComment, appendBlock, buildTableRow, createAnnotation, editBlock,
   exportMarkdown, findBlockElement, getBlock, getBlocks, getBlocksFragment,
   getBlockText, initDoc, insertBlock, isSupportedTable, listAnnotations,
   normalizeLegacyTables, parseGfmTable, repairDuplicateBlocks,
   resolveAnnotationRange, setAnnotationResolved, setBlockType,
   tableCellText, tableRows, writeGfmTable,
+  type TableMapping,
 } from "../src/index.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
@@ -117,6 +118,160 @@ describe("structured table contract", () => {
     expect(alpha.toDelta()).toEqual([{ insert: "Alphax", attributes: { italic: {} } }]);
   });
 
+  it("refuses unmapped structure and multi-cell batches before any update", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "table", text: GFM });
+    const initial = Y.encodeStateAsUpdate(doc);
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    for (const after of [
+      writeGfmTable([...CELLS, ["Gamma", "3"]]),
+      writeGfmTable(CELLS.map((row) => [...row, "Extra"])),
+      GFM.replace("Alpha", "Alpine").replace("Beta", "Gamma"),
+    ]) expect(() => editBlock(doc, id, GFM, after)).toThrow(TableMappingRequiredError);
+    expect(updates).toBe(0);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(initial);
+    expect(getBlockText(doc, id)).toBe(GFM);
+    editBlock(doc, id, GFM, GFM.replace("Alpha", "Alpine").replace("Beta", "Gamma"), {
+      tableMapping: { rows: [0, 1, 2], columns: [0, 1] },
+    });
+    expect(getBlockText(doc, id)).toContain("Alpine");
+    expect(getBlockText(doc, id)).toContain("Gamma");
+    doc.destroy();
+  });
+
+  it("accepts a parsed no-op without normalizing stored whitespace or marks", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "table", text: GFM });
+    const alpha = tableCellText(tableRows(element(doc, id))[1]![0]!)!;
+    alpha.insert(0, "  ");
+    alpha.insert(alpha.length, "  ");
+    alpha.format(0, alpha.length, { bold: {} });
+    const before = getBlockText(doc, id);
+    const delta = alpha.toDelta();
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    editBlock(doc, id, before, GFM.replace("---", ":---:"));
+    expect(updates).toBe(0);
+    expect(alpha.toDelta()).toEqual(delta);
+    expect(getBlockText(doc, id)).toBe(before);
+    doc.destroy();
+  });
+
+  it("validates every mapping position and both dimensions before any write", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "table", text: GFM });
+    const initial = Y.encodeStateAsUpdate(doc);
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    const invalid: unknown[] = [
+      null, {}, { rows: [0, 1, 2] }, { columns: [0, 1] },
+      { rows: [0, 1], columns: [0, 1] }, { rows: [0, 1, 2], columns: [0] },
+      { rows: [null, 1, 2], columns: [0, 1] }, { rows: [1, 2, null], columns: [0, 1] },
+      { rows: [0, 0, 2], columns: [0, 1] }, { rows: [0, 2, 1], columns: [0, 1] },
+      { rows: [0, 1, 3], columns: [0, 1] }, { rows: [0, -1, 2], columns: [0, 1] },
+      { rows: [0, 1.5, 2], columns: [0, 1] }, { rows: [0, Number.NaN, 2], columns: [0, 1] },
+      { rows: [0, 1, Number.MAX_SAFE_INTEGER + 1], columns: [0, 1] },
+      { rows: [0, 1, 2], columns: [0, 0] }, { rows: [0, 1, 2], columns: [1, 0] },
+      { rows: [0, 1, 2], columns: [0, 2] }, { rows: [0, 1, 2], columns: [0, -1] },
+      { rows: [0, 1, 2], columns: [0, 0.5] }, { rows: [0, 1, 2], columns: [0, Infinity] },
+    ];
+    for (const tableMapping of invalid) {
+      expect(() => editBlock(doc, id, GFM, GFM.replace("Alpha", "Alpine"), { tableMapping: tableMapping as TableMapping })).toThrow(InvalidTableMappingError);
+    }
+    expect(updates).toBe(0);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(initial);
+    doc.destroy();
+  });
+
+  it("keeps stale assertions and invalid GFM ahead of mapping errors, and refuses non-table mapping", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "table", text: GFM });
+    const prose = appendBlock(doc, { type: "paragraph", text: "Prose" });
+    const tableMapping = { rows: [0], columns: [0] };
+    const initial = Y.encodeStateAsUpdate(doc);
+    const rev = getBlock(doc, id)!.rev;
+    expect(() => editBlock(doc, id, GFM, "invalid", { rev: "stale", tableMapping })).toThrow(StaleBlockError);
+    expect(() => editBlock(doc, id, "incorrect", "invalid", { rev, tableMapping })).toThrow(OldTextMismatchError);
+    expect(() => editBlock(doc, id, GFM, "invalid", { tableMapping })).toThrow(InvalidTableError);
+    expect(() => editBlock(doc, prose, "Prose", "Prose", { tableMapping })).toThrow(InvalidTableMappingError);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(initial);
+    doc.destroy();
+  });
+
+  it.each(["row-only", "row-and-column"])("preserves the explicitly named offline survivor in the reduced %s replacement", (shape) => {
+    const beforeRows = shape === "row-only"
+      ? [["Task", "Status"], ["Write", "done"], ["Test", "done"]]
+      : [["Task", "Status", "Notes", "Owner"], ["Write", "done", "write notes", "ann"], ["Test", "done", "test notes", "ann"], ["Ship", "todo", "ship notes", "ben"]];
+    const nextRows = shape === "row-only"
+      ? [["Task", "Status"], ["New task", "todo"], ["Wrote", "done"]]
+      : [["Task", "Extra", "Status", "Owner"], ["New task", "new 1", "todo", "ann"], ["Write2", "new 2", "done", "ann"], ["Ship", "new 3", "todo", "ben"]];
+    const before = writeGfmTable(beforeRows);
+    const after = writeGfmTable(nextRows);
+    const tableMapping = shape === "row-only"
+      ? { rows: [0, null, 1], columns: [0, 1] }
+      : { rows: [0, null, 1, 3], columns: [0, null, 1, 3] };
+    let id = "";
+    const [a, b] = replicaPair((doc) => {
+      initDoc(doc, { uuid: UUID, title: "Tables" });
+      id = appendBlock(doc, { type: "table", text: before });
+      tableCellText(tableRows(element(doc, id))[1]![1]!)!.format(0, 4, { bold: {} });
+    });
+    try {
+      const originals = [a, b].map((doc) => tableCellText(tableRows(element(doc, id))[1]![1]!)!);
+      originals[1]!.insert(originals[1]!.length, " (blocked)");
+      let updates = 0;
+      a.on("update", () => { updates += 1; });
+      expect(() => editBlock(a, id, before, after)).toThrow(TableMappingRequiredError);
+      expect(updates).toBe(0);
+      editBlock(a, id, before, after, { tableMapping });
+      const statusColumn = shape === "row-only" ? 1 : 2;
+      expect(tableCellText(tableRows(element(a, id))[2]![statusColumn]!)).toBe(originals[0]);
+      syncDocs(a, b);
+      nextRows[2]![statusColumn] = "done (blocked)";
+      for (const [index, doc] of [a, b].entries()) {
+        const status = tableCellText(tableRows(element(doc, id))[2]![statusColumn]!)!;
+        expect(status).toBe(originals[index]);
+        expect(status.toDelta()).toEqual([{ insert: "done (blocked)", attributes: { bold: {} } }]);
+        expect(getBlockText(doc, id)).toBe(writeGfmTable(nextRows));
+        expect(isSupportedTable(element(doc, id))).toBe(true);
+      }
+    } finally { a.destroy(); b.destroy(); }
+  });
+
+  it("executes a nonidentity row mapping even when the GFM text is identical", () => {
+    const doc = seeded();
+    const before = writeGfmTable([["Status"], ["done"], ["done"]]);
+    const id = appendBlock(doc, { type: "table", text: before });
+    const original = tableCellText(tableRows(element(doc, id))[1]![0]!)!;
+    original.format(0, original.length, { bold: {} });
+    editBlock(doc, id, before, before, { tableMapping: { rows: [0, null, 1], columns: [0] } });
+    const cells = tableRows(element(doc, id));
+    expect(tableCellText(cells[2]![0]!)).toBe(original);
+    expect(tableCellText(cells[1]![0]!)).not.toBe(original);
+    expect(tableCellText(cells[1]![0]!)!.toDelta()).toEqual([{ insert: "done" }]);
+    expect(original.toDelta()).toEqual([{ insert: "done", attributes: { bold: {} } }]);
+    expect(getBlockText(doc, id)).toBe(before);
+    doc.destroy();
+  });
+
+  it("maps projected padding without repairing ragged rows or leaving a zero-cell row", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "table", text: writeGfmTable([["H"], ["short"]]) });
+    const table = element(doc, id);
+    table.insert(2, [buildTableRow(["long", "two", "three"], false)]);
+    const before = getBlockText(doc, id);
+    const third = tableRows(table)[2]![2]!;
+    const after = writeGfmTable([["", ""], ["", ""], ["two", "three"]]);
+    editBlock(doc, id, before, after, { tableMapping: { rows: [0, 1, 2], columns: [1, 2] } });
+    expect(tableRows(table).map((row) => row.length)).toEqual([1, 1, 2]);
+    expect(tableRows(table)[2]![1]).toBe(third);
+    expect(getBlockText(doc, id)).toBe(after);
+    expect(isSupportedTable(table)).toBe(true);
+    expect(tableRows(table).flat().every((cell) => tableCellText(cell) !== null)).toBe(true);
+    doc.destroy();
+  });
+
   it("adds and removes rows and columns, including a combined insertion, without rewriting survivors", () => {
     const doc = seeded();
     const id = appendBlock(doc, { type: "table", text: GFM });
@@ -129,13 +284,13 @@ describe("structured table contract", () => {
       ["Name", "Extra", "Count"], ["Inserted", "x", "0"],
       ["Alpha", "y", "1"], ["Beta", "z", "2"],
     ]);
-    editBlock(doc, id, GFM, expanded);
+    editBlock(doc, id, GFM, expanded, { tableMapping: { rows: [0, null, 1, 2], columns: [0, null, 1] } });
     expect(table.toArray()[2]).toBe(survivingRows[1]);
     expect(table.toArray()[3]).toBe(survivingRows[2]);
     expect(tableRows(table)[3]?.[0]).toBe(survivingCells[2]?.[0]);
     expect(tableRows(table)[3]?.[2]).toBe(survivingCells[2]?.[1]);
     expect(beta.toDelta()).toEqual([{ insert: "Beta", attributes: { bold: {} } }]);
-    editBlock(doc, id, expanded, GFM);
+    editBlock(doc, id, expanded, GFM, { tableMapping: { rows: [0, 2, 3], columns: [0, 2] } });
     expect(table.toArray()).toEqual(survivingRows);
     expect(tableRows(table)).toEqual(survivingCells);
     expect(getBlockText(doc, id)).toBe(GFM);
@@ -155,7 +310,7 @@ describe("structured table contract", () => {
     expect(exportMarkdown(doc, { frontmatter: false })).toContain("| Long | row | visible |");
   });
 
-  it("identifies inserted columns by body text when the header cells are empty", () => {
+  it("preserves mapped columns when the header cells are empty", () => {
     for (const insertRow of [false, true]) {
       const doc = seeded();
       const before = writeGfmTable([["", ""], ["Alpha", "Beta"]]);
@@ -163,10 +318,10 @@ describe("structured table contract", () => {
       const beta = tableCellText(tableRows(element(doc, id))[1]![1]!)!;
       beta.format(0, 4, { bold: {} });
       const after = writeGfmTable([["", "", ""], ...(insertRow ? [["Inserted", "x", "Row"]] : []), ["Alpha", "New", "Beta"]]);
-      editBlock(doc, id, before, after);
+      editBlock(doc, id, before, after, { tableMapping: { rows: insertRow ? [0, null, 1] : [0, 1], columns: [0, null, 1] } });
       expect(tableCellText(tableRows(element(doc, id))[insertRow ? 2 : 1]![2]!)).toBe(beta);
       expect(beta.toDelta()).toEqual([{ insert: "Beta", attributes: { bold: {} } }]);
-      editBlock(doc, id, after, before);
+      editBlock(doc, id, after, before, { tableMapping: { rows: insertRow ? [0, 2] : [0, 1], columns: [0, 2] } });
       expect(tableCellText(tableRows(element(doc, id))[1]![1]!)).toBe(beta);
     }
   });
@@ -182,10 +337,14 @@ describe("structured table contract", () => {
       const after = rowChange
         ? writeGfmTable([["", "", ""], ["Inserted", "New", "Row"], ["changed-a1", "b1", "c1"], ["a2", "b2", "c2"]])
         : writeGfmTable([["", "", "", ""], ["a1", "New", "changed-b1", "c1"], ["a2", "New", "b2", "c2"]]);
-      editBlock(doc, id, before, after);
+      editBlock(doc, id, before, after, { tableMapping: rowChange
+        ? { rows: [0, null, 1, 2], columns: [0, 1, 2] }
+        : { rows: [0, 1, 2], columns: [0, null, 1, 2] } });
       expect(tableCellText(tableRows(element(doc, id))[2]![rowChange ? 1 : 2]!)).toBe(untouched);
       expect(untouched.toDelta()).toEqual([{ insert: rowChange ? "b1" : "b2", attributes: { bold: {} } }]);
-      editBlock(doc, id, after, before);
+      editBlock(doc, id, after, before, { tableMapping: rowChange
+        ? { rows: [0, 2, 3], columns: [0, 1, 2] }
+        : { rows: [0, 1, 2], columns: [0, 2, 3] } });
       expect(tableCellText(tableRows(element(doc, id))[rowChange ? 1 : 2]![1]!)).toBe(untouched);
     }
   });
@@ -211,7 +370,10 @@ describe("structured table contract", () => {
     if (change === "delete-and-column") nextRows.forEach((row, index) => { row.splice(1, 0, index === 0 ? "Owner" : "team"); });
     const shipRow = insertion ? 4 : 2;
     const statusColumn = change === "delete-and-column" ? 2 : 1;
-    editBlock(a, id, before, writeGfmTable(nextRows));
+    editBlock(a, id, before, writeGfmTable(nextRows), { tableMapping: {
+      rows: insertion ? [0, 1, 2, null, 3, 4] : [0, 1, 3, 4],
+      columns: change === "delete-and-column" ? [0, null, 1] : [0, 1],
+    } });
     expect(tableCellText(tableRows(element(a, id))[shipRow]![statusColumn]!)).toBe(shipA);
     expect(shipA.toDelta()).toEqual([{ insert: "todo", attributes: { bold: {} } }]);
     syncDocs(a, b);
@@ -237,7 +399,7 @@ describe("structured table contract", () => {
     const ship = tableCellText(tableRows(element(a, id))[1]![2]!)!;
     const concurrentShip = tableCellText(tableRows(element(b, id))[1]![2]!)!;
     concurrentShip.insert(concurrentShip.length, " (blocked)");
-    editBlock(a, id, before, writeGfmTable([["Write", "Ship2", "Fix"], ["done", "todo", "todo"], ["no", "yes", "yes"]]));
+    editBlock(a, id, before, writeGfmTable([["Write", "Ship2", "Fix"], ["done", "todo", "todo"], ["no", "yes", "yes"]]), { tableMapping: { rows: [0, 1, 2], columns: [0, 2, 3] } });
     expect(tableCellText(tableRows(element(a, id))[1]![1]!)).toBe(ship);
     syncDocs(a, b);
     expect(getBlockText(a, id)).toBe(getBlockText(b, id));
@@ -271,7 +433,7 @@ describe("structured table contract", () => {
       const ship = survivors[0]![2]![1]!;
       const remoteShip = survivors[1]![2]![1]!;
       remoteShip.insert(remoteShip.length, " (blocked)");
-      editBlock(a, id, before, writeGfmTable(nextRows));
+      editBlock(a, id, before, writeGfmTable(nextRows), { tableMapping: { rows: [0, 1, 2], columns: direction === "right" ? [0, null, 1] : [1, 2, null] } });
       for (let row = 0; row < rows.length; row += 1) {
         expect(tableCellText(tableRows(element(a, id))[row]![0]!)).toBe(survivors[0]![row]![0]);
         expect(tableCellText(tableRows(element(a, id))[row]![newStatus]!)).toBe(survivors[0]![row]![1]);
@@ -312,7 +474,7 @@ describe("structured table contract", () => {
       const survivors = [a, b].map((doc) => tableRows(element(doc, id)).map((row) => columns.map(([oldColumn]) => tableCellText(row[oldColumn]!)!)));
       const remoteNotes = survivors[1]![1]![1]!;
       remoteNotes.insert(remoteNotes.length, " (blocked)");
-      editBlock(a, id, before, writeGfmTable(nextRows));
+      editBlock(a, id, before, writeGfmTable(nextRows), { tableMapping: { rows: [0, null, 1, 2, 3], columns: [1, 2, null, 3] } });
       syncDocs(a, b);
       nextRows[2]![1] = "write notes (blocked)";
       expect(getBlockText(a, id)).toBe(writeGfmTable(nextRows));
@@ -330,7 +492,7 @@ describe("structured table contract", () => {
     } finally { a.destroy(); b.destroy(); }
   });
 
-  it("anchors a surviving row through unique cell text when rows and columns are replaced together", () => {
+  it("retains the explicitly mapped survivor when rows and columns are replaced together", () => {
     const before = writeGfmTable([["Task", "Status", "Notes", "Owner"],
       ["Write", "done", "write notes", "ann"], ["Test", "done", "test notes", "ann"], ["Ship", "todo", "ship notes", "ben"]]);
     const doc = seeded();
@@ -341,7 +503,7 @@ describe("structured table contract", () => {
       status.format(0, status.length, { bold: {} });
       const after = writeGfmTable([["Task", "Extra", "Status", "Owner"],
         ["Test", "new 1", "done", "ann"], ["New task", "new 2", "todo", "ann"], ["Ship", "new 3", "todo", "ben"]]);
-      editBlock(doc, id, before, after);
+      editBlock(doc, id, before, after, { tableMapping: { rows: [0, 2, null, 3], columns: [0, null, 1, 3] } });
       expect(getBlockText(doc, id)).toBe(after);
       expect(tableCellText(tableRows(element(doc, id))[1]![0]!)).toBe(task);
       expect(tableCellText(tableRows(element(doc, id))[1]![2]!)).toBe(status);
@@ -349,7 +511,7 @@ describe("structured table contract", () => {
     } finally { doc.destroy(); }
   });
 
-  it("matches rows through the surviving column instead of text in an inserted column", () => {
+  it("obeys the row mapping even when an inserted column repeats a removed row value", () => {
     const doc = seeded();
     try {
       const before = writeGfmTable([["Name"], ["Ann"], ["Benedict"]]);
@@ -357,7 +519,7 @@ describe("structured table contract", () => {
       const retained = tableCellText(tableRows(element(doc, id))[2]![0]!)!;
       retained.format(0, retained.length, { bold: {} });
       const after = writeGfmTable([["Owner", "Name"], ["Ann", "Benedict"]]);
-      editBlock(doc, id, before, after);
+      editBlock(doc, id, before, after, { tableMapping: { rows: [0, 2], columns: [null, 0] } });
       expect(getBlockText(doc, id)).toBe(after);
       expect(tableCellText(tableRows(element(doc, id))[1]![1]!)).toBe(retained);
       expect(retained.toDelta()).toEqual([{ insert: "Benedict", attributes: { bold: {} } }]);
@@ -381,7 +543,12 @@ describe("structured table contract", () => {
         });
         const after = writeGfmTable(next);
         const start = performance.now();
-        editBlock(doc, id, before, after);
+        const columnMapping: Array<number | null> = Array.from({ length: columns }, (_, column) => column);
+        if (edit !== "cell") {
+          if (edit === "replace") columnMapping.splice(4, 1);
+          columnMapping.splice(2, 0, null);
+        }
+        editBlock(doc, id, before, after, edit === "cell" ? {} : { tableMapping: { rows: values.map((_, row) => row), columns: columnMapping } });
         const elapsed = performance.now() - start;
         expect(elapsed).toBeLessThan(1000);
         expect(getBlockText(doc, id)).toBe(after);
@@ -424,7 +591,7 @@ describe("structured table contract", () => {
     }
     syncDocs(a, b);
     const observed = getBlockText(a, id);
-    editBlock(a, id, observed, observed.replace("agentA", "agentA updated").replace("|  |  |\n", "| Header |  |\n"));
+    editBlock(a, id, observed, observed.replace("agentA", "agentA updated").replace("|  |  |\n", "| Header |  |\n"), { tableMapping: { rows: [0, 1, 2], columns: [0, 1] } });
     syncDocs(a, b);
     // C's first write was absent when A edited the already-merged table.
     syncDocs(a, c);
@@ -470,8 +637,8 @@ describe("structured table contract", () => {
   it("converges a concurrent row addition and column addition without squaring or repair loops", () => {
     let id = "";
     const [a, b] = replicaPair((doc) => { initDoc(doc, { uuid: UUID, title: "Tables" }); id = appendBlock(doc, { type: "table", text: GFM }); });
-    editBlock(a, id, GFM, writeGfmTable([...CELLS, ["Added", "3"]]));
-    editBlock(b, id, GFM, writeGfmTable(CELLS.map((row) => [...row, "Column"])));
+    editBlock(a, id, GFM, writeGfmTable([...CELLS, ["Added", "3"]]), { tableMapping: { rows: [0, 1, 2, null], columns: [0, 1] } });
+    editBlock(b, id, GFM, writeGfmTable(CELLS.map((row) => [...row, "Column"])), { tableMapping: { rows: [0, 1, 2], columns: [0, 1, null] } });
     syncDocs(a, b);
     expect(tableRows(element(a, id)).map((row) => row.length)).toEqual([3, 3, 3, 2]);
     expect(getBlockText(a, id)).toBe(getBlockText(b, id));

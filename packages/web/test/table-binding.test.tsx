@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { appendBlock, editBlock, exportMarkdown, getBlocks, getBlocksFragment, getBlocksWithInline, initDoc, tableRows } from "@uberblick/schema";
+import { appendBlock, editBlock, exportMarkdown, getBlocks, getBlocksFragment, getBlocksWithInline, initDoc, tableCellText, tableRows, writeGfmTable } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import * as editorFactory from "../src/editor/create-editor.js";
@@ -140,6 +140,79 @@ it("keeps local paragraph splits and their undo while the page repairs remote du
   expect(page.host.querySelector(".ProseMirror")).not.toBeNull();
   act(() => { expect(editor.commands.keyboardShortcut("Mod-z")).toBe(true); });
   expect(getBlocks(ydoc).map((block) => ({ id: block.id, text: block.text }))).toEqual([{ id: original, text: "abcdef" }]);
+});
+
+it.each([false, true])("keeps guarded pages bound and delayed person text in its mapped surviving cell (column replacement: %s)", (replaceColumn) => {
+  const createEditor = vi.spyOn(editorFactory, "createUberblickEditor");
+  const beforeRows = replaceColumn
+    ? [["Task", "Status", "Notes", "Owner"], ["Write", "done", "write notes", "ann"], ["Test", "done", "test notes", "ann"], ["Ship", "todo", "ship notes", "ben"]]
+    : [["Task", "Status"], ["Write", "done"], ["Test", "done"]];
+  const nextRows = replaceColumn
+    ? [["Task", "Extra", "Status", "Owner"], ["New task", "new 1", "todo", "ann"], ["Wrote", "new 2", "done", "ann"], ["Ship", "new 3", "todo", "ben"]]
+    : [["Task", "Status"], ["New task", "todo"], ["Wrote", "done"]];
+  const source = writeGfmTable(beforeRows);
+  const seed = new Y.Doc(); initDoc(seed, { uuid: UUID, title: "Mapped cells" });
+  const id = appendBlock(seed, { type: "table", text: source });
+  const statusCell = (ydoc: Y.Doc, row: number, column: number): Y.XmlText =>
+    tableCellText(tableRows(getBlocksFragment(ydoc).get(0) as Y.XmlElement)[row]![column]!)!;
+  statusCell(seed, 1, 1).format(0, 4, { bold: {} });
+  const initial = Y.encodeStateAsUpdate(seed); seed.destroy();
+  const a = new Y.Doc(); const b = new Y.Doc();
+  Y.applyUpdate(a, initial); Y.applyUpdate(b, initial);
+  const pages = [fixture(LIVE, a), fixture(LIVE, b)];
+  const editors = createEditor.mock.results.map((result) => result.value as Editor);
+  const originalTexts = [statusCell(a, 1, 1), statusCell(b, 1, 1)];
+  const appendInCell = (editor: Editor, row: number, column: number, columns: number, text: string): void => {
+    let cellIndex = 0;
+    let position = 0;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name !== "tableHeader" && node.type.name !== "tableCell") return;
+      if (cellIndex++ === row * columns + column) position = pos + 2 + node.textContent.length;
+    });
+    expect(position).toBeGreaterThan(0);
+    editor.commands.setTextSelection(position);
+    editor.view.dispatch(editor.state.tr.insertText(text));
+  };
+  act(() => {
+    // The person writes through the actual guarded editor while its replica
+    // still holds the old rows and columns, before the agent edit reaches it.
+    appendInCell(editors[1]!, 1, 1, beforeRows[0]!.length, " (blocked)");
+    editBlock(a, id, source, writeGfmTable(nextRows), {
+      rev: getBlocks(a)[0]!.rev,
+      tableMapping: {
+        rows: replaceColumn ? [0, null, 1, 3] : [0, null, 1],
+        columns: replaceColumn ? [0, null, 1, 3] : [0, 1],
+      },
+    });
+  });
+  const targetColumn = replaceColumn ? 2 : 1;
+  expect(statusCell(a, 2, targetColumn)).toBe(originalTexts[0]);
+  const aWrite = Y.encodeStateAsUpdate(a); const bWrite = Y.encodeStateAsUpdate(b);
+  act(() => { Y.applyUpdate(a, bWrite); Y.applyUpdate(b, aWrite); });
+  nextRows[2]![targetColumn] = "done (blocked)";
+  for (const [index, page] of pages.entries()) {
+    expect(editors[index]!.isDestroyed).toBe(false);
+    expect(page.host.querySelector(".ProseMirror")).not.toBeNull();
+    expect(statusCell(page.ydoc, 2, targetColumn)).toBe(originalTexts[index]);
+    expect(statusCell(page.ydoc, 2, targetColumn).toDelta()).toEqual([{ insert: "done (blocked)", attributes: { bold: {} } }]);
+    expect(getBlocks(page.ydoc)[0]!.text).toBe(writeGfmTable(nextRows));
+    const table = page.host.querySelector(".ub-table")!;
+    const drawn = [...table.querySelectorAll("tr")].map((row) => [...row.querySelectorAll("th, td")].map((cell) => cell.textContent));
+    expect(drawn).toEqual(nextRows);
+    expect(exportMarkdown(page.ydoc, { frontmatter: false })).toContain("**done (blocked)**");
+  }
+  expect(getBlocks(a)).toEqual(getBlocks(b));
+  act(() => {
+    appendInCell(editors[1]!, 2, targetColumn, nextRows[0]!.length, "!");
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b));
+  });
+  expect(getBlocks(a)).toEqual(getBlocks(b));
+  expect(statusCell(a, 2, targetColumn)).toBe(originalTexts[0]);
+  expect(statusCell(a, 2, targetColumn).toDelta()).toEqual([{ insert: "done (blocked)!", attributes: { bold: {} } }]);
+  for (const [index, page] of pages.entries()) {
+    expect(editors[index]!.isDestroyed).toBe(false);
+    expect(page.host.querySelector(".ProseMirror")).not.toBeNull();
+  }
 });
 
 it.each(["person", "agent"] as const)(

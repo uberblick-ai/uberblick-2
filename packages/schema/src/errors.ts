@@ -24,6 +24,22 @@ export class InvalidTableError extends Error {
   }
 }
 
+/** Structural or batched table edits need the caller's surviving identities. */
+export class TableMappingRequiredError extends Error {
+  constructor() {
+    super("Table structure or multiple cell changes require a table mapping of surviving old rows and columns");
+    this.name = "TableMappingRequiredError";
+  }
+}
+
+/** The table mapping cannot describe this asserted old and requested new table. */
+export class InvalidTableMappingError extends Error {
+  constructor(reason: string) {
+    super(`Invalid table mapping: ${reason}`);
+    this.name = "InvalidTableMappingError";
+  }
+}
+
 /** New table threads await cell-text anchors; existing conversations remain usable. */
 export class TableAnnotationError extends Error {
   readonly blockId: string;

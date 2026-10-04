@@ -1748,8 +1748,24 @@ export function registerTools(
         "\n\n" +
         "`old_text` and `new_text` are the block text get_doc returns. For a table this is GFM: each must be " +
         "exactly one table, or `invalid_table` refuses the write. Alignment markers are accepted but not stored; " +
-        "inline markdown stays literal cell text. Table edits splice only changed cells and preserve untouched " +
-        "cells when rows or columns change. Other blocks use plain text with no markdown. " +
+        "inline markdown stays literal cell text. Table edits splice only changed cells. Without `table_mapping`, " +
+        "only a parsed no-op or exactly one positional cell change at unchanged dimensions is accepted. " +
+        "Structural and multi-cell edits require `table_mapping`, including an identity mapping for a positional batch; " +
+        "otherwise `table_mapping_required` refuses before any mutation.\n\n" +
+        "`table_mapping` applies only to tables and has both `rows` and `columns` arrays. Each new position names " +
+        "its surviving old zero-based GFM projection index, or null for a new row or column; omitted old indices " +
+        "are deleted. Rows include the header, and `rows[0]` must be 0. Array lengths must match the new table; " +
+        "non-null indices must be safe non-negative integers in old bounds, unique and strictly increasing. " +
+        "Body rows cannot reuse the header. If a retained ragged row selects only virtual empty padding, " +
+        "one fresh empty cell keeps that row editable; other padding stays virtual. Reordering is not supported. " +
+        "Untouched surviving shared cells keep their identity, " +
+        "formatting and delayed collaborator edits; null entries create fresh shared cells. An explicit nonidentity " +
+        "mapping executes even when the GFM text is unchanged. A semantically invalid mapping returns " +
+        "`invalid_table_mapping`; both mapping refusals have manual recovery and `applied: false`, " +
+        "`partial: false`, `synced: false`. Stale assertions retain precedence and invalid GFM remains `invalid_table`. " +
+        "Malformed input shapes are refused by the MCP input schema before the handler. Previously accepted " +
+        "structural and multi-cell table calls must now supply mappings as part of the coordinated table cutover. " +
+        "Other blocks use plain text with no markdown and reject `table_mapping`. " +
         "Spliced-in text inherits the formatting of the character to its left, and `rev` " +
         "ignores marks, so formatting a range never makes a prepared edit stale.\n\n" +
         "Pass `old_text` (and the `rev` from get_doc) to assert what you are editing. A mismatched asserted rev " +
@@ -1777,14 +1793,21 @@ export function registerTools(
           .min(1)
           .optional()
           .describe("The block's `rev` from get_doc. Asserted alongside old_text."),
+        table_mapping: z.object({
+          rows: z.array(z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable())
+            .describe("For each new row, its old projection index or null; includes header row 0."),
+          columns: z.array(z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable())
+            .describe("For each new column, its old projection index or null."),
+        }).strict().optional().describe("Explicit surviving table positions. Both arrays are required; omitted old positions are deleted."),
       }),
     },
-    guarded("edit_block", async ({ uuid, block_id, old_text, new_text, rev }) => {
+    guarded("edit_block", async ({ uuid, block_id, old_text, new_text, rev, table_mapping }) => {
       await replicas.settle();
       briefing.require();
       const replica = requireWritableDoc(uuid, true);
       editBlock(replica.doc, block_id, old_text, new_text, {
         ...(rev === undefined ? {} : { rev }),
+        ...(table_mapping === undefined ? {} : { tableMapping: table_mapping }),
       });
       replicas.publishCursor(replica, block_id, new_text.length);
       return json({

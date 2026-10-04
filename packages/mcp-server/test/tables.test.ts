@@ -196,6 +196,7 @@ describe("structured tables through MCP", () => {
     const changed = await rig.ok("edit_block", {
       uuid: created.uuid, block_id: id, old_text: GFM,
       new_text: "| Name | Extra | Value |\n| --- | --- | --- |\n| Alpha changed | New | Beta |", rev: unchanged.rev,
+      table_mapping: { rows: [0, 1], columns: [0, null, 1] },
     });
     expect(cell(doc, id, 1, 2)).toBe(beta);
     expect(beta.toDelta()).toEqual([{ insert: "Beta", attributes: { bold: true } }]);
@@ -227,6 +228,7 @@ describe("structured tables through MCP", () => {
       expect(read.rev).toBe(created.blocks[0].rev);
       const changed = await rig.ok("edit_block", {
         uuid: created.uuid, block_id: id, old_text: before, new_text: after, rev: read.rev,
+        table_mapping: { rows: [0, 1, 2], columns: [0, null, 1] },
       });
       expect(changed.block.text).toBe(after);
       expect(changed.block.rev).not.toBe(read.rev);
@@ -263,6 +265,208 @@ describe("structured tables through MCP", () => {
       expect(cell(doc, id, 2, 2)).toBe(ship);
       expect(ship.toDelta()).toEqual([{ insert: "todo (blocked)", attributes: { bold: {} } }]);
     } finally { remote.destroy(); }
+  });
+
+  it.each([
+    {
+      name: "reduced row replacement and rename",
+      before: [["Task", "Status"], ["Write", "done"], ["Test", "done"]],
+      next: [["Task", "Status"], ["New task", "todo"], ["Wrote", "done"]],
+      mapping: { rows: [0, null, 1], columns: [0, 1] },
+      targetColumn: 1,
+    },
+    {
+      name: "combined row and column replacement",
+      before: [["Task", "Status", "Notes", "Owner"], ["Write", "done", "write notes", "ann"],
+        ["Test", "done", "test notes", "ann"], ["Ship", "todo", "ship notes", "ben"]],
+      next: [["Task", "Extra", "Status", "Owner"], ["New task", "new 1", "todo", "ann"],
+        ["Write2", "new 2", "done", "ann"], ["Ship", "new 3", "todo", "ben"]],
+      mapping: { rows: [0, null, 1, 3], columns: [0, null, 1, 3] },
+      targetColumn: 2,
+    },
+  ])("preserves identity, marks and offline text in $name with explicit positions", async ({ before, next, mapping, targetColumn }) => {
+    const rig = await localRig();
+    const source = writeGfmTable(before);
+    const requested = writeGfmTable(next);
+    const created = await rig.ok("create_doc", {
+      title: "Explicit surviving cells", description: "The caller identifies the intended surviving row.",
+      blocks: [{ type: "table", text: source }],
+    });
+    const id = created.blocks[0].id;
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const original = cell(doc, id, 1, 1);
+    original.format(0, original.length, { bold: {} });
+    const remote = new Y.Doc();
+    try {
+      Y.applyUpdate(remote, Y.encodeStateAsUpdate(doc));
+      const remoteOriginal = cell(remote, id, 1, 1);
+      remoteOriginal.insert(remoteOriginal.length, " (blocked)");
+      const state = Y.encodeStateAsUpdate(doc);
+      let updates = 0;
+      const onUpdate = (): void => { updates += 1; };
+      doc.on("update", onUpdate);
+      const refused = await rig.call("edit_block", {
+        uuid: created.uuid, block_id: id, old_text: source, new_text: requested, rev: created.blocks[0].rev,
+      });
+      expect(refused.payload).toMatchObject({ error: "table_mapping_required", recoveryClass: "manual",
+        applied: false, partial: false, synced: false });
+      expect(refused.payload.recovery).toContain("table_mapping");
+      expect(updates).toBe(0);
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(state);
+      expect(cell(doc, id, 1, 1)).toBe(original);
+      doc.off("update", onUpdate);
+
+      const changed = await rig.ok("edit_block", {
+        uuid: created.uuid, block_id: id, old_text: source, new_text: requested, rev: created.blocks[0].rev,
+        table_mapping: mapping,
+      });
+      expect(changed.block.text).toBe(requested);
+      expect(cell(doc, id, 2, targetColumn)).toBe(original);
+      expect(original.toDelta()).toEqual([{ insert: "done", attributes: { bold: {} } }]);
+      const localUpdate = Y.encodeStateAsUpdate(doc);
+      const remoteUpdate = Y.encodeStateAsUpdate(remote);
+      Y.applyUpdate(doc, remoteUpdate); Y.applyUpdate(remote, localUpdate);
+      next[2]![targetColumn] = "done (blocked)";
+      const merged = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
+      expect(merged.text).toBe(writeGfmTable(next));
+      expect(cell(doc, id, 2, targetColumn)).toBe(original);
+      expect(cell(remote, id, 2, targetColumn)).toBe(remoteOriginal);
+      expect(original.toDelta()).toEqual([{ insert: "done (blocked)", attributes: { bold: {} } }]);
+      expect(remoteOriginal.toDelta()).toEqual(original.toDelta());
+      expect((await rig.ok("export_markdown", { uuid: created.uuid, frontmatter: false })).markdown)
+        .toContain("**done (blocked)**");
+      expect(cell(doc, id, 1, targetColumn).toString()).toBe("todo");
+    } finally { remote.destroy(); }
+  });
+
+  it("refuses invalid table mappings before a write, after checking stale assertions and GFM", async () => {
+    const rig = await localRig();
+    const source = writeGfmTable([["Task", "Status"], ["Write", "done"], ["Test", "done"]]);
+    const created = await rig.ok("create_doc", {
+      title: "Mapping validation", description: "Semantic mapping errors never write.",
+      blocks: [{ type: "table", text: source }, { type: "paragraph", text: "Plain text" }],
+    });
+    const id = created.blocks[0].id;
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const state = Y.encodeStateAsUpdate(doc);
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    const args = { uuid: created.uuid, block_id: id, old_text: source, new_text: source, rev: created.blocks[0].rev };
+    for (const mapping of [
+      { rows: [0, 1], columns: [0, 1] },
+      { rows: [0, 1, 2], columns: [0] },
+      { rows: [null, 1, 2], columns: [0, 1] },
+      { rows: [0, 0, 2], columns: [0, 1] },
+      { rows: [0, 1, 1], columns: [0, 1] },
+      { rows: [0, 2, 1], columns: [0, 1] },
+      { rows: [0, 1, 3], columns: [0, 1] },
+      { rows: [0, 1, 2], columns: [1, 0] },
+      { rows: [0, 1, 2], columns: [0, 2] },
+    ]) {
+      const refused = await rig.call("edit_block", { ...args, table_mapping: mapping });
+      expect(refused.payload).toMatchObject({ error: "invalid_table_mapping", recoveryClass: "manual",
+        applied: false, partial: false, synced: false });
+      expect(refused.payload.recovery).toContain("table_mapping");
+    }
+    const invalid = { rows: [0], columns: [0] };
+    const stale = await rig.call("edit_block", { ...args, rev: "stale", table_mapping: invalid });
+    expect(stale.payload.error).toBe("stale_block");
+    const mismatch = await rig.call("edit_block", { ...args, old_text: source.replace("Write", "Wrong"), table_mapping: invalid });
+    expect(mismatch.payload.error).toBe("old_text_mismatch");
+    const badGfm = await rig.call("edit_block", { ...args, new_text: "not a table", table_mapping: invalid });
+    expect(badGfm.payload.error).toBe("invalid_table");
+    const nonTable = await rig.call("edit_block", {
+      uuid: created.uuid, block_id: created.blocks[1].id, old_text: "Plain text", new_text: "Changed",
+      table_mapping: invalid,
+    });
+    expect(nonTable.payload).toMatchObject({ error: "invalid_table_mapping", recoveryClass: "manual",
+      applied: false, partial: false, synced: false });
+    expect(updates).toBe(0);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(state);
+  });
+
+  it("accepts ordinary cell edits and explicit positional batches without guessing structure", async () => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", {
+      title: "Cell edit compatibility", description: "One cell keeps its ordinary path; batches identify positions.",
+      blocks: [{ type: "table", text: GFM }],
+    });
+    const id = created.blocks[0].id;
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const beta = cell(doc, id, 1, 1);
+    beta.format(0, beta.length, { italic: {} });
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    const noop = await rig.ok("edit_block", { uuid: created.uuid, block_id: id, old_text: GFM,
+      new_text: GFM.replace("---", ":---"), rev: created.blocks[0].rev });
+    expect(noop.block.rev).toBe(created.blocks[0].rev);
+    expect(updates).toBe(0);
+    const batch = GFM.replace("Alpha", "Alpha2").replace("Beta", "Beta2");
+    const refused = await rig.call("edit_block", { uuid: created.uuid, block_id: id, old_text: GFM, new_text: batch });
+    expect(refused.payload.error).toBe("table_mapping_required");
+    expect(updates).toBe(0);
+    const changed = await rig.ok("edit_block", { uuid: created.uuid, block_id: id, old_text: GFM, new_text: batch,
+      table_mapping: { rows: [0, 1], columns: [0, 1] } });
+    expect(changed.block.text).toBe(batch);
+    expect(cell(doc, id, 1, 1)).toBe(beta);
+    const single = await rig.ok("edit_block", { uuid: created.uuid, block_id: id, old_text: batch,
+      new_text: batch.replace("Alpha2", "Alpha3"), rev: changed.block.rev });
+    expect(single.block.text).toContain("Alpha3");
+    expect(cell(doc, id, 1, 1)).toBe(beta);
+    expect(beta.toDelta()).toEqual([{ insert: "Beta2", attributes: { italic: {} } }]);
+  });
+
+  it("advertises a strict optional mapping and refuses malformed shapes at the MCP boundary", async () => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", {
+      title: "Mapping input", description: "The advertised schema and actual input boundary agree.",
+      blocks: [{ type: "table", text: GFM }],
+    });
+    const tool = (await rig.client.listTools()).tools.find(tool => tool.name === "edit_block")!;
+    expect(tool.description).toContain("table_mapping_required");
+    expect(tool.description).toContain("invalid_table_mapping");
+    const mappingSchema = (tool.inputSchema.properties as Record<string, any>).table_mapping;
+    expect(mappingSchema.additionalProperties).toBe(false);
+    expect(mappingSchema.required).toEqual(["rows", "columns"]);
+    expect(tool.inputSchema.required).not.toContain("table_mapping");
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const state = Y.encodeStateAsUpdate(doc);
+    for (const mapping of [
+      { rows: [0, 1] }, { columns: [0, 1] },
+      { rows: [0, 1], columns: [0, 1], force: true },
+      { rows: [0, -1], columns: [0, 1] },
+      { rows: [0, 1.5], columns: [0, 1] },
+      { rows: [0, Number.MAX_SAFE_INTEGER + 1], columns: [0, 1] },
+      { rows: [0, "1"], columns: [0, 1] }, null,
+    ]) {
+      const refused = await rig.call("edit_block", {
+        uuid: created.uuid, block_id: created.blocks[0].id, old_text: GFM, new_text: GFM, table_mapping: mapping,
+      });
+      expect(refused.isError).toBe(true);
+      expect(refused.payload.error).toBe("schema_validation");
+    }
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(state);
+  });
+
+  it("executes an explicit replacement mapping even when GFM text is identical", async () => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", {
+      title: "Explicit identical replacement", description: "Text equality does not override the caller's identities.",
+      blocks: [{ type: "table", text: GFM }],
+    });
+    const id = created.blocks[0].id;
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const oldText = cell(doc, id, 1, 1);
+    oldText.format(0, oldText.length, { bold: {} });
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    const changed = await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
+      old_text: GFM, new_text: GFM, rev: created.blocks[0].rev,
+      table_mapping: { rows: [0, null], columns: [0, 1] } });
+    expect(changed.block.text).toBe(GFM);
+    expect(updates).toBeGreaterThan(0);
+    expect(cell(doc, id, 1, 1)).not.toBe(oldText);
+    expect(cell(doc, id, 1, 1).toDelta()).toEqual([{ insert: "Beta" }]);
   });
 
   it("pads ragged tables for reads and lets an agent fill a projected empty cell", async () => {

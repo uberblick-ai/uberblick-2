@@ -104,7 +104,7 @@ export {
   isSupportedTable, parseGfmTable, parseTableInput, plainXmlText,
   seedNewTableCells, tableCellText, tableCellTexts, tableRows, tableText, writeGfmTable,
 } from "./table.js";
-export type { ColumnAlign, GfmTable } from "./table.js";
+export type { ColumnAlign, GfmTable, TableMapping } from "./table.js";
 
 export { exportMarkdown, importMarkdown } from "./markdown.js";
 export type {
@@ -217,6 +217,8 @@ export {
   OldTextMismatchError,
   StaleBlockError,
   InvalidTableError,
+  InvalidTableMappingError,
+  TableMappingRequiredError,
   TableAnnotationError,
 } from "./errors.js";
 export type {

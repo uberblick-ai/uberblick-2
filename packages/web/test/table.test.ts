@@ -420,7 +420,9 @@ describe("the table block", () => {
       ea.commands.setTextSelection(ea.state.doc.content.size - 4);
       expect(ea.commands.keyboardShortcut("Tab")).toBe(true);
       expect(drawn(ea)).toHaveLength(3);
-      editBlock(b, id, source, "| name | count | extra |\n| --- | --- | --- |\n| alpha | one | new |" );
+      editBlock(b, id, source, "| name | count | extra |\n| --- | --- | --- |\n| alpha | one | new |", {
+        tableMapping: { rows: [0, 1], columns: [0, 1, null] },
+      });
       const ua = Y.encodeStateAsUpdate(a); const ub = Y.encodeStateAsUpdate(b);
       Y.applyUpdate(a, ub); Y.applyUpdate(b, ua);
       const expected = [["name", "count", "extra"], ["alpha", "one", "new"], ["", ""]];

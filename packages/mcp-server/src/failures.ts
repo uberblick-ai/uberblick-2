@@ -58,11 +58,13 @@ import {
   ConflictingLinkMarksError,
   InvalidDocumentLifecycleError,
   InvalidTableError,
+  InvalidTableMappingError,
   InvalidTagAssignmentError,
   InlineLinkRangeError,
   OldTextMismatchError,
   StaleBlockError,
   TableAnnotationError,
+  TableMappingRequiredError,
 } from "@uberblick/schema";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
@@ -169,6 +171,16 @@ const RECOVERIES: Record<string, Recovery> = {
     recoveryClass: "manual",
     guidance:
       "Supply exactly one GFM table, with a header and matching delimiter row, then call again. Alignment markers are accepted but not stored; inline markdown remains literal cell text.",
+  },
+  table_mapping_required: {
+    recoveryClass: "manual",
+    guidance:
+      "Supply table_mapping with rows and columns naming the surviving old projection indices, or null for new positions. Include header row 0; an identity map supports a positional multi-cell batch. No table change was written.",
+  },
+  invalid_table_mapping: {
+    recoveryClass: "manual",
+    guidance:
+      "Correct table_mapping for this table: match the new dimensions, keep header row 0, and use unique increasing old indices in bounds or null for new positions. No table change was written.",
   },
   table_comments_unavailable: {
     recoveryClass: "manual",
@@ -504,6 +516,12 @@ function stamped(
  * caller can re-diff and retry without another round trip.
  */
 export function toFailure(tool: string, error: unknown): CallToolResult {
+  if (error instanceof TableMappingRequiredError) {
+    return stamped(tool, { error: "table_mapping_required", message: error.message });
+  }
+  if (error instanceof InvalidTableMappingError) {
+    return stamped(tool, { error: "invalid_table_mapping", message: error.message });
+  }
   if (error instanceof InvalidTableError) {
     return stamped(tool, { error: "invalid_table", message: error.message });
   }

@@ -34,6 +34,7 @@ import {
   ConflictingLinkMarksError,
   InlineLinkRangeError,
   InvalidDocLinkTargetError,
+  InvalidTableMappingError,
   MarksNotAllowedError,
   OldTextMismatchError,
   StaleBlockError,
@@ -48,6 +49,7 @@ import {
 import { blockRev } from "./rev.js";
 import { canonicalDocumentUuid } from "./rooms.js";
 import { buildTableElement, editTable, parseGfmTable, parseTableInput, tableCellTexts, tableRows, tableText } from "./table.js";
+import type { TableMapping } from "./table.js";
 import {
   MAX_LIST_INDENT,
   isBlockType,
@@ -662,6 +664,8 @@ export interface EditBlockOptions {
    * (a heading level, a code language) is enough to invalidate it.
    */
   rev?: string;
+  /** Surviving old GFM positions, or null for newly created rows and columns. */
+  tableMapping?: TableMapping;
 }
 
 /**
@@ -733,10 +737,10 @@ export function editBlock(
     if (current.type === "table") {
       const parsedOld = parseTableInput(oldText);
       const parsedNew = parseTableInput(newText);
-      if (oldText === newText) return;
-      editTable(element, parsedOld, parsedNew);
+      editTable(element, parsedOld, parsedNew, options.tableMapping);
       return;
     }
+    if (options.tableMapping !== undefined) throw new InvalidTableMappingError("mapping applies only to a table block");
     if (oldText === newText) return;
 
     const text = requireBlockText(ydoc, element, blockId);
