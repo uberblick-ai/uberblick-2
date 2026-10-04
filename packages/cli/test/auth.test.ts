@@ -9,7 +9,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createHub, type Hub } from "@uberblick/hub";
+import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { authenticationOrigin } from "../src/auth.js";
+import { resolveConfig } from "../src/config.js";
 import {
   DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox, sleep, UB_BIN, waitUntil,
   type Run, type Sandbox,
@@ -339,6 +342,33 @@ describe("ub auth local selection and command surface", () => {
 });
 
 describe("hub-driven CLI GitHub sign-in", () => {
+  it("keeps live sync disabled with a stored login alone and does not export its key", async () => {
+    const login = fixture();
+    const box = sandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      credentials: { hubLogins: { [authenticationOrigin(DEAD_HUB_URL)]: login } },
+    });
+    const resolved = resolveConfig({ env: box.env });
+    const config = resolveMcpConfig(resolved.env);
+    expect(config.authSecret).toBeNull();
+    expect(config.deviceLogin).toBeUndefined();
+    expect(Object.values(resolved.env).every((value) => !value?.includes(login.credential.key)),
+      "the child environment contains no stored device key").toBe(true);
+    expect(JSON.stringify(config).includes(login.credential.key),
+      "MCP configuration contains no stored device key").toBe(false);
+
+    const status = await runUbAsync(["status", "--json"], box);
+    expect(status.status, status.stderr).toBe(0);
+    const report = JSON.parse(status.stdout);
+    expect(report.credentialPresent).toBe(false);
+    expect(report.hub.status).toBe("disabled");
+    const snippet = await runUbAsync(["mcp", "install", "zed", "--print"], box);
+    expect(snippet.status, snippet.stderr).toBe(0);
+    for (const output of [status.output, snippet.output, readFileSync(configPath(box), "utf8")]) {
+      expect(output.includes(login.credential.key), "the device key stays in its owner-only store").toBe(false);
+    }
+  });
+
   it("stores identity and every issued workspace privately, preserves binding and other hubs, and remains unused", async () => {
     const remote = await rig([WORKSPACE, OTHER_WORKSPACE]);
     const other = fixture([]);

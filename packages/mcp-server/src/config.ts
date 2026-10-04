@@ -60,6 +60,13 @@ export interface McpConfig {
    * in which case hub sync is disabled and every tool still works.
    */
   authSecret: string | null;
+  /**
+   * Inactive device-login composition. Only programmatic callers can select
+   * it until the coordinated remote cutover; configuration resolution and
+   * every live entry point leave it absent. The process reads the private
+   * credential store itself, never a key supplied in configuration.
+   */
+  deviceLogin?: { env?: NodeJS.ProcessEnv };
   /** SQLite file holding the update log, snapshots and the derived index. */
   databasePath: string;
   /** This process's agent session id. Becomes the token's `sub`. */
@@ -156,7 +163,8 @@ const USER_CONFIG_FILE = "config.json";
  * re-bind needs.
  *
  * The path is a directory and a filename and never a secret: the signing
- * secret lives in `credentials.json`, which nothing here opens or names.
+ * secret lives in `credentials.json`, which configuration never opens. The
+ * separately composed device sync path reads that store directly.
  */
 function missingWorkspace(env: NodeJS.ProcessEnv): string {
   const path = join(resolveStorage({ env }).configDir, USER_CONFIG_FILE);
