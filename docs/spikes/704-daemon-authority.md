@@ -14,7 +14,7 @@ artifact, not a topology failure. The driver placed the caret with three clicks
 at the same coordinate inside ProseMirror's 500 ms multi-click window; the
 third selected the whole paragraph, and the next keystroke replaced it. The
 root-cause report and keyboard-placement control are in `proof-0b-report.md` on
-`spike/recut-proofs` at `7e27d4d`. A forced local log refusal did expose a
+the tag `archive/spike/recut-proofs` at `7e27d4d`. A forced local log refusal did expose a
 separate race in one of the two runs: the tool returned `applied: false`, but
 the rejected in-memory update had already propagated upstream and reappeared
 after restart. That finding stands. Cold start also missed its provisional bar
@@ -26,7 +26,7 @@ service-manager recommendation.
 ## Reproduction artifact
 
 The disposable implementation and driver are intentionally unmerged. They are
-pushed on `spike/704-daemon-authority-harness` at commit
+kept under the tag `archive/spike/704-daemon-authority-harness` at commit
 [`9451ad4eca332c5b7e7c4c5f49d9ffd9702d14b9`](https://github.com/uberblick-ai/uberblick-2/commit/9451ad4eca332c5b7e7c4c5f49d9ffd9702d14b9).
 To reproduce from that exact artifact:
 

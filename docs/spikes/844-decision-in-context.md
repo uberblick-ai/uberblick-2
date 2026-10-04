@@ -16,8 +16,8 @@ chrome belongs in the compact container.
 ## Reproduction artifact
 
 The disposable implementation and its browser proof are intentionally
-unmerged. They are retained on
-`spike/844-decision-in-context-prototype` at commit
+unmerged. They are kept under the tag
+`archive/spike/844-decision-in-context-prototype` at commit
 [`d61323b184a5db325022ccb561ba0f06ef362f94`](https://github.com/uberblick-ai/uberblick-2/commit/d61323b184a5db325022ccb561ba0f06ef362f94).
 To reproduce from that exact artifact:
 
