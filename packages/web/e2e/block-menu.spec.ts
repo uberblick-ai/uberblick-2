@@ -1,23 +1,24 @@
 /**
- * The three block-creation paths, in a real browser.
+ * Block-menu layout and real input delivery, in a browser.
  *
- * Only what jsdom structurally cannot answer belongs here. The document
- * outcomes — what a conversion does to a block id, what an insertion does to
- * the fragment, what Esc leaves behind — are pinned in `test/block-menu.test.tsx`
- * and `test/input-rules.test.ts` against a real Y.Doc and are not repeated. What
- * is left needs layout and real key events:
+ * Document and menu state belong in `test/block-menu.test.tsx`,
+ * `test/input-rules.test.ts`, `test/list-keys.test.ts` and `test/list-a11y.test.ts`.
+ * Real input keeps one end-state witness here, without replaying those state
+ * sequences. The browser owns:
  *
  * - the gutter `+` revealing on hover *without moving the prose*, which is a
  *   claim about pixels and can only be measured where there are pixels;
  * - the pointer's route onto that `+`, which is a claim about which element is
  *   under every pixel on the way — `hover()` and `click()` both jump straight
  *   onto their target, so only a stepped move asks the question;
- * - the three gestures end to end through the browser's own event plumbing —
- *   typed keys reaching ProseMirror, a click reaching the menu, and a markdown
- *   prefix reaching `handleTextInput`, which only a real keystroke does;
+ * - a real click reaching the menu, real typing reaching an input rule, and
+ *   Tab leaving both focus and the caret in a list item;
  * - the arrow keys keeping the highlighted entry inside a list that is taller
  *   than its viewport, which is a claim about a scroll container and the boxes
  *   inside it — jsdom measures every one of them as zero.
+ *
+ * The annotated slash-heading scenario and the table source/drawing proof are
+ * retained under their separate contracts (#668 and #1095).
  */
 
 import { expect, test } from "@playwright/test";
@@ -218,26 +219,8 @@ test("the pointer can walk from the prose onto the gutter + and press it", async
   await page.mouse.down();
   await page.mouse.up();
   await page.getByRole("option", { name: "Heading 2" }).click();
-  await expect(blocks(page)).toHaveCount(2);
   await page.keyboard.type("second", { delay: 15 });
   await expect(blocks(page).nth(1)).toHaveText("second");
-});
-
-test("the gutter + inserts the chosen block below, with the caret in it", async ({
-  page,
-}) => {
-  await openDoc(page, "first");
-
-  await blocks(page).first().hover();
-  await page.getByRole("button", { name: "Insert block below" }).click();
-  await page.getByRole("option", { name: "Heading 2" }).click();
-
-  await expect(blocks(page)).toHaveCount(2);
-  // The caret landed in the new block: typing goes there and nowhere else.
-  await page.keyboard.type("second", { delay: 15 });
-  await expect(blocks(page).nth(0)).toHaveText("first");
-  await expect(blocks(page).nth(1)).toHaveText("second");
-  expect(await blocks(page).nth(1).evaluate((node) => node.tagName)).toBe("H2");
 });
 
 /**
@@ -296,14 +279,13 @@ async function listGeometry(page: Page) {
 type Geometry = Awaited<ReturnType<typeof listGeometry>>;
 
 /** The highlighted entry, whole and inside the list's viewport. */
-function visibleSelection(geometry: Geometry): string {
+function visibleSelection(geometry: Geometry): void {
   const entry = geometry.entries.find((candidate) => candidate.selected);
   if (entry === undefined) throw new Error("e2e: no entry is highlighted");
   // A pixel of slack: scroll offsets are subpixel, and so is the arithmetic
   // that produced them.
   expect(entry.top).toBeGreaterThanOrEqual(geometry.top - 1);
   expect(entry.bottom).toBeLessThanOrEqual(geometry.bottom + 1);
-  return entry.label;
 }
 
 /**
@@ -339,7 +321,7 @@ test("arrow keys keep the highlighted block type in view, and move nothing else"
   for (let step = 1; step < shown; step += 1) await page.keyboard.press("ArrowDown");
   const atFold = await listGeometry(page);
   expect(atFold.scrollTop).toBe(0);
-  expect(visibleSelection(atFold)).toBe(start.entries[shown - 1]?.label);
+  visibleSelection(atFold);
 
   // One more, onto the first entry below the fold. The list moves by exactly
   // what that entry needed and no further: its bottom edge lands on the
@@ -347,23 +329,22 @@ test("arrow keys keep the highlighted block type in view, and move nothing else"
   await page.keyboard.press("ArrowDown");
   const revealed = await listGeometry(page);
   const entry = revealed.entries.find((candidate) => candidate.selected);
-  expect(visibleSelection(revealed)).toBe(start.entries[shown]?.label);
+  visibleSelection(revealed);
   expect(entry?.bottom).toBeCloseTo(revealed.bottom, 0);
 
-  // On to the end, then past it: Down from the last entry wraps to the first,
-  // which is now above the viewport, and Up from there wraps back.
+  // Walk to the bottom, then make the highlighted entry cross the viewport in
+  // each direction. The wrap-around identities are jsdom state contracts;
+  // revealing their boxes is the browser's job.
   const remaining = start.entries.length - 1 - shown;
   for (let step = 0; step < remaining; step += 1) await page.keyboard.press("ArrowDown");
   const last = await listGeometry(page);
-  expect(visibleSelection(last)).toBe(start.entries[start.entries.length - 1]?.label);
+  expect(last.scrollTop).toBeGreaterThan(0);
+  visibleSelection(last);
 
   await page.keyboard.press("ArrowDown");
-  const wrapped = await listGeometry(page);
-  expect(visibleSelection(wrapped)).toBe(start.entries[0]?.label);
-
+  visibleSelection(await listGeometry(page));
   await page.keyboard.press("ArrowUp");
-  const back = await listGeometry(page);
-  expect(visibleSelection(back)).toBe(start.entries[start.entries.length - 1]?.label);
+  visibleSelection(await listGeometry(page));
 
   // Revealing an entry moves the list and nothing else: the menu keeps its
   // place at the caret, the prose under it has not moved, and the keys are
@@ -374,15 +355,13 @@ test("arrow keys keep the highlighted block type in view, and move nothing else"
     focusBefore,
   );
 
-  // And a menu opened again starts at the top, rather than wearing the scroll
-  // the last one ended on.
+  // A reopened menu discards the previous list's scroll position.
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("listbox", { name: "Block types" })).toHaveCount(0);
   await page.keyboard.press("Backspace");
   await page.keyboard.type("/", { delay: 15 });
   const reopened = await listGeometry(page);
   expect(reopened.scrollTop).toBe(0);
-  expect(visibleSelection(reopened)).toBe(start.entries[0]?.label);
+  visibleSelection(reopened);
 });
 
 /**
@@ -399,7 +378,6 @@ test("the gutter menu reveals with the keyboard, and scrolls for no pointer", as
 
   const start = await listGeometry(page);
   const search = page.getByRole("combobox", { name: "Search blocks" });
-  await expect(search).toBeFocused();
 
   /** The middle of an entry's visible part, in page coordinates. */
   async function over(entry: Geometry["entries"][number], view: Geometry) {
@@ -411,14 +389,12 @@ test("the gutter menu reveals with the keyboard, and scrolls for no pointer", as
     };
   }
 
-  // The pointer takes the entry it is on, and takes nothing else with it.
+  // Put the pointer over the first visible entry, then leave it there while
+  // the list scrolls. Ordinary pointer highlighting is held in jsdom.
   const first = start.entries[0];
   if (first === undefined) throw new Error("e2e: the list is empty");
   const rest = await over(first, start);
   await page.mouse.move(rest.x, rest.y);
-  const pointed = await listGeometry(page);
-  expect(pointed.scrollTop).toBe(0);
-  expect(visibleSelection(pointed)).toBe(first.label);
 
   // Now the hand stays exactly there while the keys walk past the fold. The
   // scroll that reveals the entry slides a *different* entry under the
@@ -430,7 +406,12 @@ test("the gutter menu reveals with the keyboard, and scrolls for no pointer", as
   }
   const walked = await listGeometry(page);
   expect(walked.scrollTop).toBeGreaterThan(0);
-  expect(visibleSelection(walked)).toBe(start.entries[start.entries.length - 1]?.label);
+  visibleSelection(walked);
+  // A real scroll must not let the entry newly under the stationary pointer
+  // steal the keyboard's selection. This is its one end-state witness.
+  expect(walked.entries.find((entry) => entry.selected)?.label).toBe(
+    start.entries[start.entries.length - 1]?.label,
+  );
 
   // A list that has scrolled leaves an entry half shown at the top edge; the
   // pointer takes that one too, and still moves nothing.
@@ -442,59 +423,36 @@ test("the gutter menu reveals with the keyboard, and scrolls for no pointer", as
   expect(hovered.scrollTop).toBe(walked.scrollTop);
   expect(hovered.entries.find((entry) => entry.selected)?.label).toBe(edge.label);
 
-  // The keys have not left the search field through any of it.
-  await expect(search).toBeFocused();
-
-  // Filtering makes a different list, so the highlight goes back to its first
-  // entry — and the scroll position from the list before it goes with it.
+  // Filtering discards the old list's scroll position. Its entries and initial
+  // selection are state contracts held in jsdom.
   await search.fill("he");
   const filtered = await listGeometry(page);
-  expect(filtered.entries).toHaveLength(3);
   expect(filtered.scrollTop).toBe(0);
-  expect(visibleSelection(filtered)).toBe(filtered.entries[0]?.label);
+  visibleSelection(filtered);
 });
 
 /**
- * The third path. This one is here rather than only in jsdom because the rule
- * hangs off `handleTextInput`, which is reached from the browser's own
- * `beforeinput`/`keypress` plumbing — a dispatched transaction never gets near
- * it, so a real keyboard is the only honest proof that a reader typing `## `
- * gets a heading.
+ * jsdom calls `handleTextInput` directly and proves the rule's document
+ * invariants and undo. A real keystroke also has to reach it through the
+ * browser's input/DOM-change route; the resulting H2 is that route's witness.
  */
-test("typing ## converts the block in place, and one undo gives it back", async ({
+test("real typing reaches the heading input rule", async ({
   page,
 }) => {
   await openDoc(page, "first");
   await page.keyboard.press("Enter");
 
   const second = blocks(page).nth(1);
-  const id = await second.getAttribute("id");
-  expect(id).not.toBeNull();
-
   await page.keyboard.type("## ", { delay: 15 });
   expect(await second.evaluate((node) => node.tagName)).toBe("H2");
-  // The same block, not a new one wearing the same place: the id is the
-  // invariant, and a node-replacing input rule would have churned it.
-  await expect(second).toHaveAttribute("id", id ?? "");
-  await expect(second).toHaveText("");
-
-  // Undo is one step, and it lands on the typing rather than on an empty block:
-  // this is how a reader writes a literal "## ".
-  await page.keyboard.press("ControlOrMeta+z");
-  expect(await second.evaluate((node) => node.tagName)).toBe("P");
-  // `textContent`, not `toHaveText`: the trailing space is the whole point, and
-  // `toHaveText` normalises whitespace away.
-  expect(await second.textContent()).toBe("## ");
-  await expect(second).toHaveAttribute("id", id ?? "");
 });
 
 /**
- * The list keyboard, and Tab in particular. In a browser Tab moves focus — so
- * the proof that it indents the item instead, leaving the caret where it was,
- * is a claim about a real focus model that jsdom cannot make. The rest of the
- * list rules are pinned in `test/list-keys.test.ts` against a real Y.Doc.
+ * In a browser Tab normally moves focus. Here it leaves focus and the caret in
+ * the typed list item; typing on is the witness. The depth change, document
+ * identity and ARIA state are held in jsdom.
  */
-test("typing - starts a list, and Tab indents the item rather than leaving it", async ({
+test("real Tab keeps focus and the caret in the typed list item", async ({
   page,
 }) => {
   await openDoc(page, "first");
@@ -506,33 +464,11 @@ test("typing - starts a list, and Tab indents the item rather than leaving it", 
   await page.keyboard.press("Tab");
 
   const items = page.locator(".ub-editor .ProseMirror > li");
-  await expect(items).toHaveCount(2);
-  await expect(items.nth(0)).toHaveAttribute("data-indent", "0");
-  await expect(items.nth(1)).toHaveAttribute("data-indent", "1");
-
-  // Two items, two blocks, two ids — each of them addressable on its own.
-  const first = await items.nth(0).getAttribute("id");
-  const second = await items.nth(1).getAttribute("id");
-  expect(first).not.toBeNull();
-  expect(second).not.toBe(first);
+  await expect(page.locator(".ub-editor .ProseMirror")).toBeFocused();
 
   // And the caret is still in the item Tab indented: typing carries on there.
   await page.keyboard.type("!", { delay: 15 });
   await expect(items.nth(1)).toHaveText("b!");
-
-  // The two blocks are lists for a screen reader (#227): a container per set,
-  // and each item levelled and counted where it sits. Tab made the second item
-  // a nested set of its own, so it is a list of its own — the attributes are
-  // pinned in `test/list-a11y.test.ts`; what a browser adds is that they
-  // survive a list built by typing, in the live editor.
-  const lists = page.locator(".ub-editor .ProseMirror [role=list]");
-  await expect(lists).toHaveCount(2);
-  await expect(lists.nth(0)).toHaveAttribute("aria-owns", first ?? "");
-  await expect(lists.nth(1)).toHaveAttribute("aria-owns", second ?? "");
-  await expect(items.nth(0)).toHaveAttribute("aria-level", "1");
-  await expect(items.nth(0)).toHaveAttribute("aria-setsize", "1");
-  await expect(items.nth(1)).toHaveAttribute("aria-level", "2");
-  await expect(items.nth(1)).toHaveAttribute("aria-posinset", "1");
 });
 
 /**

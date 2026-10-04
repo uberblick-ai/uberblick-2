@@ -288,7 +288,7 @@ describe("the slash trigger", () => {
 });
 
 describe("the slash menu", () => {
-  it("identifies the highlighted option from the prose until the menu closes", () => {
+  it("identifies the highlighted option, wrapping at both ends, until the menu closes", () => {
     const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
     const { editor, query, press, unmount } = mountMenu(ydoc);
     try {
@@ -303,6 +303,17 @@ describe("the slash menu", () => {
       expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(
         options[0]?.id,
       );
+      // Up from the first wraps to the last; Down from the last wraps back.
+      press("ArrowUp");
+      expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(
+        options.at(-1)?.id,
+      );
+      expect(options.at(-1)?.getAttribute("aria-selected")).toBe("true");
+      press("ArrowDown");
+      expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(
+        options[0]?.id,
+      );
+      expect(options[0]?.getAttribute("aria-selected")).toBe("true");
 
       press("ArrowDown");
       expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(
@@ -323,6 +334,17 @@ describe("the slash menu", () => {
       press("Escape");
       expect(editor.view.dom.hasAttribute("aria-activedescendant")).toBe(false);
       expect(editor.view.dom.hasAttribute("aria-controls")).toBe(false);
+
+      // Reopen the same query after a non-first selection: the previous menu's
+      // position must not become this menu's initial selection.
+      act(() => {
+        editor.commands.setContent("");
+      });
+      caret(editor, 0, 0);
+      type(editor, "/");
+      const first = query<HTMLElement>('[role="option"]');
+      expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(first?.id);
+      expect(first?.getAttribute("aria-selected")).toBe("true");
     } finally {
       unmount();
     }
@@ -998,6 +1020,15 @@ describe("the gutter menu", () => {
       expect(mounted.editor.view.dom.hasAttribute("aria-activedescendant")).toBe(
         false,
       );
+
+      // Filtering replaces the list and resets the pointer's remembered index.
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, "he");
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const filteredFirst = mounted.query<HTMLElement>('[role="option"]');
+      expect(field.getAttribute("aria-activedescendant")).toBe(filteredFirst?.id);
+      expect(filteredFirst?.getAttribute("aria-selected")).toBe("true");
 
       act(() => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, "nope");
