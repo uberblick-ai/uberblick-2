@@ -1,6 +1,6 @@
 # Re-cut proofs — local-first per identity (2026-09-02/03)
 
-The consolidated report of the proofs behind the corpus decision record *Local-first per identity* (`2542cd66-b641-4900-96b4-5c461dcdcf65`). Everything ran locally as throwaway code. The full reports, the plan's three versions, both adversarial rounds and the proof code live on the reference branch `spike/recut-proofs` at `7e27d4d`, never merged; this file is the sole merged artifact, following the precedent of `704-daemon-authority.md`.
+The consolidated report of the proofs behind the corpus decision record *Local-first per identity* (`2542cd66-b641-4900-96b4-5c461dcdcf65`). Everything ran locally as throwaway code. The full reports, the plan's three versions, both adversarial rounds and the proof code live under the tag `archive/spike/recut-proofs` at `7e27d4d`, never merged; this file is the sole merged artifact, following the precedent of `704-daemon-authority.md`.
 
 ## The one-paragraph answer
 
@@ -38,4 +38,4 @@ And one record correction (#732): **the #704 spike's content-loss hard stop is a
 
 ## Where the work is
 
-The milestone *Local-first per identity, phase 1* holds the tickets: the defects (#729, #730, #731), the harness fix and #704 correction (#732), the seams test (#733), `ub remote join` moving archived documents (#734), `ub open` as the gated serving process (#735), the thin browser (#736), the Hocuspocus patch (#737) and this report (#738). The corpus records *Local-first per identity* and *Product requirements* (`0950afda-0496-4e69-be4d-f5579dc7a44e`) carry the decision and the requirements; the reference branch carries the evidence.
+The milestone *Local-first per identity, phase 1* holds the tickets: the defects (#729, #730, #731), the harness fix and #704 correction (#732), the seams test (#733), `ub remote join` moving archived documents (#734), `ub open` as the gated serving process (#735), the thin browser (#736), the Hocuspocus patch (#737) and this report (#738). The corpus records *Local-first per identity* and *Product requirements* (`0950afda-0496-4e69-be4d-f5579dc7a44e`) carry the decision and the requirements; the tag carries the evidence.

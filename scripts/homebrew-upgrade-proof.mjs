@@ -123,6 +123,7 @@ const tapFormulaPath = join(brew(["--repository", TAP]), "Formula", "uberblick.r
 try {
 	publishToTap(tapFormulaPath, installedVersion, installedPayload);
 	brew(["install", "--build-from-source", FORMULA]);
+	brew(["test", FORMULA]);
 	expect(ub(["--version"]) === installedVersion, "the installed formula reported the wrong version");
 
 	// What the person has before the upgrade: a workspace and a document in it.
