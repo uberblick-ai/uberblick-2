@@ -84,7 +84,8 @@ Finish `needs-human`. The summary is the question, ready to answer:
 - what is blocked, and the one decision needed;
 - the answers to pick from, and your recommendation;
 - an @-mention of who can answer: the person who opened the issue (for a pull
-  request, its issue), otherwise `@bk-one`;
+  request, its issue) when they have write access, otherwise
+  `@uberblick-ai/maintainers`;
 - the closing line `Answer here, then replace needs-human with <label>.`,
   naming `needs-preparation` on an issue or `needs-changes` on a pull request.
 
