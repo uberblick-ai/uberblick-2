@@ -45,8 +45,7 @@
  * nothing here is the thing that makes `ub status` or `ub mcp serve` possible.
  *
  * **The secret.** `HUB_AUTH_TOKEN` is the HMAC secret hub tokens are signed
- * with, not a token. The owner's copy lives encrypted in `fnox.toml` and that
- * path is untouched: when a secret is already in force — from fnox, or from the
+ * with, not a token. When a secret is already in force — from fnox, or from the
  * user's own shell — nothing is generated. Otherwise a fresh 32-byte value is
  * written to `credentials.json` (mode 0600), which is the authority every reader
  * goes to: the mise tasks reach it through `ub env`, and `.mcp.json` spawns

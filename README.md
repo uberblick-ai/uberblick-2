@@ -114,38 +114,30 @@ PATH where they were. The upgrade replaces only what Homebrew installed:
 everything under [Where your files live](#where-your-files-live) —
 configuration, credentials, workspaces and their databases — is untouched, and
 `ub status` still reports the same workspace with the documents it already
-held. CI calls `.github/workflows/homebrew-formula.yml` to prove installation
-and upgrade on Apple Silicon macOS and Linux x86_64 runners on every pull
-request and `main` push, covering every change to the formula or its payload.
-The `gates` check requires all four proofs to succeed.
+held. `.github/workflows/homebrew-formula.yml` proves installation and upgrade
+on a Linux x86_64 runner after every merge that changes the formula or its
+payload, and on demand from the Actions tab.
 
 ### The signing secret
 
 `HUB_AUTH_TOKEN` is the HMAC **secret** loopback hub tokens are signed with.
 Remote hubs and clients use stored device logins; this secret grants no remote
 access and is never sent to a remote hub.
-There are two ways to have one, and they do not fight:
 
-- **The repository owner's path — fnox.** The real secret lives age-encrypted in
-  `fnox.toml`, and every task wraps its command in `fnox exec`. With the age key
-  at `~/.config/fnox/age.txt`, that value wins: `fnox exec` **overwrites**
-  `HUB_AUTH_TOKEN` in the environment it hands to the command. `ub init`
-  generates nothing when it can already see one.
-- **Everybody else — a generated development secret.** With no age key,
-  `fnox exec --if-missing warn` warns and leaves the variable alone, and
-  `ub init` writes 32 random bytes to `credentials.json` (mode 0600) in this
-  machine's config root — see [Where your files live](#where-your-files-live).
-  That file is the authority, and there is no copy of it anywhere else. It is
-  generated only while this machine has **no hub endpoint stored**: a machine
-  bound to a loopback hub needs that hub's secret. Remote bindings instead use
-  the login established by `ub auth login`.
+The repository holds no copy of it. Unless a secret is already supplied,
+`ub init` writes 32 random bytes to `credentials.json` (mode 0600) in this
+machine's config root — see [Where your files live](#where-your-files-live).
+It is generated only while this machine has **no hub endpoint stored**: a
+machine bound to a loopback hub needs that hub's secret. Remote bindings instead
+use the login established by `ub auth login`.
 
 A mise task reaches it the same way an MCP client's server does: every task that
 needs configuration wraps its command in `fnox exec -- ub env -- …`, and
 `ub env -- <command…>` execs the command under the configuration `ub`
 resolved and passes the signing secret only for loopback endpoints. Device
-credentials stay in the credential store, never child environments. So the precedence a task sees is `ub`'s own, highest first: a
-decryptable fnox secret in the environment, then `credentials.json`. There is
+credentials stay in the credential store, never child environments. So the
+precedence a task sees is `ub`'s own, highest first: an explicitly supplied
+secret in the environment, then `credentials.json`. There is
 deliberately no bare `ub env` — printing that environment would print the
 secret.
 
@@ -611,6 +603,27 @@ Docker socket. The build context is the working tree filtered by
 because a proof that runs on state `ub init` was supposed to create proves
 nothing.
 
+## Local CI
+
+CI runs on a maintainer's machine, not on GitHub. From a checkout at
+`origin/main`, after the commit is pushed:
+
+```sh
+mise run ci <sha>
+```
+
+It runs the isolated review below (lint, typecheck and the test suite in a
+Linux container without network). When that passes, it marks the commit with
+a green `signoff` commit status through
+[gh-signoff](https://github.com/basecamp/gh-signoff), and that status is what
+merging requires. It then runs browser e2e on the host, unless only
+documentation or agent process changed, and reports it as the advisory
+`signoff/e2e` status. A failed step posts a red status. Install the extension
+once with `gh extension install basecamp/gh-signoff`.
+
+GitHub Actions keeps only what cannot run locally: release publishing, and the
+Linux Homebrew upgrade proof after a merge that touches packaging.
+
 ## Review isolation
 
 `mise run review <commit>` resolves its commit argument (default `HEAD`),
@@ -667,8 +680,8 @@ there. The verification container that runs the gates is the isolated half:
 `--network none --cap-drop ALL --security-opt no-new-privileges`. Restricting
 the build itself is not on the table: `docker build --network=none` fails at
 the package-manager install. A build only ever happens on an explicit
-`mise run review <commit>` — nothing builds a branch automatically
-and no CI job builds one on push. The standing rule bounds the blast radius:
+`mise run review <commit>`, which local CI runs — nothing builds a branch
+automatically on push. The standing rule bounds the blast radius:
 never pass build secrets, host mounts, privileged mode, or the Docker socket,
 so a hostile build has no credentials of ours to exfiltrate.
 
@@ -699,8 +712,9 @@ package owns the instance. Check with `mise exec -- pnpm why yjs`.
 
 ## Secrets
 
-Secrets live in `fnox.toml`, age-encrypted and safe to commit. The private key
-is expected at `~/.config/fnox/age.txt` and never in the repo. Only real
+Encrypted secrets would live in `fnox.toml`, age-encrypted; it holds none today,
+and the loopback signing secret lives in each machine's `credentials.json`. The
+private key is expected at `~/.config/fnox/age.txt` and never in the repo. Only real
 secrets go there: plaintext local defaults such as `HUB_DB_PATH` live in
 `mise.toml`'s `[env]` block. `HUB_URL` deliberately does not — that block is
 ambient for everything in a checkout, so its `ws://localhost:1234` default lives
@@ -710,14 +724,14 @@ from its own `config.json` through `ub env`.
 Contributors without the age key are not blocked. The task wrappers pass
 `fnox exec --if-missing warn` explicitly, so a secret fnox cannot decrypt logs a
 warning and the command still runs with that variable left as it found it instead
-of aborting — which is what lets `ub init`'s generated secret through. With the
-key, `fnox exec` overwrites the variable, so the encrypted value wins. See
+of aborting. See
 "The signing secret" above for the whole precedence chain. `mise run lint`,
 `mise run test` and `mise run typecheck` don't shell through fnox at all.
 
-`HUB_AUTH_TOKEN` is the HMAC secret hub tokens are signed with, and `ub init`
-generates one when fnox cannot supply it. A loopback-only hub requires it. Remote hubs require GitHub sign-in
-configuration and admit only device credentials with membership. The MCP server
+`HUB_AUTH_TOKEN` is the HMAC secret loopback hub tokens are signed with, and
+`ub init` generates one when the machine has none. A loopback-only hub requires
+it. Remote hubs require GitHub sign-in configuration and admit only device
+credentials with membership. The MCP server
 keeps its local replica usable when its remote login is absent or refused,
 reports the needed action, and resumes sharing after login with access. A local
 loopback binding without a secret reports `hub.status: "disabled"`. `WORKSPACE_ID` it does
