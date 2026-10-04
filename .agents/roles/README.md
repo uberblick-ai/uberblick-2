@@ -18,8 +18,8 @@ Workflow state is not the run's to write. The table below is this
 repository's workflow, and ub-agents applies it: it moves the labels, posts the
 handoff, records which runtime did the work, and ensures only one run holds an
 item at a time. A role never changes a workflow label on an existing item,
-posts a claim, or starts the `agent` review itself; it may request the Copilot
-review (`.agents/protocols/delivery-policy.md`). What the task produces is the
+posts a claim, or starts the `agent` review itself. Optional Copilot requests
+follow `.agents/protocols/delivery-policy.md`. What the task produces is the
 run's to write: issue bodies and relationships, commits and pull requests,
 findings, the merge, corpus updates and new issues.
 

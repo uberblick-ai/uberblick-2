@@ -47,10 +47,11 @@ ledger is kept:
 3. The corrections review marks every listed id `resolved`, `explanation
    accepted` or `unresolved — <why>`.
 
-When Copilot is owed too, it is requested at the head the `agent` review
-sees, and one revision answers whatever both have posted. Copilot's remarks
-carry no ids: they are corrected or answered in their own threads, and any
-still open at integration are the integrator's to answer.
+When an optional Copilot review has posted findings, one revision answers
+whatever both reviews have posted. Copilot's remarks carry no finding ids:
+they are corrected or answered in their own threads, and any still open at
+integration are the integrator's to answer. Its absence or pending status is
+not a reason to wait; the delivery policy governs optional review requests.
 
 ## Settling a finding
 

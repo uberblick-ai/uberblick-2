@@ -67,11 +67,10 @@ complexity, or needs a person's decision, do not deviate. On an issue, finish
 (`.agents/roles/README.md`).
 
 Read `.agents/protocols/delivery-policy.md`'s "Reviews owed" table for this
-diff. When it owes the `agent` review, finish `review`; when it also owes
-`copilot`, first request that review at the same head (`gh pr edit <N>
---add-reviewer @copilot`). When it owes none, finish `integrate` and state
-`none owed (<reason>)`. Owe more when you can name a concrete unresolved risk
-that warrants them.
+diff. When it owes the `agent` review, finish `review`. When it owes none,
+finish `integrate` and state `none owed (<reason>)`. Require agent review when
+you can name a concrete unresolved risk that warrants it. Copilot is optional
+under that policy and is not requested automatically.
 
 When the change makes a corpus claim wrong, or adds behavior a corpus
 document should describe, draft the rewrite under the pull request's
@@ -209,8 +208,7 @@ Corpus: not used — <why no product choice needed it> | <title> (<uuid>) — <o
 ```
 
 Link logs instead of pasting counts. The summary links the pull request, names
-the grounding SHA and the reviews owed (and whether Copilot was requested), and
-nothing else.
+the grounding SHA and the reviews owed, and nothing else.
 
 Retrospectives go to the implementer board, under the rule in
 `.agents/roles/README.md`.
