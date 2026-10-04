@@ -314,7 +314,6 @@ body {
 }
 
 .ub-list-head,
-.ub-user-card,
 .ub-doc-meta,
 .ub-waiting-meta,
 .ub-tldr-form-meta,
@@ -343,12 +342,6 @@ body {
 
 /* Keep font resets scoped to product selectors: unlayered rules outrank
    every Tailwind utility, including shadcn controls. */
-.ub-list-head button,
-.ub-list .ub-nav li button:not(.ub-nav-soon),
-.ub-settings-entry,
-.ub-group-add,
-.ub-user-card,
-.ub-appearance-option,
 .ub-mention,
 .ub-tags:not(.ub-tag-picker-trigger),
 .ub-tool,
@@ -359,13 +352,7 @@ body {
   font: inherit;
 }
 
-.ub-list-head button,
-.ub-list .ub-nav li button:not(.ub-nav-soon),
-.ub-settings-entry,
-.ub-group-add,
-.ub-user-card,
 .ub-swatch,
-.ub-appearance-option,
 .ub-mention,
 .ub-tool,
 .ub-terminal-toggle,
@@ -374,54 +361,10 @@ body {
   cursor: pointer;
 }
 
-/* Sidebar rows can grow for wrapped labels. Reserve the selected row's
-   1px edge in the resting border so selection shifts no content. */
-.ub-list-head button,
-.ub-list .ub-nav li button:not(.ub-nav-soon),
-.ub-settings-entry,
-.ub-group-add {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 6px 8px;
-  border: 1px solid transparent;
-  border-radius: 0.42rem;
-  color: var(--sidebar-row-foreground);
-  font-size: 14px;
-  text-align: left;
-}
-
-/* Disabled controls and aria-disabled navigation rows get no hover fill. */
-.ub-list-head button:hover:not(:disabled),
-.ub-list .ub-nav li button:not(.ub-nav-soon):hover:not(:disabled, [aria-disabled="true"]),
-.ub-settings-entry:hover,
-.ub-group-add:hover:not(:disabled) {
-  background: var(--sidebar-accent);
-  color: var(--sidebar-foreground);
-}
-
-/* The current navigation destination keeps its edge and emphasis. */
-.ub-list .ub-nav li button:not(.ub-nav-soon)[aria-current="page"] {
-  background: var(--sidebar-accent);
-  border-color: var(--sidebar-selected-border);
-  color: var(--sidebar-foreground);
-  font-weight: 500;
-}
-
-.ub-list-head button:disabled {
-  color: var(--sidebar-muted-foreground);
-  cursor: default;
-}
-
 .ub-list ul {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.ub-list .ub-nav li button:not(.ub-nav-soon) {
-  width: 100%;
 }
 
 /* Row glyphs share one fixed box and sidebar icon tint. */
@@ -467,10 +410,6 @@ body {
   padding: 0.4rem;
 }
 
-.ub-settings-entry {
-  width: 100%;
-}
-
 .ub-settings-nav {
   margin-top: 0.25rem;
 }
@@ -483,7 +422,6 @@ body {
   font-size: 0.7rem;
 }
 
-.ub-user-card,
 .ub-terminal-toggle,
 .ub-copy,
 .ub-docs-open,
@@ -491,28 +429,14 @@ body {
   border: 0;
 }
 
-.ub-user-card,
-.ub-appearance-option,
 .ub-docs-open {
   color: inherit;
 }
 
-.ub-user-card,
 .ub-docs-open {
   width: 100%;
   border-radius: var(--radius-sm);
   text-align: left;
-}
-
-.ub-user-card {
-  margin-top: 0.15rem;
-  padding: 0.3rem 0.4rem;
-}
-
-.ub-user-card:hover,
-.ub-appearance-option:hover {
-  background: var(--sidebar-accent);
-  color: var(--accent-foreground);
 }
 
 .ub-identity-tile,
@@ -606,18 +530,6 @@ body {
   gap: 0.25rem;
 }
 
-.ub-appearance-option {
-  padding: 0.25rem 0.4rem;
-  border: 1px solid var(--sidebar-border);
-  border-radius: var(--radius-sm);
-  font-size: 0.8rem;
-}
-
-.ub-appearance-option[aria-pressed="true"] {
-  background: var(--brand-subtle);
-  border-color: var(--foreground);
-}
-
 .ub-panel-facts {
   display: grid;
   gap: 0.2rem;
@@ -672,14 +584,8 @@ body {
   border-top: 1px solid var(--sidebar-border);
 }
 
-.ub-group-add {
-  align-self: flex-start;
-  margin-top: 0.35rem;
-}
-
 .ub-comment-buttons .ub-tool:disabled,
-.ub-tldr-actions .ub-tool:disabled,
-.ub-group-add:disabled {
+.ub-tldr-actions .ub-tool:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -868,12 +774,6 @@ h1.ub-heading {
   display: none;
 }
 
-.ub-list-head button,
-.ub-list .ub-nav li button:not(.ub-nav-soon),
-.ub-settings-entry,
-.ub-group-add,
-.ub-user-card,
-.ub-appearance-option,
 .ub-title,
 .ub-copy-identity .ub-copied,
 .ub-terminal-toggle,
