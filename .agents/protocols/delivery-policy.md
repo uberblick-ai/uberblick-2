@@ -88,23 +88,26 @@ considered, so no diff is waived out of a boundary it crosses.
 
 | Condition | Reviews owed |
 | --- | --- |
-| `boundary` — the diff changes schema meaning, persistence, synchronization, concurrency, auth, runtime dependencies or decided architecture, or the implementer or integrator names a concrete unresolved risk warranting a second perspective | `agent` and `copilot` |
+| `boundary` — the diff changes schema meaning, persistence, synchronization, concurrency, auth, runtime dependencies or decided architecture, or the implementer or integrator names a concrete unresolved risk warranting a second perspective | `agent` |
 | `exempt` — a test-only, docs-only or narrowly mechanical diff that preserves production behavior, where focused validation directly proves the contract and it is not an agent-authored process change | none |
 | `otherwise` — every other diff, including an agent-authored process change that would otherwise be exempt | `agent` |
 
 The implementer routes by the reviews owed: it finishes `review` when the
-`agent` review is owed, first requesting the Copilot review at the same head
-when that is owed too, or `integrate` with `none owed (<reason>)`. The
-integrator may require more with `review`. The `agent` review always runs on a
+`agent` review is owed, or `integrate` with `none owed (<reason>)`. The
+integrator may require more agent review with `review`. The `agent` review always runs on a
 different runtime from the author and is never started by the role that owes
 it. It hunts for counterexamples, missing failure paths, incorrect
 assumptions, overengineering and overtesting; gate work never substitutes for
 it.
 
-A Copilot review is required where the table owes it and optional evidence
-otherwise; every remark it posts falls under the no-unanswered-remarks gate. A
-required Copilot review that cannot be delivered is an escalation and is never
-merged past; an optional one's refusal is recorded once and blocks nothing.
+Copilot is optional until an explicit owner decision reinstates its gate.
+Do not request it automatically; request it only when a person asks. A missing,
+pending, stale-head or unavailable Copilot review never by itself defers,
+escalates or blocks integration, even if an older handoff calls it required.
+Record a refusal once; do not retry it without a person's request. Every finding
+already posted still falls under the no-unanswered-remarks gate. Independent
+agent review, required correction rounds, CI and all other validation and merge
+gates remain unchanged.
 
 ## Merge policy — the rules are the authority, not a session
 
