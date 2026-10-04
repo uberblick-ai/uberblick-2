@@ -3,7 +3,7 @@
  * loud read-only fallback when the palette gate is closed.
  */
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import {
   getAnnotation,
@@ -659,8 +659,7 @@ const BoundEditor = memo(function BoundEditor({
    * not rebind (see the effect below), and those two are only compatible if the
    * effect can read the flag without re-running when it moves.
    */
-  const archivedNow = useRef(archived);
-  archivedNow.current = archived;
+  const readArchived = useEffectEvent(() => archived);
 
   useEffect(() => {
     const element = host.current;
@@ -673,7 +672,7 @@ const BoundEditor = memo(function BoundEditor({
       element,
       fragment: getBlocksFragment(connection.ydoc),
       awareness: connection.provider.awareness,
-      editable: !archivedNow.current && connection.status.writable,
+      editable: !readArchived() && connection.status.writable,
       canWrite: () => connection.status.writable,
       docLinks,
     });

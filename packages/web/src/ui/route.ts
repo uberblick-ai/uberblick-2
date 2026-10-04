@@ -26,7 +26,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { parseWorkspaceId } from "@uberblick/schema";
+import { canonicalDocumentUuid, parseWorkspaceId } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
 
 /** The workspace an address names: the identity, and how the URL spells it. */
@@ -79,21 +79,6 @@ export const SETTINGS_SEGMENT = "settings";
 
 /** The only child address inside workspace settings. */
 export const TAG_SETTINGS_SEGMENT = "tags";
-
-/**
- * Canonical UUID shape — lowercase, and a *shape* check only.
- *
- * Lowercase-strict on purpose: the workspace segment is (schema owns that
- * rule), and one address spelling its two uuids by two different rules was an
- * inconsistency nobody could explain (#196). A shouted uuid is still not a bad
- * link — {@link parseRoute} folds it and {@link canonicalPath} redirects to the
- * folded spelling — because document uuids are generated lowercase, so an
- * upper-case link is a mis-spelling of a lowercase identity, not a second one.
- *
- * The version and variant nibbles are left unconstrained so a document whose
- * uuid came from somewhere other than `crypto.randomUUID` still opens.
- */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * One path segment, percent-decoding tolerated.
@@ -190,23 +175,20 @@ export function parseRoute(pathname: string, configured: string | null): Route {
     };
   }
 
-  // Folded, then matched against the one lowercase rule the workspace segment
-  // already answers to. Room names, directory keys and `meta.uuid` are all
-  // case-sensitive, but every uuid that reaches them is lowercase —
-  // `crypto.randomUUID` writes them and nothing upper-cases them afterwards —
-  // so a shouted link names the lowercase document, and `canonicalPath` puts
-  // that spelling in the address bar the way it does a trailing slash. The
-  // rejection message keeps the spelling as typed: it is about the link on
-  // screen.
+  // Schema owns the document identity's shape and case rule. A shouted link
+  // names the lowercase document, and `canonicalPath` puts that spelling in
+  // the address bar. The rejection message keeps the spelling as typed: it is
+  // about the link on screen.
   if (canonical === ALL_SEGMENT) return { kind: "all", workspace };
-  if (!UUID.test(canonical)) {
+  const uuid = canonicalDocumentUuid(second);
+  if (uuid === null) {
     return {
       kind: "invalid",
       reason: `“${second}” is not a document uuid.`,
       workspace,
     };
   }
-  return { kind: "doc", workspace, uuid: canonical };
+  return { kind: "doc", workspace, uuid };
 }
 
 /**

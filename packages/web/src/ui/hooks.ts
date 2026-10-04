@@ -26,7 +26,7 @@ import type { RoomConnection, RoomStatus } from "../collab/rooms.js";
 import { resolveClientConfig } from "../config.js";
 import { getSetting, subscribeSettings } from "../settings.js";
 import type { Settings } from "../settings.js";
-import { AGENT_CLIENT, AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
+import { parseRemoteAwareness } from "../collab/remote-awareness.js";
 import type { AwarenessUser } from "../collab/identity.js";
 import { findForeignBlocks, findLinkConflicts } from "../editor/palette.js";
 import type { ForeignBlock, LinkConflict } from "../editor/palette.js";
@@ -142,6 +142,61 @@ export function useRoomStatus(connection: RoomConnection | null): RoomStatus {
   return reading?.connection === connection ? reading.status : connection.status;
 }
 
+/** Stable empty lists while a connection has not supplied a reading. */
+const EMPTY_ARRAY: never[] = [];
+
+type ConnectionObserver<T> = (
+  connection: RoomConnection,
+  emit: (value: T) => void,
+) => () => void;
+
+/**
+ * Keep a subscription's reading paired with its exact source. State lags a
+ * changed connection by one effect, so even a direct replacement (including
+ * the same room on a new provider) returns the empty value on its first render.
+ * The observer is part of the source too: directory filtering can change it.
+ */
+function useConnectionReading<T>(
+  connection: RoomConnection | null,
+  empty: T,
+  observe: ConnectionObserver<T>,
+  same: (previous: T, next: T) => boolean = Object.is,
+): [T, (value: T) => void] {
+  const [stored, setStored] = useState<{
+    connection: RoomConnection;
+    observe: ConnectionObserver<T>;
+    value: T;
+  } | null>(null);
+  const emit = useCallback(
+    (value: T): void => {
+      if (connection === null) return;
+      setStored((previous) =>
+        previous?.connection === connection &&
+        previous.observe === observe &&
+        same(previous.value, value)
+          ? previous
+          : { connection, observe, value },
+      );
+    },
+    [connection, observe, same],
+  );
+  useEffect(() => {
+    if (connection === null) {
+      setStored(null);
+      return;
+    }
+    return observe(connection, emit);
+  }, [connection, observe, emit]);
+  return [
+    stored !== null &&
+    stored.connection === connection &&
+    stored.observe === observe
+      ? stored.value
+      : empty,
+    emit,
+  ];
+}
+
 /**
  * Directory entries, live. Discovery is a synced doc, so this is just an
  * observer.
@@ -157,15 +212,10 @@ export function useDirectory(
   connection: RoomConnection | null,
   includeDeleted = false,
 ): DirectoryEntry[] {
-  const [entries, setEntries] = useState<DirectoryEntry[]>([]);
-  useEffect(() => {
-    if (connection === null) {
-      setEntries([]);
-      return;
-    }
-    const { ydoc } = connection;
+  const observe = useCallback((current: RoomConnection, emit: (value: DirectoryEntry[]) => void) => {
+    const { ydoc } = current;
     const map = getDirectoryMap(ydoc);
-    const read = (): void => setEntries(listDirectory(ydoc, { includeDeleted }).map(
+    const read = (): void => emit(listDirectory(ydoc, { includeDeleted }).map(
       (entry) => entry.kind === "decision"
         ? { ...entry, deleted: decisionTopicArchived(ydoc, entry.uuid) }
         : entry,
@@ -173,8 +223,8 @@ export function useDirectory(
     read();
     map.observe(read);
     return () => map.unobserve(read);
-  }, [connection, includeDeleted]);
-  return entries;
+  }, [includeDeleted]);
+  return useConnectionReading(connection, EMPTY_ARRAY, observe)[0];
 }
 
 /**
@@ -190,19 +240,18 @@ export function useDirectory(
  * and the read behind it is a walk over a handful of uuids.
  */
 export function useSidebar(connection: RoomConnection | null): SidebarGroup[] {
-  const [groups, setGroups] = useState<SidebarGroup[]>([]);
-  useEffect(() => {
-    if (connection === null) {
-      setGroups([]);
-      return;
-    }
-    const { ydoc } = connection;
-    const read = (): void => setGroups(readSidebar(ydoc));
-    read();
-    ydoc.on("update", read);
-    return () => ydoc.off("update", read);
-  }, [connection]);
-  return groups;
+  return useConnectionReading(connection, EMPTY_ARRAY, observeSidebar)[0];
+}
+
+function observeSidebar(
+  connection: RoomConnection,
+  emit: (value: SidebarGroup[]) => void,
+): () => void {
+  const { ydoc } = connection;
+  const read = (): void => emit(readSidebar(ydoc));
+  read();
+  ydoc.on("update", read);
+  return () => ydoc.off("update", read);
 }
 
 /**
@@ -258,27 +307,24 @@ export function useArchived(
  * yet" from "it has answered, and the document is not here" — the second earns
  * a waiting screen, the first earns silence (see `RoutePane`).
  *
- * The null is reliable across a change of document because `useRoom` withholds
- * a connection that belongs to another room: every switch passes through
- * `connection === null`, which resets this to null before the next document's
- * metadata is read. That is what keeps the previous document's title from
- * appearing under the new document's address.
+ * The shared connection guard returns null before reading any new connection,
+ * including a direct replacement without null between. A previous document's
+ * title can never appear under the new document's address.
  */
 export function useDocMeta(connection: RoomConnection | null): DocMeta | null {
-  const [meta, setMeta] = useState<DocMeta | null>(null);
-  useEffect(() => {
-    if (connection === null) {
-      setMeta(null);
-      return;
-    }
-    const { ydoc } = connection;
-    const map = getMetaMap(ydoc);
-    const read = (): void => setMeta(getMeta(ydoc));
-    read();
-    map.observe(read);
-    return () => map.unobserve(read);
-  }, [connection]);
-  return meta;
+  return useConnectionReading<DocMeta | null>(connection, null, observeDocMeta)[0];
+}
+
+function observeDocMeta(
+  connection: RoomConnection,
+  emit: (value: DocMeta | null) => void,
+): () => void {
+  const { ydoc } = connection;
+  const map = getMetaMap(ydoc);
+  const read = (): void => emit(getMeta(ydoc));
+  read();
+  map.observe(read);
+  return () => map.unobserve(read);
 }
 
 /**
@@ -296,19 +342,18 @@ export function useDocMeta(connection: RoomConnection | null): DocMeta | null {
 export function useForeignBlocks(
   connection: RoomConnection | null,
 ): ForeignBlock[] {
-  const [foreign, setForeign] = useState<ForeignBlock[]>([]);
-  useEffect(() => {
-    if (connection === null) {
-      setForeign([]);
-      return;
-    }
-    const fragment = getBlocksFragment(connection.ydoc);
-    const read = (): void => setForeign(findForeignBlocks(fragment));
-    read();
-    fragment.observeDeep(read);
-    return () => fragment.unobserveDeep(read);
-  }, [connection]);
-  return foreign;
+  return useConnectionReading(connection, EMPTY_ARRAY, observeForeignBlocks)[0];
+}
+
+function observeForeignBlocks(
+  connection: RoomConnection,
+  emit: (value: ForeignBlock[]) => void,
+): () => void {
+  const fragment = getBlocksFragment(connection.ydoc);
+  const read = (): void => emit(findForeignBlocks(fragment));
+  read();
+  fragment.observeDeep(read);
+  return () => fragment.unobserveDeep(read);
 }
 
 /**
@@ -328,33 +373,33 @@ export function useLinkConflicts(connection: RoomConnection | null): {
   conflicts: LinkConflict[];
   refresh: () => void;
 } {
-  const [conflicts, setConflicts] = useState<LinkConflict[]>([]);
+  const [conflicts, emit] = useConnectionReading(
+    connection, EMPTY_ARRAY, observeLinkConflicts,
+  );
   const refresh = useCallback((): void => {
-    setConflicts(
-      connection === null
-        ? []
-        : findLinkConflicts(getBlocksFragment(connection.ydoc)),
-    );
-  }, [connection]);
-  useEffect(() => {
-    if (connection === null) {
-      setConflicts([]);
-      return;
+    if (connection !== null) {
+      emit(findLinkConflicts(getBlocksFragment(connection.ydoc)));
     }
-    const fragment = getBlocksFragment(connection.ydoc);
-    refresh();
-    fragment.observeDeep(refresh);
-    return () => fragment.unobserveDeep(refresh);
-  }, [connection, refresh]);
+  }, [connection, emit]);
   return { conflicts, refresh };
 }
 
-/** A mention candidate. `clientId` distinguishes peers whose names collide. */
-export interface Peer extends AwarenessUser {
-  clientId: number;
+function observeLinkConflicts(
+  connection: RoomConnection,
+  emit: (value: LinkConflict[]) => void,
+): () => void {
+  const fragment = getBlocksFragment(connection.ydoc);
+  const read = (): void => emit(findLinkConflicts(fragment));
+  read();
+  fragment.observeDeep(read);
+  return () => fragment.unobserveDeep(read);
 }
 
-const NO_PEERS: Peer[] = [];
+/** A mention candidate. `clientId` distinguishes peers whose names collide. */
+export interface Peer {
+  clientId: number;
+  name: string;
+}
 
 /** Only the identity and name matter to the editor's mention candidates. */
 function samePeerNames(previous: Peer[], next: Peer[]): boolean {
@@ -365,41 +410,27 @@ function samePeerNames(previous: Peer[], next: Peer[]): boolean {
 
 /** Awareness names other than our own, stable through caret/colour changes. */
 export function usePeers(connection: RoomConnection | null): Peer[] {
-  const [reading, setReading] = useState<{
-    connection: RoomConnection;
-    peers: Peer[];
-  } | null>(null);
-  useEffect(() => {
-    const awareness = connection?.provider.awareness ?? null;
-    if (connection === null || awareness === null) {
-      setReading(null);
-      return;
-    }
-    let previous: Peer[] | null = null;
-    const read = (): void => {
-      const out: Peer[] = [];
-      awareness.getStates().forEach((state, clientId) => {
-        if (clientId === awareness.clientID) return;
-        const user = (state as { user?: Partial<AwarenessUser> }).user;
-        if (user === undefined) return;
-        out.push({
-          clientId,
-          name: typeof user.name === "string" ? user.name : `client ${clientId}`,
-          color: typeof user.color === "string" ? user.color : AWARENESS_FALLBACK_COLOR,
-        });
-      });
-      // Compare before scheduling React work: returning the same state from an
-      // updater can still invoke the component before React bails out.
-      if (previous !== null && samePeerNames(previous, out)) return;
-      previous = out;
-      setReading({ connection, peers: out });
-    };
-    read();
-    awareness.on("change", read);
-    return () => awareness.off("change", read);
-  }, [connection]);
-  // A replacement provider can have the same room name but different peers.
-  return reading?.connection === connection ? reading.peers : NO_PEERS;
+  return useConnectionReading(connection, EMPTY_ARRAY, observePeers, samePeerNames)[0];
+}
+
+function observePeers(
+  connection: RoomConnection,
+  emit: (value: Peer[]) => void,
+): () => void {
+  const awareness = connection.provider.awareness ?? null;
+  if (awareness === null) return () => {};
+  const read = (): void => {
+    const out: Peer[] = [];
+    awareness.getStates().forEach((state, clientId) => {
+      const peer = parseRemoteAwareness(awareness, clientId, state);
+      if (peer === null || !peer.hasUser) return;
+      out.push({ clientId, name: peer.name });
+    });
+    emit(out);
+  };
+  read();
+  awareness.on("change", read);
+  return () => awareness.off("change", read);
 }
 
 /**
@@ -426,28 +457,26 @@ export function usePeers(connection: RoomConnection | null): Peer[] {
  * included, whatever document it is working on.
  */
 export function useAgentSessions(connection: RoomConnection | null): number {
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    const awareness = connection?.provider.awareness ?? null;
-    if (awareness === null) {
-      setCount(0);
-      return;
-    }
-    const read = (): void => {
-      let agents = 0;
-      awareness.getStates().forEach((state, clientId) => {
-        if (clientId === awareness.clientID) return;
-        const fields = state as { user?: unknown; client?: unknown };
-        if (fields.user === undefined || fields.client !== AGENT_CLIENT) return;
-        agents += 1;
-      });
-      setCount((previous) => (previous === agents ? previous : agents));
-    };
-    read();
-    awareness.on("change", read);
-    return () => awareness.off("change", read);
-  }, [connection]);
-  return count;
+  return useConnectionReading(connection, 0, observeAgentSessions)[0];
+}
+
+function observeAgentSessions(
+  connection: RoomConnection,
+  emit: (value: number) => void,
+): () => void {
+  const awareness = connection.provider.awareness ?? null;
+  if (awareness === null) return () => {};
+  const read = (): void => {
+    let agents = 0;
+    awareness.getStates().forEach((state, clientId) => {
+      const peer = parseRemoteAwareness(awareness, clientId, state);
+      if (peer?.hasUser && peer.kind === "agent") agents += 1;
+    });
+    emit(agents);
+  };
+  read();
+  awareness.on("change", read);
+  return () => awareness.off("change", read);
 }
 
 /** Nobody else here. One frozen instance, so an empty room never re-renders. */
@@ -482,39 +511,24 @@ const NOBODY: readonly RemotePresence[] = [];
 export function usePresence(
   connection: RoomConnection | null,
 ): readonly RemotePresence[] {
-  const [stored, setStored] = useState<{
-    room: string;
-    sessions: readonly RemotePresence[];
-  } | null>(null);
-  useEffect(() => {
-    const awareness = connection?.provider.awareness ?? null;
-    if (connection === null || awareness === null) {
-      setStored(null);
-      return;
-    }
-    const { room } = connection;
-    const fragment = getBlocksFragment(connection.ydoc);
-    const read = (): void => {
-      const next = readPresence(connection.ydoc, awareness);
-      setStored((previous) =>
-        previous !== null &&
-        previous.room === room &&
-        samePresence(previous.sessions, next)
-          ? previous
-          : { room, sessions: next },
-      );
-    };
-    read();
-    awareness.on("change", read);
-    fragment.observe(read);
-    return () => {
-      awareness.off("change", read);
-      fragment.unobserve(read);
-    };
-  }, [connection]);
-  return stored !== null && stored.room === connection?.room
-    ? stored.sessions
-    : NOBODY;
+  return useConnectionReading(connection, NOBODY, observePresence, samePresence)[0];
+}
+
+function observePresence(
+  connection: RoomConnection,
+  emit: (value: readonly RemotePresence[]) => void,
+): () => void {
+  const awareness = connection.provider.awareness ?? null;
+  if (awareness === null) return () => {};
+  const fragment = getBlocksFragment(connection.ydoc);
+  const read = (): void => emit(readPresence(connection.ydoc, awareness));
+  read();
+  awareness.on("change", read);
+  fragment.observe(read);
+  return () => {
+    awareness.off("change", read);
+    fragment.unobserve(read);
+  };
 }
 
 /**
@@ -525,16 +539,19 @@ export function usePresence(
  * must not cost a re-read of the document per keystroke.
  */
 export function useDocRev(connection: RoomConnection | null): string | null {
-  const [rev, setRev] = useState<string | null>(null);
-  useEffect(() => {
-    if (connection === null) {
-      setRev(null);
-      return;
-    }
-    return observeDocRev(connection.ydoc, setRev);
-  }, [connection]);
-  return rev;
+  return useConnectionReading<string | null>(
+    connection, null, observeConnectionDocRev,
+  )[0];
 }
+
+function observeConnectionDocRev(
+  connection: RoomConnection,
+  emit: (value: string | null) => void,
+): () => void {
+  return observeDocRev(connection.ydoc, emit);
+}
+
+type RawBlock = { nodeName: string; id: string | null; text: string };
 
 /**
  * The plain-text rendering used by the read-only fallback when the palette gate
@@ -542,37 +559,28 @@ export function useDocRev(connection: RoomConnection | null): string | null {
  * unknown node name as a paragraph — the fallback exists to make the unknown
  * visible, not to normalise it away.
  */
-export function useRawBlocks(
-  connection: RoomConnection | null,
-): Array<{ nodeName: string; id: string | null; text: string }> {
-  const [blocks, setBlocks] = useState<
-    Array<{ nodeName: string; id: string | null; text: string }>
-  >([]);
-  useEffect(() => {
-    if (connection === null) {
-      setBlocks([]);
-      return;
+export function useRawBlocks(connection: RoomConnection | null): RawBlock[] {
+  return useConnectionReading(connection, EMPTY_ARRAY, observeRawBlocks)[0];
+}
+
+function observeRawBlocks(
+  connection: RoomConnection,
+  emit: (value: RawBlock[]) => void,
+): () => void {
+  const fragment = getBlocksFragment(connection.ydoc);
+  const read = (): void => emit(fragment.toArray().map((child) => {
+    if (!(child instanceof Y.XmlElement)) {
+      return { nodeName: "#text", id: null, text: String(child) };
     }
-    const fragment = getBlocksFragment(connection.ydoc);
-    const read = (): void => {
-      setBlocks(
-        fragment.toArray().map((child) => {
-          if (!(child instanceof Y.XmlElement)) {
-            return { nodeName: "#text", id: null, text: String(child) };
-          }
-          return {
-            nodeName: child.nodeName,
-            id: child.getAttribute("id") ?? null,
-            text: plainText(blockText(child)),
-          };
-        }),
-      );
+    return {
+      nodeName: child.nodeName,
+      id: child.getAttribute("id") ?? null,
+      text: plainText(blockText(child)),
     };
-    read();
-    fragment.observeDeep(read);
-    return () => fragment.unobserveDeep(read);
-  }, [connection]);
-  return blocks;
+  }));
+  read();
+  fragment.observeDeep(read);
+  return () => fragment.unobserveDeep(read);
 }
 
 /**
@@ -581,15 +589,14 @@ export function useRawBlocks(
  * client renames redraws the outline.
  */
 export function useOutline(connection: RoomConnection | null): OutlineEntry[] {
-  const [outline, setOutline] = useState<OutlineEntry[]>([]);
-  useEffect(() => {
-    if (connection === null) {
-      setOutline([]);
-      return;
-    }
-    return observeOutline(connection.ydoc, setOutline);
-  }, [connection]);
-  return outline;
+  return useConnectionReading(connection, EMPTY_ARRAY, observeConnectionOutline)[0];
+}
+
+function observeConnectionOutline(
+  connection: RoomConnection,
+  emit: (value: OutlineEntry[]) => void,
+): () => void {
+  return observeOutline(connection.ydoc, emit);
 }
 
 /**
@@ -598,15 +605,14 @@ export function useOutline(connection: RoomConnection | null): OutlineEntry[] {
  * range a human deletes both reach the rail the same way.
  */
 export function useThreads(connection: RoomConnection | null): ThreadView[] {
-  const [threads, setThreads] = useState<ThreadView[]>([]);
-  useEffect(() => {
-    if (connection === null) {
-      setThreads([]);
-      return;
-    }
-    return observeThreads(connection.ydoc, setThreads);
-  }, [connection]);
-  return threads;
+  return useConnectionReading(connection, EMPTY_ARRAY, observeConnectionThreads)[0];
+}
+
+function observeConnectionThreads(
+  connection: RoomConnection,
+  emit: (value: ThreadView[]) => void,
+): () => void {
+  return observeThreads(connection.ydoc, emit);
 }
 
 /**
