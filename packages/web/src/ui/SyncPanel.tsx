@@ -13,7 +13,6 @@
  * source here. An omitted row says less than an invented one.
  */
 
-import { useEffect } from "react";
 import type { ReactElement } from "react";
 import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
@@ -74,7 +73,6 @@ export function SyncPanel({
   hubAcked,
   notSharedReason = null,
   lastUpdated,
-  onClose,
 }: {
   connection: RoomConnection | null;
   /** Every remote session in that room, read once by the shell. */
@@ -86,7 +84,6 @@ export function SyncPanel({
   notSharedReason?: NotSharedReason | null;
   /** The stamp currently shown by the status line; absent while it omits it. */
   lastUpdated?: number | undefined;
-  onClose: () => void;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const raw = rawSyncState(status);
@@ -102,49 +99,10 @@ export function SyncPanel({
   const updated =
     lastUpdated === undefined ? null : formatExactTimestamp(lastUpdated);
 
-  /**
-   * Escape closes the panel, and the panel alone.
-   *
-   * Registered in the *capture* phase on `window`, which runs before every
-   * bubble-phase listener there — the threads drawer's (#101) is one — and the
-   * event is then consumed. This panel is the topmost layer while it is open,
-   * so one keypress must dismiss one thing: without this, an Escape with both
-   * open reached both listeners and closed both. `preventDefault` is what the
-   * drawer's own rule reads; stopping propagation as well is what keeps a
-   * control *underneath* the panel from acting on a key aimed at the panel.
-   *
-   * An Escape somebody else already handled is left alone, for the same reason
-   * the drawer leaves one alone: two gestures, and the reader made one.
-   */
-  useEffect(() => {
-    const close = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", close, true);
-    return () => window.removeEventListener("keydown", close, true);
-  }, [onClose]);
-
   return (
-    <aside
-      id="ub-sync-panel"
-      className="ub-sync-panel"
-      aria-label="Sync and presence"
-    >
-      <div className="ub-sync-head">
-        <h2 className="ub-rail-head">Sync</h2>
-        <button
-          type="button"
-          className="ub-tool"
-          aria-label="Close sync details"
-          onClick={onClose}
-        >
-          ×
-        </button>
-      </div>
-      <dl className="ub-sync-facts">
+    <div>
+      <h2 className="m-0 mb-[0.4rem] text-[0.7rem] tracking-[0.06em] uppercase text-muted-foreground">Sync</h2>
+      <dl className="ub-sync-facts m-0 mb-5">
         <Fact label="Hub" value={namedEndpoint?.url ?? UNKNOWN} />
         {/* Always drawn, "served config" included: a reader checking which hub
             they are on is asking in the same breath who decided it. */}
@@ -185,11 +143,11 @@ export function SyncPanel({
           />
         )}
       </dl>
-      <h2 className="ub-rail-head">Present now</h2>
+      <h2 className="m-0 mb-[0.4rem] text-[0.7rem] tracking-[0.06em] uppercase text-muted-foreground">Present now</h2>
       {presence.length === 0 ? (
         <p className="ub-muted">Nobody else is in this room.</p>
       ) : (
-        <ul className="ub-presence">
+        <ul className="ub-presence m-0 flex list-none flex-col gap-[0.3rem] p-0">
           {presence.map((session) => (
             <li
               key={session.clientId}
@@ -214,6 +172,6 @@ export function SyncPanel({
           ))}
         </ul>
       )}
-    </aside>
+    </div>
   );
 }

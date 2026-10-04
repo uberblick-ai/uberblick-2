@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { StatusLine } from "../src/ui/EditorPane.js";
+import { Popover } from "../src/ui/shadcn/popover.js";
 import { STORE_REFUSED, TOKEN_MISSING } from "../src/ui/status-reading.js";
 import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
@@ -343,13 +344,14 @@ describe("a directly connected document's sync reading opens its details", () =>
     const root = createRoot(host);
     act(() =>
       root.render(
-        <StatusLine
-          connection={stubConnection(0, { connected: true, synced: true })}
-          presence={NOBODY}
-          endpoint={endpoint}
-          syncOpen={false}
-          onToggleSync={toggle}
-        />,
+        <Popover onOpenChange={toggle}>
+          <StatusLine
+            connection={stubConnection(0, { connected: true, synced: true })}
+            presence={NOBODY}
+            endpoint={endpoint}
+            syncDetails
+          />
+        </Popover>,
       ),
     );
     act(() => void vi.advanceTimersByTime(5_000));
@@ -358,8 +360,6 @@ describe("a directly connected document's sync reading opens its details", () =>
     expect(button?.tagName).toBe("BUTTON");
     expect(host.querySelectorAll(".ub-status-word")).toHaveLength(1);
     expect(button?.textContent?.trim()).toBe("synced");
-    expect(button?.getAttribute("aria-expanded")).toBe("false");
-    expect(button?.getAttribute("aria-controls")).toBe("ub-sync-panel");
     expect(button?.getAttribute("aria-label")).toBe(
       "Sync details — synced, hub wss://hub.example/ws (served /uberblick-config.json)",
     );
@@ -389,19 +389,21 @@ describe("the locally served document's two sync facts", () => {
     const root = createRoot(host);
     act(() =>
       root.render(
-        <StatusLine
-          connection={stubConnection(0, {
-            connected: true,
-            synced: true,
-            writable: true,
-            ...patch,
-          })}
-          presence={NOBODY}
-          endpoint={{ url: "wss://remote.example/ws", source: "document" }}
-          hubAcked={hubAcked}
-          notSharedReason={notSharedReason}
-          onToggleSync={() => {}}
-        />,
+        <Popover>
+          <StatusLine
+            connection={stubConnection(0, {
+              connected: true,
+              synced: true,
+              writable: true,
+              ...patch,
+            })}
+            presence={NOBODY}
+            endpoint={{ url: "wss://remote.example/ws", source: "document" }}
+            hubAcked={hubAcked}
+            notSharedReason={notSharedReason}
+            syncDetails
+          />
+        </Popover>,
       ),
     );
     act(() => void vi.advanceTimersByTime(5_000));

@@ -23,7 +23,7 @@ import {
 } from "../src/auth-store.js";
 import { credentialsPath, resolveConfig, userConfigPath } from "../src/config.js";
 import { acquireInitLock, initLockPath, tryAcquireInitLock } from "../src/init-lock.js";
-import * as safeWrite from "../src/safe-write.js";
+import * as safeWrite from "@uberblick/hub/safe-write";
 import { PACKAGE_ROOT, SECRET_IN_ENV, SECRET_ON_FILE, removeTempDirs, sandbox, waitUntil, type Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -81,9 +81,10 @@ const barrier = process.argv[3];
 const read = fs.readFileSync;
 const open = fs.openSync;
 let paused = false;
+let credentialFd;
 fs.readFileSync = (path, ...args) => {
   const contents = read(path, ...args);
-  if (!paused && String(path) === credentialsPath()) {
+  if (!paused && (String(path) === credentialsPath() || path === credentialFd)) {
     paused = true;
     fs.writeFileSync(barrier + ".read", "");
     const deadline = Date.now() + 10_000;
@@ -96,7 +97,11 @@ fs.readFileSync = (path, ...args) => {
   return contents;
 };
 fs.openSync = (path, ...args) => {
-  try { return open(path, ...args); } catch (error) {
+  try {
+    const fd = open(path, ...args);
+    if (String(path) === credentialsPath()) credentialFd = fd;
+    return fd;
+  } catch (error) {
     if (String(path) === initLockPath() && error.code === "EEXIST") {
       fs.writeFileSync(barrier + ".waiting", "");
     }

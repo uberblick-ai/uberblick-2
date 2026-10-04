@@ -335,7 +335,8 @@ test("the served configuration names the workspaces, and the build's define is o
   // route, because that is where the status surfaces are (#424).
   await createDoc(page, docTitle("served"), { pin: true });
   await page.locator(".ub-sync-toggle").click();
-  const source = page.locator('.ub-sync-fact:has(dt:text-is("Source")) dd');
+  const source = page.getByRole("dialog", { name: "Sync and presence" })
+    .locator('.ub-sync-fact:has(dt:text-is("Source")) dd');
   // "served …", not either of the two "… not used" answers: falling back to
   // the compiled value while still reading *synced* is the failure #362 exists
   // to remove. The wording itself is `config.ts`'s, pinned in

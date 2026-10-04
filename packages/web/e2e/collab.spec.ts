@@ -310,13 +310,13 @@ test("the open document's last-updated reading follows its stub through status a
     await expect(saved).toHaveText("saved here");
     await expect(upstream).toHaveText("not synced with hub");
     await page.locator(".ub-sync-toggle").click();
-    const panel = page.getByRole("complementary", { name: "Sync and presence" });
+    const panel = page.getByRole("dialog", { name: "Sync and presence" });
     const fact = (label: string) =>
       panel.getByText(label, { exact: true }).locator("..").locator("dd");
     await expect(fact("Hub")).toHaveText(harness().hubUrl);
     await expect(fact("State")).toHaveText("saved here");
     await expect(fact("Hub state")).toHaveText("not synced with hub");
-    await page.getByRole("button", { name: "Close sync details" }).click();
+    await page.locator(".ub-sync-toggle").click();
     await expect(reading).toContainText("last updated just now");
     await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
     expect(await reading.boundingBox()).toEqual(stablePosition);

@@ -515,6 +515,7 @@ export async function importSeedDir(
     return { results, hub: replicas.sync.state().status, sidebar: seeded };
   } finally {
     replicas.destroy();
+    await replicas.sync.waitForDeviceWork();
     store.close();
   }
 }

@@ -1,7 +1,7 @@
 /** A floating view of the open document's first two heading levels. */
 
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent, ReactElement } from "react";
+import type { ReactElement } from "react";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useOutline } from "./hooks.js";
 import { scrollBlockIntoView } from "./outline.js";
@@ -13,9 +13,6 @@ import {
   DropdownMenuTrigger,
 } from "./shadcn/dropdown-menu.js";
 
-/** Long enough to cross the trigger/content gap, short enough to feel direct. */
-const HOVER_CLOSE_DELAY_MS = 120;
-
 export function OutlinePane({
   connection,
   obscured = false,
@@ -26,66 +23,15 @@ export function OutlinePane({
 }): ReactElement | null {
   const entries = useOutline(connection);
   const [open, setOpen] = useState(false);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const openedFromHover = useRef(false);
-  const closingFromHover = useRef(false);
   const closingFromTab = useRef(false);
-  const focusBeforeHover = useRef<HTMLElement | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
-
-  const cancelClose = (): void => {
-    if (closeTimer.current === null) return;
-    clearTimeout(closeTimer.current);
-    closeTimer.current = null;
-  };
-
-  const openFromHover = (event: PointerEvent): void => {
-    if (event.pointerType !== "mouse") return;
-    cancelClose();
-    if (open) return;
-    openedFromHover.current = true;
-    focusBeforeHover.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setOpen(true);
-  };
-
-  const closeAfterHover = (event: PointerEvent): void => {
-    if (event.pointerType !== "mouse") return;
-    cancelClose();
-    closeTimer.current = setTimeout(() => {
-      closeTimer.current = null;
-      const focused = document.activeElement;
-      if (
-        !openedFromHover.current &&
-        (
-          trigger.current?.matches(":hover") ||
-          trigger.current?.matches(":focus-visible") ||
-          document.querySelector(".ub-outline-panel")?.contains(focused)
-        )
-      ) {
-        return;
-      }
-      closingFromHover.current = true;
-      setOpen(false);
-    }, HOVER_CLOSE_DELAY_MS);
-  };
-
-  useEffect(
-    () => () => {
-      if (closeTimer.current !== null) clearTimeout(closeTimer.current);
-    },
-    [],
-  );
 
   // A live edit can remove the last eligible heading without unmounting this
   // component. Do not remember an open surface for a later heading.
   useEffect(() => {
     if (entries.length !== 0) return;
-    if (closeTimer.current !== null) clearTimeout(closeTimer.current);
-    closeTimer.current = null;
-    if (open) closingFromHover.current = true;
     setOpen(false);
-  }, [entries.length, open]);
+  }, [entries.length]);
 
   useEffect(() => {
     // The state is meaningful only where CSS turns the rail into an overlay;
@@ -93,48 +39,28 @@ export function OutlinePane({
     if (!obscured) return;
     const closeWhenCovered = (): void => {
       if (trigger.current?.getClientRects().length !== 0) return;
-      if (closeTimer.current !== null) clearTimeout(closeTimer.current);
-      closeTimer.current = null;
-      if (open) closingFromHover.current = true;
       setOpen(false);
     };
     closeWhenCovered();
     window.addEventListener("resize", closeWhenCovered);
     return () => window.removeEventListener("resize", closeWhenCovered);
-  }, [obscured, open]);
+  }, [obscured]);
 
   if (entries.length === 0) return null;
 
   return (
-    <DropdownMenu
-      modal={false}
-      open={open}
-      onOpenChange={(shown) => {
-        cancelClose();
-        if (shown) {
-          closingFromHover.current = false;
-        } else {
-          openedFromHover.current = false;
-        }
-        setOpen(shown);
-      }}
-    >
+    <DropdownMenu modal={false} open={open} onOpenChange={setOpen}>
       <div
         // The drawer covers this edge; hiding also removes the trigger from Tab order.
         className={`ub-outline self-start shrink-0 mt-3 me-3${obscured ? " max-xl:hidden" : ""}`}
-        onPointerEnter={openFromHover}
-        onPointerLeave={closeAfterHover}
       >
         <DropdownMenuTrigger asChild>
           <button
             ref={trigger}
             type="button"
-            className="ub-outline-trigger"
-            onPointerDown={() => {
-              openedFromHover.current = false;
-            }}
+            className="ub-outline-trigger inline-flex min-h-6 min-w-6 items-center gap-[0.45rem] rounded-full border border-border bg-(--card-accent) px-[0.55rem] py-1 text-secondary-foreground text-xs/[1.4] whitespace-nowrap cursor-pointer [font-family:inherit] hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 [@media(any-pointer:coarse)]:min-h-11"
           >
-            Contents <span>{entries.length}</span>
+            Contents <span className="text-[0.7rem] text-muted-foreground">{entries.length}</span>
           </button>
         </DropdownMenuTrigger>
       </div>
@@ -143,28 +69,11 @@ export function OutlinePane({
         side="bottom"
         collisionPadding={8}
         className="ub-outline-panel flex w-[min(20rem,calc(100vw_-_2rem))] max-h-[min(calc(100vh_-_2rem),var(--radix-dropdown-menu-content-available-height))]! flex-col overflow-hidden! p-0!"
-        onPointerEnter={(event) => {
-          if (event.pointerType === "mouse") cancelClose();
-        }}
-        onPointerLeave={closeAfterHover}
-        onOpenAutoFocus={(event) => {
-          if (!openedFromHover.current) return;
-          event.preventDefault();
-        }}
         onCloseAutoFocus={(event) => {
           if (closingFromTab.current) {
             closingFromTab.current = false;
             event.preventDefault();
-            return;
           }
-          if (!closingFromHover.current) return;
-          closingFromHover.current = false;
-          openedFromHover.current = false;
-          event.preventDefault();
-          if (focusBeforeHover.current?.isConnected) {
-            focusBeforeHover.current.focus({ preventScroll: true });
-          }
-          focusBeforeHover.current = null;
         }}
         onKeyDown={(event) => {
           if (event.key !== "Tab") return;

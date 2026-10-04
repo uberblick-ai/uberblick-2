@@ -41,6 +41,7 @@ import {
 } from "@hocuspocus/provider";
 import {
   MAX_TOKEN_LIFETIME_SECONDS,
+  importCredentialKey,
   importRootSecret,
   mintToken,
 } from "@uberblick/hub/token";
@@ -51,6 +52,8 @@ import {
   SYNC_PROTOCOL_VERSION,
   wrapToken,
 } from "@uberblick/hub/protocol";
+import { ensureDeviceLogin, readDeviceLogin, type DeviceLoginFailure } from "@uberblick/hub/device-login";
+import type { StoredHubLogin } from "@uberblick/hub/auth-store";
 import type * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
 import type { McpConfig } from "./config.js";
@@ -74,6 +77,10 @@ export interface HubState {
    * here, never taken from the wire — see {@link AUTH_REJECTED}.
    */
   reason?: string;
+  /** Recovery keeps the established status meanings; no new status values. */
+  recoveryClass?: "retry" | "manual";
+  /** Safe detail for the inactive device-login path, never credential contents. */
+  authRecovery?: "sign-in-required" | "no-workspace-access" | "credential-store" | "renewal-unavailable";
   /**
    * The sync protocol this client speaks. Reported on every reading, including
    * the ones with no hub in them: when the hub is down there is nothing to
@@ -203,6 +210,20 @@ export function rebuildDelayMs(
   return Math.round(floorMs + (ceiling - floorMs) * random());
 }
 
+/** Device recovery polls grow to thirty seconds, with a short first refusal. */
+export function deviceRetryDelayMs(
+  attempts: number,
+  reconnectMaxDelayMs: number,
+  afterRefusal = false,
+  random: () => number = Math.random,
+): number {
+  if (afterRefusal && attempts === 0) {
+    return rebuildDelayMs(0, socketBackoff(reconnectMaxDelayMs).delay, reconnectMaxDelayMs, random);
+  }
+  const base = Math.max(1_000, reconnectMaxDelayMs);
+  return rebuildDelayMs(attempts, base, Math.max(base, 30_000), random);
+}
+
 export interface AttachOptions {
   room: string;
   doc: Y.Doc;
@@ -328,7 +349,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 export class HubSync {
-  /** False when no `HUB_AUTH_TOKEN` was configured: local-only, by design. */
+  /** False when neither signing-secret nor device-login sync is composed. */
   readonly enabled: boolean;
 
   private readonly config: McpConfig;
@@ -389,12 +410,14 @@ export class HubSync {
    * Whether the hub has refused this client outright — its token or its
    * protocol version.
    *
-   * What {@link waitForQuiet} settles for: neither refusal is resolved by
-   * waiting, so a tool call that waited its full budget on one would spend the
-   * budget to learn what was already known.
+   * What {@link waitForQuiet} settles for: a known refusal or device outcome
+   * gains nothing by waiting. A device refusal still being checked must keep
+   * its bounded settle alive through reconnect so a short-lived probe learns
+   * whether renewal, sign-in or workspace access is needed.
    */
   private refusedByHub(): boolean {
-    return this.authRejected || this.hubProtocolVersion !== null;
+    return this.authRejected || this.hubProtocolVersion !== null ||
+      (this.deviceReading !== null && !this.checkingDeviceRefusal);
   }
 
   /** The socket's own first retry delay, reused by {@link rebuild}. */
@@ -489,6 +512,16 @@ export class HubSync {
    */
   private signingKey: Promise<CryptoKey> | null = null;
 
+  private deviceReading: Omit<HubState, "protocolVersion"> | null = null;
+  private rejectedLogin: StoredHubLogin | undefined;
+  /** The credential actually offered by each room, rather than a later login. */
+  private readonly offeredLogins = new Map<string, StoredHubLogin>();
+  private deviceRetryTimer: NodeJS.Timeout | null = null;
+  private deviceRetryAttempts = 0;
+  private checkingDeviceRefusal = false;
+  private readonly deviceWork = new Set<Promise<unknown>>();
+  private readonly deviceAbort = new AbortController();
+
   constructor(
     config: McpConfig,
     onConnected: () => void,
@@ -496,7 +529,7 @@ export class HubSync {
   ) {
     this.config = config;
     this.onConnected = onConnected;
-    this.enabled = config.authSecret !== null;
+    this.enabled = config.deviceLogin !== undefined || config.authSecret !== null;
     this.silent = options.silent === true;
     this.maxConcurrentAttaches =
       options.maxConcurrentAttaches ?? MAX_CONCURRENT_ROOM_ATTACHES;
@@ -511,6 +544,11 @@ export class HubSync {
     const backoff = socketBackoff(config.reconnectMaxDelayMs);
     // The socket's first retry delay, and the first delay a rebuild waits out.
     this.reconnectDelayMs = backoff.delay;
+
+    if (config.deviceLogin !== undefined) {
+      const stored = readDeviceLogin(config.hubUrl, config.workspaceId, config.deviceLogin.env);
+      if (stored.status !== "ready") this.deviceReading = this.deviceFailure(stored);
+    }
 
     if (!this.enabled) {
       if (!this.silent) {
@@ -541,6 +579,10 @@ export class HubSync {
           }
         }
         if (status === "connected") {
+          if (this.deviceRetryTimer !== null) {
+            clearTimeout(this.deviceRetryTimer);
+            this.deviceRetryTimer = null;
+          }
           this.sawFailure = false;
           // A new connection has proven nothing yet and dropped nothing yet.
           // This runs before any of its rooms can answer, which is what makes
@@ -680,7 +722,41 @@ export class HubSync {
   mintCount = 0;
 
   /** Mint a fresh token for this agent session. */
-  private token(): Promise<string> {
+  private async token(room: string): Promise<string | null> {
+    if (this.config.deviceLogin !== undefined) {
+      const rejected = this.rejectedLogin;
+      const work = ensureDeviceLogin(this.config.hubUrl, this.config.workspaceId, {
+        ...(this.config.deviceLogin.env === undefined ? {} : { env: this.config.deviceLogin.env }),
+        ...(rejected === undefined ? {} : { rejected }),
+        signal: this.deviceAbort.signal,
+      });
+      this.deviceWork.add(work);
+      const result = await work.finally(() => this.deviceWork.delete(work));
+      if (this.stopped) return null;
+      // A token already minting before the refusal says nothing about it.
+      if (rejected !== undefined) this.checkingDeviceRefusal = false;
+      if (result.status !== "ready") {
+        this.deviceReading = this.deviceFailure(result);
+        if (result.status === "update-required" && result.hubVersion !== undefined) {
+          this.stopForProtocolMismatch(result.hubVersion);
+        } else {
+          this.retryDeviceConnection();
+        }
+        return null;
+      }
+      this.deviceReading = null;
+      this.rejectedLogin = undefined;
+      this.offeredLogins.set(room, result.login);
+      this.mintCount += 1;
+      return mintToken(await importCredentialKey(Buffer.from(result.login.credential.key, "base64url")), {
+        typ: "room",
+        sub: this.config.sessionId,
+        workspace: this.config.workspaceId,
+        scope: "read-write",
+        kid: result.login.credential.record.id,
+        lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+      });
+    }
     this.mintCount += 1;
     const secret = this.config.authSecret;
     if (secret === null) {
@@ -700,6 +776,46 @@ export class HubSync {
         lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
       }),
     );
+  }
+
+  private deviceFailure(result: DeviceLoginFailure): Omit<HubState, "protocolVersion"> {
+    const authRecovery = result.status === "sign-in-required" ? "sign-in-required"
+      : result.status === "no-access" ? "no-workspace-access"
+      : result.status === "renewal-unavailable" ? "renewal-unavailable" : "credential-store";
+    return {
+      status: result.status === "hub-down" ? "hub-down"
+        : result.status === "update-required" ? "update-required" : "auth-failed",
+      url: this.config.hubUrl,
+      reason: result.message,
+      recoveryClass: result.status === "hub-down" ? "retry" : "manual",
+      ...(result.status === "hub-down" || result.status === "update-required" ? {} : { authRecovery }),
+    };
+  }
+
+  private stopDeviceWork(): void {
+    this.deviceAbort.abort();
+    if (this.deviceRetryTimer !== null) clearTimeout(this.deviceRetryTimer);
+    this.deviceRetryTimer = null;
+    this.checkingDeviceRefusal = false;
+    this.offeredLogins.clear();
+    this.rejectedLogin = undefined;
+  }
+
+  /**
+   * Re-read login in a growing random band, including while waiting for a
+   * human. The first refusal gets the socket's short band so a bounded probe
+   * can classify it; subsequent failures grow to a thirty-second ceiling.
+   */
+  private retryDeviceConnection(afterRefusal = false): void {
+    if (this.stopped || this.deviceRetryTimer !== null) return;
+    const delay = deviceRetryDelayMs(this.deviceRetryAttempts, this.config.reconnectMaxDelayMs, afterRefusal);
+    this.deviceRetryAttempts += 1;
+    this.deviceRetryTimer = setTimeout(() => {
+      this.deviceRetryTimer = null;
+      if (this.stopped || this.socketStatus !== "connected") return;
+      this.rebuilding = true;
+      this.socket?.disconnect();
+    }, delay);
   }
 
   /**
@@ -817,7 +933,28 @@ export class HubSync {
             this.roomAnswered(room);
             return "";
           }
-          const token = await this.token();
+          let token: string | null;
+          try {
+            token = await this.token(room);
+          } catch {
+            if (this.config.deviceLogin === undefined) throw new Error("could not mint a hub token");
+            if (!this.stopped && this.config.deviceLogin !== undefined) {
+              // Store, transport and crypto exceptions can contain secrets.
+              // No exception text reaches the provider's error callback.
+              this.deviceReading = {
+                status: "hub-down", url: this.config.hubUrl, recoveryClass: "retry",
+                reason: "could not check the stored device login; the client will retry",
+              };
+              this.checkingDeviceRefusal = false;
+              this.retryDeviceConnection();
+            }
+            this.roomAnswered(room);
+            return "";
+          }
+          if (token === null || this.stopped) {
+            this.roomAnswered(room);
+            return "";
+          }
           // Two `onOpen` continuations can share one ticket across a flap. The
           // first to finish owns the room on this generation; the other ends
           // here instead of taking a second slot after that room has answered.
@@ -841,6 +978,7 @@ export class HubSync {
       },
       onAuthenticated: () => {
         this.authRejected = false;
+        this.deviceRetryAttempts = 0;
         this.roomAnswered(room);
       },
       onSynced: ({ state }) => {
@@ -862,6 +1000,17 @@ export class HubSync {
         const hubProtocol = readProtocolMismatch(reason);
         if (hubProtocol !== null) {
           this.stopForProtocolMismatch(hubProtocol);
+          return;
+        }
+        if (this.config.deviceLogin !== undefined) {
+          this.rejectedLogin ??= this.offeredLogins.get(room);
+          this.checkingDeviceRefusal = true;
+          this.deviceReading = {
+            status: "hub-down", url: this.config.hubUrl, recoveryClass: "retry",
+            reason: "the hub refused this connection; checking the stored device login on reconnect",
+          };
+          this.roomAnswered(room);
+          this.retryDeviceConnection(true);
           return;
         }
         // Distinct from an unreachable hub: a human has to fix the secret. The
@@ -937,6 +1086,7 @@ export class HubSync {
       return;
     }
     this.quarantined = true;
+    this.stopDeviceWork();
     for (const provider of this.providers.values()) {
       provider.detach();
     }
@@ -973,6 +1123,7 @@ export class HubSync {
       return;
     }
     this.hubProtocolVersion = hubProtocol;
+    this.stopDeviceWork();
     if (!this.silent) {
       log.error("the hub speaks a different sync protocol: update required", {
         protocolVersion: SYNC_PROTOCOL_VERSION,
@@ -1003,7 +1154,12 @@ export class HubSync {
    * forget it and `sync_status` reports the number even with the hub down.
    */
   state(): HubState {
-    return { protocolVersion: SYNC_PROTOCOL_VERSION, ...this.reach() };
+    const reach = this.reach();
+    return {
+      protocolVersion: SYNC_PROTOCOL_VERSION,
+      recoveryClass: reach.status === "connecting" || reach.status === "connected" || reach.status === "hub-down" ? "retry" : "manual",
+      ...reach,
+    };
   }
 
   private reach(): Omit<HubState, "protocolVersion"> {
@@ -1040,6 +1196,7 @@ export class HubSync {
         reason: AUTH_REJECTED,
       };
     }
+    if (this.deviceReading !== null) return this.deviceReading;
     if (this.socketStatus === "connected") {
       return { status: "connected", url: this.config.hubUrl };
     }
@@ -1062,6 +1219,7 @@ export class HubSync {
    * honestly claim and no more.
    */
   isRoomQuiet(room: string): boolean {
+    if (this.state().status !== "connected") return false;
     const provider = this.providers.get(room);
     if (provider === undefined) {
       return false;
@@ -1169,7 +1327,7 @@ export class HubSync {
     const syncDeadline = Date.now() + this.config.syncTimeoutMs;
     while (!this.allQuiet()) {
       if (
-        this.socketStatus !== "connected" ||
+        (this.socketStatus !== "connected" && !this.checkingDeviceRefusal) ||
         this.refusedByHub() ||
         Date.now() >= syncDeadline
       ) {
@@ -1184,6 +1342,7 @@ export class HubSync {
       return;
     }
     this.destroyed = true;
+    this.stopDeviceWork();
     this.roomQuietListeners.clear();
     if (this.rebuildTimer !== null) {
       clearTimeout(this.rebuildTimer);
@@ -1195,5 +1354,10 @@ export class HubSync {
     this.providers.clear();
     this.releaseAdmissions();
     this.socket?.destroy();
+  }
+
+  /** After destruction, drain any issued credential's conditional publication. */
+  async waitForDeviceWork(): Promise<void> {
+    await Promise.allSettled(this.deviceWork);
   }
 }
