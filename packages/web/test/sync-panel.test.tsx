@@ -136,14 +136,12 @@ function Panel({
   hubAcked,
   notSharedReason = null,
   lastUpdated,
-  onClose = () => {},
 }: {
   fix: Fixture;
   endpoint?: HubEndpoint | null;
   hubAcked?: boolean | null | undefined;
   notSharedReason?: "no-hub-credentials" | null;
   lastUpdated?: number | undefined;
-  onClose?: () => void;
 }): ReactElement {
   const presence = usePresence(fix.connection);
   return (
@@ -154,7 +152,6 @@ function Panel({
       hubAcked={hubAcked}
       notSharedReason={notSharedReason}
       lastUpdated={lastUpdated}
-      onClose={onClose}
     />
   );
 }
@@ -245,7 +242,6 @@ function TimestampSurfaces({
           presence={[]}
           endpoint={ENDPOINT}
           lastUpdated={shown?.room === connection.room ? shown.value : undefined}
-          onClose={() => {}}
         />
       )}
     </>
@@ -359,7 +355,6 @@ describe("the sync panel renders the state this client holds", () => {
           connection={null}
           presence={[]}
           endpoint={ENDPOINT}
-          onClose={() => {}}
         />,
       ),
     );
@@ -648,46 +643,6 @@ describe("the sync panel renders the state this client holds", () => {
       expect(presentNow(host)).toEqual([]);
       expect(host.querySelector(".ub-presence")).toBeNull();
     } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
-  });
-
-  it("consumes the Escape that closes it, so one keypress closes one thing", () => {
-    vi.useFakeTimers();
-    const fix = fixture();
-    // The threads drawer's listener, as `App` registers it (#101): bubble phase
-    // on window, skipping an Escape somebody else has already handled. It is
-    // registered *first*, the way it would be with the drawer opened first —
-    // which is exactly the order that used to close both panels at once.
-    let drawerClosed = false;
-    const drawer = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && !event.defaultPrevented) drawerClosed = true;
-    };
-    window.addEventListener("keydown", drawer);
-    const closed = vi.fn();
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() => root.render(<Panel fix={fix} onClose={closed} />));
-    try {
-      act(() => {
-        document.body.dispatchEvent(
-          new KeyboardEvent("keydown", {
-            key: "Escape",
-            bubbles: true,
-            cancelable: true,
-          }),
-        );
-      });
-      expect(closed).toHaveBeenCalledTimes(1);
-      // The panel is the topmost layer, so the drawer under it keeps its state:
-      // the reader made one gesture and dismissed one thing.
-      expect(drawerClosed).toBe(false);
-    } finally {
-      window.removeEventListener("keydown", drawer);
       act(() => root.unmount());
       host.remove();
     }

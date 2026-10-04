@@ -132,7 +132,7 @@ test("a short-lived MCP client's caret stays long enough to be read, labelled an
   // document room's own awareness — the same room the retained caret is drawn
   // in — and says the room is empty while that caret is on screen.
   await page.locator(".ub-sync-toggle").click();
-  const presence = page.locator("#ub-sync-panel");
+  const presence = page.getByRole("dialog", { name: "Sync and presence" });
   await expect(presence).toContainText("Nobody else is in this room.");
   await expect(
     presence.getByText("Uberblick Coordinator Agent"),

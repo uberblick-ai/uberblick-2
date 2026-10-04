@@ -57,7 +57,8 @@ test("local-only edits survive a restart and reach the hub after authentication 
     await trigger.click();
     await expect(page.locator('.ub-sync-fact:has(dt:text-is("Reason")) dd'))
       .toHaveText("this machine has no credentials for its hub");
-    await page.getByRole("button", { name: "Close sync details" }).click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Sync and presence", exact: true })).toHaveCount(0);
   }
   await page.setViewportSize({ width: 1280, height: 720 });
   await expect(editor(page)).toHaveAttribute("contenteditable", "true");
