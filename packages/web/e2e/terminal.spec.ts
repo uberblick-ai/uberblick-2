@@ -89,12 +89,16 @@ async function writeDemo(
   await createDoc(page, "demos");
 
   const blocks = page.locator(".ub-editor .ProseMirror > *");
+  await blocks.first().click();
   if (fillerLines > 0) {
-    await blocks.first().click();
     for (let i = 0; i < fillerLines; i += 1) {
       await page.keyboard.type("filler", { delay: 0 });
       await page.keyboard.press("Enter");
     }
+  } else {
+    // Give caretAway prose to target: clicking a wholly empty paragraph can
+    // leave the native range at the editor boundary while focus settles.
+    await page.keyboard.type("before", { delay: 0 });
   }
 
   await blocks.last().hover();
