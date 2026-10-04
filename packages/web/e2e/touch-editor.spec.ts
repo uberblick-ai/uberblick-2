@@ -50,8 +50,12 @@ async function openDoc(page: Page, paragraphs: string[]): Promise<void> {
 }
 
 /** The real browser reports range geometry and selectionchange to ProseMirror. */
-async function selectBlock(block: Locator, input: "touch" | "mouse" = "touch"): Promise<void> {
-  await block.evaluate((element, pointerType) => {
+async function selectBlock(
+  block: Locator,
+  input: "touch" | "mouse" = "touch",
+  offsets?: { start: number; end: number; endBlock?: number },
+): Promise<void> {
+  await block.evaluate((element, { pointerType, offsets }) => {
     const root = element.closest(".ProseMirror");
     if (!(root instanceof HTMLElement)) throw new Error("e2e: missing editor");
     root.focus();
@@ -60,10 +64,26 @@ async function selectBlock(block: Locator, input: "touch" | "mouse" = "touch"): 
     }));
     const range = document.createRange();
     range.selectNodeContents(element);
+    if (offsets !== undefined) {
+      // Prose marks and source colouring can split text into nested nodes.
+      const position = (block: Element, offset: number): [Node, number] => {
+        const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+          const length = node.textContent?.length ?? 0;
+          if (offset <= length) return [node, offset];
+          offset -= length;
+        }
+        throw new Error("e2e: selection offset outside block");
+      };
+      const endBlock = offsets.endBlock === undefined ? element : root.children[offsets.endBlock];
+      if (endBlock === undefined) throw new Error("e2e: missing selection end block");
+      range.setStart(...position(element, offsets.start));
+      range.setEnd(...position(endBlock, offsets.end));
+    }
     const selection = document.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
-  }, input);
+  }, { pointerType: input, offsets });
   await selectionChanged(block.page());
 }
 
@@ -122,13 +142,6 @@ async function minimumTargets(controls: Locator, size: number, square = false): 
   }
 }
 
-/** Mark only the known activation failure, after launch and touch preconditions. */
-function touchActivation(browser: Browser): { timeout?: number } {
-  const webkit = browser.browserType().name() === "webkit";
-  test.fail(webkit, "#1195: touch pointerdown cancellation prevents WebKit's compatibility click");
-  return webkit ? { timeout: 1_000 } : {};
-}
-
 test("a touch caret exposes a 44px gutter without moving prose, follows edits, and inserts by tap", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const page = await touchPage(browser, info);
   await openDoc(page, ["first block", "second block"]);
@@ -179,7 +192,7 @@ test("a touch caret exposes a 44px gutter without moving prose, follows edits, a
   await collapseToCaret(second);
   await expect(gutter(page)).toHaveCSS("opacity", "1");
   await gutter(page).tap();
-  await expect(page.getByRole("listbox", { name: "Block types" })).toBeVisible(touchActivation(browser));
+  await expect(page.getByRole("listbox", { name: "Block types" })).toBeVisible();
   await page.getByRole("option", { name: "Quote", exact: true }).tap();
   await page.keyboard.insertText("inserted by touch");
   const blocks = editor(page).locator(":scope > *");
@@ -198,10 +211,12 @@ test("a touch caret exposes a 44px gutter without moving prose, follows edits, a
 
 test("touch selects below, keyboard and mouse select above, and touch toolbar controls fit the viewport", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const page = await touchPage(browser, info);
-  await openDoc(page, ["select these words without obscuring the handles"]);
+  const text = "before selected words after";
+  const selected = "selected words";
+  await openDoc(page, [text]);
   const paragraph = editor(page).locator(":scope > p").first();
   await paragraph.tap();
-  await selectBlock(paragraph);
+  await selectBlock(paragraph, "touch", { start: 7, end: 21 });
   const toolbar = page.getByRole("toolbar", { name: "Text formatting and comment" });
   await expect(toolbar).toBeVisible();
   await expect(card(page)).toHaveAttribute("data-placement", "below");
@@ -212,10 +227,21 @@ test("touch selects below, keyboard and mouse select above, and touch toolbar co
   expect(below.y).toBeGreaterThan(selection.bottom);
   await minimumTargets(toolbar.getByRole("button"), 44, true);
 
-  const selected = await page.evaluate(() => document.getSelection()?.toString());
-  await toolbar.getByRole("button", { name: "Bold", exact: true }).tap();
-  expect(await page.evaluate(() => document.getSelection()?.toString())).toBe(selected);
-  await expect(paragraph.locator("strong")).toHaveText(selected ?? "", touchActivation(browser));
+  for (const [name, mark] of [["Bold", "strong"], ["Italic", "em"], ["Strikethrough", "s"], ["Inline code", "code"]] as const) {
+    const control = toolbar.getByRole("button", { name, exact: true });
+    await control.tap();
+    await expect(paragraph.locator(mark)).toHaveText(selected);
+    await expect(control).toHaveAttribute("aria-pressed", "true");
+    await expect(paragraph).toHaveText(text);
+    expect(await page.evaluate(() => document.getSelection()?.toString())).toBe(selected);
+    await expect(editor(page)).toBeFocused();
+    // A second native tap removes it once, from the same retained range.
+    await control.tap();
+    await expect(paragraph.locator(mark)).toHaveCount(0);
+    await expect(control).toHaveAttribute("aria-pressed", "false");
+    expect(await page.evaluate(() => document.getSelection()?.toString())).toBe(selected);
+    await expect(editor(page)).toBeFocused();
+  }
 
   await page.keyboard.press("Shift+ArrowLeft");
   await expect(card(page)).toHaveAttribute("data-placement", "above");
@@ -230,6 +256,43 @@ test("touch selects below, keyboard and mouse select above, and touch toolbar co
   await minimumTargets(toolbar.getByRole("button"), 24, true);
 });
 
+test("touch link Cancel and Apply and Comment keep the selected words as their write range", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const page = await touchPage(browser, info);
+  const text = "before selected words after";
+  const selected = "selected words";
+  await openDoc(page, [text]);
+  const paragraph = editor(page).locator(":scope > p").first();
+  await paragraph.tap();
+  await selectBlock(paragraph, "touch", { start: 7, end: 21 });
+  const link = page.getByRole("form", { name: "External link", exact: true });
+  const url = page.getByRole("textbox", { name: "External link URL" });
+  await page.getByRole("button", { name: "External link", exact: true }).tap();
+  await expect(url).toBeFocused();
+  await url.fill("https://example.com/cancelled");
+  await link.getByRole("button", { name: "Cancel", exact: true }).tap();
+  await expect(link).toHaveCount(0);
+  await expect(paragraph.locator("a")).toHaveCount(0);
+
+  // No reselection: both fields must still write the reader's original range.
+  await page.getByRole("button", { name: "External link", exact: true }).tap();
+  await expect(url).toBeFocused();
+  await url.fill("https://example.com/applied");
+  await link.getByRole("button", { name: "Apply", exact: true }).tap();
+  await expect(link).toHaveCount(0);
+  await expect(paragraph.locator("a")).toHaveText(selected);
+  await expect(paragraph.locator("a")).toHaveAttribute("href", "https://example.com/applied");
+  await expect(paragraph).toHaveText(text);
+
+  await page.getByRole("button", { name: "Comment", exact: true }).tap();
+  const comment = page.getByPlaceholder(/Comment as/);
+  await expect(comment).toBeFocused();
+  await expect(card(page).locator('[data-slot="selection-excerpt"]')).toHaveText(selected);
+  await comment.fill("touch comment on selected words");
+  await card(page).getByRole("button", { name: "Comment", exact: true }).tap();
+  await expect(paragraph.locator("[data-comment-thread]")).toHaveText(selected);
+  await expect(paragraph).toHaveText(text);
+});
+
 test("focused link and comment fields follow visual viewport resize and scroll without a window resize", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const page = await touchPage(browser, info);
   await openDoc(page, ["first context", "second context", "keep fields beside this selection"]);
@@ -240,7 +303,7 @@ test("focused link and comment fields follow visual viewport resize and scroll w
   await page.getByRole("button", { name: "External link", exact: true }).tap();
   const link = page.getByRole("form", { name: "External link", exact: true });
   const url = page.getByRole("textbox", { name: "External link URL" });
-  await expect(url).toBeFocused(touchActivation(browser));
+  await expect(url).toBeFocused();
   await minimumTargets(link.getByRole("button"), 44);
   await minimumTargets(url, 44);
   expect(await url.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
@@ -344,7 +407,7 @@ test("a code selection has a 44px Comment-only affordance below it on touch", { 
   await page.keyboard.insertText("const selected = true;");
   const code = editor(page).locator(":scope > pre > code").first();
   await code.tap();
-  await selectBlock(code);
+  await selectBlock(code, "touch", { start: 6, end: 14 });
   const comment = card(page).getByRole("button", { name: /^Comment on Code block/ });
   await expect(comment).toBeVisible();
   await expect(card(page)).toHaveAttribute("data-placement", "below");
@@ -353,6 +416,30 @@ test("a code selection has a 44px Comment-only affordance below it on touch", { 
   const bounds = await card(page).boundingBox();
   if (bounds === null) throw new Error("e2e: missing Comment-only affordance");
   expect(bounds.y).toBeGreaterThan((await selectionBox(page)).bottom);
+  await comment.tap();
+  const field = page.getByPlaceholder(/Comment as/);
+  await expect(field).toBeFocused();
+  await expect(card(page).locator('[data-slot="selection-excerpt"]')).toHaveText("selected");
+  await field.fill("touch comment on source");
+  await card(page).getByRole("button", { name: "Comment", exact: true }).tap();
+  await expect(code.locator("[data-comment-thread]")).toHaveText("selected");
+});
+
+test("touch Comment-only on a cross-block selection writes its first-block excerpt", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const page = await touchPage(browser, info);
+  await openDoc(page, ["before selected tail", "second block"]);
+  const paragraphs = editor(page).locator(":scope > p");
+  await paragraphs.first().tap();
+  await selectBlock(paragraphs.first(), "touch", { start: 7, end: 6, endBlock: 1 });
+  await card(page).getByRole("button", { name: /^Comment on Paragraph 1/ }).tap();
+  const field = page.getByPlaceholder(/Comment as/);
+  await expect(field).toBeFocused();
+  await expect(card(page)).toContainText("first block only");
+  await expect(card(page).locator('[data-slot="selection-excerpt"]')).toHaveText("selected tail");
+  await field.fill("touch comment on first block");
+  await card(page).getByRole("button", { name: "Comment", exact: true }).tap();
+  await expect(paragraphs.first().locator("[data-comment-thread]")).toHaveText("selected tail");
+  await expect(paragraphs.nth(1).locator("[data-comment-thread]")).toHaveCount(0);
 });
 
 
@@ -364,7 +451,7 @@ test("an overflowing comment excerpt keeps its focused field visible in a short 
   await selectBlock(paragraph);
   await page.getByRole("button", { name: "Comment", exact: true }).tap();
   const field = page.getByPlaceholder(/Comment as/);
-  await expect(field).toBeFocused(touchActivation(browser));
+  await expect(field).toBeFocused();
   await field.fill("keep this focused draft visible");
   for (const height of [220, 180]) {
     await page.evaluate((visibleHeight) => {

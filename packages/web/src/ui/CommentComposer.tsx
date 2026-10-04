@@ -184,7 +184,8 @@ function FormatButton({
       data-state={state}
       aria-label={label}
       aria-pressed={pressed(state)}
-      onPointerDown={(event) => event.preventDefault()}
+      // Preserve prose focus while allowing WebKit's native touch click.
+      onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
     >
       {children}
@@ -493,7 +494,7 @@ export function CommentComposer({
             variant="selection"
             size="selection"
             data-selection-tool
-            onPointerDown={(event) => event.preventDefault()}
+            onMouseDown={(event) => event.preventDefault()}
             onClick={close}
           >
             Cancel
@@ -504,7 +505,7 @@ export function CommentComposer({
             size="selection"
             data-selection-tool
             data-emphasis
-            onPointerDown={(event) => event.preventDefault()}
+            onMouseDown={(event) => event.preventDefault()}
           >
             Apply
           </Button>
@@ -550,7 +551,7 @@ export function CommentComposer({
             size="selection"
             data-selection-tool
             aria-label="External link"
-            onPointerDown={(event) => event.preventDefault()}
+            onMouseDown={(event) => event.preventDefault()}
             onClick={() => {
               setHref(draft.marks.link.href ?? "");
               setError(null);
@@ -566,7 +567,7 @@ export function CommentComposer({
             size="selection"
             data-selection-tool
             aria-label="Comment"
-            onPointerDown={(event) => event.preventDefault()}
+            onMouseDown={(event) => event.preventDefault()}
             onClick={openComment}
           >
             Comment
@@ -578,7 +579,7 @@ export function CommentComposer({
           variant="secondary"
           size="selection"
           data-selection-tool
-          onPointerDown={(event) => event.preventDefault()}
+          onMouseDown={(event) => event.preventDefault()}
           onClick={openComment}
         >
           Comment on {blockRef}
