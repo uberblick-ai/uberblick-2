@@ -1576,57 +1576,6 @@ body {
   outline-offset: 1px;
 }
 
-/* A card, not the sidebar's ground. `DialogContent` supplies the portal and the
-   dimmed overlay and no surface at all, so this class is the whole panel — and
-   it used to name `--popover`/`--popover-foreground`, which nothing in this
-   file defines: an undefined custom property makes the background `transparent`
-   and the text `canvastext`, so a destructive confirmation was read through the
-   page it covered. `--card` is the pair the other plain-CSS floating panels
-   take (`.ub-composer`, the caret menus); the sidebar's ground belongs to
-   surfaces that belong to that column (#480), and a modal centred over the
-   whole page does not. */
-.ub-confirm {
-  width: min(28rem, calc(100vw - 2rem));
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--card);
-  color: var(--card-foreground);
-  box-shadow: var(--shadow-float);
-  padding: 1rem;
-}
-
-.ub-confirm h2 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.ub-confirm p {
-  margin: 0.65rem 0 1rem;
-  line-height: 1.5;
-}
-
-.ub-confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-}
-
-.ub-tool-danger {
-  border-color: var(--destructive);
-  background: var(--destructive);
-  color: var(--destructive-foreground);
-}
-
-/* Readiness can be lost while the confirmation is open, and then the button is
-   refused rather than removed — the dialog says why. The same treatment the
-   other disabled `.ub-tool`s get, so a destructive control that cannot act does
-   not go on looking like one that can. */
-.ub-confirm-actions .ub-tool:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 /* ---- editor chrome above the prose ---- */
 
 /* The row that used to hold the block-type buttons. Block types now come from

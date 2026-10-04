@@ -290,7 +290,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     openActions(host);
     act(() => action("Archive document")?.click());
     act(() => document.querySelector<HTMLButtonElement>(
-      '[role="alertdialog"] .ub-tool-danger',
+      '[data-slot=alert-dialog-action]',
     )?.click());
     expect(getDirectoryEntry(directory, OTHER)?.deleted).toBe(true);
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
@@ -343,6 +343,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
 
     openActions(host);
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
     act(() => action("Archive document")?.click());
     const dialog = document.querySelector('[role="alertdialog"]');
     expect(dialog?.textContent).toContain("Archive Retired protocol?");
@@ -365,7 +366,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     act(() => action("Archive document")?.click());
     act(() => {
       document
-        .querySelector<HTMLButtonElement>('[role="alertdialog"] .ub-tool-danger')
+        .querySelector<HTMLButtonElement>('[data-slot=alert-dialog-action]')
         ?.click();
     });
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
@@ -464,7 +465,7 @@ describe("an archived document is readable, says so, and offers one way back", (
       emitStatus(roomName, { writable: false });
       act(() => {
         document
-          .querySelector<HTMLButtonElement>('[role="alertdialog"] .ub-tool-danger')
+          .querySelector<HTMLButtonElement>('[data-slot=alert-dialog-action]')
           ?.click();
       });
 
@@ -479,7 +480,7 @@ describe("an archived document is readable, says so, and offers one way back", (
       emitStatus(roomName, { writable: true });
       act(() => {
         document
-          .querySelector<HTMLButtonElement>('[role="alertdialog"] .ub-tool-danger')
+          .querySelector<HTMLButtonElement>('[data-slot=alert-dialog-action]')
           ?.click();
       });
       expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
