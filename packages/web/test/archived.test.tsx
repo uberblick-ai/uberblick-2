@@ -40,6 +40,7 @@ import {
   getMeta,
   getMetaMap,
   initDoc,
+  listAnnotations,
   listDirectory,
   pinDoc,
   readSidebar,
@@ -613,4 +614,54 @@ describe("an archived document is readable, says so, and offers one way back", (
     act(() => root.render(<Probe uuid={UUID} />));
     expect(seen.slice(switched)).not.toContain(false);
   });
+});
+
+describe("starting a thread requires a writable document", () => {
+  for (const cause of ["archived", "not writable"] as const) {
+    it(`withholds Comment while the document is ${cause}, then offers it again`, async () => {
+      const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+      const directory = room(directoryRoom(WORKSPACE)).ydoc;
+      const docRoom = roomForDoc(WORKSPACE, UUID);
+      const ydoc = room(docRoom).ydoc;
+      initDoc(ydoc, { uuid: UUID, title: "Retired protocol" });
+      appendBlock(ydoc, { type: "paragraph", text: "still every byte of it" });
+      upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired protocol" });
+      if (cause === "archived") tombstoneDirectoryEntry(directory, UUID);
+      else roomStatus.set(docRoom, { ...LIVE, writable: false });
+
+      const host = await openApp(`/${WORKSPACE}/${UUID}`);
+      const result = binding.mock.results[0];
+      if (result?.type !== "return" || result.value.editor === null) {
+        throw new Error("fixture document did not bind an editor");
+      }
+      const editor = result.value.editor;
+      const before = Y.encodeStateAsUpdate(ydoc);
+      // Select actual prose in the bound editor, without mounting a composer
+      // independently of the App's archive and room-status wiring.
+      act(() => editor.commands.setTextSelection({ from: 1, to: 12 }));
+      expect(editor.state.selection.empty).toBe(false);
+      expect(editor.state.doc.textBetween(1, 12)).toBe("still every");
+      expect(document.querySelector('[data-slot="selection-composer"]')).toBeNull();
+      expect(document.querySelector('button[aria-label="Comment"]')).toBeNull();
+      expect(listAnnotations(ydoc)).toEqual([]);
+      expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
+
+      if (cause === "archived") expect(restoreButton(host)).not.toBeNull();
+      await act(async () => {
+        if (cause === "archived") restoreButton(host)?.click();
+        else emitStatus(docRoom, { writable: true });
+      });
+      const comment = document.querySelector<HTMLButtonElement>(
+        '[data-slot="selection-composer"] button[aria-label="Comment"]',
+      );
+      expect(comment?.textContent).toBe("Comment");
+      act(() => comment?.click());
+      expect(document.querySelector('[data-slot="selection-excerpt"]')?.textContent).toBe(
+        "still every",
+      );
+      expect(document.querySelector('[data-slot="selection-composer"] textarea')).not.toBeNull();
+      expect(listAnnotations(ydoc)).toEqual([]);
+      expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
+    });
+  }
 });
