@@ -342,8 +342,9 @@ describe("an archived document is readable, says so, and offers one way back", (
     act(() => action("Pin to sidebar")?.click());
     expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
 
-    openActions(host);
+    act(() => trigger?.click());
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    openActions(host);
     act(() => action("Archive document")?.click());
     const dialog = document.querySelector('[role="alertdialog"]');
     expect(dialog?.textContent).toContain("Archive Retired protocol?");
