@@ -90,6 +90,42 @@ describe("device renewal response and recovery contracts", () => {
     expect(hub.renewalCount).toBe(1);
   });
 
+  it("renews for a later workspace grant after an unrelated renewal", async () => {
+    const { hub, env } = await setup();
+    hub.grant(WORKSPACE);
+    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("ready");
+    expect(hub.renewalCount).toBe(1);
+
+    hub.grant(OTHER_WORKSPACE);
+    expireCooldown();
+    const joined = await ensureDeviceLogin(hub.url, OTHER_WORKSPACE, { env });
+    expect(joined.status).toBe("ready");
+    if (joined.status !== "ready") throw new Error("later membership grant did not renew");
+    expect(joined.login.credential.record.workspaces).toEqual(expect.arrayContaining([WORKSPACE, OTHER_WORKSPACE]));
+    expect(readHubLogins(env).logins[hub.origin]).toEqual(joined.login);
+    expect((await ensureDeviceLogin(hub.url, OTHER_WORKSPACE, { env })).status).toBe("ready");
+    expect(hub.renewalCount).toBe(2);
+  });
+
+  it("retains confirmed omissions as the machine uses more workspaces", async () => {
+    const { hub, env } = await setup();
+    const denied = Array.from({ length: 30 }, () => randomUUID());
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    for (const workspace of denied) {
+      now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
+      expect((await ensureDeviceLogin(hub.url, workspace, { env })).status).toBe("no-access");
+    }
+    expect(hub.renewalCount).toBe(denied.length);
+    const stored = readHubLogins(env).logins[hub.origin];
+    now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
+    for (const workspace of denied) {
+      expect((await ensureDeviceLogin(hub.url, workspace, { env })).status).toBe("no-access");
+    }
+    expect(hub.renewalCount).toBe(denied.length);
+    expect(readHubLogins(env).logins[hub.origin]).toEqual(stored);
+  });
+
   it("stores an issued replacement despite cancellation while configuration publication waits", async () => {
     const { hub, env, login } = await setup();
     hub.grant(WORKSPACE);

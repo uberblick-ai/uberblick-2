@@ -74,12 +74,14 @@ interface Outcome {
   fingerprint: string;
   retryAt: number;
   status: "renewed" | FailureStatus;
+  /** Omitted workspaces that a renewal was actually asked to resolve. */
+  confirmedNoAccess?: string[];
   hubVersion?: number;
 }
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
-/** Sidecar contains no identity, token or key; damaged state never authorizes use. */
+/** Sidecar contains no principal identity, token or key; damaged state never authorizes use. */
 function readOutcome(path: string): Outcome | null {
   let fd: number | undefined;
   try {
@@ -87,11 +89,13 @@ function readOutcome(path: string): Outcome | null {
     const stat = fstatSync(fd);
     if (!stat.isFile() || (stat.mode & 0o077) !== 0 ||
       (process.getuid !== undefined && stat.uid !== process.getuid())) return null;
-    if (stat.size > 1024) return null;
+    if (stat.size > MAX_RESPONSE_BYTES) return null;
     const parsed: unknown = JSON.parse(readFileSync(fd, "utf8"));
     if (!object(parsed) || typeof parsed.fingerprint !== "string" || !/^[0-9a-f]{64}$/.test(parsed.fingerprint) ||
       !Number.isSafeInteger(parsed.retryAt) || typeof parsed.status !== "string" ||
       !["renewed", "sign-in-required", "hub-down", "renewal-unavailable", "update-required"].includes(parsed.status) ||
+      (parsed.confirmedNoAccess !== undefined && (!Array.isArray(parsed.confirmedNoAccess) ||
+        !parsed.confirmedNoAccess.every(workspace => typeof workspace === "string"))) ||
       (parsed.status === "update-required" && (!isProtocolVersion(parsed.hubVersion) || parsed.hubVersion === SYNC_PROTOCOL_VERSION))) return null;
     return parsed as unknown as Outcome;
   } catch {
@@ -195,12 +199,13 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     current = readDeviceLogin(endpoint, workspace, env);
     if (current.status !== "ready") return current;
     if (!needsRenewal(current.login)) return current;
-    const cached = readOutcome(path.outcome);
-    if (cached?.fingerprint === fingerprint(current.login) &&
-      (cached.retryAt > Date.now() || (cached.status === "renewed" && !current.login.credential.record.workspaces.includes(workspace)))) {
-      // A renewal has already confirmed this credential's missing access.
-      // Only a changed stored credential can change that manual reading;
-      // polling it must not keep retiring other workspaces' connections.
+    const recorded = readOutcome(path.outcome);
+    const cached = recorded?.fingerprint === fingerprint(current.login) ? recorded : null;
+    const confirmedNoAccess = cached?.confirmedNoAccess ?? [];
+    // Polling a confirmed denial must not retire other workspaces' credentials.
+    // An unchecked workspace still gets its own renewal after the cooldown.
+    if (confirmedNoAccess.includes(workspace) && !current.login.credential.record.workspaces.includes(workspace)) return noAccess(origin, workspace);
+    if (cached !== null && cached.retryAt > Date.now()) {
       // A replacement with workspace access is ready for an old refused
       // connection. A refusal of the newly issued credential waits, rather than
       // repeatedly retiring every process's working credential.
@@ -224,7 +229,9 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
       // If login changed concurrently, this exchange's result does not describe
       // its authority. Use that newer login; its next need may renew it.
       if (!sameCredential(current.login, result)) return current.login.credential.record.workspaces.includes(workspace) ? current : offline(origin);
-      publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(result), retryAt: Date.now() + DEVICE_RENEWAL_COOLDOWN_MS, status: "renewed" } satisfies Outcome));
+      publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(result), retryAt: Date.now() + DEVICE_RENEWAL_COOLDOWN_MS,
+        status: "renewed", confirmedNoAccess: [...new Set([...confirmedNoAccess, workspace])]
+          .filter(omitted => !result.credential.record.workspaces.includes(omitted)) } satisfies Outcome));
       options.signal?.throwIfAborted();
       return result.credential.record.workspaces.includes(workspace) ? current : noAccess(origin, workspace);
     }
@@ -234,7 +241,7 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     if (!sameCredential(current.login, expected)) return current.login.credential.record.workspaces.includes(workspace) ? current : offline(origin);
     const failure = result === "already-replaced" ? signIn(origin) : result;
     publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(expected), retryAt: Date.now() + DEVICE_RENEWAL_COOLDOWN_MS,
-      status: failure.status, ...(failure.hubVersion === undefined ? {} : { hubVersion: failure.hubVersion }) } satisfies Outcome));
+      status: failure.status, confirmedNoAccess, ...(failure.hubVersion === undefined ? {} : { hubVersion: failure.hubVersion }) } satisfies Outcome));
     return failure;
   } catch {
     options.signal?.throwIfAborted();
