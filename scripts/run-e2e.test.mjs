@@ -31,9 +31,10 @@ function fixture() {
 
 	for (const command of ["pnpm", "fnox"]) {
 		const path = join(bin, command);
+		const statusVariable = command === "pnpm" ? "E2E_TEST_INSTALL_STATUS" : "E2E_TEST_STATUS";
 		writeFileSync(
 			path,
-			`#!/bin/sh\nprintf '%s\\t%s' "$TMPDIR" "$PWD" >> "$E2E_TEST_LOG"\nfor arg do printf '\\t%s' "$arg" >> "$E2E_TEST_LOG"; done\nprintf '\\n' >> "$E2E_TEST_LOG"\nexit "\${E2E_TEST_STATUS:-0}"\n`,
+			`#!/bin/sh\nprintf '%s\\t%s' "$TMPDIR" "$PWD" >> "$E2E_TEST_LOG"\nfor arg do printf '\\t%s' "$arg" >> "$E2E_TEST_LOG"; done\nprintf '\\n' >> "$E2E_TEST_LOG"\nexit "\${${statusVariable}:-0}"\n`,
 		);
 		chmodSync(path, 0o755);
 	}
@@ -44,7 +45,7 @@ function fixture() {
 	);
 	chmodSync(df, 0o755);
 
-	function run({ args = [], available = "2097152", status = "0" } = {}) {
+	function run({ args = [], available = "2097152", status = "0", installStatus = "0" } = {}) {
 		return spawnSync("sh", [script, ...args], {
 			cwd: root,
 			encoding: "utf8",
@@ -52,6 +53,7 @@ function fixture() {
 				...process.env,
 				E2E_TEST_AVAILABLE_KIB: available,
 				E2E_TEST_LOG: log,
+				E2E_TEST_INSTALL_STATUS: installStatus,
 				E2E_TEST_STATUS: status,
 				PATH: `${bin}:${process.env.PATH}`,
 				XDG_CACHE_HOME: cache,
@@ -80,6 +82,11 @@ test("the browser install and suite share private storage that is always removed
 	assert.equal(calls.length, 2);
 	const [installTmp, installCwd] = calls[0].split("\t");
 	const [suiteTmp, suiteCwd] = calls[1].split("\t");
+	// This exact install argument list permits engine downloads, never host
+	// package installation (install-deps or --with-deps).
+	assert.deepEqual(calls[0].split("\t").slice(2), [
+		"--filter", "@uberblick/web", "exec", "playwright", "install", "chromium", "webkit",
+	]);
 	assert.equal(installCwd, repoRoot);
 	assert.equal(suiteCwd, repoRoot);
 	assert.equal(suiteTmp, installTmp);
@@ -91,8 +98,21 @@ test("the browser install and suite share private storage that is always removed
 	t.after(() => failed.remove());
 	result = failed.run({ status: "23" });
 	assert.equal(result.status, 23);
-	const [failedTmp] = readFileSync(failed.log, "utf8").trim().split("\t");
+	const failedCalls = readFileSync(failed.log, "utf8").trim().split("\n");
+	assert.equal(failedCalls.length, 2, "a failed browser suite must propagate its exit status");
+	const [failedTmp] = failedCalls[1].split("\t");
 	assert.equal(existsSync(failedTmp), false);
+});
+
+test("an engine download failure stops the suite and removes private storage", (t) => {
+	const current = fixture();
+	t.after(() => current.remove());
+	const result = current.run({ installStatus: "19" });
+	assert.equal(result.status, 19);
+	const calls = readFileSync(current.log, "utf8").trim().split("\n");
+	assert.equal(calls.length, 1);
+	const [installTmp] = calls[0].split("\t");
+	assert.equal(existsSync(installTmp), false);
 });
 
 test("Playwright arguments keep their boundaries and order", (t) => {
@@ -100,11 +120,12 @@ test("Playwright arguments keep their boundaries and order", (t) => {
 	t.after(() => current.remove());
 
 	const result = current.run({
-		args: ["--repeat-each=3", "outline.spec.ts", "--grep", "focused name"],
+		args: ["--project=chromium", "--repeat-each=3", "outline.spec.ts", "--grep", "focused name"],
 	});
 	assert.equal(result.status, 0, result.stderr);
 	const [, suite] = readFileSync(current.log, "utf8").trim().split("\n");
-	assert.deepEqual(suite.split("\t").slice(-4), [
+	assert.deepEqual(suite.split("\t").slice(-5), [
+		"--project=chromium",
 		"--repeat-each=3",
 		"outline.spec.ts",
 		"--grep",
@@ -112,14 +133,14 @@ test("Playwright arguments keep their boundaries and order", (t) => {
 	]);
 });
 
-test("insufficient capacity stops before Chromium and cleans the private directory", (t) => {
+test("insufficient capacity stops before browsers and cleans the private directory", (t) => {
 	const current = fixture();
 	t.after(() => current.remove());
 
 	const result = current.run({ available: "1048575" });
 	assert.equal(result.status, 1);
 	assert.match(result.stderr, /at least 1048576 KiB is required/);
-	assert.match(result.stderr, /Chromium was not started/);
+	assert.match(result.stderr, /Browsers were not started/);
 	assert.equal(existsSync(current.log), false);
 	assert.deepEqual(readdirSync(join(current.cache, "uberblick/e2e")), []);
 });
