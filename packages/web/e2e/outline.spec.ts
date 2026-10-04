@@ -328,6 +328,7 @@ for (const width of [390, 820, 1024, 1194, 1279]) {
       await page.keyboard.insertText("second");
       // Prepare both unmarked ranges before annotating either: typing at an
       // existing comment's edge would extend its mark into the new fixture.
+      await page.locator(".ub-editor .ub-paragraph").first().click();
       await page.locator(".ub-editor .ub-paragraph").first().selectText();
       await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("first");
       await page.getByRole("button", { name: "Comment", exact: true }).click();
@@ -336,6 +337,7 @@ for (const width of [390, 820, 1024, 1194, 1279]) {
 
       // Wait for Tiptap's deferred focus before setting the next range.
       await expect(editor(page)).toBeFocused();
+      await page.locator(".ub-editor .ub-paragraph").last().click();
       await page.locator(".ub-editor .ub-paragraph").last().selectText();
       await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("second");
       await page.getByRole("button", { name: "Comment", exact: true }).click();
@@ -405,6 +407,7 @@ test("touch reveals a low thread in the sheet while its close control stays in v
       await page.keyboard.insertText(anchor);
     }
     for (const [index, anchor] of anchors.entries()) {
+      await page.locator(".ub-editor .ub-paragraph").nth(index).click();
       await page.locator(".ub-editor .ub-paragraph").nth(index).selectText();
       await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(anchor);
       await page.getByRole("button", { name: "Comment", exact: true }).click();
