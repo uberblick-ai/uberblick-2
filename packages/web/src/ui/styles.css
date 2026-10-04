@@ -1,54 +1,20 @@
-/* Product tokens, fonts, editor content and unmigrated UI in plain CSS.
- * Web UI system calls for Tailwind utilities and shadcn variants on all UI
- * except editor content. Legacy surfaces move to utilities when next changed,
- * deleting their product rules in the same change. Tailwind output is layered
- * and this file is not, so these remaining rules outrank utilities.
- * `ui/tailwind.css` bridges the token block below without a second palette.
+/* Product tokens, fonts, editor content and remaining UI rules are unlayered,
+ * so they outrank the layered utilities in `ui/tailwind.css`. Theme colors
+ * pair both appearances in `light-dark()`; the terminal's fixed palette stays
+ * local to its surface.
  *
- * Theme colors live in the token block below, with both appearances named
- * together by `light-dark()`. The fixed dark terminal palette and targeted
- * lifecycle ink variants stay local to their surfaces; changing an accent to
- * make it text would repaint every other consumer of that accent.
- *
- * Which half is in force is `color-scheme`, and only that: unset by the reader
- * it is `light dark`, so the system preference decides and the app restyles
- * live when macOS appearance changes; the appearance menu (#74) stamps
- * `data-theme` on <html> and pins it. One attribute, two rules, no per-rule
- * theming.
- *
- * That sets the floor deliberately: `light-dark()` is Chrome 123, Safari 17.5
- * and Firefox 120 (all 2024). The app already asks for more than those in
- * places — `inert`, oklch — and the alternative was a second copy of every
- * colour, which is the thing this file exists to not have.
- *
- * Token values are the uberblick brand set (uberblick-ai/uberblick-rails
- * `frontend/src/style.css`), with the rails light/dark default inverted.
- *
- * Weight works the same way: the product uses two, 400 for text and 500 for
- * headings and emphasis, and no rule here sets 600 or 700. A heavier face on a
- * screen-first grotesque reads as shouting rather than as hierarchy, which size
- * and colour already carry. Keep new rules inside those two — the one known
- * exception, the browser's own <strong>, is noted at the inline-marks section.
- *
- * The awareness palette in `src/collab/identity.ts` also uses color literals:
- * y-prosemirror only accepts `#rrggbb` for remote cursors.
+ * Default text and emphasis use weights 400 and 500. Avatar initials,
+ * collaborator overflow counts and the TL;DR label use 600; prose <strong>
+ * keeps the browser's bold weight.
  */
 
 :root {
-  /* Both schemes, always — this is what `light-dark()` below reads to pick a
-     half of each token, and the *page* is what sets it. The two rules after
-     this block are then the entire appearance override (#74): the reader's
-     choice is stamped on <html> as `data-theme`, and every colour in the app
-     follows because every colour in the app is one of these tokens. Without a
-     choice there is no attribute, and the system preference decides. */
+  /* `light-dark()` follows the page's color-scheme. Without `data-theme`,
+     both schemes remain available and the system preference chooses. */
   color-scheme: light dark;
 
-  /* The page's own ground, and the one token that is not a flat colour: the
-     warm radial fall-off the deployed uberblick.ai paints behind everything
-     (#480). `body` is its only consumer — `--background` stays flat because the
-     fields that read it are boxes, and a gradient in a box is a smear. The `light-dark()` is per *stop* rather than around the whole
-     value, which is what keeps the one-block architecture above true: still one
-     property naming both of its halves at once. */
+  /* Only the body uses the radial page ground. Field backgrounds stay flat;
+     each gradient stop pairs its two appearances with `light-dark()`. */
   --page-ground: radial-gradient(
     at 0% 0%,
     light-dark(#ffffff, oklch(0.184 0.022 65)),
@@ -61,226 +27,122 @@
   --card-foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
   --primary: light-dark(oklch(0.205 0 0), oklch(0.922 0 0));
   --primary-foreground: light-dark(oklch(0.985 0 0), oklch(0.205 0 0));
-  /* Dark's neutral greys move onto the scheme's warm hue. They land on the
-     same value as `--sidebar` below, which is why every affordance that sits
-     *on* the sidebar reads `--sidebar-accent` instead — see the sidebar tokens
-     for the whole inventory. */
+  /* These dark fills equal the sidebar ground. Highlights on that surface
+     need the distinct `--sidebar-accent` below. */
   --secondary: light-dark(oklch(0.97 0 0), oklch(0.22 0.01 65));
   --secondary-foreground: light-dark(oklch(0.205 0 0), oklch(0.985 0 0));
   --muted: light-dark(oklch(0.97 0 0), oklch(0.22 0.01 65));
-  /* Light stops at the tightest full-strength rendered reading: card-accent
-     under the Contents count, block-menu hints and collaborator rows. At
-     0.511 it clears AA without collapsing the secondary tier into body ink.
-     Enabled copy and thread text must not add opacity to this ink. */
+  /* Full-strength muted ink clears AA (4.5:1) on card-accent, its tightest
+     rendered ground. Enabled copy and thread text must not dilute it with
+     opacity. */
   --muted-foreground: light-dark(oklch(0.511 0 0), oklch(0.708 0 0));
   --accent: light-dark(oklch(0.97 0 0), oklch(0.22 0.01 65));
   --accent-foreground: light-dark(oklch(0.205 0 0), oklch(0.985 0 0));
   --destructive: light-dark(oklch(0.577 0.245 27.325), oklch(0.704 0.191 22.216));
   --destructive-foreground: light-dark(#ffffff, #111827);
-  /* Not in the brand set: the loud unsupported-content banner needs a tinted
-     ground, and the set ships `-subtle` pairs for every other status hue. Same
-     recipe, destructive's hue. */
+  /* The unsupported-content banner uses a tinted destructive ground. */
   --destructive-subtle: light-dark(oklch(0.95 0.03 27.325), oklch(0.25 0.04 22.216));
   --border: light-dark(oklch(0.922 0 0), oklch(1 0 0 / 10%));
   --input: light-dark(oklch(0.922 0 0), oklch(1 0 0 / 15%));
   --ring: light-dark(oklch(0.708 0 0), oklch(0.556 0 0));
 
-  /* The sidebar is its own surface, not a card that happens to be a column
-     (#480). It needs its own four because the page behind it is now a gradient:
-     a column painted `--card` had nothing to be distinct *from* while the ground
-     was one flat colour, and has to earn that distinctness now. In dark it sits
-     above the ground; in light it sits below it, which is the same relationship
-     read from the other side.
-
-     `--sidebar-accent` exists because `--secondary`, `--muted` and `--accent`
-     all land on `--sidebar`'s dark value: an affordance on this surface has to
-     step off it, and those three no longer can. Its consumers are the document
-     row, the workspace header, the user card, the group action, `+ group`,
-     `+ new doc`, All docs, and the appearance options — plus the workspace,
-     user, Contents, Document actions and tag picker panels through the bridge
-     in `ui/tailwind.css`.
-
-     The ink does not move: `--sidebar-foreground` carries `--card-foreground`'s
-     two halves unchanged. */
+  /* The sidebar stays distinct from the page gradient in both appearances.
+     Its accent must step off its own ground, where the global dark secondary,
+     muted and accent fills coincide. Its foreground matches card ink. */
   --sidebar: light-dark(oklch(0.94 0.01 65), oklch(0.22 0.01 65));
   --sidebar-foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
   --sidebar-border: light-dark(oklch(0.9 0.006 65), oklch(1 0 0 / 12%));
   --sidebar-accent: light-dark(oklch(0.89 0.015 65), oklch(0.28 0.015 65));
 
-  /* The sidebar's five derived tints (#481, #515). uberblick.ai steps its column
-     back from full ink in three places — the row, its leading icon and the group
-     label — and edges the open row in brand. Each is a *named* token
-     rather than a percentage written at a use site, because a tint spelled out
-     at three rules is three places to drift; the alpha is on the ink, so the tint
-     reads against `--sidebar` and against `--sidebar-accent` alike.
-
-     They carry both halves the way every token above does, so light and dark
-     step back by the same amount rather than by two hand-picked colours.
-
-     The fifth is the AA half of #515. Owner decision, 2026-08-30: AA wins,
-     one rung. The label and muted ink share the ladder's 60% rung, reaching
-     4.96:1 on the column and 4.70:1 on its highlight in light. Two names for
-     one value on purpose: the label follows the ladder, while the muted ink
-     is the floor for small text on this surface. The global muted ink serves
-     other grounds; its light value now also meets AA, without changing these
-     settled sidebar tints or either token's dark value. */
+  /* Sidebar tints apply alpha to the ink so they work on the column and its
+     accent. Label and small-text ink have separate roles but share the 60%
+     AA floor: 4.96:1 on the light column and 4.70:1 on its highlight (#515). */
   --sidebar-row-foreground: light-dark(oklch(0.145 0 0 / 82%), oklch(0.985 0 0 / 82%));
   --sidebar-row-icon: light-dark(oklch(0.145 0 0 / 68%), oklch(0.985 0 0 / 68%));
   --sidebar-group-label: light-dark(oklch(0.145 0 0 / 60%), oklch(0.985 0 0 / 60%));
   --sidebar-muted-foreground: light-dark(oklch(0.145 0 0 / 60%), oklch(0.985 0 0 / 60%));
   --sidebar-selected-border: light-dark(oklch(0.75 0.15 65 / 28%), oklch(0.8 0.18 65 / 28%));
 
-  /* The one interior stroke `--sidebar-border` could not simply absorb (#515).
-     The group-rename field edged itself in `--input`, which in light is ΔE 0.021
-     against this ground — half the floor, so it had to move — but whose dark
-     half is 15% white against the border's 12%. Taking `--sidebar-border`
-     wholesale would have traded that field's dark contrast down from 1.587 to
-     1.430 while every other interior stroke rose to it, and the criterion is
-     that no stroke *loses* contrast. So the field takes the column's light half
-     and keeps `--input`'s dark one. Not a second standard: it is the same value
-     as `--sidebar-border` where the standard was the problem, and one rung above
-     it in the appearance that was already fine. */
+  /* The rename-field edge matches the sidebar border in light and keeps
+     the stronger 15% input stroke in dark (#515). */
   --sidebar-input: light-dark(oklch(0.9 0.006 65), oklch(1 0 0 / 15%));
 
-  /* `--sidebar-accent`'s job, on the other surface (#516). #480 moved dark's
-     neutral greys onto the scheme's warm hue, which narrowed every highlight
-     that sits on `--card` — including block-menu entries and thread-card chips
-     — from OKLab ΔE 0.064 against their ground to 0.018. The
-     sidebar got its own accent then; the card did not, and the three were left
-     reading the globals. Owner decision, 2026-08-30: one card-scoped token, so
-     the answer is one thing rather than three per-surface answers, and
-     `--accent`/`--secondary` keep their warm values for every other consumer.
-
-     Both halves are `--card` stepped the way `--sidebar-accent` steps off
-     `--sidebar`: away from the ground at chroma 0.015, on `--card`'s own hue.
-     Dark lands past the literal step, and that is deliberate — +0.06 L gives
-     ΔE 0.0619, just under the 0.064 the pairs had before the retune, so it
-     goes to 0.275 (ΔE 0.0716) rather than sit fractionally under the floor it
-     exists to clear. Light steps -0.05 for ΔE 0.0510, against 0.0050 before. */
+  /* Card highlights step off their own ground and hue: OKLab ΔE is 0.0510
+     in light and 0.0716 in dark, clearing the dark 0.064 floor (#516).
+     The global accent and secondary fills retain their warm values. */
   --card-accent: light-dark(oklch(0.92 0.015 75), oklch(0.275 0.015 75));
 
   --brand: light-dark(oklch(0.75 0.15 65), oklch(0.8 0.18 65));
   --brand-subtle: light-dark(oklch(0.95 0.03 65), oklch(0.25 0.04 65));
 
-  /* The brand *as text* — the one value every functional brand ink reads (#569).
-     `--brand` above stays the accent it always was: borders, outlines, fills,
-     `--brand-subtle`, and non-text accents.
-
-     Two values in light rather than one, by owner decision (2026-08-31, option
-     C): the amber reaches 1.65:1 on `--sidebar-accent` and 2.04–2.30:1 on every
-     other light ground, so text painted in it is not readable — and darkening
-     `--brand` itself to fix that would repaint every brand stroke in the app a
-     brown. Dark never had the problem (7.2–10.2:1), so its half is the accent's
-     own value; only light needs a second one.
-
-     `oklch(0.48 0.1 65)` is the accent's hue at the lightness AA allows:
-     4.82:1 on `--sidebar-accent`, the tightest ground in the app, rising to
-     6.71:1 on the page's white. One rung lighter (0.49) leaves 4.61:1, which is
-     the floor with nothing in hand; chroma comes down with the lightness
-     because sRGB does not hold 0.15 this dark. */
+  /* Functional brand text uses `--brand-ink`; strokes, fills and other
+     non-text accents use `--brand` (#569). The light ink clears AA at 4.82:1
+     on sidebar-accent, its tightest ground. Dark ink can use the accent itself;
+     darkening the accent to serve light text would also repaint every stroke. */
   --brand-ink: light-dark(oklch(0.48 0.1 65), var(--brand));
 
-  /* Ink on a `--brand` fill (#482, the workspace tile). Theme-invariant for the
-     same reason as `--cursor-label-foreground` below: `--brand` is a light
-     amber in *both* appearances, so the ink on it is dark in both, and a
-     `light-dark()` pair here would flip a letter to white on a light ground.
-     `--foreground`'s light half — 8.61:1 on light's brand and 9.76:1 on
-     dark's. */
+  /* Brand fills are light amber in both appearances, so their ink stays
+     dark in both: at least 8.61:1 on the fill. */
   --brand-foreground: oklch(0.145 0 0);
   --status-success: light-dark(oklch(0.65 0.18 145), oklch(0.7 0.2 145));
   --status-warning: light-dark(oklch(0.75 0.18 75), oklch(0.8 0.2 75));
   --status-warning-subtle: light-dark(oklch(0.95 0.04 75), oklch(0.25 0.04 75));
 
-  /* Running prose, one step back from `--foreground`. A whole column set at
-     the brightest ink in the palette glares; headings keep `--foreground`, so
-     the hierarchy is carried by contrast rather than by size alone. */
+  /* Running prose steps back from heading ink to preserve contrast hierarchy. */
   --prose-text: light-dark(oklch(0.3 0 0), oklch(0.92 0 0));
 
-  /* Syntax ink is presentation-only and theme-owned. Lowlight supplies token
-     names, never a stylesheet; these five roles keep the source readable on
-     the code block's `--muted` ground in both appearances. */
+  /* Lowlight supplies token classes; these theme-owned inks keep syntax
+     readable on the code block's muted ground in both appearances. */
   --syntax-comment: light-dark(oklch(0.5 0.03 65), oklch(0.72 0.03 65));
   --syntax-keyword: light-dark(oklch(0.45 0.13 305), oklch(0.8 0.13 305));
   --syntax-name: light-dark(oklch(0.43 0.11 240), oklch(0.78 0.1 240));
   --syntax-string: light-dark(oklch(0.42 0.1 145), oklch(0.78 0.12 145));
   --syntax-number: light-dark(oklch(0.46 0.13 40), oklch(0.8 0.14 40));
 
-  /* Text on an awareness colour. Theme-invariant on purpose — the palette
-     y-prosemirror writes inline as `#rrggbb` literals (see
-     src/collab/identity.ts) is picked for white text: ≥4.69:1 for every
-     colour. Not overridden in the light block. Two surfaces read it, the
-     remote-cursor label it is named for and the sidebar's user tile (#482),
-     and it stays one token because it is one fact about that palette.
-
-     Spelled in oklch like every other token here, rather than as the hex it
-     started as: #515's surface walk parses what the column paints, and a
-     legacy colour reaches it as `rgb(255, 255, 255)`. Same white either way. */
+  /* Cursor labels and user tiles keep white ink in both appearances:
+     the inline #rrggbb awareness palette in src/collab/identity.ts gives it
+     at least 4.69:1 contrast on every color. */
   --cursor-label-foreground: oklch(1 0 0);
 
   --radius: 0.625rem;
   --radius-sm: calc(var(--radius) - 4px);
 
-  /* The floating-surface lift, written out at more than one call site before
-     the vendored shadcn chrome needed it too (#27). A popover that floats over
-     the prose has to be the *same* lift as the block menu and the comment
-     composer — two spellings would read as two surfaces. Theme-invariant:
-     black over a light ground and black over a dark one are both "less light
-     here".*/
+  /* Floating menus and the comment composer share this lift in both themes. */
   --shadow-float: 0 8px 24px oklch(0 0 0 / 25%);
-  /* The TL;DR is an inset editorial card rather than floating chrome. The
-     Rails reference gives it a wider, softer lift at less than half the ink. */
+  /* The inset TL;DR card has a wider, softer shadow than floating chrome. */
   --shadow-callout: 0 18px 40px oklch(0 0 0 / 12%);
 
-  /* The reading composition. Prose wider than ~75ch is hard to track back to
-     the next line; the other three values keep its origin, the comments rail
-     and a minimum trailing breath independent of viewport surplus. */
+  /* Cap the reading measure and keep its inset, rail gap and trailing space
+     independent of surplus viewport width. */
   --measure: 72ch;
   --sidebar-width: 18rem;
   --outline-width: 15rem;
   --pane-document-inset: 2rem;
   --document-rail-gap: 2rem;
   --pane-trailing-space: 1rem;
-  /* Reserved down the left of the content column for the block gutter's `+`.
-     Permanent, so hovering a block reveals the button without moving a pixel
-     of prose. */
+  /* Permanently reserve the block gutter so revealing its + moves no prose. */
   --block-gutter: 1.75rem;
 
-  /* Geist for UI and prose, Geist Mono for machine-flavoured text — room keys,
-     uuids, sync detail, group labels. Both are bundled (see the @font-face
-     block below), with a system stack behind them for the swap period.
-
-     The document title and TL;DR heading are the two editorial surfaces set
-     in neither. Both use `--font-display` so their shared Fraunces stack
-     cannot drift between its use sites (#536). */
+  /* UI and prose use Geist; machine text uses Geist Mono. The document title
+     and TL;DR heading share the Fraunces display stack. System fallbacks cover
+     the font-swap period. */
   --font-sans: "Geist", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-display: "Fraunces", Georgia, "Times New Roman", serif;
 
   font-family: var(--font-sans);
-  /* Geist is a low-contrast grotesque; subpixel rendering thickens its stems
-     enough that 400 reads as 500 and the two-weight system collapses. */
+  /* Grayscale smoothing keeps the 400 and 500 stems visually distinct. */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* The three faces ship with the app: variable woff2 files vendored under
- * `src/assets/fonts` (Geist 1.7.2 and Fraunces v38, both SIL Open Font
- * License 1.1). The OFL wants its text to travel with the font software, so
- * `public/LICENSE-Geist.txt` and `public/LICENSE-Fraunces.txt` are copied
- * verbatim into every build and served at those paths — they cover the
- * vendored files only, not the app. (They live in `public/` rather than beside the
- * woff2 files because Vite emits from `src/` only what something references,
- * and no honest document-level reference to a font license
- * exists.) No CDN, no `fonts.googleapis.com`: the
- * app is offline-first, and a render-blocking third-party request would make
- * it render differently with no network.
+/* Bundle variable WOFF2 faces for offline rendering; relative asset URLs
+ * survive the build's base path. `swap` keeps first paint on system fallbacks,
+ * and normal faces leave italics to synthetic oblique.
  *
- * Vite rewrites these relative urls to hashed emitted assets, so the paths
- * survive any base path. One variable file per family covers every weight
- * (`font-weight: 100 900`) — Fraunces is served in three subsets and says so
- * below; italics are left to the browser's synthetic
- * oblique rather than doubling the payload. `swap` keeps first paint on the
- * system stack instead of blocking on the download.
+ * Geist 1.7.2 and Fraunces v38 use SIL Open Font License 1.1. Distributions
+ * must retain public/LICENSE-Geist.txt and public/LICENSE-Fraunces.txt for
+ * these vendored fonts.
  */
 @font-face {
   font-family: "Geist";
@@ -298,19 +160,9 @@
   font-display: swap;
 }
 
-/* Fraunces is the exception to the file-per-family rule above, because Google
-   Fonts publishes it in three cuts rather than one: all three are vendored,
-   with the `unicode-range` each is served with, so the face covers everything
-   Google publishes for it and a Polish or Turkish title is not half Georgia
-   (#536). The ranges overlap on a few combining marks and the last declaration
-   wins, so the order is Google's own. Fraunces has no Cyrillic upstream at
-   all, so a Cyrillic title falls back to Georgia where Geist would have set it
-   — a property of the typeface, not of this packaging.
-
-   Its optical-size axis is left to the browser's default
-   `font-optical-sizing: auto`, which reads the axis off the title's own
-   2.05rem — the whole reason to ship the variable file rather than an instance
-   cut for one size. */
+/* Fraunces needs all three unicode subsets. Their combining marks overlap,
+   so declaration order determines which subset serves them. Cyrillic falls
+   back to Georgia; the variable face keeps optical sizing automatic. */
 @font-face {
   font-family: "Fraunces";
   src: url("../assets/fonts/Fraunces-Variable-vietnamese.woff2") format("woff2");
@@ -345,12 +197,9 @@
     U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-/* The appearance override (#74), and all of it: the reader's choice is an
-   attribute on <html>, and `color-scheme` is the one property `light-dark()`
-   consults. No token is restated, so light and dark cannot drift apart, and
-   the UA's own surfaces — scrollbars, form controls, the canvas behind the
-   page — follow the choice for free. `src/ui/theme.ts` writes the attribute;
-   nothing else may. */
+/* `data-theme` pins color-scheme for tokens and UA controls; removing it
+   restores the system preference. The bootstrap and src/ui/theme.ts use this
+   same attribute without restating any token. */
 :root[data-theme="light"] {
   color-scheme: light;
 }
@@ -369,15 +218,23 @@ body {
   color: var(--foreground);
 }
 
-.ub-app {
+.ub-app,
+.ub-pane,
+.ub-column,
+.ub-presence,
+.ub-comment-form,
+.ub-link-repair ul,
+.ub-tldr-form {
   display: flex;
   flex-direction: column;
+}
+
+.ub-app {
   height: 100vh;
 }
 
-/* `ub open` keeps serving its useful startup binding after the machine is
-   rebound. This page-level fact sits above every route without covering or
-   disabling the panes behind it. */
+/* The rebound notice occupies its own row above every route, keeping the
+   panes visible and operable. */
 .ub-rebound-notice {
   flex: none;
   margin: 0;
@@ -389,13 +246,22 @@ body {
   text-align: center;
 }
 
-.ub-rebound-notice strong {
+/* Notice leads use the 500 UI emphasis weight instead of UA bold. */
+.ub-rebound-notice strong,
+.ub-foreign-banner strong,
+.ub-notice strong {
   font-weight: 500;
 }
 
-.ub-rebound-notice code {
+.ub-rebound-notice code,
+.ub-notice code,
+.ub-inline-code {
   font-family: var(--font-mono);
   font-size: 0.9em;
+}
+
+.ub-rebound-notice code,
+.ub-notice code {
   overflow-wrap: anywhere;
 }
 
@@ -404,51 +270,41 @@ body {
   font-size: 0.8rem;
 }
 
-/* Machine-flavoured text is Geist Mono: the workspace and room keys, the sync
-   detail lines, and the block ids in the unsupported-content fallback. Prose and
-   chrome stay Geist. Scoped selectors rather than the bare `.ub-muted`, which
-   also carries prose ("No documents yet.").
-
-   `.ub-group-head` left this list with #481: a group name is a word somebody
-   typed, not an identifier, and it now reads as a small-caps section label. */
+/* Machine identifiers and sync details use the mono face. Keep these
+   selectors scoped: `.ub-muted` also carries running prose. */
 .ub-list-head .ub-muted,
 .ub-status,
 .ub-foreign-list {
   font-family: var(--font-mono);
 }
 
-/* A session as a circle (#494, #616): every session's name initial, with a
-   small robot badge added for an agent. The ring and the letter are the session's
-   own presence
-   colour, written inline by the component because that palette is `#rrggbb`
-   literals rather than theme tokens (src/collab/identity.ts).
-
-   The disc is *not* filled with that colour, and the reason is in identity.ts:
-   those eight hues sit near luminance 0.18 because they are calibrated for
-   contrast **against** a ground, so a filled disc would put a dark glyph on a
-   dark fill in either theme. A ring plus coloured ink keeps one identity legible
-   on both. Transparent rather than a ground token, so the circle takes whatever
-   it sits on — the status line sits on the page, the sync panel's rows sit on a
-   card, and a token would be wrong on one of them. */
-.ub-avatar {
+.ub-avatar,
+.ub-peer-control {
   position: relative;
   box-sizing: border-box;
   width: 28px;
   height: 28px;
   flex: none;
-  align-self: center;
-  border: 2px solid var(--border);
   border-radius: 50%;
+}
+
+.ub-avatar,
+.ub-avatar-agent-badge,
+.ub-copy-link,
+.ub-status-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+/* Session avatars keep their inline presence color on the ring and initial.
+   A transparent disc stays legible on page and card grounds; the #rrggbb
+   awareness palette is scoped in src/collab/identity.ts. */
+.ub-avatar {
+  align-self: center;
+  border: 2px solid var(--border);
   background: transparent;
-  font-family: var(--font-sans);
-  font-size: 0.7rem;
   line-height: 1;
-  /* A letter is an identity, not a word: centred and bold enough to read at
-     this size. The robot ignores both — an emoji brings its own glyph. */
-  font-weight: 600;
   user-select: none;
 }
 
@@ -458,9 +314,6 @@ body {
   bottom: -3px;
   width: 13px;
   height: 13px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   border: 1px solid var(--card);
   border-radius: 50%;
   background: var(--card);
@@ -468,40 +321,90 @@ body {
   line-height: 1;
 }
 
-.ub-list-head {
+.ub-list-head,
+.ub-user-card,
+.ub-status,
+.ub-peer-overflow-row,
+.ub-doc-meta,
+.ub-waiting-meta,
+.ub-tldr-form-meta,
+.ub-tldr-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.5rem;
+}
+
+.ub-list-head {
+  justify-content: space-between;
   margin-bottom: 0.5rem;
 }
 
-/* The column's own small text: the "nothing pinned yet" line, and the `·
-   archived` suffix or uuid stub inside a pinned row. `.ub-muted` is a
-   whole-app class and keeps `--muted-foreground` everywhere else; on this
-   ground it keeps the sidebar's settled 60% rung (#515). Ahead of the head
-   rule below, which ties on specificity and has its own step. */
+/* Sidebar small text uses its AA floor (#515). Keep this before the
+   equal-specificity header rule, which has its own label tint. */
 .ub-list .ub-muted {
   color: var(--sidebar-muted-foreground);
 }
 
-/* The status line under the head. Still mono — it is sync detail, not a name —
-   but at the group label's size and step-back, so the head reads as one system
-   with the labels below it (#481). */
+/* Sync detail shares the group labels' size and tint while staying mono. */
 .ub-list-head .ub-muted {
   font-size: 11px;
   color: var(--sidebar-group-label);
 }
 
-/* ---- the sidebar row (#481) ----
-   One shape for the things the column lists: a pinned document, the navigation
-   rows, "+ new doc" and "+ group". They are the same affordance at four
-   places, so they are one rule; four near-copies is how two of them end up a
-   pixel apart. The uberblick.ai row is 34px, and `min-height` rather than
-   `height` so a wrapped label grows the row instead of spilling out of it.
+/* Keep font resets scoped to product selectors: unlayered rules outrank
+   every Tailwind utility, including shadcn controls. */
+.ub-list-head button,
+.ub-list .ub-nav li button:not(.ub-nav-soon),
+.ub-settings-entry,
+.ub-group-add,
+.ub-user-card,
+.ub-appearance-option,
+.ub-group-act,
+.ub-outline-trigger,
+.ub-mention,
+.ub-status-sync,
+.ub-copy-link,
+.ub-peer-control,
+.ub-peer-overflow-row,
+.ub-tags,
+.ub-actions-trigger,
+.ub-tool,
+.ub-lang,
+.ub-tldr-form textarea,
+.ub-docs-mode,
+.ub-docs-search,
+.ub-docs-sort,
+.ub-docs-open {
+  font: inherit;
+}
 
-   The transparent border is load-bearing: the open row gains a 1px edge below,
-   and reserving it here is what stops selection from nudging every row. */
+.ub-list-head button,
+.ub-list .ub-nav li button:not(.ub-nav-soon),
+.ub-settings-entry,
+.ub-group-add,
+.ub-user-card,
+.ub-swatch,
+.ub-appearance-option,
+.ub-group-act,
+.ub-outline-trigger,
+.ub-mention,
+.ub-status-sync,
+.ub-copy-link,
+.ub-peer-control,
+.ub-peer-overflow-row,
+.ub-tag-picker-trigger,
+.ub-actions-trigger,
+.ub-tool,
+.ub-terminal-toggle,
+.ub-copy,
+.ub-docs-mode,
+.ub-docs-sort,
+.ub-docs-open {
+  cursor: pointer;
+}
+
+/* Sidebar rows can grow for wrapped labels. Reserve the selected row's
+   1px edge in the resting border so selection shifts no content. */
 .ub-list-head button,
 .ub-list .ub-nav li button:not(.ub-nav-soon),
 .ub-settings-entry,
@@ -513,20 +416,12 @@ body {
   padding: 6px 8px;
   border: 1px solid transparent;
   border-radius: 0.42rem;
-  background: none;
   color: var(--sidebar-row-foreground);
-  font: inherit;
   font-size: 14px;
   text-align: left;
-  cursor: pointer;
 }
 
-/* Hover is an offer, so only a control that can take it lights up. The shared
-   rule used to match a disabled `+ new doc` as well, and the `:disabled` rule
-   below resets the ink and the cursor but not the ground — so the one row that
-   could do nothing was the one that looked most ready (#529). Navigation's
-   placeholder rows say the same thing with `aria-disabled`, because they stay
-   focusable (#483), and they are declined here for the same reason. */
+/* Disabled controls and aria-disabled navigation rows get no hover fill. */
 .ub-list-head button:hover:not(:disabled),
 .ub-list .ub-nav li button:not(.ub-nav-soon):hover:not(:disabled, [aria-disabled="true"]),
 .ub-settings-entry:hover,
@@ -535,10 +430,7 @@ body {
   color: var(--sidebar-foreground);
 }
 
-/* The open thing, wherever it is. Until #481 a document row was marked by a
-   class and the All-docs entry by `aria-current`, which meant two rules painting
-   one state — and only one of them told a screen reader anything. Now the
-   attribute is the state, and the rule is one. */
+/* The current navigation destination keeps its edge and emphasis. */
 .ub-list .ub-nav li button:not(.ub-nav-soon)[aria-current="page"] {
   background: var(--sidebar-accent);
   border-color: var(--sidebar-selected-border);
@@ -551,7 +443,8 @@ body {
   cursor: default;
 }
 
-.ub-list ul {
+.ub-list ul,
+.ub-presence {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -561,9 +454,7 @@ body {
   width: 100%;
 }
 
-/* A row's leading glyph — drawn, like the group caret (#110). One box and one
-   step-back ink for the pinned rows and the navigation rows above them: they
-   are the same row shape, so their marks are the same mark. */
+/* Row glyphs share one fixed box and sidebar icon tint. */
 .ub-doc-icon,
 .ub-nav-icon {
   display: block;
@@ -573,18 +464,11 @@ body {
   color: var(--sidebar-row-icon);
 }
 
-/* ---- the sidebar's fixed navigation (#483) ----
-   Chrome above the curation: the live "All docs" row, and the two destinations
-   the product has decided on and not yet built. */
-
 .ub-nav {
   margin-bottom: 0.5rem;
 }
 
-/* The section's name, in the group label's voice (#481) — the same 11px
-   wide-tracked small caps, at `.ub-group-toggle`'s inset so both labels start
-   on one vertical line. Without that button's shape: this section discloses
-   nothing, so it is a label rather than a control. */
+/* Navigation and group labels share an inset and small-caps voice. */
 .ub-nav-label {
   margin: 0;
   padding: 0.25rem 0.4rem;
@@ -595,10 +479,14 @@ body {
   color: var(--sidebar-group-label);
 }
 
-/* Everything the row is called, in one flex child: the title, and the `·
-   archived` suffix or the uuid stub that can follow it. Two children here
-   instead would put the row's 8px gap between a title and its own suffix. */
-.ub-pin-label {
+/* Truncate titles, names and metadata without growing their rows. Pinned
+   titles keep their suffix inside the same flex child. */
+.ub-pin-label,
+.ub-user-name,
+.ub-group-label,
+.ub-last-updated,
+.ub-peer-overflow-name,
+.ub-docs-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -617,85 +505,87 @@ body {
   margin-top: 0.25rem;
 }
 
-/* ---- the sidebar's two anchored menus (#74, design 1c) ----
-
-   Both use vendored shadcn surfaces reading these tokens through the Tailwind
-   bridge. The remaining product rules below move to utilities when these
-   surfaces are next changed, under Web UI system's Styling rule.
-
-   A portalled menu is a sibling of `.ub-app`, not a child, so every selector
-   here matches a class *on* the menu or inside it. None of them reaches down
-   from `.ub-app`, and none of them can. */
+/* Portalled menus sit outside `.ub-app`, so their selectors must match
+   classes on the menu or its descendants. */
 
 .ub-menu-caret {
   color: var(--sidebar-muted-foreground);
   font-size: 0.7rem;
 }
 
-/* The user card: the footer's row shape, plus the tile that carries this
-   session's presence colour — the same colour peers see it in. */
-.ub-user-card {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  margin-top: 0.15rem;
-  padding: 0.3rem 0.4rem;
+.ub-user-card,
+.ub-group-act,
+.ub-status-sync,
+.ub-peer-overflow-row,
+.ub-tag-picker-trigger,
+.ub-terminal-toggle,
+.ub-copy,
+.ub-docs-sort,
+.ub-docs-open,
+.ub-peer-control,
+.ub-title {
   border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
 }
 
-.ub-user-card:hover {
+.ub-user-card,
+.ub-appearance-option,
+.ub-status-sync,
+.ub-peer-overflow-row,
+.ub-docs-sort,
+.ub-docs-open {
+  color: inherit;
+}
+
+.ub-user-card,
+.ub-peer-overflow-row,
+.ub-docs-open {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+
+.ub-user-card {
+  margin-top: 0.15rem;
+  padding: 0.3rem 0.4rem;
+}
+
+.ub-user-card:hover,
+.ub-appearance-option:hover {
   background: var(--sidebar-accent);
   color: var(--accent-foreground);
 }
 
-/* The sidebar's two identity tiles (#482): where you are, and who this client
-   is. Rounded squares, and the shape is the distinction — #494's session
-   avatars are circles because they say who is *present*, which is a different
-   question from who you are. Both letters are `aria-hidden` in the markup, so
-   this is decoration and never a reading. */
+.ub-identity-tile,
+.ub-copied {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Sidebar identity tiles are rounded squares; present-session avatars
+   are circles, so the two kinds of identity remain visually distinct. */
 .ub-identity-tile {
   flex: none;
   width: 1.75rem;
   height: 1.75rem;
   border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   font-size: 0.8rem;
-  /* 500, the emphasis weight of the two this file uses: a letter alone at 400
-     reads as a stray character, and at 28px on a filled ground it needs no
-     more than that. */
+  /* Identity tiles use the default 500 emphasis weight. */
   font-weight: 500;
   line-height: 1;
   user-select: none;
 }
 
-/* Filled with the presence colour, which the component writes inline because
-   that palette is `#rrggbb` literals rather than tokens (identity.ts). The ink
-   is the token those eight hues were picked for: white, ≥4.69:1 on every one
-   of them, in either appearance. Filled rather than the avatar circle's ring,
-   because this tile is not competing with a ground it has to stay legible
-   against — it sits alone at the foot of the column. */
+/* White ink keeps at least 4.69:1 contrast on every inline presence fill
+   in both appearances. */
 .ub-user-tile {
   color: var(--cursor-label-foreground);
 }
 
 .ub-user-name {
   flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-/* The user panel: three stacked sections, each a label over its controls. */
 .ub-user-panel {
   display: grid;
   gap: 0.6rem;
@@ -706,24 +596,27 @@ body {
   font-weight: 500;
 }
 
-/* A <fieldset>, because a caption over a set of related controls is what one
-   is for — with the UA's box taken back off it. */
-.ub-panel-group {
+/* Remove the fieldset's UA box and minimum inline size. */
+.ub-panel-group,
+.ub-docs-mode-fieldset {
   margin: 0;
   padding: 0;
   border: 0;
   min-inline-size: 0;
 }
 
-.ub-panel-label {
-  padding: 0;
-  margin-bottom: 0.3rem;
+.ub-panel-label,
+.ub-panel-fact dt {
   color: var(--sidebar-muted-foreground);
   font-size: 0.75rem;
 }
 
-/* The presence palette. A row of eight rather than eight lines: it is one
-   choice, and a list of it would be the whole panel. */
+.ub-panel-label {
+  padding: 0;
+  margin-bottom: 0.3rem;
+}
+
+/* Keep the eight presence choices in one equal-width row. */
 .ub-swatches {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
@@ -735,18 +628,21 @@ body {
   padding: 0;
   border: 2px solid transparent;
   border-radius: var(--radius-sm);
-  cursor: pointer;
 }
 
-/* The chosen one is ringed in the ink of the ground it sits on, so the mark
-   works over any of the eight hues. */
+/* Selection uses a border visible over every swatch hue, leaving outline
+   available for the browser's keyboard focus ring. */
 .ub-swatch[aria-pressed="true"] {
   border-color: var(--foreground);
 }
 
-.ub-appearance {
+.ub-appearance,
+.ub-docs-modes {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+}
+
+.ub-appearance {
   gap: 0.25rem;
 }
 
@@ -754,16 +650,7 @@ body {
   padding: 0.25rem 0.4rem;
   border: 1px solid var(--sidebar-border);
   border-radius: var(--radius-sm);
-  background: none;
-  color: inherit;
-  font: inherit;
   font-size: 0.8rem;
-  cursor: pointer;
-}
-
-.ub-appearance-option:hover {
-  background: var(--sidebar-accent);
-  color: var(--accent-foreground);
 }
 
 .ub-appearance-option[aria-pressed="true"] {
@@ -771,8 +658,6 @@ body {
   border-color: var(--foreground);
 }
 
-/* Readouts. Nothing here takes the pointer or the keyboard, because there is
-   nothing to do — they are facts about this client. */
 .ub-panel-facts {
   display: grid;
   gap: 0.2rem;
@@ -781,16 +666,12 @@ body {
   border-top: 1px solid var(--sidebar-border);
 }
 
-.ub-panel-fact {
+.ub-panel-fact,
+.ub-sync-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 0.5rem;
-}
-
-.ub-panel-fact dt {
-  color: var(--sidebar-muted-foreground);
-  font-size: 0.75rem;
 }
 
 .ub-panel-fact dd {
@@ -799,33 +680,17 @@ body {
   font-size: 0.75rem;
 }
 
-/* ---- doc list groups ---- */
-
 .ub-group + .ub-group {
   margin-top: 0.5rem;
 }
 
-/* The header is a row: the toggle fills it, and the two group actions sit at
-   its end. */
 .ub-group-head {
   display: flex;
   align-items: center;
 }
 
-/* A named group can be named anything, and the sidebar is 16rem wide. */
-.ub-group-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* One shape, one transform. The path is drawn pointing right and turns a
-   quarter turn down when the group is open — there is no second glyph to be
-   centred differently, which is what used to make the mark jump. `display:
-   block` drops the inline baseline so the flex row can centre the box, and the
-   path is centred inside its own square viewBox, so the ink lands on the
-   label's middle. */
+/* Rotate the same caret from right to down on disclosure. Block display
+   removes its inline baseline so the flex row centers its box. */
 .ub-group-caret {
   display: block;
   width: 0.75rem;
@@ -839,9 +704,8 @@ body {
   transform: rotate(90deg);
 }
 
-/* The hairline takes the space the label leaves, so the header reads as one
-   ruled row. Decoration with no text: it is inside the toggle, so it neither
-   breaks the disclosure button nor the drag handle they share. */
+/* The rule fills the header space left by the label without shrinking
+   below its minimum visible length. */
 .ub-group-rule {
   flex: 1;
   min-width: 0.5rem;
@@ -849,19 +713,13 @@ body {
   border-top: 1px solid var(--sidebar-border);
 }
 
-/* Rename and delete. Quiet until the row is hovered — and until anything in it
-   takes focus, which is what keeps them reachable from the keyboard rather than
-   from the pointer alone. */
+/* Reveal group actions on hover and focus-within for pointer and keyboard. */
 .ub-group-act {
   flex: none;
-  border: 0;
-  background: none;
   border-radius: var(--radius-sm);
   padding: 0.15rem 0.3rem;
   color: var(--sidebar-muted-foreground);
-  font: inherit;
   font-size: 0.75rem;
-  cursor: pointer;
   opacity: 0;
   transition: opacity 120ms ease;
 }
@@ -881,26 +739,22 @@ body {
   margin-top: 0.35rem;
 }
 
+.ub-comment-buttons .ub-tool:disabled,
+.ub-tldr-actions .ub-tool:disabled,
 .ub-group-add:disabled {
-  cursor: default;
   opacity: 0.5;
+  cursor: default;
 }
-
-/* ---- editor pane ---- */
 
 .ub-pane {
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
   padding: 0.75rem 1rem;
   overflow-y: auto;
 }
 
-/* A document and its rail are one left-anchored composition. The pane stops
-   growing once it holds the inset, the capped column and their fixed gap, so
-   wider windows add room after the rail instead of before the prose. It may
-   still shrink all the way down at the rail breakpoint. */
+/* Cap the left-anchored document pane at its inset, reading measure and
+   rail gap, so wider windows add space after the rail. It may still shrink. */
 .ub-document-pane {
   flex: 0 1 calc(
     var(--pane-document-inset) + var(--measure) + var(--document-rail-gap)
@@ -911,73 +765,82 @@ body {
     flex-basis 180ms ease;
 }
 
-/* The reading column is capped at the measure. A document pane anchors it at
-   the pane's fixed inset; non-document panes retain their centred column.
-
-   The left padding is the block gutter, reserved for good — see
-   `--block-gutter` and the "block insertion menu" section below. */
+/* Cap the column at the reading measure. Document columns keep a fixed
+   inset; other panes center theirs. Left padding reserves `--block-gutter`. */
 .ub-column {
   width: 100%;
   max-width: var(--measure);
   margin-inline: auto;
   padding-left: var(--block-gutter);
-  display: flex;
-  flex-direction: column;
 }
 
 .ub-document-pane > .ub-column {
   margin-inline: 0;
 }
 
-/* ---- document contents and the independent threads rail ---- */
-
-.ub-outline-trigger {
+.ub-outline-trigger,
+.ub-tag {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
   border: 1px solid var(--border);
   border-radius: 999px;
+}
+
+.ub-outline-trigger {
+  gap: 0.45rem;
   padding: 0.25rem 0.55rem;
   background: var(--card-accent);
   color: var(--secondary-foreground);
-  font: inherit;
   font-size: 0.75rem;
   line-height: 1.4;
   white-space: nowrap;
-  cursor: pointer;
 }
 
-.ub-outline-trigger span {
-  color: var(--muted-foreground);
+.ub-outline-trigger span,
+.ub-code[data-language]:not([data-language=""])::before,
+.ub-mermaid::before,
+.ub-terminal::before {
   font-size: 0.7rem;
+  color: var(--muted-foreground);
 }
 
-.ub-outline-trigger:hover {
+.ub-outline-trigger:hover,
+.ub-docs-mode:hover,
+.ub-docs-sort:hover,
+.ub-docs-row:hover {
   background: var(--accent);
   color: var(--accent-foreground);
 }
 
-.ub-outline-trigger:focus-visible {
+.ub-outline-trigger:focus-visible,
+.ub-copy-link:focus-visible,
+.ub-peer-control:focus-visible,
+.ub-peer-overflow-row:focus-visible,
+.ub-tag-picker-trigger:focus-visible,
+.ub-status-sync:focus-visible,
+.ub-actions-trigger:focus-visible,
+.ub-tldr-form textarea:focus {
   outline: 2px solid var(--ring);
+}
+
+.ub-outline-trigger:focus-visible,
+.ub-copy-link:focus-visible,
+.ub-peer-control:focus-visible,
+.ub-peer-overflow-row:focus-visible,
+.ub-tag-picker-trigger:focus-visible {
   outline-offset: 2px;
 }
 
 @media (max-width: 767px) {
-  /* The uuid is the actionable identity at this width; the revision is the one
-     optional fact in the row. Removing only that suffix keeps the identity,
-     copy and actions controls inside the viewport without shrinking their
-     touch targets. */
+  /* Hide only the revision at narrow widths, retaining identity, copy and
+     actions without shrinking their touch targets. */
   .ub-doc-rev {
     display: none;
   }
 }
 
-/* ---- the sync detail panel (#72, design surface 1e's right column) ---- */
-
-/* An overlay, not a fourth column: it is opened to answer a question and closed
-   again, so it must not reflow the prose to appear. `.ub-body` is its
-   containing block — the same one the threads drawer overlays — and it sits
-   above that drawer, because the pill that opens it is always reachable. */
+/* Position the sync panel over the panes, above the threads drawer, so
+   opening it reflows no prose. */
 .ub-sync-panel {
   position: absolute;
   top: 0;
@@ -996,23 +859,11 @@ body {
   font-size: 0.85rem;
 }
 
-.ub-sync-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
 .ub-sync-facts {
   margin: 0 0 1.25rem;
 }
 
 .ub-presence {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
   gap: 0.3rem;
 }
 
@@ -1030,8 +881,6 @@ body {
 }
 
 .ub-comment-form {
-  display: flex;
-  flex-direction: column;
   gap: 0.35rem;
 }
 
@@ -1041,18 +890,18 @@ body {
   gap: 0.25rem;
 }
 
-/* A mention is a typing shortcut for a convention, not a link to anything: the
-   chip inserts `@name` as text, and nothing is delivered anywhere. */
-.ub-mention {
-  font: inherit;
-  font-size: 0.7rem;
-  font-family: var(--font-mono);
-  padding: 0 0.3rem;
+.ub-mention,
+.ub-tool {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--secondary);
   color: var(--secondary-foreground);
-  cursor: pointer;
+}
+
+.ub-mention {
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  padding: 0 0.3rem;
 }
 
 .ub-comment-buttons {
@@ -1061,19 +910,9 @@ body {
   gap: 0.25rem;
 }
 
-.ub-comment-buttons .ub-tool:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-/* The open composer is a `--card` surface, so the two `--secondary` fills it
-   paints step onto the card accent — the same repair, from the same cause, that
-   #516 made for the three affordances it named (see `--card-accent`). Scoped to
-   the composer because `.ub-tool` and `.ub-mention` are shared: `CommentForm`
-   also renders in the rail, on `--background`, where `--secondary` is already a
-   step. Two exclusions the selector makes rather than states: the submit keeps
-   `.ub-tool-on`'s brand emphasis, and the closed "Comment on …" affordance is
-   outside `.ub-comment-buttons` — it floats over the prose, not on `--card`. */
+/* Composer controls on card use its accent; rail controls on background
+   keep secondary. Exclude the submit's brand emphasis and the closed
+   affordance outside the composer buttons. */
 .ub-composer .ub-mention,
 .ub-composer .ub-comment-buttons .ub-tool:not(.ub-tool-on) {
   background: var(--card-accent);
@@ -1088,20 +927,18 @@ body {
   padding: 0.2rem 0.35rem;
 }
 
-/* The doc title is the document's h1 and is set like one — same size, leading
-   and tracking as `h1.ub-heading` below, and differing from it in family
-   alone. It and the TL;DR heading are the app's two editorial surfaces and use
-   Fraunces through `--font-display`, while every heading inside the prose
-   stays Geist (#41, #536). The placeholder needs no rule of its own; an input
-   paints it in the field's own face. */
-.ub-title {
+/* Match the prose h1's size, leading and tracking while using the display
+   family shared by the title and TL;DR heading. */
+.ub-title,
+h1.ub-heading {
   font-size: 2.05rem;
-  font-weight: 500;
   line-height: 1.18;
   letter-spacing: -0.021em;
-  border: 0;
+}
+
+.ub-title {
+  font-weight: 500;
   border-bottom: 1px solid transparent;
-  background: none;
   padding: 0.2rem 0;
   color: inherit;
   font-family: var(--font-display);
@@ -1113,23 +950,11 @@ body {
 }
 
 .ub-status {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
   font-size: 0.8rem;
-  /* Optional text readings share this line box; the mono face's normal leading
-     would otherwise resize the row when one appears (#793). */
+  /* Optional mono readings share this leading so appearing text resizes no row. */
   line-height: 1.2;
-  /* The collaborator cluster's 28px circle is the tallest thing this row ever
-     holds, and the row states that height so the *peerless* row reserves it —
-     the same rule `.ub-doc-meta` follows for its copy control (#592). Without
-     the floor the first `.ub-peer-control` to render stretches this ~15.4px
-     line box and drops the prose ~12.7px the moment a collaborator joins
-     (#832). Further peers only widen a non-wrapping row of identical circles,
-     so the one circle is the whole contract.
-
-     The `*` reset above makes this a border-box floor, so it names the circle
-     plus the two lines below it — this row's own padding and its rule. */
+  /* Reserve the 28px collaborator circle even without peers. The border-box
+     floor also includes this row's vertical padding and bottom rule. */
   min-height: calc(28px + 0.7rem + 1px);
   color: var(--muted-foreground);
   padding: 0.35rem 0;
@@ -1138,27 +963,13 @@ body {
   min-width: 0;
 }
 
-.ub-last-updated {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The document's sync facts share one details-panel handle. It stays
-   inside the status line, so making it operable adds no second status surface. */
 .ub-status-sync {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   margin: -0.2rem 0;
   padding: 0.2rem 0.3rem;
-  border: 0;
   border-radius: var(--radius-sm);
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
 }
 
 .ub-status-sync:hover {
@@ -1166,8 +977,9 @@ body {
   color: var(--secondary-foreground);
 }
 
-.ub-status-sync:focus-visible {
-  outline: 2px solid var(--ring);
+.ub-status-sync:focus-visible,
+.ub-actions-trigger:focus-visible,
+.ub-tldr-form textarea:focus {
   outline-offset: 1px;
 }
 
@@ -1186,41 +998,22 @@ body {
   background: var(--destructive);
 }
 
-/* ---- copying the document's link (#68, #607) ---- */
-
-/* The confirmation is positioned against this, so it is placed relative to the
-   control rather than to whatever happens to be positioned above it. */
+/* Anchor the confirmation to the copy control's own wrapper. */
 .ub-copy-wrap {
   position: relative;
   display: inline-flex;
   flex: none;
 }
 
-/* The control *is* the touch target: 44x44 of its own box.
-
-   It was a pseudo-element overhanging a 25px row, and both directions it could
-   overhang were already taken (#535). Downward is `.ub-title`, which is
-   full-bleed and starts a few pixels below, so a target reaching there answered
-   taps meant for the title (Codex round 1). Upward is `.ub-pane`'s top padding,
-   which scrolls away: the same target measured 44px at rest and 25px once the
-   pane had scrolled 20px, while the button itself stayed fully visible and
-   unchanged (Opus round 1). A target that exists at one scroll offset is not a
-   target, so the row now carries the height a thumb needs instead of borrowing
-   it from its neighbours. */
+/* The control owns its full touch target, so scrolling or adjacent title
+   hit areas cannot clip or borrow it. */
 .ub-copy-link {
-  font: inherit;
   color: var(--muted-foreground);
-  background: none;
   border: none;
   padding: 0 0.15rem;
-  /* 44px for a thumb, and never narrower than the waiting screen's explicit
-     label and confirmation. */
+  /* Reserve 44px and enough width for the waiting-screen label and confirmation. */
   min-width: max(2.75rem, 6em);
   min-height: 2.75rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
 }
 
 .ub-copy-link:hover {
@@ -1228,47 +1021,30 @@ body {
   text-decoration: underline;
 }
 
-.ub-copy-link:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
+.ub-copy-link:focus-visible,
+.ub-tag-picker-trigger:focus-visible {
   border-radius: var(--radius-sm);
 }
 
-/* On a hydrated document the short uuid is the copy control. Its confirmation
-   sits in the unused lower half of the existing 44px target, below both machine
-   facts. It therefore changes no box when it appears and covers neither fact. */
+/* Stretch the identity copy control to the row's reserved target height;
+   its confirmation uses the lower half without covering machine facts. */
 .ub-copy-identity {
   align-self: stretch;
 }
 
 .ub-copy-identity .ub-copy-link {
-  /* This is narrower than the uuid + old text action it replaces, but wide
-     enough to contain the fixed success message without reaching the adjacent
-     action when the revision is hidden on phones. */
+  /* Contain the confirmation without reaching the adjacent action, including
+     when the revision is hidden on phones. */
   min-width: 12em;
   justify-content: flex-start;
 }
 
-/* Out of flow, and only there while it has something to say: a confirmation
-   that took part in the layout would push everything after it sideways for a
-   second and a half. The identity-line modifier above uses the target's lower
-   half; the waiting screen still draws the confirmation over its explicit
-   button, where no identity is hidden.
-
-   Over the control itself, because every direction around it belongs to
-   something this header keeps. Above is the pane's clip edge, which cuts the
-   confirmation off as soon as anyone scrolls; below is the document's title;
-   and beside it are the `uuid … · rev …` facts on the identity line and the
-   whole sync reading on the waiting screen — the two things #535 preserves
-   while moving the control, which a confirmation to their right covered for a
-   second and a half (Codex round 2). The control's own `min-width` above is
-   what keeps this inside it. */
+/* Keep confirmations out of flow and inside the control, clear of pane
+   clipping, the title and adjacent facts. Empty confirmations paint no box;
+   the identity variant uses the target's lower half. */
 .ub-copied {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   border-radius: var(--radius-sm);
   background: var(--secondary);
   color: var(--secondary-foreground);
@@ -1283,10 +1059,30 @@ body {
   display: none;
 }
 
+.ub-list-head button,
+.ub-list .ub-nav li button:not(.ub-nav-soon),
+.ub-settings-entry,
+.ub-group-add,
+.ub-user-card,
+.ub-appearance-option,
+.ub-group-act,
+.ub-title,
+.ub-status-sync,
+.ub-copy-link,
+.ub-copy-identity .ub-copied,
+.ub-peer-overflow-row,
+.ub-tag-picker-trigger,
+.ub-terminal-toggle,
+.ub-copy,
+.ub-docs-mode,
+.ub-docs-sort,
+.ub-docs-open {
+  background: none;
+}
+
 .ub-copy-identity .ub-copied {
   inset: auto 0 0;
   border-radius: 0;
-  background: none;
   font-size: 0.6rem;
   line-height: 1;
   white-space: nowrap;
@@ -1308,27 +1104,18 @@ body {
 }
 
 .ub-peer-control {
-  position: relative;
-  box-sizing: border-box;
-  width: 28px;
-  height: 28px;
-  flex: none;
   margin: 0;
   padding: 0;
-  border: 0;
-  border-radius: 50%;
   background: var(--background);
   color: var(--foreground);
-  font: inherit;
-  cursor: pointer;
 }
 
 .ub-peer-control + .ub-peer-control {
   margin-left: -6px;
 }
 
-/* Each badge overhangs to the right, so earlier circles paint above the later
-   sibling that overlaps them. Hover and focus lift a control above all three. */
+/* Earlier circles paint above overlapping siblings and their badges;
+   hover and focus lift a control above the cluster. */
 .ub-peers > .ub-peer-control:nth-child(1) {
   z-index: 3;
 }
@@ -1341,24 +1128,23 @@ body {
   z-index: 1;
 }
 
-.ub-peer-control:focus-visible,
-.ub-peer-overflow-row:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-
 .ub-peers > .ub-peer-control:hover,
 .ub-peers > .ub-peer-control:focus-visible {
   z-index: 4;
+}
+
+/* Small identity initials and overflow counts keep their heavier UI weight. */
+.ub-avatar,
+.ub-peer-more {
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  font-weight: 600;
 }
 
 .ub-peer-more {
   border: 1px solid var(--border);
   background: var(--secondary);
   color: var(--secondary-foreground);
-  font-family: var(--font-sans);
-  font-size: 0.7rem;
-  font-weight: 600;
 }
 
 .ub-peer-overflow {
@@ -1373,30 +1159,12 @@ body {
 }
 
 .ub-peer-overflow-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
   min-width: 0;
   padding: 0.35rem;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
 }
 
 .ub-peer-overflow-row:hover {
   background: var(--card-accent);
-}
-
-.ub-peer-overflow-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .ub-peer-overflow-row .ub-muted {
@@ -1404,34 +1172,19 @@ body {
   flex: none;
 }
 
-/* ---- the document's identity line, above the prose (#69) ---- */
-
-/* The eyebrow above the H1 (design surface 1a): what kind of document this is,
-   what it is tagged, and which version of it is on screen.
-
-   One row of parts — badge, tags, machine facts — that never breaks apart, and
-   whose `min-height` still reserves a single line before `meta` arrives. What
-   changed with #958 is inside it: the tag pills wrap onto a further line within
-   the strip and grow this row, rather than scrolling sideways in a hidden
-   scroller whose end nobody can see. */
+/* Keep badge, tags and machine facts in one row; only the tags wrap within
+   their flexible strip, growing the row without horizontal scrolling. */
 .ub-doc-meta {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
   flex-wrap: nowrap;
-  /* The copy control's 44px target sets this row's height, and the row states
-     it so that the *empty* row — the one drawn for the frame before `meta`
-     arrives — reserves the same space. A row that grew when its contents
-     landed would push the title down one frame after every navigation, which
-     is the jump this layout is built to avoid. */
+  /* Reserve the copy control's 44px target before metadata arrives so
+     hydration moves no title. */
   min-height: 2.75rem;
   margin: 0 0 0.15rem;
   font-size: 0.75rem;
   color: var(--muted-foreground);
 }
 
-/* Outlined in the brand amber, lettered in the brand's ink: what kind of
-   document this is, said once. */
+/* Brand strokes and brand text use their separate accent and ink tokens. */
 .ub-badge {
   border: 1px solid var(--brand);
   border-radius: 999px;
@@ -1444,40 +1197,9 @@ body {
   white-space: nowrap;
 }
 
-/* The catalog-backed tag control, in the row's flexible middle (#509, #958).
-
-   Tags, not a form field: pills at their natural width, wrapping within this
-   row. `min-width: 0` is what lets the strip be narrower than its content, and
-   so what lets it wrap at all rather than pushing the machine facts off the
-   end. */
-.ub-tags {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  flex: 1 1 auto;
-  min-width: 0;
-  color: inherit;
-  font: inherit;
-}
-
-/* Bare on purpose (#958): the pills are the affordance, so the button around
-   them draws no border, no ground and no fixed height. What is left to see is
-   the chevron, which comes up out of its faintness under the pointer. */
-.ub-tag-picker-trigger {
-  padding: 0;
-  border: 0;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-}
-
-.ub-tag-picker-trigger:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
-}
-
+/* Let the tag strip shrink below its content width so its pills wrap
+   without pushing the machine facts outside the row. */
+.ub-tags,
 .ub-tag-selected {
   display: flex;
   align-items: center;
@@ -1487,20 +1209,19 @@ body {
   flex: 1 1 auto;
 }
 
-/* A pill sits at its natural width until the strip has less than that to give,
-   and then the name wraps inside it. A catalog name is up to 30 characters of
-   letters, digits and hyphens, so a single-token one offers the line breaker no
-   opportunity at all: `anywhere` is what gives it one, and — because it is the
-   value that also lowers min-content — what lets this flex item shrink to the
-   room the row has. Without it one legal name is wider than the whole strip and
-   paints over the machine facts beside it, which is neither of the two things
-   the row is allowed to do instead: nothing scrolls sideways and nothing is
-   clipped, the pill just grows downwards and takes the row with it. */
+.ub-tags {
+  color: inherit;
+}
+
+/* The pills carry the affordance; their trigger adds no edge or ground. */
+.ub-tag-picker-trigger {
+  padding: 0;
+  text-align: left;
+}
+
+/* `anywhere` lowers min-content width and wraps unbroken catalog names.
+   Pills grow downwards inside the strip instead of covering machine facts. */
 .ub-tag {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--border);
-  border-radius: 999px;
   padding: 0.05rem 0.5rem;
   overflow-wrap: anywhere;
 }
@@ -1515,21 +1236,16 @@ body {
   opacity: 0.55;
 }
 
-/* The trigger has no edge left to change, so the chevron is the hover cue. */
+/* The unbordered trigger uses its chevron for the hover cue. */
 .ub-tag-picker-trigger:hover .ub-tag-chevron {
   opacity: 1;
 }
 
-/* An archived document, or a room refusing writes: the same pills, and they
-   wrap here too — clipping them would hide an assignment this reader has no
-   other way to see. */
 .ub-tags-readonly {
   min-height: 2rem;
 }
 
-/* Machine facts, in the machine face — and monospaced for the other reason
-   too: the rev changes on every edit, and a proportional one would breathe in
-   and out under the title while somebody types. */
+/* Mono machine facts keep changing revisions at a stable character width. */
 .ub-doc-ids {
   font-family: var(--font-mono);
   flex: none;
@@ -1537,8 +1253,7 @@ body {
   align-items: center;
 }
 
-/* The live document's lifecycle and sidebar curation share one compact home at
-   the row's right edge. The target stays 44px even when the tags give up width. */
+/* Keep the actions target at 44px even when tags give up width. */
 .ub-document-actions {
   flex: none;
   display: inline-flex;
@@ -1551,10 +1266,8 @@ body {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted-foreground);
-  font: inherit;
   font-size: 1.25rem;
   line-height: 1;
-  cursor: pointer;
 }
 
 .ub-actions-trigger:hover,
@@ -1564,16 +1277,6 @@ body {
   background: var(--secondary);
 }
 
-.ub-actions-trigger:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 1px;
-}
-
-/* ---- editor chrome above the prose ---- */
-
-/* The row that used to hold the block-type buttons. Block types now come from
-   the insertion menu (see the last section), so all that is left here is the
-   code block's language field. */
 .ub-toolbar {
   display: flex;
   align-items: center;
@@ -1582,65 +1285,52 @@ body {
 }
 
 .ub-tool {
-  font: inherit;
   font-size: 0.75rem;
   padding: 0.15rem 0.45rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--secondary);
-  color: var(--secondary-foreground);
-  cursor: pointer;
 }
 
-/* The emphasised tool button — the comment form's submit. The brand amber is
-   light in both themes, so it works as an accent (border, 1px, non-text) but
-   not as label text: `--brand` on `--brand-subtle` is 1.98:1 in the light
-   theme. The label stays `--foreground` (15.4:1 dark, 17.0:1 light). */
+/* Tool emphasis uses brand for its edge and foreground for its label:
+   `--brand` text on `--brand-subtle` would fail AA in light. */
 .ub-tool-on {
   background: var(--brand-subtle);
   border-color: var(--brand);
   color: var(--foreground);
 }
 
-.ub-lang {
-  font: inherit;
-  font-size: 0.75rem;
-  width: 7rem;
-  padding: 0.15rem 0.35rem;
-  border: 1px solid var(--input);
+.ub-lang,
+.ub-tldr-form textarea,
+.ub-docs-search {
   border-radius: var(--radius-sm);
   background: var(--background);
   color: var(--foreground);
 }
 
-/* ---- blocks ---- */
+.ub-lang,
+.ub-tldr-form textarea {
+  border: 1px solid var(--input);
+}
+
+.ub-lang {
+  font-size: 0.75rem;
+  width: 7rem;
+  padding: 0.15rem 0.35rem;
+}
 
 .ub-editor .tiptap {
   outline: none;
   min-height: 12rem;
-  /* Long-form leading. The measure is capped at `--measure`, and a wide-ish
-     column needs the extra air to keep the return sweep findable. */
+  /* Long-form leading keeps return sweeps readable at the capped measure. */
   line-height: 1.7;
-  /* ProseMirror warns without this and relies on it for caret placement at
-     line ends and around trailing spaces. Set here instead of loading
-     prosemirror-view's stylesheet, which brings a pile of unrelated rules. */
+  /* ProseMirror needs pre-wrap for caret placement at line ends and trailing spaces. */
   white-space: pre-wrap;
 }
 
-/* Sizes, leading and tracking are the 1a mockup's. Tracking tightens as the
-   size grows — at display sizes the default fit reads loose. Levels 4-6 are
-   reachable from the schema but not from the block palette, so they keep the
-   browser's sizing and only inherit the weight and leading below. */
+/* Tracking tightens with heading size. Levels 4–6 retain browser sizing
+   while sharing the heading weight and leading. */
 .ub-heading {
   font-weight: 500;
   line-height: 1.2;
   margin: 1.2em 0 0.4em;
-}
-
-h1.ub-heading {
-  font-size: 2.05rem;
-  line-height: 1.18;
-  letter-spacing: -0.021em;
 }
 
 h2.ub-heading {
@@ -1655,28 +1345,16 @@ h3.ub-heading {
   letter-spacing: -0.008em;
 }
 
-/* Prose steps back to `--prose-text`; the headings above stay `--foreground`,
-   and code and mermaid are source text, not prose, so they are untouched. */
+/* Prose uses softer ink than headings and source panels. */
 .ub-paragraph {
   margin: 0.5em 0;
   color: var(--prose-text);
 }
 
-/* ---- list items and quotes (#59) ----
-
-   A list is a *run of sibling blocks*, never a tree, so there is no <ul> to
-   hang a marker on: the item is a bare <li> with `list-style: none`, its marker
-   drawn as a `::before` and its depth read off `data-indent`. Both attributes
-   are the schema's, so the rendering follows the document rather than the other
-   way round.
-
-   An ordered item's number is *not* a CSS counter: it is `data-number`, put
-   there by a decoration that asks the schema package for the same numbering the
-   markdown writer uses (editor/list-keys.ts). Counters cannot express this
-   list — no selector can say "a bullet nested inside an ordered item", so a
-   nested bullet would restart the enclosing list while the export carried on
-   counting, and the reader would be shown a number that is not the one their
-   document exports. */
+/* Lists are flat sibling blocks: suppress native markers and draw each
+   item's ::before from data-list and data-indent. Ordered markers read
+   data-number, supplied by editor/list-keys.ts from the schema's export
+   numbering; CSS counters cannot follow mixed nested runs. */
 .ub-list-item {
   list-style: none;
   position: relative;
@@ -1706,9 +1384,8 @@ h3.ub-heading {
   content: attr(data-number) ".";
 }
 
-/* Content for a screen reader and nobody else: the list container each run of
-   list items is announced inside (editor/list-keys.ts). Off-screen rather than
-   `display: none`, which would take it out of the accessibility tree too. */
+/* Keep the list run's screen-reader container (editor/list-keys.ts) in
+   the accessibility tree while clipping it visually. */
 .ub-sr-only {
   position: absolute;
   width: 1px;
@@ -1729,19 +1406,11 @@ h3.ub-heading {
   font-style: italic;
 }
 
-/* ---- the table block (#59) ----
-
-   Two representations of one text: the drawing, and the GFM source it was drawn
-   from. The source is hidden until the caret is in the block — a class the
-   editing plugin puts there (editor/table.ts) — so a reader sees a table and an
-   editor sees markdown, with no mode to remember.
-
-   Source that does not parse as a table keeps the source visible instead
-   (`data-parsed="false"`): a half-typed table must never look like an empty box
-   with the reader's text hidden inside it. */
-.ub-table {
-  margin: 0.7em 0;
+.ub-table,
+.ub-mermaid,
+.ub-terminal {
   position: relative;
+  margin: 0.7em 0;
 }
 
 .ub-table-render {
@@ -1749,9 +1418,13 @@ h3.ub-heading {
   cursor: text;
 }
 
-.ub-table table {
+.ub-table table,
+.ub-docs-table {
   border-collapse: collapse;
   width: 100%;
+}
+
+.ub-table table {
   font-size: 0.9rem;
 }
 
@@ -1773,18 +1446,34 @@ h3.ub-heading {
   color: var(--prose-text);
 }
 
-.ub-table-source {
-  display: none;
+.ub-table-source,
+.ub-code,
+.ub-mermaid pre,
+.ub-terminal-source,
+.ub-terminal-frame {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+}
+
+.ub-table-source,
+.ub-code,
+.ub-mermaid pre,
+.ub-terminal-source {
   background: var(--muted);
   border: 1px solid var(--border);
   border-left: 3px solid var(--muted-foreground);
   border-radius: var(--radius-sm);
   padding: 0.6rem 0.75rem;
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  white-space: pre-wrap;
   overflow-x: auto;
+}
+
+/* Reveal GFM source while editing or when parsing fails; otherwise show
+   the table. Incomplete source must stay visible instead of becoming an
+   empty rendered box. */
+.ub-table-source {
+  display: none;
+  margin: 0;
 }
 
 .ub-table.ub-table-editing .ub-table-source,
@@ -1799,24 +1488,11 @@ h3.ub-heading {
 
 .ub-code,
 .ub-mermaid pre {
-  background: var(--muted);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--muted-foreground);
-  border-radius: var(--radius-sm);
-  padding: 0.6rem 0.75rem;
   margin: 0.7em 0;
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  white-space: pre-wrap;
-  overflow-x: auto;
 }
 
-/* The chrome row: the language label at the left, the copy button at the right
-   (the 1a mockup's "ts … copy"). The label is a pseudo-element rather than
-   markup — it must not be part of the editable content, and `attr()` keeps it
-   in step with the `data-language` attribute the schema owns. A block with no
-   language declared gets no label rather than a made-up one; the row itself is
-   unconditional, because the copy button is always there. */
+/* Reserve the copy row even without a language. Its caption reads
+   data-language in a pseudo-element so it stays outside editable content. */
 .ub-code {
   position: relative;
   padding-top: 1.6rem;
@@ -1827,9 +1503,7 @@ h3.ub-heading {
   position: absolute;
   top: 0.3rem;
   left: 0.75rem;
-  font-size: 0.7rem;
   letter-spacing: 0.04em;
-  color: var(--muted-foreground);
   user-select: none;
   pointer-events: none;
 }
@@ -1876,59 +1550,35 @@ h3.ub-heading {
   color: var(--syntax-number);
 }
 
-/* ---- the mermaid block ---- */
-.ub-mermaid {
-  position: relative;
-  margin: 0.7em 0;
+/* Brand-edged source panels retain zero margins inside their block wrappers. */
+.ub-mermaid pre,
+.ub-terminal-source {
+  margin: 0;
+  border-left-color: var(--brand);
 }
 
-.ub-mermaid pre {
-  border-left-color: var(--brand);
-  margin: 0;
+.ub-mermaid::before,
+.ub-terminal::before {
+  display: block;
+  margin-bottom: 0.2rem;
 }
 
 .ub-mermaid::before {
   content: "mermaid source (not rendered)";
-  display: block;
-  font-size: 0.7rem;
-  color: var(--muted-foreground);
-  margin-bottom: 0.2rem;
 }
 
-/* ---- the terminal block (#843) ----
-
-   The table block's rule again: the panel is what a reader sees and the
-   transcript is what they get with their caret in the block. `data-rendered`
-   is `false` for the one thing that keeps the transcript on screen — a block
-   carrying an annotation anchor, whose highlighted range a panel would hide.
-
-   The panel is dark in both appearances on purpose. A terminal is a terminal:
-   inverting it in a light theme would make the demonstration look like
-   something other than the thing it is a demonstration of. */
+/* The terminal's screen, text, cursor and controls share one fixed dark
+   palette in both appearances. */
 .ub-terminal {
-  position: relative;
-  margin: 0.7em 0;
-}
-
-.ub-terminal-source {
-  background: var(--muted);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--brand);
-  border-radius: var(--radius-sm);
-  padding: 0.6rem 0.75rem;
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  white-space: pre-wrap;
-  overflow-x: auto;
+  --terminal-screen: #12151a;
+  --terminal-ink: #d6dde6;
+  --terminal-cursor: #7fd6a2;
+  --terminal-control-ink: oklch(0.708 0 0);
+  --terminal-control-hover-ink: oklch(0.985 0 0);
 }
 
 .ub-terminal::before {
   content: "terminal transcript";
-  display: block;
-  font-size: 0.7rem;
-  color: var(--muted-foreground);
-  margin-bottom: 0.2rem;
 }
 
 .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing)::before {
@@ -1938,75 +1588,70 @@ h3.ub-heading {
 .ub-terminal-screen {
   display: none;
   border-radius: var(--radius-sm);
-  background: #12151a;
+  background: var(--terminal-screen);
   padding: 1.6rem 0.9rem 0.75rem;
   cursor: text;
   overflow-x: auto;
 }
 
-/* The panel is the control that opens the transcript, so it looks like one when
-   the keyboard is on it — the same ring the diagram and the annotation
-   highlights use. */
-.ub-terminal-screen:focus-visible {
+/* Terminal screens and annotations keep keyboard focus visible over
+   their grounds. */
+.ub-terminal-screen:focus-visible,
+.ub-comment:focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 2px;
 }
 
-/* A floor rather than a height: the panel must not resize line by line as the
-   demonstration fills it, and must not collapse to nothing while it is empty. */
+/* Reserve a minimum frame height for empty and short terminal output;
+   longer output may grow beyond the floor. */
 .ub-terminal-frame {
   margin: 0;
   min-height: 4.5em;
-  color: #d6dde6;
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
+  color: var(--terminal-ink);
   line-height: 1.5;
-  white-space: pre-wrap;
   word-break: break-word;
 }
 
-/* Solid, not blinking: the cursor says where the typing is, and a second
-   animation would be one more thing for a reader to have to stop. */
+/* The typing cursor stays solid, adding no animation to the demonstration. */
 .ub-terminal-cursor {
   display: inline-block;
   width: 0.55ch;
   height: 1.05em;
   margin-left: 0.05ch;
   vertical-align: text-bottom;
-  background: #7fd6a2;
+  background: var(--terminal-cursor);
 }
 
-/* Positioned beside the screen. Root light-dark() tokens resolve before
-   inheritance, so these controls keep the original dark inks locally. */
-.ub-terminal-toggle {
-  display: none;
+.ub-terminal-toggle,
+.ub-copy {
   position: absolute;
   top: 0.15rem;
-  left: 0.4rem;
-  min-width: 6ch;
   padding: 0.05rem 0.3rem;
-  border: 0;
   border-radius: var(--radius-sm);
-  background: none;
-  color: oklch(0.708 0 0);
   font-family: var(--font-mono);
   font-size: 0.7rem;
   letter-spacing: 0.04em;
   text-align: center;
-  cursor: pointer;
   user-select: none;
+}
+
+/* The screen controls use local fixed dark inks: root light-dark() tokens
+   resolve before inheritance. */
+.ub-terminal-toggle {
+  display: none;
+  left: 0.4rem;
+  min-width: 6ch;
+  color: var(--terminal-control-ink);
 }
 
 .ub-terminal-toggle:hover,
 .ub-terminal-toggle:focus-visible {
-  color: oklch(0.985 0 0);
+  color: var(--terminal-control-hover-ink);
 }
 
-/* The control is removed, not merely greyed, where nothing plays — a reduced
-   motion preference, or a transcript with nothing in it. `hidden` says so, and
-   a rule that shows the control must therefore not claim a hidden one: a later
-   `[hidden]` rule would lose this selector's specificity and leave a blank
-   button painted and focusable (#906). */
+/* Outside editing, data-rendered swaps transcript for screen. Annotation
+   anchors keep the transcript visible. Hidden playback controls stay hidden:
+   a later [hidden] reset would lose to this selector's specificity. */
 .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-terminal-screen,
 .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-terminal-toggle:not([hidden]) {
   display: block;
@@ -2016,14 +1661,9 @@ h3.ub-heading {
   display: none;
 }
 
-/* An annotated range. Amber ground plus an amber underline — the underline is
-   what keeps the range legible when the ground alone is too quiet (a highlight
-   the reader has to hunt for is not a highlight). Clickable: it focuses the
-   thread's card in the rail.
-
-   A *resolved* thread's range fades to a neutral rule with no ground. That rule
-   cannot live here — it is per thread — so the rail emits it as a stylesheet
-   keyed by thread id; see `resolvedHighlightCss` in threads.ts. */
+/* Annotations retain an amber underline as well as their tinted ground.
+   Resolved ranges instead use a dotted neutral line with no ground, emitted
+   per thread by resolvedHighlightCss in ui/threads.ts. */
 .ub-comment {
   background: var(--brand-subtle);
   border-bottom: 2px solid var(--brand);
@@ -2031,19 +1671,8 @@ h3.ub-heading {
   cursor: pointer;
 }
 
-/* The highlight is a tab stop (#101), so it has to look like one when the
-   keyboard is on it. An explicit ring rather than the platform default, which
-   is a hairline drawn over an amber ground. */
-.ub-comment:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 2px;
-}
-
-/* Clicking a card flashes its range: a ring in the brand amber, pulsed and then
-   gone. The ring rather than the ground, because full-strength amber under the
-   prose fails contrast in one theme or the other whatever the text colour —
-   `--brand` is a light hue in both. The class is removed on a timer, so no
-   `forwards`: the range has to come back to normal. */
+/* Flash the annotation's ring rather than its ground to preserve text
+   contrast. No forwards fill: the range returns to normal before class removal. */
 .ub-comment-flash {
   outline: 2px solid transparent;
   outline-offset: 2px;
@@ -2061,8 +1690,7 @@ h3.ub-heading {
   }
 }
 
-/* Reduced motion still needs the range to be findable, so the flash becomes a
-   hold rather than a pulse. */
+/* Reduced motion holds the range cue instead of pulsing it. */
 @media (prefers-reduced-motion: reduce) {
   .ub-comment-flash {
     animation: none;
@@ -2070,50 +1698,32 @@ h3.ub-heading {
   }
 }
 
-/* ---- inline marks ---- */
-
-/* Bold, italic and strikethrough render as <strong>, <em> and <s>, and the
-   browser's own styling of those is exactly right — Geist covers the weights,
-   and italics are the synthetic oblique the @font-face block above settles on.
-   Only the two machine-flavoured marks need rules of their own.
-
-   One exception is already known: <strong> takes the browser's 700, the single
-   place in the app that exceeds the 500 the file header sets. Inside 400
-   prose 600 is the emphasis that belongs to this scale — 700 is a different
-   typeface weight than anything else on the page. Left to #57, which owns the
-   mark rendering; changing it here would land untested styling for a surface
-   that issue is about to rework. */
+/* Inline code keeps machine text distinct with its mono face and box. */
 .ub-inline-code {
-  font-family: var(--font-mono);
-  font-size: 0.9em;
   background: var(--muted);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0.05em 0.3em;
 }
 
-.ub-link {
+.ub-link,
+.ub-doclink {
   color: var(--brand-ink);
-  text-decoration: underline;
   text-underline-offset: 0.15em;
 }
 
-/* An inline reference to another document. Dotted where an external link is
-   solid, so the two read apart at a glance (#444). */
+.ub-link {
+  text-decoration: underline;
+}
+
+/* Document references use dotted underlines; external links use solid ones. */
 .ub-doclink {
-  color: var(--brand-ink);
   text-decoration: underline dotted;
-  text-underline-offset: 0.15em;
   cursor: pointer;
 }
 
-/* The two states a reference can be in that its label cannot say, and they are
-   *not* the same thing: an unresolved target is one the directory has not
-   named — most often one that has not synced yet, which is why it is muted
-   rather than alarming — while an archived target is a document this workspace
-   really does have and really has tombstoned. Both stay clickable: the first
-   opens the waiting screen, the second the read-only view. The anchor's
-   `title` carries the sentence; this carries the glance. */
+/* Muted wavy and struck underlines distinguish unresolved and archived
+   references without removing their link affordance. */
 .ub-doclink[data-doc-link-state="unresolved"] {
   color: var(--muted-foreground);
   text-decoration-style: wavy;
@@ -2124,11 +1734,8 @@ h3.ub-heading {
   text-decoration-line: underline line-through;
 }
 
-/* ---- foreign-content fallback ---- */
-
-/* Loud comes from the ground and the 2px border; the prose stays
-   `--foreground` (15.5:1 dark, 16.8:1 light) because `--destructive` on
-   `--destructive-subtle` is only 4.05:1 in the light theme. */
+/* Banner emphasis comes from its ground and edge. Foreground prose keeps
+   AA contrast; destructive ink on this tinted ground would fail in light. */
 .ub-foreign-banner {
   background: var(--destructive-subtle);
   color: var(--foreground);
@@ -2137,20 +1744,10 @@ h3.ub-heading {
   padding: 0.6rem 0.75rem;
 }
 
-/* Chrome, not prose: the banner's lead sentence is a <strong> for the meaning,
-   and takes the UI weight rather than the browser's 700. */
-.ub-foreign-banner strong {
-  font-weight: 500;
-}
-
 .ub-foreign-list {
   font-size: 0.85rem;
 }
 
-/* The way out of a link conflict (#451). Under the banner that names the
-   problem and above the block list that shows it, because it is the answer to
-   the first and not a property of the second. One row per conflicting range:
-   the text that carries both links, then the two choices. */
 .ub-link-repair {
   margin: 0.75rem 0;
   font-size: 0.9rem;
@@ -2160,8 +1757,6 @@ h3.ub-heading {
   list-style: none;
   margin: 0.5rem 0 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
   gap: 0.5rem;
 }
 
@@ -2172,14 +1767,11 @@ h3.ub-heading {
   gap: 0.4rem;
 }
 
-/* The two targets can be long — a URL especially — so a choice wraps inside its
-   own button rather than pushing the row sideways. */
+/* Long repair targets wrap within their buttons instead of widening the row. */
 .ub-link-repair .ub-tool {
   text-align: left;
   overflow-wrap: anywhere;
 }
-
-/* ---- the document's person-facing quick summary (#534) ---- */
 
 .ub-tldr {
   position: relative;
@@ -2281,8 +1873,6 @@ h3.ub-heading {
 }
 
 .ub-tldr-form {
-  display: flex;
-  flex-direction: column;
   gap: 0.4rem;
 }
 
@@ -2296,25 +1886,12 @@ h3.ub-heading {
   min-height: 5rem;
   resize: vertical;
   padding: 0.5rem 0.6rem;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-sm);
-  background: var(--background);
-  color: var(--foreground);
-  font: inherit;
   line-height: 1.5;
-}
-
-.ub-tldr-form textarea:focus {
-  outline: 2px solid var(--ring);
-  outline-offset: 1px;
 }
 
 .ub-tldr-form-meta,
 .ub-tldr-actions {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
 }
 
 .ub-tldr-error {
@@ -2329,26 +1906,9 @@ h3.ub-heading {
   justify-content: flex-end;
 }
 
-.ub-tldr-actions .ub-tool:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
-/* ---- what an address resolved to, when it was not a document (#68) ---- */
-
-/* The waiting screen's own row: what this link is waiting on, and the address
-   to hand somebody who already has the document.
-
-   Its own class rather than the identity line's (`.ub-doc-meta`), because
-   `.ub-status` is written as a block line — a divider across the column and a
-   margin separating it from the prose — and as a flex item neither rule means
-   that any more: the divider stops under the words, and the margin pushes the
-   copy control below them (#535, Opus round 1). So the row takes both over and
-   the status line drops them here. */
+/* The waiting row owns the full-column divider and prose separation;
+   remove both from its nested status line so the copy control shares the row. */
 .ub-waiting-meta {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
   border-bottom: 1px solid var(--border);
   margin-bottom: 0.75rem;
 }
@@ -2358,24 +1918,10 @@ h3.ub-heading {
   margin-bottom: 0;
 }
 
-/* Quieter than the unsupported-content banner above and built the same way: a
-   <strong> lead in UI weight, then the detail. None of these three states is an
-   error the reader caused — an unsynced link is the ordinary case — so none of
-   them gets the destructive ground. */
 .ub-notice {
   margin: 0.4rem 0;
   line-height: 1.6;
   max-width: 52ch;
-}
-
-.ub-notice strong {
-  font-weight: 500;
-}
-
-.ub-notice code {
-  font-family: var(--font-mono);
-  font-size: 0.9em;
-  overflow-wrap: anywhere;
 }
 
 .ub-foreign-list pre {
@@ -2385,15 +1931,13 @@ h3.ub-heading {
   border-radius: var(--radius-sm);
 }
 
-/* ---- remote cursors (y-prosemirror default DOM) ---- */
-
 .ProseMirror-yjs-cursor {
   position: relative;
   margin-left: -1px;
   margin-right: -1px;
   border-left: 1px solid var(--foreground);
   border-right: 1px solid var(--foreground);
-  /* Overridden inline per peer by y-prosemirror's cursor builder. */
+  /* Fallback color; y-prosemirror overrides it inline for each peer. */
   border-color: var(--brand);
   word-break: normal;
   pointer-events: none;
@@ -2418,32 +1962,15 @@ h3.ub-heading {
   border-radius: var(--radius-sm);
 }
 
-/* ==== calm UI: the sync indicator, the group disclosure, the copy button ====
-
-   One rule runs through this block: state changes are drawn with opacity and
-   transform, never by resizing or reflowing anything. A reader's eye is caught
-   by movement, and none of these three things is worth catching it. */
-
-/* ---- sync indicator (#76) ---- */
-
-/* Fixed-width slots. Every fact's mark is one square and every word has a
-   reserved column, so local acknowledgement and upstream acknowledgement can
-   change independently without moving the freshness or presence readings. */
+/* Fixed mark slots let sync facts change without moving adjacent readings. */
 .ub-status-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   width: 0.7rem;
   height: 0.7rem;
   flex: none;
 }
 
-/* Sized for the longest word the slot can hold, so nothing beside it moves when
-   the reading changes. That word is now "update required" (#448) rather than
-   "syncing…": the refusal readings share this slot with the calm three. The
-   slot is blank until a room's reading settles (#707); an empty span has no
-   line box, so without the minimum the row collapses to the mark's height and
-   the prose below jumps down when the word arrives. */
+/* Reserve the longest reading, including "update required", and one line
+   even while blank so settled status moves no adjacent content. */
 .ub-status-word {
   width: 15ch;
   min-height: 1lh;
@@ -2452,9 +1979,7 @@ h3.ub-heading {
   text-align: left;
 }
 
-/* Locally served pages split the old column into the two facts #746 names.
-   Each keeps the width of its longest reading, including while blank, so a
-   first `/api/status` answer changes ink and never geometry. */
+/* Saved and hub readings each reserve their longest label width while blank. */
 .ub-status-word--saved {
   width: 12ch;
 }
@@ -2463,8 +1988,7 @@ h3.ub-heading {
   width: 19ch;
 }
 
-/* The dot's replacement, in the same slot: a ring with one lit quarter. Same
-   amber the dot used to carry, so the state still reads at a glance. */
+/* A lit quarter of the warning ring rotates in the fixed status-mark slot. */
 .ub-spinner {
   width: 0.7rem;
   height: 0.7rem;
@@ -2480,14 +2004,8 @@ h3.ub-heading {
   }
 }
 
-/* ---- doc list group bodies (#110) ---- */
-
-/* The 0fr → 1fr grid row is the height animation that needs no measurement: the
-   row is sized by its content when open and to nothing when closed, and the
-   browser interpolates between the two. The child needs `min-height: 0` or it
-   refuses to shrink below its content, and `overflow: hidden` or it spills out
-   of the shrinking row. Following groups slide with it — the outer height is
-   animating continuously, so nothing snaps. */
+/* Animate disclosure from 0fr to 1fr without measuring content. The child
+   needs min-height: 0 to shrink and overflow: hidden to stay inside the row. */
 .ub-group-body {
   display: grid;
   grid-template-rows: 1fr;
@@ -2503,31 +2021,14 @@ h3.ub-heading {
   overflow: hidden;
 }
 
-/* ---- code and mermaid copy button (#103) ---- */
-
-/* Sits in the block's chrome, opposite the language label — the mockup's
-   "ts … copy" row. Wide enough for "copied" and "failed" as well as "copy", so
-   the confirmation replaces the label without the button changing size.
-   Present but quiet, and it brightens on hover: an affordance nobody can see
-   is not one, and hover-only would hide it from touch entirely. */
+/* Position copy in the reserved source chrome, visible at rest and brighter
+   on hover or keyboard focus. */
 .ub-copy {
-  position: absolute;
-  top: 0.15rem;
   right: 0.4rem;
-  /* Wide enough for the longest label plus its padding and letter-spacing —
-     `box-sizing: border-box` means this floor covers the whole box. */
+  /* Reserve "copied" and "failed" plus padding and tracking inside this
+     border-box width, so confirmation never resizes the control. */
   min-width: 8ch;
-  padding: 0.05rem 0.3rem;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
   color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
-  text-align: center;
-  cursor: pointer;
-  user-select: none;
   transition:
     opacity 120ms ease,
     color 120ms ease;
@@ -2542,23 +2043,19 @@ h3.ub-heading {
   color: var(--foreground);
 }
 
-/* On the fixed dark screen, keep the original dark rendering in both
-   appearances. The source representation uses the ordinary page ink. */
+/* Rendered terminal copy uses fixed dark-screen inks; source uses page ink. */
 .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-copy {
-  color: oklch(0.708 0 0);
+  color: var(--terminal-control-ink);
   opacity: 0.6;
 }
 
 .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing):hover .ub-copy,
 .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-copy:focus-visible {
-  color: oklch(0.985 0 0);
+  color: var(--terminal-control-hover-ink);
   opacity: 1;
 }
 
-/* ---- reduced motion ---- */
-
-/* Every transition above is decoration on a state change that has already
-   happened, so removing it changes nothing but the movement. */
+/* Reduced motion removes decoration while preserving every state change. */
 @media (prefers-reduced-motion: reduce) {
   .ub-document-pane,
   .ub-group-caret,
@@ -2573,21 +2070,9 @@ h3.ub-heading {
   }
 }
 
-/* ---- block insertion menu ---- */
-
-/* The route to the `+`, and the reason it is reachable at all.
-
-   The button overhangs the frame's left edge into `.ub-column`'s reserved
-   padding, so the strip it sits in is not the frame's — and hover is dropped by
-   the frame's own `mouseleave`. A pointer walking from the prose towards the
-   button therefore left the frame in the few pixels between the two and the
-   button was already hidden by the time it arrived (#507). This claims the
-   whole strip back for the frame: events over a pseudo-element are the
-   originating element's, so crossing it never leaves the frame.
-
-   Hit-testing only — no chrome, nothing to see. It stops exactly at the frame's
-   left edge, so it covers the gutter and takes not one pixel of the prose. The
-   button's explicit stacking order keeps its complete target above the strip. */
+/* Extend the frame's hit area across its reserved gutter so pointer travel
+   to the overhanging + never leaves the frame. This invisible strip stops at
+   the prose edge; the button's stacking order keeps its target above it. */
 .ub-editor-frame::before {
   content: "";
   position: absolute;
@@ -2596,11 +2081,6 @@ h3.ub-heading {
   right: 100%;
   width: var(--block-gutter);
 }
-
-/* ---- the document list (#118, #406, #441) ---------------------------------
-   The corpus listing and the sidebar's fixed entry into it. Self-contained:
-   nothing here touches the tokens or the rules above, and nothing above knows
-   about it. */
 
 .ub-docs {
   --docs-pin: 1.75rem;
@@ -2614,25 +2094,13 @@ h3.ub-heading {
 
 .ub-docs-mode-fieldset {
   width: min(24rem, 100%);
-  min-inline-size: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.ub-docs-modes {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
 }
 
 .ub-docs-mode {
   padding: 0.3rem 0.55rem;
   border: 1px solid var(--border);
   border-right: 0;
-  background: none;
   color: var(--muted-foreground);
-  font: inherit;
-  cursor: pointer;
 }
 
 .ub-docs-mode:first-child {
@@ -2644,40 +2112,23 @@ h3.ub-heading {
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
-.ub-docs-mode:hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-
 .ub-docs-mode[aria-pressed="true"] {
   background: var(--brand-subtle);
   color: var(--brand-ink);
 }
 
-/* The label carries only the field's accessible name, which is drawn
-   off-screen because the hint inside the field already says it on screen. The
-   wrapper still needs a box of its own so the input can fill the column. */
+/* The search-label wrapper keeps a full-width box for its input. */
 .ub-docs-search-label {
   display: grid;
 }
 
-/* The full width of `.ub-docs-table` below it: a filter over that table reads
-   as belonging to it, and a box capped well short of the content it narrows
-   reads as decoration. Both are children of the same `.ub-column`, so 100% is
-   the same width in both. */
+/* Fill the same column width as the table this search filters. */
 .ub-docs-search {
   width: 100%;
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--background);
-  color: var(--foreground);
-  font: inherit;
 }
 
-/* Its own class rather than the sidebar's `.ub-empty`: two components on one
-   screen now, and a page with two elements of the same name is a page whose
-   selectors are ambiguous — for a stylesheet and for a test alike. */
 .ub-docs-empty {
   margin: 0;
   padding: 0.4rem;
@@ -2688,9 +2139,7 @@ h3.ub-heading {
 }
 
 .ub-docs-table {
-  width: 100%;
   margin: 0;
-  border-collapse: collapse;
   table-layout: fixed;
 }
 
@@ -2717,21 +2166,11 @@ h3.ub-heading {
   align-items: center;
   gap: 0.3rem;
   padding: 0.25rem 0.4rem;
-  border: 0;
   border-radius: var(--radius-sm);
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
 }
 
 .ub-docs-heading-cell--changed .ub-docs-sort {
   justify-content: flex-end;
-}
-
-.ub-docs-sort:hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
 }
 
 .ub-docs-sort-arrow {
@@ -2749,48 +2188,29 @@ h3.ub-heading {
 
 .ub-docs-open {
   display: flex;
-  width: 100%;
   min-width: 0;
   align-items: baseline;
   gap: 0.5rem;
-  text-align: left;
   padding: 0.4rem;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
 }
 
-.ub-docs-row:hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-
-/* A long title is cut, never wrapped: a row that grew taller would move every
-   row below it the moment a document is renamed somewhere else. */
 .ub-docs-title {
   flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-/* Where the sidebar carries this document. Quiet — it is context for the
-   title, not a second title. */
+.ub-docs-group,
+.ub-docs-age {
+  font-size: 0.78rem;
+  color: var(--muted-foreground);
+}
+
 .ub-docs-group {
   flex: none;
-  font-size: 0.78rem;
-  color: var(--muted-foreground);
 }
 
-/* Machine facts in the machine face, like the room keys and the sync detail. */
+/* Document ages use the mono face for machine facts. */
 .ub-docs-age {
   font-family: var(--font-mono);
-  font-size: 0.78rem;
-  color: var(--muted-foreground);
 }
 
 .ub-docs-age-cell {
