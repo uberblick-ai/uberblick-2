@@ -20,16 +20,11 @@ function gutter(page: Page): Locator {
 }
 
 async function touchPage(browser: Browser, info: TestInfo): Promise<Page> {
-  const device = info.project.use;
-  const context = trackContext(await browser.newContext({
-    hasTouch: true,
-    ...(device.isMobile === undefined ? {} : { isMobile: device.isMobile }),
-    ...(device.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: device.deviceScaleFactor }),
-    ...(device.userAgent === undefined ? {} : { userAgent: device.userAgent }),
-    viewport: info.project.name === "chromium"
-      ? { width: 390, height: 844 }
-      : device.viewport ?? { width: 1280, height: 800 },
-  }));
+  // Playwright's browser fixture supplies the project's context options. Keep
+  // Chromium's existing synthetic touch proof; WebKit uses its actual device.
+  const context = trackContext(await browser.newContext(info.project.name === "chromium"
+    ? { hasTouch: true, viewport: { width: 390, height: 844 } }
+    : {}));
   const page = await context.newPage();
   await page.emulateMedia({ reducedMotion: "reduce" });
   return page;
@@ -43,7 +38,12 @@ async function openDoc(page: Page, paragraphs: string[]): Promise<void> {
   await createDoc(page, "touch editor");
   await placeCaret(page);
   for (const [index, text] of paragraphs.entries()) {
-    if (index > 0) await page.keyboard.press("Enter");
+    if (index > 0) {
+      await page.keyboard.press("Enter");
+      if (page.context().browser()?.browserType().name() === "webkit") {
+        await expect(editor(page).locator(":scope > p")).toHaveCount(index + 1);
+      }
+    }
     await page.keyboard.insertText(text);
   }
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
@@ -64,6 +64,14 @@ async function selectBlock(block: Locator, input: "touch" | "mouse" = "touch"): 
     selection?.removeAllRanges();
     selection?.addRange(range);
   }, input);
+  await selectionChanged(block.page());
+}
+
+/** WebKit delivers the native range's selectionchange after the setup task. */
+async function selectionChanged(page: Page): Promise<void> {
+  if (page.context().browser()?.browserType().name() === "webkit") {
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  }
 }
 
 async function collapseToCaret(block: Locator): Promise<void> {
@@ -78,6 +86,7 @@ async function collapseToCaret(block: Locator): Promise<void> {
     selection?.removeAllRanges();
     selection?.addRange(range);
   });
+  await selectionChanged(block.page());
 }
 
 async function selectionBox(page: Page) {
@@ -113,7 +122,14 @@ async function minimumTargets(controls: Locator, size: number, square = false): 
   }
 }
 
-test("a touch caret exposes a 44px gutter without moving prose, follows edits, and inserts by tap", async ({ browser }, info) => {
+/** Mark only the known activation failure, after launch and touch preconditions. */
+function touchActivation(browser: Browser): { timeout?: number } {
+  const webkit = browser.browserType().name() === "webkit";
+  test.fail(webkit, "#1195: touch pointerdown cancellation prevents WebKit's compatibility click");
+  return webkit ? { timeout: 1_000 } : {};
+}
+
+test("a touch caret exposes a 44px gutter without moving prose, follows edits, and inserts by tap", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const page = await touchPage(browser, info);
   await openDoc(page, ["first block", "second block"]);
   const first = editor(page).locator(":scope > p").first();
@@ -163,7 +179,7 @@ test("a touch caret exposes a 44px gutter without moving prose, follows edits, a
   await collapseToCaret(second);
   await expect(gutter(page)).toHaveCSS("opacity", "1");
   await gutter(page).tap();
-  await expect(page.getByRole("listbox", { name: "Block types" })).toBeVisible();
+  await expect(page.getByRole("listbox", { name: "Block types" })).toBeVisible(touchActivation(browser));
   await page.getByRole("option", { name: "Quote", exact: true }).tap();
   await page.keyboard.insertText("inserted by touch");
   const blocks = editor(page).locator(":scope > *");
@@ -180,7 +196,7 @@ test("a touch caret exposes a 44px gutter without moving prose, follows edits, a
   await expect(gutter(page)).toHaveCSS("opacity", "0");
 });
 
-test("touch selects below, keyboard and mouse select above, and touch toolbar controls fit the viewport", async ({ browser }, info) => {
+test("touch selects below, keyboard and mouse select above, and touch toolbar controls fit the viewport", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const page = await touchPage(browser, info);
   await openDoc(page, ["select these words without obscuring the handles"]);
   const paragraph = editor(page).locator(":scope > p").first();
@@ -199,7 +215,7 @@ test("touch selects below, keyboard and mouse select above, and touch toolbar co
   const selected = await page.evaluate(() => document.getSelection()?.toString());
   await toolbar.getByRole("button", { name: "Bold", exact: true }).tap();
   expect(await page.evaluate(() => document.getSelection()?.toString())).toBe(selected);
-  await expect(paragraph.locator("strong")).toHaveText(selected ?? "");
+  await expect(paragraph.locator("strong")).toHaveText(selected ?? "", touchActivation(browser));
 
   await page.keyboard.press("Shift+ArrowLeft");
   await expect(card(page)).toHaveAttribute("data-placement", "above");
@@ -214,7 +230,7 @@ test("touch selects below, keyboard and mouse select above, and touch toolbar co
   await minimumTargets(toolbar.getByRole("button"), 24, true);
 });
 
-test("focused link and comment fields follow visual viewport resize and scroll without a window resize", async ({ browser }, info) => {
+test("focused link and comment fields follow visual viewport resize and scroll without a window resize", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const page = await touchPage(browser, info);
   await openDoc(page, ["first context", "second context", "keep fields beside this selection"]);
   const paragraph = editor(page).locator(":scope > p").last();
@@ -224,7 +240,7 @@ test("focused link and comment fields follow visual viewport resize and scroll w
   await page.getByRole("button", { name: "External link", exact: true }).tap();
   const link = page.getByRole("form", { name: "External link", exact: true });
   const url = page.getByRole("textbox", { name: "External link URL" });
-  await expect(url).toBeFocused();
+  await expect(url).toBeFocused(touchActivation(browser));
   await minimumTargets(link.getByRole("button"), 44);
   await minimumTargets(url, 44);
   expect(await url.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
@@ -287,8 +303,10 @@ test("focused link and comment fields follow visual viewport resize and scroll w
   expect(field.y + field.height).toBeLessThanOrEqual(keyboardHeight + 1);
 });
 
-test("selection chrome follows a peer edit within a line without an editor resize", async ({ browser }) => {
-  const context = trackContext(await browser.newContext({ viewport: { width: 1280, height: 800 } }));
+test("selection chrome follows a peer edit within a line without an editor resize", { tag: "@webkit" }, async ({ browser }, info) => {
+  const context = trackContext(await browser.newContext(info.project.name === "chromium"
+    ? { viewport: { width: 1280, height: 800 } }
+    : {}));
   const page = await context.newPage();
   await openDoc(page, ["preface selected end"]);
   const paragraph = editor(page).locator(":scope > p").first();
@@ -318,7 +336,7 @@ test("selection chrome follows a peer edit within a line without an editor resiz
   await expect.poll(async () => (await card(page).boundingBox())?.x ?? before.x).toBeGreaterThan(before.x + 10);
 });
 
-test("a code selection has a 44px Comment-only affordance below it on touch", async ({ browser }, info) => {
+test("a code selection has a 44px Comment-only affordance below it on touch", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const page = await touchPage(browser, info);
   await openDoc(page, [""]);
   await page.keyboard.type("/co");
@@ -338,7 +356,7 @@ test("a code selection has a 44px Comment-only affordance below it on touch", as
 });
 
 
-test("an overflowing comment excerpt keeps its focused field visible in a short visual viewport", async ({ browser }, info) => {
+test("an overflowing comment excerpt keeps its focused field visible in a short visual viewport", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const page = await touchPage(browser, info);
   await openDoc(page, ["A long excerpt remains attached to the draft. ".repeat(35)]);
   const paragraph = editor(page).locator(":scope > p").first();
@@ -346,7 +364,7 @@ test("an overflowing comment excerpt keeps its focused field visible in a short 
   await selectBlock(paragraph);
   await page.getByRole("button", { name: "Comment", exact: true }).tap();
   const field = page.getByPlaceholder(/Comment as/);
-  await expect(field).toBeFocused();
+  await expect(field).toBeFocused(touchActivation(browser));
   await field.fill("keep this focused draft visible");
   for (const height of [220, 180]) {
     await page.evaluate((visibleHeight) => {

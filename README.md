@@ -170,7 +170,7 @@ mise run dev          # hub + web in parallel
 mise run lint         # Biome lint across the workspace (no formatter)
 mise run typecheck    # tsc --noEmit across all packages
 mise run test         # all test suites
-mise run e2e          # browser proof points (Playwright, Chromium, on demand)
+mise run e2e          # browser proof points (Chromium and tagged WebKit, on demand)
 mise run fue          # the documented install path, executed on a clean machine
 mise run review <commit>  # immutable Docker review of one commit
 ```
@@ -187,7 +187,13 @@ two live clients converging on one block, a rendered remote cursor, and fresh
 and reloaded browsers receiving only what their server sends. Everything else
 belongs in `mise run test`. Arguments after `--` go to Playwright unchanged; for
 example, `mise run e2e -- --repeat-each=3 outline.spec.ts` runs only that spec
-three times.
+three times. The full suite runs in Chromium; a tagged device and engine set
+also runs in WebKit at iPhone, iPad and 13-inch MacBook sizes. WebKit requires
+host system libraries, which CI installs separately; the task downloads engines
+without installing system packages. A missing library fails the full run.
+`mise run e2e -- --project=chromium` runs Chromium alone. Real-device checks for
+the keyboard, native selection menu and composition are in the
+[manual input checklist](packages/web/e2e/device-input.md).
 
 `mise run dev` deliberately runs **hub + web only**. The MCP server speaks JSON-RPC
 over stdio and is normally spawned by its client (Claude Code and friends, via

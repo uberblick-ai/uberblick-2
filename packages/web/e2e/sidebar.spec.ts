@@ -100,20 +100,31 @@ async function expectPaneClearsOpener(page: Page): Promise<{ left: number; width
   return { left: layout.paneLeft, width: layout.paneWidth };
 }
 
-test("phone, iPad and MacBook widths keep the drawer and pane controls inside the viewport", async ({ browser }) => {
-  const page = await openApp(browser);
+test("phone, iPad and MacBook widths keep the drawer and pane controls inside the viewport", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
+  const webkit = browserName === "webkit";
+  const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+  const projectWidth = page.viewportSize()?.width;
+  if (projectWidth === undefined) throw new Error("e2e: viewport missing");
+  if (webkit) {
+    // Even a manually created context must keep its project's device. The
+    // inherited input controls which floors and drawer path this proof sees.
+    expect(page.viewportSize()).toEqual(info.project.use.viewport);
+    expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(info.project.use.hasTouch === true);
+    if (projectWidth < 1280) await openDrawer(page);
+  }
   await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
   for (const settings of [false, true]) {
-    await page.setViewportSize({ width: 1280, height: 832 });
+    if (!webkit) await page.setViewportSize({ width: 1280, height: 832 });
     if (settings) {
+      if (webkit && projectWidth < 1280) await openDrawer(page);
       await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
       await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
     }
-    for (const width of [320, 375, 744, 932, 1024, 1279, 1280, 1366, 1470]) {
+    for (const width of webkit ? [projectWidth] : [320, 375, 744, 932, 1024, 1279, 1280, 1366, 1470]) {
       await test.step(`${settings ? "settings" : "documents"} at ${width}px`, async () => {
-        await page.setViewportSize({ width, height: 832 });
+        if (!webkit) await page.setViewportSize({ width, height: 832 });
         if (width < 1280) {
           await expect(page.getByRole("button", { name: settings ? "Show sidebar" : "Show document list", exact: true })).toBeVisible();
           const before = await expectPaneClearsOpener(page);

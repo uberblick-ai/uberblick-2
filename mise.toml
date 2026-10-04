@@ -175,7 +175,7 @@ description = "Run all test suites"
 run = "pnpm test"
 
 [tasks.e2e]
-description = "Run the browser end-to-end proof points (Playwright, Chromium only)"
+description = "Run the browser end-to-end proof points (Chromium and tagged WebKit)"
 # The harness builds the current checkout into private storage, starts its own
 # hub on an ephemeral port, and serves that bundle through a real `ub open`
 # under private XDG homes. Nothing needs the developer's configuration and no
@@ -184,8 +184,8 @@ description = "Run the browser end-to-end proof points (Playwright, Chromium onl
 # spawned `ub open` removes those inherited pins and reads the run's files.
 #
 # `playwright install` runs first because the browser is a download, not a
-# dependency pnpm can fetch: it is a no-op once the pinned Chromium is in the
-# local cache, and the alternative is a first run that fails with instructions.
+# dependency pnpm can fetch: it is a no-op once pinned Chromium and WebKit are
+# cached. System libraries are provisioned separately by CI or the host operator.
 run = 'sh "{{config_root}}/bin/run-e2e.sh"'
 
 [tasks.fue]

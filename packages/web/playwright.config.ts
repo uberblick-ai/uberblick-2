@@ -1,7 +1,8 @@
 /**
  * The e2e harness (`mise run e2e`).
  *
- * Chromium only, one worker, no retries, no `webServer`:
+ * Full Chromium suite plus tagged supported-device WebKit proofs, one worker,
+ * no retries, no `webServer`:
  *
  * - **One worker, serial file.** A spec's tests share one hub and one `ub open`
  *   serving a private build (see e2e/harness.ts), and one proof point stops the
@@ -9,9 +10,11 @@
  *   separately started harnesses are collision-free and have a direct proof.
  * - **No retries.** A real-browser test that only passes on the second attempt
  *   is not evidence of anything; a flake here should be visible, not absorbed.
- * - **Chromium only** — a cross-browser matrix is explicitly out of scope
- *   (#46). The behaviour under test is our collaboration wiring, not a
- *   browser's.
+ * - **Bounded WebKit set.** @webkit runs at all three supported devices;
+ *   @webkit-touch runs only on iPhone/iPad; @webkit-iphone adds the phone's
+ *   short visual viewport. Chromium still runs every test, including its
+ *   forced-width and forced-touch cases. Tagged WebKit tests inherit their
+ *   project's viewport and input rather than resizing or enabling touch.
  */
 
 import { defineConfig, devices } from "@playwright/test";
@@ -33,6 +36,21 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "webkit-iphone",
+      grep: /@webkit(?:-touch|-iphone)?(?:\s|$)/,
+      use: { ...devices["iPhone 13"] },
+    },
+    {
+      name: "webkit-ipad",
+      grep: /@webkit(?:-touch)?(?:\s|$)/,
+      use: { ...devices["iPad (gen 7)"] },
+    },
+    {
+      name: "webkit-macbook",
+      grep: /@webkit(?:\s|$)/,
+      use: { ...devices["Desktop Safari"], viewport: { width: 1280, height: 800 } },
     },
   ],
 });
