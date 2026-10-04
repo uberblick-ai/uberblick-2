@@ -102,7 +102,10 @@ export function PeerCluster({
           setOpen(shown);
         }}
       >
-        <span className="ub-peers" ref={cluster}>
+        {/* Reserve the capped cluster even while empty: joining must not wrap
+            the sync facts and move the status rule or prose. Four 28px controls
+            with three 6px overlaps occupy 94px. */}
+        <span className="ub-peers relative flex min-w-[94px] flex-none items-center justify-end ml-auto" ref={cluster}>
           {visible.map((session) => {
             const label = presenceLabel(session);
             return (

@@ -52,7 +52,9 @@ export function OutlinePane({
     <DropdownMenu modal={false} open={open} onOpenChange={setOpen}>
       <div
         // The drawer covers this edge; hiding also removes the trigger from Tab order.
-        className={`ub-outline self-start shrink-0 mt-3 me-3${obscured ? " max-xl:hidden" : ""}`}
+        // At drawer widths, share the opener's clearance rather than taking
+        // a column away from the status facts and presence cluster.
+        className={`ub-outline self-start shrink-0 mt-3 me-3 max-xl:absolute max-xl:start-12 max-xl:top-0 max-xl:me-0${obscured ? " max-xl:hidden" : ""}`}
       >
         <DropdownMenuTrigger asChild>
           <button

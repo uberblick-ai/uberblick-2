@@ -353,7 +353,6 @@ body {
 .ub-user-card,
 .ub-appearance-option,
 .ub-mention,
-.ub-status-sync,
 .ub-copy-link,
 .ub-peer-control,
 .ub-peer-overflow-row,
@@ -377,7 +376,6 @@ body {
 .ub-swatch,
 .ub-appearance-option,
 .ub-mention,
-.ub-status-sync,
 .ub-copy-link,
 .ub-peer-control,
 .ub-peer-overflow-row,
@@ -502,7 +500,6 @@ body {
 }
 
 .ub-user-card,
-.ub-status-sync,
 .ub-peer-overflow-row,
 .ub-tag-picker-trigger,
 .ub-terminal-toggle,
@@ -516,7 +513,6 @@ body {
 
 .ub-user-card,
 .ub-appearance-option,
-.ub-status-sync,
 .ub-peer-overflow-row,
 .ub-docs-sort,
 .ub-docs-open {
@@ -768,7 +764,6 @@ body {
 .ub-peer-control:focus-visible,
 .ub-peer-overflow-row:focus-visible,
 .ub-tag-picker-trigger:focus-visible,
-.ub-status-sync:focus-visible,
 .ub-actions-trigger:focus-visible,
 .ub-tldr-form textarea:focus {
   outline: 2px solid var(--ring);
@@ -863,21 +858,6 @@ h1.ub-heading {
   border-bottom-color: var(--ring);
 }
 
-.ub-status-sync {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: -0.2rem 0;
-  padding: 0.2rem 0.3rem;
-  border-radius: var(--radius-sm);
-}
-
-.ub-status-sync:hover {
-  background: var(--card-accent);
-  color: var(--secondary-foreground);
-}
-
-.ub-status-sync:focus-visible,
 .ub-actions-trigger:focus-visible,
 .ub-tldr-form textarea:focus {
   outline-offset: 1px;
@@ -966,7 +946,6 @@ h1.ub-heading {
 .ub-user-card,
 .ub-appearance-option,
 .ub-title,
-.ub-status-sync,
 .ub-copy-link,
 .ub-copy-identity .ub-copied,
 .ub-peer-overflow-row,
@@ -985,21 +964,6 @@ h1.ub-heading {
   font-size: 0.6rem;
   line-height: 1;
   white-space: nowrap;
-}
-
-.ub-pending {
-  background: var(--status-warning-subtle);
-  color: var(--foreground);
-  border-radius: var(--radius-sm);
-  padding: 0 0.3rem;
-}
-
-.ub-peers {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex: none;
-  margin-left: auto;
 }
 
 .ub-peer-control {

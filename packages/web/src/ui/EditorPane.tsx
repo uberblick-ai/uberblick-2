@@ -354,7 +354,7 @@ export function StatusLine({
     </span>
   );
   const primary = (
-    <span className="inline-flex items-center gap-2">
+    <span className="inline-flex flex-none items-center gap-2">
       {mark(facts.primaryTone)}
       <span
         className={`ub-status-word${facts.twoFact ? " ub-status-word--saved" : ""}`}
@@ -364,12 +364,18 @@ export function StatusLine({
     </span>
   );
   const hubFact = facts.twoFact ? (
-    <span className="inline-flex items-center gap-2">
+    <span className="inline-flex flex-none items-center gap-2">
       {mark(facts.hubTone)}
       <span className="ub-status-word ub-status-word--hub">{facts.hub}</span>
     </span>
   ) : null;
   const blank = facts.primary === null;
+  const pendingReading =
+    reading.detail === null && state !== "synced" && status.unsyncedChanges > 0 ? (
+      <span className="ub-pending rounded-(--radius-sm) bg-(--status-warning-subtle) text-(--foreground) px-[0.3rem]">
+        {backlogLabel(status.unsyncedChanges)}
+      </span>
+    ) : null;
   const hub =
     endpoint === null || (hubAcked !== undefined && !facts.twoFact)
       ? null
@@ -387,7 +393,7 @@ export function StatusLine({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className={`ub-status-sync ub-sync-toggle${hubAcked === undefined ? "" : " min-w-0 max-w-full flex-wrap"}`}
+          className={`ub-status-sync ub-sync-toggle inline-flex cursor-pointer items-center gap-2 -my-[0.2rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.3rem] py-[0.2rem] [font:inherit] text-inherit hover:bg-(--card-accent) hover:text-(--secondary-foreground) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1${hubAcked === undefined ? " flex-none" : " min-w-min max-w-full flex-wrap"}`}
           aria-label={
             factLabel.length === 0
               ? hub === null
@@ -437,16 +443,7 @@ export function StatusLine({
       <div className="flex min-w-0 min-h-7 items-center gap-2">
         {syncReading}
         {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
-        {!blank && saveNote}
         {!blank && updatedReading}
-        {!blank &&
-          reading.detail === null &&
-          state !== "synced" &&
-          status.unsyncedChanges > 0 && (
-            <span className="ub-pending">
-              {backlogLabel(status.unsyncedChanges)}
-            </span>
-          )}
         {/* Circles, not name pills (#494): the strip is the constrained surface,
             and a row of words pushes the status line around as sessions come and
             go. The detail a name carried is on the avatar's hover instead — which
@@ -454,6 +451,14 @@ export function StatusLine({
             caret sits in is resolved once, in `readPresence`. */}
         {reading.detail === null && peerStrip}
       </div>
+      {/* Supplementary warnings can wrap independently without consuming the
+          sync facts' reserved widths or colliding with the capped cluster. */}
+      {!blank && (saveNote !== null || pendingReading !== null) && (
+        <div className="ub-status-notes flex min-w-0 flex-wrap items-center gap-2 mt-2">
+          {saveNote}
+          {pendingReading}
+        </div>
+      )}
       {/* Reserve the full wrapping line even before the first status answer,
           through room changes, failed polls and refusals. Visibility changes
           ink only; the readings row and prose keep their geometry. */}
