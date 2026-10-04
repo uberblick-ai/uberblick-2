@@ -431,6 +431,7 @@ export async function initCommand(
   if (selected.binding === null && flags.workspace === undefined &&
       (existing.raw?.workspace !== undefined || existing.raw?.hubUrl !== undefined)) {
     io.err("ub init: a legacy machine workspace or hub is configured, but this project has no binding. Nothing was written or seeded. Review the old configuration, then explicitly select it with `ub workspace use <workspace-id> --hub <hub-url|local>`; use `ub remote join <workspace-url>` to hydrate a remote workspace. No legacy URL or credential has been copied.\n");
+    io.err(`To finish migration after selecting the projects you want to keep, remove only the obsolete workspace and hubUrl keys from ${resolved.paths.userConfig}. Preserve the other fields and credentials.json. Then \`ub init\` can create a fresh workspace in an unbound directory.\n`);
     return 1;
   }
   // The same problem is reported by each reader; the set keeps it said once.

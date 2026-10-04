@@ -151,6 +151,37 @@ describe("ub init", () => {
     expect(existsSync(credentialsPath(box))).toBe(false);
   });
 
+  it("creates a fresh workspace in another project after completing the documented legacy migration", () => {
+    const box = sandbox({ userConfig: { workspace: JOINED, hubUrl: "wss://legacy.example.test/ws", displayName: "Synthetic operator" } });
+    const first = { ...box, cwd: join(box.cwd, "first") };
+    const second = { ...box, cwd: join(box.cwd, "second") };
+    mkdirSync(first.cwd);
+    mkdirSync(second.cwd);
+    const migrated = runUb(["workspace", "use", JOINED, "--hub", "local"], first);
+    expect(migrated.status, migrated.output).toBe(0);
+    const before = projectBinding(first);
+    const refused = runUb(["init", "--yes"], second);
+    expect(refused.status, refused.output).toBe(1);
+    expect(refused.stderr).toContain("remove only the obsolete workspace and hubUrl keys");
+    const path = join(box.configHome, "uberblick", "config.json");
+    expect(refused.stderr).toContain(path);
+    expect(existsSync(join(second.cwd, ".uberblick.json"))).toBe(false);
+    // Follow the documented opt-in cleanup, preserving identity and project A.
+    const legacy = userConfig(box);
+    delete legacy.workspace;
+    delete legacy.hubUrl;
+    writeFileSync(path, JSON.stringify(legacy));
+    const created = runUb(["init", "--yes"], second);
+    expect(created.status, created.output).toBe(0);
+    const fresh = projectBinding(second);
+    expect(fresh.workspaceId).toMatch(UUID);
+    expect(fresh.workspaceId).not.toBe(JOINED);
+    expect(fresh.hubUrl).toBeNull();
+    expect(projectBinding(first)).toEqual(before);
+    expect(userConfig(box).displayName).toBe("Synthetic operator");
+    expect(existsSync(join(box.dataHome, "uberblick", `${fresh.workspaceId}.sqlite`))).toBe(true);
+  });
+
   it("generates an owner-only secret and prints none of it", () => {
     const box = sandbox({ checkout: true });
     const run = runUb(["init", "--yes"], box);

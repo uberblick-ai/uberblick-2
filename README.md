@@ -470,8 +470,9 @@ commands, `ub open`, `ub env` and `ub mcp serve` use one resolver:
 2. Otherwise, search from the current directory up to the filesystem root for
    the nearest `.uberblick.json`. An invalid nearest file fails; it never falls
    through to a parent. A file in a common ancestor intentionally covers its
-   descendants, including a file placed in your home directory; use a project
-   file to give a repository its own selection.
+   descendants, including a file placed in your home directory. To give a
+   repository its own selection beneath an ancestor binding, create a closer
+   `.uberblick.json` there explicitly; selection commands update the nearest file.
 3. Without either, `ub status` reports **No workspace selected** without opening
    a database. Workspace-dependent commands refuse until a binding is chosen.
    `ub env -- <command>` can still run non-workspace commands, with no workspace
@@ -506,6 +507,12 @@ variables. Existing MCP entries must be updated to include both variables;
 installation reports conflicting entries without overwriting them.
 Plain `ub init` refuses an unbound project with legacy machine selection rather
 than creating a different workspace. Explicitly select the intended pair first.
+After giving existing projects their bindings, finish migration by removing only
+the obsolete `workspace` and `hubUrl` keys from
+`$XDG_CONFIG_HOME/uberblick/config.json` (normally
+`~/.config/uberblick/config.json`). Keep other fields, `credentials.json`, project
+files and databases. New unbound directories can then use `ub init` to create a
+fresh workspace, including starter documents; existing project bindings remain.
 Temporary environment overrides are never implicitly saved by setup commands.
 
 The private `credentials.json` remains owner-only and holds local development

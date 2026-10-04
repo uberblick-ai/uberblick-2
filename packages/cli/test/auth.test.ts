@@ -241,12 +241,16 @@ describe("ub auth local selection and command surface", () => {
     expect(existsSync(credentialPath(box))).toBe(false);
   });
 
-  it("requires an explicit or file-bound hub, ignores ambient HUB_URL and keeps local-only work quiet", async () => {
+  it("refuses legacy ambient hub selection and keeps local work quiet without it", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, userConfig: { workspace: WORKSPACE } });
     for (const subcommand of ["login", "status", "logout"]) {
       const run = await runUbAsync(["auth", subcommand], box, { HUB_URL: "ws://ambient.invalid" });
       expect(run.status).toBe(1);
-      expect(run.stderr).toMatch(/local.only.*no login|local.only.*no sign.in/i);
+      expect(run.stderr).toContain("Legacy WORKSPACE_ID / HUB_URL selection is no longer supported");
+      expect(run.output).not.toContain("ambient.invalid");
+      const local = await runUbAsync(["auth", subcommand], box);
+      expect(local.status).toBe(1);
+      expect(local.stderr).toMatch(/local.only.*no login|local.only.*no sign.in/i);
     }
     const status = await runUbAsync(["status"], box);
     expect(status.output).not.toMatch(/auth login|sign.in/i);
