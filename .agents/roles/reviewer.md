@@ -42,6 +42,12 @@ consequence. Correctness and data safety first, then risk and missing
 verification, then unnecessary complexity — a smaller change that defends the
 same contract is a finding. No findings is itself a verdict and is stated as one.
 
+For a choice passing delivery-policy's when-to-record test without a record,
+raise a finding under [`review-protocol.md`](../protocols/review-protocol.md#findings);
+do not draft the record. The implementer writes it in the same PR as a stance
+or boundary `open` recommendation; verify the correction without holding the
+PR for a person's confirmation of that record.
+
 This is an adversarial implementation challenge, not a gate replay. Try to
 falsify the change: trace important failure paths and boundary conditions,
 challenge assumptions in the issue and PR record against the code and product

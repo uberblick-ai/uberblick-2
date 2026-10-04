@@ -28,6 +28,20 @@ outside that intake without automatically creating more issues. Do not force a
 cohesive outcome into tiny technical fragments. Reopen a settled choice only
 when new evidence or changed direction conflicts with it, naming the conflict.
 
+Raise a durable choice that passes
+[`delivery-policy.md`'s when-to-record test](delivery-policy.md#decision-records)
+as a decision record rather than leaving the decision in issue text. Read
+**Decision logs** (`b7fdc6d7-ce5c-4733-a083-3fc30196f0b3`) and **MCP interface
+contract** (`6e73bb70-e5da-4ee6-98ff-93ec9804856d`) for its shape and calls.
+The authorization rule below also governs this write: confirm its meaning and
+destination before creating it. With the person present, record their actual
+choice through `create_doc` or `set_status` as `decided` with
+`answer: {who, when, where}`,
+not as an agent stance; an unanswered topic stays `open` with a recommendation.
+A change to a decided record is an `open` successor naming it in `supersedes`,
+effective only after the person's recorded approval. Link the record from the
+intake instead of copying its reasoning there; it grants no queue authority.
+
 ## Keep the effort oriented
 
 For a larger effort, keep a compact overview of the intended outcome, settled

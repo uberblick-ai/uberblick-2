@@ -76,9 +76,69 @@ that warrants them.
 When the change makes a corpus claim wrong, or adds behavior a corpus
 document should describe, draft the rewrite under the pull request's
 `Corpus update`: each document by title and UUID, the block, and its new text,
-following the Editorial contract — rewrite, never append, and no PR or issue
-numbers. The integrator applies it after the merge, so the corpus never
-describes unmerged code. Keep it current with every revision.
+following the Editorial contract — rewrite, never append; Regular Document
+rewrites carry no PR or issue numbers. The integrator applies it after merge,
+so the corpus never describes unmerged code. Keep it current with every revision.
+
+## Decision records
+
+Apply [`delivery-policy.md`'s Decision records](../protocols/delivery-policy.md#decision-records):
+its three-condition when-to-record test, overkill cases and initial stance rule
+own whether to record and whether a first record is `decided` as an agent
+stance or `open` with a recommendation on a Human boundaries topic. Read its
+live corpus sources rather than treating a pointer as the record.
+
+Write a new implementation record as a complete draft in this same PR's
+`Corpus update`, including its topic, decision line, enduring reasons,
+guidance, governing requirement when applicable, Links and intended creation
+status (`decided` stance or boundary `open`). The integrator creates it through
+`create_doc` after merge; name a new record as new rather than inventing its
+UUID. Decision-record Links may cite GitHub items under the Editorial contract.
+For a new boundary `open` draft, include the built-on GitHub item and its linked
+Links entry in the update, and direct the integrator to complete that item's
+built-on line with the topic UUID returned by `create_doc`.
+Keep the draft current through review; do not create an immutable decided
+stance before reviewers can correct it. A missing-record finding under
+`review-protocol.md` is corrected here like any other finding:
+the reviewer flags it, the implementer writes it, and the PR does not wait for
+a person's confirmation of a first stance or open recommendation. Existing
+review and merge gates still apply.
+
+### Build on an open decision
+
+Within an already approved issue whose implementation meets an open decision,
+proceed on its recommended option and continue toward merge. State in the
+issue or PR:
+
+```text
+Built on open decision: <topic>, <topic uuid>, recommended option: <option>
+```
+
+Add that item to the open record's Links as `owner/repo#n`, linked to its
+`https://github.com/owner/repo/issues/n` or `/pull/n` URL. Use ordinary external
+link marks in the prose: plain reference text is invisible to `find_decisions`.
+This is the record's rework list if a person later chooses differently; record
+the resulting rework as a follow-up issue within the shared role rules.
+
+Only a major-impact step, one expensive to reverse, waits for the person's
+answer: for example a core technology swap, a data format other systems or
+users depend on, or making users migrate. Releases, data migrations and
+permission changes are not automatically major impact. Continue independent
+work, then use the existing stop outcome when the remaining step needs an
+answer (`returned` with `Reason: owner-decision` on an issue, `needs-human` on
+a PR). This exception approves no new outcome or `Implements:` approval;
+ISSUE_SPEC's ready bar and delivery-policy's review and merge tiers still
+apply. Every other Human boundaries crossing still escalates.
+
+### Challenge a decided record
+
+Create an `open` successor through `create_doc`, with `supersedes` naming the
+decided record and prose stating the challenge, evidence and recommendation.
+Do not edit the decided record or work around it. Stop only work depending on
+that decision until a person answers; continue independent work before ending
+with the existing stop outcome above. The prior answer stays in force until
+the person approves a successor, under Decision logs. This challenge route is
+also used by the issue preparer; its role permits the successor write.
 
 ## Revising a pull request
 
