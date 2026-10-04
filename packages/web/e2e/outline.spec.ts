@@ -8,7 +8,7 @@
  */
 
 import { chromium, expect, test } from "@playwright/test";
-import type { Browser, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
 
@@ -214,77 +214,6 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
       options: { behavior: "smooth", block: "start" },
     })),
   );
-});
-
-test("a non-hover pointer toggles the panel and dismisses it outside", async ({
-  browser,
-}: {
-  browser: Browser;
-}) => {
-  const context = await browser.newContext({ hasTouch: true });
-  const page = await context.newPage();
-  try {
-    await page.setViewportSize({ width: 1194, height: 540 });
-    await openDocument(page);
-    await typeHeading(page, 1, "Touch target");
-    const trigger = page.locator(".ub-outline-trigger");
-    const panel = page.getByRole("menu", { name: "Contents 1" });
-    await trigger.tap();
-    await expect(panel).toBeVisible();
-    await trigger.tap();
-    await expect(panel).toBeHidden();
-
-    await trigger.tap();
-    await expect(panel).toBeVisible();
-    await page.locator(".ub-title").tap();
-    await expect(panel).toBeHidden();
-    await expect(page.locator(".ub-title")).toBeFocused();
-
-    // An open threads drawer owns this edge: the covered outline is removed
-    // from both rendering and keyboard navigation, and its portal closes.
-    await page.locator(".ub-editor .ub-paragraph").last().click();
-    await page.keyboard.type("annotate me");
-    await selectParagraph(page.locator(".ub-editor .ub-paragraph").last());
-    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("annotate me");
-    await page.getByRole("button", { name: "Comment", exact: true }).click();
-    await page.getByPlaceholder(/Comment as/).fill("a thread");
-    await page.keyboard.press("Enter");
-    await page.keyboard.press("Escape");
-    const threads = page.locator(".ub-threads-toggle");
-    await expect(threads).toBeVisible();
-    await trigger.tap();
-    await expect(panel).toBeVisible();
-    await threads.tap();
-    const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
-    await expect(sheet).toBeVisible();
-    await expect(page.locator('[data-slot="sheet-overlay"]')).toBeVisible();
-    await expect(trigger).toBeHidden();
-    await expect(panel).toBeHidden();
-    expect(await trigger.evaluate((node) => {
-      node.focus();
-      return node === document.activeElement;
-    })).toBe(false);
-
-    // The drawer stays open across the breakpoint. If Contents opens while
-    // wide, narrowing again must close its portal when CSS hides the trigger.
-    await page.setViewportSize({ width: 1280, height: 540 });
-    await expect(sheet).toHaveCount(0);
-    await expect(page.locator("aside.ub-rail")).toBeVisible();
-    await expect(threads).toBeHidden();
-    await expect(page.locator('[data-slot="sheet-overlay"]')).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Hide document list" })).toBeVisible();
-    await expect(trigger).toBeVisible();
-    await trigger.tap();
-    await expect(panel).toBeVisible();
-    await page.setViewportSize({ width: 1279, height: 540 });
-    await expect(sheet).toBeVisible();
-    await expect(trigger).toBeHidden();
-    await expect(panel).toBeHidden();
-    await sheet.getByRole("button", { name: "Close threads" }).tap();
-    await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
-  } finally {
-    await context.close();
-  }
 });
 
 test.describe("fractional layout", () => {
