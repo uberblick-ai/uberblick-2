@@ -18,6 +18,7 @@ import type { ReactElement } from "react";
 import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
+import type { NotSharedReason } from "../shell/document-search.js";
 import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
 import { documentSyncFacts } from "./sync-facts.js";
@@ -71,6 +72,7 @@ export function SyncPanel({
   presence,
   endpoint,
   hubAcked,
+  notSharedReason = null,
   lastUpdated,
   onClose,
 }: {
@@ -81,6 +83,7 @@ export function SyncPanel({
   endpoint: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
   hubAcked?: boolean | null | undefined;
+  notSharedReason?: NotSharedReason | null;
   /** The stamp currently shown by the status line; absent while it omits it. */
   lastUpdated?: number | undefined;
   onClose: () => void;
@@ -92,7 +95,8 @@ export function SyncPanel({
   // cadence, never a quieter version of the truth (see calm.ts) — and two
   // different words in one corner of the screen would be worse than either.
   const reading = statusReading(status, state ?? raw);
-  const facts = documentSyncFacts(status, state, reading, hubAcked);
+  const facts = documentSyncFacts(status, state, reading, hubAcked, notSharedReason);
+  const reason = reading.detail ?? facts.hubDetail;
   const hasReading = connection !== null && facts.primary !== null;
   const namedEndpoint = hubAcked !== undefined && !facts.twoFact ? null : endpoint;
   const updated =
@@ -160,14 +164,10 @@ export function SyncPanel({
         {facts.twoFact && (
           <Fact label="Hub state" value={facts.hub ?? UNKNOWN} />
         )}
-        {/* Drawn only under a refusal (#448). This is the panel the pill opens,
-            and the pill has room for the word alone — so the sentence saying
-            what to do about it belongs here, and nowhere else. There is no such
-            sentence for the ordinary states, so the row is absent rather than
-            empty: a Reason row that read "—" three states out of four would be
-            noise in the place a reader looks during an outage. */}
-        {connection !== null && reading.detail !== null && (
-          <Fact label="Reason" value={reading.detail} />
+        {/* Refusals and known not-shared causes explain their own reading.
+            Ordinary states have no cause to name, so this row stays absent. */}
+        {connection !== null && reason !== null && (
+          <Fact label="Reason" value={reason} />
         )}
         {/* Always drawn, zero included: this is the panel someone opens to ask
             what the backlog is, and a row that vanished at zero would leave

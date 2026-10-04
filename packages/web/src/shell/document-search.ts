@@ -5,7 +5,11 @@ import { mintHubAuthMessage } from "../collab/rooms.js";
 export interface DocumentSearchStatus {
   readonly caughtUp: boolean;
   readonly rooms: Readonly<Record<string, { readonly hubAcked: boolean }>>;
+  /** Why this serving run cannot share local edits, absent on older servers. */
+  readonly notSharedReason?: NotSharedReason | null;
 }
+
+export type NotSharedReason = "no-hub-credentials";
 
 export interface DocumentSearchClient {
   status(signal: AbortSignal): Promise<DocumentSearchStatus>;
@@ -29,7 +33,10 @@ function searchStatus(body: Record<string, unknown>): DocumentSearchStatus {
   if (
     typeof body.caughtUp !== "boolean" ||
     rooms === null ||
-    Array.isArray(body.rooms)
+    Array.isArray(body.rooms) ||
+    (body.notSharedReason !== undefined &&
+      body.notSharedReason !== null &&
+      body.notSharedReason !== "no-hub-credentials")
   ) {
     throw new Error("ub open returned a malformed status answer");
   }
@@ -41,7 +48,12 @@ function searchStatus(body: Record<string, unknown>): DocumentSearchStatus {
     }
     parsed[room] = { hubAcked: status.hubAcked };
   }
-  return { caughtUp: body.caughtUp, rooms: parsed };
+  return {
+    caughtUp: body.caughtUp,
+    rooms: parsed,
+    notSharedReason:
+      body.notSharedReason === "no-hub-credentials" ? body.notSharedReason : null,
+  };
 }
 
 /**
