@@ -37,7 +37,10 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { createHub, silentLogger } from "@uberblick/hub";
+import { getWorkspaceName, setWorkspaceName } from "@uberblick/schema";
 import { afterAll, describe, expect, it } from "vitest";
+import * as Y from "yjs";
 import { REPO_ROOT } from "./helpers.js";
 
 const directories: string[] = [];
@@ -210,6 +213,11 @@ function hubDatabase(path: string, rows: number, privateTables = false): void {
       principal_id TEXT NOT NULL, github_account_id TEXT NOT NULL,
       github_username TEXT NOT NULL, had_documents INTEGER NOT NULL CHECK(had_documents IN (0, 1))
     );
+    CREATE TABLE hub_claim_state (
+      id INTEGER PRIMARY KEY CHECK(id = 1), default_workspace_id TEXT,
+      unclaimed INTEGER NOT NULL CHECK(unclaimed IN (0, 1)),
+      CHECK(unclaimed = 0 OR default_workspace_id IS NOT NULL)
+    );
   `);
   db.close();
 }
@@ -358,6 +366,108 @@ describe("hub-backup.sh", () => {
 });
 
 describe("hub-restore.sh", () => {
+  it.each([false, true])("preserves default workspace, rename and claim state across restore and recreation (claimed=%s)", async (claimed) => {
+    const fix = fixture();
+    const live = join(fix.volume, "hub.sqlite");
+    let time = 1_000;
+    const github = {
+      clientId: "Iv23AbCdEF0123456789",
+      now: () => time,
+      fetch: (async (input) => {
+        const url = String(input);
+        if (url === "https://github.com/login/device/code") {
+          return Response.json({ device_code: "backup-test-device", user_code: "ABCD-EFGH",
+            verification_uri: "https://github.com/login/device", expires_in: 900, interval: 1 });
+        }
+        if (url === "https://github.com/login/oauth/access_token") {
+          return Response.json({ access_token: "backup-test-github-token", token_type: "bearer", scope: "" });
+        }
+        expect(url).toBe("https://api.github.com/user");
+        return Response.json({ id: 1234, login: "backup-test-admin" });
+      }) as typeof fetch,
+    };
+    const config = { port: 0, databasePath: live, authSecret: "backup-test-only-signing-secret", github, log: silentLogger };
+    const options = { initializeDefaultWorkspace: true };
+    const hub = await createHub(config, options);
+    let completed: Record<string, unknown> | undefined;
+    try {
+      expect(await (await fetch(`http://127.0.0.1:${hub.port}/auth/claim-state`)).json())
+        .toEqual({ unclaimed: true, canClaim: true });
+      if (claimed) {
+        const started = await (await fetch(`http://127.0.0.1:${hub.port}/auth/github/start`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+        })).json() as { requestId: string; collectionSecret: string };
+        time += 1_000;
+        completed = await (await fetch(`http://127.0.0.1:${hub.port}/auth/github/collect`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ requestId: started.requestId, collectionSecret: started.collectionSecret }),
+        })).json() as Record<string, unknown>;
+        expect(completed.status).toBe("complete");
+      }
+    } finally {
+      await hub.stop();
+    }
+
+    const database = new DatabaseSync(live);
+    let workspaceId: string;
+    let records: { claim: unknown; principals: unknown; memberships: unknown; credentials: unknown };
+    try {
+      const claim = database.prepare("SELECT * FROM hub_claim_state").get();
+      workspaceId = claim?.default_workspace_id as string;
+      expect(workspaceId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(claim?.unclaimed).toBe(claimed ? 0 : 1);
+      if (claimed) expect(completed?.claimedWorkspaceId).toBe(workspaceId);
+      const settings = new Y.Doc();
+      try {
+        const row = database.prepare("SELECT data FROM documents WHERE name = ?").get(`${workspaceId}/_settings`);
+        Y.applyUpdate(settings, row?.data as Uint8Array);
+        expect(getWorkspaceName(settings)).toBe("Default workspace");
+        setWorkspaceName(settings, "Renamed default");
+        database.prepare("UPDATE documents SET data = ? WHERE name = ?")
+          .run(Y.encodeStateAsUpdate(settings), `${workspaceId}/_settings`);
+      } finally {
+        settings.destroy();
+      }
+      records = { claim, principals: database.prepare("SELECT * FROM hub_principals").all(),
+        memberships: database.prepare("SELECT * FROM hub_memberships").all(),
+        credentials: database.prepare("SELECT * FROM hub_credentials").all() };
+    } finally {
+      database.close();
+    }
+
+    const backup = join(fix.caller, "default-workspace.sqlite");
+    expect(run(fix, "hub-backup.sh", [backup]).status).toBe(0);
+    rmSync(live);
+    expect(run(fix, "hub-restore.sh", [backup]).status).toBe(0);
+    expect(readFileSync(live)).toEqual(readFileSync(backup));
+    const recreated = await createHub(config, options);
+    try {
+      expect(await (await fetch(`http://127.0.0.1:${recreated.port}/auth/claim-state`)).json())
+        .toEqual({ unclaimed: !claimed, canClaim: !claimed });
+    } finally {
+      await recreated.stop();
+    }
+    const restored = new DatabaseSync(live, { readOnly: true });
+    try {
+      expect({ claim: restored.prepare("SELECT * FROM hub_claim_state").get(),
+        principals: restored.prepare("SELECT * FROM hub_principals").all(),
+        memberships: restored.prepare("SELECT * FROM hub_memberships").all(),
+        credentials: restored.prepare("SELECT * FROM hub_credentials").all() }).toEqual(records);
+      const documents = restored.prepare("SELECT name, data FROM documents").all();
+      expect(documents).toHaveLength(1);
+      expect(documents[0]?.name).toBe(`${workspaceId}/_settings`);
+      const settings = new Y.Doc();
+      try {
+        Y.applyUpdate(settings, documents[0]?.data as Uint8Array);
+        expect(getWorkspaceName(settings)).toBe("Renamed default");
+      } finally {
+        settings.destroy();
+      }
+    } finally {
+      restored.close();
+    }
+  });
+
   it("refuses a backup that is not there, without stopping the hub", () => {
     const fix = fixture();
     const ran = run(fix, "hub-restore.sh", [join(fix.checkout, "absent.sqlite")]);
@@ -440,6 +550,38 @@ describe("hub-restore.sh", () => {
       expect(recovered.prepare("SELECT count(*) AS count FROM hub_credentials").get()?.count).toBe(0);
     } finally {
       recovered.close();
+    }
+  });
+
+  it("restores a sealed installation whose old hub data was removed without reopening claiming", async () => {
+    const fix = fixture();
+    const live = join(fix.volume, "hub.sqlite");
+    hubDatabase(live, 0, true);
+    const database = new DatabaseSync(live);
+    database.exec("INSERT INTO hub_claim_state VALUES (1, NULL, 0)");
+    database.close();
+    const backup = join(fix.caller, "sealed.sqlite");
+    expect(run(fix, "hub-backup.sh", [backup]).status).toBe(0);
+    rmSync(live);
+    const result = run(fix, "hub-restore.sh", [backup]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("private access state");
+    expect(readFileSync(live)).toEqual(readFileSync(backup));
+    const recreated = await createHub({ port: 0, databasePath: live,
+      authSecret: "backup-test-only-signing-secret", log: silentLogger }, { initializeDefaultWorkspace: true });
+    try {
+      expect(await (await fetch(`http://127.0.0.1:${recreated.port}/auth/claim-state`)).json())
+        .toEqual({ unclaimed: false, canClaim: false });
+    } finally {
+      await recreated.stop();
+    }
+    const restored = new DatabaseSync(live, { readOnly: true });
+    try {
+      expect(restored.prepare("SELECT * FROM hub_claim_state").get())
+        .toEqual({ id: 1, default_workspace_id: null, unclaimed: 0 });
+      expect(restored.prepare("SELECT count(*) AS count FROM documents").get()?.count).toBe(0);
+    } finally {
+      restored.close();
     }
   });
 

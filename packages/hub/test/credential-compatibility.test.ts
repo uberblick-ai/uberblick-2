@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createConnection } from "node:net";
+import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { Server } from "@hocuspocus/server";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -28,8 +29,11 @@ let hub: Hub;
 let localServer: Server<HubContext>;
 let issuedToken: string;
 const clients: TestClient[] = [];
+let originalDirectory: string;
 
 beforeAll(async () => {
+  originalDirectory = process.cwd();
+  process.chdir(tmpdir());
   // Actual host setup must leave root admission independent of membership,
   // and issue no credential until the approving account later signs in.
   const databasePath = tempDatabasePath();
@@ -155,9 +159,11 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-  await localServer?.destroy();
-  await hub?.stop();
-  removeTempDatabases();
+  try {
+    await localServer?.destroy();
+    await hub?.stop();
+    removeTempDatabases();
+  } finally { process.chdir(originalDirectory); }
 });
 
 function connect(
@@ -177,6 +183,46 @@ function connect(
 }
 
 describe("current admission is unchanged", () => {
+  it("claiming a fresh hub changes no live admission decisions", async () => {
+    let now = 1000;
+    const fresh = await createHub({ authSecret: TEST_SECRET, databasePath: tempDatabasePath(), address: "127.0.0.1", port: 0,
+      log: silentLogger, github: {
+        clientId: "Iv1.0123456789abcdef", now: () => now,
+        fetch: async (url) => Response.json(String(url) === "https://github.com/login/device/code"
+          ? { device_code: "claim-private-code", user_code: "ABCD-EFGH", verification_uri: "https://github.com/login/device", expires_in: 900, interval: 1 }
+          : String(url) === "https://github.com/login/oauth/access_token"
+            ? { access_token: "claim-private-token", token_type: "bearer", scope: "" }
+            : { id: 5678, login: "claiming-account" }),
+      },
+    }, { initializeDefaultWorkspace: true });
+    try {
+      const post = (path: string, body: unknown) => fetch(`http://127.0.0.1:${fresh.port}${path}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const pending = await (await post("/auth/github/start", {})).json() as Awaited<ReturnType<GithubSignIn["start"]>>;
+      if (pending.status !== "pending") throw new Error("sign-in did not start");
+      now += 1000;
+      const claimed = await (await post("/auth/github/collect", {
+        requestId: pending.requestId, collectionSecret: pending.collectionSecret,
+      })).json() as SignInCollection;
+      if (claimed.status !== "complete" || claimed.claimedWorkspaceId === undefined) throw new Error("hub was not claimed");
+      const workspace = claimed.claimedWorkspaceId;
+      const room = testRoom(workspace);
+      const rootToken = await token("read-write", { workspace, sub: randomUUID() });
+      const rootClient = connect(fresh.port, workspace, rootToken, room);
+      await rootClient.synced;
+      rootClient.text.insert(0, "claim still uses root admission");
+      const observer = connect(fresh.port, workspace, rootToken, room);
+      await observer.synced;
+      await waitForText("claimed-hub observer", observer.text, "claim still uses root admission");
+      const deviceToken = await mintToken(await importCredentialKey(Buffer.from(claimed.credential.key, "base64url")), {
+        typ: "room", sub: claimed.identity.id, workspace, scope: "read-write", kid: claimed.credential.record.id,
+        lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+      });
+      await expect(connect(fresh.port, workspace, deviceToken).denied).resolves.toBe("invalid-token");
+    } finally { await fresh.stop(); }
+  });
+
   it.each(["live hub", "local authenticator"])(
     "%s admits root-signed document edits without membership",
     async (server) => {

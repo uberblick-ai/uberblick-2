@@ -12,6 +12,7 @@
 
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { once } from "node:events";
+import { dirname } from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
@@ -29,7 +30,6 @@ import {
 } from "./helpers.js";
 
 const ENTRY_POINT = fileURLToPath(new URL("../src/main.ts", import.meta.url));
-const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 interface HubProcess {
   readonly child: ChildProcessByStdio<null, Readable, Readable>;
@@ -44,8 +44,10 @@ interface HubProcess {
  * the environment — and wait for the `hub.listen` line it logs to stderr.
  */
 async function startHubProcess(databasePath: string): Promise<HubProcess> {
-  const child = spawn(process.execPath, ["--import", "tsx", ENTRY_POINT], {
-    cwd: PACKAGE_ROOT,
+  const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), ENTRY_POINT], {
+    // The private scratch root may be deep; relative Unix socket paths from
+    // the database directory stay within the hub's existing length limit.
+    cwd: dirname(databasePath), timeout: 15_000, killSignal: "SIGKILL",
     env: {
       ...process.env,
       HUB_AUTH_TOKEN: TEST_SECRET,
@@ -58,6 +60,7 @@ async function startHubProcess(databasePath: string): Promise<HubProcess> {
   });
 
   const port = await new Promise<number>((resolve, reject) => {
+    child.once("error", reject);
     let buffered = "";
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {

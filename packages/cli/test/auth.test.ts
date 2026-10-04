@@ -119,7 +119,7 @@ async function serve(handler: (request: IncomingMessage, response: ServerRespons
   return { server, origin: `http://127.0.0.1:${address.port}` };
 }
 
-async function rig(workspaces: string[] = [], configured = true) {
+async function rig(workspaces: string[] = [], configured = true, initializeDefaultWorkspace = false) {
   const box = sandbox();
   const github = new GithubFake();
   const logs: unknown[] = [];
@@ -128,7 +128,7 @@ async function rig(workspaces: string[] = [], configured = true) {
     const hub = await createHub({
       authSecret: SIGNING_SECRET, port: 0, databasePath, log: (line) => logs.push(line),
       ...(configured ? { github: { clientId: "Iv23AbCdEF0123456789", fetch: github.fetch } } : {}),
-    });
+    }, { initializeDefaultWorkspace });
     hubs.push(hub);
     return hub;
   };
@@ -150,15 +150,23 @@ async function rig(workspaces: string[] = [], configured = true) {
     onStart: ((result: Record<string, unknown>) => Promise<void> | void) | undefined;
     holdCollection: boolean;
     unavailableCollection: boolean;
+    claimStateFailure: "lost" | "hung-body" | "oversized" | undefined;
     transform: ((path: string, status: number, result: Record<string, unknown>) => { status: number; result: unknown }) | undefined;
-  } = { onStart: undefined, holdCollection: false, unavailableCollection: false, transform: undefined };
+  } = { onStart: undefined, holdCollection: false, unavailableCollection: false, claimStateFailure: undefined, transform: undefined };
   const proxy = await serve((request, response) => {
     void (async () => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
-      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+      const body = chunks.length > 0 ? JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown> : {};
       const path = request.url ?? "";
       requests.push({ path, method: request.method, authorization: request.headers.authorization, body });
+      if (path === "/auth/claim-state" && controls.claimStateFailure !== undefined) {
+        if (controls.claimStateFailure === "lost") { response.destroy(); return; }
+        response.writeHead(200, { "Content-Type": "application/json" });
+        if (controls.claimStateFailure === "hung-body") response.write('{"unclaimed":true,');
+        else response.end(JSON.stringify({ unclaimed: true, canClaim: true, extra: "x".repeat(65_536) }));
+        return;
+      }
       if (controls.unavailableCollection && path === "/auth/github/collect") {
         response.writeHead(502);
         response.end();
@@ -171,7 +179,7 @@ async function rig(workspaces: string[] = [], configured = true) {
       }
       const upstream = await fetch(`http://127.0.0.1:${hub.port}${path}`, {
         method: request.method ?? "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        ...(request.method === "GET" ? {} : { body: JSON.stringify(body) }),
       });
       const result = await upstream.json() as Record<string, unknown>;
       if (path === "/auth/github/collect") collectionStatuses.push(String(result.status));
@@ -224,6 +232,7 @@ describe("ub auth local selection and command surface", () => {
       if (args[1] === "login") {
         expect(help.stdout).toContain("GitHub's approval page shows the app's name, not the hub.");
         expect(help.stdout.replace(/\s+/g, " ")).toContain("Approve only a login you started for the displayed hub");
+        expect(help.stdout.replace(/\s+/g, " ")).toContain("the first GitHub account to complete approval claims its default workspace as administrator");
       }
     }
     for (const args of [["auth", "unknown"], ["auth", "login", "--json"], ["auth", "logout", "a", "b"]]) {
@@ -342,6 +351,105 @@ describe("ub auth local selection and command surface", () => {
 });
 
 describe("hub-driven CLI GitHub sign-in", () => {
+  it("claims a fresh deployed hub before storing its workspace credential and leaves the binding unchanged", async () => {
+    const remote = await rig([], true, true);
+    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const binding = readFileSync(configPath(box));
+    const login = await runUbAsync(["auth", "login", remote.origin], box);
+    expect(login.status, login.stderr).toBe(0);
+    const stored = savedLogin(box, remote.origin);
+    const workspace = stored.credential.record.workspaces[0];
+    expect(stored.credential.record.workspaces).toHaveLength(1);
+    expect(workspace).toMatch(/^[0-9a-f-]{36}$/);
+    expect(workspace).not.toBe(WORKSPACE);
+    const notice = "This hub is unclaimed. The first GitHub account to complete approval becomes administrator of its default workspace.";
+    expect(login.stdout).toContain(notice);
+    expect(login.stdout.indexOf(notice)).toBeLessThan(login.stdout.indexOf("Approve in a browser:"));
+    const completion = `This login claimed the hub. Default workspace: ${workspace}`;
+    expect(login.stdout).toContain(completion);
+    expect(login.stdout.indexOf(completion)).toBeLessThan(login.stdout.indexOf("Stored login"));
+    expect(readFileSync(configPath(box))).toEqual(binding);
+    expect(remote.requests[0]).toMatchObject({ path: "/auth/claim-state", method: "GET", body: {} });
+    const again = await runUbAsync(["auth", "login", remote.origin], box);
+    expect(again.status, again.stderr).toBe(0);
+    expect(again.stdout).not.toContain("This hub is unclaimed");
+    expect(again.stdout).not.toContain("This login claimed");
+    expect(savedLogin(box, remote.origin).credential.record.workspaces).toEqual([workspace]);
+    expect(readFileSync(configPath(box))).toEqual(binding);
+    assertPublicOnly(login, remote, stored.credential.key);
+  });
+
+  it("reports ordinary completion when another account claimed after the unclaimed notice", async () => {
+    const remote = await rig();
+    remote.controls.transform = (path, status, result) => path === "/auth/claim-state"
+      ? { status: 200, result: { unclaimed: true, canClaim: true } } : { status, result };
+    const box = sandbox();
+    const login = await runUbAsync(["auth", "login", remote.origin], box);
+    expect(login.status, login.stderr).toBe(0);
+    expect(login.stdout).toContain("This hub is unclaimed");
+    expect(login.stdout).not.toContain("This login claimed");
+    expect(login.stdout).toContain("Credential covers no workspaces. Sign-in grants no membership.");
+    expect(savedLogin(box, remote.origin).credential.record.workspaces).toEqual([]);
+  });
+
+  it.each(["already-claimed", "failed-read"])("reports a committed claim independently of an earlier %s answer", async (kind) => {
+    const remote = await rig([WORKSPACE]);
+    remote.controls.transform = (path, status, result) => {
+      if (path === "/auth/claim-state") return kind === "failed-read"
+        ? { status: 503, result: { unclaimed: true, canClaim: true } }
+        : { status: 200, result: { unclaimed: false, canClaim: false } };
+      if (path === "/auth/github/collect" && result.status === "complete") {
+        return { status, result: { ...result, claimedWorkspaceId: WORKSPACE } };
+      }
+      return { status, result };
+    };
+    const login = await runUbAsync(["auth", "login", remote.origin], sandbox());
+    expect(login.status, login.stderr).toBe(0);
+    expect(login.stdout).not.toContain("This hub is unclaimed");
+    expect(login.stdout).toContain(`This login claimed the hub. Default workspace: ${WORKSPACE}`);
+  });
+
+  it.each(["lost", "hung-body", "oversized", "old-hub", "unavailable", "wrong-shape", "unexpected-field"])("continues ordinary login after a %s claim-state read without an unclaimed notice", async (kind) => {
+    const remote = await rig();
+    if (kind === "lost" || kind === "hung-body" || kind === "oversized") remote.controls.claimStateFailure = kind;
+    remote.controls.transform = (path, status, result) => {
+      if (path !== "/auth/claim-state") return { status, result };
+      if (kind === "old-hub") return { status: 404, result: { status: "unknown-request" } };
+      if (kind === "unavailable") return { status: 503, result: { unclaimed: true, canClaim: true } };
+      if (kind === "wrong-shape") return { status: 200, result: { unclaimed: "true", canClaim: true } };
+      return { status: 200, result: { unclaimed: true, canClaim: true, workspaceName: GITHUB_TOKEN } };
+    };
+    const box = sandbox();
+    const startedAt = Date.now();
+    const login = await runUbAsync(["auth", "login", remote.origin], box);
+    expect(login.status, login.stderr).toBe(0);
+    expect(login.stdout).not.toContain("This hub is unclaimed");
+    expect(login.stdout).not.toContain("This login claimed");
+    expect(login.output).not.toContain(GITHUB_TOKEN);
+    expect(savedLogin(box, remote.origin).credential.record.workspaces).toEqual([]);
+    if (kind === "hung-body") expect(Date.now() - startedAt).toBeLessThan(6_000);
+  });
+
+  it.each(["not-a-uuid", "not-covered", "not-a-string", "room-id"])("refuses a %s committed claim field without printing it or replacing stored credentials", async (kind) => {
+    const remote = await rig();
+    remote.controls.transform = (path, status, result) => {
+      if (path !== "/auth/github/collect" || result.status !== "complete") return { status, result };
+      const claimedWorkspaceId = kind === "not-a-uuid" ? GITHUB_TOKEN
+        : kind === "not-covered" ? WORKSPACE : kind === "room-id" ? `${WORKSPACE}/_settings` : null;
+      return { status, result: { ...result, claimedWorkspaceId } };
+    };
+    const box = sandbox({ credentials: { hubLogins: { [remote.origin]: fixture() } } });
+    const before = readFileSync(credentialPath(box));
+    const login = await runUbAsync(["auth", "login", remote.origin], box);
+    expect(login.status).toBe(1);
+    expect(login.stderr).toContain("invalid sign-in claim result");
+    expect(login.stdout).not.toContain("This login claimed");
+    expect(login.output).not.toContain(GITHUB_TOKEN);
+    expect(readFileSync(credentialPath(box))).toEqual(before);
+    expect(privateDeviceRows(remote.databasePath)).toHaveLength(1);
+    assertPublicOnly(login, remote);
+  });
+
   it("keeps live sync disabled with a stored login alone and does not export its key", async () => {
     const login = fixture();
     const box = sandbox({
@@ -395,9 +503,9 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(login.output).toMatch(/not.*sync|sync.*not|does not.*sync/i);
     assertPublicOnly(login, remote, stored.credential.key);
     for (const request of remote.requests) {
-      expect(request.method).toBe("POST");
+      expect(request.method).toBe(request.path === "/auth/claim-state" ? "GET" : "POST");
       expect(request.authorization).toBeUndefined();
-      expect(Object.keys(request.body).sort()).toEqual(request.path.endsWith("start") ? [] : ["collectionSecret", "requestId"]);
+      expect(Object.keys(request.body).sort()).toEqual(request.path.endsWith("start") || request.path === "/auth/claim-state" ? [] : ["collectionSecret", "requestId"]);
     }
     // The child compares private values in memory and prints only conclusions.
     // A successful test must not teach people to dump a resolved environment.
@@ -524,7 +632,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
   });
 
   it("reports an issued device left on the hub when publication fails after collection", async () => {
-    const remote = await rig();
+    const remote = await rig([], true, true);
     const box = sandbox({ credentials: { signingSecret: SIGNING_SECRET, hubLogins: { [remote.origin]: fixture() } } });
     const before = readFileSync(credentialPath(box));
     const backup = `${credentialPath(box)}.previous`;
@@ -535,6 +643,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     try {
       const run = await runUbAsync(["auth", "login", remote.origin], box);
       expect(run.status).toBe(1);
+      expect(run.stdout).toMatch(/This login claimed the hub\. Default workspace: [0-9a-f-]{36}/);
       expect(run.stderr).toMatch(/issued.*device.*remain|issued.*device.*hub|device.*remain.*hub/i);
       expect(privateDeviceRows(remote.databasePath)).toHaveLength(1);
       expect(readFileSync(backup)).toEqual(before);

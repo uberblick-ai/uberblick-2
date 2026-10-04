@@ -5,8 +5,10 @@ import { createConnection, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SetupReceipts, startAdminSetup, type SetupGrant } from "../src/admin-setup.js";
+import { adminSocketPath, SetupReceipts, startAdminSetup, type SetupGrant } from "../src/admin-setup.js";
 import { CredentialRegistry } from "../src/credentials.js";
+import { GithubSignIn } from "../src/github-sign-in.js";
+import { HubClaimState } from "../src/hub-claim.js";
 import type { HubLogRecord } from "../src/log.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
@@ -22,6 +24,8 @@ const DEVICE_CODE = "private-github-device-code";
 const directories: string[] = [];
 const controls: TestRig[] = [];
 const clients: HostClient[] = [];
+const signIns: GithubSignIn[] = [];
+let originalDirectory: string;
 
 class GithubFake {
   time = 1000;
@@ -95,6 +99,7 @@ interface TestRig {
   principals: PrincipalRegistry;
   memberships: MembershipRegistry;
   credentials: CredentialRegistry;
+  claims: HubClaimState | undefined;
   github: GithubFake;
   logs: HubLogRecord[];
   liveWorkspaces: Set<string>;
@@ -102,12 +107,13 @@ interface TestRig {
   stop(): Promise<void>;
 }
 
-async function rig(options: { databasePath?: string; configured?: boolean; onGrant?: () => void } = {}): Promise<TestRig> {
+async function rig(options: { databasePath?: string; configured?: boolean; onGrant?: () => void; initialize?: boolean } = {}): Promise<TestRig> {
   const directory = options.databasePath === undefined
     ? mkdtempSync(join(tmpdir(), `ub-${process.env.UB_AGENTS_RUN ?? "admin-setup"}-`)) : undefined;
   if (directory !== undefined) directories.push(directory);
   const database = new HubDatabase(options.databasePath ?? join(directory!, "hub.sqlite"), () => {});
   database.open();
+  const claims = options.initialize ? new HubClaimState(database) : undefined;
   const principals = new PrincipalRegistry(database);
   const memberships = new MembershipRegistry(database);
   const credentials = new CredentialRegistry(database);
@@ -116,7 +122,7 @@ async function rig(options: { databasePath?: string; configured?: boolean; onGra
   const liveWorkspaces = new Set<string>();
   let control: Awaited<ReturnType<typeof startAdminSetup>>;
   try {
-    control = await startAdminSetup({ database, principals, memberships,
+    control = await startAdminSetup({ database, principals, memberships, claims,
       ...(options.configured === false ? {} : { github: { clientId: CLIENT_ID, fetch: github.fetch, now: () => github.time } }),
       hasLiveDocuments: (workspaceId) => liveWorkspaces.has(workspaceId),
       log: (record) => { logs.push(record); if (record.event === "hub.admin-setup.granted") options.onGrant?.(); },
@@ -126,7 +132,7 @@ async function rig(options: { databasePath?: string; configured?: boolean; onGra
     throw error;
   }
   let stopped = false;
-  const result = { database, principals, memberships, credentials, github, logs, liveWorkspaces, control,
+  const result = { database, principals, memberships, credentials, claims, github, logs, liveWorkspaces, control,
     async stop() {
       if (stopped) return;
       stopped = true;
@@ -160,7 +166,19 @@ function rows(testRig: TestRig) {
     principals: db.prepare("SELECT * FROM hub_principals ORDER BY id").all(),
     memberships: db.prepare("SELECT * FROM hub_memberships ORDER BY workspace_id, principal_id").all(),
     credentials: db.prepare("SELECT * FROM hub_credentials ORDER BY id").all(),
-    receipts: db.prepare("SELECT * FROM hub_admin_setup_grants ORDER BY setup_id").all() };
+    receipts: db.prepare("SELECT * FROM hub_admin_setup_grants ORDER BY setup_id").all(),
+    claimState: testRig.claims === undefined ? undefined : db.prepare("SELECT * FROM hub_claim_state").all() };
+}
+
+function publicSignIn(testRig: TestRig) {
+  const flow = new GithubSignIn({ clientId: CLIENT_ID, fetch: testRig.github.fetch, now: () => testRig.github.time },
+    testRig.database, testRig.principals, testRig.credentials, testRig.memberships, () => {}, testRig.claims);
+  signIns.push(flow);
+  return flow;
+}
+
+function defaultWorkspace(testRig: TestRig): string {
+  return testRig.database.connection.prepare("SELECT default_workspace_id FROM hub_claim_state").get()!.default_workspace_id as string;
 }
 
 function identityPause(github: GithubFake) {
@@ -178,12 +196,23 @@ function identityPause(github: GithubFake) {
   return { entered, aborted, resume };
 }
 
-beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }); });
+beforeEach(() => {
+  originalDirectory = process.cwd();
+  // Private run scratch can have a long absolute path. Use short relative
+  // socket paths inside it without weakening the production sockaddr guard.
+  process.chdir(tmpdir());
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+});
 afterEach(async () => {
-  for (const client of clients.splice(0)) client.socket.destroy();
-  for (const testRig of controls.splice(0)) await testRig.stop();
-  vi.useRealTimers();
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  try {
+    for (const flow of signIns.splice(0)) flow.stop();
+    for (const client of clients.splice(0)) client.socket.destroy();
+    for (const testRig of controls.splice(0)) await testRig.stop();
+    for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  } finally {
+    vi.useRealTimers();
+    process.chdir(originalDirectory);
+  }
 });
 
 describe("host-only first-admin setup", () => {
@@ -219,7 +248,7 @@ describe("host-only first-admin setup", () => {
     directories.push(directory);
     const databasePath = join(directory, "hub.sqlite");
     mkdirSync(`${databasePath}.admin`, { mode: 0o700 });
-    const stalePath = `${databasePath}.admin/control.sock`;
+    const stalePath = adminSocketPath(databasePath);
     const child = spawn(process.execPath, ["--input-type=module", "-e",
       "import {createServer} from 'node:net'; createServer().listen(process.argv[1], () => process.stdout.write('ready'));", stalePath],
       { stdio: ["ignore", "pipe", "pipe"] });
@@ -398,7 +427,7 @@ describe("host-only first-admin setup", () => {
   });
 
   it("rolls back identity refresh and membership if the durable receipt cannot be committed", async () => {
-    const testRig = await rig();
+    const testRig = await rig({ initialize: true });
     testRig.principals.identify("1234", "original-login");
     const before = rows(testRig);
     testRig.database.connection.exec(`CREATE TRIGGER receipt_failure BEFORE INSERT ON hub_admin_setup_grants
@@ -407,6 +436,50 @@ describe("host-only first-admin setup", () => {
     await tick(testRig);
     expect(await request.client.next()).toMatchObject({ status: "failed", setupId: request.setupId });
     expect(rows(testRig)).toEqual(before);
+    expect(testRig.claims!.state(true)).toEqual({ unclaimed: true, canClaim: true });
+  });
+
+  it.each(["default", "other"])("a committed host grant on the %s workspace closes claiming before a pending public login", async (workspace) => {
+    const testRig = await rig({ initialize: true });
+    const defaultId = defaultWorkspace(testRig);
+    const flow = publicSignIn(testRig);
+    const login = await flow.start();
+    if (login.status !== "pending") throw new Error("sign-in did not start");
+    testRig.github.account = { id: 5678, login: "host-approver" };
+    const setup = await pending(testRig, workspace === "default" ? defaultId : WORKSPACE);
+    await tick(testRig);
+    expect(await setup.client.next()).toMatchObject({ status: "complete" });
+    expect(testRig.claims!.state(true)).toEqual({ unclaimed: false, canClaim: false });
+    const result = await flow.collect(login.requestId, login.collectionSecret);
+    expect(result).toMatchObject({ status: "complete", identity: { githubAccountId: "1234" }, credential: { record: { workspaces: [] } } });
+    expect(result).not.toHaveProperty("claimedWorkspaceId");
+    const grants = rows(testRig).memberships;
+    expect(grants).toHaveLength(1);
+    expect(grants[0]!.workspace_id).toBe(workspace === "default" ? defaultId : WORKSPACE);
+  });
+
+  it("a public claim wins over an earlier host approval still fetching identity", async () => {
+    const testRig = await rig({ initialize: true });
+    const defaultId = defaultWorkspace(testRig);
+    const setup = await pending(testRig, defaultId);
+    const pause = identityPause(testRig.github);
+    const polling = tick(testRig);
+    await pause.entered;
+    testRig.github.pauseIdentity = undefined;
+    testRig.github.account = { id: 5678, login: "public-approver" };
+    const flow = publicSignIn(testRig);
+    const login = await flow.start();
+    if (login.status !== "pending") throw new Error("sign-in did not start");
+    testRig.github.time += 1000;
+    const result = await flow.collect(login.requestId, login.collectionSecret);
+    expect(result).toMatchObject({ status: "complete", claimedWorkspaceId: defaultId });
+    pause.resume();
+    await polling;
+    expect(await setup.client.next()).toMatchObject({ status: "workspace-has-membership" });
+    expect(rows(testRig).memberships).toHaveLength(1);
+    expect(rows(testRig).receipts).toEqual([]);
+    expect(rows(testRig).principals).toHaveLength(1);
+    expect(testRig.claims!.state(true)).toEqual({ unclaimed: false, canClaim: false });
   });
 
   it("refuses an unconfigured hub distinctly without changing private state", async () => {

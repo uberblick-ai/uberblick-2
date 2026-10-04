@@ -314,6 +314,16 @@ describe("every human-facing command path", () => {
     );
   });
 
+  it("explains one-time fresh-hub claiming in login help without changing the machine binding", async () => {
+    const run = await dispatch(["auth", "login", "--help"]);
+    expect(run.status).toBe(0);
+    const help = run.stdout.replace(/\s+/g, " ");
+    expect(help).toContain("the first GitHub account to complete approval claims its default workspace as administrator");
+    expect(help).toContain("Claiming is one-time");
+    expect(help).toContain("this command reports whether this login claimed it and the workspace UUID");
+    expect(help).toContain("The machine's binding stays unchanged.");
+  });
+
   it("keeps the hidden `mcp serve` out of the group help it is dispatched by", async () => {
     const run = await dispatch(["mcp", "--help"]);
     expect(run.status).toBe(0);
