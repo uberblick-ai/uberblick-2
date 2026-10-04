@@ -10,12 +10,12 @@
  */
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { closeSync, constants, openSync } from "node:fs";
+import { closeSync, constants, existsSync, openSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
-import { DEAD_HUB_URL, UB_BIN, removeTempDirs, sandbox } from "./helpers.js";
+import { DEAD_HUB_URL, UB_BIN, removeTempDirs, runUb, sandbox } from "./helpers.js";
 import type { Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -172,8 +172,6 @@ describe("ub mcp serve", () => {
 
   // What the wrapper owes a client: the endpoint is the project binding's, and it
   // survives the exec into the server the client actually talks to.
-  // The project binding remains authoritative over an unrelated legacy
-  // HUB_URL from the checkout environment.
   it("dials the project binding's endpoint when a client spawns it inside a checkout", async () => {
     const box = sandbox({
       checkout: true,
@@ -207,9 +205,7 @@ describe("ub mcp serve", () => {
       credentials: { signingSecret: "cli-serve-signing-secret" },
     });
 
-    // And the ambient `HUB_URL` does not survive it: the project binding's endpoint
-    // is what the server must report, whatever the process was started with.
-    const session = await connect(box, { HUB_URL: "ws://ambient.invalid:1" });
+    const session = await connect(box);
     try {
       const result = await session.client.callTool({
         name: "sync_status",
@@ -227,6 +223,51 @@ describe("ub mcp serve", () => {
       expect(session.stderr()).toMatch(/belongs in credentials\.json/);
       expect(session.stderr()).not.toContain("cli-serve-signing-secret");
       expect(session.stderr()).not.toContain("cli-serve-misplaced-secret");
+    } finally {
+      await session.close();
+    }
+  });
+
+  it.each([
+    { WORKSPACE_ID: "8f21c604-3b7d-4a15-9c62-0d5e8b3f7a29" },
+    { HUB_URL: "wss://legacy.example.test/ws" },
+  ])("refuses a legacy MCP selector before opening the project workspace", (legacy) => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    // The real subprocess receives a valid project binding plus an old MCP
+    // entry's pin. Ignoring that pin would boot the wrong corpus and seed data.
+    const run = runUb(["mcp", "serve"], box, legacy);
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("Legacy WORKSPACE_ID / HUB_URL");
+    expect(run.stderr).toContain("No workspace was opened");
+    expect(existsSync(box.dataHome)).toBe(false);
+    expect(existsSync(box.configHome)).toBe(false);
+    expect(readdirSync(box.cwd)).toEqual([".uberblick.json"]);
+  });
+
+  it("serves only the complete new MCP binding even when legacy and project selections disagree", async () => {
+    const selected = "8f21c604-3b7d-4a15-9c62-0d5e8b3f7a29";
+    const legacy = "5cb9a7a5-3cc0-4cdb-bd20-fd348fbf1311";
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const session = await connect(box, {
+      WORKSPACE_ID: legacy,
+      HUB_URL: "wss://legacy.example.test/ws",
+      UB_WORKSPACE_ID: selected,
+      UB_HUB_URL: "local",
+    });
+    try {
+      await session.client.callTool({ name: "create_doc", arguments: {
+        title: "Explicit binding only", description: "Synthetic binding regression.",
+      } });
+      const result = await session.client.callTool({ name: "list_docs", arguments: {} });
+      const content = result.content as { text: string }[];
+      const listing = JSON.parse(content[0]!.text);
+      expect(listing.workspace).toBe(selected);
+      expect(listing.docs.map((doc: { title: string }) => doc.title)).toEqual(["Explicit binding only"]);
+      const data = join(box.dataHome, "uberblick");
+      expect(existsSync(join(data, `${selected}.sqlite`))).toBe(true);
+      expect(existsSync(join(data, `${WORKSPACE}.sqlite`))).toBe(false);
+      expect(existsSync(join(data, `${legacy}.sqlite`))).toBe(false);
     } finally {
       await session.close();
     }

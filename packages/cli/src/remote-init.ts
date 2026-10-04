@@ -34,7 +34,7 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { resolveMcpConfig } from "./budget.js";
 import type { McpConfig } from "@uberblick/mcp-server";
-import { resolveConfig } from "./config.js";
+import { requireBinding, resolveConfig } from "./config.js";
 import { resolveProjectBinding } from "./project-binding.js";
 import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
@@ -649,11 +649,16 @@ export async function remoteInitCommand(
   // was here when it started is one it may replace; one that *arrives* while it
   // is deploying belongs to a run that knows something this one does not, and
   // the publish below refuses rather than overwriting it.
-  const bindingBefore = resolveProjectBinding({ env, cwd }).binding;
+  const bindingBefore = resolveProjectBinding({ env: {}, cwd }).binding;
   const endpointBefore = bindingBefore?.hubUrl ?? null;
 
   let base: McpConfig;
   try {
+    const effective = requireBinding(resolved);
+    if (bindingBefore === null || effective.workspaceId !== bindingBefore.workspaceId || effective.hubUrl !== bindingBefore.hubUrl) {
+      io.err("ub remote init: select the intended project with `ub workspace use <id> --hub <url|local>` first. An environment-only or differing binding is not persisted by deployment. Nothing was done.\n");
+      return 1;
+    }
     base = resolveMcpConfig(resolved.env);
   } catch (error) {
     io.err(`ub remote init: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -953,7 +958,7 @@ export async function remoteInitCommand(
   }
   let persistence: RemotePersistence;
   try {
-    const bindingNow = resolveProjectBinding({ env, cwd }).binding;
+    const bindingNow = resolveProjectBinding({ env: {}, cwd }).binding;
     const endpointNow = bindingNow?.hubUrl ?? null;
     if (bindingNow?.workspaceId !== bindingBefore?.workspaceId || (endpointNow !== endpointBefore && endpointNow !== endpoint)) {
       io.err(
@@ -964,7 +969,7 @@ export async function remoteInitCommand(
       );
       return 1;
     }
-    persistence = setRemote(endpoint, { env, cwd, workspace: base.workspaceId });
+    persistence = setRemote(endpoint, { env, cwd, workspace: bindingBefore.workspaceId });
   } finally {
     lock.release();
   }

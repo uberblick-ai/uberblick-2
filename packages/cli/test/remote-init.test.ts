@@ -230,6 +230,28 @@ function init(rig: Harness, args: string[] = [TARGET]): Promise<number> {
 
 
 describe("ub remote init", () => {
+  it("refuses differing or environment-only bindings before touching a host", async () => {
+    for (const present of [false, true]) {
+      const rig = harness();
+      if (!present) rmSync(join(rig.box.cwd, ".uberblick.json"));
+      rig.env.UB_WORKSPACE_ID = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
+      rig.env.UB_HUB_URL = "local";
+      expect(await init(rig), rig.err()).toBe(1);
+      expect(rig.err()).toContain("environment-only or differing binding");
+      expect(rig.steps()).toEqual([]);
+      const after = resolveProjectBinding({ env: {}, cwd: rig.box.cwd }).binding;
+      expect(after).toEqual(present ? { workspaceId: WORKSPACE, hubUrl: null } : null);
+    }
+  });
+
+  it("preserves the project workspace spelling when publishing the deployment", async () => {
+    const rig = harness();
+    const workspaceId = `docs-${WORKSPACE}`;
+    writeFileSync(join(rig.box.cwd, ".uberblick.json"), JSON.stringify({ workspaceId, hubUrl: null }));
+    expect(await init(rig), rig.err()).toBe(0);
+    expect(resolveProjectBinding({ env: {}, cwd: rig.box.cwd }).binding).toEqual({ workspaceId, hubUrl: `wss://${MAGIC_DNS}/ws` });
+  });
+
   it("keeps every accepted workspace spelling inside the compose charset", () => {
     // bin/remote-compose.sh interpolates this value into JSON, so schema's accepted
     // grammar must remain a subset of its explicit deployment rule.
@@ -348,7 +370,8 @@ describe("ub remote init", () => {
     const rig = harness();
     rmSync(join(rig.box.cwd, ".uberblick.json"));
     expect(await init(rig)).toBe(2);
-    expect(rig.err()).toContain("Run `ub init`");
+    expect(rig.err()).toContain("No workspace selected");
+    expect(rig.err()).toContain(".uberblick.json");
     expect(rig.steps()).toEqual([]);
   });
 

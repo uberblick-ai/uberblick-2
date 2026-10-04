@@ -200,7 +200,7 @@ describe("`ub status`", () => {
     expect(selected.report.projectConfig).toBeNull();
     expect(selected.report.shadowed).toBeUndefined();
     expect(renderStatus(selected.report)).toMatch(/selection\s+environment/);
-    expect(renderStatus(selected.report)).toMatch(/hub\s+local-only/);
+    expect(renderStatus(selected.report)).toMatch(/hub\s+local \(this computer\)/);
     expect(selected.warnings).toEqual([]);
   });
 

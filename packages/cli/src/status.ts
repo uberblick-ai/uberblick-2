@@ -206,7 +206,7 @@ export function renderStatus(report: StatusReport | UnboundStatusReport): string
   if (report.workspaceUuid !== report.workspace) {
     text += field("uuid", report.workspaceUuid);
   }
-  text += field("hub", report.binding.hubUrl ?? "local-only");
+  text += field("hub", report.binding.hubUrl ?? "local (this computer)");
   text += field("selection", report.projectConfig ?? ORIGIN_LABELS[report.sources.workspace]);
   text += field("connection", hub.status);
   if (hub.reason !== undefined) text += field("recovery", hub.reason);

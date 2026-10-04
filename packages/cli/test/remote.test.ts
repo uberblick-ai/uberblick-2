@@ -361,6 +361,14 @@ function storedSecret(box: Sandbox): unknown {
 }
 
 describe("ub remote", () => {
+  it("explains explicit selection when no binding exists", async () => {
+    const run = await runUbAsync(["remote"], sandbox());
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("No workspace selected");
+    expect(run.stderr).toContain(".uberblick.json");
+    expect(run.stderr).not.toContain("Set WORKSPACE_ID");
+  });
+
   it("says so when no remote is configured, and exits 0", async () => {
     // A workspace but no remote: `ub remote` reads which workspace it is
     // reporting on, and there is no default workspace to fall back to.
@@ -513,28 +521,15 @@ describe("ub remote", () => {
     expect(persistedHubUrl(box)).toBe("wss://hub.example.ts.net");
   });
 
-  it("ignores an endpoint in the environment, in every command", async () => {
-    // The layer that redirected a bound workspace at whatever a checkout
-    // exported (#376). There is no such layer any more: the user config's
-    // endpoint is what `ub status` reports and what a spawned server dials.
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
-    });
-
-    const shown = await runUbAsync(["remote"], box, {
-      HUB_URL: "ws://127.0.0.1:9999",
-    });
-    expect(shown.status).toBe(0);
-    expect(shown.stdout).toContain(DEAD_HUB_URL);
-    expect(shown.stdout).not.toContain("9999");
-
-    const status = await runUbAsync(["status", "--json"], box, {
-      HUB_URL: "ws://127.0.0.1:9999",
-    });
-    expect(status.status).toBe(0);
-    const report = JSON.parse(status.stdout);
-    expect(report.hubUrl).toBe(DEAD_HUB_URL);
-    expect(report.sources.hubUrl).toBe("project config");
+  it("rejects obsolete partial environment selection rather than silently ignoring it", async () => {
+    const original = { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL };
+    const box = sandbox({ projectBinding: original });
+    for (const command of [["remote"], ["status", "--json"]]) {
+      const run = await runUbAsync(command, box, { HUB_URL: "ws://127.0.0.1:9999" });
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain("Legacy WORKSPACE_ID / HUB_URL");
+      expect(readConfigFile(box, "config.json")).toEqual(original);
+    }
   });
 
   it("preserves credentials when binding publication fails", () => {
@@ -1018,6 +1013,10 @@ describe("ub remote join", () => {
     expect(run.stdout).toContain(mine);
     expect(run.stdout).toContain("was not merged into this one");
     expect(run.stdout).toContain("previous workspace and its documents remain unchanged");
+    expect(run.stdout).toContain(`ub workspace use ${mine} --hub '${DEAD_HUB_URL}'`);
+    const restored = await runUbAsync(["workspace", "use", mine, "--hub", DEAD_HUB_URL], box);
+    expect(restored.status, restored.output).toBe(0);
+    expect(readConfigFile(box, "config.json")).toEqual({ workspaceId: mine, hubUrl: DEAD_HUB_URL });
     expect(run.stdout).not.toContain("endpoint, though, is machine-wide");
 
     // Both are listed, and the first one still holds everything it held.

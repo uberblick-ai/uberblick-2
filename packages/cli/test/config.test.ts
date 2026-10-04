@@ -46,7 +46,7 @@ function mcpConfig(env: NodeJS.ProcessEnv) {
 describe("resolveConfig", () => {
   it("does not use a legacy workspace or hub, and does not pass either to children", () => {
     const box = sandbox({ userConfig: { workspace: FROM_USER, hubUrl: "wss://old.example.test/ws" } });
-    const resolved = resolveConfig({ env: { ...box.env, WORKSPACE_ID: FROM_ENV, HUB_URL: "wss://ambient.example.test/ws" }, cwd: box.cwd });
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
     expect(resolved.binding).toBeNull();
     expect(resolved.env.WORKSPACE_ID).toBeUndefined();
     expect(resolved.env.HUB_URL).toBeUndefined();

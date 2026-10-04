@@ -60,6 +60,9 @@ export function validateProjectBinding(value: unknown, source: string): ProjectB
   if (typeof raw.hubUrl !== "string" || raw.hubUrl.trim() === "") {
     throw new Error(`${source}: hubUrl must be a hub URL or null for local-only`);
   }
+  if (raw.hubUrl.trim().toLowerCase() === LOCAL_HUB) {
+    throw new Error(`${source}: use JSON null for local operation on this computer, not the string "local"`);
+  }
   return { workspaceId, hubUrl: normalizeRemoteUrl(raw.hubUrl) };
 }
 
@@ -92,6 +95,11 @@ export function resolveProjectBinding(options: BindingOptions = {}): ResolvedBin
       origin: "environment",
       path: null,
     };
+  }
+  // Old named MCP entries pinned WORKSPACE_ID only. Ignoring that pin while
+  // adopting a project file would silently send that entry to another corpus.
+  if (env.WORKSPACE_ID?.trim() || env.HUB_URL?.trim()) {
+    throw new Error("Legacy WORKSPACE_ID / HUB_URL selection is no longer supported. Replace it with a complete UB_WORKSPACE_ID and UB_HUB_URL pair, or remove both legacy variables and explicitly select a .uberblick.json binding. No workspace was opened.");
   }
   const path = findProjectConfig(options.cwd);
   if (path === null) return { binding: null, origin: null, path: null };

@@ -32,6 +32,7 @@ describe("ub workspace", () => {
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toContain(WORKSPACE);
     expect(shown.stdout).toContain("project config");
+    expect(shown.stdout).toContain(HUB);
   });
 
   it("ignores a legacy machine default without an explicit project binding", () => {
@@ -39,6 +40,7 @@ describe("ub workspace", () => {
     const shown = runUb(["workspace"], box);
     expect(shown.status).toBe(1);
     expect(shown.stderr).toContain("no workspace configured");
+    expect(shown.stderr).toContain("--hub <url|local>");
   });
 
   it("reports a complete environment override", () => {
@@ -48,6 +50,7 @@ describe("ub workspace", () => {
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toContain(OTHER);
     expect(shown.stdout).toContain("environment");
+    expect(shown.stdout).toContain("local (this computer)");
   });
 });
 
@@ -75,6 +78,27 @@ describe("ub workspace list", () => {
 });
 
 describe("ub workspace use", () => {
+  it("never saves an environment hub when only changing project workspace spelling", () => {
+    const box = sandbox();
+    bind(box);
+    const run = runUb(["workspace", "use", `docs-${WORKSPACE}`], box, {
+      UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "wss://override.example.test/ws",
+    });
+    expect(run.status, run.output).toBe(0);
+    expect(binding(box)).toEqual({ workspaceId: `docs-${WORKSPACE}`, hubUrl: HUB });
+    expect(run.stderr).toContain("takes precedence");
+  });
+
+  it("requires an explicit hub even when the requested UUID matches an environment override", () => {
+    const box = sandbox();
+    bind(box);
+    const run = runUb(["workspace", "use", `docs-${OTHER}`], box, {
+      UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "wss://override.example.test/ws",
+    });
+    expect(run.status, run.output).toBe(2);
+    expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
+  });
+
   it("requires a complete destination when selecting another UUID, even if it has a local database", () => {
     const box = sandbox();
     bind(box);

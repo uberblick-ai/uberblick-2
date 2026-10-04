@@ -59,6 +59,7 @@ interface InForce {
   configured: string | null;
   uuid: string | null;
   origin: Origin;
+  hubUrl: string | null;
   warnings: string[];
 }
 
@@ -74,6 +75,7 @@ function inForce(options: { env?: NodeJS.ProcessEnv } = {}): InForce {
     // resolveConfig already refused anything that is not a workspace id.
     uuid: configured === null ? null : parseWorkspaceId(configured).uuid,
     origin: resolved.origins.workspace,
+    hubUrl: resolved.binding?.hubUrl ?? null,
     warnings: resolved.warnings,
   };
 }
@@ -142,7 +144,7 @@ function showWorkspace(io: Io): number {
     io.err(
       "ub workspace: no workspace configured. There is no default — a guessed " +
         "workspace would open a corpus nobody chose. Run `ub init` to create " +
-        "one, or `ub workspace use <id>` to adopt one that exists.\n",
+        "one, or `ub workspace use <id> --hub <url|local>` to adopt one that exists.\n",
     );
     return 1;
   }
@@ -155,6 +157,7 @@ function showWorkspace(io: Io): number {
   if (current.uuid !== current.configured) {
     text += field("uuid", current.uuid);
   }
+  text += field("hub", current.hubUrl ?? "local (this computer)");
   io.out(text);
   return 0;
 }
@@ -285,10 +288,10 @@ operands:
                     prefix of a local UUID
 
 options:
-  --hub <url|local>  explicit hub URL, or local for a local-only workspace
+  --hub <url|local>  explicit hub URL, or local for this computer
   -h, --help        show this help
 
-The hub is required when selecting a different workspace. An existing local
+The hub is required unless the project file already selects this workspace. An existing local
 database does not identify which hub owns it. This command moves no documents
 and verifies no membership; use \`ub remote join\` to hydrate a remote workspace.
 Complete UB_WORKSPACE_ID and UB_HUB_URL environment overrides still take priority.
@@ -336,7 +339,8 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   }
   const id = resolved.id;
 
-  const current = resolveProjectBinding().binding;
+  // Environment overrides select this process, never a persistence default.
+  const current = resolveProjectBinding({ env: {} }).binding;
   if (hub === undefined) {
     if (current === null || parseWorkspaceId(current.workspaceId).uuid !== parseWorkspaceId(id).uuid) {
       io.err("ub workspace use: specify --hub <url> or --hub local when selecting a different workspace.\n");
@@ -368,7 +372,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   if (uuid !== id) {
     text += field("uuid", uuid);
   }
-  text += field("hub", hub ?? "local-only");
+  text += field("hub", hub ?? "local (this computer)");
   text += field("config", path);
   io.out(text);
 

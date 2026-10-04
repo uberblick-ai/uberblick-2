@@ -47,7 +47,7 @@ describe("ub status", () => {
     const run = runUb(["status"], sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } }));
     expect(run.status).toBe(0);
     expect(run.stdout).toMatch(WORKSPACE);
-    expect(run.stdout).toMatch(/local-only/);
+    expect(run.stdout).toContain("local (this computer)");
   });
 
   it("reports that no workspace is selected, and names `ub init`", () => {
