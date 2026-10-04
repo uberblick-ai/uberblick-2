@@ -20,13 +20,15 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, parse } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { findCheckoutRoot } from "../src/checkout.js";
 import {
   REPO_ROOT,
   removeTempDirs,
@@ -458,10 +460,29 @@ describe("ub init", () => {
     expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
   });
 
+  it("names the contributor task inside the sandbox's own checkout", () => {
+    const box = sandbox({ checkout: true });
+    const cwd = realpathSync(box.cwd);
+    expect(
+      findCheckoutRoot(cwd),
+      "the fixture must detect its own checkout, not an enclosing checkout",
+    ).toBe(cwd);
+
+    const run = runUb(["init", "--yes"], box);
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("mise run dev");
+  });
+
   it("initialises outside a checkout, and names no contributor task there", () => {
     // An installed `ub` with no checkout still initialises. The mise tasks only
     // exist inside one, so they are not offered as a next step.
-    const box = sandbox();
+    // Scratch may itself be beneath a checkout. init only reads its cwd, so
+    // use the filesystem root while keeping all config and data in scratch.
+    const box = { ...sandbox(), cwd: parse(REPO_ROOT).root };
+    expect(
+      findCheckoutRoot(realpathSync(box.cwd)),
+      "the outside-checkout fixture must have no checkout ancestor",
+    ).toBeNull();
     const run = runUb(["init", "--yes"], box);
     expect(run.status).toBe(0);
     expect(storedSecret(box)).toMatch(/^[A-Za-z0-9._-]+$/);
