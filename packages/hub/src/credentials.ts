@@ -156,11 +156,14 @@ export class CredentialRegistry {
       UPDATE hub_credentials SET replaced_at = $replacedAt
       WHERE id = $id AND revoked_at IS NULL AND replaced_at IS NULL
     `);
+    // Renewal appends rows; timestamp order can change when the clock moves.
+    // Retained insertion order identifies the device's original sign-in.
     this.selectDevices = db.prepare(`
       SELECT current.device_id, current.workspaces,
-        (SELECT MIN(history.issued_at) FROM hub_credentials AS history
+        (SELECT history.issued_at FROM hub_credentials AS history
           WHERE history.principal_id = current.principal_id
-            AND history.device_id = current.device_id) AS signed_in_at
+            AND history.device_id = current.device_id
+          ORDER BY history.rowid LIMIT 1) AS signed_in_at
       FROM hub_credentials AS current
       WHERE current.principal_id = $principalId
         AND current.revoked_at IS NULL AND current.replaced_at IS NULL
@@ -229,7 +232,8 @@ export class CredentialRegistry {
   /**
    * Verify request-bound possession without granting any room or credential.
    * A caller must perform its authority check synchronously after awaiting this
-   * result, including a fresh get() before any operation that may change state.
+   * result, including a fresh get() and re-clamping the returned proof at the
+   * operation's current time.
    */
   async verifyRequest(token: string, request: RequestAction): Promise<CredentialRequestVerification | null> {
     const lookup = readTokenKeyId(token);

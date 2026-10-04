@@ -115,6 +115,21 @@ describe("principal-owned device management", () => {
     expect(closed).not.toHaveBeenCalled();
   });
 
+  it("preserves the original sign-in time when the clock moves backwards before renewal", async () => {
+    const { store, memberships } = registry();
+    const signedInAt = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(signedInAt);
+    const original = issue(store);
+    const renewingProof = await proof(original, { operation: "renew-credential" });
+    now.mockReturnValue(signedInAt - 10_000);
+
+    const renewed = replacement(await store.renew(renewingProof, memberships));
+    expect(renewed.record.issuedAt).toBeLessThan(original.record.issuedAt);
+    expect(store.listDevices("person")).toEqual([
+      { deviceId: "laptop", signedInAt, workspaces: [] },
+    ]);
+  });
+
   it("revokes the renewal chain while leaving other devices and principals working", async () => {
     const { store, memberships } = registry();
     const original = issue(store);
