@@ -52,8 +52,8 @@ function validateRole(role: MembershipRole): void {
  * and management must share this instance so removal reaches its subscribers.
  * Checks and each single-statement mutation stay synchronous on the hub's one
  * database connection, so another operation cannot interleave between them.
- * Configured live sign-in reads this registry without granting memberships;
- * live credential and membership admission await the client cutover.
+ * Sign-in grants only when claiming a fresh deployed hub; afterwards it reads
+ * this registry. Live credential and membership admission await the cutover.
  */
 export class MembershipRegistry {
   private readonly insert: StatementSync;
@@ -100,7 +100,7 @@ export class MembershipRegistry {
     `);
   }
 
-  /** Internal grant for first-admin setup and invitation acceptance. */
+  /** Internal grant for hub claiming, first-admin setup and invitation acceptance. */
   grant(record: MembershipRecord): void {
     validateIdentity(record.workspaceId, record.principalId);
     validateRole(record.role);
