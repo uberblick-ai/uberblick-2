@@ -1,7 +1,8 @@
 import { createConnection } from "node:net";
+import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { adminSocketPath, type SetupGrant } from "../src/admin-setup.js";
 import { resolveRemoteHubConfig, SHARED_GITHUB_CLIENT_ID } from "../src/config.js";
 import { CredentialRegistry } from "../src/credentials.js";
@@ -14,10 +15,17 @@ import { removeTempDatabases, tempDatabasePath, WORKSPACE } from "./helpers.js";
 
 const ACCOUNT = { id: 1234, login: "same-person" };
 const hubs: Hub[] = [];
+let originalDirectory: string;
 
+beforeEach(() => {
+  originalDirectory = process.cwd();
+  process.chdir(tmpdir());
+});
 afterEach(async () => {
-  for (const hub of hubs.splice(0)) await hub.stop();
-  removeTempDatabases();
+  try {
+    for (const hub of hubs.splice(0)) await hub.stop();
+    removeTempDatabases();
+  } finally { process.chdir(originalDirectory); }
 });
 
 class GithubFake {

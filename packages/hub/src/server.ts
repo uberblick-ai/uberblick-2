@@ -62,6 +62,7 @@ import { CredentialRegistry } from "./credentials.js";
 import { handleCredentialRenewal } from "./credential-renewal.js";
 import { startAdminSetup } from "./admin-setup.js";
 import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
+import { HubClaimState, handleHubClaimState } from "./hub-claim.js";
 import { MembershipRegistry } from "./memberships.js";
 import { PrincipalRegistry } from "./principals.js";
 import { stderrLogger } from "./log.js";
@@ -570,7 +571,10 @@ async function listen(
  * handlers and mutates no process state — `main.ts` owns the process, this owns
  * a server — which is what makes it usable from tests.
  */
-export async function createHub(config: HubConfig, options: { operatorSetup?: boolean } = {}): Promise<Hub> {
+export async function createHub(config: HubConfig, options: {
+  operatorSetup?: boolean;
+  initializeDefaultWorkspace?: boolean;
+} = {}): Promise<Hub> {
   if (config.github !== undefined) validateGithubClientId(config.github.clientId);
   if (config.authSecret === "") {
     throw new Error(
@@ -641,13 +645,17 @@ export async function createHub(config: HubConfig, options: { operatorSetup?: bo
   let credentials: CredentialRegistry | undefined;
   let principals: PrincipalRegistry | undefined;
   let memberships: MembershipRegistry | undefined;
+  let claims: HubClaimState | undefined;
   try {
+    // Standalone entry points opt in. ub open's embedded hub never initializes
+    // or claims, even when it offers an explicitly configured GitHub sign-in.
+    if (options.initializeDefaultWorkspace) claims = new HubClaimState(database);
     if (config.github !== undefined || options.operatorSetup) {
       principals = new PrincipalRegistry(database);
       memberships = new MembershipRegistry(database);
       if (config.github !== undefined) {
         credentials = new CredentialRegistry(database);
-        signIn = new GithubSignIn(config.github, principals, credentials, memberships, log);
+        signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims);
       }
     }
   } catch (error) {
@@ -688,6 +696,7 @@ export async function createHub(config: HubConfig, options: { operatorSetup?: bo
     onAuthenticate: authenticate,
 
     async onRequest({ request, response }) {
+      if (handleHubClaimState(claims, signIn !== undefined, request, response)) return Promise.reject();
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response)) {
         return Promise.reject();
       }
@@ -742,7 +751,7 @@ export async function createHub(config: HubConfig, options: { operatorSetup?: bo
       if (principals === undefined || memberships === undefined || isEphemeralDatabase(databasePath)) {
         throw new Error("hub setup: durable hub database required");
       }
-      adminSetup = await startAdminSetup({ database, principals, memberships,
+      adminSetup = await startAdminSetup({ database, principals, memberships, claims,
         github: config.github, log, hasLiveDocuments: (workspaceId) =>
           [...server.hocuspocus.documents.keys()].some((name) => name.startsWith(`${workspaceId}/`)) });
     }
