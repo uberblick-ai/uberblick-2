@@ -140,8 +140,6 @@ describe("archive_doc", () => {
       governs: requirement.uuid,
       blocks: [
         { type: "paragraph", text: "Use the append-only update log." },
-        { type: "heading", text: "Reconsidering", level: 2 },
-        { type: "paragraph", text: "Revisit if the log outgrows one file." },
       ],
     });
     const second = await rig.ok("create_doc", {

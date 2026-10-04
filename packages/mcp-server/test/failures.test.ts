@@ -134,7 +134,19 @@ const EXPECTED: Record<
     recoveryClass: "manual",
     detail: ["kind", "status"],
   },
-  revival_trigger_missing: {
+  decision_answer_required: {
+    recoveryClass: "manual",
+    detail: ["kind", "status"],
+  },
+  decision_reason_required: {
+    recoveryClass: "manual",
+    detail: ["uuid", "kind", "status"],
+  },
+  decision_transition_invalid: {
+    recoveryClass: "manual",
+    detail: ["kind", "status"],
+  },
+  decision_read_only: {
     recoveryClass: "manual",
     detail: ["uuid", "kind", "status"],
   },
@@ -315,19 +327,33 @@ describe("the failure contract", () => {
         })
       ).payload,
     );
-    const unfinishedDecision = await rig.ok("create_doc", {
-      title: "Unfinished decision",
-      description: "A decision without a revival trigger.",
+    const firstDecision = await rig.ok("create_doc", {
+      title: "First decision",
+      description: "The topic's first stance.",
       kind: "decision",
+      status: "decided",
+    });
+    const successorDecision = await rig.ok("create_doc", {
+      title: "Successor proposal",
+      description: "A proposal that needs a person's answer.",
+      kind: "decision",
+      supersedes: firstDecision.uuid,
     });
     record(
       (
         await rig.call("set_status", {
-          uuid: unfinishedDecision.uuid,
+          uuid: successorDecision.uuid,
           status: "decided",
         })
       ).payload,
     );
+    record((await rig.call("set_status", {
+      uuid: successorDecision.uuid,
+      status: "rejected",
+      answer: { who: "A member", when: "2026-10-04T12:00:00Z", where: "A team discussion." },
+    })).payload);
+    record((await rig.call("set_status", { uuid: firstDecision.uuid, status: "open" })).payload);
+    record((await rig.call("set_title", { uuid: firstDecision.uuid, title: "Frozen" })).payload);
     record(
       (
         await rig.call("create_doc", {

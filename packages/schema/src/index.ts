@@ -48,6 +48,7 @@ export {
 } from "./doc.js";
 export type { InitDocOptions } from "./doc.js";
 export { decisionRelations, readDecisions, resolveDecisionTopics } from "./decisions.js";
+export { decisionApprovalChanged, decisionApprovalFingerprint } from "./approval.js";
 
 export {
   appendBlock,

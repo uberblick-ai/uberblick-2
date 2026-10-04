@@ -93,11 +93,17 @@ describe("decision metadata and caches", () => {
     meta.set("agentStance", "yes");
     meta.set("decidedBy", " ");
     meta.set("decidedAt", 42);
+    meta.set("decidedWhere", " ");
+    meta.set("approvalFingerprint", 42);
+    meta.set("rejectionReason", " ");
     expect(getMeta(doc)).toMatchObject({ topic: A, status: "withdrawn" });
     expect(getMeta(doc)).not.toHaveProperty("supersedes");
     expect(getMeta(doc)).not.toHaveProperty("agentStance");
     expect(getMeta(doc)).not.toHaveProperty("decidedBy");
     expect(getMeta(doc)).not.toHaveProperty("decidedAt");
+    expect(getMeta(doc)).not.toHaveProperty("decidedWhere");
+    expect(getMeta(doc)).not.toHaveProperty("approvalFingerprint");
+    expect(getMeta(doc)).not.toHaveProperty("rejectionReason");
   });
 
   it("caches all decision fields and counts comments across resolved and orphaned threads", () => {
@@ -107,6 +113,9 @@ describe("decision metadata and caches", () => {
     meta.set("agentStance", false);
     meta.set("decidedBy", "a-person");
     meta.set("decidedAt", "2026-10-03T12:00:00Z");
+    meta.set("decidedWhere", "An owner answer");
+    meta.set("rejectionReason", "The alternative fits the constraint");
+    expect(getMeta(doc)).toMatchObject({ decidedWhere: "An owner answer", rejectionReason: "The alternative fits the constraint" });
     const block = appendBlock(doc, { type: "paragraph", text: "Reasoning" });
     const thread = createAnnotation(doc, block, 0, 3, "a-person", "One");
     addComment(doc, thread.id, "another-person", "Two");
@@ -114,7 +123,7 @@ describe("decision metadata and caches", () => {
     setAnnotationResolved(doc, resolved.id, true);
     deleteBlock(doc, block);
     const fields = decisionDirectoryFields(doc);
-    expect(fields).toEqual({ governs: REQUIREMENT, topic: A, supersedes: A, tldr: "Use durable rooms.", agentStance: false, decidedBy: "a-person", decidedAt: "2026-10-03T12:00:00Z", commentCount: 3 });
+    expect(fields).toEqual({ governs: REQUIREMENT, topic: A, supersedes: A, tldr: "Use durable rooms.", agentStance: false, decidedBy: "a-person", decidedAt: "2026-10-03T12:00:00Z", approvalChanged: false, commentCount: 3 });
     const directory = new Y.Doc();
     upsertDirectoryEntry(directory, { ...getMeta(doc), description: getMeta(doc).description ?? "", ...fields });
     expect(directoryStubDiffers(getDirectoryEntry(directory, B), getMeta(doc), fields)).toBe(false);
@@ -154,11 +163,11 @@ describe("decision metadata and caches", () => {
 
   it("keeps decision-only cache fields out of ordinary and requirement stubs", () => {
     const directory = new Y.Doc();
-    upsertDirectoryEntry(directory, { uuid: A, title: "Ordinary", topic: A, governs: REQUIREMENT, tldr: "No", agentStance: true, commentCount: 10 });
+    upsertDirectoryEntry(directory, { uuid: A, title: "Ordinary", topic: A, governs: REQUIREMENT, tldr: "No", agentStance: true, approvalChanged: true, commentCount: 10 });
     upsertDirectoryEntry(directory, { uuid: B, title: "Product", kind: "requirement", topic: A, commentCount: 10 });
     expect(getDirectoryEntry(directory, A)).toEqual({ uuid: A, title: "Ordinary", tags: [] });
     expect(getDirectoryEntry(directory, B)).toEqual({ uuid: B, title: "Product", tags: [], kind: "requirement" });
-    getDirectoryMap(directory).set(C, { title: "Malformed", kind: "decision", topic: false, commentCount: -1, decidedBy: {}, agentStance: "true" });
+    getDirectoryMap(directory).set(C, { title: "Malformed", kind: "decision", topic: false, commentCount: -1, decidedBy: {}, agentStance: "true", approvalChanged: "true" });
     expect(getDirectoryEntry(directory, C)).toEqual({ uuid: C, title: "Malformed", tags: [], kind: "decision" });
   });
 });
