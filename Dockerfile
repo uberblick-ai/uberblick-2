@@ -11,6 +11,7 @@ RUN npm install --global "$(node -p "require('./package.json').packageManager")"
 
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches patches
+COPY packages/cli/package.json packages/cli/package.json
 COPY packages/hub/package.json packages/hub/package.json
 COPY packages/mcp-server/package.json packages/mcp-server/package.json
 COPY packages/schema/package.json packages/schema/package.json
@@ -22,29 +23,18 @@ COPY . .
 
 FROM workspace AS web-build
 
-# HUB_URL is only the bundle's fallback: the client prefers the hub endpoint
-# Caddy serves at /uberblick-config.json (see the Caddyfile), so retargeting a
-# deployment does not need this image rebuilt.
-#
-# There is deliberately no WORKSPACE_ID/WORKSPACES build argument. The same
-# document names the workspaces, and a deployed bundle that carried its own
-# would be a second answer to retarget — the build-time defines exist for the
-# dev server, which serves that document from vite instead.
-#
-# And no secret of any kind (#426). The signing secret is served in that same
-# document, so this stage needs none: the bundle it produces carries no
-# credential at all, and rotating the secret is a Caddy restart rather than a
-# rebuild. Not *identical* across deployments — HUB_URL above is still compiled
-# in as the fallback — but independent of who deploys it and of what their
-# secret is, which is what makes the image publishable.
-ARG HUB_URL
-RUN test -n "$HUB_URL" \
-    && HUB_URL="$HUB_URL" pnpm --filter @uberblick/web build
+# Every deployment setting comes from the served configuration document.
+# The checkout build retains development fallbacks; released web images also
+# disable those fallbacks through their explicit runtime-only build mode.
+RUN pnpm --filter @uberblick/web build
 
 FROM caddy:2.10.2-alpine AS web
 
 COPY Caddyfile /etc/caddy/Caddyfile
 COPY --from=web-build /app/packages/web/dist /srv
+COPY web-release-entrypoint.sh remote-settings.sh /usr/local/bin/
+ENTRYPOINT ["sh", "/usr/local/bin/web-release-entrypoint.sh"]
+CMD ["run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
 
 FROM workspace AS hub
 
@@ -53,7 +43,12 @@ ENV HUB_HOST=0.0.0.0
 ENV PORT=1234
 ENV HUB_DB_PATH=/data/hub.sqlite
 
-RUN install -d -o node -g node /data
+# Operator scripts use this same bundled setup command in checkout and release
+# deployments, so their behavior does not depend on a source-tree entrypoint.
+RUN node scripts/build-hub-release-payload.mjs /app \
+    && install -d -o node -g node /data
+COPY hub-release-entrypoint.sh remote-settings.sh /usr/local/bin/
+ENTRYPOINT ["sh", "/usr/local/bin/hub-release-entrypoint.sh"]
 
 USER node
 EXPOSE 1234

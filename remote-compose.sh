@@ -21,46 +21,13 @@ if [ -f .env ]; then
   set +a
 fi
 
-: "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
-
-# The secret's alphabet is load-bearing twice over. Compose and the shell parse
-# other characters differently, so the deployed secret could silently diverge
-# from the one MCP clients use — and since #426 it is substituted into the
-# document as well.
-case "$HUB_AUTH_TOKEN" in
-  *[!A-Za-z0-9._-]*)
-    printf 'HUB_AUTH_TOKEN may only contain A-Z a-z 0-9 . _ - : shell and Docker Compose parse other characters differently, so the deployed secret could silently diverge from the one MCP clients use, and it is substituted into the JSON configuration document Caddy serves, where a quote or a backslash would let the value inject further keys. Regenerate the secret with safe characters.\n' >&2
-    exit 1
-    ;;
+# Share the same alphabets with container startup, so plain Compose is safe too.
+case "$0" in
+  */*) settings_dir=${0%/*} ;;
+  *) settings_dir=. ;;
 esac
-
-# Workspace ids are uuids, optionally slug-decorated, so the character set that
-# can express every legitimate value has no quoting in it at all.
-case "${WEB_WORKSPACES-}" in
-  *[!A-Za-z0-9,-]*)
-    printf 'WEB_WORKSPACES may only contain A-Z a-z 0-9 , - : it is substituted into the JSON configuration document Caddy serves, where a quote or a backslash would let the value inject further keys — including one that retargets the browser at another hub. A workspace id is a uuid, optionally prefixed with a display slug.\n' >&2
-    exit 1
-    ;;
-esac
-
-# The endpoint reaches that same document by either route: `WEB_HUB_URL` when an
-# operator sets one, and `TAILSCALE_HOST` through the `wss://<host>/ws` default
-# compose builds from it — which is also the Caddy site address. A ws(s) address
-# needs no quoting and a MagicDNS name is letters, digits, dots and hyphens, so
-# both alphabets can express every legitimate value.
-case "${WEB_HUB_URL-}" in
-  *[!A-Za-z0-9:/._-]*)
-    printf 'WEB_HUB_URL may only contain A-Z a-z 0-9 : / . _ - : it is substituted into the JSON configuration document Caddy serves, where a quote, a backslash or whitespace would let the value inject further keys — including a second hubUrl that retargets every browser. It is a plain ws:// or wss:// address, which needs none of them.\n' >&2
-    exit 1
-    ;;
-esac
-
-case "${TAILSCALE_HOST-}" in
-  *[!A-Za-z0-9.-]*)
-    printf 'TAILSCALE_HOST may only contain A-Z a-z 0-9 . - : it is the Caddy site address and the hub endpoint served in the JSON configuration document, where a quote, a backslash or whitespace would let the value inject further keys. It is the full MagicDNS name, with no scheme and no trailing slash.\n' >&2
-    exit 1
-    ;;
-esac
+. "$settings_dir/remote-settings.sh"
+validate_remote_settings
 
 compose_version=$(docker compose version --short)
 compose_version=${compose_version#v}
@@ -79,14 +46,5 @@ if [ "$compose_major" -lt 2 ] || { [ "$compose_major" -eq 2 ] && [ "$compose_min
   printf 'Docker Compose 2.6.0 or newer is required; found %s\n' "$compose_version" >&2
   exit 1
 fi
-
-# The checked copy, and the only variable this script sets. `docker-compose.yml`
-# gates Caddy's secret on this name with `:?`, so a bare `docker compose up` —
-# which would read HUB_AUTH_TOKEN straight out of `.env` and skip every check
-# above — fails instead of serving an unchecked value into the Caddyfile's raw
-# JSON. It is exported rather than passed so the value never reaches a command
-# line, an argument list or a shell history.
-CHECKED_HUB_AUTH_TOKEN=$HUB_AUTH_TOKEN
-export CHECKED_HUB_AUTH_TOKEN
 
 exec docker compose "$@"

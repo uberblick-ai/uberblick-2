@@ -5,10 +5,10 @@
  * corpus, so the properties worth defending are the refusals: a backup must not
  * be written when the hub's shutdown flush failed, and a restore must not touch
  * the volume for a file it has not read. Neither survives being mocked, so the
- * scripts are run as themselves against a stub `remote-compose.sh` — the wrapper
- * is the only thing a checkout ever drives Docker through, which is exactly why
- * it is the seam (`remote-update.test.ts` uses the same one). No Docker runs
- * here.
+ * scripts are copied into a directory without a checkout and run as themselves
+ * against a stub `remote-compose.sh` — the wrapper is the shared seam for a
+ * checkout and a hub release (`remote-update.test.ts` uses the same one).
+ * No Docker runs here.
  *
  * Nothing the scripts hand the hub image is faked either. The stub executes the
  * `sh -c` payload it is given, with the container paths rewritten into the
@@ -26,17 +26,23 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
-import { REPO_ROOT, removeTempDirs, sandbox } from "./helpers.js";
+import { REPO_ROOT } from "./helpers.js";
 
-afterAll(removeTempDirs);
+const directories: string[] = [];
+afterAll(() => {
+  for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+});
 
 /**
  * Stands in for the compose wrapper.
@@ -63,8 +69,18 @@ case "$1" in
   start | up)
     if [ -n "\${UB_TEST_START_FAIL:-}" ]; then exit 1; fi
     ;;
+  stop)
+    if [ -n "\${UB_TEST_STOP_FAIL:-}" ]; then exit 1; fi
+    ;;
   cp)
-    if [ -n "\${UB_TEST_CP_FAIL:-}" ]; then exit 1; fi
+    # A failed copy can leave bytes behind, not merely exit before it starts.
+    if [ -n "\${UB_TEST_CP_FAIL:-}" ]; then
+      case "$2" in
+        hub:*) printf 'partial backup' > "$3" ;;
+        *) printf 'partial restore' > "$UB_TEST_VOLUME/\${3#hub:/data/}" ;;
+      esac
+      exit 1
+    fi
     case "$2" in
       hub:*)
         cp "$UB_TEST_VOLUME/hub.sqlite" "$3"
@@ -114,7 +130,7 @@ exit 0
 `;
 
 interface Fixture {
-  /** The stand-in host checkout the scripts run from. */
+  /** The stand-in deployment directory: operator scripts, with no checkout. */
   checkout: string;
   /** Stands in for the `hub-data` volume: what `cp` copies out of and into. */
   volume: string;
@@ -123,8 +139,8 @@ interface Fixture {
 }
 
 function fixture(): Fixture {
-  const box = sandbox();
-  const checkout = box.cwd;
+  const checkout = mkdtempSync(join(tmpdir(), `uberblick-${process.env.UB_AGENTS_RUN ?? "test"}-hub-operators-`));
+  directories.push(checkout);
   const volume = join(checkout, "volume");
   mkdirSync(volume, { recursive: true });
 
@@ -143,7 +159,7 @@ function fixture(): Fixture {
     volume,
     composeLog: join(checkout, "compose.log"),
     env: {
-      ...box.env,
+      ...process.env,
       UB_TEST_COMPOSE_LOG: join(checkout, "compose.log"),
       UB_TEST_VOLUME: volume,
       UB_TEST_VERIFY_DB: join(checkout, "verify.sqlite"),
@@ -261,7 +277,21 @@ describe("hub-backup.sh", () => {
 
     expect(ran.status).not.toBe(0);
     expect(readFileSync(target, "utf8")).toBe("the backup from yesterday");
+    expect(readdirSync(fix.checkout).some((name) => name.startsWith("backup.sqlite.tmp."))).toBe(false);
     expect(subcommands(fix)).toEqual(["stop", "ps", "cp", "start"]);
+  });
+
+  it("starts the hub again when stop fails partway, without writing a backup", () => {
+    const fix = fixture();
+    hubDatabase(join(fix.volume, "hub.sqlite"), 3);
+    const target = join(fix.checkout, "backup.sqlite");
+    fix.env.UB_TEST_STOP_FAIL = "1";
+
+    const ran = run(fix, "hub-backup.sh", [target]);
+
+    expect(ran.status).not.toBe(0);
+    expect(existsSync(target)).toBe(false);
+    expect(subcommands(fix)).toEqual(["stop", "start"]);
   });
 
   it("refuses a target that is a directory, before stopping anything", () => {
@@ -470,11 +500,28 @@ describe("hub-restore.sh", () => {
     expect(ran.status).not.toBe(0);
     expect(ran.stderr).toContain("NOT replaced");
     expect(readFileSync(live)).toEqual(before);
+    expect(existsSync(join(fix.volume, "hub.sqlite.restoring"))).toBe(false);
     expect(calls(fix).some((line) => line.includes("mv -f /data/hub.sqlite.restoring"))).toBe(
       false,
     );
     // Verify, stop, ps, probe, the failed cp, the discard, and the restart.
     expect(subcommands(fix)).toEqual(["run", "stop", "ps", "run", "cp", "run", "start"]);
+  });
+
+  it("starts the hub again when stop fails partway, without replacing the database", () => {
+    const fix = fixture();
+    const live = join(fix.volume, "hub.sqlite");
+    hubDatabase(live, 7);
+    const before = readFileSync(live);
+    const backup = join(fix.checkout, "good.sqlite");
+    hubDatabase(backup, 2);
+    fix.env.UB_TEST_STOP_FAIL = "1";
+
+    const ran = run(fix, "hub-restore.sh", [backup]);
+
+    expect(ran.status).not.toBe(0);
+    expect(readFileSync(live)).toEqual(before);
+    expect(subcommands(fix)).toEqual(["run", "stop", "start"]);
   });
 
   /**

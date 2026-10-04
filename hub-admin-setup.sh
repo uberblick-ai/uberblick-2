@@ -20,12 +20,12 @@ case "${1-}" in
     ;;
 esac
 
-checkout=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-cd "$checkout"
+deployment=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$deployment"
 
 # Compose exec does not forward host signals. With terminal input, use its
 # container TTY so Ctrl-C reaches the command and it can report cancellation.
-set -- hub packages/hub/node_modules/.bin/tsx packages/hub/src/admin-setup-command.ts "$@"
+set -- hub node /app/hub-admin-setup.mjs "$@"
 if [ -t 0 ]; then
   exec sh remote-compose.sh exec "$@"
 fi

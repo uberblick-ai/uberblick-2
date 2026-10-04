@@ -56,12 +56,14 @@
  * {@link resolveClientConfig} reports which of the three it used. The secret
  * has no such fallback: a document that does not carry one leaves this client
  * unable to authenticate, and {@link resolveClientConfig} does not memoise that
- * answer.
+ * answer. Hub release images disable both endpoint and workspace fallbacks;
+ * only their served document can supply a deployment value.
  */
 
 import { parseWorkspaceId } from "@uberblick/schema";
 
 // Injected as string literals at build time. Declared, never imported.
+declare const __RUNTIME_CONFIG_ONLY__: boolean;
 declare const __HUB_URL__: string;
 declare const __WORKSPACE_ID__: string;
 declare const __WORKSPACES__: string;
@@ -200,13 +202,16 @@ export function endpointSourceLabel(source: ConfigSource): string {
  * so the reported source stays truthful when a build's `HUB_URL` happens to
  * equal the in-code fallback — which is the common case, not a corner one.
  */
+const RUNTIME_CONFIG_ONLY = typeof __RUNTIME_CONFIG_ONLY__ === "boolean" && __RUNTIME_CONFIG_ONLY__;
 const BUILT_IN_HUB_URL: Pick<ClientConfig, "hubUrl" | "hubUrlSource"> =
-  typeof __HUB_URL__ === "string" && __HUB_URL__ !== ""
+  RUNTIME_CONFIG_ONLY
+    ? { hubUrl: "", hubUrlSource: "fallback" }
+    : typeof __HUB_URL__ === "string" && __HUB_URL__ !== ""
     ? { hubUrl: __HUB_URL__, hubUrlSource: "define" }
     : { hubUrl: FALLBACK_HUB_URL, hubUrlSource: "fallback" };
 
 /**
- * The workspaces a build carries: `WORKSPACE_ID` first — it is the one that has
+ * Development/client builds carry `WORKSPACE_ID` first — it is the one that has
  * always answered `/` — then `WORKSPACES`, the menu.
  *
  * One ordered list, because the served document is one ordered list and the
@@ -219,7 +224,7 @@ const BUILT_IN_HUB_URL: Pick<ClientConfig, "hubUrl" | "hubUrlSource"> =
  * match the menu. Two *spellings* of one workspace are a uuid comparison, which
  * `workspaceList` owns.
  */
-const BUILT_IN_WORKSPACES: readonly string[] = [
+const BUILT_IN_WORKSPACES: readonly string[] = RUNTIME_CONFIG_ONLY ? [] : [
   ...new Set(
     [
       typeof __WORKSPACE_ID__ === "string" ? __WORKSPACE_ID__ : "",
@@ -459,9 +464,10 @@ export const HUB_CONFIG_TIMEOUT_MS = 3_000;
  * Read the client configuration: the served document, else the build-time
  * defines, else the in-code fallback.
  *
- * Never rejects, and always settles. A client left with no hub at all would be
- * worse than one dialling a stale address, and the `rejected` reason — which
- * {@link resolveClientConfig} logs — is what keeps the difference legible.
+ * Never rejects, and always settles. Development/client builds retain their
+ * fallback; hub release bundles settle with no endpoint when the document
+ * cannot supply one. The `rejected` reason, which {@link resolveClientConfig}
+ * logs, makes that missing configuration visible.
  */
 export async function readClientConfig(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,

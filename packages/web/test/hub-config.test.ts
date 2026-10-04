@@ -520,29 +520,22 @@ describe("the deployments that serve it", () => {
       'respond `{"hubUrl":"{$HUB_URL}","workspaces":"{$WORKSPACES}","hubAuthToken":"{$HUB_AUTH_TOKEN}"}`',
     );
 
-    // The first two are host-side `.env` values, renamed on the way in for the
-    // same reason: the undecorated names already mean "what my local tools
-    // use". The secret arrives under a name only the wrapper sets, and its
-    // `:?` gate is what forces every deployment command through the wrapper's
-    // checks — the chokehold must not lapse exactly when the document starts
-    // carrying a credential.
+    // Both the wrapper and the image use the same guard. Plain Compose passes
+    // native operator names; the container validates before aliasing them into
+    // the Caddyfile, so it cannot bypass the wrapper's alphabets.
     const compose = readFileSync(resolve(repoRoot, "docker-compose.yml"), "utf8");
-    expect(compose).toContain('HUB_URL: "${WEB_HUB_URL:-wss://');
-    expect(compose).toContain('WORKSPACES: "${WEB_WORKSPACES');
-    expect(compose).toContain('HUB_AUTH_TOKEN: "${CHECKED_HUB_AUTH_TOKEN:?');
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal Compose expression
+    expect(compose).toContain('WEB_HUB_URL: "${WEB_HUB_URL:-}"');
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal Compose expression
+    expect(compose).toContain('WEB_WORKSPACES: "${WEB_WORKSPACES:-}"');
+    expect(compose).toContain('HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?');
     expect(readFileSync(resolve(repoRoot, "remote.env.example"), "utf8")).toContain(
       "WEB_WORKSPACES=",
     );
-
-    // …and both are substituted *inside* a JSON string, so the wrapper that
-    // renders it refuses anything that could close that string and append a
-    // second `hubUrl`. The client refuses such a document too, but this is
-    // where the value is stopped before it is ever served.
-    const wrapper = readFileSync(resolve(repoRoot, "remote-compose.sh"), "utf8");
-    expect(wrapper).toContain("WEB_WORKSPACES");
-    expect(wrapper).toContain("*[!A-Za-z0-9,-]*)");
-    expect(wrapper).toContain("*[!A-Za-z0-9._-]*)");
-    expect(wrapper).toContain("CHECKED_HUB_AUTH_TOKEN=$HUB_AUTH_TOKEN");
+    const guard = readFileSync(resolve(repoRoot, "remote-settings.sh"), "utf8");
+    expect(guard).toContain("WEB_WORKSPACES");
+    expect(guard).toContain("*[!A-Za-z0-9,-]*)");
+    expect(guard).toContain("*[!A-Za-z0-9._-]*)");
 
     // The dev server answers the same path from one middleware, out of the
     // environment `ub env` resolves — `mise run web`, `mise run dev`, the e2e
