@@ -78,9 +78,9 @@ describe("the table block", () => {
         }),
       ]);
 
-      // Drawn as a real table, from that source and nothing else.
+      // Drawn from the structured cells the GFM door created.
       expect(drawn(editor)).toEqual([["name", "count"]]);
-      // …and the source is what goes back out, verbatim.
+      // Export projects those cells back to canonical GFM.
       const exported = exportMarkdown(ydoc, { frontmatter: false });
       expect(exported).toBe(`${HEADER}\n${DELIMITER}\n`);
       expect(importMarkdown(exported).blocks).toEqual([
@@ -92,10 +92,10 @@ describe("the table block", () => {
   });
 
   /**
-   * The point of storing GFM: an agent rewrites one cell the way it writes
-   * markdown, and the reader watching sees the table change.
+   * Agents write GFM while the editor binds the shared cells, so an agent edit
+   * arrives live without a second representation to keep in step.
    */
-  it("redraws when an agent edits a cell through the source", () => {
+  it("redraws when an agent edits a cell through the GFM projection", () => {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: "table-agent", title: "Tables" });
     const source = `${HEADER}\n${DELIMITER}\n| alpha | 1 |`;
@@ -113,7 +113,7 @@ describe("the table block", () => {
         ["name", "count"],
         ["alpha", "42"],
       ]);
-      // One block, one text: the drawing added nothing to the document.
+      // The edit stays inside the same table block.
       expect(getBlocks(ydoc)).toHaveLength(1);
       expect(getBlocks(ydoc)[0]?.type).toBe("table");
     } finally {
@@ -193,6 +193,13 @@ describe("the table block", () => {
       // falls through to the ordinary paste and stays the blocks it is.
       expect(paste(`${HEADER}\n${DELIMITER}\n\nprose after it\n`)).toBe(false);
       expect(getBlocks(ydoc)[1]?.type).toBe("paragraph");
+      // These lines end a GFM table even without a blank separator. The
+      // tolerant reader can project them as rows; the write door must not.
+      const before = getBlocks(ydoc);
+      for (const nextBlock of ["# Heading | text", "---"]) {
+        expect(paste(`${HEADER}\n${DELIMITER}\n${nextBlock}`)).toBe(false);
+        expect(getBlocks(ydoc)).toEqual(before);
+      }
     } finally {
       editor.destroy();
     }

@@ -89,11 +89,25 @@ function scanRow(line: string): Row {
 /** A write must contain exactly one table, rather than a table plus a block. */
 export function parseTableInput(source: string): GfmTable {
   const parsed = parseGfmTable(source);
-  const otherBlock = source.replace(/\r\n?/g, "\n").replace(/\s+$/, "").split("\n").slice(2).some((line) =>
-    /^\s*(?:#{1,6}\s|>|`{3,}|~{3,}|<!--|[-+*]\s|\d+[.)]\s)/.test(line),
+  const lines = source.replace(/\r\n?/g, "\n").replace(/\s+$/, "").split("\n");
+  const otherBlock = lines.some((line) =>
+    /^(?: {4}| {0,3}\t)/.test(line) || startsNonTableBlock(line),
   );
   if (parsed === null || otherBlock) throw new InvalidTableError();
   return parsed;
+}
+
+/** GFM block starters interrupt a table even without an intervening blank line. */
+function startsNonTableBlock(line: string): boolean {
+  const text = line.replace(/^ {0,3}/, "");
+  if (/^(?:#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,}|[-+*](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$))/.test(text)) return true;
+  if (/^(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(text)) return true;
+  // HTML block types 1–6 start even when text follows the opening tag. Type 7
+  // requires a complete standalone tag; an autolink or inline HTML stays a row.
+  if (/^<(?:script|pre|style|textarea)(?:[ \t>]|$)/i.test(text) || /^<!--|^<\?|^<![A-Z]|^<!\[CDATA\[/.test(text)) return true;
+  if (/^<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t/>]|$)/i.test(text)) return true;
+  return /^<\/[A-Za-z][A-Za-z\d-]*[ \t]*>[ \t]*$/.test(text) ||
+    /^<[A-Za-z][A-Za-z\d-]*(?:[ \t]+[A-Za-z_:][\w.:-]*(?:[ \t]*=[ \t]*(?:"[^"]*"|'[^']*'|[^ \t"'=<>`]+))?)*[ \t]*\/?>[ \t]*$/.test(text);
 }
 
 /** The formatting vocabulary in a cell. Document links stay prose-only. */

@@ -9,7 +9,8 @@ import { Plugin, TextSelection } from "@tiptap/pm/state";
 import type { EditorState } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import { ySyncPluginKey } from "y-prosemirror";
-import { parseGfmTable, TABLE_CELL_MARKS } from "@uberblick/schema";
+import { InvalidTableError, parseTableInput, TABLE_CELL_MARKS } from "@uberblick/schema";
+import type { GfmTable } from "@uberblick/schema";
 import { endUndoCapture, findBlockById } from "./block-menu.js";
 
 const CELL_MARKS = new Set<string>(TABLE_CELL_MARKS);
@@ -110,9 +111,19 @@ function tableLimitsPlugin(): Plugin {
   });
 }
 
+/** Use the schema's exact-one-table write rule at every GFM door. */
+function tableInput(source: string): GfmTable | null {
+  try {
+    return parseTableInput(source);
+  } catch (error) {
+    if (error instanceof InvalidTableError) return null;
+    throw error;
+  }
+}
+
 /** Whether `header` and `delimiter` are the first two lines of a GFM table. */
 function opensTable(header: string, delimiter: string): boolean {
-  return parseGfmTable(`${header}\n${delimiter}`) !== null;
+  return tableInput(`${header}\n${delimiter}`) !== null;
 }
 
 /**
@@ -158,7 +169,7 @@ function convertToTable(
   if (found === null) return false;
 
   endUndoCapture(view.state);
-  const parsed = parseGfmTable(source);
+  const parsed = tableInput(source);
   if (parsed === null) return false;
   const tr = view.state.tr;
   tr.replaceWith(found.pos, found.pos + found.node.nodeSize,
@@ -267,8 +278,9 @@ export function tableFromTextPlugin(): Plugin {
         // A table with prose under it is a document, and swallowing that prose
         // into the block would store it as rows of a table nobody wrote — so it
         // falls through to the ordinary paste, which keeps it as the blocks it
-        // is. `parseGfmTable` is the same rule the renderer and the reader use.
-        if (parseGfmTable(source) === null) return false;
+        // is. The schema's writer adds block-boundary validation to its shared
+        // GFM reader, so web and agent writes accept the same input.
+        if (tableInput(source) === null) return false;
 
         const $from = view.state.selection.$from;
         if ($from.depth !== 1) return false;

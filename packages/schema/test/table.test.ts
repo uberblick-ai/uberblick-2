@@ -73,7 +73,8 @@ describe("structured table contract", () => {
     const id = appendBlock(doc, { type: "table", text: GFM });
     let updates = 0;
     doc.on("update", () => { updates += 1; });
-    for (const bad of ["not a table", `${GFM}\n\nprose`, `${GFM}\n# heading`, `${GFM}\n> quote`]) {
+    const separateBlocks = ["# heading", "#", "> quote", "---", "* * *", "_ _ _", "-", "+", "1.", "2. item", "<div>after</div>", "<b>", "<?xml test>", "<!DOCTYPE html>", "<![CDATA[foo]]>", "    indented", "\tindented"];
+    for (const bad of ["not a table", "# Heading | h\n--- | ---", "- item | h\n--- | ---", "<div> | h\n--- | ---", "a | b\n- | -", `${GFM}\n\nprose`, ...separateBlocks.map((block) => `${GFM}\n${block}`), GFM.split("\n").map((line) => `    ${line}`).join("\n")]) {
       expect(() => insertBlock(doc, id, { type: "table", text: bad })).toThrow(InvalidTableError);
       expect(() => editBlock(doc, id, GFM, bad)).toThrow(InvalidTableError);
     }
@@ -81,6 +82,13 @@ describe("structured table contract", () => {
     expect(updates).toBe(0);
     expect(listAnnotations(doc)).toEqual([]);
     expect(getBlocks(doc)).toHaveLength(1);
+  });
+
+  it("accepts inline HTML and autolinks as literal cells when they do not start another block", () => {
+    const doc = seeded();
+    const text = "| Header |\n| --- |\n<b>bold</b>\n<http://example.test>";
+    const id = appendBlock(doc, { type: "table", text });
+    expect(parseGfmTable(getBlockText(doc, id))?.rows).toEqual([["<b>bold</b>"], ["<http://example.test>"]]);
   });
 
   it("preserves untouched cell identity, whitespace and marks when editing a neighbour", () => {

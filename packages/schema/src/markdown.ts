@@ -1760,8 +1760,8 @@ export function importMarkdown(markdown: string): ImportedDoc {
       // every one of them is a perfectly good one-column row, so asking it
       // first swallows the rest of the document up to the next blank line.
       // Then, and only then: does the block still parse as one table? That is
-      // the parser's own boundary, and asking it keeps the reader from storing
-      // source it would itself read differently.
+      // the parser's own boundary, and asking it keeps the imported GFM cells
+      // consistent with the table write boundary.
       //
       // The blank line is tested here rather than left to the parser because a
       // *trailing* one is trimmed off any source before it is parsed; inside the
