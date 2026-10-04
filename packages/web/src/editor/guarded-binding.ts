@@ -45,7 +45,7 @@
  * editor synchronously inside the callback. Both are load-bearing.
  */
 
-import { normalizeLegacyTables } from "@uberblick/schema";
+import { normalizeLegacyTables, repairDuplicateBlocks } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import type * as Y from "yjs";
 import { createUberblickEditor } from "./create-editor.js";
@@ -78,14 +78,21 @@ export function bindGuardedEditor(
     throw new Error("bindGuardedEditor: the fragment must belong to a Y.Doc");
   }
 
-  if (canNormalize?.() === true) normalizeLegacyTables(ydoc);
+  if (canNormalize?.() === true) {
+    normalizeLegacyTables(ydoc);
+    repairDuplicateBlocks(ydoc);
+  }
   if (findForeignBlocks(fragment).length > 0) {
     return { editor: null, refused: true, destroy: () => {} };
   }
 
   let instance: Editor | null = null;
-  const guard = (): void => {
+  const guard = (transaction: Y.Transaction): void => {
     if (instance === null) return;
+    // Concurrent same-id conversions use the schema's document-order winner.
+    // Repair before y-prosemirror renders both copies and BlockIds gives the
+    // shadow a new identity. Local editor splits retain BlockIds' normal path.
+    if (!transaction.local && canNormalize?.() === true) repairDuplicateBlocks(ydoc);
     if (findForeignBlocks(fragment).length === 0) return;
     const doomed = instance;
     instance = null;

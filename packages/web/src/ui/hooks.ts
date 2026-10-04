@@ -19,6 +19,7 @@ import {
   getMetaMap,
   listDirectory,
   normalizeLegacyTables,
+  repairDuplicateBlocks,
   tableText,
   readSidebar,
 } from "@uberblick/schema";
@@ -353,7 +354,10 @@ function observeForeignBlocks(
 ): () => void {
   const fragment = getBlocksFragment(connection.ydoc);
   const read = (): void => {
-    if (connection.status.writable && connection.status.synced) normalizeLegacyTables(connection.ydoc);
+    if (connection.status.writable && connection.status.synced) {
+      repairDuplicateBlocks(connection.ydoc);
+      normalizeLegacyTables(connection.ydoc);
+    }
     emit(findForeignBlocks(fragment));
   };
   read();
