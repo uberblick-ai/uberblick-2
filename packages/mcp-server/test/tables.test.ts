@@ -15,6 +15,7 @@ import {
   setStatus,
   tableCellText,
   tableRows,
+  writeGfmTable,
 } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
@@ -202,6 +203,66 @@ describe("structured tables through MCP", () => {
       uuid: created.uuid, block_id: id, old_text: changed.block.text, new_text: changed.block.text, rev: unchanged.rev,
     });
     expect(stale.payload.error).toBe("stale_block");
+  });
+
+  it("preserves shifted status cells and delayed edits through a guarded same-width column replacement", async () => {
+    const rig = await localRig();
+    const before = writeGfmTable([["Task", "Status", "Notes"], ["Write", "done", "draft"], ["Ship", "todo", "needs QA"]]);
+    const nextRows = [["Task", "Owner", "Status"], ["Write", "ann", "done"], ["Ship", "ben", "todo"]];
+    const after = writeGfmTable(nextRows);
+    const created = await rig.ok("create_doc", {
+      title: "Column replacement", description: "Shifted cells keep concurrent work.",
+      blocks: [{ type: "table", text: before }],
+    });
+    const id = created.blocks[0].id;
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const ship = cell(doc, id, 2, 1);
+    ship.format(0, 4, { bold: {} });
+    const remote = new Y.Doc();
+    try {
+      Y.applyUpdate(remote, Y.encodeStateAsUpdate(doc));
+      const remoteShip = cell(remote, id, 2, 1);
+      remoteShip.insert(remoteShip.length, " (blocked)");
+      const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
+      expect(read.rev).toBe(created.blocks[0].rev);
+      const changed = await rig.ok("edit_block", {
+        uuid: created.uuid, block_id: id, old_text: before, new_text: after, rev: read.rev,
+      });
+      expect(changed.block.text).toBe(after);
+      expect(changed.block.rev).not.toBe(read.rev);
+      expect(cell(doc, id, 2, 2)).toBe(ship);
+      expect(ship.toDelta()).toEqual([{ insert: "todo", attributes: { bold: {} } }]);
+      const localUpdate = Y.encodeStateAsUpdate(doc);
+      const remoteUpdate = Y.encodeStateAsUpdate(remote);
+      Y.applyUpdate(doc, remoteUpdate);
+      Y.applyUpdate(remote, localUpdate);
+      nextRows[2]![2] = "todo (blocked)";
+      const merged = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
+      expect(merged.text).toBe(writeGfmTable(nextRows));
+      expect(parseGfmTable(merged.text)).toMatchObject({ header: nextRows[0], rows: nextRows.slice(1) });
+      expect(cell(doc, id, 2, 2)).toBe(ship);
+      expect(cell(remote, id, 2, 2)).toBe(remoteShip);
+      expect(ship.toDelta()).toEqual([{ insert: "todo (blocked)", attributes: { bold: {} } }]);
+      expect(remoteShip.toDelta()).toEqual(ship.toDelta());
+      expect((await rig.ok("export_markdown", { uuid: created.uuid, frontmatter: false })).markdown).toContain("| Ship | ben | **todo (blocked)** |");
+      const state = Y.encodeStateVector(doc);
+      const stale = await rig.call("edit_block", {
+        uuid: created.uuid, block_id: id, old_text: merged.text, new_text: merged.text, rev: changed.block.rev,
+      });
+      expect(stale.payload.error).toBe("stale_block");
+      const mismatch = await rig.call("edit_block", {
+        uuid: created.uuid, block_id: id, old_text: after, new_text: merged.text, rev: merged.rev,
+      });
+      expect(mismatch.payload.error).toBe("old_text_mismatch");
+      expect(Y.encodeStateVector(doc)).toEqual(state);
+      const followup = await rig.ok("edit_block", {
+        uuid: created.uuid, block_id: id, old_text: merged.text,
+        new_text: merged.text.replace("| Ship | ben |", "| Ship | ben2 |"), rev: merged.rev,
+      });
+      expect(followup.block.text).toContain("| Ship | ben2 | todo (blocked) |");
+      expect(cell(doc, id, 2, 2)).toBe(ship);
+      expect(ship.toDelta()).toEqual([{ insert: "todo (blocked)", attributes: { bold: {} } }]);
+    } finally { remote.destroy(); }
   });
 
   it("pads ragged tables for reads and lets an agent fill a projected empty cell", async () => {

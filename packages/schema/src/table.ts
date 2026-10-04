@@ -246,24 +246,70 @@ export function spliceTableCell(cell: Y.XmlElement, value: string): void {
   }
 }
 
-type EntryMatch = { cells: number; characters: number };
-
 /**
  * Align the complete edit, maximizing unchanged cells before substitutions.
  * Character overlap breaks repeated-value ties, such as Ship becoming Ship2.
  */
 function alignEntries(
   oldLength: number, newLength: number,
-  matchingCells: (oldIndex: number, newIndex: number) => EntryMatch,
+  matchingCells: (oldIndex: number, newIndex: number) => number,
+  matchingCharacters: (oldIndex: number, newIndex: number) => number,
+  unchanged: (oldIndex: number, newIndex: number) => boolean,
 ): Array<number | null> {
-  let maxCharacters = 0;
-  const matches = Array.from({ length: oldLength }, (_, oldIndex) => Array.from({ length: newLength }, (_, newIndex) => {
-    const match = matchingCells(oldIndex, newIndex);
-    maxCharacters = Math.max(maxCharacters, match.characters);
-    return match;
-  }));
+  const result: Array<number | null> = Array<number | null>(newLength).fill(null);
+  let start = 0;
+  while (start < oldLength && start < newLength && unchanged(start, start)) {
+    result[start] = start;
+    start += 1;
+  }
+  let oldEnd = oldLength;
+  let newEnd = newLength;
+  while (oldEnd > start && newEnd > start && unchanged(oldEnd - 1, newEnd - 1)) {
+    oldEnd -= 1;
+    newEnd -= 1;
+    result[newEnd] = oldEnd;
+  }
+  // Fully equal edges need no scoring. In the changed range, score exact
+  // cells cheaply first; character diffs cannot improve a worse cell match.
+  oldLength = oldEnd - start;
+  newLength = newEnd - start;
+  if (oldLength === 0 || newLength === 0) return result;
   const stride = newLength + 1;
-  const scores = new Float64Array((oldLength + 1) * stride);
+  const size = (oldLength + 1) * stride;
+  const cells = new Float64Array(size);
+  const suffix = new Float64Array(size);
+  const prefix = new Float64Array(size);
+  for (let oldIndex = oldLength - 1; oldIndex >= 0; oldIndex -= 1) {
+    for (let newIndex = newLength - 1; newIndex >= 0; newIndex -= 1) {
+      const index = oldIndex * stride + newIndex;
+      cells[index] = matchingCells(oldIndex + start, newIndex + start);
+      suffix[index] = Math.max(
+        cells[index]! + suffix[index + stride + 1]!,
+        suffix[index + stride]!, suffix[index + 1]!,
+      );
+    }
+  }
+  for (let oldIndex = 0; oldIndex < oldLength; oldIndex += 1) {
+    for (let newIndex = 0; newIndex < newLength; newIndex += 1) {
+      const index = oldIndex * stride + newIndex;
+      prefix[index + stride + 1] = Math.max(
+        prefix[index]! + cells[index]!, prefix[index + 1]!, prefix[index + stride]!,
+      );
+    }
+  }
+  const characters = new Float64Array(size).fill(-1);
+  let maxCharacters = 0;
+  for (let oldIndex = 0; oldIndex < oldLength; oldIndex += 1) {
+    for (let newIndex = 0; newIndex < newLength; newIndex += 1) {
+      const index = oldIndex * stride + newIndex;
+      // Only a pair on an optimal exact-cell path can win. This avoids
+      // diffing every row pair (and aligning its columns) on a column edit.
+      if (prefix[index]! + cells[index]! + suffix[index + stride + 1]! !== suffix[0]) continue;
+      characters[index] = matchingCharacters(oldIndex + start, newIndex + start);
+      maxCharacters = Math.max(maxCharacters, characters[index]!);
+    }
+  }
+  const scores = new Float64Array(size);
   const score = (oldIndex: number, newIndex: number): number => scores[oldIndex * stride + newIndex] ?? 0;
   const pairs = Math.min(oldLength, newLength);
   const characterWeight = pairs + 1;
@@ -271,8 +317,9 @@ function alignEntries(
   // character outweighs all substitutions. Neither can displace a better match.
   const cellWeight = (pairs * maxCharacters + 1) * characterWeight;
   const pairScore = (oldIndex: number, newIndex: number): number => {
-    const match = matches[oldIndex]?.[newIndex];
-    return (match?.cells ?? 0) * cellWeight + (match?.characters ?? 0) * characterWeight + 1;
+    const index = oldIndex * stride + newIndex;
+    if (characters[index]! < 0) return -Infinity;
+    return cells[index]! * cellWeight + characters[index]! * characterWeight + 1;
   };
   for (let oldIndex = oldLength - 1; oldIndex >= 0; oldIndex -= 1) {
     for (let newIndex = newLength - 1; newIndex >= 0; newIndex -= 1) {
@@ -282,13 +329,12 @@ function alignEntries(
       );
     }
   }
-  const result: Array<number | null> = Array<number | null>(newLength).fill(null);
   let oldIndex = 0;
   let newIndex = 0;
   while (oldIndex < oldLength && newIndex < newLength) {
     const paired = pairScore(oldIndex, newIndex) + score(oldIndex + 1, newIndex + 1);
     if (score(oldIndex, newIndex) === paired) {
-      result[newIndex] = oldIndex;
+      result[newIndex + start] = oldIndex + start;
       oldIndex += 1;
       newIndex += 1;
     } else if (score(oldIndex, newIndex) === score(oldIndex + 1, newIndex)) oldIndex += 1;
@@ -297,27 +343,31 @@ function alignEntries(
   return result;
 }
 
-function matchCell(before: string, after: string): EntryMatch {
-  return {
-    cells: before === after ? 1 : 0,
-    characters: fastDiff(before, after).reduce((count, [operation, text]) => operation === 0 ? count + text.length : count, 0),
-  };
+function matchingCharacters(before: string, after: string): number {
+  if (before === after) return before.length;
+  return fastDiff(before, after).reduce((count, [operation, text]) => operation === 0 ? count + text.length : count, 0);
 }
 
-function countMatchingCells(before: readonly string[], after: readonly string[], columnsChanged = false): EntryMatch {
-  // Column changes shift positions. Match surviving cells in order while
-  // allowing a neighbouring cell to be edited in the same structural mutation.
-  const columns = columnsChanged
-    ? alignEntries(before.length, after.length, (oldCol, newCol) => matchCell(before[oldCol] ?? "", after[newCol] ?? ""))
-    : after.map((_, column) => column < before.length ? column : null);
-  const result: EntryMatch = { cells: 0, characters: 0 };
-  columns.forEach((oldCol, newCol) => {
-    if (oldCol === null) return;
-    const match = matchCell(before[oldCol] ?? "", after[newCol] ?? "");
-    result.cells += match.cells;
-    result.characters += match.characters;
-  });
-  return result;
+function countMatchingCharacters(before: readonly string[], after: readonly string[]): number {
+  return after.reduce((count, value, index) => count + matchingCharacters(before[index] ?? "", value), 0);
+}
+
+/** Exact cells in order, without diffing text or scoring column substitutions. */
+function countEqualCells(before: readonly string[], after: readonly string[]): number {
+  const scores = new Uint32Array(after.length + 1);
+  for (const value of before) {
+    let diagonal = 0;
+    for (let column = 0; column < after.length; column += 1) {
+      const previous = scores[column + 1]!;
+      scores[column + 1] = Math.max(previous, scores[column]!, diagonal + (value === after[column] ? 1 : 0));
+      diagonal = previous;
+    }
+  }
+  return scores[after.length]!;
+}
+
+function equalEntries(before: readonly string[], after: readonly string[]): boolean {
+  return before.length === after.length && before.every((value, index) => value === after[index]);
 }
 
 /**
@@ -331,17 +381,48 @@ export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: G
   const newValues = [newTable.header, ...newTable.rows];
   const storedRows = element.toArray() as Y.XmlElement[];
   const oldCells = tableRows(element);
-  const widthChanged = oldTable.header.length !== newTable.header.length;
+  // Choose one column mapping for the whole edit. Independent per-row
+  // guesses can mistake inserted-column values for surviving status cells.
+  // The header stays fixed; body evidence allows simultaneous row changes.
+  const oldColumns = oldTable.header.map((_, col) => oldTable.rows.map((row) => row[col] ?? ""));
+  const newColumns = newTable.header.map((_, col) => newTable.rows.map((row) => row[col] ?? ""));
+  const columnMap = alignEntries(oldColumns.length, newColumns.length,
+    (oldCol, newCol) => (oldTable.header[oldCol] === newTable.header[newCol] ? 1 : 0) +
+      countEqualCells(oldColumns[oldCol] ?? [], newColumns[newCol] ?? []),
+    (oldCol, newCol) => matchingCharacters(oldTable.header[oldCol] ?? "", newTable.header[newCol] ?? "") +
+      countMatchingCharacters(oldColumns[oldCol] ?? [], newColumns[newCol] ?? []),
+    (oldCol, newCol) => oldTable.header[oldCol] === newTable.header[newCol] &&
+      equalEntries(oldColumns[oldCol] ?? [], newColumns[newCol] ?? []),
+  );
+  const occurrences = (values: readonly string[]): Map<string, number> => {
+    const counts = new Map<string, number>();
+    for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+    return counts;
+  };
+  const matchedColumns = columnMap.flatMap((oldCol, newCol) => oldCol === null ? [] : [{
+    oldCol, newCol,
+    beforeCounts: occurrences(oldColumns[oldCol] ?? []), afterCounts: occurrences(newColumns[newCol] ?? []),
+  }]);
+  // An unambiguous surviving value anchors its row ahead of repeated statuses.
+  // Otherwise several partial matches can displace a row's unique Task/Notes
+  // when the same edit both removes a row and inserts a replacement.
+  const rowWeight = Math.min(oldTable.rows.length, newTable.rows.length) * matchedColumns.length + 1;
+  const matchRow = (oldRow: number, newRow: number, characters: boolean): number => matchedColumns.reduce((count, { oldCol, newCol, beforeCounts, afterCounts }) => {
+    const before = oldTable.rows[oldRow]?.[oldCol] ?? "";
+    const after = newTable.rows[newRow]?.[newCol] ?? "";
+    if (characters) return count + matchingCharacters(before, after);
+    if (before !== after) return count;
+    return count + 1 + (beforeCounts.get(before) === 1 && afterCounts.get(after) === 1 ? rowWeight : 0);
+  }, 0);
+
   const rowMap = [0, ...alignEntries(
     oldTable.rows.length, newTable.rows.length,
-    (oldRow, newRow) => countMatchingCells(oldTable.rows[oldRow] ?? [], newTable.rows[newRow] ?? [], widthChanged),
+    (oldRow, newRow) => matchRow(oldRow, newRow, false),
+    (oldRow, newRow) => matchRow(oldRow, newRow, true),
+    (oldRow, newRow) => matchedColumns.every(({ oldCol, newCol }) =>
+      oldTable.rows[oldRow]?.[oldCol] === newTable.rows[newRow]?.[newCol],
+    ),
   ).map((index) => index === null ? null : index + 1)];
-  const matchedRows = rowMap.flatMap((oldIndex, newIndex) => oldIndex === null ? [] : [{ oldIndex, newIndex }]);
-  const oldColumns = oldTable.header.map((_, col) => matchedRows.map(({ oldIndex }) => oldValues[oldIndex]?.[col] ?? ""));
-  const newColumns = newTable.header.map((_, col) => matchedRows.map(({ newIndex }) => newValues[newIndex]?.[col] ?? ""));
-  const columnMap = widthChanged
-    ? alignEntries(oldColumns.length, newColumns.length, (oldCol, newCol) => countMatchingCells(oldColumns[oldCol] ?? [], newColumns[newCol] ?? []))
-    : newTable.header.map((_, col) => col);
 
   const retainedRows = new Set(rowMap);
   for (let row = storedRows.length - 1; row >= 1; row -= 1) {

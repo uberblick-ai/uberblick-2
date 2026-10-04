@@ -247,6 +247,148 @@ describe("structured table contract", () => {
     b.destroy();
   });
 
+  it.each(["right", "left"])("preserves cells shifted %s by a same-width column replacement", (direction) => {
+    const rows = direction === "right"
+      ? [["Task", "Status", "Notes"], ["Write", "done", "draft"], ["Ship", "todo", "needs QA"]]
+      : [["Notes", "Task", "Status"], ["draft", "Write", "done"], ["needs QA", "Ship", "todo"]];
+    const nextRows = direction === "right"
+      ? [["Task", "Owner", "Status"], ["Write", "ann", "done"], ["Ship", "ben", "todo"]]
+      : [["Task", "Status", "Owner"], ["Write", "done", "ann"], ["Ship", "todo", "ben"]];
+    const before = writeGfmTable(rows);
+    const oldTask = direction === "right" ? 0 : 1;
+    const oldStatus = direction === "right" ? 1 : 2;
+    const newStatus = direction === "right" ? 2 : 1;
+    let id = "";
+    const [a, b] = replicaPair((doc) => {
+      initDoc(doc, { uuid: UUID, title: "Tables" });
+      id = appendBlock(doc, { type: "table", text: before });
+      tableCellText(tableRows(element(doc, id))[2]![oldStatus]!)!.format(0, 4, { bold: {} });
+    });
+    try {
+      const survivors = [a, b].map((doc) => tableRows(element(doc, id)).map((row) => [
+        tableCellText(row[oldTask]!)!, tableCellText(row[oldStatus]!)!,
+      ]));
+      const ship = survivors[0]![2]![1]!;
+      const remoteShip = survivors[1]![2]![1]!;
+      remoteShip.insert(remoteShip.length, " (blocked)");
+      editBlock(a, id, before, writeGfmTable(nextRows));
+      for (let row = 0; row < rows.length; row += 1) {
+        expect(tableCellText(tableRows(element(a, id))[row]![0]!)).toBe(survivors[0]![row]![0]);
+        expect(tableCellText(tableRows(element(a, id))[row]![newStatus]!)).toBe(survivors[0]![row]![1]);
+      }
+      expect(ship.toDelta()).toEqual([{ insert: "todo", attributes: { bold: {} } }]);
+      syncDocs(a, b);
+      nextRows[2]![newStatus] = "todo (blocked)";
+      expect(getBlockText(a, id)).toBe(writeGfmTable(nextRows));
+      expect(getBlockText(b, id)).toBe(getBlockText(a, id));
+      for (const [index, doc] of [a, b].entries()) {
+        for (let row = 0; row < rows.length; row += 1) {
+          expect(tableCellText(tableRows(element(doc, id))[row]![0]!)).toBe(survivors[index]![row]![0]);
+          expect(tableCellText(tableRows(element(doc, id))[row]![newStatus]!)).toBe(survivors[index]![row]![1]);
+        }
+      }
+      expect(ship.toDelta()).toEqual([{ insert: "todo (blocked)", attributes: { bold: {} } }]);
+      expect(remoteShip.toDelta()).toEqual(ship.toDelta());
+    } finally { a.destroy(); b.destroy(); }
+  });
+
+  it("preserves shifted cells when a same-width column replacement also inserts a row", () => {
+    const rows = [["Task", "Status", "Notes", "Owner"], ["Write", "done", "write notes", "ann"], ["Test", "done", "test notes", "ann"], ["Ship", "todo", "ship notes", "ben"]];
+    const nextRows = [["Status", "Notes", "Extra", "Owner"], ["todo", "new notes", "todo", "ann"], ["done", "write notes", "new 2", "ann"], ["done", "test notes", "new 3", "ann"], ["todo", "ship notes", "new 4", "ben"]];
+    const before = writeGfmTable(rows);
+    const columns = [[1, 0], [2, 1], [3, 3]] as const;
+    let id = "";
+    const [a, b] = replicaPair((doc) => {
+      initDoc(doc, { uuid: UUID, title: "Tables" });
+      id = appendBlock(doc, { type: "table", text: before });
+      for (const row of tableRows(element(doc, id))) {
+        for (const [oldColumn] of columns) {
+          const text = tableCellText(row[oldColumn]!)!;
+          text.format(0, text.length, { bold: {} });
+        }
+      }
+    });
+    try {
+      const survivors = [a, b].map((doc) => tableRows(element(doc, id)).map((row) => columns.map(([oldColumn]) => tableCellText(row[oldColumn]!)!)));
+      const remoteNotes = survivors[1]![1]![1]!;
+      remoteNotes.insert(remoteNotes.length, " (blocked)");
+      editBlock(a, id, before, writeGfmTable(nextRows));
+      syncDocs(a, b);
+      nextRows[2]![1] = "write notes (blocked)";
+      expect(getBlockText(a, id)).toBe(writeGfmTable(nextRows));
+      expect(getBlockText(b, id)).toBe(getBlockText(a, id));
+      for (const [index, doc] of [a, b].entries()) {
+        for (let oldRow = 0; oldRow < rows.length; oldRow += 1) {
+          const newRow = oldRow === 0 ? 0 : oldRow + 1;
+          for (const [columnIndex, [, newColumn]] of columns.entries()) {
+            const text = tableCellText(tableRows(element(doc, id))[newRow]![newColumn]!)!;
+            expect(text).toBe(survivors[index]![oldRow]![columnIndex]);
+            expect(text.toDelta()).toEqual([{ insert: nextRows[newRow]![newColumn], attributes: { bold: {} } }]);
+          }
+        }
+      }
+    } finally { a.destroy(); b.destroy(); }
+  });
+
+  it("anchors a surviving row through unique cell text when rows and columns are replaced together", () => {
+    const before = writeGfmTable([["Task", "Status", "Notes", "Owner"],
+      ["Write", "done", "write notes", "ann"], ["Test", "done", "test notes", "ann"], ["Ship", "todo", "ship notes", "ben"]]);
+    const doc = seeded();
+    try {
+      const id = appendBlock(doc, { type: "table", text: before });
+      const task = tableCellText(tableRows(element(doc, id))[2]![0]!)!;
+      const status = tableCellText(tableRows(element(doc, id))[2]![1]!)!;
+      status.format(0, status.length, { bold: {} });
+      const after = writeGfmTable([["Task", "Extra", "Status", "Owner"],
+        ["Test", "new 1", "done", "ann"], ["New task", "new 2", "todo", "ann"], ["Ship", "new 3", "todo", "ben"]]);
+      editBlock(doc, id, before, after);
+      expect(getBlockText(doc, id)).toBe(after);
+      expect(tableCellText(tableRows(element(doc, id))[1]![0]!)).toBe(task);
+      expect(tableCellText(tableRows(element(doc, id))[1]![2]!)).toBe(status);
+      expect(status.toDelta()).toEqual([{ insert: "done", attributes: { bold: {} } }]);
+    } finally { doc.destroy(); }
+  });
+
+  it("matches rows through the surviving column instead of text in an inserted column", () => {
+    const doc = seeded();
+    try {
+      const before = writeGfmTable([["Name"], ["Ann"], ["Benedict"]]);
+      const id = appendBlock(doc, { type: "table", text: before });
+      const retained = tableCellText(tableRows(element(doc, id))[2]![0]!)!;
+      retained.format(0, retained.length, { bold: {} });
+      const after = writeGfmTable([["Owner", "Name"], ["Ann", "Benedict"]]);
+      editBlock(doc, id, before, after);
+      expect(getBlockText(doc, id)).toBe(after);
+      expect(tableCellText(tableRows(element(doc, id))[1]![1]!)).toBe(retained);
+      expect(retained.toDelta()).toEqual([{ insert: "Benedict", attributes: { bold: {} } }]);
+    } finally { doc.destroy(); }
+  });
+
+  it.each([[500, 6], [200, 12]])("edits a %i-row, %i-column table without blocking for a second", (rows, columns) => {
+    for (const edit of ["cell", "add", "replace"]) {
+      const doc = seeded();
+      try {
+        const values = [Array.from({ length: columns }, (_, col) => `Column ${col}`),
+          ...Array.from({ length: rows }, (_, row) => Array.from({ length: columns }, (_, col) =>
+            col === 1 ? row % 2 === 0 ? "done" : "todo" : `r${row}c${col}-abcdefghijklmnopqrstuvwxyz`))];
+        const before = writeGfmTable(values);
+        const id = appendBlock(doc, { type: "table", text: before });
+        const next = values.map((row) => row.slice());
+        if (edit === "cell") next[Math.floor(rows / 2)]![3] += " changed";
+        else next.forEach((row, index) => {
+          if (edit === "replace") row.splice(4, 1);
+          row.splice(2, 0, index === 0 ? "Owner" : `owner-${index}`);
+        });
+        const after = writeGfmTable(next);
+        const start = performance.now();
+        editBlock(doc, id, before, after);
+        const elapsed = performance.now() - start;
+        expect(elapsed).toBeLessThan(1000);
+        expect(getBlockText(doc, id)).toBe(after);
+      } finally { doc.destroy(); }
+    }
+  });
+
   it("keeps different-cell and same-cell concurrent typing on shared text types", () => {
     let id = "";
     const [a, b] = replicaPair((doc) => { initDoc(doc, { uuid: UUID, title: "Tables" }); id = appendBlock(doc, { type: "table", text: GFM }); });
