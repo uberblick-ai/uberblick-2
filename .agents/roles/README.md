@@ -96,6 +96,12 @@ person, and the recommendation. Keep material risks and tradeoffs visible;
 brevity never justifies omitting or truncating them. Keep the @-mention and
 invitation to answer here visible too.
 
+Give the person one unambiguous next action and one place to answer. In the
+resume details, name the one next label required by this project's route.
+Launcher-generated steps for the stopped role apply only when that same role
+should resume; do not present them as an alternative when a correction or
+handoff requires another role.
+
 Put supporting technical evidence, commits, CI results and resume mechanics in
 a collapsed `<details>` block with a descriptive `<summary>`, or link to their
 existing record. Keep the prescribed closing line in the resume details. If
