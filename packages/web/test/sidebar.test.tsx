@@ -67,18 +67,22 @@ const LIVE: RoomStatus = {
 let roomStatus: RoomStatus = LIVE;
 
 const rooms = new Map<string, RoomConnection>();
+const statusListeners = new Map<string, Set<(next: RoomStatus) => void>>();
 
 function room(name: string): RoomConnection {
   const existing = rooms.get(name);
   if (existing !== undefined) return existing;
+  const listeners = new Set<(next: RoomStatus) => void>();
+  statusListeners.set(name, listeners);
   const connection = {
     room: name,
     ydoc: new Y.Doc(),
     provider: { awareness: null },
     status: roomStatus,
     onStatusChange: (listener: (next: RoomStatus) => void) => {
+      listeners.add(listener);
       listener(connection.status);
-      return () => {};
+      return () => listeners.delete(listener);
     },
   } as unknown as RoomConnection;
   rooms.set(name, connection);
@@ -142,6 +146,7 @@ afterEach(() => {
     open.host.remove();
   }
   rooms.clear();
+  statusListeners.clear();
   roomStatus = LIVE;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -489,8 +494,83 @@ describe("the sidebar is the _sidebar document", () => {
     // sidebar only ever held the uuids of.
     const remove = host.querySelector<HTMLButtonElement>('[aria-label="Delete group Reading"]');
     act(() => remove?.click());
+    expect(groupNames(host)).toEqual(["Reading", "Elsewhere"]);
+    act(() => document.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-action"]')?.click());
     expect(groupNames(host)).toEqual(["Elsewhere"]);
     expect(stored(peer)).toEqual([["Elsewhere", []]]);
+  });
+
+  it.each(["cancel", "dismiss"])("writes nothing when group deletion is %s", async (how) => {
+    seedDirectory();
+    const sidebar = sidebarDoc();
+    pinDoc(sidebar, createGroup(sidebar, "Reading"), ONE);
+    const peer = peerOf(sidebar);
+    const before = stored(peer);
+    const host = await openApp(`/${WORKSPACE}`);
+    const writes = vi.fn();
+    sidebar.on("update", writes);
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Delete group Reading"]')?.click());
+    const dialog = document.querySelector<HTMLElement>('[role="alertdialog"]');
+    expect(dialog?.textContent).toContain("Delete group Reading?");
+    expect(writes).not.toHaveBeenCalled();
+    await act(async () => {
+      if (how === "cancel") dialog?.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-cancel"]')?.click();
+      else press(document.activeElement, "Escape");
+    });
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(writes).not.toHaveBeenCalled();
+    expect(stored(peer)).toEqual(before);
+  });
+
+  it("confirmed group deletion removes its pins and preserves every document", async () => {
+    const directory = seedDirectory();
+    const documents = [ONE, TWO].map((uuid) => {
+      const doc = room(roomForDoc(WORKSPACE, uuid)).ydoc;
+      initDoc(doc, { uuid, title: "Preserved" });
+      appendBlock(doc, { type: "paragraph", text: "Preserved content" });
+      return doc;
+    });
+    const sidebar = sidebarDoc();
+    const reading = createGroup(sidebar, "Reading");
+    pinDoc(sidebar, reading, ONE);
+    pinDoc(sidebar, reading, TWO);
+    pinDoc(sidebar, createGroup(sidebar, "Elsewhere"), THREE);
+    const peer = peerOf(sidebar);
+    const host = await openApp(`/${WORKSPACE}`);
+    const before = [directory, ...documents].map((doc) => Y.encodeStateAsUpdate(doc));
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Delete group Reading"]')?.click());
+    expect(stored(peer)).toEqual([["Reading", [ONE, TWO]], ["Elsewhere", [THREE]]]);
+    act(() => document.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-action"]')?.click());
+    expect(stored(peer)).toEqual([["Elsewhere", [THREE]]]);
+    expect([directory, ...documents].map((doc) => Y.encodeStateAsUpdate(doc))).toEqual(before);
+  });
+
+  it.each([true, false])("refuses deletion in place when writability is lost (notified: %s)", async (notified) => {
+    seedDirectory();
+    const sidebar = room(sidebarRoom(WORKSPACE));
+    pinDoc(sidebar.ydoc, createGroup(sidebar.ydoc, "Reading"), ONE);
+    const peer = peerOf(sidebar.ydoc);
+    const before = stored(peer);
+    const host = await openApp(`/${WORKSPACE}`);
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Delete group Reading"]')?.click());
+    const writes = vi.fn();
+    sidebar.ydoc.on("update", writes);
+    act(() => {
+      sidebar.status = { ...LIVE, writable: false };
+      if (notified) {
+        for (const listener of statusListeners.get(sidebar.room) ?? []) listener(sidebar.status);
+      }
+    });
+    if (notified) expect(host.querySelectorAll(".ub-group-act")).toHaveLength(0);
+    act(() => document.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-action"]')?.click());
+    const dialog = document.querySelector<HTMLElement>('[role="alertdialog"]');
+    expect(dialog?.textContent).toContain("Delete unavailable");
+    expect(dialog?.textContent).toContain("Nothing has been deleted");
+    expect(stored(peer)).toEqual(before);
+    expect(writes).not.toHaveBeenCalled();
+    act(() => dialog?.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-cancel"]')?.click());
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(writes).not.toHaveBeenCalled();
   });
 
   it("collapses a group, and remembers it", async () => {
