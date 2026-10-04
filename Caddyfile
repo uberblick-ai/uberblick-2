@@ -1,4 +1,10 @@
-{$TAILSCALE_HOST} {
+{
+	# HTTPS routes expose only port 443. ACME uses TLS-ALPN; never create an
+	# HTTP redirect listener on a non-loopback route.
+	auto_https disable_redirects
+}
+
+{$WEB_SITE} {
 	# Public runtime configuration contains only the endpoint and workspace list.
 	# Remote browsers have no credential and cannot sign in directly yet; use
 	# ub auth login and ub open on a computer. Never serve a signing secret.

@@ -39,6 +39,8 @@ import {
   silentLogger,
 } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/hub/protocol";
+import { writeHubLogin, removeHubLogin } from "@uberblick/hub/auth-store";
+import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import {
   bridgeConfig,
   createMcpServer,
@@ -567,6 +569,31 @@ describe("ub remote", () => {
 });
 
 describe("ub remote join", () => {
+  it.each([false, true])("joins a loopback deployment using its origin login and persists device admission (old local secret: %s)", async withSecret => {
+    const box = sandbox({ ...(withSecret ? { credentials: { signingSecret: SECRET } } : {}) });
+    const remote = await startDeviceSyncHub({ directory: box.cwd });
+    try {
+      remote.grant(WORKSPACE);
+      const target = `${remote.url}/custom-proxy-path/${WORKSPACE}`;
+      const beforeLogin = await runUbAsync(["remote", "join", target], box);
+      expect(beforeLogin.status).toBe(1);
+      expect(beforeLogin.stderr).toContain(`ub auth login ${remote.origin}`);
+      expect(beforeLogin.stderr).not.toContain("secret is wrong");
+      expect(beforeLogin.stderr).not.toContain("HUB_AUTH_TOKEN");
+      expect(beforeLogin.stderr).not.toContain("make them equal");
+      expect(existsSync(join(box.configHome, "uberblick", "config.json"))).toBe(false);
+      await writeHubLogin(remote.origin, remote.issue({ workspaces: [WORKSPACE] }), box.env);
+      const joined = await runUbAsync(["remote", "join", target], box);
+      expect(joined.status, joined.output).toBe(0);
+      expect(readConfigFile(box, "config.json")).toMatchObject({ hubUrl: `${remote.url}/custom-proxy-path`, hubAdmission: "device", workspace: WORKSPACE });
+      if (withSecret) expect(readConfigFile(box, "credentials.json").signingSecret).toBe(SECRET);
+      await removeHubLogin(remote.origin, box.env);
+      const loggedOut = await runUbAsync(["remote"], box);
+      expect(loggedOut.stdout).toContain("sign-in required");
+      expect(loggedOut.stdout).not.toContain("configured (credentials file)");
+    } finally { await remote.close(); }
+  });
+
   /**
    * The join URL, which is the whole of what a second machine is told: the
    * endpoint with the workspace id as its last path segment.
@@ -1220,20 +1247,16 @@ describe("ub remote join", () => {
     expect(run.stderr).not.toContain("hub rejected the token");
   });
 
-  it("says nothing about running local-only before it would ask for a secret", async () => {
-    // The other reading that reaches the prompt, and the machine `join` exists
-    // for: nothing configured at all, so the pre-prompt probe has no credential
-    // to send and is a disabled client. `running local-only` is that client
-    // announcing itself — on a run that is about to be neither local nor only.
+  it("asks an unconfigured client to sign in without a local-secret diagnostic", async () => {
     const remote = await startHub(OTHER_SECRET);
     const box = sandbox();
 
     const run = await runUbAsync(["remote", "join", joinUrl(remote)], box);
 
     expect(run.stderr).not.toContain("running local-only");
-    // Everything the refusal owes a person is unchanged.
     expect(run.status).toBe(1);
-    expect(run.stderr).toContain("no signing secret is configured");
+    expect(run.stderr).toContain("ub auth login");
+    expect(run.stderr).not.toContain("no signing secret is configured");
     expect(run.stderr).not.toContain("--secret-file");
     expect(run.stderr).not.toContain("remote signing secret (");
     expect(run.stderr).toContain("Nothing was written");

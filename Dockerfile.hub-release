@@ -16,7 +16,7 @@ COPY packages/web/package.json packages/web/package.json
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile
 COPY packages packages
 COPY scripts/build-hub-release-payload.mjs scripts/build-hub-release-payload.mjs
-COPY compose.release.yml remote.env.example remote-settings.sh REMOTE.md RELEASING.md ./
+COPY compose.release.yml remote.https.yml remote.tailscale.yml remote.env.example remote-settings.sh REMOTE.md RELEASING.md ./
 COPY bin/remote-compose.sh bin/hub-backup.sh bin/hub-restore.sh bin/hub-admin-setup.sh bin/
 ARG HUB_RELEASE_VERSION
 ARG HUB_RELEASE_COMMIT

@@ -55,6 +55,21 @@ function mcpConfig(env: NodeJS.ProcessEnv) {
 }
 
 describe("resolveConfig", () => {
+  it("retains joined device admission without a login and suppresses local authority in children", () => {
+    const box = sandbox({ userConfig: { workspace: FROM_USER, hubUrl: "ws://localhost:8080/custom-path", hubAdmission: "device" }, credentials: { signingSecret: SECRET_ON_FILE } });
+    const resolved = resolveConfig({ env: { ...box.env, HUB_AUTH_TOKEN: SECRET_IN_ENV } });
+    expect(resolved.env.HUB_ADMISSION).toBe("device");
+    expect(resolved.env.HUB_AUTH_TOKEN).toBeUndefined();
+    expect(resolved.origins.credential).toBeNull();
+    expect(resolved.warnings).toEqual([]);
+    expect(mcpConfig(resolved.env).deviceLogin).toBeDefined();
+    const local = sandbox({ userConfig: { workspace: FROM_USER }, credentials: { signingSecret: SECRET_ON_FILE } });
+    const localResolved = resolveConfig({ env: { ...local.env, HUB_ADMISSION: "device" } });
+    expect(localResolved.env.HUB_ADMISSION).toBeUndefined();
+    expect(mcpConfig(localResolved.env).deviceLogin).toBeUndefined();
+    expect(localResolved.env.HUB_AUTH_TOKEN).toBe(SECRET_ON_FILE);
+  });
+
   it("defaults when no configuration file exists anywhere", () => {
     const box = sandbox();
     const resolved = resolveConfig({ env: box.env });

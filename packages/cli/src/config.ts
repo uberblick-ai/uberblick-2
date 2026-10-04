@@ -46,7 +46,7 @@
  */
 
 
-import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
+import { usesDeviceLogin } from "@uberblick/mcp-server";
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { StoragePaths } from "@uberblick/hub/storage";
@@ -240,6 +240,8 @@ export interface UserConfig {
   // file does not carry reads as undefined rather than being absent.
   workspace?: string | undefined;
   hubUrl?: string | undefined;
+  /** Joined hubs retain device admission even after this machine logs out. */
+  hubAdmission?: string | undefined;
   /** Awareness display name. */
   displayName?: string | undefined;
   /** Awareness colour, 6-digit hex — the only form y-prosemirror accepts. */
@@ -268,6 +270,7 @@ export function readUserConfig(env: NodeJS.ProcessEnv = process.env): {
     config: {
       workspace: stringField(raw, "workspace", path, warnings) ?? undefined,
       hubUrl: stringField(raw, "hubUrl", path, warnings) ?? undefined,
+      hubAdmission: stringField(raw, "hubAdmission", path, warnings) ?? undefined,
       displayName: stringField(raw, "displayName", path, warnings) ?? undefined,
       color: stringField(raw, "color", path, warnings) ?? undefined,
     },
@@ -509,11 +512,20 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   warnings.push(...credentials.warnings);
   const secretFromFile = credentials.exposed ? null : credentials.signingSecret;
   const secretFromEnv = trimmed(env.HUB_AUTH_TOKEN);
+  const admission = stringField(userConfig, "hubAdmission", paths.userConfig, warnings);
+  if (admission !== null && admission !== "device") {
+    warnings.push(`unsupported hubAdmission in ${paths.userConfig}; using device credentials`);
+  }
+  // Like HUB_URL, this plain admission setting is resolved only from the binding.
+  const admissionEnv: NodeJS.ProcessEnv = { ...env };
+  delete admissionEnv.HUB_ADMISSION;
+  if (hubUrl.value !== null && admission !== null) admissionEnv.HUB_ADMISSION = "device";
+  const device = hubUrl.value !== null && usesDeviceLogin(hubUrl.value, admissionEnv);
   // **That** they differ, and nothing else: not either value, not a length, not
   // a prefix. Compared after the exposure refusal above, so a file nobody may
   // read costs one warning — its mode — rather than two.
   if (
-    (hubUrl.value === null || isLoopbackEndpoint(hubUrl.value)) &&
+    !device &&
     secretFromEnv !== null &&
     secretFromFile !== null &&
     secretFromEnv !== secretFromFile
@@ -535,7 +547,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
     credentialOrigin = "credentials file";
   }
 
-  const resolvedEnv: NodeJS.ProcessEnv = { ...env };
+  const resolvedEnv: NodeJS.ProcessEnv = { ...admissionEnv };
   if (workspace.value !== null) {
     resolvedEnv.WORKSPACE_ID = workspace.value;
   }
@@ -548,7 +560,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   } else {
     resolvedEnv.HUB_URL = hubUrl.value;
   }
-  if (hubUrl.value !== null && !isLoopbackEndpoint(hubUrl.value)) {
+  if (device) {
     delete resolvedEnv.HUB_AUTH_TOKEN;
     credentialOrigin = null;
   } else if (secret !== null) {

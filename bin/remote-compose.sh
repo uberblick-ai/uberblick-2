@@ -34,6 +34,8 @@ compose_version=${compose_version#v}
 compose_major=${compose_version%%.*}
 compose_remainder=${compose_version#*.}
 compose_minor=${compose_remainder%%.*}
+compose_patch=${compose_remainder#*.}
+compose_patch=${compose_patch%%[-+]*}
 
 case "$compose_major.$compose_minor" in
   *[!0-9.]* | .* | *.)
@@ -45,6 +47,45 @@ esac
 if [ "$compose_major" -lt 2 ] || { [ "$compose_major" -eq 2 ] && [ "$compose_minor" -lt 6 ]; }; then
   printf 'Docker Compose 2.6.0 or newer is required; found %s\n' "$compose_version" >&2
   exit 1
+fi
+
+# The extracted release carries metadata; checkout compatibility keeps its
+# original Compose file and Tailscale-only route. Select ordinary override files
+# rather than generating deployment configuration or changing the project name.
+if [ -f release.json ]; then
+  case "$compose_patch" in
+    '' | *[!0-9]*) printf 'Cannot parse Docker Compose version.\n' >&2; exit 1 ;;
+  esac
+  if [ "$compose_major" -eq 2 ] && { [ "$compose_minor" -lt 24 ] || { [ "$compose_minor" -eq 24 ] && [ "$compose_patch" -lt 4 ]; }; }; then
+    printf 'Docker Compose 2.24.4 or newer is required for released hubs.\n' >&2
+    exit 1
+  fi
+  host=${WEB_HOST:-${TAILSCALE_HOST:-}}
+  if [ -z "$host" ]; then
+    # Docker before 28 can expose loopback-published ports on the local network.
+    # Only startup needs the daemon; config and offline inspection still work.
+    for argument in "$@"; do
+      if [ "$argument" = up ] || [ "$argument" = start ] || [ "$argument" = create ]; then
+        engine_version=$(docker version --format '{{.Server.Version}}')
+        engine_major=${engine_version%%.*}
+        case "$engine_major" in
+          '' | *[!0-9]*) printf 'Cannot parse Docker Engine version.\n' >&2; exit 1 ;;
+        esac
+        if [ "$engine_major" -lt 28 ]; then
+          printf 'Docker Engine 28.0.0 or newer is required for host-only HTTP publication.\n' >&2
+          exit 1
+        fi
+        break
+      fi
+    done
+  fi
+  if [ -z "${COMPOSE_FILE-}" ]; then
+    case "$host" in
+      *.[tT][sS].[nN][eE][tT]) set -- -f docker-compose.yml -f remote.https.yml -f remote.tailscale.yml "$@" ;;
+      '') set -- -f docker-compose.yml "$@" ;;
+      *) set -- -f docker-compose.yml -f remote.https.yml "$@" ;;
+    esac
+  fi
 fi
 
 exec docker compose "$@"
