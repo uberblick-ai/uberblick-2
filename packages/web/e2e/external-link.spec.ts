@@ -43,7 +43,7 @@ async function expectPopup(page: Page, activate: () => Promise<unknown>): Promis
   }
 }
 
-test("editable primary, Ctrl and Cmd clicks open an isolated tab without changing the document", async ({ page }) => {
+test("editable primary, Ctrl and Cmd clicks open an isolated tab without changing the document", { tag: "@webkit" }, async ({ page }) => {
   await openDoc(page);
   const link = page.locator(".ub-editor a.ub-link");
   for (const modifiers of [[], ["Control"], ["Meta"]] as const) {
@@ -90,7 +90,7 @@ async function textPoint(target: Locator, offset: number): Promise<{ x: number; 
   }, offset);
 }
 
-test("dragging and Shift-clicking a link select text, and the toolbar still edits its URL", async ({ page }) => {
+test("dragging and Shift-clicking a link select text, and the toolbar still edits its URL", { tag: "@webkit" }, async ({ page }) => {
   await openDoc(page);
   const link = page.locator(".ub-editor a.ub-link");
   const toolbar = page.getByRole("toolbar", { name: "Text formatting and comment" });
@@ -151,7 +151,7 @@ async function archiveDoc(page: Page): Promise<void> {
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
 }
 
-test("a link inside a comment wins in editable and read-only panes; other thread gestures still select", async ({ page }) => {
+test("a link inside a comment wins in editable and read-only panes; other thread gestures still select", { tag: "@webkit" }, async ({ page }) => {
   await openDoc(page);
   await commentSentence(page);
   const link = page.locator(".ub-editor a.ub-link");
@@ -182,7 +182,7 @@ test("a link inside a comment wins in editable and read-only panes; other thread
   await expect(editor(page)).toHaveText(TEXT);
 });
 
-test("a touch tap follows a highlighted external link without opening its thread", async ({ page }, testInfo) => {
+test("a touch tap follows a highlighted external link without opening its thread", { tag: "@webkit-touch" }, async ({ page }, testInfo) => {
   test.skip(testInfo.project.use.hasTouch !== true, "A touch-capable device supplies this input path.");
   await openDoc(page);
   await commentSentence(page);

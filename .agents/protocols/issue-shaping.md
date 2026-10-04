@@ -28,6 +28,20 @@ outside that intake without automatically creating more issues. Do not force a
 cohesive outcome into tiny technical fragments. Reopen a settled choice only
 when new evidence or changed direction conflicts with it, naming the conflict.
 
+Raise a durable choice that passes
+[`delivery-policy.md`'s when-to-record test](delivery-policy.md#decision-records)
+as a decision record rather than leaving the decision in issue text. Read
+**Decision logs** (`b7fdc6d7-ce5c-4733-a083-3fc30196f0b3`) and **MCP interface
+contract** (`6e73bb70-e5da-4ee6-98ff-93ec9804856d`) for its shape and calls.
+The authorization rule below also governs this write: confirm its meaning and
+destination before creating it. With the person present, record their actual
+choice through `create_doc` or `set_status` as `decided` with
+`answer: {who, when, where}`,
+not as an agent stance; an unanswered topic stays `open` with a recommendation.
+A change to a decided record is an `open` successor naming it in `supersedes`,
+effective only after the person's recorded approval. Link the record from the
+intake instead of copying its reasoning there; it grants no queue authority.
+
 ## Keep the effort oriented
 
 For a larger effort, keep a compact overview of the intended outcome, settled
@@ -57,7 +71,7 @@ silence and a request for more analysis are not approval.
 When the destination is undecided, offer the two supported paths:
 
 - **Discuss with coworkers:** publish a draft requirement.
-- **Create an intake:** file the confirmed scope with `needs-preparation`.
+- **Create an intake:** file the confirmed scope for a maintainer to start.
 
 Never choose from size or confidence alone. Neither path authorizes `ready` or
 implementation. For shared drafts and requirement resumption by UUID, read
@@ -81,8 +95,10 @@ Known constraints:
 omit if absent>
 ```
 
-Create it with `gh issue create --repo uberblick-ai/uberblick-2 --label
-needs-preparation`. Add only the `priority:<value>` the human stated, recording
+Create it with `gh issue create --repo uberblick-ai/uberblick-2`. When this
+session posts as a maintainer, add `--label needs-preparation`, which starts it.
+When it posts as `uberblick-agent`, add no trigger label and ask the human to add
+`needs-preparation` from their own account. Add only the `priority:<value>` the human stated, recording
 that decision in a comment; otherwise leave priority unset. Tell the human to
 set Request Source `Human` in the sidebar. Do not invent `Touches`, relationships,
 architecture, acceptance criteria, Pointers or `ready`: the preparer supplies

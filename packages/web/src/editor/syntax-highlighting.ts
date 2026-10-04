@@ -14,7 +14,25 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { common, createLowlight } from "lowlight";
 
 const highlighter = createLowlight(common);
-export const codeHighlightingKey = new PluginKey<DecorationSet>(
+
+interface CodeToken {
+  from: number;
+  to: number;
+  classes: string;
+}
+
+interface HighlightedCode {
+  text: string;
+  language: unknown;
+  tokens: CodeToken[];
+}
+
+interface HighlightingState {
+  decorations: DecorationSet;
+  blocks: Map<PMNode, HighlightedCode>;
+}
+
+export const codeHighlightingKey = new PluginKey<HighlightingState>(
   "uberblickCodeHighlighting",
 );
 
@@ -34,8 +52,7 @@ function tokenClasses(node: HighlightNode): string[] {
   return value.filter((item): item is string => typeof item === "string");
 }
 
-function highlightedCode(node: PMNode, pos: number): Decoration[] {
-  const language = node.attrs.language;
+function codeTokens(language: unknown, text: string): CodeToken[] {
   if (
     typeof language !== "string" ||
     language === "" ||
@@ -44,10 +61,10 @@ function highlightedCode(node: PMNode, pos: number): Decoration[] {
     return [];
   }
 
-  const tree = highlighter.highlight(language, node.textContent) as unknown as {
+  const tree = highlighter.highlight(language, text) as unknown as {
     children: HighlightNode[];
   };
-  const decorations: Decoration[] = [];
+  const tokens: CodeToken[] = [];
   let offset = 0;
 
   const visit = (child: HighlightNode, inherited: string[]): void => {
@@ -55,11 +72,7 @@ function highlightedCode(node: PMNode, pos: number): Decoration[] {
       const start = offset;
       offset += child.value.length;
       if (start !== offset && inherited.length > 0) {
-        decorations.push(
-          Decoration.inline(pos + 1 + start, pos + 1 + offset, {
-            class: inherited.join(" "),
-          }),
-        );
+        tokens.push({ from: start, to: offset, classes: inherited.join(" ") });
       }
       return;
     }
@@ -69,31 +82,66 @@ function highlightedCode(node: PMNode, pos: number): Decoration[] {
   };
 
   for (const child of tree.children) visit(child, []);
-  return decorations;
+  return tokens;
 }
 
-function highlightedDocument(doc: PMNode): DecorationSet {
+function highlightedDocument(
+  doc: PMNode,
+  previous: Map<PMNode, HighlightedCode> = new Map(),
+): HighlightingState {
+  // Node identity avoids even reading unchanged source. A new node can also
+  // carry only a comment/attribute change, so fall back to the actual inputs.
+  // Both indexes retain only the previous/current document, not edit history.
+  const sources = new Map<unknown, Map<string, HighlightedCode>>();
+  for (const cached of previous.values()) {
+    let texts = sources.get(cached.language);
+    if (texts === undefined) {
+      texts = new Map();
+      sources.set(cached.language, texts);
+    }
+    texts.set(cached.text, cached);
+  }
+  const blocks = new Map<PMNode, HighlightedCode>();
   const decorations: Decoration[] = [];
   doc.descendants((node, pos) => {
     if (node.type.name !== "code") return;
-    decorations.push(...highlightedCode(node, pos));
+    let cached = previous.get(node);
+    if (cached === undefined) {
+      const text = node.textContent;
+      const language: unknown = node.attrs.language;
+      cached = sources.get(language)?.get(text) ?? {
+        text,
+        language,
+        tokens: codeTokens(language, text),
+      };
+    }
+    blocks.set(node, cached);
+    // Rebuild positions from block-relative tokens: y-prosemirror replaces
+    // the whole document for remote edits and undo, which drops mapped spans.
+    for (const token of cached.tokens) {
+      decorations.push(
+        Decoration.inline(pos + 1 + token.from, pos + 1 + token.to, {
+          class: token.classes,
+        }),
+      );
+    }
     return false;
   });
-  return DecorationSet.create(doc, decorations);
+  return { decorations: DecorationSet.create(doc, decorations), blocks };
 }
 
-function codeHighlightingPlugin(): Plugin<DecorationSet> {
-  return new Plugin<DecorationSet>({
+function codeHighlightingPlugin(): Plugin<HighlightingState> {
+  return new Plugin<HighlightingState>({
     key: codeHighlightingKey,
     state: {
       init: (_config, state) => highlightedDocument(state.doc),
       apply: (transaction, previous) =>
         transaction.docChanged
-          ? highlightedDocument(transaction.doc)
-          : previous.map(transaction.mapping, transaction.doc),
+          ? highlightedDocument(transaction.doc, previous.blocks)
+          : previous,
     },
     props: {
-      decorations: (state) => codeHighlightingKey.getState(state) ?? null,
+      decorations: (state) => codeHighlightingKey.getState(state)?.decorations ?? null,
     },
   });
 }

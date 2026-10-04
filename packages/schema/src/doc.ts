@@ -214,6 +214,9 @@ export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
   const agentStance = meta.get("agentStance");
   const decidedBy = readDecisionString(meta.get("decidedBy"));
   const decidedAt = readDecisionString(meta.get("decidedAt"));
+  const decidedWhere = readDecisionString(meta.get("decidedWhere"));
+  const approvalFingerprint = readDecisionString(meta.get("approvalFingerprint"));
+  const rejectionReason = readDecisionString(meta.get("rejectionReason"));
   return {
     uuid: typeof uuid === "string" ? uuid : "",
     title: typeof title === "string" ? title : "",
@@ -229,6 +232,9 @@ export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
     ...(decision && typeof agentStance === "boolean" ? { agentStance } : {}),
     ...(decision && decidedBy !== undefined ? { decidedBy } : {}),
     ...(decision && decidedAt !== undefined ? { decidedAt } : {}),
+    ...(decision && decidedWhere !== undefined ? { decidedWhere } : {}),
+    ...(decision && approvalFingerprint !== undefined ? { approvalFingerprint } : {}),
+    ...(decision && rejectionReason !== undefined ? { rejectionReason } : {}),
     links: effectiveLinks(
       readStringArray(meta.get("links")),
       [governs, supersedes].filter((link): link is string => typeof link === "string"),

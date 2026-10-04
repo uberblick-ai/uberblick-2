@@ -26,6 +26,16 @@ limitation.
 A finding keeps its id across heads. Reopen a settled one only when changed
 code or new evidence invalidates how it was settled.
 
+When a PR settles a choice that passes
+[`delivery-policy.md`'s when-to-record test](delivery-policy.md#decision-records)
+but has no record, raise a finding; the reviewer does not draft it. The
+implementer supplies the complete record in the same PR under
+[`implementer.md`'s Decision records](../roles/implementer.md#decision-records),
+as a drafted initial stance or a linked boundary `open` recommendation. Verify
+the draft or open record like any other correction, while it is still editable;
+do not hold the PR for a person's confirmation of that record. Review and merge gates
+remain owed.
+
 ## Handing findings over
 
 Three records carry findings between implementer and reviewer, so no separate

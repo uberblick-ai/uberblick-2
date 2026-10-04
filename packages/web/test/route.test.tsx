@@ -125,12 +125,18 @@ describe("an address names a document, a workspace mode, or neither", () => {
     expect(canonicalPath(route(`/${WS}/settings/TAGS/`))).toBe(
       `/${WS}/settings/tags`,
     );
+    expect(canonicalPath(route(`/${WS}/SETTINGS/TAGS`))).toBe(`/${WS}/settings/tags`);
 
     for (const invalid of ["general", "unknown", "tags/more"]) {
       const nested = route(`/${WS}/settings/${invalid}`);
       expect(nested.kind).toBe("invalid");
       expect(nested.kind === "invalid" && nested.workspace).toEqual(workspace);
     }
+  });
+
+  it("folds the reserved corpus-list segment before checking document identity", () => {
+    expect(route(`/${WS}/ALL`)).toEqual({ kind: "all", workspace });
+    expect(canonicalPath(route(`/${WS}/ALL`))).toBe(`/${WS}/all`);
   });
 
   it("says so when nothing names a workspace, rather than guessing one", () => {
@@ -162,12 +168,15 @@ describe("an address names a document, a workspace mode, or neither", () => {
   it("calls a malformed uuid an invalid link — the one case that is not a document", () => {
     // The distinction the whole feature turns on: these can never arrive by
     // sync, so waiting for them would be waiting forever.
-    for (const bad of ["not-a-uuid", "1234", `${UUID}x`, "%zz"]) {
+    for (const bad of ["not-a-uuid", "1234", `${UUID}x`, "%zz", "NOT-A-UUID"]) {
       const parsed = route(`/${WS}/${bad}`);
       expect(parsed.kind).toBe("invalid");
       // The workspace survives a mistyped document, so the sidebar does not
       // empty itself over a bad link.
       expect(parsed.kind === "invalid" && parsed.workspace).toEqual(workspace);
+      expect(parsed.kind === "invalid" && parsed.reason).toBe(
+        `“${bad}” is not a document uuid.`,
+      );
     }
     expect(route(`/${WS}/${UUID}/blocks`).kind).toBe("invalid");
   });
@@ -203,6 +212,17 @@ describe("an address names a document, a workspace mode, or neither", () => {
     // which is the whole reason the fold happens before the room key is built.
     expect(roomForDoc(WS, UUID)).toBe(`${WS}/${UUID}`);
     expect(docIsHydrated(UUID, meta(UUID))).toBe(true);
+  });
+
+  it("accepts document identities without restricting version or variant nibbles", () => {
+    const external = "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF";
+    const canonical = external.toLowerCase();
+    expect(route(`/${WS}/${external}`)).toEqual({
+      kind: "doc",
+      workspace,
+      uuid: canonical,
+    });
+    expect(canonicalPath(route(`/${WS}/${external}`))).toBe(`/${WS}/${canonical}`);
   });
 
   it("leaves an address it cannot resolve exactly as it was opened", () => {

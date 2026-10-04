@@ -1,0 +1,43 @@
+name: uberblick-remote
+
+services:
+  hub:
+    image: __HUB_IMAGE__
+    platform: linux/amd64
+    environment:
+      HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
+      # Unset/empty uses public Uberblick Login: no app registration is needed.
+      # Optionally use your own Device Flow app to control its settings/budget.
+      # Remove and recreate to use the default again. GitHub names the app, not
+      # the hub; give setup codes only to the intended admin. This reaches only
+      # the hub, never browser configuration or the web build. See REMOTE.md.
+      HUB_GITHUB_CLIENT_ID: "${HUB_GITHUB_CLIENT_ID:-}"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    volumes:
+      - hub-data:/data
+
+  caddy:
+    image: __WEB_IMAGE__
+    platform: linux/amd64
+    depends_on:
+      - hub
+    environment:
+      TAILSCALE_HOST: "${TAILSCALE_HOST:?set TAILSCALE_HOST in .env}"
+      WEB_HUB_URL: "${WEB_HUB_URL:-}"
+      WEB_WORKSPACES: "${WEB_WORKSPACES:-}"
+      # Entrypoints validate all document inputs, including with plain Compose.
+      HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
+    ports:
+      - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:443:443"
+    restart: unless-stopped
+    user: "0:0"
+    volumes:
+      - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  hub-data:
+  caddy-data:
+  caddy-config:

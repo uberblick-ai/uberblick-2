@@ -18,8 +18,13 @@ Uberblick project agent workflow and Editorial contract through MCP
 ## Boundaries
 
 Edit this issue and its relationships; create sub-issues only under the
-protocol's split procedure. No implementation, branches, PRs, implementation
-scheduling or priority changes. Preserve approved behavior and guarantees;
+protocol's split procedure. When preparation challenges a decided record,
+follow [`implementer.md`'s Challenge a decided record](implementer.md#challenge-a-decided-record):
+create an `open` successor stating the challenge, stop only preparation that
+depends on that decision until a person answers, and continue independent
+work. This successor write is permitted; an unresolved challenge finishes
+`needs-human` under the shared escalation rules. No implementation, branches,
+PRs, implementation scheduling or priority changes. Preserve approved behavior and guarantees;
 escalate unresolved product choices rather than inventing them. Never silently
 waive a serious finding. Shared role rules own workflow labels, permissions, escalation and retrospectives.
 

@@ -76,9 +76,75 @@ that warrants them.
 When the change makes a corpus claim wrong, or adds behavior a corpus
 document should describe, draft the rewrite under the pull request's
 `Corpus update`: each document by title and UUID, the block, and its new text,
-following the Editorial contract — rewrite, never append, and no PR or issue
-numbers. The integrator applies it after the merge, so the corpus never
-describes unmerged code. Keep it current with every revision.
+following the Editorial contract — rewrite, never append; Regular Document
+rewrites carry no PR or issue numbers. The integrator applies it after merge,
+so the corpus never describes unmerged code. Keep it current with every revision.
+
+## Decision records
+
+Apply [`delivery-policy.md`'s Decision records](../protocols/delivery-policy.md#decision-records):
+its three-condition when-to-record test, overkill cases and initial stance rule
+own whether to record and whether a first record is `decided` as an agent
+stance or `open` with a recommendation on a Human boundaries topic. Read its
+live corpus sources rather than treating a pointer as the record.
+
+Write a new `decided` implementation stance as a complete draft in this same PR's
+`Corpus update`, including its topic, decision line, enduring reasons,
+guidance, governing requirement when applicable, Links and intended creation
+status (`decided` stance). The integrator creates it through
+`create_doc` after merge; name a new record as new rather than inventing its
+UUID. Decision-record Links may cite GitHub items under the Editorial contract.
+Keep the draft current through review; do not create an immutable decided
+stance before reviewers can correct it.
+
+Create a new boundary `open` record now through `create_doc`, with its
+recommendation and the same complete content, and cite its title and UUID in
+this same PR. While it remains open, keep the record current with corrections
+through review; if a person decides it first, use the decided-record successor
+rule below. Use its returned topic UUID in the built-on line and link the
+GitHub item in its Links under the procedure below, without a post-merge fix-up.
+
+A missing-record finding under `review-protocol.md` is corrected here like any
+other finding: the reviewer flags it, the implementer writes it, and the PR
+does not wait for a person's confirmation of a first stance or open recommendation. Existing
+review and merge gates still apply.
+
+### Build on an open decision
+
+Within an already approved issue whose implementation meets an open decision,
+proceed on its recommended option and continue toward merge. State in the
+issue or PR:
+
+```text
+Built on open decision: <topic>, <topic uuid>, recommended option: <option>
+```
+
+Add that item to the open record's Links as `owner/repo#n`, linked to its
+`https://github.com/owner/repo/issues/n` or `/pull/n` URL. Use ordinary external
+link marks in the prose: plain reference text is invisible to `find_decisions`.
+This is the record's rework list if a person later chooses differently; record
+the resulting rework as a follow-up issue within the shared role rules.
+
+Only a major-impact step, one expensive to reverse, waits for the person's
+answer: for example a core technology swap, a data format other systems or
+users depend on, or making users migrate. Releases, data migrations and
+permission changes are not automatically major impact. On an issue, stop this
+item at the dependent step and finish `returned` with `Reason: owner-decision`;
+independent items continue in their own runs. On a PR, continue independent
+work and commit and push it on that PR before finishing `needs-human`, so the
+next run can continue from GitHub. This exception approves no new outcome or
+`Implements:` approval; ISSUE_SPEC's ready bar and delivery-policy's review and
+merge tiers still apply. Every other Human boundaries crossing still escalates.
+
+### Challenge a decided record
+
+Create an `open` successor through `create_doc`, with `supersedes` naming the
+decided record and prose stating the challenge, evidence and recommendation.
+Do not edit the decided record or work around it. Stop only work depending on
+that decision until a person answers; use the stop and independent-work
+handoff rule above. The prior answer stays in force until the person approves
+a successor, under Decision logs. This challenge route is also used by the
+issue preparer; its role permits the successor write.
 
 ## Revising a pull request
 

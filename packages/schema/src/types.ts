@@ -285,8 +285,14 @@ export interface DocMeta {
   agentStance?: boolean;
   /** Person whose answer was recorded. */
   decidedBy?: string;
-  /** When the answer was recorded, conventionally ISO-8601. */
+  /** When the person's answer was given, conventionally ISO-8601. */
   decidedAt?: string;
+  /** Where the person's answer was given. */
+  decidedWhere?: string;
+  /** Approved title, decision line and ordered block text; a change detector. */
+  approvalFingerprint?: string;
+  /** Why a person rejected the proposal. */
+  rejectionReason?: string;
   /** Outbound links, by target document UUID. Never paths or titles. */
   links: string[];
 }
@@ -410,6 +416,8 @@ export interface DirectoryEntry {
   agentStance?: boolean;
   decidedBy?: string;
   decidedAt?: string;
+  /** Whether approved content differs from the recorded approval. */
+  approvalChanged?: boolean;
   commentCount?: number;
 }
 

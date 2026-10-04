@@ -89,6 +89,10 @@ function buildStampPlugin(): Plugin {
   };
 }
 
+// Release builds accept no deployment values, including fallback endpoints.
+// Development and installed clients retain their existing defines.
+const runtimeConfigOnly = process.env.UBERBLICK_RELEASE_WEB === "1";
+
 export default defineConfig({
   // Tailwind compiles `src/ui/tailwind.css` for shadcn and product UI utilities.
   // Web UI system keeps editor content in plain CSS; other legacy surfaces
@@ -96,9 +100,10 @@ export default defineConfig({
   // existing editor and unmigrated controls keep their defaults — see that file.
   plugins: [tailwindcss(), react(), devConfigDocumentPlugin(), buildStampPlugin()],
   define: {
-    __HUB_URL__: JSON.stringify(process.env.HUB_URL ?? "ws://localhost:1234"),
-    __WORKSPACE_ID__: JSON.stringify(process.env.WORKSPACE_ID ?? ""),
-    __WORKSPACES__: JSON.stringify(process.env.WORKSPACES ?? ""),
+    __RUNTIME_CONFIG_ONLY__: JSON.stringify(runtimeConfigOnly),
+    __HUB_URL__: JSON.stringify(runtimeConfigOnly ? "" : (process.env.HUB_URL ?? "ws://localhost:1234")),
+    __WORKSPACE_ID__: JSON.stringify(runtimeConfigOnly ? "" : (process.env.WORKSPACE_ID ?? "")),
+    __WORKSPACES__: JSON.stringify(runtimeConfigOnly ? "" : (process.env.WORKSPACES ?? "")),
   },
   server: {
     port: 5173,

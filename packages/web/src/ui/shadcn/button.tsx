@@ -9,6 +9,7 @@ import { cn } from "./cn.js";
 
 const variants = {
   default: "bg-primary text-primary-foreground hover:enabled:bg-primary/90",
+  destructive: "bg-destructive text-destructive-foreground hover:enabled:bg-destructive/90",
   secondary: "bg-secondary text-secondary-foreground hover:enabled:bg-secondary/80",
   selection: "relative cursor-pointer border border-transparent bg-transparent leading-none text-card-foreground hover:enabled:border-(--border) hover:enabled:bg-(--card-accent) hover:enabled:text-card-foreground focus-visible:border-(--border) focus-visible:bg-(--card-accent) data-[state=on]:border-brand data-[state=on]:bg-(--brand-subtle) data-[state=mixed]:border-dashed data-[state=mixed]:border-(--muted-foreground) data-[state=on]:after:content-['✓'] data-[state=mixed]:after:content-['−'] after:absolute after:top-0 after:right-[0.1rem] after:text-[0.55rem] after:leading-none data-[emphasis]:border-brand data-[emphasis]:bg-(--brand-subtle)",
   outline: "border border-(--border) bg-background text-foreground hover:enabled:bg-accent hover:enabled:text-accent-foreground",

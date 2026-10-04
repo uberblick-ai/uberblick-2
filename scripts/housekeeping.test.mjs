@@ -16,7 +16,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const script = join(root, "scripts/housekeeping.sh");
+const script = join(root, "bin/housekeeping.sh");
 
 function fixture(t) {
 	// `realpathSync` because macOS `tmpdir()` is `/var/folders/...`, a symlink
@@ -461,7 +461,7 @@ test("rejects no arguments and --dry-run alone before invoking Docker", (t) => {
 		assert.equal(result.status, 2);
 		assert.match(
 			result.stderr,
-			/usage: housekeeping\.sh <review sha>\.\.\. \[--dry-run\]/,
+			/usage: sh bin\/housekeeping\.sh <review sha>\.\.\. \[--dry-run\]/,
 		);
 	}
 	assert.equal(existsSync(calls), false);

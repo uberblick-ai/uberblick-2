@@ -23,34 +23,15 @@ services:
     build:
       context: .
       target: web
-      args:
-        HUB_URL: "wss://${TAILSCALE_HOST:?set TAILSCALE_HOST in .env}/ws"
     depends_on:
       - hub
     environment:
       TAILSCALE_HOST: "${TAILSCALE_HOST:?set TAILSCALE_HOST in .env}"
-      # What Caddy serves at /uberblick-config.json, and therefore the hub the
-      # browser actually dials — the build argument above is only the fallback
-      # compiled into the bundle. Deliberately not named HUB_URL on the host
-      # side: that name already means "the hub my local tools dial" (mise
-      # `[env]`, MCP clients), and inheriting a developer's `ws://localhost:1234`
-      # here would silently serve it to every visitor.
-      HUB_URL: "${WEB_HUB_URL:-wss://${TAILSCALE_HOST:?set TAILSCALE_HOST in .env}/ws}"
-      # The workspaces Caddy serves in that same document — a comma-separated
-      # list, and its first entry is what `https://<host>/` opens. Renamed on
-      # the way in for the same reason as HUB_URL: `WORKSPACES` already means
-      # "the workspaces my local tools offer" (mise `[env]`). Empty by default,
-      # because a workspace id is a uuid per installation and there is nothing
-      # sensible to guess: the host is given its own with `WEB_WORKSPACES` in
-      # `.env`.
-      WORKSPACES: "${WEB_WORKSPACES:-}"
-      # The signing secret, served in that same document because the bundle no
-      # longer carries one (#426). Gated on the name only `remote-compose.sh`
-      # sets: that gate is the chokehold which forces every deployment command
-      # through the wrapper's safe-alphabet checks, and those checks are what
-      # keep a value substituted into the Caddyfile's raw JSON from closing its
-      # string and injecting further keys.
-      HUB_AUTH_TOKEN: "${CHECKED_HUB_AUTH_TOKEN:?run commands through sh remote-compose.sh}"
+      # Native operator names are validated by the image entrypoint before
+      # becoming Caddy's HUB_URL and WORKSPACES. One bundle serves every host.
+      WEB_HUB_URL: "${WEB_HUB_URL:-}"
+      WEB_WORKSPACES: "${WEB_WORKSPACES:-}"
+      HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
     ports:
       - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:443:443"
     restart: unless-stopped

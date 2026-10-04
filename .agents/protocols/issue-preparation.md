@@ -27,6 +27,13 @@ in Pointers, without copying the source. Mark missing context honestly. A proven
 mechanical correction with no governing product document may stop at the
 catalog scan; explain why. Resumed work refreshes only affected sources.
 
+Include relevant decisions in that reading guide, including open records the
+implementation would build on: cite the topic and record UUIDs with the reading
+reason. Read the topic's answer in force and pending records under **Decision
+logs** (`b7fdc6d7-ce5c-4733-a083-3fc30196f0b3`); an open recommendation never
+supplies the approved outcome required by ISSUE_SPEC. A challenge to a decided
+record follows the successor and affected-work stop in the preparer's role.
+
 Before drafting on every route, compare the likely footprint with the files in
 all open PRs. Inspect overlapping diffs to distinguish a dependency, semantic
 conflict or mechanical reconciliation. Use tracked-file searches; exclude copied
@@ -57,8 +64,9 @@ Grounded dispositions include:
   justify reopening or a new issue.
 - **`split`:** the request cannot fit one independently reviewable PR. Follow
   ISSUE_SPEC's sizing rule: substantial, independently useful pieces rather
-  than tiny technical steps. Create native sub-issues with `needs-preparation`,
-  the source milestone and only real ordering blockers. Keep the source open
+  than tiny technical steps. Create native sub-issues without labels, with
+  the source milestone and only real ordering blockers; a maintainer starts each
+  with `needs-preparation`. Keep the source open
   as their parent, blocked by each child so priority inherits. Product-changing
   decomposition requires a human decision.
 

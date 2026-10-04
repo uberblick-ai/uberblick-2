@@ -295,11 +295,13 @@ describe("the rail renders its cards", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
+    // Refocusing keeps the same room source; it does not replace the connection.
+    const connection = stubConnection(ydoc);
     const draw = (next: ThreadFocus | null): void => {
       act(() => {
         root.render(
           <LiveThreadsPane
-            connection={stubConnection(ydoc)}
+            connection={connection}
             focused={next}
             author="ben"
             onFocus={(threadId) => focus.push(threadId)}

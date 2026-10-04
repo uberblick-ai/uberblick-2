@@ -260,11 +260,28 @@ const RECOVERIES: Record<string, Recovery> = {
       "The document's stored kind is fixed through MCP. Choose a status in that kind's lifecycle; if the kind " +
       "itself is wrong, retrying cannot change or clear it through this interface.",
   },
-  revival_trigger_missing: {
+  decision_read_only: {
     recoveryClass: "manual",
     guidance:
-      "Add a heading whose text is exactly `Reconsidering`, immediately followed by a non-heading block with " +
-      "non-whitespace text, then call set_status again.",
+      "A decided record's title, decision line and blocks are read-only. Create an open superseding record " +
+      "for any content change, then record a person's answer to decide it. Comments stay open.",
+  },
+  decision_answer_required: {
+    recoveryClass: "manual",
+    guidance:
+      "Record the person's answer with answer: {who, when, where}, then call again. No proposal or " +
+      "lifecycle change was written by this refused call.",
+  },
+  decision_reason_required: {
+    recoveryClass: "manual",
+    guidance: "Supply a non-empty rejection reason and the person's answer, then call set_status again.",
+  },
+  decision_transition_invalid: {
+    recoveryClass: "manual",
+    guidance:
+      "Create a decision as open or decided. Only an open proposal can withdraw; rejection is for an open " +
+      "proposal, an agent stance or a decided record in conflict and records a person's answer and reason. " +
+      "Decided records cannot reopen or withdraw, and rejected and withdrawn records are final.",
   },
   governs_not_requirement: {
     recoveryClass: "reread",

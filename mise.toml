@@ -43,14 +43,14 @@ _.path = ["{{config_root}}/node_modules/.bin"]
 # `mise activate` — shims alone never run hooks. The script decides whether to
 # say anything at all; see its header.
 [hooks]
-enter = { run = 'sh "{{config_root}}/scripts/mise-welcome.sh"' }
+enter = { run = 'sh "{{config_root}}/bin/mise-welcome.sh"' }
 
 [tasks.welcome]
 description = "Show the contributor quick-start"
 # `quiet` keeps mise's own "[welcome] $ sh ..." banner off the output, so the
 # hook and the task print the same thing.
 quiet = true
-run = 'sh "{{config_root}}/scripts/mise-welcome.sh"'
+run = 'sh "{{config_root}}/bin/mise-welcome.sh"'
 
 [tasks.setup]
 description = "Fresh checkout to running: pinned toolchain, frozen dependencies, then `ub init`"
@@ -118,6 +118,10 @@ description = "Build a versioned, checkout-free CLI and web archive"
 usage = 'arg "<version>" help="Release version, for example 0.1.0"'
 run = 'node scripts/build-install-payload.mjs "${usage_version?}"'
 
+[tasks.publish-hub-release]
+description = "Build, scan and publish an immutable hub tag; --dry-run builds without credentials or pushes"
+run = "node scripts/publish-hub-release.mjs"
+
 [tasks.publish-homebrew-release]
 description = "Publish a version tag's payload and generated Homebrew formula; add --dry-run to inspect"
 run = "node scripts/publish-homebrew-release.mjs"
@@ -171,7 +175,7 @@ description = "Run all test suites"
 run = "pnpm test"
 
 [tasks.e2e]
-description = "Run the browser end-to-end proof points (Playwright, Chromium only)"
+description = "Run the browser end-to-end proof points (Chromium and tagged WebKit)"
 # The harness builds the current checkout into private storage, starts its own
 # hub on an ephemeral port, and serves that bundle through a real `ub open`
 # under private XDG homes. Nothing needs the developer's configuration and no
@@ -180,9 +184,9 @@ description = "Run the browser end-to-end proof points (Playwright, Chromium onl
 # spawned `ub open` removes those inherited pins and reads the run's files.
 #
 # `playwright install` runs first because the browser is a download, not a
-# dependency pnpm can fetch: it is a no-op once the pinned Chromium is in the
-# local cache, and the alternative is a first run that fails with instructions.
-run = 'sh "{{config_root}}/scripts/run-e2e.sh"'
+# dependency pnpm can fetch: it is a no-op once pinned Chromium and WebKit are
+# cached. System libraries are provisioned separately by CI or the host operator.
+run = 'sh "{{config_root}}/bin/run-e2e.sh"'
 
 [tasks.fue]
 description = "First-user experience: run the documented install path on a clean machine, then assert what it promised"

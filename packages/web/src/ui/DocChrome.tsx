@@ -28,13 +28,15 @@ import {
   DropdownMenuTrigger,
 } from "./shadcn/dropdown-menu.js";
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-  DialogTrigger,
-} from "./shadcn/dialog.js";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "./shadcn/alert-dialog.js";
 import {
   Popover,
   PopoverContent,
@@ -557,10 +559,10 @@ function DocumentActions({
   );
 
   return (
-    <Dialog
+    <AlertDialog
       open={confirming}
       onOpenChange={(open) => {
-        // The persistent menu button is also DialogTrigger so Radix can return
+        // The persistent menu button is also AlertDialogTrigger so Radix can return
         // focus to it. Its ordinary menu click therefore requests a dialog
         // open too; only the Archive item below is allowed to accept that half.
         if (!open) setConfirming(false);
@@ -569,7 +571,7 @@ function DocumentActions({
       <span className="ub-document-actions">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <DialogTrigger asChild>
+            <AlertDialogTrigger asChild>
               <button
                 type="button"
                 className="ub-actions-trigger"
@@ -578,7 +580,7 @@ function DocumentActions({
               >
                 ⋯
               </button>
-            </DialogTrigger>
+            </AlertDialogTrigger>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
@@ -629,9 +631,7 @@ function DocumentActions({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <DialogContent
-          className="ub-confirm"
-          role="alertdialog"
+        <AlertDialogContent
           onFocusCapture={() => onConfirmationFocusChange?.(true)}
           onBlurCapture={(event) => {
             const next = event.relatedTarget;
@@ -640,37 +640,34 @@ function DocumentActions({
             }
           }}
         >
-          <DialogTitle>Archive {title}?</DialogTitle>
-          <DialogDescription>
+          <AlertDialogTitle>Archive {title}?</AlertDialogTitle>
+          <AlertDialogDescription>
             {onArchive === null
               ? `${ARCHIVE_UNAVAILABLE}. Nothing has been archived.`
               : "Its content is preserved, but the document becomes read-only and leaves normal listings until you Restore it."}
-          </DialogDescription>
-          <span className="ub-confirm-actions">
-            <DialogClose asChild>
-              <button type="button" className="ub-tool">
-                Cancel
-              </button>
-            </DialogClose>
-            <button
-              type="button"
-              className="ub-tool ub-tool-danger"
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
               disabled={onArchive === null}
-              onClick={() => {
+              onClick={(event) => {
                 // Readiness can be lost while this dialog is open, and then
                 // closing on the click would look exactly like a successful
                 // archive. Refuse in place instead: the dialog stays, saying
                 // why, and Cancel is still the way out.
-                if (onArchive === null) return;
-                setConfirming(false);
+                if (onArchive === null) {
+                  event.preventDefault();
+                  return;
+                }
                 onArchive();
               }}
             >
               Archive document
-            </button>
-          </span>
-        </DialogContent>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
       </span>
-    </Dialog>
+    </AlertDialog>
   );
 }
