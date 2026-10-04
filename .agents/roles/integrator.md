@@ -42,7 +42,9 @@ delivery policy's merge policy says.
 After the merge, close a parent whose last open sub-issue this merge closed,
 and apply the pull request's `Corpus update` through MCP, checked against the
 merged code; draft a rewrite yourself only for a claim the merge made wrong
-that the update missed. The documentation pass rewrites, it never appends. For
+that the update missed. Create any new decision record drafted in the update
+through `create_doc` under [the implementer's Decision records](implementer.md#decision-records).
+For existing documents, the documentation pass rewrites, it never appends. For
 each claim the merge made wrong, rewrite the affected sentences to the new
 present-tense truth and delete what they replace; add a block only for a fact
 no existing block owns. No PR or issue number, merge date, run id or "since"

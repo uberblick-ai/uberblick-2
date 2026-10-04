@@ -195,6 +195,16 @@ Five required `##` headings after the header. The bar for all of them:
 **would the implementing agent have to make a product decision the issue
 doesn't answer? Then the issue is not `ready`.**
 
+An already approved issue's implementation may meet an open decision without
+changing its approved outcome. Work proceeds on the recommendation; only a
+major-impact step expensive to reverse waits for a person's answer. The issue
+or PR says `Built on open decision: <topic>, <topic uuid>, recommended option:
+<option>`, and that item joins the record's Links as `owner/repo#n` linked to
+its GitHub issue or PR URL. [`implementer.md`](../.agents/roles/implementer.md#build-on-an-open-decision)
+owns the procedure. An open record supplies neither an approved outcome nor
+the person's `Implements:` approval above, and does not waive this ready bar
+or delivery-policy's review and merge tiers.
+
 - **What** — one paragraph, the outcome in behavioral terms.
 - **Why** — a sentence or two, tied to the spike acceptance criteria or a
   doc. Keeps the agent from "improving" beyond intent.

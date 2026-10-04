@@ -5,6 +5,44 @@ Product intent, architecture and principles live in the MCP corpus; this file
 owns operational authority only. `integration.md` holds how the gates run, and
 `review-protocol.md` how findings are settled.
 
+## Decision records
+
+Record a choice only when all three hold:
+
+1. It outlives its task: it still binds work after the issue closes.
+2. There was a real alternative, not already dictated by a decision or corpus
+   document.
+3. Reversing it costs something: it fixes user-facing behavior, a command or
+   API, a data shape, a guarantee, a dependency or a process rule. Would a
+   fresh agent choosing the opposite next month leave something to undo?
+
+A record is overkill when the choice dies with the task; an existing decision,
+corpus document, linter, formatter or established code convention already
+decides it (link that source); it is cheap to reverse and binds nothing
+downstream (naming, refactors, internal helpers or test structure); it is a bug
+fix restoring intended behavior; or it describes current behavior rather than
+a choice (update the owning Regular Document). Keep task-local reasoning in
+the issue, PR or code comment. When in doubt, mention the choice in the PR
+without a new record; a reviewer or person can promote it later.
+
+An agent creates a topic's first record `decided` as its stance, except that a
+topic crossing the live **Uberblick project agent workflow**
+(`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`)'s **Human boundaries** table starts
+`open` with the agent's recommendation. Use **Decision logs**
+(`b7fdc6d7-ce5c-4733-a083-3fc30196f0b3`) for stance, answers, rejection and
+topic resolution, and **MCP interface contract**
+(`6e73bb70-e5da-4ee6-98ff-93ec9804856d`) for the installed calls and refusals.
+`create_doc` and `set_status` record a person's answer with
+`answer: {who, when, where}`; a first record decided without one is
+`agentStance`. Do not invent an answer or reject a stance without a person's
+recorded answer. A decided record's title, decision line and blocks refuse
+writes with `decision_read_only`; a change needs a successor a person approves.
+
+Implementation and review corrections follow
+[`implementer.md`](../roles/implementer.md#decision-records); missing-record
+findings follow [`review-protocol.md`](review-protocol.md#findings). These
+routes do not change the review or merge tiers below.
+
 ## Workflow
 
 1. **Issue first.** Every change starts as a GitHub issue that conforms to

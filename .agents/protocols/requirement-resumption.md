@@ -30,35 +30,67 @@ A later shaping conversation may resume a requirement by uuid, whether its
 status is `draft` or already `planned`. Read it with `get_doc`; a title match is
 not identity. Refuse to reinterpret another document kind as a requirement.
 Gather every unresolved annotation on the requirement, every unresolved
-annotation on each decision document in its log that this replica can read, and
-every log entry whose own status is still `open`. Read those decision documents
-for their annotations whatever their status: a decision's status and its
-threads' `resolved` flags are independent, so deciding a decision leaves an
-unresolved objection on it unresolved and still owed a disposition. A decision
-reference this replica cannot read is a visible boundary to surface to the
-human, never an item to skip.
+annotation on each readable decision document referenced by its log, and every
+record in each topic row's `pending` as an open decision item, plus every
+non-empty `conflicts` group as a decision item naming all its records. Do not
+select topic rows by their representative's `status`: the row may be `decided`
+while several successors are pending. Read the representative, `inForce`, `pending`
+and `conflicts` records by UUID, deduplicating identical UUIDs, for annotations
+whatever their status. For annotations, also follow those reads' predecessor
+and successor references within the topic, reading each UUID once so earlier
+or rejected records' unresolved objections survive a change of answer. A
+decision's status and its threads' `resolved` flags are independent, so deciding
+a decision leaves an unresolved objection unresolved and still owed a
+disposition. A decision reference this replica cannot read is a visible
+boundary to surface to the human, never an item to skip.
+
+**Decision logs** (`b7fdc6d7-ce5c-4733-a083-3fc30196f0b3`) owns topic
+resolution. With A decided and open successors B and C, gather B and C and
+both records' unresolved annotations even though A represents the topic.
+A stays in force until a person approves a successor; a pending recommendation
+does not replace it. After approving B, a person who declines C rejects it
+rather than deciding it just to clear the pending item. A conflict has nothing
+in force; present its competing answers for the person to resolve, even when
+there is no pending record.
 
 Walk through the gathered items one at a time. For each, first state what
 material change you believe it asks for, then let the human choose: revise,
-reply and resolve with a reason, decide an open decision, or leave it open. Act
-only on that explicit disposition:
+reply and resolve with a reason, decide an open decision, reject a proposal
+with a reason, resolve a conflict, or leave the item unresolved. Act only on
+that explicit disposition:
 
-- revise the existing requirement or decision block by block with `edit_block`,
-  `insert_block`, or `delete_block`; never recreate the document, churn an
-  unchanged outcome block's id, or erase an unresolved choice without the
+- revise the existing requirement or an open decision block by block with
+  `edit_block`, `insert_block`, or `delete_block`; never recreate the document,
+  churn an unchanged outcome block's id, or erase an unresolved choice without the
   human's disposition;
+- change a decided record only by creating an `open` successor through
+  `create_doc`, naming the predecessor in `supersedes`; never direct a block,
+  title or decision-line edit of a decided record (`decision_read_only`);
 - reply to an annotation with `annotate`, naming its `thread_id`, the reason,
   and `resolved: true`; reopening is the same reply shape with
   `resolved: false` and the human's reason;
-- edit an open decision in place and call `set_status` with `decided` only after
-  the human confirms the choice and the document carries the required
-  `Reconsidering` section; or
-- make no write when the human leaves the item open.
+- finish an open record's text while it is editable, then call `set_status`
+  with `decided` and `answer: {who, when, where}` recording the person's actual
+  confirmed choice and its source. A successor takes effect only through that
+  approval, never an agent stance. No `Reconsidering` section is required;
+  **MCP interface contract** (`6e73bb70-e5da-4ee6-98ff-93ec9804856d`) owns the
+  exact call and refusals;
+- reject an open proposal, an agent stance, or a side of a decided conflict
+  through `set_status` with `status: rejected`, the person's non-empty `reason`
+  and `answer: {who, when, where}`. To resolve a conflict, reject only the
+  records the person declines, re-reading the topic after each write until the
+  chosen answer is in force. If new competing records surface, obtain their
+  disposition before further writes. The MCP interface contract owns the exact
+  call and refusals; never infer rejection from approval of another record; or
+- make no write when the human leaves the item unresolved.
 
-Only a resolved annotation drops out of the next resumption, and a decided
-decision drops out only as a decision item: its own unresolved annotations stay
-in the walk. Re-read affected documents after writes so the next item is based
-on current block revisions and decision state.
+Only a resolved annotation drops out of the next resumption. A topic drops out
+as a decision item only when it has no pending record and no conflict;
+deciding one successor does not drop another pending successor. Approving B
+and rejecting C leaves B in force with no pending record or conflict. Its
+records' unresolved annotations stay in the walk. Re-read affected documents
+and the requirement's log after writes so the next item is based on current
+block revisions and decision state.
 
 When the human explicitly declares the requirement planned, set its status to
 `planned` and ask them to group the product outcomes into the intakes they want.

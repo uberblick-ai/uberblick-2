@@ -69,6 +69,10 @@ waiting for a live dialogue. Other role-specific stops remain unchanged.
 
 ## Escalate what is not yours to decide
 
+For implementation within an already approved issue that meets an open
+decision, follow [the implementer's bounded exception](implementer.md#build-on-an-open-decision).
+All other boundary crossings follow the escalation rule here.
+
 Decide what the issue, settled decisions, adopted principles and repository
 policy already cover. Ask a person when the next step would change product
 direction, an adopted principle or guarantee, external resources or agent
