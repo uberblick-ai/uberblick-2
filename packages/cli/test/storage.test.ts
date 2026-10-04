@@ -69,7 +69,7 @@ describe("the resolved roots", () => {
     expect(userConfigPath(env)).toBe(join(configRoot(root), "config.json"));
     expect(credentialsPath(env)).toBe(join(configRoot(root), "credentials.json"));
 
-    const resolved = resolveConfig({ env });
+    const resolved = resolveConfig({ env, cwd: root });
     expect(resolved.paths.userConfig).toBe(join(configRoot(root), "config.json"));
     expect(resolved.paths.credentials).toBe(
       join(configRoot(root), "credentials.json"),
@@ -118,8 +118,10 @@ describe("the resolved roots", () => {
 
   it("stays owner-only when a workspace replica is the first writer", async () => {
     const root = home();
-    const env = homeEnv(root, { WORKSPACE_ID: WORKSPACE });
-    const { report } = await statusReport({ env });
+    const env = homeEnv(root, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" });
+    const { report } = await statusReport({ env, cwd: root });
+
+    if (report.workspace === null) throw new Error("expected the explicit binding");
 
     // 0600 because the replica is the whole corpus. The chmod happens before
     // the WAL exists, so the files SQLite creates beside it inherit the mode.
@@ -135,7 +137,7 @@ describe("`ub status`", () => {
   it("reports a storage object with the resolved paths, and no secret", async () => {
     const box = sandbox({
       credentials: { signingSecret: "storage-test-secret-91af3c" },
-      userConfig: { workspace: WORKSPACE, hubUrl: "ws://127.0.0.1:9/dead" },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: "ws://127.0.0.1:9/dead" },
     });
 
     // Async, not `runUb`: this suite owns an in-process hub in the ordering
@@ -161,7 +163,7 @@ describe("`ub status`", () => {
     // not in four-character fragments, not as a size. See `tracesOf`.
     const box = sandbox({
       credentials: { signingSecret: SECRET_ON_FILE },
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
     });
     const pinned = { HUB_AUTH_TOKEN: SECRET_IN_ENV };
 
@@ -185,35 +187,25 @@ describe("`ub status`", () => {
     expect(tracesOf(SECRET_ON_FILE, json.output)).toEqual([]);
   });
 
-  it("keeps shadowed layers in JSON and warnings, outside the human overview", async () => {
-    // The report answered "which layer won?" and nothing else, so a machine
-    // whose environment named one workspace and whose config.json named
-    // another looked healthy. In-process rather than spawned: no secret, so
-    // nothing is dialled, and the render is checked off the same report.
-    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
-    const conflict = await statusReport({
-      env: { ...box.env, WORKSPACE_ID: PINNED },
+  it("shows the complete environment binding instead of merging it with the project", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "https://project.example.test" } });
+    const selected = await statusReport({
+      env: { ...box.env, UB_WORKSPACE_ID: PINNED, UB_HUB_URL: "local" },
+      cwd: box.cwd,
     });
+    if (selected.report.workspace === null) throw new Error("expected an environment binding");
 
-    expect(conflict.report.sources.workspace).toBe("environment");
-    expect(conflict.report.shadowed).toEqual([
-      { setting: "workspace", layer: "user config" },
-    ]);
-    expect(renderStatus(conflict.report)).not.toMatch(/shadowed|user config/);
-    expect(conflict.warnings.join("\n")).toMatch(/names a different workspace/);
-
-    // Agreeing layers leave the key out entirely, so `--json` carries the
-    // conflict by its presence.
-    const agreed = await statusReport({
-      env: { ...box.env, WORKSPACE_ID: WORKSPACE },
-    });
-    expect(agreed.report.shadowed).toBeUndefined();
-    expect(renderStatus(agreed.report)).not.toMatch(/shadowed/);
-    expect(agreed.warnings).toEqual([]);
+    expect(selected.report.sources).toEqual({ workspace: "environment", hubUrl: "environment" });
+    expect(selected.report.binding).toEqual({ workspaceId: PINNED, hubUrl: null });
+    expect(selected.report.projectConfig).toBeNull();
+    expect(selected.report.shadowed).toBeUndefined();
+    expect(renderStatus(selected.report)).toMatch(/selection\s+environment/);
+    expect(renderStatus(selected.report)).toMatch(/hub\s+local-only/);
+    expect(selected.warnings).toEqual([]);
   });
 
   it("keeps database and storage paths outside the human overview", async () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     const run = await runUbAsync(["status"], box);
 
     expect(run.status).toBe(0);
@@ -228,7 +220,7 @@ describe("`ub doctor`", () => {
     // therefore no check below which the rest would have to be skipped.
     const root = home();
     const { report } = await doctorReport({
-      env: homeEnv(root, { WORKSPACE_ID: WORKSPACE }),
+      env: homeEnv(root, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" }),
       cwd: root,
     });
 

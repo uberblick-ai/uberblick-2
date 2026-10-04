@@ -23,7 +23,7 @@
  */
 
 import { runChild } from "./child.js";
-import { resolveConfig } from "./config.js";
+import { resolveConfig, requireBinding } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 
@@ -66,6 +66,7 @@ export async function envCommand(argv: string[], io: Io): Promise<number> {
   }
 
   const resolved = resolveConfig();
+  requireBinding(resolved);
   for (const warning of resolved.warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }

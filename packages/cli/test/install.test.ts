@@ -29,12 +29,12 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { afterAll, describe, expect, it } from "vitest";
 import { DEFAULT_ENTRY, snippet } from "../src/mcp-config.js";
 import {
-  REPO_ROOT,
   type Sandbox,
+  type SandboxFiles,
   UB_BIN,
   removeTempDirs,
   runUb,
-  sandbox,
+  sandbox as unboundSandbox,
 } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -57,6 +57,8 @@ const REPORTED = [
   RECORD,
   "HUB_AUTH_TOKEN",
   "HUB_URL",
+  "UB_WORKSPACE_ID",
+  "UB_HUB_URL",
   "HUB_DB_PATH",
   "UBERBLICK_DB",
   "WORKSPACE_ID",
@@ -71,6 +73,18 @@ const REPORTED = [
 const SECRET = "tok-must-never-be-printed-4a1f";
 
 const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
+const LOCAL_BINDING_ENV = { UB_HUB_URL: "local", UB_WORKSPACE_ID: WORKSPACE };
+
+/** These installer cases start with a deliberately selected project binding. */
+function sandbox(files: SandboxFiles = {}): Sandbox {
+  const box = unboundSandbox(files);
+  writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify({
+    workspaceId: WORKSPACE,
+    hubUrl: null,
+  }));
+  return box;
+}
+
 
 interface Stub {
   /** Prepend to PATH, and the environment that points the stub at its record. */
@@ -131,6 +145,7 @@ describe("ub mcp install --print", () => {
       type: "stdio",
       command: "ub",
       args: ["mcp", "serve"],
+      env: LOCAL_BINDING_ENV,
     });
     expect(claude.stderr).toContain(join(box.cwd, ".mcp.json"));
     expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
@@ -142,7 +157,8 @@ describe("ub mcp install --print", () => {
     });
     expect(codex.status).toBe(0);
     expect(codex.stdout).toBe(
-      '[mcp_servers.uberblick]\ncommand = "ub"\nargs = ["mcp", "serve"]\n',
+      '[mcp_servers.uberblick]\ncommand = "ub"\nargs = ["mcp", "serve"]\n' +
+      `\n[mcp_servers.uberblick.env]\nUB_HUB_URL = "local"\nUB_WORKSPACE_ID = "${WORKSPACE}"\n`,
     );
   });
 
@@ -156,6 +172,7 @@ describe("ub mcp install --print", () => {
       type: "stdio",
       command: "ub",
       args: ["mcp", "serve"],
+      env: LOCAL_BINDING_ENV,
     });
     expect(run.stderr).toMatch(/not a client/);
     expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
@@ -186,7 +203,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expected: string[];
   }[] = [
     {
-      what: "claude, project, unpinned",
+      what: "claude, project, selected pair",
       program: "claude",
       argv: ["mcp", "install", "claude", "--project"],
       expected: [
@@ -195,6 +212,10 @@ describe("ub mcp install, and the vendor's own CLI", () => {
         "uberblick",
         "--scope",
         "project",
+        "-e",
+        "UB_HUB_URL=local",
+        "-e",
+        `UB_WORKSPACE_ID=${WORKSPACE}`,
         "--",
         "ub",
         "mcp",
@@ -204,7 +225,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     {
       what: "claude, user, pinned",
       program: "claude",
-      argv: ["mcp", "install", "claude", "--user", "--workspace", WORKSPACE],
+      argv: ["mcp", "install", "claude", "--user", "--workspace", WORKSPACE, "--hub", "local"],
       expected: [
         "mcp",
         "add",
@@ -212,7 +233,9 @@ describe("ub mcp install, and the vendor's own CLI", () => {
         "--scope",
         "user",
         "-e",
-        `WORKSPACE_ID=${WORKSPACE}`,
+        "UB_HUB_URL=local",
+        "-e",
+        `UB_WORKSPACE_ID=${WORKSPACE}`,
         "--",
         "ub",
         "mcp",
@@ -220,21 +243,23 @@ describe("ub mcp install, and the vendor's own CLI", () => {
       ],
     },
     {
-      what: "codex, user, unpinned",
+      what: "codex, user, selected pair",
       program: "codex",
       argv: ["mcp", "install", "codex", "--user"],
-      expected: ["mcp", "add", "uberblick", "--", "ub", "mcp", "serve"],
+      expected: ["mcp", "add", "uberblick", "--env", "UB_HUB_URL=local", "--env", `UB_WORKSPACE_ID=${WORKSPACE}`, "--", "ub", "mcp", "serve"],
     },
     {
       what: "codex, project, pinned",
       program: "codex",
-      argv: ["mcp", "install", "codex", "--project", "--workspace", WORKSPACE],
+      argv: ["mcp", "install", "codex", "--project", "--workspace", WORKSPACE, "--hub", "local"],
       expected: [
         "mcp",
         "add",
         "uberblick",
         "--env",
-        `WORKSPACE_ID=${WORKSPACE}`,
+        "UB_HUB_URL=local",
+        "--env",
+        `UB_WORKSPACE_ID=${WORKSPACE}`,
         "--",
         "ub",
         "mcp",
@@ -277,15 +302,16 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     const box = sandbox();
     const stub = stubVendor(box, "claude");
     const run = runUb(
-      ["mcp", "install", "claude", "--project", "--workspace", WORKSPACE, "--label", "research"],
+      ["mcp", "install", "claude", "--project", "--workspace", WORKSPACE, "--hub", "local", "--label", "research"],
       box,
       stub.env,
     );
 
     expect(run.status, run.output).toBe(0);
     expect(read(stub.record)).toContain("uberblick-research");
-    expect(run.stdout).toContain(`This entry is pinned to ${WORKSPACE}`);
-    expect(run.stdout).toContain("does not follow `ub workspace use`");
+    expect(run.stdout).toContain(WORKSPACE);
+    expect(run.stdout).toContain("This entry is pinned");
+    expect(run.stdout).toContain("later project selection changes do not redirect it");
   });
 
   it("reports that it failed without repeating what it said", () => {
@@ -320,6 +346,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
       HUB_DB_PATH: "/tmp/hub.sqlite",
       UBERBLICK_DB: "/tmp/uberblick.sqlite",
       WORKSPACE_ID: WORKSPACE,
+      ...LOCAL_BINDING_ENV,
       WORKSPACES: "one,two",
     };
 
@@ -375,15 +402,13 @@ describe("ub mcp install, and the vendor's own CLI", () => {
 
 describe("ub mcp install, and what is registered already", () => {
   it("reports what the vendor's own CLI wrote as already installed, and runs nothing", () => {
-    // `claude mcp add` writes `type` and an empty `env`, and the snippet writes
-    // neither. Equality is about what the client will run, so this must not be
-    // a clash between two ways of installing the very same server.
+    // Vendor-generated entries include the same complete binding as snippets.
     const box = sandbox();
     const path = join(box.cwd, ".mcp.json");
     const before = `${JSON.stringify(
       {
         mcpServers: {
-          uberblick: { type: "stdio", command: "ub", args: ["mcp", "serve"], env: {} },
+          uberblick: { type: "stdio", command: "ub", args: ["mcp", "serve"], env: LOCAL_BINDING_ENV },
         },
       },
       null,
@@ -408,12 +433,12 @@ describe("ub mcp install, and what is registered already", () => {
     const path = join(home, "config.toml");
     const before =
       'model = "gpt-5"\n\n[mcp_servers.uberblick]\ncommand = "ub"\n' +
-      `args = ["mcp", "serve"]\n\n[mcp_servers.uberblick.env]\nWORKSPACE_ID = "${WORKSPACE}"\n`;
+      `args = ["mcp", "serve"]\n\n[mcp_servers.uberblick.env]\nUB_HUB_URL = "local"\nUB_WORKSPACE_ID = "${WORKSPACE}"\n`;
     writeFileSync(path, before, "utf8");
     const stub = stubVendor(box, "codex");
 
     const run = runUb(
-      ["mcp", "install", "codex", "--user", "--workspace", WORKSPACE],
+      ["mcp", "install", "codex", "--user", "--workspace", WORKSPACE, "--hub", "local"],
       box,
       { ...stub.env, CODEX_HOME: home },
     );
@@ -587,6 +612,7 @@ describe("ub mcp install cursor", () => {
       type: "stdio",
       command: "ub",
       args: ["mcp", "serve"],
+      env: LOCAL_BINDING_ENV,
     });
     expect(existsSync(join(box.cwd, ".cursor"))).toBe(false);
   });
@@ -602,14 +628,7 @@ describe("MCP install and the checkout's deployment override", () => {
     expect([entry.command, ...entry.args]).toEqual(["ub", "mcp", "serve"]);
   });
 
-  it("carries no workspace pin, so this checkout follows the machine default", () => {
-    // A project entry MAY pin `WORKSPACE_ID` — that is how a repository binds
-    // itself to a workspace now — and this one deliberately does not, so
-    // `ub workspace use` still moves what an agent session here reads.
-    const entry = JSON.parse(read(join(REPO_ROOT, ".mcp.json"))).mcpServers
-      .uberblick;
-    expect(entry.env).toBeUndefined();
-  });
+
 });
 
 describe("ub mcp install --workspace", () => {
@@ -622,38 +641,19 @@ describe("ub mcp install --workspace", () => {
     writeFileSync(join(dir, `${uuid}.sqlite`), "", "utf8");
   }
 
-  it("never prints an endpoint, a credential or a secret, in any format", () => {
-    // A client config is committable, and `credentials.json` is the one file on
-    // this machine that must not be copied anywhere. Nothing is written now, so
-    // the surface to scan is the snippet and the report around it — every
-    // target format, pinned and unpinned. `WORKSPACE_ID` is deliberately not on
-    // the list: it is an id, it is the one value an entry may carry, and the
-    // pinned runs below print it on purpose.
-    const forbidden = [
-      SECRET,
-      "wss://hub.example.ts.net",
-      "HUB_URL",
-      "HUB_AUTH_TOKEN",
-      "HUB_CREDENTIAL",
-      "HUB_ROOT_SECRET",
-      "signingSecret",
-    ];
-
+  it("prints the selected endpoint but never credentials, in any format", () => {
     for (const target of ["claude", "cursor", "codex"] as const) {
-      for (const pin of [[], ["--workspace", WORKSPACE]]) {
-        const box = sandbox({
-          userConfig: { workspace: WORKSPACE, hubUrl: "wss://hub.example.ts.net" },
-          credentials: { signingSecret: SECRET },
-        });
-        const run = runUb(["mcp", "install", target, "--project", ...pin], box, {
-          ...NO_VENDOR,
-          CODEX_HOME: codexHome(box),
-        });
-        expect(run.status, run.output).toBe(0);
-        for (const value of forbidden) {
-          expect(run.output, `${target} ${pin.join(" ")}`).not.toContain(value);
-        }
-        expect(run.stdout).toContain(pin.length === 0 ? "uberblick" : WORKSPACE);
+      const box = sandbox({ credentials: { signingSecret: SECRET } });
+      const run = runUb([
+        "mcp", "install", target, "--print", "--workspace", WORKSPACE,
+        "--hub", "https://hub.example.test",
+      ], box, { ...NO_VENDOR, CODEX_HOME: codexHome(box) });
+      expect(run.status, run.output).toBe(0);
+      expect(run.stdout).toContain("wss://hub.example.test/ws");
+      expect(run.stdout).toContain("UB_HUB_URL");
+      expect(run.stdout).toContain(WORKSPACE);
+      for (const forbidden of [SECRET, "HUB_AUTH_TOKEN", "signingSecret"]) {
+        expect(run.output).not.toContain(forbidden);
       }
     }
   });
@@ -668,24 +668,22 @@ describe("ub mcp install --workspace", () => {
       runUb(["mcp", "install", "claude", "--project", ...flags], box, stub.env);
 
     // Ambiguous: both `4d8e…` uuids start with it, and the refusal names them.
-    const ambiguous = install("--workspace", "4d8e");
+    const ambiguous = install("--workspace", "4d8e", "--hub", "local");
     expect(ambiguous.status).toBe(2);
     expect(ambiguous.stderr).toMatch(WORKSPACE);
     expect(ambiguous.stderr).toMatch(OTHER);
 
-    const noMatch = install("--workspace", "ffff");
+    const noMatch = install("--workspace", "ffff", "--hub", "local");
     expect(noMatch.status).toBe(2);
     expect(noMatch.stderr).toMatch(/no workspace on this machine starts with/);
 
-    const notAUuid = install("--workspace", "my-notes");
+    const notAUuid = install("--workspace", "my-notes", "--hub", "local");
     expect(notAUuid.status).toBe(2);
     expect(notAUuid.stderr).toMatch(/is not a workspace id/);
 
-    // A name with nothing to pin would be a second entry running the same
-    // unpinned command under a second name, which is not a thing to install.
-    const unpinned = install("--label", "research");
-    expect(unpinned.status).toBe(2);
-    expect(unpinned.stderr).toMatch(/needs a --workspace/);
+    const incomplete = install("--workspace", WORKSPACE);
+    expect(incomplete.status).toBe(2);
+    expect(incomplete.stderr).toMatch(/--workspace and --hub must be supplied together/);
 
     const stale = install("--workspace", WORKSPACE, "--name", "research");
     expect(stale.status).toBe(2);
@@ -693,6 +691,121 @@ describe("ub mcp install --workspace", () => {
 
     expect(existsSync(stub.record)).toBe(false);
   });
+});
+
+describe("complete MCP bindings", () => {
+  const OTHER = "5cb9a7a5-3cc0-4cdb-bd20-fd348fbf1311";
+
+  it("does not install from the old machine default", () => {
+    const box = unboundSandbox({ userConfig: {
+      workspace: WORKSPACE, hubUrl: "wss://old-hub.example.test/ws",
+    } });
+    const stub = stubVendor(box, "claude");
+    const run = runUb(["mcp", "install", "claude"], box, stub.env);
+    expect(run.status).toBe(2);
+    expect(run.stderr).toMatch(/No workspace selected/);
+    expect(run.stdout).toBe("");
+    expect(existsSync(stub.record)).toBe(false);
+  });
+
+  it("pins the nearest ancestor binding, with no dependence on the spawn directory", () => {
+    const box = sandbox();
+    writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify({
+      workspaceId: WORKSPACE, hubUrl: "https://project.example.test",
+    }));
+    const nested = join(box.cwd, "src", "feature");
+    mkdirSync(nested, { recursive: true });
+    const run = runUb(["mcp", "install", "claude", "--print"], { ...box, cwd: nested });
+    expect(run.status, run.output).toBe(0);
+    expect(JSON.parse(run.stdout).mcpServers.uberblick.env).toEqual({
+      UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "wss://project.example.test/ws",
+    });
+  });
+
+  it("can name the current complete binding without restating it", () => {
+    const run = runUb(["mcp", "install", "claude", "--print", "--label", "primary"], sandbox());
+    expect(run.status, run.output).toBe(0);
+    expect(JSON.parse(run.stdout).mcpServers["uberblick-primary"].env).toEqual(LOCAL_BINDING_ENV);
+  });
+
+  it("keeps separately named entries on different hubs, preserving existing registrations", () => {
+    const box = sandbox();
+    const first = runUb([
+      "mcp", "install", "claude", "--print", "--workspace", WORKSPACE,
+      "--hub", "https://first.example.test", "--label", "first",
+    ], box);
+    expect(first.status, first.output).toBe(0);
+    const firstEntry = JSON.parse(first.stdout).mcpServers["uberblick-first"];
+    const path = join(box.cwd, ".mcp.json");
+    const before = first.stdout;
+    writeFileSync(path, before);
+    const stub = stubVendor(box, "claude");
+    const second = runUb([
+      "mcp", "install", "claude", "--workspace", OTHER,
+      "--hub", "https://second.example.test", "--label", "second",
+    ], box, stub.env);
+    expect(second.status, second.output).toBe(0);
+    expect(read(stub.record).trimEnd().split("\n")).toEqual([
+      "mcp", "add", "uberblick-second", "--scope", "project",
+      "-e", "UB_HUB_URL=wss://second.example.test/ws",
+      "-e", `UB_WORKSPACE_ID=${OTHER}`, "--", "ub", "mcp", "serve",
+    ]);
+    expect(firstEntry.env).toEqual({
+      UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "wss://first.example.test/ws",
+    });
+    expect(read(path)).toBe(before);
+  });
+
+  it.each([
+    { UB_WORKSPACE_ID: OTHER, UB_HUB_URL: undefined },
+    { UB_WORKSPACE_ID: undefined, UB_HUB_URL: "https://other.example.test" },
+  ])("refuses an incomplete environment override instead of borrowing the project half", (env) => {
+    const box = sandbox();
+    const stub = stubVendor(box, "claude");
+    const run = runUb(["mcp", "install", "claude"], box, { ...stub.env, ...env });
+    expect(run.status).toBe(2);
+    expect(run.stderr).toMatch(/UB_WORKSPACE_ID.*UB_HUB_URL/);
+    expect(existsSync(stub.record)).toBe(false);
+  });
+
+  it("lets complete explicit flags replace an incomplete ambient override", () => {
+    const run = runUb([
+      "mcp", "install", "claude", "--print", "--workspace", OTHER, "--hub", "local",
+    ], sandbox(), { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: undefined });
+    expect(run.status, run.output).toBe(0);
+    expect(JSON.parse(run.stdout).mcpServers.uberblick.env).toEqual({
+      UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "local",
+    });
+  });
+
+  it.each([`https://user:${SECRET}@hub.example.test`, `https://hub.example.test?token=${SECRET}`])(
+    "refuses a credential-bearing hub without leaking it", (hub) => {
+      const run = runUb([
+        "mcp", "install", "claude", "--print", "--workspace", WORKSPACE, "--hub", hub,
+      ], sandbox());
+      expect(run.status).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.output).not.toContain(SECRET);
+    },
+  );
+
+  it.each([undefined, { WORKSPACE_ID: WORKSPACE }])(
+    "leaves legacy entries untouched instead of silently upgrading their binding", (env) => {
+      const box = sandbox();
+      const path = join(box.cwd, ".mcp.json");
+      const before = JSON.stringify({ mcpServers: {
+        uberblick: { command: "ub", args: ["mcp", "serve"], env },
+      } });
+      writeFileSync(path, before);
+      const stub = stubVendor(box, "claude");
+      const run = runUb(["mcp", "install", "claude"], box, stub.env);
+      expect(run.status).toBe(1);
+      expect(run.stderr).toMatch(/something other than this/);
+      expect(JSON.parse(run.stdout).mcpServers.uberblick.env).toEqual(LOCAL_BINDING_ENV);
+      expect(read(path)).toBe(before);
+      expect(existsSync(stub.record)).toBe(false);
+    },
+  );
 });
 
 describe("two entries, side by side", () => {
@@ -747,7 +860,8 @@ describe("two entries, side by side", () => {
   }
 
   it("serve disjoint corpora out of one data directory", async () => {
-    const box = sandbox({ userConfig: { workspace: PRIMARY } });
+    const box = sandbox();
+    writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify({ workspaceId: PRIMARY, hubUrl: null }));
     // Both entries have to spawn *this* checkout's `ub`, which is not on any
     // PATH, so both are printed through the `--` override. Everything else —
     // the names, the pin, the shape — is what `ub mcp install` decided.
@@ -764,6 +878,8 @@ describe("two entries, side by side", () => {
         "--print",
         "--workspace",
         PINNED,
+        "--hub",
+        "local",
         "--label",
         "other",
         "--",

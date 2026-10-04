@@ -59,11 +59,9 @@ export { normalizeRemoteUrl, parseJoinTarget } from "@uberblick/hub/remote-url";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import {
   readCredentials,
-  readUserConfig,
   resolveConfig,
-  userConfigPath,
-  writeUserConfig,
 } from "./config.js";
+import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
@@ -99,37 +97,20 @@ export interface RemotePersistence {
   warnings: string[];
 }
 
-/**
- * Persist the endpoint, and say honestly who will follow it.
- *
- * `config.json` is where `ub` resolves `hubUrl`, and it is the only place: it is
- * what makes `ub status`, `ub mcp serve`, the MCP server this CLI spawns and
- * every checkout task running under `ub env` dial the new hub. Nothing ambient
- * outranks it.
- *
- * A *deployed* web client learns its endpoint at runtime from the served
- * `/uberblick-config.json` (#91), not from anything written here.
- *
- * **A workspace travels with the endpoint, when one is given.** `ub remote join`
- * binds this machine to the workspace its URL names, and that binding and the
- * endpoint have to land in the same file in the same write — a machine pointed
- * at the remote hub while still naming the workspace it had before would dial
- * the right hub for the wrong rooms.
- *
- * Deployment and initialization also publish through this helper.
- */
+/** Persist the verified complete project destination in one atomic write. */
 export function setRemote(
   url: string,
-  options: { workspace?: string | undefined; env?: NodeJS.ProcessEnv } = {},
+  options: { workspace?: string | undefined; env?: NodeJS.ProcessEnv; cwd?: string } = {},
 ): RemotePersistence {
   const env = options.env ?? process.env;
-  const current = readUserConfig(env);
-  writeUserConfig({
-    ...current.raw,
-    hubUrl: url,
-    ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
-  }, env);
-  return { written: [userConfigPath(env)], warnings: [] };
+  const current = resolveProjectBinding({ env, ...(options.cwd === undefined ? {} : { cwd: options.cwd }) });
+  const workspaceId = options.workspace ?? current.binding?.workspaceId;
+  if (workspaceId === undefined) throw new Error("a workspace is required before binding a remote hub");
+  const path = writeProjectBinding({ workspaceId, hubUrl: url }, {
+    env,
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+  });
+  return { written: [path], warnings: [] };
 }
 
 function plural(count: number, noun: string): string {
@@ -230,7 +211,7 @@ function report(
   }
   text +=
     "\n`ub`, `ub mcp serve` and the MCP server it spawns read this endpoint from\n" +
-    "config.json. A deployed web client reads its own from the served\n" +
+    ".uberblick.json. A deployed web client reads its own from the served\n" +
     "/uberblick-config.json.\n";
   text +=
     "\nVerified here means the hub acknowledged the writes. A fresh client read the\n" +
@@ -312,13 +293,13 @@ function showRemote(io: Io): number {
   const resolved = resolveConfig();
   warn(io, resolved.warnings);
   const config = resolveMcpConfig(resolved.env);
-  const configured = resolved.origins.hubUrl !== "default";
+  const selected = resolveProjectBinding();
+  const configured = selected.binding?.hubUrl != null;
 
   if (!configured) {
     let text = "no remote configured\n\n";
     text +=
-      `Documents sync with ${config.hubUrl}, the built-in default — a hub on ` +
-      "this machine.\n\n";
+      "This project uses a local-only workspace.\n\n";
     text +=
       "  ub remote init <ssh-target>\n" +
       "                           stand one up on a host you can reach\n";
@@ -329,7 +310,7 @@ function showRemote(io: Io): number {
     return 0;
   }
 
-  let text = `remote        ${config.hubUrl} (user config)\n`;
+  let text = `remote        ${config.hubUrl} (${ORIGIN_LABELS[resolved.origins.hubUrl]})\n`;
   text += `workspace     ${config.workspaceId}\n`;
   text += `credential    ${
     config.deviceLogin !== undefined
@@ -562,16 +543,7 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     previous !== undefined &&
     previous !== "" &&
     parseWorkspaceId(previous).uuid !== parseWorkspaceId(flags.workspace).uuid;
-  // The endpoint that workspace was dialling, from the snapshot taken before
-  // anything was written — the built-in default filled in, because "start the
-  // hub and point back at it" needs an address a person can paste.
-  const previousEndpoint = switched
-    ? resolveMcpConfig(resolved.env).hubUrl
-    : bridge.target;
-
-  // `config.json` is read, merged and republished here, and `ub init` and
-  // `ub workspace use` do the same to the same file — so all three run under
-  // one lock, or one of them loses a field another had just written.
+  // Serialize project binding writes with init and workspace selection.
   let lock: InitLock;
   try {
     lock = await acquireInitLock();
@@ -609,19 +581,12 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
       `\n${previous} was not merged into this one and nothing of it was moved. ` +
       "Whatever this\nmachine holds for it is still here — `ub workspace list` " +
       "shows the workspaces with\na replica on this machine — and " +
-      `\`ub workspace use ${previous}\` switches back.\n` +
-      "\nThe endpoint, though, is machine-wide: that workspace now syncs with " +
-      `${bridge.target}\ntoo, under its own rooms. Documents that only ever ` +
-      "reached a local hub — written in\na browser and never pulled down by an " +
-      "MCP session — are in that hub's database and\nnowhere else, and nothing " +
-      "points at it any more. Going back to that endpoint is\n" +
-      `\`ub remote join ${previousEndpoint}/${previous}\`, which hydrates from ` +
-      "it the way this join did.\n";
+      "The previous workspace and its documents remain unchanged.\n";
   }
   io.out(report("joined", bridge.target, checked.corpus, persistence, takenAt, note));
 
   // Written, and possibly overruled: `WORKSPACE_ID` in the environment outranks
-  // `config.json`, and a report naming a binding that something else outranks is
+  // `.uberblick.json`, and a report naming a binding that something else outranks is
   // the lie `ub status` then contradicts.
   const after = resolveConfig();
   const inForce = after.env.WORKSPACE_ID?.trim();

@@ -242,7 +242,7 @@ describe("ub auth local selection and command surface", () => {
   });
 
   it("requires an explicit or file-bound hub, ignores ambient HUB_URL and keeps local-only work quiet", async () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, userConfig: { workspace: WORKSPACE } });
     for (const subcommand of ["login", "status", "logout"]) {
       const run = await runUbAsync(["auth", subcommand], box, { HUB_URL: "ws://ambient.invalid" });
       expect(run.status).toBe(1);
@@ -293,7 +293,7 @@ describe("ub auth local selection and command surface", () => {
     const endpoint = "wss://Hub.Example.TS.net:443/ws";
     const old = fixture();
     const other = fixture([]);
-    const box = sandbox({
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint },
       userConfig: { workspace: WORKSPACE, hubUrl: endpoint },
       credentials: { signingSecret: SIGNING_SECRET, hubLogins: { [origin]: old, [OTHER_HUB]: other } },
     });
@@ -321,7 +321,7 @@ describe("ub auth local selection and command surface", () => {
   });
 
   it("explains renewal for a bound workspace outside the credential snapshot", async () => {
-    const box = sandbox({
+    const box = sandbox({ projectBinding: { workspaceId: OTHER_WORKSPACE, hubUrl: DEAD_HUB_URL },
       userConfig: { workspace: OTHER_WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { hubLogins: { "http://127.0.0.1:1": fixture() } },
     });
@@ -335,7 +335,7 @@ describe("ub auth local selection and command surface", () => {
   it.each(["exposed", "unreadable", "invalid-entry"])("refuses %s local credentials without presenting identity as signed in", async (kind) => {
     const origin = "http://127.0.0.1:1";
     const old = fixture();
-    const box = sandbox({
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { hubLogins: { [origin]: kind === "invalid-entry" ? {} : old } },
     });
@@ -353,7 +353,7 @@ describe("ub auth local selection and command surface", () => {
 describe("hub-driven CLI GitHub sign-in", () => {
   it("claims a fresh deployed hub before storing its workspace credential and leaves the binding unchanged", async () => {
     const remote = await rig([], true, true);
-    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL }, userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const binding = readFileSync(configPath(box));
     const login = await runUbAsync(["auth", "login", remote.origin], box);
     expect(login.status, login.stderr).toBe(0);
@@ -452,11 +452,11 @@ describe("hub-driven CLI GitHub sign-in", () => {
 
   it("keeps loopback sync disabled without a local secret and does not export its login key", async () => {
     const login = fixture();
-    const box = sandbox({
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { hubLogins: { [authenticationOrigin(DEAD_HUB_URL)]: login } },
     });
-    const resolved = resolveConfig({ env: box.env });
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
     const config = resolveMcpConfig(resolved.env);
     expect(config.authSecret).toBeNull();
     expect(config.deviceLogin).toBeUndefined();
@@ -480,7 +480,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
   it("stores identity and every issued workspace privately, preserving binding and other hubs", async () => {
     const remote = await rig([WORKSPACE, OTHER_WORKSPACE]);
     const other = fixture([]);
-    const box = sandbox({
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: `${remote.origin.replace("http:", "ws:")}/ws` },
       userConfig: { workspace: WORKSPACE, hubUrl: `${remote.origin.replace("http:", "ws:")}/ws` },
       credentials: { signingSecret: SIGNING_SECRET, hubLogins: { [OTHER_HUB]: other } },
     });
@@ -550,7 +550,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
 
   it("signs in with zero workspaces and explicitly leaves a different hub binding unchanged", async () => {
     const remote = await rig();
-    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL }, userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const binding = readFileSync(configPath(box));
     const login = await runUbAsync(["auth", "login", remote.origin], box);
     expect(login.status, login.stderr).toBe(0);
@@ -574,7 +574,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
 
   it("keeps an existing login byte-for-byte on denial and replaces it only after completion without revoking", async () => {
     const remote = await rig([WORKSPACE]);
-    const box = sandbox({
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: remote.origin.replace("http:", "ws:") },
       userConfig: { workspace: WORKSPACE, hubUrl: remote.origin.replace("http:", "ws:") },
       credentials: { signingSecret: SIGNING_SECRET },
     });

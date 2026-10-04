@@ -1,57 +1,13 @@
-/**
- * Where `ub` gets its configuration.
- *
- * **The endpoint has one authority: this machine's `config.json`.** There is no
- * ambient layer above it — a `HUB_URL` in the environment is not read, and not
- * passed on to anything this spawns. That layer is what silently redirected a
- * workspace bound to a remote hub at whatever a checkout happened to export
- * (#376, #385), and an endpoint is not the kind of thing two sources may
- * disagree about. `WORKSPACE_ID` and `HUB_AUTH_TOKEN` keep theirs: a repository
- * binds itself to a workspace by pinning `WORKSPACE_ID` in its project MCP
- * entry (see `install.ts`), and `fnox exec` supplies the signing secret. When
- * such a layer names something *different* from the file below it, the
- * environment still wins — that is the point of it — and the disagreement is
- * reported rather than left to whoever notices the wrong corpus: see
- * {@link ShadowedLayer}.
- *
- * *Where* that `config.json` is belongs to `@uberblick/hub/storage`:
- * `$XDG_CONFIG_HOME/uberblick`, or `~/.config/uberblick` — one layout on every
- * platform. This module reads and writes whichever root that resolves to and
- * never picks one itself.
- *
- * What this module produces is an **environment**, not a config object. The MCP
- * server's interface is environment variables and nothing else (see
- * `packages/mcp-server/src/config.ts`), and that contract is what lets `ub mcp
- * serve` stay the one stable spawn line an MCP client is pointed at. So
- * resolution ends by naming `WORKSPACE_ID`, `HUB_URL` and `HUB_AUTH_TOKEN`, and
- * both consumers read them back through `resolveMcpConfig` — one definition of
- * the defaults, of the database path, and of the workspace rule, for the server
- * and for `ub status` alike. A workspace id is a uuid (optionally
- * slug-decorated); schema owns that parse and this module applies it to every
- * layer, environment and files alike. `ub env -- <command…>` hands that same
- * environment to any command, which is how the checkout's mise tasks consume
- * this configuration instead of keeping a parallel copy of it.
- *
- * Absent files are a default, never an error: nothing here requires `ub init` to
- * have run. A file that exists but cannot be read, parsed, or believed is a
- * warning, and warnings go to stderr — in the `ub mcp serve` path stdout is the
- * JSON-RPC transport.
- *
- * `HUB_AUTH_TOKEN` holds the hub's HMAC **signing secret**, not a token (see
- * `packages/hub/src/token.ts`). It remains in `credentials.json` for loopback
- * hubs, is passed to a child only for loopback sync, and is never printed. A `credentials.json` other users
- * can read is refused rather than used — see {@link credentialsAreExposed}. The
- * endpoint comes from `config.json`; remote clients read the login for its
- * authentication origin from the private store themselves.
+/** Shared CLI configuration: an atomic project/environment binding plus private credentials.
+ * Machine settings retain identity and migration information, never select a workspace.
  */
-
 
 import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { StoragePaths } from "@uberblick/hub/storage";
 import { resolveStorage } from "@uberblick/hub/storage";
-import { parseWorkspaceId } from "@uberblick/schema";
+import { resolveProjectBinding, type ProjectBinding, NO_BINDING } from "./project-binding.js";
 import { CREDENTIALS_FILE, credentialsPath } from "@uberblick/hub/auth-store";
 export { CREDENTIALS_FILE, credentialsPath } from "@uberblick/hub/auth-store";
 import {
@@ -67,7 +23,7 @@ export const USER_CONFIG_FILE = "config.json";
 const SIGNING_SECRET_KEY = "signingSecret";
 
 /** Which layer a resolved value came from. Stable strings: `--json` prints them. */
-export type Origin = "environment" | "user config" | "default";
+export type Origin = "environment" | "project config" | "user config" | "default";
 
 /** Where a signing secret came from, or null when none is configured. */
 export type CredentialOrigin = "environment" | "credentials file";
@@ -102,6 +58,7 @@ export interface ResolvedConfig {
    * we resolved written over it. Feed it to `resolveMcpConfig`, or to a spawn.
    */
   env: NodeJS.ProcessEnv;
+  binding: ProjectBinding | null;
   origins: {
     workspace: Origin;
     hubUrl: Origin;
@@ -115,6 +72,7 @@ export interface ResolvedConfig {
   paths: {
     userConfig: string;
     credentials: string;
+    projectConfig: string | null;
   };
   /**
    * The roots those paths came out of, and the hub and workspace database
@@ -220,16 +178,6 @@ interface Layer {
   label: string;
 }
 
-/** The highest layer that has a value, or the built-in default. */
-function pick(layers: Layer[]): { value: string | null; origin: Origin; label: string } {
-  for (const layer of layers) {
-    if (layer.value !== null) {
-      return { value: layer.value, origin: layer.origin, label: layer.label };
-    }
-  }
-  return { value: null, origin: "default", label: "the built-in default" };
-}
-
 /**
  * What `config.json` may hold. `ub init` writes it; {@link resolveConfig} reads
  * the two fields that resolve into an environment, and the identity fields ride
@@ -314,49 +262,6 @@ function warnAboutMisplacedSecret(
   }
 }
 
-/**
- * Say when the environment's workspace and the file's are different
- * workspaces. True when they are.
- *
- * **Identity, not spelling.** `<slug>-<uuid>` and the bare uuid are one
- * workspace, so both sides are parsed and their uuids compared; otherwise
- * every legitimately decorated pin would report a conflict it does not have.
- *
- * The losing layer is parsed *here* — resolution validates only the winner, so
- * a malformed `config.json` under a valid pin is tolerated today and stays
- * tolerated. Hence the try/catch: this warns, it never throws. Workspace ids
- * are not secrets and both are named, but a value that did not parse is not,
- * because the mistake this catches in the field is a pasted secret.
- */
-function warnAboutShadowedWorkspace(
-  winner: { value: string; uuid: string },
-  loser: { value: string; path: string },
-  warnings: string[],
-): boolean {
-  let uuid: string;
-  try {
-    uuid = parseWorkspaceId(loser.value, `"workspace" in ${loser.path}`).uuid;
-  } catch {
-    warnings.push(
-      `WORKSPACE_ID in the environment is in force (${winner.value}); ` +
-        `"workspace" in ${loser.path} is not a workspace id, so the two ` +
-        "could not be compared — fix that file, or unset one",
-    );
-    return false;
-  }
-  if (uuid === winner.uuid) {
-    return false;
-  }
-  // Informative, not alarmed: a repository pin exists *because* it differs
-  // from the machine default, and whoever set one sees this at every start.
-  warnings.push(
-    `WORKSPACE_ID in the environment is in force (${winner.value}); ` +
-      `${loser.path} names a different workspace (${loser.value}) — expected ` +
-      "for a pinned checkout, otherwise unset one",
-  );
-  return true;
-}
-
 /** True when the file exists and no other user can read it. */
 export function isOwnerOnly(path: string): boolean {
   try {
@@ -428,10 +333,12 @@ export function readCredentials(env: NodeJS.ProcessEnv = process.env): {
 
 export interface ResolveOptions {
   env?: NodeJS.ProcessEnv;
+  cwd?: string;
 }
 
 export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   const env = options.env ?? process.env;
+  const selection = resolveProjectBinding(options);
   const storage = resolveStorage({ env });
   const warnings: string[] = [];
   const shadowed: ShadowedLayer[] = [];
@@ -439,67 +346,19 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   const paths = {
     userConfig: join(storage.configDir, USER_CONFIG_FILE),
     credentials: join(storage.configDir, CREDENTIALS_FILE),
+    projectConfig: selection.path,
   };
 
   const userConfig = readJsonObject(paths.userConfig, warnings);
   warnAboutMisplacedSecret(userConfig, paths.userConfig, warnings);
 
-  const workspaceFromEnv = trimmed(env.WORKSPACE_ID);
-  const workspaceFromFile = stringField(
-    userConfig,
-    "workspace",
-    paths.userConfig,
-    warnings,
-  );
-  const workspace = pick([
-    {
-      origin: "environment",
-      value: workspaceFromEnv,
-      label: "WORKSPACE_ID",
-    },
-    {
-      origin: "user config",
-      value: workspaceFromFile,
-      label: `"workspace" in ${paths.userConfig}`,
-    },
-  ]);
-  let workspaceUuid: string | null = null;
-  if (workspace.value !== null) {
-    // The same rule the MCP server applies, applied to file-sourced values too.
-    // The value is kept as typed — a `<slug>-<uuid>` spelling is stored and
-    // shown the way its owner wrote it; only what reaches a room, a token or
-    // the database is the bare uuid, and that parse happens where it is used.
-    workspaceUuid = parseWorkspaceId(workspace.value, workspace.label).uuid;
+  const workspace = { value: selection.binding?.workspaceId ?? null, origin: selection.origin ?? "default" } as const;
+  const hubUrl = { value: selection.binding?.hubUrl ?? null, origin: selection.origin ?? "default" } as const;
+  if (selection.binding === null &&
+      (env.WORKSPACE_ID !== undefined || env.HUB_URL !== undefined ||
+       userConfig?.workspace !== undefined || userConfig?.hubUrl !== undefined)) {
+    warnings.push("Legacy machine workspace/endpoint settings are not used. " + NO_BINDING);
   }
-  // Both layers name a workspace, so the file's is being overridden — say
-  // which, and by what. Only a value the file actually supplied: a field of the
-  // wrong type was warned about above and is no layer at all. (The environment
-  // is the winner whenever it has a value, so `workspaceUuid` is its uuid; the
-  // null check is how the types say so.)
-  if (
-    workspaceFromEnv !== null &&
-    workspaceFromFile !== null &&
-    workspaceUuid !== null
-  ) {
-    const differs = warnAboutShadowedWorkspace(
-      { value: workspaceFromEnv, uuid: workspaceUuid },
-      { value: workspaceFromFile, path: paths.userConfig },
-      warnings,
-    );
-    if (differs) {
-      shadowed.push({ setting: "workspace", layer: "user config" });
-    }
-  }
-
-  // One layer, and deliberately one: `hubUrl` in this machine's `config.json`,
-  // or the built-in default. Nothing ambient outranks it — see the module note.
-  const hubUrl = pick([
-    {
-      origin: "user config",
-      value: stringField(userConfig, "hubUrl", paths.userConfig, warnings),
-      label: `"hubUrl" in ${paths.userConfig}`,
-    },
-  ]);
 
   // Credentials are read last and from one file only: every layer above is one
   // the user set on their own machine, so the secret applies to whichever
@@ -538,6 +397,12 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   const resolvedEnv: NodeJS.ProcessEnv = { ...env };
   if (workspace.value !== null) {
     resolvedEnv.WORKSPACE_ID = workspace.value;
+    resolvedEnv.UB_WORKSPACE_ID = workspace.value;
+    resolvedEnv.UB_HUB_URL = hubUrl.value ?? "local";
+  } else {
+    delete resolvedEnv.WORKSPACE_ID;
+    delete resolvedEnv.UB_WORKSPACE_ID;
+    delete resolvedEnv.UB_HUB_URL;
   }
   // Written when there is one and *removed* when there is not: this map is
   // handed to every child `ub` spawns (`ub mcp serve`, `ub env`), and leaving an
@@ -557,6 +422,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
 
   return {
     env: resolvedEnv,
+    binding: selection.binding,
     origins: {
       workspace: workspace.origin,
       hubUrl: hubUrl.origin,
@@ -659,4 +525,10 @@ export function claimSigningSecret(
   }
   writeCredentials({ ...existing.raw, [SIGNING_SECRET_KEY]: candidate }, env);
   return candidate;
+}
+
+/** Refuse before opening a database or spawning a workspace-dependent child. */
+export function requireBinding(resolved: ResolvedConfig): ProjectBinding {
+  if (resolved.binding === null) throw new Error(NO_BINDING);
+  return resolved.binding;
 }

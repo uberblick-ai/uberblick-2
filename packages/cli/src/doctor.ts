@@ -46,7 +46,7 @@ import { AUTH_REJECTED, protocolSkew } from "@uberblick/hub/protocol";
 import type { McpConfig } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "./budget.js";
 import type { ResolvedConfig } from "./config.js";
-import { readCredentials, resolveConfig, userConfigPath } from "./config.js";
+import { readCredentials, resolveConfig, requireBinding } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
@@ -103,7 +103,7 @@ function skipped(name: string, reason: string, remedy: string | null = null): Ch
 
 const WORKSPACE_REMEDY =
   "`ub init` creates a workspace; `ub remote join <hub>/<workspace-id>` binds " +
-  "this machine to one that already exists; `ub workspace use <id>` adopts one " +
+  "this project to one that already exists; `ub workspace use <id> --hub <url|local>` adopts one " +
   "this machine already has";
 
 /**
@@ -117,7 +117,7 @@ const PORT_REMEDY =
 // --- workspace ---------------------------------------------------------------
 
 function workspaceCheck(
-  env: NodeJS.ProcessEnv,
+  _env: NodeJS.ProcessEnv,
   resolved: ResolvedConfig | null,
   config: McpConfig | null,
   error: string | null,
@@ -126,11 +126,7 @@ function workspaceCheck(
     // Nothing configured at all is the common case and gets a line of its own;
     // a value that *is* configured and was refused keeps the refusal's own
     // message, which names the layer the value came from.
-    const configured = env.WORKSPACE_ID?.trim();
-    const reason =
-      configured === undefined || configured === ""
-        ? `none configured — a workspace id names the rooms, the token claim and the local database, and there is no default; this machine's belongs in ${userConfigPath(env)}`
-        : (error ?? `${configured} was refused`);
+    const reason = error ?? "No workspace selected; choose a complete project or environment binding";
     return fail("workspace", reason, WORKSPACE_REMEDY);
   }
   const spelling = resolved.env.WORKSPACE_ID ?? config.workspaceId;
@@ -666,7 +662,7 @@ export async function doctorReport(
   let resolved: ResolvedConfig | null = null;
   let error: string | null = null;
   try {
-    resolved = resolveConfig({ env });
+    resolved = resolveConfig({ env, cwd });
     warnings.push(...resolved.warnings);
   } catch (thrown) {
     error = message(thrown);
@@ -675,6 +671,7 @@ export async function doctorReport(
   let config: McpConfig | null = null;
   if (resolved !== null) {
     try {
+      requireBinding(resolved);
       config = resolveMcpConfig(resolved.env);
     } catch (thrown) {
       error = message(thrown);

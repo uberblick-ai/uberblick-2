@@ -57,6 +57,10 @@ function storedSecret(box: Sandbox): string {
   return secret as string;
 }
 
+function projectBinding(box: Sandbox): Record<string, unknown> {
+  return JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8"));
+}
+
 function userConfig(box: Sandbox): Record<string, unknown> {
   return JSON.parse(
     readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"),
@@ -107,9 +111,9 @@ describe("ub init", () => {
     expect(statSync(credentialsPath(box)).mode & 0o777).toBe(0o600);
     // One workspace, generated here because nothing else in the system will
     // invent one.
-    expect(userConfig(box).workspace).toMatch(UUID);
+    expect(projectBinding(box).workspaceId).toMatch(UUID);
     // It is in the report too, so the id is not something to go looking for.
-    expect(run.stdout).toContain(userConfig(box).workspace as string);
+    expect(run.stdout).toContain(projectBinding(box).workspaceId as string);
 
     // Identity is recorded, and the colour is one y-prosemirror will accept.
     expect(typeof userConfig(box).displayName).toBe("string");
@@ -125,11 +129,11 @@ describe("ub init", () => {
     // workspace: the one in force is what a re-run confirms.
     const box = sandbox({ checkout: true });
     expect(runUb(["init", "--yes"], box).status).toBe(0);
-    const first = userConfig(box).workspace as string;
+    const first = projectBinding(box).workspaceId as string;
     expect(first).toMatch(UUID);
 
     expect(runUb(["init", "--yes"], box).status).toBe(0);
-    expect(userConfig(box).workspace).toBe(first);
+    expect(projectBinding(box).workspaceId).toBe(first);
   });
 
   it("is a no-op for the secret on a second run", () => {
@@ -180,7 +184,7 @@ describe("ub init", () => {
     // No `--yes`, stdin a pipe: this must complete rather than block on input.
     // With nobody to ask for a display slug, the id is the bare uuid.
     expect(runUb(["init"], box).status).toBe(0);
-    expect(userConfig(box).workspace).toMatch(UUID);
+    expect(projectBinding(box).workspaceId).toMatch(UUID);
 
     const decorated = `team-b-${JOINED}`;
     const flagged = runUb(
@@ -230,7 +234,7 @@ describe("ub init", () => {
       const box = sandbox({ checkout: true });
       const run = runUb(["init", "--yes", "--workspace", workspace], box);
       expect(run.status, run.stderr).toBe(0);
-      expect(userConfig(box).workspace).toBe(workspace);
+      expect(projectBinding(box).workspaceId).toBe(workspace);
     }
   });
 
@@ -272,7 +276,7 @@ describe("ub init", () => {
       }
 
       const authority = storedSecret(box);
-      expect(userConfig(box).workspace).toBe(workspace);
+      expect(projectBinding(box).workspaceId).toBe(workspace);
       // Exactly one secret survives: neither process printed its own, and the
       // one on disk is the one both of them now describe.
       for (const run of runs) {
@@ -335,14 +339,14 @@ describe("ub init", () => {
     );
     await waitUntil("`ub init` to say it is waiting for the lock", () => waiting);
     writeFileSync(
-      join(box.configHome, "uberblick", "config.json"),
-      `${JSON.stringify({ workspace: JOINED }, null, 2)}\n`,
+      join(box.cwd, ".uberblick.json"),
+      `${JSON.stringify({ workspaceId: JOINED, hubUrl: null }, null, 2)}\n`,
     );
     rmSync(lock);
 
     const run = await running;
     expect(run.status, run.output).toBe(0);
-    expect(userConfig(box).workspace).toBe(JOINED);
+    expect(projectBinding(box).workspaceId).toBe(JOINED);
     // And the report describes the machine rather than the intention.
     expect(run.stdout).toContain(JOINED);
   });
@@ -354,7 +358,7 @@ describe("ub init", () => {
     // the next run — or a seed, or a report — is where it would finally go
     // wrong.
     const box = sandbox({ checkout: true });
-    const config = join(box.configHome, "uberblick", "config.json");
+    const config = join(box.cwd, ".uberblick.json");
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
@@ -370,7 +374,7 @@ describe("ub init", () => {
       },
     );
     await waitUntil("`ub init` to say it is waiting for the lock", () => waiting);
-    writeFileSync(config, `${JSON.stringify({ workspace: "a/b" }, null, 2)}\n`);
+    writeFileSync(config, `${JSON.stringify({ workspaceId: "a/b", hubUrl: null }, null, 2)}\n`);
     rmSync(lock);
 
     const run = await running;
@@ -378,7 +382,7 @@ describe("ub init", () => {
     // Named by file, the way every other reader of it reports the same value.
     expect(run.stderr).toContain(config);
     // And nothing was written on top of it.
-    expect(userConfig(box).workspace).toBe("a/b");
+    expect(projectBinding(box).workspaceId).toBe("a/b");
   });
 
   it("never removes a lock it did not create, however old that lock is", () => {
@@ -426,7 +430,7 @@ describe("ub init", () => {
   });
 
   it("repairs the mode of a config.json that was left readable", () => {
-    const box = sandbox({ checkout: true, userConfig: { workspace: JOINED } });
+    const box = sandbox({ projectBinding: { workspaceId: JOINED, hubUrl: null }, checkout: true, userConfig: { workspace: JOINED } });
     chmodSync(join(box.configHome, "uberblick", "config.json"), 0o644);
 
     expect(runUb(["init", "--yes"], box).status).toBe(0);

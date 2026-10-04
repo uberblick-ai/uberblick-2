@@ -19,7 +19,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runChild } from "./child.js";
-import { resolveConfig } from "./config.js";
+import { resolveConfig, requireBinding } from "./config.js";
 import { isInstallPayload } from "./installation.js";
 
 /**
@@ -53,6 +53,7 @@ export async function serveCommand(
   }
 
   const resolved = resolveConfig();
+  requireBinding(resolved);
   for (const warning of resolved.warnings) {
     err(`ub: warning: ${warning}\n`);
   }

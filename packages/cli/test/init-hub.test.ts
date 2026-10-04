@@ -66,7 +66,7 @@ function url(hub: Hub): string {
 }
 
 function configPath(box: Sandbox): string {
-  return join(box.configHome, "uberblick", "config.json");
+  return join(box.cwd, ".uberblick.json");
 }
 
 function credentialsPath(box: Sandbox): string {
@@ -113,7 +113,7 @@ describe("ub init <hub-url>", () => {
     // stored exactly as typed.
     expect(config(box).hubUrl).toBe(url(hub));
     expect(run.stdout).toContain(url(hub));
-    const workspace = config(box).workspace;
+    const workspace = config(box).workspaceId;
     expect(typeof workspace).toBe("string");
 
     // The whole point of doing it in this run: the starter documents are on the
@@ -188,7 +188,7 @@ describe("ub init <hub-url>", () => {
     expect(run.stderr).toContain("Nothing was written");
     // One endpoint, and it is the one that got there first.
     expect(config(box).hubUrl).toBe(first);
-    expect(config(box).workspace).toBe(WORKSPACE);
+    expect(config(box).workspaceId).toBe(WORKSPACE);
   });
 
   it("applies the bound-machine rules to an endpoint that arrived under the lock", async () => {
@@ -228,7 +228,7 @@ describe("ub init <hub-url>", () => {
     // The accepted exception to "no argument is what it always was": a machine
     // with an endpoint needs that hub's secret, and `ub init` says so instead of
     // writing a random one every later run would send and every hub reject.
-    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: CLOSED } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: CLOSED }, userConfig: { workspace: WORKSPACE, hubUrl: CLOSED } });
 
     const run = await runUbAsync(["init", "--yes"], box);
 
@@ -356,11 +356,11 @@ describe("ub init <hub-url>", () => {
     // its update log — there is nothing to repair, only to get up.
     expect(run.stdout).toContain("uberblick initialised");
     expect(config(box).hubUrl).toBe(endpoint);
-    expect(typeof config(box).workspace).toBe("string");
+    expect(typeof config(box).workspaceId).toBe("string");
   });
 
   it("refuses a second endpoint, naming the verb that moves a machine", async () => {
-    const box = sandbox({
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "ws://127.0.0.1:2" },
       userConfig: { workspace: WORKSPACE, hubUrl: "ws://127.0.0.1:2" },
     });
     const before = readFileSync(configPath(box), "utf8");
@@ -439,7 +439,7 @@ describe("ub init <hub-url>", () => {
     // The promise is about the endpoint in force, not about which run stored
     // it: a retry on a bound machine whose hub is down must not report a hub
     // holding a corpus it has never seen.
-    const box = sandbox({
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: CLOSED },
       userConfig: { workspace: WORKSPACE, hubUrl: CLOSED },
       credentials: { signingSecret: SECRET },
     });
@@ -476,7 +476,7 @@ describe("ub init <hub-url>", () => {
 
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).toContain("already set up");
-    expect(config(box).workspace).toBe(WORKSPACE);
+    expect(config(box).workspaceId).toBe(WORKSPACE);
     expect(readFileSync(configPath(box), "utf8")).toBe(settled);
   });
 

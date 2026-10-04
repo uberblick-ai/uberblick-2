@@ -143,7 +143,7 @@ const WORKSPACE = "1e9b7a30-52c4-4d6f-8a13-c7b204e5f981";
 
 describe("ub mcp serve", () => {
   it("serves the shipped tool set to a client that spawns it", async () => {
-    const session = await connect(sandbox({ userConfig: { workspace: WORKSPACE } }));
+    const session = await connect(sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } }));
     try {
       const names = (await session.client.listTools()).tools.map(
         (tool) => tool.name,
@@ -170,16 +170,14 @@ describe("ub mcp serve", () => {
     }
   });
 
-  // What the wrapper owes a client: the endpoint is the user config's, and it
+  // What the wrapper owes a client: the endpoint is the project binding's, and it
   // survives the exec into the server the client actually talks to.
-  // `checkout: true` is documentation of the spawn shape, a `cwd` inside a
-  // repository; nothing on this path reads it, which is the point. Worth
-  // pinning because of #376, where an ambient `HUB_URL` from the checkout's own
-  // mise config replaced this answer for every process spawned there.
-  it("dials the user config's endpoint when a client spawns it inside a checkout", async () => {
+  // The project binding remains authoritative over an unrelated legacy
+  // HUB_URL from the checkout environment.
+  it("dials the project binding's endpoint when a client spawns it inside a checkout", async () => {
     const box = sandbox({
       checkout: true,
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { signingSecret: "cli-serve-checkout-secret" },
     });
 
@@ -197,20 +195,19 @@ describe("ub mcp serve", () => {
   });
 
   it("passes the resolved configuration through, warnings and all", async () => {
-    // A user config that names the workspace and an endpoint, a credential so
-    // the hub is enabled rather than disabled, and a secret misplaced in that
-    // same config — which is refused with a warning, so resolution has something
+    // A project binding, a credential so the hub is enabled rather than
+    // disabled, and a secret misplaced in the user config. The secret is
+    // refused with a warning, so resolution has something
     // to write to stderr while stdout is carrying the protocol.
     const box = sandbox({
+      projectBinding: { workspaceId: `serve-${WORKSPACE}`, hubUrl: DEAD_HUB_URL },
       userConfig: {
-        workspace: `serve-${WORKSPACE}`,
-        hubUrl: DEAD_HUB_URL,
         signingSecret: "cli-serve-misplaced-secret",
       },
       credentials: { signingSecret: "cli-serve-signing-secret" },
     });
 
-    // And the ambient `HUB_URL` does not survive it: the user config's endpoint
+    // And the ambient `HUB_URL` does not survive it: the project binding's endpoint
     // is what the server must report, whatever the process was started with.
     const session = await connect(box, { HUB_URL: "ws://ambient.invalid:1" });
     try {
@@ -242,7 +239,7 @@ describe("ub mcp serve", () => {
   it.each(["SIGHUP", "SIGQUIT"] as const)(
     "forwards %s to the server, takes it down, and dies of it too",
     async (signal) => {
-      const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+      const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
       const { childEnd, writer } = clientStdin(join(box.cwd, "client-stdin"));
       // Its own process group, so teardown can take a survivor down by group
       // even after the wrapper — the group's leader — is gone. `child.kill`

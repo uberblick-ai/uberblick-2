@@ -27,6 +27,7 @@ import { resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
+import { NO_BINDING, type ProjectBinding } from "./project-binding.js";
 import { cliVersion } from "./version.js";
 
 /**
@@ -54,6 +55,8 @@ export interface StorageReport {
 }
 
 export interface StatusReport {
+  binding: ProjectBinding;
+  projectConfig: string | null;
   version: string;
   /** The workspace id as configured — the spelling its owner typed. */
   workspace: string;
@@ -102,6 +105,7 @@ export interface StatusReport {
 export const ORIGIN_LABELS: Record<Origin, string> = {
   environment: "environment",
   "user config": "user config",
+  "project config": "project config",
   default: "built-in default",
 };
 
@@ -115,19 +119,33 @@ export async function readSyncStatus(config: McpConfig): Promise<SyncStatus> {
   }
 }
 
+export interface UnboundStatusReport {
+  version: string;
+  workspace: null;
+  binding: null;
+  hubUrl: null;
+  projectConfig: null;
+  message: string;
+}
+
 /** Collect the report without printing it. Exported for tests. */
 export async function statusReport(
-  options: { env?: NodeJS.ProcessEnv } = {},
-): Promise<{ report: StatusReport; warnings: string[] }> {
+  options: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
+): Promise<{ report: StatusReport | UnboundStatusReport; warnings: string[] }> {
   const resolved = resolveConfig(options);
-  // Throws when nothing configures a workspace, which `ub` reports as the
-  // error it is: there is no default to fall back to, and `ub init` is named in
-  // the message.
+  if (resolved.binding === null) {
+    return { warnings: resolved.warnings, report: {
+      version: cliVersion(), workspace: null, binding: null, hubUrl: null,
+      projectConfig: null, message: NO_BINDING,
+    } };
+  }
   const config = resolveMcpConfig(resolved.env);
   const sync = await readSyncStatus(config);
   return {
     warnings: resolved.warnings,
     report: {
+      binding: resolved.binding,
+      projectConfig: resolved.paths.projectConfig,
       version: cliVersion(),
       workspace: resolved.env.WORKSPACE_ID ?? config.workspaceId,
       workspaceUuid: config.workspaceId,
@@ -170,7 +188,8 @@ function field(name: string, value: string): string {
   return `${name.padEnd(12)}${value}\n`;
 }
 
-export function renderStatus(report: StatusReport): string {
+export function renderStatus(report: StatusReport | UnboundStatusReport): string {
+  if (report.workspace === null) return `${report.message}\n`;
   const hub = report.hub;
   const hubFailure =
     hub.status === "auth-failed" ||
@@ -187,7 +206,8 @@ export function renderStatus(report: StatusReport): string {
   if (report.workspaceUuid !== report.workspace) {
     text += field("uuid", report.workspaceUuid);
   }
-  text += field("hub", report.hubUrl);
+  text += field("hub", report.binding.hubUrl ?? "local-only");
+  text += field("selection", report.projectConfig ?? ORIGIN_LABELS[report.sources.workspace]);
   text += field("connection", hub.status);
   if (hub.reason !== undefined) text += field("recovery", hub.reason);
   // Two counts in two units, as `sync_status` reports them: rooms, and provider
@@ -215,7 +235,7 @@ export const STATUS_OPTIONS = {
 
 export const STATUS_HELP = `usage: ub status [--json]
 
-Overview of this machine's workspace, configured hub endpoint, connection state,
+Overview of the selected project workspace, hub, selection source, connection state,
 pending rooms and sync messages, attached rooms, records stored in the local log and
 detected failures. Connection does not mean the hub acknowledged every change.
 Recovery names the next action; \`ub doctor\` gives further diagnostics.

@@ -114,7 +114,7 @@ import {
 import { buildLockPath } from "./build-lock.js";
 import { budget, resolveMcpConfig } from "./budget.js";
 import { localBrowserKey } from "./browser-key.js";
-import { resolveConfig } from "./config.js";
+import { resolveConfig, requireBinding } from "./config.js";
 import { takeHelp } from "./help.js";
 import { isInstallPayload } from "./installation.js";
 import type { InitLock } from "./init-lock.js";
@@ -1542,6 +1542,7 @@ export async function openCommand(
   const startupEnv: NodeJS.ProcessEnv = { ...process.env };
   const initial = await initialConfig(startupEnv);
   const resolved = initial.resolved;
+  requireBinding(resolved);
   for (const warning of resolved.warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }

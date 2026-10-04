@@ -34,7 +34,8 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { resolveMcpConfig } from "./budget.js";
 import type { McpConfig } from "@uberblick/mcp-server";
-import { readUserConfig, resolveConfig } from "./config.js";
+import { resolveConfig } from "./config.js";
+import { resolveProjectBinding } from "./project-binding.js";
 import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
@@ -646,7 +647,7 @@ export async function remoteInitCommand(
   // was here when it started is one it may replace; one that *arrives* while it
   // is deploying belongs to a run that knows something this one does not, and
   // the publish below refuses rather than overwriting it.
-  const endpointBefore = readUserConfig(env).config.hubUrl?.trim() ?? null;
+  const endpointBefore = resolveProjectBinding({ env }).binding?.hubUrl ?? null;
 
   let base: McpConfig;
   try {
@@ -949,7 +950,7 @@ export async function remoteInitCommand(
   }
   let persistence: RemotePersistence;
   try {
-    const endpointNow = readUserConfig(env).config.hubUrl?.trim() ?? null;
+    const endpointNow = resolveProjectBinding({ env }).binding?.hubUrl ?? null;
     if (endpointNow !== endpointBefore && endpointNow !== endpoint) {
       io.err(
         `ub remote init: this machine was bound to ${endpointNow ?? "no endpoint"} ` +
@@ -959,7 +960,7 @@ export async function remoteInitCommand(
       );
       return 1;
     }
-    persistence = setRemote(endpoint, { env });
+    persistence = setRemote(endpoint, { env, workspace: base.workspaceId });
   } finally {
     lock.release();
   }

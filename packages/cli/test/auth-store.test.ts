@@ -189,7 +189,7 @@ describe("hub login store", () => {
   });
 
   it("stores at mode 0600 while keeping the binding, signing secret and unknown fields", async () => {
-    const box = sandbox({
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "wss://hub.example.test/ws" },
       userConfig: { hubUrl: "wss://hub.example.test/ws", workspace: WORKSPACE },
       credentials: { signingSecret: SECRET_ON_FILE, future: { opaque: true } },
     });

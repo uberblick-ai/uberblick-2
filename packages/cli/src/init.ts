@@ -77,7 +77,6 @@ import {
   readCredentials,
   readUserConfig,
   resolveConfig,
-  userConfigPath,
   writeCredentials,
   writeUserConfig,
 } from "./config.js";
@@ -88,7 +87,8 @@ import { acquireInitLock, seedLockPath } from "./init-lock.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
-import { normalizeRemoteUrl, remoteProblem, setRemote } from "./remote.js";
+import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
+import { normalizeRemoteUrl, remoteProblem } from "./remote.js";
 import { seedStarterDocs } from "./starter.js";
 
 /**
@@ -229,8 +229,8 @@ no endpoint is stored. Remote hubs use this machine’s stored login, never a
 signing secret. What is generated is written to
 $XDG_CONFIG_HOME/uberblick/credentials.json at mode 0600, and is never printed.
 
-A WORKSPACE_ID in the environment — a project .mcp.json's pin, or your own
-shell — outranks the workspace in config.json, whatever this run settles.
+The complete UB_WORKSPACE_ID and UB_HUB_URL binding in the environment — a project .mcp.json's pin, or your own
+shell — outranks the complete binding in .uberblick.json, whatever this run settles.
 `;
 
 function parseFlags(argv: string[]): Flags {
@@ -439,7 +439,14 @@ export async function initCommand(
   // workspace stays on the old one with nothing dialling it (#376, #385). So a
   // stored endpoint that is not the one asked for is refused outright, and the
   // refusal names the verb that does move a machine.
-  const bound = trimmed(existing.config.hubUrl);
+  const selected = resolveProjectBinding();
+  const bound = selected.binding?.hubUrl ?? null;
+  if (flags.workspace !== undefined && inForceWorkspace !== null &&
+      parseWorkspaceId(flags.workspace).uuid !== parseWorkspaceId(inForceWorkspace).uuid &&
+      flags.hub === undefined) {
+    io.err("ub init: a different workspace needs an explicit hub. Use `ub workspace use <id> --hub <url|local>`.\n");
+    return 2;
+  }
   if (flags.hub !== undefined && bound !== null && bound !== flags.hub) {
     io.err(
       `ub init: this machine already syncs with ${bound}, and \`ub init\` never ` +
@@ -459,7 +466,8 @@ export async function initCommand(
   if (
     flags.hub !== undefined &&
     bound === flags.hub &&
-    inForceWorkspace !== null
+    inForceWorkspace !== null &&
+    (flags.workspace === undefined || parseWorkspaceId(flags.workspace).uuid === parseWorkspaceId(inForceWorkspace).uuid)
   ) {
     for (const warning of warnings) {
       io.err(`ub: warning: ${warning}\n`);
@@ -467,7 +475,7 @@ export async function initCommand(
     let already = "uberblick is already set up here\n\n";
     already += field("workspace", inForceWorkspace);
     already += field("hub", bound);
-    already += field("config", userConfigPath());
+    already += field("config", selected.path ?? "environment");
     already += "\nNothing was changed. `ub status` reports the live state.\n";
     io.out(already);
     return 0;
@@ -661,7 +669,8 @@ export async function initCommand(
     // command refuses by design, arrived at by a race instead of by an
     // argument. The refusal returns from inside the lock, which the `finally`
     // below releases, and nothing has been written yet at this point.
-    const settledHub = trimmed(current.config.hubUrl);
+    const settledBinding = resolveProjectBinding();
+    const settledHub = settledBinding.binding?.hubUrl ?? null;
     if (binding !== null && settledHub !== null && settledHub !== binding) {
       io.err(
         `ub init: this machine was bound to ${settledHub} while this run was ` +
@@ -715,7 +724,7 @@ export async function initCommand(
     // workspace while the run that got there first — the one holding the seed
     // lock — writes the starter documents into another.
     const settled = generatingWorkspace
-      ? trimmed(current.config.workspace)
+      ? settledBinding.binding?.workspaceId ?? null
       : null;
     if (settled !== null) {
       // Adopting is reading a workspace out of a file, so it is held to what
@@ -724,24 +733,16 @@ export async function initCommand(
       // the message the next `ub init` would give for the same file, rather
       // than publishing a value that would make a later run, a seed or a
       // report fail somewhere less obvious.
-      parseWorkspaceId(settled, `"workspace" in ${userConfigPath()}`);
+      parseWorkspaceId(settled, "the selected workspace");
       workspace = settled;
       workspaceName = null;
     }
-    configPath = writeUserConfig({
+    writeUserConfig({
       ...current.raw,
-      workspace,
       displayName: name,
       color,
     });
-    // The endpoint goes through the writer `ub remote join` uses, in the same
-    // file and under the same lock — one place that decides what being bound to
-    // a hub means, rather than a second one that has to be kept in step. Not
-    // when the same endpoint arrived while this run was probing: there is
-    // nothing left to write, and the check above has already refused any other.
-    if (binding !== null && settledHub === null) {
-      setRemote(binding);
-    }
+    configPath = writeProjectBinding({ workspaceId: workspace, hubUrl: hubInForce });
 
     // --- the signing secret -------------------------------------------------
     // The raw environment, not `resolved.env`: what matters here is whether
@@ -783,7 +784,7 @@ export async function initCommand(
     // and the re-read keeps the report describing the machine rather than this
     // process's intention.
     const persisted = readCredentials();
-    persistedWorkspace = readUserConfig().config.workspace ?? workspace;
+    persistedWorkspace = workspace;
     if (secret !== null && persisted.signingSecret !== null) {
       secret = persisted.signingSecret;
     }
@@ -876,8 +877,9 @@ export async function initCommand(
       // into the workspace this run had in hand would leave a corpus nothing on
       // this machine points at. A workspace somebody named by id is not this
       // run's to seed either — that is what `--workspace` opting out means.
-      const configured = trimmed(readUserConfig().config.workspace);
-      if (configured !== persistedWorkspace) {
+      const selectedNow = resolveProjectBinding().binding;
+      const configured = selectedNow?.workspaceId ?? null;
+      if (configured !== persistedWorkspace || (selectedNow?.hubUrl ?? null) !== hubInForce) {
         warnings.add(
           `this machine is configured for ${configured ?? "no workspace"} now, ` +
             `not ${persistedWorkspace} — another \`ub init\` settled that ` +

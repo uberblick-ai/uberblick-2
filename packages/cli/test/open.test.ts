@@ -517,7 +517,7 @@ function configured(): {
   bundle: string;
 } {
   const box = sandbox({
-    userConfig: { workspace: WORKSPACE },
+    projectBinding: { workspaceId: WORKSPACE, hubUrl: null },
     credentials: { signingSecret: SECRET },
   });
   const bundle = fixtureBundle(box);
@@ -604,8 +604,8 @@ function writeBinding(box: Sandbox, hubUrl: string, workspace: string): void {
   const dir = configDir(box);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
-    join(dir, "config.json"),
-    `${JSON.stringify({ workspace, hubUrl }, null, 2)}\n`,
+    join(box.cwd, ".uberblick.json"),
+    `${JSON.stringify({ workspaceId: workspace, hubUrl }, null, 2)}\n`,
     "utf8",
   );
 }
@@ -1524,11 +1524,12 @@ describe("ub open", () => {
     pointAt(box, FIRST_REMOTE);
     const webPort = await freePort();
     // The pin a repository puts in its project MCP entry. It outranks this
-    // machine's default, and re-resolving must not quietly demote it — nor
+    // project's file, and re-resolving must not quietly demote it — nor
     // promote the file-sourced secret beside it into a pin of its own.
     const app = await open(box, ["--port", String(webPort)], {
       ...env,
-      WORKSPACE_ID: REBOUND_WORKSPACE,
+      UB_WORKSPACE_ID: REBOUND_WORKSPACE,
+      UB_HUB_URL: FIRST_REMOTE,
     });
     const url = `${app.url}uberblick-config.json`;
 
