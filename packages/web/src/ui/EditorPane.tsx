@@ -45,6 +45,7 @@ import {
 import type { RemotePresence } from "./doc-chrome.js";
 import { CommentComposer } from "./CommentComposer.js";
 import { PeerCluster } from "./PeerCluster.js";
+import { PopoverTrigger } from "./shadcn/popover.js";
 import { DocMetaLine } from "./DocChrome.js";
 import { threadIdFromActivation, threadIdFromTarget } from "./threads.js";
 import type { SelectThread, ThreadView } from "./threads.js";
@@ -294,8 +295,7 @@ export function StatusLine({
   onLastUpdatedChange,
   endpoint = null,
   hubAcked,
-  syncOpen = false,
-  onToggleSync,
+  syncDetails = false,
   onActivatePresence,
 }: {
   connection: RoomConnection;
@@ -319,9 +319,8 @@ export function StatusLine({
   endpoint?: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
   hubAcked?: boolean | null | undefined;
-  /** The reading is the details-panel trigger when this callback is present. */
-  syncOpen?: boolean;
-  onToggleSync?: (() => void) | undefined;
+  /** Compose the reading as a trigger within the shell's sync Popover. */
+  syncDetails?: boolean;
   /** Reveal one currently resolvable remote caret without following it. */
   onActivatePresence?: ((session: RemotePresence) => void) | undefined;
 }): ReactElement {
@@ -376,32 +375,31 @@ export function StatusLine({
     (value): value is string => value !== null,
   );
   const syncReading =
-    onToggleSync === undefined ? (
+    !syncDetails ? (
       <>
         {primary}
         {hubFact}
       </>
     ) : (
-      <button
-        type="button"
-        className="ub-status-sync ub-sync-toggle"
-        aria-expanded={syncOpen}
-        aria-controls="ub-sync-panel"
-        aria-label={
-          factLabel.length === 0
-            ? hub === null
-              ? "Sync details"
-              : `Sync details — hub ${hub}`
-            : hub === null
-              ? `Sync details — ${factLabel.join(", ")}`
-              : `Sync details — ${factLabel.join(", ")}${facts.twoFact ? ";" : ","} hub ${hub}`
-        }
-        title={hub === null ? "Sync details" : `Sync details — hub ${hub}`}
-        onClick={onToggleSync}
-      >
-        {primary}
-        {hubFact}
-      </button>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="ub-status-sync ub-sync-toggle"
+          aria-label={
+            factLabel.length === 0
+              ? hub === null
+                ? "Sync details"
+                : `Sync details — hub ${hub}`
+              : hub === null
+                ? `Sync details — ${factLabel.join(", ")}`
+                : `Sync details — ${factLabel.join(", ")}${facts.twoFact ? ";" : ","} hub ${hub}`
+          }
+          title={hub === null ? "Sync details" : `Sync details — hub ${hub}`}
+        >
+          {primary}
+          {hubFact}
+        </button>
+      </PopoverTrigger>
     );
   const now = useTimestampClock();
   const formattedUpdatedAt =
@@ -873,8 +871,7 @@ export function EditorPane({
   threads = [],
   threadsOpen = false,
   onToggleThreads,
-  syncOpen = false,
-  onToggleSync,
+  syncDetails = false,
 }: {
   connection: RoomConnection | null;
   /** The workspace as the address spells it — see {@link DocMetaLine}. */
@@ -923,8 +920,7 @@ export function EditorPane({
   threads?: readonly ThreadView[];
   threadsOpen?: boolean;
   onToggleThreads?: (() => void) | undefined;
-  syncOpen?: boolean;
-  onToggleSync?: (() => void) | undefined;
+  syncDetails?: boolean;
 }): ReactElement {
   const pane = useRef<HTMLElement | null>(null);
   const [tldrEditorRoom, setTldrEditorRoom] = useState<string | null>(null);
@@ -1020,8 +1016,7 @@ export function EditorPane({
           onLastUpdatedChange={onLastUpdatedChange}
           endpoint={endpoint}
           hubAcked={hubAcked}
-          syncOpen={syncOpen}
-          onToggleSync={onToggleSync}
+          syncDetails={syncDetails}
           onActivatePresence={revealPresence}
         />
         <TldrCallout

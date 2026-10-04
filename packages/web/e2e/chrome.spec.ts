@@ -679,7 +679,7 @@ test("the open document owns the remaining chrome and its one sync-details handl
   const path = new URL(page.url()).pathname;
   await sync.click();
   await expect(
-    page.getByRole("complementary", { name: "Sync and presence" }),
+    page.getByRole("dialog", { name: "Sync and presence" }),
   ).toBeVisible();
   expect(new URL(page.url()).pathname).toBe(path);
   await page.keyboard.press("Escape");
@@ -2836,7 +2836,7 @@ for (const scheme of ["light", "dark"] as const) {
         }
       };
       const contents = page.getByRole("button", { name: "Contents 2" });
-      await contents.hover();
+      await contents.click();
       await expect(page.locator(".ub-outline-panel")).toBeVisible();
       await check(".ub-outline-panel");
       const row = page.locator(".ub-outline-panel [role=menuitem]").first();
@@ -2896,12 +2896,12 @@ for (const scheme of ["light", "dark"] as const) {
       const readings: Awaited<ReturnType<typeof renderedText>> = [];
       const collect = async (root = "body") => readings.push(...await renderedText(page, root, { mutedOnly: true }));
       await collect();
-      await page.locator(".ub-outline-trigger").hover();
+      await page.getByRole("button", { name: "Contents 2" }).click();
       await collect();
       await page.keyboard.press("Escape");
       await page.locator(".ub-sync-toggle").click();
       await collect();
-      await page.getByRole("button", { name: "Close sync details" }).click();
+      await page.locator(".ub-sync-toggle").click();
       await page.locator(".ub-peer-more").click();
       await collect();
       for (const row of await page.locator(".ub-peer-overflow-row").all()) {
@@ -3102,7 +3102,7 @@ for (const [device, width, hasTouch] of [
       const sync = page.getByRole("button", { name: /^Sync details/ });
       if (hasTouch) await sync.tap();
       else { await sync.focus(); await page.keyboard.press("Enter"); }
-      const panel = page.getByRole("complementary", { name: "Sync and presence" });
+      const panel = page.getByRole("dialog", { name: "Sync and presence" });
       await expect(panel).toBeVisible();
       await expect(panel.locator("dt", { hasText: "Last updated" }).locator("..").locator("time")).toHaveText(exact ?? "");
       await expect(panel.locator("time")).toHaveAttribute("datetime", stamp ?? "");
@@ -3111,7 +3111,7 @@ for (const [device, width, hasTouch] of [
         await expect(text).toHaveText(name);
         const layout = await text.evaluate((element) => {
           const nameBox = element.getBoundingClientRect();
-          const panel = element.closest("aside");
+          const panel = element.closest('[role="dialog"]');
           if (panel === null) throw new Error("name has no panel");
           const panelBox = panel.getBoundingClientRect();
           const range = document.createRange();
@@ -3132,6 +3132,21 @@ for (const [device, width, hasTouch] of [
       provider.setAwarenessField("user", { name: UNBROKEN_NAME, color: "#0675c9" });
       await checkName(UNBROKEN_NAME);
       await expect(panel.getByText("block 29", { exact: true })).toHaveCount(0);
+      // The popover stays contained at each device width, including a reduced
+      // available height where its unchanged facts and names need to scroll.
+      for (const height of [900, 430]) {
+        await page.setViewportSize({ width, height });
+        await expect.poll(async () => {
+          const box = await panel.boundingBox();
+          return box !== null && box.x >= 0 && box.y >= 0 &&
+            box.x + box.width <= width && box.y + box.height <= height;
+        }).toBe(true);
+      }
+      await expect.poll(() => panel.evaluate((element) =>
+        element.scrollHeight > element.clientHeight,
+      )).toBe(true);
+      await panel.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+      expect(await panel.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
     } finally {
       provider.destroy();
       doc.destroy();

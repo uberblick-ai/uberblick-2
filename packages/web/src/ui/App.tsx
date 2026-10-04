@@ -50,6 +50,7 @@ import { SidebarProvider, SIDEBAR_TOGGLE_CLASSES } from "./shadcn/sidebar.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { SyncPanel } from "./SyncPanel.js";
+import { Popover, PopoverContent } from "./shadcn/popover.js";
 import { ThreadsPane } from "./ThreadsPane.js";
 import { WorkspaceSettings } from "./WorkspaceSettings.js";
 import { useWorkspaceNames } from "./workspace-names.js";
@@ -149,8 +150,7 @@ export function RoutePane({
   threads = [],
   threadsOpen = false,
   onToggleThreads,
-  syncOpen = false,
-  onToggleSync,
+  syncDetails = false,
 }: {
   route: Route;
   /**
@@ -215,8 +215,7 @@ export function RoutePane({
   threadsOpen?: boolean;
   onToggleThreads?: (() => void) | undefined;
   /** The document-local sync reading opens the existing details panel. */
-  syncOpen?: boolean;
-  onToggleSync?: (() => void) | undefined;
+  syncDetails?: boolean;
 }): ReactElement {
   // Before the branches: a hook may not sit behind an early return. The answer
   // flag tells a freshly opened empty room apart from an empty server answer.
@@ -284,8 +283,7 @@ export function RoutePane({
               endpoint={endpoint}
               hubAcked={hubAcked}
               onLastUpdatedChange={onLastUpdatedChange}
-              syncOpen={syncOpen}
-              onToggleSync={onToggleSync}
+              syncDetails={syncDetails}
             />
             <CopyLink room={connection.room} segment={route.workspace.segment} />
           </div>
@@ -325,8 +323,7 @@ export function RoutePane({
       threads={threads}
       threadsOpen={threadsOpen}
       onToggleThreads={onToggleThreads}
-      syncOpen={syncOpen}
-      onToggleSync={onToggleSync}
+      syncDetails={syncDetails}
     />
   );
 }
@@ -476,23 +473,6 @@ export function App(): ReactElement {
         ? opener
         : document.querySelector<HTMLElement>(".ub-threads-toggle");
     back?.focus();
-  }, []);
-
-  const onToggleSync = useCallback(() => setSyncOpen((open) => !open), []);
-
-  /**
-   * Close the panel, and give focus back to the pill that opened it.
-   *
-   * Only when the focus is inside the panel that is about to go — its own ×,
-   * usually — because focus on a detached element is focus nobody has, and the
-   * reader would be returned to the top of the page. A click on the pill needs
-   * no repair: focus is already there.
-   */
-  const closeSync = useCallback(() => {
-    setSyncOpen(false);
-    const inPanel = document.activeElement?.closest(".ub-sync-panel") ?? null;
-    if (inPanel === null) return;
-    document.querySelector<HTMLElement>(".ub-sync-toggle")?.focus();
   }, []);
 
   const onFocusThread = useCallback<SelectThread>((threadId, selection) => {
@@ -1031,51 +1011,74 @@ export function App(): ReactElement {
             }
           />
         ) : (
-          <RoutePane
-            route={route}
-            configured={hubReady}
-            connection={doc}
-            presence={presence}
-            endpoint={statusEndpoint}
-            hubAcked={serving === null ? undefined : hubAcked}
-            meta={meta}
-            author={identity.name}
-            catalogConnection={catalog}
-            archived={archived}
-            updatedAt={selectedDirectoryEntry?.updatedAt}
-            onLastUpdatedChange={onLastUpdatedChange}
-            docLinks={docLinks}
-            pinned={pinned}
-            onTogglePin={
-              sidebarStatus.writable && sidebarStatus.synced && selected !== null
-                ? onTogglePin
-                : null
-            }
-            onArchive={
-              selectedDirectoryEntry !== null &&
-              selectedDirectoryEntry !== undefined &&
-              selectedDirectoryEntry.deleted !== true &&
-              directoryStatus.writable &&
-              sidebarStatus.writable &&
-              sidebarStatus.synced
-                ? onArchive
-                : null
-            }
-            onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
-            focusRestore={
-              doc !== null &&
-              (restoreFocusRoom.current === doc.room ||
-                archiveConfirmationFocusRoom.current === doc.room)
-            }
-            onRestoreFocused={onRestoreFocused}
-            onRestore={directoryStatus.writable ? onRestore : null}
-            onSelectThread={onFocusThread}
-            threads={threads}
-            threadsOpen={threadsOpen}
-            onToggleThreads={onToggleThreads}
-            syncOpen={syncOpen}
-            onToggleSync={onToggleSync}
-          />
+          <Popover open={syncOpen} onOpenChange={setSyncOpen}>
+            <RoutePane
+              route={route}
+              configured={hubReady}
+              connection={doc}
+              presence={presence}
+              endpoint={statusEndpoint}
+              hubAcked={serving === null ? undefined : hubAcked}
+              meta={meta}
+              author={identity.name}
+              catalogConnection={catalog}
+              archived={archived}
+              updatedAt={selectedDirectoryEntry?.updatedAt}
+              onLastUpdatedChange={onLastUpdatedChange}
+              docLinks={docLinks}
+              pinned={pinned}
+              onTogglePin={
+                sidebarStatus.writable && sidebarStatus.synced && selected !== null
+                  ? onTogglePin
+                  : null
+              }
+              onArchive={
+                selectedDirectoryEntry !== null &&
+                selectedDirectoryEntry !== undefined &&
+                selectedDirectoryEntry.deleted !== true &&
+                directoryStatus.writable &&
+                sidebarStatus.writable &&
+                sidebarStatus.synced
+                  ? onArchive
+                  : null
+              }
+              onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
+              focusRestore={
+                doc !== null &&
+                (restoreFocusRoom.current === doc.room ||
+                  archiveConfirmationFocusRoom.current === doc.room)
+              }
+              onRestoreFocused={onRestoreFocused}
+              onRestore={directoryStatus.writable ? onRestore : null}
+              onSelectThread={onFocusThread}
+              threads={threads}
+              threadsOpen={threadsOpen}
+              onToggleThreads={onToggleThreads}
+              syncDetails
+            />
+            {/* The popover reads the same room and sessions as its status trigger. */}
+            {route.kind === "doc" && (
+              <PopoverContent
+                align="start"
+                collisionPadding={8}
+                aria-label="Sync and presence"
+                className="ub-sync-panel w-[min(22rem,calc(100vw_-_1rem))]! max-h-[min(calc(100dvh_-_1rem),var(--radix-popover-content-available-height))] overflow-y-auto"
+              >
+                <SyncPanel
+                  connection={chromeRoom}
+                  presence={presence}
+                  endpoint={statusEndpoint}
+                  hubAcked={serving === null ? undefined : hubAcked}
+                  lastUpdated={
+                    shownLastUpdated !== null &&
+                    shownLastUpdated.room === chromeRoom?.room
+                      ? shownLastUpdated.value
+                      : undefined
+                  }
+                />
+              </PopoverContent>
+            )}
+          </Popover>
         )}
         {/* The outline follows the document independently of the comments rail:
             its compact trigger remains while the document pane scrolls, and no
@@ -1099,25 +1102,6 @@ export function App(): ReactElement {
           onOpenChange={setThreadsOpen}
           onCloseAutoFocus={restoreThreadsFocus}
         />
-        {/* The sync detail panel (#72), over the panes rather than beside them:
-            it is opened to answer a question and closed again. The room and
-            sessions are the ones the document-local status line describes;
-            the endpoint is null only while its configuration read settles. */}
-        {syncOpen && route.kind === "doc" && (
-          <SyncPanel
-            connection={chromeRoom}
-            presence={presence}
-            endpoint={statusEndpoint}
-            hubAcked={serving === null ? undefined : hubAcked}
-            lastUpdated={
-              shownLastUpdated !== null &&
-              shownLastUpdated.room === chromeRoom?.room
-                ? shownLastUpdated.value
-                : undefined
-            }
-            onClose={closeSync}
-          />
-        )}
       </SidebarProvider>
     </main>
   );

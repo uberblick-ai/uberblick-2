@@ -934,37 +934,6 @@ body {
 
 /* ---- document contents and the independent threads rail ---- */
 
-.ub-outline-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.25rem 0.55rem;
-  background: var(--card-accent);
-  color: var(--secondary-foreground);
-  font: inherit;
-  font-size: 0.75rem;
-  line-height: 1.4;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.ub-outline-trigger span {
-  color: var(--muted-foreground);
-  font-size: 0.7rem;
-}
-
-.ub-outline-trigger:hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-
-.ub-outline-trigger:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-
 @media (max-width: 767px) {
   /* The uuid is the actionable identity at this width; the revision is the one
      optional fact in the row. Removing only that suffix keeps the identity,
@@ -973,58 +942,6 @@ body {
   .ub-doc-rev {
     display: none;
   }
-}
-
-/* ---- the sync detail panel (#72, design surface 1e's right column) ---- */
-
-/* An overlay, not a fourth column: it is opened to answer a question and closed
-   again, so it must not reflow the prose to appear. `.ub-body` is its
-   containing block — the same one the threads drawer overlays — and it sits
-   above that drawer, because the pill that opens it is always reachable. */
-.ub-sync-panel {
-  position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 6;
-  width: min(22rem, 90vw);
-  max-height: 100%;
-  overflow-y: auto;
-  padding: 0.75rem;
-  border-left: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  border-bottom-left-radius: var(--radius);
-  background: var(--card);
-  color: var(--card-foreground);
-  box-shadow: -8px 8px 24px rgb(0 0 0 / 0.18);
-  font-size: 0.85rem;
-}
-
-.ub-sync-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.ub-sync-facts {
-  margin: 0 0 1.25rem;
-}
-
-.ub-presence {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-.ub-sync-panel .ub-rail-head {
-  margin: 0 0 0.4rem;
-  font-size: 0.7rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted-foreground);
 }
 
 /* The frame anchors the gutter button beside ProseMirror-owned content. */

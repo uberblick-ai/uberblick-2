@@ -2,9 +2,9 @@
  * The floating document outline in a real browser.
  *
  * Its derived H1/H2 data stays in the unit suite. This file owns the behavior
- * only a layout and input model can prove: stable geometry, the pointer path
- * across a portalled popover, keyboard focus and restoration, touch toggling,
- * long-list containment, and the smooth scroll call into the rendered block.
+ * only a layout and input model can prove: stable geometry, activation-only
+ * opening, keyboard operation, touch toggling, long-list containment, and the
+ * smooth scroll call into the rendered block.
  */
 
 import { chromium, expect, test } from "@playwright/test";
@@ -84,14 +84,13 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
     .poll(async () => (await trigger.boundingBox())?.y)
     .toBeCloseTo(top ?? 0, 1);
 
-  // Hover opens without stealing the editor's focus. The portal is a short
-  // pointer crossing away; entering it before the grace expires keeps it open.
-  await trigger.hover();
+  // Contents stays closed on hover and opens when the control is activated.
   const panel = page.getByRole("menu", { name: `Contents ${expected.length}` });
+  await trigger.hover();
+  await page.clock.runFor(180);
+  await expect(panel).toBeHidden();
+  await trigger.click();
   await expect(panel).toBeVisible();
-  expect(
-    await panel.evaluate((node) => !node.contains(document.activeElement)),
-  ).toBe(true);
   const rows = panel.getByRole("menuitem");
   await expect(rows).toHaveText(expected);
   await expect(panel.getByRole("menuitem", { name: "Hidden detail" })).toHaveCount(0);
@@ -122,19 +121,6 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
   expect(await first.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe(
     rowGround,
   );
-  await panel.hover();
-  await page.clock.runFor(180);
-  await expect(panel).toBeVisible();
-  await page.mouse.move(0, 0);
-  await page.clock.runFor(180);
-  await expect(panel).toBeHidden();
-  await expect(editor(page)).toBeFocused();
-  await page.keyboard.type("x");
-  await expect(page.locator(".ub-editor .ub-paragraph").last()).toHaveText("x");
-
-  // Mouse activation does not poison the next keyboard opening.
-  await trigger.hover();
-  await expect(panel).toBeVisible();
   await first.click();
   await expect(panel).toBeHidden();
   await expect(trigger).toBeFocused();

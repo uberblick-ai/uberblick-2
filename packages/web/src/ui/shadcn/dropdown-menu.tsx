@@ -18,13 +18,6 @@ import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import type { ComponentProps, ReactElement } from "react";
 import { cn } from "./cn.js";
 
-type DropdownMenuContentProps = ComponentProps<
-  typeof DropdownMenuPrimitive.Content
-> & {
-  /** Keep a pointer-opened menu from taking the reader's current focus. */
-  onOpenAutoFocus?: (event: Event) => void;
-};
-
 function DropdownMenu(
   props: ComponentProps<typeof DropdownMenuPrimitive.Root>,
 ): ReactElement {
@@ -43,7 +36,7 @@ function DropdownMenuContent({
   className,
   sideOffset = 6,
   ...props
-}: DropdownMenuContentProps): ReactElement {
+}: ComponentProps<typeof DropdownMenuPrimitive.Content>): ReactElement {
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
@@ -54,7 +47,7 @@ function DropdownMenuContent({
           "max-h-(--radix-dropdown-menu-content-available-height)",
           className,
         )}
-        {...(props as ComponentProps<typeof DropdownMenuPrimitive.Content>)}
+        {...props}
       />
     </DropdownMenuPrimitive.Portal>
   );
