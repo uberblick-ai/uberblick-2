@@ -124,7 +124,7 @@ afterAll(() => {
 });
 
 describe("archive_doc", () => {
-  it("leaves a requirement and its ordered decisions independent", async () => {
+  it("leaves a requirement and its derived decision topics independent", async () => {
     const rig = await localRig();
     const requirement = await rig.ok("create_doc", {
       title: "Choose the delivery path",
@@ -151,20 +151,11 @@ describe("archive_doc", () => {
       governs: requirement.uuid,
       blocks: [{ type: "paragraph", text: "Use ub open." }],
     });
-    const expectedLog = [
-      {
-        uuid: first.uuid,
-        title: "Choose the store",
-        status: "decided",
-        available: true,
-      },
-      {
-        uuid: second.uuid,
-        title: "Choose the serving process",
-        status: "open",
-        available: true,
-      },
-    ];
+    const expectedLog = (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions;
+    expect(expectedLog).toMatchObject([
+      { topic: first.uuid, inForce: { uuid: first.uuid }, pending: [] },
+      { topic: second.uuid, inForce: null, pending: [{ uuid: second.uuid }] },
+    ]);
     const decisionsBefore = await Promise.all(
       [first.uuid, second.uuid].map((uuid) => rig.ok("get_doc", { uuid })),
     );
@@ -193,17 +184,14 @@ describe("archive_doc", () => {
       ),
     ).toEqual(decisionsBefore);
 
-    // Restore remains single-document in the other direction too: a decision
+    // Requirement restore remains independent in the other direction too: a decision
     // archived deliberately stays archived when its requirement cycles.
     await rig.ok("archive_doc", { uuid: first.uuid });
     await rig.ok("archive_doc", { uuid: requirement.uuid });
     await rig.ok("restore_doc", { uuid: requirement.uuid });
     expect(
       (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions,
-    ).toEqual([
-      { ...expectedLog[0], available: false },
-      expectedLog[1],
-    ]);
+    ).toEqual([expectedLog[1]]);
   });
 
   it("drops a document from discovery and search, and from nothing else", async () => {

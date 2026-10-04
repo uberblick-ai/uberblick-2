@@ -35,14 +35,17 @@ import {
   appendBlock,
   createGroup,
   directoryRoom,
+  getDirectoryMap,
   getDirectoryEntry,
   getMeta,
+  getMetaMap,
   initDoc,
   listDirectory,
   pinDoc,
   readSidebar,
   restoreDirectoryEntry,
   roomForDoc,
+  setKind,
   sidebarRoom,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
@@ -256,6 +259,62 @@ function action(label: string): HTMLElement | undefined {
 }
 
 describe("an archived document is readable, says so, and offers one way back", () => {
+  it("archives and restores a whole decision topic from a successor, with first-record authority", async () => {
+    const directory = room(directoryRoom(WORKSPACE)).ydoc;
+    const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+    const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
+    initDoc(ydoc, { uuid: UUID, title: "New lease" });
+    setKind(ydoc, "decision");
+    getMetaMap(ydoc).set("topic", OTHER);
+    getMetaMap(ydoc).set("supersedes", OTHER);
+    appendBlock(ydoc, { type: "paragraph", text: "The proposed lease." });
+    for (const uuid of [OTHER, UUID]) {
+      upsertDirectoryEntry(directory, {
+        uuid, title: uuid === UUID ? "New lease" : "Original lease",
+        kind: "decision", status: "open", topic: OTHER,
+        ...(uuid === UUID ? { supersedes: OTHER } : {}),
+      });
+    }
+    const group = createGroup(sidebar, "Reading");
+    pinDoc(sidebar, group, OTHER);
+    pinDoc(sidebar, group, UUID);
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+
+    // A foreign/partial write to a mirror cannot make the record read-only.
+    const map = getDirectoryMap(directory);
+    act(() => {
+      map.set(UUID, { ...(map.get(UUID) as object), deleted: true });
+    });
+    expect(banner(host)).toBeNull();
+    expect(prose(host)?.getAttribute("contenteditable")).toBe("true");
+    openActions(host);
+    act(() => action("Archive document")?.click());
+    act(() => document.querySelector<HTMLButtonElement>(
+      '[role="alertdialog"] .ub-tool-danger',
+    )?.click());
+    expect(getDirectoryEntry(directory, OTHER)?.deleted).toBe(true);
+    expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
+    expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
+
+    act(() => restoreButton(host)?.click());
+    expect(getDirectoryEntry(directory, OTHER)?.deleted).toBeUndefined();
+    expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
+    expect(banner(host)).toBeNull();
+    expect(prose(host)?.getAttribute("contenteditable")).toBe("true");
+
+    // A first-record tombstone alone closes the successor's editing surface.
+    act(() => map.set(OTHER, { ...(map.get(OTHER) as object), deleted: true }));
+    expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
+    expect(banner(host)).not.toBeNull();
+    expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
+    expect(host.querySelector<HTMLInputElement>(".ub-title")?.readOnly).toBe(true);
+    act(() => typeInto(host.querySelector<HTMLInputElement>(".ub-title"), "changed"));
+    expect(getMeta(ydoc).title).toBe("New lease");
+    act(() => restoreButton(host)?.click());
+    expect(banner(host)).toBeNull();
+  });
+
   it("curates and archives from the identity-row menu, taking the pin with it", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;

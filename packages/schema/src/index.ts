@@ -4,8 +4,7 @@
  * Owns the Y.Doc layout for an uberblick document:
  *   - `meta`        Y.Map: uuid, title, description, TL;DR, changelog suggestion,
  *                        `tag-assigned:<identity>` presence entries,
- *                        links-by-UUID, kind, status, supersedes and internal
- *                        decision remove/add levels
+ *                        links-by-UUID, kind, status and decision metadata
  *   - `blocks`      Y.XmlFragment: one Y.XmlElement per block, each holding a
  *                   single Y.XmlText of plain-text source
  *                   (types: paragraph, heading, code, mermaid, list-item,
@@ -15,8 +14,6 @@
  *   - `annotations` Y.Map of one Y.Map per thread — anchor, resolved flag and
  *                   the conversation as a nested Y.Array — anchored by
  *                   `comment` formatting marks on the block's text
- *   - `decisions`   Y.Array of decision-document uuids: the ordered log of
- *                   which decisions govern this document
  *
  * …plus workspace ids (a uuid, optionally slug-decorated for display), room
  * names (`<workspaceId>/<uuid>`), the directory doc that makes discovery a
@@ -34,18 +31,12 @@
 export {
   ANNOTATIONS_KEY,
   BLOCKS_KEY,
-  DECISIONS_KEY,
   META_KEY,
-  addDecision,
   getAnnotationsMap,
   getBlocksFragment,
-  getDecisionsArray,
   getMeta,
   getMetaMap,
   initDoc,
-  readDecisions,
-  removeDecision,
-  reorderDecisions,
   setChangelogSuggestion,
   setDescription,
   setTldr,
@@ -56,6 +47,7 @@ export {
   setTitle,
 } from "./doc.js";
 export type { InitDocOptions } from "./doc.js";
+export { decisionRelations, readDecisions, resolveDecisionTopics } from "./decisions.js";
 
 export {
   appendBlock,
@@ -164,6 +156,8 @@ export {
 
 export {
   DIRECTORY_DOCS_KEY,
+  decisionDirectoryFields,
+  decisionTopicArchived,
   directoryStubDiffers,
   getDirectoryEntry,
   getDirectoryMap,
@@ -172,7 +166,7 @@ export {
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "./directory.js";
-export type { DirectoryUpsert, ListDirectoryOptions } from "./directory.js";
+export type { DecisionDirectoryFields, DirectoryUpsert, ListDirectoryOptions } from "./directory.js";
 
 export {
   EXAMPLE_TAGS,
@@ -201,7 +195,6 @@ export {
   AnnotationRangeError,
   BlockNotFoundError,
   ConflictingLinkMarksError,
-  InvalidDecisionReferenceError,
   InvalidDocumentLifecycleError,
   InvalidSupersedesReferenceError,
   InvalidTagAssignmentError,
@@ -218,7 +211,6 @@ export {
 } from "./errors.js";
 export type {
   AnnotationRangeErrorReason,
-  DecisionReferenceErrorReason,
   SupersedesReferenceErrorReason,
   InlineLinkRangeErrorReason,
   OldTextMismatchDetails,
@@ -253,6 +245,7 @@ export type {
   BlockType,
   CommentMark,
   DecisionReference,
+  DecisionTopicResolution,
   DirectoryEntry,
   DecisionStatus,
   DocMeta,

@@ -43,6 +43,7 @@
 
 import type * as Y from "yjs";
 import {
+  decisionDirectoryFields,
   directoryStubDiffers,
   getDirectoryEntry,
   getMeta,
@@ -67,15 +68,18 @@ export const UPDATED_AT_COARSENESS_MS = 5 * 60_000;
  * window costs the workspace no directory update at all. A tombstone is left
  * alone — `upsertDirectoryEntry` keeps it sticky, but rewriting it on every
  * observed update would churn the directory to no end, and un-archiving is
- * `restoreDirectoryEntry`'s business.
+ * `restoreDirectoryEntry`'s business. Decision caches also repair while archived:
+ * their fields serve the whole topic's history and resolution, and a record's
+ * own tombstone is only a mirror of the topic's archive state.
  */
 function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changedAt: number | null): void {
   const meta = getMeta(docDoc);
   if (meta.uuid === "") return;
   const stub = getDirectoryEntry(dirDoc, meta.uuid);
-  if (stub?.deleted === true) return;
+  if (stub?.deleted === true && meta.kind !== "decision") return;
 
-  const metaChanged = directoryStubDiffers(stub, meta);
+  const decisionFields = decisionDirectoryFields(docDoc);
+  const metaChanged = directoryStubDiffers(stub, meta, decisionFields);
   const staleStamp =
     stub?.updatedAt === undefined ||
     (changedAt !== null &&
@@ -94,6 +98,7 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changedAt: number | null): voi
     description: meta.description ?? "",
     kind: meta.kind ?? "",
     status: meta.status ?? "",
+    ...decisionFields,
     createdAt: Date.now(),
     ...(stamp ? { updatedAt: changedAt } : {}),
   });

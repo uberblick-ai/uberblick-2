@@ -56,6 +56,7 @@ import {
   MAX_DESCRIPTION_LENGTH,
   appendBlock,
   createGroup,
+  decisionDirectoryFields,
   getDirectoryEntry,
   getMeta,
   importMarkdown,
@@ -240,6 +241,7 @@ function applySeed(
         uuid: seed.uuid,
         title: stub.title,
         tags: stub.tags,
+        ...decisionDirectoryFields(doc),
         createdAt: Date.now(),
       });
     }
@@ -273,6 +275,7 @@ function applySeed(
     title: seed.title,
     description: seed.description,
     tags: seed.tags,
+    ...decisionDirectoryFields(doc),
     createdAt: now,
     updatedAt: now,
   });

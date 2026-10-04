@@ -15,7 +15,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
-  addDecision,
   getDirectoryEntry,
   getMeta,
   getMetaMap,
@@ -798,10 +797,10 @@ describe("lifecycle tool text", () => {
       'unfiltered orientation listing omits `kind: "decision"`',
     );
     expect(description("list_docs")).toContain(
-      '`kind: "decision"` lists decision records',
+      '`kind: "decision"` lists decision topics',
     );
     expect(description("list_docs")).toContain(
-      "`include_deleted` admits tombstones but is not a predicate",
+      "`include_deleted` admits archived topics but is not a predicate",
     );
     expect(description("archive_doc")).toContain(
       "for a decision, add a matching `kind`, `status` or `tag` predicate",
@@ -824,21 +823,12 @@ describe("lifecycle tool text", () => {
 });
 
 describe("decision log tools", () => {
-  it("states that archive and restore never cascade through a decision log", async () => {
+  it("states that decision lifecycle acts on the whole topic", async () => {
     const rig = await localRig();
     const { tools } = await rig.client.listTools();
-
     for (const name of ["archive_doc", "restore_doc"]) {
-      const description = tools.find((tool) => tool.name === name)?.description;
-      expect(description, name).toContain(
-        "writes lifecycle state only for the uuid passed",
-      );
-      expect(description, name).toContain(
-        "decision log can still report whether the target is available",
-      );
-      expect(description, name).toContain(
-        "Call archive_doc or restore_doc separately for each related document",
-      );
+      expect(tools.find(tool => tool.name === name)?.description).toContain("acts on every record in its topic");
+      expect(tools.find(tool => tool.name === name)?.description).toContain("first record's directory tombstone");
     }
   });
 
@@ -864,36 +854,18 @@ describe("decision log tools", () => {
     expect(decision.rooms.map((room: any) => room.purpose)).toEqual([
       "document",
       "directory",
-      "requirement",
     ]);
     expect(decision.rooms.every((room: any) => room.applied)).toBe(true);
     expect(decision.rooms.every((room: any) => room.synced === false)).toBe(true);
 
     const governed = await rig.ok("get_doc", { uuid: requirement.uuid });
-    expect(governed.decisions).toEqual([
-      {
-        uuid: decision.uuid,
-        title: "Choose the durable path",
-        status: "open",
-        available: true,
-      },
+    expect(governed.decisions).toMatchObject([
+      { uuid: decision.uuid, topic: decision.uuid, inForce: null, pending: [{ uuid: decision.uuid }] },
     ]);
-    expect(governed.links).toEqual([decision.uuid]);
-    expect((await rig.ok("get_doc", { uuid: decision.uuid })).decisions).toEqual(
-      [],
-    );
-
-    // `links` is the effective graph edge list. Passing it back stores the
-    // decision in the curated array as well, while the read stays deduplicated.
-    await rig.ok("set_links", { uuid: requirement.uuid, links: governed.links });
-    expect(
-      getMetaMap(rig.instance.replicas.replica(requirement.uuid).doc).get(
-        "links",
-      ),
-    ).toEqual([decision.uuid]);
-    expect((await rig.ok("get_doc", { uuid: requirement.uuid })).links).toEqual([
-      decision.uuid,
-    ]);
+    expect(governed.links).toEqual([]);
+    expect((await rig.ok("get_doc", { uuid: decision.uuid })).links).toEqual([requirement.uuid]);
+    expect((await rig.ok("backlinks", { uuid: requirement.uuid })).backlinks).toMatchObject([{ uuid: decision.uuid }]);
+    expect((await rig.ok("get_doc", { uuid: decision.uuid })).decisions).toEqual([]);
   });
 
   it("records supersession on the new decision and exposes it as a backlink", async () => {
@@ -924,7 +896,10 @@ describe("decision log tools", () => {
       supersedes: earlier.uuid,
       links: [earlier.uuid],
     });
-    expect(await rig.ok("get_doc", { uuid: earlier.uuid })).toEqual(before);
+    const earlierRead = await rig.ok("get_doc", { uuid: earlier.uuid });
+    expect(earlierRead.blocks).toEqual(before.blocks);
+    expect(earlierRead.successors).toMatchObject([{ uuid: successor.uuid, status: "open" }]);
+    expect(earlierRead.resolution).toMatchObject({ inForce: { uuid: earlier.uuid }, pending: [{ uuid: successor.uuid }] });
     expect(
       (await rig.ok("backlinks", { uuid: earlier.uuid })).backlinks,
     ).toEqual([
@@ -966,35 +941,15 @@ describe("decision log tools", () => {
     expect(await rig.ok("get_doc", { uuid: ordinary.uuid })).toEqual(before);
   });
 
-  it("keeps archived and missing decision references visible in stored order", async () => {
+  it("omits archived topics from the derived requirement log", async () => {
     const rig = await localRig();
-    const requirement = await lifecycleDoc(rig, "Requirement", {
-      kind: "requirement",
-    });
+    const requirement = await lifecycleDoc(rig, "Requirement", { kind: "requirement" });
     const decision = await rig.ok("create_doc", {
-      title: "An archived decision",
-      description: "Remains in the requirement's history.",
-      kind: "decision",
-      governs: requirement.uuid,
+      title: "Archived topic", description: "Archive is the topic's visibility switch.",
+      kind: "decision", governs: requirement.uuid,
     });
-    const missing = randomUUID();
-    addDecision(
-      rig.instance.replicas.replica(requirement.uuid).doc,
-      missing,
-    );
     await rig.ok("archive_doc", { uuid: decision.uuid });
-
-    expect(
-      (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions,
-    ).toEqual([
-      {
-        uuid: decision.uuid,
-        title: "An archived decision",
-        status: "open",
-        available: false,
-      },
-      { uuid: missing, title: null, status: null, available: false },
-    ]);
+    expect((await rig.ok("get_doc", { uuid: requirement.uuid })).decisions).toEqual([]);
   });
 
   it("refuses every invalid governing target before creating a document", async () => {
@@ -1076,12 +1031,12 @@ describe("decision log tools", () => {
     const setLinks = tools.find((tool) => tool.name === "set_links");
 
     expect(create?.description).toContain("`governs`");
-    expect(create?.description).toContain("governed requirement");
+    expect(create?.description).toContain("governing requirement");
     expect(create?.description).toContain("`supersedes`");
     expect(create?.description).toContain("without editing that earlier document");
-    expect(get?.description).toContain("ordered log");
+    expect(get?.description).toContain("oldest-topic-first log");
     expect(get?.description).toContain("derived outbound edges");
-    expect(get?.description).toContain("immutable `supersedes` reference");
+    expect(get?.description).toContain("immutable `supersedes`");
     expect(setLinks?.description).toContain("curated link array");
     expect(setLinks?.description).toContain("passing get_doc's effective `links`");
   });
