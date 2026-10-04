@@ -52,8 +52,8 @@ test("web derives HTTP or HTTPS only from validated settings, ignoring unchecked
 			[{}, settings.TAILSCALE_HOST, settings.WEB_HUB_URL],
 			[{ WEB_HUB_URL: "" }, settings.TAILSCALE_HOST, `wss://${settings.TAILSCALE_HOST}/ws`],
 			[{ TAILSCALE_HOST: "", WEB_HOST: "hub.example.com", WEB_HUB_URL: "" }, "hub.example.com", "wss://hub.example.com/ws"],
-			[{ TAILSCALE_HOST: "", TAILSCALE_IP: "", WEB_HUB_URL: "" }, "http://:80", "ws://localhost:8080/ws"],
-			[{ TAILSCALE_HOST: "", TAILSCALE_IP: "", WEB_HUB_URL: "", LOOPBACK_PORT: "8123" }, "http://:80", "ws://localhost:8123/ws"],
+			[{ TAILSCALE_HOST: "", TAILSCALE_IP: "", WEB_HUB_URL: "" }, "http://localhost:80, http://127.0.0.1:80", "ws://localhost:8080/ws"],
+			[{ TAILSCALE_HOST: "", TAILSCALE_IP: "", WEB_HUB_URL: "", LOOPBACK_PORT: "8123" }, "http://localhost:80, http://127.0.0.1:80", "ws://localhost:8123/ws"],
 		]) {
 			const result = spawnSync("sh", [join(scratch, "web-release-entrypoint.sh"), "run"], {
 				env: { ...process.env, ...settings, ...overrides,

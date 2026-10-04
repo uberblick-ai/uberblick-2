@@ -5,7 +5,8 @@ macOS. Apple Silicon Macs run the published `linux/amd64` images under emulation
 The host needs no repository checkout, build tools, `ub`, GitHub account or
 registry login. One version supplies the hub image, the prebuilt web image and
 all host files. By default Caddy serves plain HTTP only on the host's loopback
-interface at `http://localhost:8080`. Other computers use HTTPS for a configured
+interface at `http://localhost:8080`, answering only `localhost` and `127.0.0.1`
+Host names to prevent DNS rebinding. Other computers use HTTPS for a configured
 host name. Tailscale is the recommended optional network layer; public DNS is
 also supported. Caddy serves the app and `/uberblick-config.json` and proxies
 `/ws` and `/auth/*` to the hub. The hub is not published directly.

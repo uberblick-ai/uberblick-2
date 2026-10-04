@@ -7,7 +7,8 @@ if [ -n "$host" ]; then
   WEB_SITE=$host
   HUB_URL=${WEB_HUB_URL:-wss://${host}/ws}
 else
-  WEB_SITE=http://:80
+  # Match loopback hosts too, so a DNS-rebinding page cannot reach sign-in.
+  WEB_SITE='http://localhost:80, http://127.0.0.1:80'
   HUB_URL=${WEB_HUB_URL:-ws://localhost:${LOOPBACK_PORT:-8080}/ws}
 fi
 WORKSPACES=${WEB_WORKSPACES:-}

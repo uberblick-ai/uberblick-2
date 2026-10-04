@@ -79,11 +79,11 @@ async function command(program, args, options = {}) {
   });
 }
 
-function request(port, path, websocket = false) {
+function request(port, path, websocket = false, host = `localhost:${port}`, method = "GET") {
   return new Promise((resolve, reject) => {
     const req = http.request({
-      hostname: "127.0.0.1", port, path,
-      headers: { Host: `localhost:${port}`, ...(websocket ? {
+      hostname: "127.0.0.1", port, path, method,
+      headers: { Host: host, ...(method === "POST" ? { "Content-Type": "application/json" } : {}), ...(websocket ? {
         Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13",
         "Sec-WebSocket-Key": "c3ludGhldGljLXByb29mIQ==",
       } : {}) },
@@ -100,7 +100,7 @@ function request(port, path, websocket = false) {
       response.once("end", () => resolve({ status: response.statusCode, headers: response.headers, body }));
       response.once("error", reject);
     });
-    req.end();
+    req.end(method === "POST" ? "{}" : undefined);
   });
 }
 
@@ -239,7 +239,21 @@ db.close(); console.log(JSON.stringify(result));`;
     assert.equal(fresh.hub_claim_state.length, 1);
     assert.equal(fresh.hub_claim_state[0].unclaimed, 1);
     const freshPort = Number((await compose(["port", "caddy", "80"])).stdout.trim().split(":").at(-1));
-    assert.deepEqual(JSON.parse((await request(freshPort, "/auth/claim-state")).body), { unclaimed: true, canClaim: true });
+    for (const host of [`localhost:${freshPort}`, `127.0.0.1:${freshPort}`]) {
+      assert.deepEqual(JSON.parse((await request(freshPort, "/auth/claim-state", false, host)).body), { unclaimed: true, canClaim: true });
+      const config = await request(freshPort, "/uberblick-config.json", false, host);
+      assert.equal(config.status, 200);
+      assert.deepEqual(JSON.parse(config.body), { hubUrl: `ws://localhost:${freshPort}/ws`, workspaces: WORKSPACE });
+      assert.equal((await request(freshPort, "/ws", true, host)).status, 101);
+    }
+    for (const path of ["/", "/auth/claim-state", "/auth/github/start", "/uberblick-config.json", "/ws"]) {
+      const rebound = await request(freshPort, path, path === "/ws", `rebind.example:${freshPort}`,
+        path === "/auth/github/start" ? "POST" : "GET");
+      assert.notEqual(rebound.status, 101);
+      // Caddy's unmatched host returns an empty response, never a site route.
+      assert.equal(rebound.body, "", `non-loopback Host reached ${path}`);
+    }
+    console.log("Loopback Host names reach config, claiming and WebSockets; a rebound Host reaches none of the site routes.");
     await compose(["stop", "hub"]);
     await offline(`const { DatabaseSync } = require("node:sqlite");
 const db = new DatabaseSync("/data/hub.sqlite"); db.exec("BEGIN IMMEDIATE");
