@@ -297,14 +297,6 @@ body {
   justify-content: center;
 }
 
-/* Small identity initials and overflow counts keep their heavier UI weight. */
-.ub-avatar,
-.ub-peer-more {
-  font-family: var(--font-sans);
-  font-size: 0.7rem;
-  font-weight: 600;
-}
-
 /* Session avatars keep their inline presence color on the ring and initial.
    A transparent disc stays legible on page and card grounds; the #rrggbb
    awareness palette is scoped in src/collab/identity.ts. */
@@ -1139,6 +1131,14 @@ h1.ub-heading {
 .ub-peers > .ub-peer-control:hover,
 .ub-peers > .ub-peer-control:focus-visible {
   z-index: 4;
+}
+
+/* Small identity initials and overflow counts keep their heavier UI weight. */
+.ub-avatar,
+.ub-peer-more {
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  font-weight: 600;
 }
 
 .ub-peer-more {
