@@ -251,6 +251,29 @@ const destinations = [
   { choice: "Back", settings: true, selector: ".ub-settings-back", path: `/${WORKSPACE}` },
 ];
 
+it("retires each outgoing drawer pane from interaction and assistive navigation", async () => {
+  await openApp();
+
+  function expectMode(settings: boolean): void {
+    const documentsPane = drawer()?.querySelector<HTMLElement>(".ub-document-sidebar");
+    const settingsPane = drawer()?.querySelector<HTMLElement>(".ub-settings-sidebar");
+    for (const [pane, retired] of [[documentsPane, settings], [settingsPane, !settings]] as const) {
+      expect(pane).not.toBeNull();
+      expect(pane?.hasAttribute("inert")).toBe(retired);
+      expect(pane?.getAttribute("aria-hidden")).toBe(String(retired));
+    }
+  }
+
+  await openDrawer();
+  expectMode(false);
+  await click(sidebarButton(".ub-settings-entry"));
+  await openDrawer(true);
+  expectMode(true);
+  await click(sidebarButton(".ub-settings-back"));
+  await openDrawer();
+  expectMode(false);
+});
+
 it.each(destinations)("closes and restores focus after choosing $choice", async (destination) => {
   // A saved hidden desktop sidebar must not retire the open drawer's controls.
   stored.set(COLLAPSED_KEY, "true");

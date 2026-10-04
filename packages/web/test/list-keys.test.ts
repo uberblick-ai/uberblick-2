@@ -95,6 +95,13 @@ describe("typing a list", () => {
       expect(new Set(ids).size).toBe(2);
       expect(ids.every((id) => id !== "")).toBe(true);
 
+      // The rendered depth follows the typed list's document attributes.
+      expect(
+        [...editor.view.dom.querySelectorAll("li")].map((item) =>
+          item.getAttribute("data-indent"),
+        ),
+      ).toEqual(["0", "1"]);
+
       // The list a reader typed is the list markdown means: nested, tight, and
       // it comes back as the same two flat blocks.
       const exported = exportMarkdown(ydoc, { frontmatter: false });
