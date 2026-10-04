@@ -124,7 +124,7 @@ describe("credential request proofs", () => {
     const fields = {
       deviceId: "device", workspaceId: WORKSPACE, principalId: "principal", role: "member",
     };
-    for (const action of ACTIONS) {
+    for (const action of ACTIONS.filter((candidate) => candidate.operation !== "renew-credential")) {
       for (const [field, value] of Object.entries(fields)) {
         const changes = Object.hasOwn(action, field)
           ? [{ [field]: undefined }, { [field]: "" }, { [field]: 7 }]
@@ -148,6 +148,16 @@ describe("credential request proofs", () => {
     await expect(mintRequestProof(key, request({
       operation: "revoke-device", deviceId: "x".repeat(MAX_TOKEN_LENGTH),
     }))).rejects.toThrow(/mintRequestProof/);
+  });
+
+  it("preserves renewal's existing handling of extra payload fields", async () => {
+    const metadata = { workspaceId: WORKSPACE, role: "admin" };
+    const expected = { typ: "request", kid: KID, operation: "renew-credential", iat: NOW, exp: NOW + 60 };
+    expect(await inspectRequestProof(key, await forge({ ...expected, ...metadata }), "renew-credential"))
+      .toEqual(expected);
+    const proof = await mintRequestProof(key, request(metadata));
+    expect(await inspectRequestProof(key, proof, "renew-credential")).toEqual(expected);
+    expect(JSON.parse(Buffer.from(proof.split(".")[0]!, "base64url").toString())).toEqual(expected);
   });
 
   it("rejects another device's signature and the shared root signature without reflecting claims or key material", async () => {

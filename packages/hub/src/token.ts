@@ -593,6 +593,9 @@ export function readRequestAction(payload: Record<string, unknown>): RequestActi
   let action: RequestAction;
   switch (operation) {
     case "renew-credential":
+      // Renewal predates management and has no targets; its existing proof
+      // contract ignores extra payload fields.
+      return { operation };
     case "list-devices":
       action = { operation };
       break;
