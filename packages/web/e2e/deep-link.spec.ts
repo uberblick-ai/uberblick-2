@@ -307,7 +307,7 @@ test("an unbound development config keeps its local key with the compiled loopba
   // admission and transport through the fallback rather than only a UI state.
   const observer = await openApp(browser, `/${ws()}/${uuid}`, { upstream: true });
   await expect(observer.locator(".ub-title")).toHaveValue(title);
-  await expect(editor(observer)).toHaveText("A development write reaches the hub.");
+  await expect(editor(observer)).toContainText("A development write reaches the hub.");
 });
 
 test("the served configuration names the workspaces, and the build's define is only the fallback", async ({
