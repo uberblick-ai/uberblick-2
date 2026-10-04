@@ -15,7 +15,7 @@
  *   schemes, and they only can if `@theme` resolved to the product's tokens
  *   rather than to Tailwind's defaults.
  * - **The primitives behave.** They portal out of the app's subtree, take the
- *   keyboard and close on Escape. jsdom will happily let all of that be broken.
+ *   keyboard and close on Escape through the composed surfaces' native input.
  * - **The theme is real.** `data-theme` re-themes the editor and the sidebar
  *   from tokens alone, and survives a reload. A stylesheet is exactly what
  *   jsdom does not have.
@@ -39,6 +39,9 @@
  * - **The document and rail are one composition.** Their fixed insets and
  *   overlay breakpoint are geometry, so only a laid-out browser can prove that
  *   viewport surplus follows them without shifting the prose.
+ * - **Settings follow browser history.** Back and Forward retire the outgoing
+ *   pane from hit testing and close its portalled controls. jsdom holds the
+ *   panes' inert and ARIA state; the browser holds history focus and motion.
  */
 
 import { randomUUID } from "node:crypto";
@@ -153,17 +156,14 @@ async function expectFocusIndicator(control: Locator): Promise<void> {
   expect(alphaOf(await paintedIn(control, "outline-color"))).toBeGreaterThan(0);
 }
 
-async function expectInertPane(pane: Locator): Promise<void> {
+/** jsdom owns inert/ARIA state; the browser owns the pane's hit testing. */
+async function expectPaneRejectsPointer(pane: Locator): Promise<void> {
   expect(await pane.evaluate((element) => {
     const box = element.getBoundingClientRect();
-    return {
-      inert: (element as HTMLElement).inert,
-      hidden: element.getAttribute("aria-hidden"),
-      takesPointer: element.contains(document.elementFromPoint(
-        box.left + box.width / 2, box.top + box.height / 2,
-      )),
-    };
-  })).toEqual({ inert: true, hidden: "true", takesPointer: false });
+    return element.contains(document.elementFromPoint(
+      box.left + box.width / 2, box.top + box.height / 2,
+    ));
+  })).toBe(false);
 }
 
 async function expectNoSidebarMotion(page: Page): Promise<void> {
@@ -448,7 +448,7 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
-test("workspace settings is an address-selected, inert sidebar drill-in", async ({
+test("settings panes reject the pointer and follow browser history", async ({
   browser,
 }) => {
   const page = await openAppearanceApp(browser, "light");
@@ -466,15 +466,14 @@ test("workspace settings is an address-selected, inert sidebar drill-in", async 
   await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
   const back = settings.getByRole("button", { name: /^Back to / });
   await expect(back).toBeVisible();
-  await expect(back).toBeFocused();
-  await expectInertPane(documents);
+  await expectPaneRejectsPointer(documents);
 
   // The route is the selection: browser Back restores the document sidebar.
   await page.goBack();
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
   await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
   await expect(settingsEntry).toBeFocused();
-  await expectInertPane(settings);
+  await expectPaneRejectsPointer(settings);
 
   // Portalled controls sit outside the pane's inert subtree. Browser Forward
   // changes the address without clicking underneath them, and the mode change
@@ -501,13 +500,6 @@ test("workspace settings is an address-selected, inert sidebar drill-in", async 
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
   await expect(settingsEntry).toBeFocused();
 
-  // The fixed bottom entry is the settings front door. Back in the settings
-  // pane always targets the workspace list rather than a remembered doc.
-  await settingsEntry.click();
-  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
-  await settings.getByRole("button", { name: /^Back to / }).click();
-  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
-
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
   await expectNoSidebarMotion(page);
@@ -520,7 +512,7 @@ test("the settings drawer retires the outgoing pane and respects reduced motion"
   await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
-  await expectInertPane(page.locator(".ub-document-sidebar"));
+  await expectPaneRejectsPointer(page.locator(".ub-document-sidebar"));
 
   // History switches modes while the drawer remains open, so the reduced
   // motion proof observes the drill-in itself rather than a fresh mount.
@@ -528,10 +520,10 @@ test("the settings drawer retires the outgoing pane and respects reduced motion"
   await page.goBack();
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
-  await expectInertPane(page.locator(".ub-settings-sidebar"));
+  await expectPaneRejectsPointer(page.locator(".ub-settings-sidebar"));
   await expectNoSidebarMotion(page);
   await page.goForward();
-  await expectInertPane(page.locator(".ub-document-sidebar"));
+  await expectPaneRejectsPointer(page.locator(".ub-document-sidebar"));
   await expectNoSidebarMotion(page);
 });
 

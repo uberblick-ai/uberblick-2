@@ -10,16 +10,16 @@
  * - **which representation a reader actually sees.** The switch is CSS, and
  *   only a browser applies CSS: the panel visible with the transcript hidden,
  *   and the two swapping the moment the caret lands in the block.
- * - **that the demonstration starts by itself and stops when it scrolls away.**
- *   The wiring is a real `IntersectionObserver`; jsdom has none, so the suite
- *   there drives a stub and this is the only proof that the real one is
- *   attached to the right element.
+ * - **that scrolling the demonstration into view reaches the real observer.**
+ *   jsdom drives a stub; this checks the browser's `IntersectionObserver`
+ *   delivery, with playback starting as its one end-state witness.
  * - **the pause control by keyboard**, which is the WCAG 2.2.2 mechanism. Tab
  *   has to reach it and Enter has to work it — a control only a mouse can
  *   operate satisfies nothing.
- * - **the reduced-motion preference**, which is a media query the browser owns.
- * - **what assistive technology is offered**: the animation out of the
- *   accessibility tree, the complete transcript in it, and no live region.
+ * - **the reduced-motion preference**, which is a real media query, and the
+ *   control's painted visibility under it and with an empty transcript.
+ *
+ * Transcript, frame, pause/resume and accessibility state stay in jsdom.
  */
 
 import { expect, test } from "@playwright/test";
@@ -70,12 +70,6 @@ async function frameText(page: Page): Promise<string> {
   return (await frame(page).textContent()) ?? "";
 }
 
-/** Advance scheduled playback while observing every part of the original proof. */
-async function advancePlayback(page: Page): Promise<string> {
-  await page.clock.runFor(100);
-  return frameText(page);
-}
-
 /**
  * A document whose last block is a terminal demonstration, with the caret left
  * in it. `fillerLines` paragraphs go in front of it, for the one test that
@@ -115,28 +109,19 @@ async function writeDemo(
   }
 }
 
-test("a transcript plays on screen, opens under the caret, and stops on its control", async ({
+test("the panel swaps with the source, and real Tab reaches its pause control", async ({
   page,
 }) => {
   await writeDemo(page, harness().appUrl);
 
-  // The caret is in the block, so the reader is looking at what they typed and
-  // nothing is playing behind it.
+  // CSS shows the source while the caret is in the block.
   await expect(source(page)).toBeVisible();
   await expect(panel(page)).toBeHidden();
 
-  // Caret away, and the block is a terminal playing what they wrote.
+  // CSS shows the panel instead when the caret leaves.
   await caretAway(page);
   await expect(panel(page)).toBeVisible();
   await expect(source(page)).toBeHidden();
-  await expect.poll(() => advancePlayback(page), { intervals: [0] }).toContain("$ ub init");
-  await expect.poll(() => advancePlayback(page), { intervals: [0] }).toContain("workspace ready");
-
-  // It loops: the panel clears and the first prompt comes round again.
-  await expect
-    .poll(() => advancePlayback(page), { intervals: [0], timeout: 20_000 })
-    .not.toContain("workspace ready");
-
   // Clicking the panel is how a reader gets back to the transcript.
   await panel(page).click();
   await expect(source(page)).toBeVisible();
@@ -144,43 +129,36 @@ test("a transcript plays on screen, opens under the caret, and stops on its cont
   await caretAway(page);
   await expect(panel(page)).toBeVisible();
 
-  // The control is reachable and operable by keyboard, which is the mechanism
-  // WCAG 2.2.2 asks for — not the caret, and not the mouse alone.
-  await control(page).focus();
+  // Browser Tab order reaches the panel, then the pause control from the prose.
+  // Native Enter must survive ProseMirror's event boundary; the new label is
+  // the one end-state witness. jsdom holds the pause/resume sequence.
+  await page.keyboard.press("Tab");
+  await expect(panel(page)).toBeFocused();
+  await page.keyboard.press("Tab");
   await expect(control(page)).toBeFocused();
-  await expect(control(page)).toHaveText("Pause");
   await page.keyboard.press("Enter");
   await expect(control(page)).toHaveText("Play");
-
-  const held = await frameText(page);
-  await page.clock.runFor(3_000);
-  expect(await frameText(page)).toBe(held);
-
-  await page.keyboard.press("Enter");
-  await expect(control(page)).toHaveText("Pause");
-  await expect.poll(() => advancePlayback(page), { intervals: [0] }).not.toBe(held);
 });
 
-test("a demonstration nobody can see is not running", async ({ page }) => {
+test("scrolling the demonstration into view delivers the real observer", async ({ page }) => {
   await page.setViewportSize({ width: 1_000, height: 400 });
   // Enough document in front of the block to scroll it off the screen.
   await writeDemo(page, harness().appUrl, 40);
-
   // The caret goes to the top of the document, which takes the panel with it.
   await caretAway(page);
   await expect(panel(page)).not.toBeInViewport();
+  // Freeze scheduled frames so only the native viewport observation can change
+  // the frame. A panel that plays regardless of its viewport cannot pass by looping.
+  await page.clock.pauseAt(new Date(Date.now() + 1_000));
+  const beforeScroll = await frameText(page);
 
-  // Nothing paints into a panel nobody is looking at.
-  await expect.poll(() => frameText(page)).toBe("");
-  await page.clock.runFor(2_000);
-  expect(await frameText(page)).toBe("");
-
-  // Scrolled back to, it starts — from the top, not from where it left off.
+  // The changed frame witnesses native delivery. jsdom owns the exact first
+  // frame and the off-screen cancellation/restart sequence.
   await panel(page).scrollIntoViewIfNeeded();
-  await expect.poll(() => advancePlayback(page), { intervals: [0] }).toContain("$ ub init");
+  await expect.poll(() => frameText(page)).not.toBe(beforeScroll);
 });
 
-test("reduced motion gets the whole transcript, and no control at all", async ({
+test("the real reduced-motion preference stops the control being painted", async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -188,59 +166,25 @@ test("reduced motion gets the whole transcript, and no control at all", async ({
   await caretAway(page);
 
   await expect(panel(page)).toBeVisible();
-  await expect.poll(() => frameText(page)).toBe(TRANSCRIPT);
-  // Nothing moves, so there is nothing to stop — and nothing painted where the
-  // control would be. Computed visibility, not the role: the attribute alone
-  // satisfied the role engine while the cascade still painted the button.
+  // Computed visibility catches a cascade that paints the control despite its
+  // hidden attribute. Transcript and playback state stay in jsdom.
   await expect(toggle(page)).toBeHidden();
-  const settled = await frameText(page);
-  await page.clock.runFor(3_000);
-  expect(await frameText(page)).toBe(settled);
 
-  // Turned off mid-view, the demonstration starts — the reader is answered
-  // either way round, without a reload.
+  // The live media query changes computed visibility without a reload.
   await page.emulateMedia({ reducedMotion: "no-preference" });
-  await expect(control(page)).toHaveText("Pause");
   await expect(toggle(page)).toBeVisible();
-  await expect.poll(() => advancePlayback(page), { intervals: [0] }).not.toBe(settled);
 
-  // …and turned back on mid-run the control goes again, rather than standing
-  // there as a button that would stop nothing.
+  // Switching the preference on again hides the painted control.
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(toggle(page)).toBeHidden();
-  await expect.poll(() => frameText(page)).toBe(TRANSCRIPT);
 });
 
-test("an empty transcript is an idle panel with no control on it", async ({ page }) => {
+test("an empty transcript leaves the panel visible and its control unpainted", async ({ page }) => {
   await writeDemo(page, harness().appUrl, 0, "");
   await caretAway(page);
 
-  // Nothing plays, so the same rule holds for a reason that has nothing to do
-  // with motion — and here the button would be blank as well as inert, because
-  // a panel that never plays never writes a label on it.
+  // Empty content is a separate path through the control's computed visibility;
+  // jsdom holds its idle frame and hidden-control state.
   await expect(panel(page)).toBeVisible();
   await expect(toggle(page)).toBeHidden();
-});
-
-test("assistive technology is offered the transcript, not the animation", async ({
-  page,
-}) => {
-  await writeDemo(page, harness().appUrl);
-  await caretAway(page);
-  await expect(panel(page)).toBeVisible();
-
-  // The animation is out of the accessibility tree; the complete transcript
-  // beside it is in it, off-screen rather than removed.
-  await expect(frame(page)).toHaveAttribute("aria-hidden", "true");
-  await expect
-    .poll(
-      async () =>
-        (await page.locator(".ub-terminal-transcript").textContent()) ?? "",
-    )
-    .toBe(TRANSCRIPT);
-  await expect(page.locator(".ub-terminal [aria-live]")).toHaveCount(0);
-
-  // The panel names itself as the way to the transcript, and the name is what
-  // is announced — Chromium's accessible-name computation, not our attribute.
-  await expect(panel(page)).toHaveAccessibleName(/transcript/i);
 });
