@@ -114,10 +114,9 @@ PATH where they were. The upgrade replaces only what Homebrew installed:
 everything under [Where your files live](#where-your-files-live) —
 configuration, credentials, workspaces and their databases — is untouched, and
 `ub status` still reports the same workspace with the documents it already
-held. CI calls `.github/workflows/homebrew-formula.yml` to prove installation
-and upgrade on Apple Silicon macOS and Linux x86_64 runners on every pull
-request and `main` push, covering every change to the formula or its payload.
-The `gates` check requires all four proofs to succeed.
+held. `.github/workflows/homebrew-formula.yml` proves installation and upgrade
+on a Linux x86_64 runner after every merge that changes the formula or its
+payload, and on demand from the Actions tab.
 
 ### The signing secret
 
@@ -615,6 +614,27 @@ Docker socket. The build context is the working tree filtered by
 because a proof that runs on state `ub init` was supposed to create proves
 nothing.
 
+## Local CI
+
+CI runs on a maintainer's machine, not on GitHub. From a checkout at
+`origin/main`, after the commit is pushed:
+
+```sh
+mise run ci <sha>
+```
+
+It runs the isolated review below (lint, typecheck and the test suite in a
+Linux container without network). When that passes, it marks the commit with
+a green `signoff` commit status through
+[gh-signoff](https://github.com/basecamp/gh-signoff), and that status is what
+merging requires. It then runs browser e2e on the host, unless only
+documentation or agent process changed, and reports it as the advisory
+`signoff/e2e` status. A failed step posts a red status. Install the extension
+once with `gh extension install basecamp/gh-signoff`.
+
+GitHub Actions keeps only what cannot run locally: release publishing, and the
+Linux Homebrew upgrade proof after a merge that touches packaging.
+
 ## Review isolation
 
 `mise run review <commit>` resolves its commit argument (default `HEAD`),
@@ -671,8 +691,8 @@ there. The verification container that runs the gates is the isolated half:
 `--network none --cap-drop ALL --security-opt no-new-privileges`. Restricting
 the build itself is not on the table: `docker build --network=none` fails at
 the package-manager install. A build only ever happens on an explicit
-`mise run review <commit>` — nothing builds a branch automatically
-and no CI job builds one on push. The standing rule bounds the blast radius:
+`mise run review <commit>`, which local CI runs — nothing builds a branch
+automatically on push. The standing rule bounds the blast radius:
 never pass build secrets, host mounts, privileged mode, or the Docker socket,
 so a hostile build has no credentials of ours to exfiltrate.
 
