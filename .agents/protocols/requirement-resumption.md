@@ -117,8 +117,8 @@ Each planned-outcome intake starts with this line:
 Implements: <requirement uuid> [<outcome block ids, when used>]
 ```
 
-Follow it with the confirmed intake sections in `issue-shaping.md`. Add only
-`needs-preparation`: do not write `Touches`, relationships, Priority, or
+Follow it with the confirmed intake sections in `issue-shaping.md`. Label it as
+`issue-shaping.md` describes for this session's account: do not write `Touches`, relationships, Priority, or
 `ready`. The issue-preparer later completes the machine-readable header and
 grounds the contract. Record the human's planned decision as a comment on the
 intake; it is their approval only when it comes from their own account

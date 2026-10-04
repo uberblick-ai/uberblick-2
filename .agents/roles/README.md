@@ -32,7 +32,7 @@ except `defer` removes that label and adds the next one:
 | --- | --- | --- |
 | issue-preparer | `ready` | issue: `needs-preparation` → `ready` |
 | issue-preparer | `review` | issue: `needs-preparation` → `needs-review` |
-| issue-preparer | `split` | issue: `needs-preparation` removed; its sub-issues carry `needs-preparation` |
+| issue-preparer | `split` | issue: `needs-preparation` removed; its sub-issues wait, unlabelled, for a maintainer to add `needs-preparation` |
 | issue-preparer | `wontfix` | `needs-preparation` removed; the run has closed the issue as not planned |
 | implementer | `review` | its pull request gets `needs-review`; the issue loses `ready`, or the pull request `needs-changes` |
 | implementer | `integrate` | its pull request gets `ready-to-merge`; the issue loses `ready`, or the pull request `needs-changes` |
@@ -125,10 +125,10 @@ transcript is never a handoff: GitHub must be sufficient for a fresh run to cont
 Before creating a follow-up issue discovered during a run, fetch `origin/main`
 and check the observation against that commit and existing open issues. Do not
 queue work that the current base already resolved or already tracks. Create it
-with `gh issue create --repo uberblick-ai/uberblick-2 --label
-needs-preparation`, adding `--blocked-by` or `--parent` only for a real
-relationship, and leave Request Source unset. This is the one label a run sets,
-and only on an issue it creates.
+with `gh issue create --repo uberblick-ai/uberblick-2` and no labels, adding
+`--blocked-by` or `--parent` only for a real relationship, and leave Request
+Source unset. A maintainer starts it by adding `needs-preparation`. A trigger
+label set by a run is not a start: ub-agents parks the issue for a human instead.
 
 Priority is the `priority:urgent|high|medium|low` label. A person owns every
 value; agents never set one by their own judgement. The one agent write is a

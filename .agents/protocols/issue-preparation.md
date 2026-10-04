@@ -64,8 +64,9 @@ Grounded dispositions include:
   justify reopening or a new issue.
 - **`split`:** the request cannot fit one independently reviewable PR. Follow
   ISSUE_SPEC's sizing rule: substantial, independently useful pieces rather
-  than tiny technical steps. Create native sub-issues with `needs-preparation`,
-  the source milestone and only real ordering blockers. Keep the source open
+  than tiny technical steps. Create native sub-issues without labels, with
+  the source milestone and only real ordering blockers; a maintainer starts each
+  with `needs-preparation`. Keep the source open
   as their parent, blocked by each child so priority inherits. Product-changing
   decomposition requires a human decision.
 

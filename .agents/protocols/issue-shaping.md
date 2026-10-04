@@ -71,7 +71,7 @@ silence and a request for more analysis are not approval.
 When the destination is undecided, offer the two supported paths:
 
 - **Discuss with coworkers:** publish a draft requirement.
-- **Create an intake:** file the confirmed scope with `needs-preparation`.
+- **Create an intake:** file the confirmed scope for a maintainer to start.
 
 Never choose from size or confidence alone. Neither path authorizes `ready` or
 implementation. For shared drafts and requirement resumption by UUID, read
@@ -95,8 +95,10 @@ Known constraints:
 omit if absent>
 ```
 
-Create it with `gh issue create --repo uberblick-ai/uberblick-2 --label
-needs-preparation`. Add only the `priority:<value>` the human stated, recording
+Create it with `gh issue create --repo uberblick-ai/uberblick-2`. When this
+session posts as a maintainer, add `--label needs-preparation`, which starts it.
+When it posts as `uberblick-agent`, add no trigger label and ask the human to add
+`needs-preparation` from their own account. Add only the `priority:<value>` the human stated, recording
 that decision in a comment; otherwise leave priority unset. Tell the human to
 set Request Source `Human` in the sidebar. Do not invent `Touches`, relationships,
 architecture, acceptance criteria, Pointers or `ready`: the preparer supplies
