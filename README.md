@@ -121,16 +121,10 @@ payload, and on demand from the Actions tab.
 ### The signing secret
 
 `HUB_AUTH_TOKEN` is the HMAC **secret** hub tokens are signed with, not a token.
-There are two ways to have one, and they do not fight:
-
-- **The repository owner's path — fnox.** The real secret lives age-encrypted in
-  `fnox.toml`, and every task wraps its command in `fnox exec`. With the age key
-  at `~/.config/fnox/age.txt`, that value wins: `fnox exec` **overwrites**
-  `HUB_AUTH_TOKEN` in the environment it hands to the command. `ub init`
-  generates nothing when it can already see one.
-- **Everybody else — a generated development secret.** With no age key,
-  `fnox exec --if-missing warn` warns and leaves the variable alone, and
-  `ub init` writes 32 random bytes to `credentials.json` (mode 0600) in this
+The repository holds no copy of it. Each machine keeps its own in
+`credentials.json`: a machine joined to a hub holds that hub's secret, given to
+it by the hub's operator (`ub remote join --secret-file`). Otherwise
+`ub init` writes 32 random bytes to `credentials.json` (mode 0600) in this
   machine's config root — see [Where your files live](#where-your-files-live).
   That file is the authority, and there is no copy of it anywhere else. It is
   generated only while this machine has **no hub endpoint stored**: a machine
@@ -723,8 +717,9 @@ package owns the instance. Check with `mise exec -- pnpm why yjs`.
 
 ## Secrets
 
-Secrets live in `fnox.toml`, age-encrypted and safe to commit. The private key
-is expected at `~/.config/fnox/age.txt` and never in the repo. Only real
+Encrypted secrets would live in `fnox.toml`, age-encrypted; it holds none today,
+and the hub signing secret lives only in each machine's `credentials.json`. The
+private key is expected at `~/.config/fnox/age.txt` and never in the repo. Only real
 secrets go there: plaintext local defaults such as `HUB_DB_PATH` live in
 `mise.toml`'s `[env]` block. `HUB_URL` deliberately does not — that block is
 ambient for everything in a checkout, so its `ws://localhost:1234` default lives
@@ -734,13 +729,12 @@ from its own `config.json` through `ub env`.
 Contributors without the age key are not blocked. The task wrappers pass
 `fnox exec --if-missing warn` explicitly, so a secret fnox cannot decrypt logs a
 warning and the command still runs with that variable left as it found it instead
-of aborting — which is what lets `ub init`'s generated secret through. With the
-key, `fnox exec` overwrites the variable, so the encrypted value wins. See
+of aborting. See
 "The signing secret" above for the whole precedence chain. `mise run lint`,
 `mise run test` and `mise run typecheck` don't shell through fnox at all.
 
 `HUB_AUTH_TOKEN` is the HMAC secret hub tokens are signed with, and `ub init`
-generates one when fnox cannot supply it. The hub refuses to start without it —
+generates one when the machine has none. The hub refuses to start without it —
 a hub that cannot verify a token would accept anything.
 The MCP server treats it as optional and runs local-only without it: its update
 log is the authoritative replica, so no secret means no sync, not no service
