@@ -56,7 +56,8 @@ routes do not change the review or merge tiers below.
    follows semantic risk: paths and line counts are inspection signals, not
    extra rounds. Link exact-head evidence instead of repeating it.
    - **CI.** Every tier requires a `signoff` commit status of `success` at the
-     merging head, posted by local CI (`mise run ci <sha>`, `integration.md`).
+     merging head, from the integrator's own local CI run (`mise run ci <sha>`,
+     `integration.md`).
      A missing or failing status blocks agent merge. If the run cannot
      complete for reasons outside the change, escalate to a maintainer, who
      may merge by hand.

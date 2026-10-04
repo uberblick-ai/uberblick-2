@@ -1,7 +1,7 @@
 #!/bin/sh
 # Local CI: verify one pushed commit on this machine and sign off on it.
 #
-#   mise run ci <sha | pull request number>
+#   mise run ci <sha>
 #
 # Run from a checkout at origin/main, the same place `mise run review` requires.
 # The steps:
@@ -18,7 +18,7 @@ set -eu
 root=$(CDPATH= cd "$(dirname "$0")/.." && pwd -P)
 
 if [ $# -ne 1 ]; then
-	printf 'usage: mise run ci <sha | pull request number>\n' >&2
+	printf 'usage: mise run ci <sha>\n' >&2
 	exit 2
 fi
 
@@ -27,12 +27,9 @@ if ! gh signoff --help >/dev/null 2>&1; then
 	exit 1
 fi
 
-case "$1" in
-	*[!0-9]* | '') target=$1 ;;
-	*) target=$(gh pr view "$1" --json headRefOid --jq .headRefOid) ;;
-esac
 git -C "$root" fetch --quiet origin main
-sha=$(git -C "$root" rev-parse --verify --end-of-options "$target^{commit}")
+git -C "$root" cat-file -e "$1^{commit}" 2>/dev/null || git -C "$root" fetch --quiet origin "$1"
+sha=$(git -C "$root" rev-parse --verify --end-of-options "$1^{commit}")
 short=$(printf '%s' "$sha" | cut -c1-12)
 
 step() {
@@ -75,7 +72,15 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
+mkdir "$worktree.gh"
+trap 'cleanup; rm -rf "$worktree.gh"' EXIT
 git -C "$root" worktree add --quiet --detach "$worktree" "$sha"
-(cd "$worktree" && mise trust >/dev/null && mise run install && mise run e2e) || fail "browser e2e" e2e
+# The commit's own code runs on the host here, so it runs without this
+# machine's GitHub and git credentials: it cannot post a signoff or push in the
+# caller's name.
+(cd "$worktree" && mise trust >/dev/null &&
+	env GH_CONFIG_DIR="$worktree.gh" GH_TOKEN= GITHUB_TOKEN= GH_ENTERPRISE_TOKEN= \
+		GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null SSH_AUTH_SOCK= \
+		sh -c 'mise run install && mise run e2e') || fail "browser e2e" e2e
 gh signoff --commit "$sha" e2e
 printf 'ci: browser e2e passed at %s\n' "$short"

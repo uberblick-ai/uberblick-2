@@ -10,10 +10,8 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
 - **CI, every tier.** Run `mise run ci <headRefOid>` from a checkout at
   freshly fetched `origin/main`. It posts the `signoff` commit status only when
   the isolated review passes, and a failing status otherwise. A failing run
-  blocks agent merge. Skip the run only when the head already carries a
-  successful `signoff` posted by a maintainer's own account, never
-  `uberblick-agent`: `gh api repos/{owner}/{repo}/commits/<headRefOid>/statuses
-  --jq '.[]|select(.context=="signoff")|"\(.state) \(.creator.login)"'`. If
+  blocks agent merge. Always run it yourself at the exact head: a `signoff`
+  already on the commit only says someone posted it, not that checks ran. If
   the run cannot complete for reasons outside the change, escalate to a
   maintainer, who may merge by hand.
 - **Isolated review.** Local CI runs it as `mise run review <headRefOid>`,
@@ -29,7 +27,8 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   stateful boundaries, then remove it when the PR is settled.
 - Local CI also runs browser e2e at the head, unless only documentation or
   agent process changed, and reports it as the advisory `signoff/e2e` status.
-  For a browser-observable outcome the e2e proof is owed regardless. A
+  That run uses the candidate's own e2e recipe, so for a browser-observable
+  outcome read its output rather than trusting the status. A
   failure may be called environmental only after the same failing spec is run
   against the base: green at the base and red at the head is a branch
   regression to fix, even when the stale code is a test fixture rather than

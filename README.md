@@ -620,7 +620,7 @@ CI runs on a maintainer's machine, not on GitHub. From a checkout at
 `origin/main`, after the commit is pushed:
 
 ```sh
-mise run ci <sha-or-pr-number>
+mise run ci <sha>
 ```
 
 It runs the isolated review below (lint, typecheck and the test suite in a
