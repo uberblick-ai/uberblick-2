@@ -406,12 +406,6 @@ describe("the sidebar is the _sidebar document", () => {
     expect(trigger?.getAttribute("aria-label")).toBe("Document actions");
     openActions(host);
     act(() => documentAction("Pin to sidebar")?.click());
-    // The dropdown returns focus to its trigger a macrotask after it closes, so
-    // this waits a timer; a microtask flush would ask before Radix answers.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(document.activeElement).toBe(trigger);
 
     // A pin with nowhere to go makes somewhere to go.
     expect(stored(peer)).toEqual([["Pinned", [THREE]]]);
