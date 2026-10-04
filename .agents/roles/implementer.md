@@ -21,7 +21,9 @@ inspect the code and Pointers it depends on.
 
 - Never open a second pull request for an issue. Check each branch the
   assignment lists as `earlier_branches` (`gh pr list --state open --head
-  <branch>`); an open pull request there is an earlier run's work: continue it
+  <branch> --json number,isCrossRepository --jq '.[] | select(.isCrossRepository
+  == false) | .number'`, which ignores forks); an open pull request there is an
+  earlier run's work: continue it
   on its branch and hand it off. Any other open pull request that closes this
   issue is not yours to replace: escalate, naming it.
 - If an open pull request is expected to edit the same substantive files
