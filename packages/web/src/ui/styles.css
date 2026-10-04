@@ -218,7 +218,6 @@ body {
   color: var(--foreground);
 }
 
-.ub-app,
 .ub-pane,
 .ub-column,
 .ub-comment-form,
@@ -226,10 +225,6 @@ body {
 .ub-tldr-form {
   display: flex;
   flex-direction: column;
-}
-
-.ub-app {
-  height: 100vh;
 }
 
 /* The rebound notice occupies its own row above every route, keeping the
@@ -357,7 +352,6 @@ body {
 .ub-group-add,
 .ub-user-card,
 .ub-appearance-option,
-.ub-group-act,
 .ub-mention,
 .ub-status-sync,
 .ub-copy-link,
@@ -382,7 +376,6 @@ body {
 .ub-user-card,
 .ub-swatch,
 .ub-appearance-option,
-.ub-group-act,
 .ub-mention,
 .ub-status-sync,
 .ub-copy-link,
@@ -509,7 +502,6 @@ body {
 }
 
 .ub-user-card,
-.ub-group-act,
 .ub-status-sync,
 .ub-peer-overflow-row,
 .ub-tag-picker-trigger,
@@ -705,27 +697,6 @@ body {
   min-width: 0.5rem;
   margin: 0 0.25rem;
   border-top: 1px solid var(--sidebar-border);
-}
-
-/* Reveal group actions on hover and focus-within for pointer and keyboard. */
-.ub-group-act {
-  flex: none;
-  border-radius: var(--radius-sm);
-  padding: 0.15rem 0.3rem;
-  color: var(--sidebar-muted-foreground);
-  font-size: 0.75rem;
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-
-.ub-group-head:hover .ub-group-act,
-.ub-group-head:focus-within .ub-group-act {
-  opacity: 1;
-}
-
-.ub-group-act:hover {
-  color: var(--foreground);
-  background: var(--sidebar-accent);
 }
 
 .ub-group-add {
@@ -994,7 +965,6 @@ h1.ub-heading {
 .ub-group-add,
 .ub-user-card,
 .ub-appearance-option,
-.ub-group-act,
 .ub-title,
 .ub-status-sync,
 .ub-copy-link,
@@ -1989,7 +1959,6 @@ h3.ub-heading {
   .ub-document-pane,
   .ub-group-caret,
   .ub-group-body,
-  .ub-group-act,
   .ub-copy {
     transition: none;
   }

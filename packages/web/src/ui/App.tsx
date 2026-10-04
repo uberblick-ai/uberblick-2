@@ -931,7 +931,7 @@ export function App(): ReactElement {
   const sidebarCloseLabel = narrowSidebar ? `Close ${sidebarName}` : sidebarToggleLabel;
 
   return (
-    <main className="ub-app">
+    <main className="ub-app flex h-dvh flex-col">
       <ReboundNotice serving={serving} />
       <SidebarProvider
         open={!collapsed}
