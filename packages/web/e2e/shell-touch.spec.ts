@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import type { Browser, Locator, Page, TestInfo } from "@playwright/test";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 
-const { openApp } = setupHarness({ scope: "test" });
+const { harness, openApp } = setupHarness({ scope: "test" });
 
 const drawer = (page: Page): Locator => page.getByRole("dialog", { name: "Sidebar", exact: true });
 const group = (page: Page, name: string): Locator => page.locator(".ub-group")
@@ -59,8 +59,9 @@ async function expectInsideViewport(control: Locator): Promise<void> {
   })).toBe(true);
 }
 
-async function devicePage(browser: Browser, info: TestInfo, touch = false): Promise<Page> {
+async function devicePage(browser: Browser, info: TestInfo, touch = false, upstream = false): Promise<Page> {
   return openApp(browser, "/", {
+    upstream,
     // WebKit inherits its project's actual device and input. Chromium supplies
     // the existing synthetic phone proof or a docked pointer surface.
     contextOptions: info.project.name === "chromium"
@@ -115,7 +116,7 @@ test("pointer rows retain their rest, hover and focus reveal, and deletion resto
   await expect(page.getByRole("button", { name: "+ group", exact: true })).toBeFocused();
 });
 
-test("touch rows expose their actions without sticky hover, and group confirmation leaves the drawer open", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+test("touch rows expose their actions without sticky hover, and Cancel and Delete keep the drawer open", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const page = await devicePage(browser, info, true);
   expect(await page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true);
   await seed(page);
@@ -142,14 +143,16 @@ test("touch rows expose their actions without sticky hover, and group confirmati
   await expect(remove).toBeFocused();
   expect(await ownTreatment(remove)).toEqual(deleteRest);
 
-  // Escape from the nested confirmation must not propagate to the drawer.
+  // The installed Radix layers may also dismiss the drawer on Escape. The
+  // confirmation must still cancel without deleting the group.
   await remove.tap();
   await expect(confirmation).toBeVisible();
   await expect(confirmation).toContainText("Reading");
   await expect(confirmation.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(confirmation).toHaveCount(0);
-  await expect(drawer(page)).toBeVisible();
+  await showSidebar(page);
+  await expect(group(page, "Reading")).toBeVisible();
   await remove.tap();
   await expect(confirmation).toBeVisible();
   await expect(confirmation).toContainText("Reading");
@@ -174,6 +177,24 @@ test("touch rows expose their actions without sticky hover, and group confirmati
   await expect(unpinned).toHaveAttribute("aria-pressed", "false");
   await expect(unpinned).toHaveCSS("opacity", "1");
   expect(await ownTreatment(unpinned)).toEqual(pinRest);
+});
+
+test("a Delete group confirmation refuses in place after sidebar readiness is lost in the drawer", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  // Direct hub transport makes the room read-only when that hub stops; the
+  // local serving replica would remain writable while offline.
+  const page = await devicePage(browser, info, true, true);
+  await showSidebar(page);
+  await addGroup(page, "Reading");
+  await page.getByRole("button", { name: "Delete group Reading", exact: true }).tap();
+  const confirmation = page.getByRole("alertdialog");
+  await expect(confirmation).toContainText("Delete group Reading?");
+  await harness().stopHub();
+  await expect(confirmation).toContainText("Nothing has been deleted");
+  await expect(confirmation.getByRole("button", { name: "Delete group", exact: true })).toBeDisabled();
+  await confirmation.getByRole("button", { name: "Cancel", exact: true }).tap();
+  await expect(confirmation).toHaveCount(0);
+  await expect(drawer(page)).toBeVisible();
+  await expect(group(page, "Reading")).toBeVisible();
 });
 
 test("the shell, sidebar, document pane and long Contents stay within the visible viewport", { tag: "@webkit" }, async ({ browser }, info) => {
