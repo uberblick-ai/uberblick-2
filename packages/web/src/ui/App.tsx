@@ -948,7 +948,7 @@ export function App(): ReactElement {
   }
 
   return (
-    <main className="ub-app">
+    <main className="ub-app flex h-dvh flex-col">
       <ReboundNotice serving={serving} />
       <SidebarProvider
         open={!collapsed}
