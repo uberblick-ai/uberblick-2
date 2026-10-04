@@ -708,9 +708,17 @@ test("a multiline comment composer stays above its selected passage", async ({ b
     await page.keyboard.type(`Passage ${index}`);
     if (index < 10) await page.keyboard.press("Enter");
   }
-  await page.keyboard.press("Shift+Home");
+  const selectedPassage = "Passage 10";
+  // Shift+Home selects to the document start on macOS. Keep this keyboard
+  // selection within the final passage on both macOS and Linux.
+  for (let character = 0; character < selectedPassage.length; character += 1) {
+    await page.keyboard.press("Shift+ArrowLeft");
+  }
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(selectedPassage);
   await page.getByRole("button", { name: "Comment", exact: true }).click();
   const composer = page.locator('[data-slot="selection-composer"]');
+  await expect(composer.locator('[data-slot="selection-excerpt"]')).toHaveText(selectedPassage);
+  await expect(composer.locator('[data-slot="selection-clamp"]')).toHaveCount(0);
   await expect(composer).toHaveAttribute("data-placement", "above");
   const field = composer.locator("textarea");
   const lines = Array.from({ length: 8 }, (_, index) => `Comment line ${index + 1}`);
