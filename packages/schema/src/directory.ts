@@ -38,6 +38,7 @@ import { readDocumentLifecycle } from "./types.js";
 import { canonicalDocumentUuid } from "./rooms.js";
 import { getMeta } from "./doc.js";
 import { listAnnotations } from "./annotations.js";
+import { decisionApprovalChanged } from "./approval.js";
 import type {
   DirectoryEntry,
   DocMeta,
@@ -67,6 +68,7 @@ interface StoredEntry {
   agentStance?: boolean;
   decidedBy?: string;
   decidedAt?: string;
+  approvalChanged?: boolean;
   commentCount?: number;
 }
 
@@ -112,6 +114,7 @@ export function directoryStubDiffers(
       stub.agentStance !== meta.agentStance ||
       stub.decidedBy !== meta.decidedBy ||
       stub.decidedAt !== meta.decidedAt ||
+      (fields !== undefined && stub.approvalChanged !== fields.approvalChanged) ||
       (fields !== undefined && stub.commentCount !== fields.commentCount)
     ))
   );
@@ -196,7 +199,7 @@ function withResolvedUpdatedAt(
 
 const DECISION_CACHE_KEYS = [
   "governs", "topic", "supersedes", "tldr", "agentStance", "decidedBy",
-  "decidedAt", "commentCount",
+  "decidedAt", "approvalChanged", "commentCount",
 ] as const;
 
 /** Tolerant reads of the decision-only cache; unknown foreign values vanish. */
@@ -212,6 +215,7 @@ function readDecisionFields(value: Record<string, unknown>): Partial<StoredEntry
     if (typeof text === "string" && text.trim() !== "") fields[key] = text;
   }
   if (typeof value.agentStance === "boolean") fields.agentStance = value.agentStance;
+  if (typeof value.approvalChanged === "boolean") fields.approvalChanged = value.approvalChanged;
   if (typeof value.commentCount === "number" && Number.isSafeInteger(value.commentCount) && value.commentCount >= 0) {
     fields.commentCount = value.commentCount;
   }
@@ -305,12 +309,13 @@ export interface DirectoryUpsert {
   agentStance?: boolean | null;
   decidedBy?: string | null;
   decidedAt?: string | null;
+  approvalChanged?: boolean | null;
   commentCount?: number | null;
 }
 
 export type DecisionDirectoryFields = Pick<DirectoryUpsert,
   "governs" | "topic" | "supersedes" | "tldr" | "agentStance" |
-  "decidedBy" | "decidedAt" | "commentCount">;
+  "decidedBy" | "decidedAt" | "approvalChanged" | "commentCount">;
 
 /** Hydrated writers restate every decision cache, including deliberate clears. */
 export function decisionDirectoryFields(doc: Y.Doc): DecisionDirectoryFields {
@@ -324,6 +329,7 @@ export function decisionDirectoryFields(doc: Y.Doc): DecisionDirectoryFields {
     agentStance: meta.agentStance ?? null,
     decidedBy: meta.decidedBy ?? null,
     decidedAt: meta.decidedAt ?? null,
+    approvalChanged: decisionApprovalChanged(doc),
     commentCount: listAnnotations(doc).reduce((count, thread) => count + thread.comments.length, 0),
   };
 }

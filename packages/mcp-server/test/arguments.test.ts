@@ -141,6 +141,7 @@ describe("create_doc lifecycle arguments", () => {
           kind: { const: "requirement" },
           governs: false,
           supersedes: false,
+          answer: false,
         },
       },
       {
@@ -150,6 +151,7 @@ describe("create_doc lifecycle arguments", () => {
           status: false,
           governs: false,
           supersedes: false,
+          answer: false,
         },
       },
     ]);

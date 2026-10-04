@@ -10,7 +10,8 @@ const stores: FailingStore[] = [];
 afterEach(async () => { for (const rig of rigs.splice(0)) await rig.close(); for (const store of stores.splice(0)) store.close(); });
 afterAll(removeTempDirs);
 async function localRig() { const rig = await startServer(testConfig()); rigs.push(rig); return rig; }
-const blocks = [{ type: "heading", text: "Reconsidering", level: 2 }, { type: "paragraph", text: "If constraints change." }];
+const blocks = [{ type: "heading", text: "Topic", level: 2 }, { type: "paragraph", text: "Choose the implementation under these constraints." }];
+const answer = { who: "A person", when: "2026-10-04T12:00:00Z", where: "A recorded team discussion." };
 async function decision(rig: Rig, fields: Record<string, unknown> = {}) {
   return rig.ok("create_doc", { title: "Topic", description: "A decision record.", kind: "decision", blocks, ...fields });
 }
@@ -107,7 +108,7 @@ describe("decision topics through directory stubs", () => {
     const rig = await localRig();
     const requirement = await rig.ok("create_doc", { title: "Product", description: "Product direction.", kind: "requirement" });
     const a = await decision(rig, { status: "decided", governs: requirement.uuid });
-    const b = await decision(rig, { status: "decided", supersedes: a.uuid, governs: requirement.uuid });
+    const b = await decision(rig, { status: "decided", supersedes: a.uuid, governs: requirement.uuid, answer, tldr: "The answer." });
     await rig.ok("pin_doc", { uuid: a.uuid, group: "Reading" });
     await rig.ok("pin_doc", { uuid: b.uuid, group: "Reading" });
     rawDeleted(rig, b.uuid, true);
@@ -117,7 +118,6 @@ describe("decision topics through directory stubs", () => {
     ]);
     expect((await rig.ok("search", { query: "constraints" })).hits.map((hit: any) => hit.uuid).sort()).toEqual([a.uuid, b.uuid].sort());
     expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ uuid: b.uuid, inForce: { uuid: b.uuid } }]);
-    await rig.ok("set_tldr", { uuid: b.uuid, tldr: "The answer." });
     expect(getDirectoryEntry(rig.instance.replicas.directory().doc, b.uuid)?.tldr).toBe("The answer.");
     expect((await rig.ok("list_docs", { kind: "decision" })).docs[0].inForce.deleted).toBe(false);
     rawDeleted(rig, a.uuid, true);
@@ -145,8 +145,10 @@ describe("decision topics through directory stubs", () => {
 
   it("lists a rejected or withdrawn first proposal even with no live records", async () => {
     const rig = await localRig();
-    const rejected = await decision(rig, { status: "rejected" });
-    const withdrawn = await decision(rig, { status: "withdrawn" });
+    const rejected = await decision(rig);
+    const withdrawn = await decision(rig);
+    await rig.ok("set_status", { uuid: rejected.uuid, status: "rejected", answer, reason: "The team chose another option." });
+    await rig.ok("set_status", { uuid: withdrawn.uuid, status: "withdrawn" });
     const rows = (await rig.ok("list_docs", { kind: "decision" })).docs;
     expect(rows.map((row: any) => row.uuid).sort()).toEqual([rejected.uuid, withdrawn.uuid].sort());
     for (const row of rows) expect(row).toMatchObject({ inForce: null, pending: [], conflicts: [] });

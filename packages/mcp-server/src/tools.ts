@@ -50,6 +50,8 @@ import {
   appendBlock,
   canonicalDocumentUuid,
   createAnnotation,
+  decisionApprovalChanged,
+  decisionApprovalFingerprint,
   decisionDirectoryFields,
   decisionRelations,
   decisionTopicArchived,
@@ -58,10 +60,10 @@ import {
   exportMarkdown,
   getBlock,
   getBlockRev,
-  getBlocks,
   getBlocksWithInline,
   getDirectoryEntry,
   getMeta,
+  getMetaMap,
   initDoc,
   insertBlock,
   isDocumentStatusForKind,
@@ -190,6 +192,24 @@ const ARCHIVED_IS_READ_ONLY =
   "moment of the call. It is refusal-at-call, not a cross-replica lock — an edit made on a replica that has not seen " +
   "the archive yet is an ordinary CRDT write and merges normally when the two replicas meet.";
 
+const DECIDED_IS_READ_ONLY =
+  "A decided decision record's title, decision line and blocks are read-only: this tool refuses with " +
+  "`decision_read_only` and changes nothing. Use a new superseding record for any content change. Comments, " +
+  "description, tags, curated links and changelog suggestion stay writable. This check runs on this replica " +
+  "at call time; an unseen offline edit can still merge later, detected as changed after approval.";
+
+const DECISION_AUTHORITY =
+  "A decision record is a topic followed by the decision itself, then its enduring reasons and guidance. " +
+  "A Reconsidering section is optional. Every MCP call follows the agent-account rule: a topic's first record, " +
+  "with no `supersedes`, may become `decided` as an `agentStance`. A topic crossing the agent workflow's boundary " +
+  "table starts `open` with the agent's recommendation, even as a first record. Any other move to `decided`, " +
+  "or confirming an agent stance, requires `answer: {who, when, where}`, recording a person's answer. " +
+  "The answer stores `decidedBy`, `decidedAt` and `decidedWhere`, clears the stance marker and approves the " +
+  "current title, decision line and ordered block text with an `approvalFingerprint`. Comments, comment " +
+  "anchors and approval bookkeeping are excluded. `approvalChanged: true` means changed after approval; " +
+  "recording an answer again approves the current content. get_doc returns where; list_docs and every " +
+  "`inForce`, `pending` and `conflicts` entry expose the stance, who, when and approvalChanged from stubs.";
+
 /**
  * What a splice costs the marks already in a block — the boundary that is
  * mechanically fine and semantically wrong, so it has to be said rather than
@@ -275,7 +295,7 @@ const descriptionArg = z
 const tldrArg = z
   .string({
     error:
-      "set_tldr requires a `tldr`: one or two sentences of plain English for a person, or null to clear it.",
+      "A `tldr` is one or two sentences of plain English for a person, or null to clear it.",
   })
   .trim()
   .min(1, "a TL;DR cannot be empty or whitespace; pass null to clear it")
@@ -287,6 +307,13 @@ const tldrArg = z
   .describe(
     `One or two sentences of plain English for a person opening the document. At most ${MAX_TLDR_LENGTH} characters; null clears it.`,
   );
+
+const decisionAnswerArg = z.object({
+  who: z.string().trim().min(1).describe("Person who gave the answer."),
+  when: z.string().trim().min(1).describe("When the person gave the answer, preferably an ISO date-time."),
+  where: z.string().trim().min(1).describe("Where the answer was given, such as a conversation or review URL."),
+}).strict().describe("Record a person's answer, not the agent's own approval. MCP does not verify its provenance.");
+type DecisionAnswer = z.infer<typeof decisionAnswerArg>;
 
 /**
  * What a changelog suggestion is, and how its three states are asked for.
@@ -350,12 +377,12 @@ const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
     title: "A requirement document (`kind: requirement`)",
     when: { field: "kind", is: "requirement" },
-    forbids: ["governs", "supersedes"],
+    forbids: ["governs", "supersedes", "answer"],
   },
   {
     title: "An ordinary document",
     when: { field: "kind", present: false },
-    forbids: ["status", "governs", "supersedes"],
+    forbids: ["status", "governs", "supersedes", "answer"],
   },
 ];
 
@@ -524,47 +551,6 @@ function toBlockInput(
     ...(input.language === undefined ? {} : { language: input.language }),
     ...(inline === undefined ? {} : { inline }),
   };
-}
-
-/**
- * Does this block sequence record what would reopen a decision?
- *
- * The rule: a heading whose text is exactly `Reconsidering`, immediately
- * followed by a non-heading block with non-whitespace text. One predicate for
- * both doors — `set_status`'s transition and `create_doc`'s seeded blocks —
- * because a shape one accepted and the other refused would leave a decision
- * reachable but not repeatable (#856).
- */
-function hasRevivalTrigger(
-  blocks: readonly { type: string; text: string }[],
-): boolean {
-  return blocks.some((block, index) => {
-    const next = blocks[index + 1];
-    return (
-      block.type === "heading" &&
-      block.text === "Reconsidering" &&
-      next !== undefined &&
-      next.type !== "heading" &&
-      next.text.trim().length > 0
-    );
-  });
-}
-
-/**
- * The text a seeded block will actually store, so the gate above judges what
- * the document receives rather than what the caller typed.
- *
- * This mirrors the schema's own `inlineOf` (`packages/schema/src/blocks.ts`):
- * on a prose block an `inline` array replaces `text` entirely — an empty array
- * included — while a source block ignores `inline` and keeps `text`. The runs
- * are the resolved ones {@link toBlockInput} was handed, so a docLink label
- * filled in from its target's title counts as the text it will become.
- */
-function storedTextOf(input: BlockInput): string {
-  if (input.inline !== undefined && isProseBlockType(input.type)) {
-    return input.inline.map((run) => run.text).join("");
-  }
-  return input.text ?? "";
 }
 
 /**
@@ -878,8 +864,9 @@ export function registerTools(
 
   /**
    * Resolve a document for a write. The one choke point every mutator that
-   * touches a document goes through — archived means read-only, and saying so
-   * in one place is what keeps that true of tools written later.
+   * touches a document goes through — archived means read-only. Content
+   * mutators also request the decided-record refusal; comments and metadata
+   * outside the approved content need only the archive check.
    *
    * The archive check comes before {@link requireDoc} on purpose: an archived
    * room is not one `adoptKnownDocs` attaches, so a replica that knows the
@@ -893,7 +880,7 @@ export function registerTools(
    * convention, which is all the spike has; real enforcement belongs to the
    * hosted-auth era.
    */
-  const requireWritableDoc = (uuid: string): Replica => {
+  const requireWritableDoc = (uuid: string, contentMutation = false): Replica => {
     if (decisionTopicArchived(replicas.directory().doc, uuid)) {
       throw new ToolError(
         "doc_archived",
@@ -901,7 +888,34 @@ export function registerTools(
         { uuid, archived: true },
       );
     }
-    return requireDoc(uuid);
+    const replica = requireDoc(uuid);
+    const meta = getMeta(replica.doc);
+    if (contentMutation && meta.kind === "decision" && meta.status === "decided") {
+      throw new ToolError("decision_read_only", "A decided record's title, decision line and blocks are read-only; create a superseding record.", { uuid, kind: meta.kind, status: meta.status });
+    }
+    return replica;
+  };
+
+  const recordAnswer = (replica: Replica, answer: DecisionAnswer): void => {
+    const meta = getMetaMap(replica.doc);
+    meta.set("decidedBy", answer.who);
+    meta.set("decidedAt", answer.when);
+    meta.set("decidedWhere", answer.where);
+    meta.set("agentStance", false);
+    meta.set("approvalFingerprint", decisionApprovalFingerprint(replica.doc));
+  };
+
+  const decisionAuthorityJson = (replica: Replica) => {
+    const meta = getMeta(replica.doc);
+    if (meta.kind !== "decision") return {};
+    return {
+      ...(meta.agentStance === undefined ? {} : { agentStance: meta.agentStance }),
+      ...(meta.decidedBy === undefined ? {} : { decidedBy: meta.decidedBy }),
+      ...(meta.decidedAt === undefined ? {} : { decidedAt: meta.decidedAt }),
+      ...(meta.decidedWhere === undefined ? {} : { decidedWhere: meta.decidedWhere }),
+      ...(meta.rejectionReason === undefined ? {} : { rejectionReason: meta.rejectionReason }),
+      approvalChanged: decisionApprovalChanged(replica.doc),
+    };
   };
 
   /**
@@ -1164,7 +1178,8 @@ export function registerTools(
         "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
         "search; a decision needs a matching `kind`, `status` or `tag` predicate in list_docs. " +
         "Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
-        "When the call seeds at least one block, its answer also carries the non-blocking TL;DR review reminder; " +
+        "Optional `tldr` supplies the decision line before a decided record freezes it, under set_tldr rules and limit. " +
+        "When the call seeds at least one block and stays editable, its answer carries the non-blocking TL;DR review reminder; " +
         "a metadata-only create carries no such reminder. " +
         "The write applies to the local replica and syncs in the background.\n\n" +
         "`tags` is a complete assignment set of active catalog ids or exact active names. Names are selectors; " +
@@ -1187,10 +1202,11 @@ export function registerTools(
         "decision exposes every successor without editing that earlier document. A non-decision target or a " +
         "self-reference is refused before any room is written. An archived predecessor topic is refused with " +
         "`doc_archived` before a UUID is allocated or a room is written; restore the topic before reconsidering it. " +
-        "A decision created with `status: decided` must seed the record of what would reopen it: a heading whose " +
-        "text is exactly `Reconsidering`, immediately followed by a non-heading block with non-whitespace text — " +
-        "another heading does not count as that content. Without it the call is refused before a UUID is " +
-        "allocated or a room is written, so nothing is created. " +
+        "Decisions are created only `open` or `decided`; rejected and withdrawn records must first exist as proposals. " +
+        "A decided successor without an answer is refused before allocating a UUID or writing any room. " +
+        DECISION_AUTHORITY +
+        "\n\n" +
+        DECIDED_IS_READ_ONLY +
         "\n\n" +
         CREATE_DOC_PLACEMENT +
         "\n\n" +
@@ -1205,6 +1221,8 @@ export function registerTools(
         {
           title: titleArg,
           description: descriptionArg,
+          tldr: tldrArg.optional(),
+          answer: decisionAnswerArg.optional(),
           tags: z.array(z.string().min(1)).optional(),
           kind: documentKindArg.optional(),
           status: documentStatusArg.optional(),
@@ -1230,6 +1248,8 @@ export function registerTools(
     guarded("create_doc", async ({
       title,
       description,
+      tldr,
+      answer,
       tags,
       kind,
       status,
@@ -1306,34 +1326,16 @@ export function registerTools(
       // does not know refuses the whole call before there is a document.
       const inputs = (blocks ?? []).map(blockInputFor);
 
-      // The other door on the same rule: a decision born `decided` must already
-      // record what would reopen it, or it is decided and unrepeatable, since
-      // `set_status` would refuse to re-affirm the status it was created with.
-      // Judged here because inline resolution is what fixes a block's stored
-      // text, and still before a UUID exists, so a refused call creates nothing.
-      if (
-        lifecycle?.kind === "decision" &&
-        lifecycle.status === "decided" &&
-        !hasRevivalTrigger(
-          inputs.map((input) => ({
-            type: input.type,
-            text: storedTextOf(input),
-          })),
-        )
-      ) {
-        throw new ToolError(
-          "revival_trigger_missing",
-          "A decision can be created decided only when its blocks carry a heading whose text is exactly " +
-            "`Reconsidering`, immediately followed by a non-heading block with non-whitespace text.",
-          {
-            kind: lifecycle.kind,
-            status: lifecycle.status,
-            recoveryClass: "manual",
-            recovery:
-              "Seed a heading whose text is exactly `Reconsidering`, immediately followed by a non-heading block " +
-              "with non-whitespace text, then call create_doc again. Nothing was created by this refused call.",
-          },
-        );
+      if (lifecycle?.kind === "decision") {
+        if (lifecycle.status !== "open" && lifecycle.status !== "decided") {
+          throw new ToolError("decision_transition_invalid", "Create a decision as open or decided; reject or withdraw an existing proposal.", lifecycle);
+        }
+        if (answer !== undefined && lifecycle.status !== "decided") {
+          throw new ToolError("decision_transition_invalid", "An answer at creation approves a decided decision record.", lifecycle);
+        }
+        if (lifecycle.status === "decided" && superseded !== null && answer === undefined) {
+          throw new ToolError("decision_answer_required", "Deciding a successor requires recording a person's answer (who, when, where). Nothing was created.", lifecycle);
+        }
       }
 
       const uuid = randomUUID();
@@ -1386,8 +1388,13 @@ export function registerTools(
             setKind(replica.doc, lifecycle.kind);
             setStatus(replica.doc, lifecycle.status);
           }
+          if (tldr !== undefined) setTldr(replica.doc, tldr);
           for (const input of inputs) {
             appendBlock(replica.doc, input);
+          }
+          if (lifecycle?.kind === "decision" && lifecycle.status === "decided") {
+            if (answer === undefined) getMetaMap(replica.doc).set("agentStance", true);
+            else recordAnswer(replica, answer);
           }
         });
       });
@@ -1463,10 +1470,12 @@ export function registerTools(
         ...(governs === undefined ? {} : { governs }),
         ...(lifecycle?.kind === "decision" ? { topic: getMeta(replica.doc).topic } : {}),
         ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
+        ...(tldr === undefined ? {} : { tldr: getMeta(replica.doc).tldr }),
+        ...decisionAuthorityJson(replica),
         blocks: blocksJson(replica),
         ...(placement === null ? {} : { sidebar: placement }),
         ...durabilityAcross(replica, completed),
-        ...(inputs.length === 0 ? {} : tldrReview(replica)),
+        ...(inputs.length === 0 || lifecycle?.status === "decided" ? {} : tldrReview(replica)),
       });
     }),
   );
@@ -1484,6 +1493,8 @@ export function registerTools(
         "\n\n" +
         DECISION_EDGES +
         "\n\n" +
+        DECISION_AUTHORITY +
+        "\n\n" +
         "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
         "`text` is plain and mark-free, as it has always been. A block that carries inline references to other " +
         "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
@@ -1500,6 +1511,7 @@ export function registerTools(
       const meta = getMeta(replica.doc);
       const result = json({
         ...meta,
+        ...decisionAuthorityJson(replica),
         tags: documentTags(replica),
         room: replica.room,
         decisions: readDecisions(replica.doc, replicas.directory().doc).map(topic => ({ ...decisionEntryJson(topic.representative), ...topicJson(topic) })),
@@ -1548,6 +1560,8 @@ export function registerTools(
         "returned assignment carries its canonical id, current name (or null while unresolved), and active, retired " +
         "or unresolved state. " +
         LIFECYCLE_RECORDS_STATE +
+        "\n\n" +
+        DECISION_AUTHORITY +
         failureContract("list_docs"),
       inputSchema: strictInput({
         tag: z.string().min(1).optional().describe("Only documents carrying this tag."),
@@ -1733,6 +1747,8 @@ export function registerTools(
         "Scope of that guarantee, stated plainly: it is a check against THIS replica at the moment of the call. " +
         "There is no cross-replica compare-and-swap — an edit made elsewhere that has not reached this replica yet " +
         "cannot be detected, and the window widens the longer this server stays offline.\n\n" +
+        DECIDED_IS_READ_ONLY +
+        "\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_MEANS +
@@ -1754,7 +1770,7 @@ export function registerTools(
     guarded("edit_block", async ({ uuid, block_id, old_text, new_text, rev }) => {
       await replicas.settle();
       briefing.require();
-      const replica = requireWritableDoc(uuid);
+      const replica = requireWritableDoc(uuid, true);
       editBlock(replica.doc, block_id, old_text, new_text, {
         ...(rev === undefined ? {} : { rev }),
       });
@@ -1778,6 +1794,8 @@ export function registerTools(
         "GFM table source, and a terminal's text is a transcript in which a line beginning `$ ` is a command " +
         "typed out and every other line is output shown whole — the format has no escape, so an output line " +
         "that itself begins `$ ` cannot be written. Every block has one text an agent can edit.\n\n" +
+        DECIDED_IS_READ_ONLY +
+        "\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
@@ -1797,7 +1815,7 @@ export function registerTools(
     guarded("insert_block", async ({ uuid, after_block_id, type, text, level, language, inline }) => {
       await replicas.settle();
       briefing.require();
-      const replica = requireWritableDoc(uuid);
+      const replica = requireWritableDoc(uuid, true);
       // Before the insert: an unknown reference target refuses the call with
       // nothing written.
       const input = blockInputFor({ type, text, level, language, inline });
@@ -1821,6 +1839,8 @@ export function registerTools(
       description:
         "Delete one block. Deleting is never how a block changes type — use insert_block plus edit_block only for new content, " +
         "and never delete-and-reinsert to re-type, which churns the block id and orphans its annotations.\n\n" +
+        DECIDED_IS_READ_ONLY +
+        "\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
@@ -1832,7 +1852,7 @@ export function registerTools(
     guarded("delete_block", async ({ uuid, block_id }) => {
       await replicas.settle();
       briefing.require();
-      const replica = requireWritableDoc(uuid);
+      const replica = requireWritableDoc(uuid, true);
       deleteBlock(replica.doc, block_id);
       return json({ uuid, blockId: block_id, ...contentDurability(replica) });
     }),
@@ -1907,6 +1927,8 @@ export function registerTools(
         "`status` or `tag` predicate.\n\n" +
         "An empty title, and a title of nothing but whitespace, are both refused: a document nobody can name is " +
         "a document nobody can pick out of a listing.\n\n" +
+        DECIDED_IS_READ_ONLY +
+        "\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
@@ -1916,7 +1938,7 @@ export function registerTools(
     guarded("set_title", async ({ uuid, title }) => {
       await replicas.settle();
       briefing.require();
-      const replica = requireWritableDoc(uuid);
+      const replica = requireWritableDoc(uuid, true);
       setTitle(replica.doc, title);
       return json({ uuid, title, ...durability(replica) });
     }),
@@ -1964,6 +1986,8 @@ export function registerTools(
         "Ordinary document stubs, search and Markdown do not carry it.\n\n" +
         "An empty or whitespace-only string is refused rather than treated as a clear, and an overlong value is " +
         `refused rather than truncated. The shared limit is ${MAX_TLDR_LENGTH} characters.\n\n` +
+        DECIDED_IS_READ_ONLY +
+        "\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
@@ -1973,7 +1997,7 @@ export function registerTools(
     guarded("set_tldr", async ({ uuid, tldr }) => {
       await replicas.settle();
       briefing.require();
-      const replica = requireWritableDoc(uuid);
+      const replica = requireWritableDoc(uuid, true);
       setTldr(replica.doc, tldr);
       return json({ uuid, tldr, ...durability(replica) });
     }),
@@ -1987,32 +2011,66 @@ export function registerTools(
         "Record a document's lifecycle status. On an ordinary document this also adopts the kind that owns the " +
         "status; the result names both, so adoption is never silent. A document that already has a kind accepts " +
         "only that kind's statuses. Its kind is fixed through MCP: if it was adopted in error, retrying with the " +
-        "other kind's status cannot change it. Moving a decision to `decided` also requires a heading whose text " +
-        "is exactly `Reconsidering`, immediately followed by a non-heading block with non-whitespace text; " +
-        "otherwise the call is refused and changes nothing.\n\n" +
+        "other kind's status cannot change it. An open record can be withdrawn without an answer; decided records " +
+        "cannot reopen or withdraw. Rejected and withdrawn are final. Rejection requires a non-empty `reason` " +
+        "and a recorded person's answer, and applies only to an open proposal, an agent stance or a decided " +
+        "record in a conflict. It stores `rejectionReason`. All refusals change nothing.\n\n" +
+        DECISION_AUTHORITY +
+        "\n\n" +
         LIFECYCLE_RECORDS_STATE +
         "\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         toolContract("set_status"),
-      inputSchema: strictInput({ uuid: uuidArg, status: documentStatusArg }),
+      inputSchema: strictInput({
+        uuid: uuidArg, status: documentStatusArg,
+        answer: decisionAnswerArg.optional(),
+        reason: z.string().trim().optional().describe("Non-empty reason required when rejecting a proposal."),
+      }),
     },
-    guarded("set_status", async ({ uuid, status }) => {
+    guarded("set_status", async ({ uuid, status, answer, reason }) => {
       await replicas.settle();
       briefing.require();
       const replica = requireWritableDoc(uuid);
       const stored = getMeta(replica.doc);
       const kind = stored.kind ?? kindForStatus(status);
 
-      if (kind === "decision" && status === "decided") {
-        if (!hasRevivalTrigger(getBlocks(replica.doc))) {
-          throw new ToolError(
-            "revival_trigger_missing",
-            "A decision can be set to decided only when it has a heading whose text is exactly `Reconsidering`, " +
-              "immediately followed by a non-heading block with non-whitespace text.",
-            { uuid, kind, status },
-          );
+      // Validate every authority/lifecycle door before adopting a kind or writing metadata.
+      if (!isDocumentStatusForKind(kind, status)) {
+        throw new InvalidDocumentLifecycleError(kind, status);
+      }
+      if (kind !== "decision" && (answer !== undefined || reason !== undefined)) {
+        throw new ToolError("decision_transition_invalid", "Only decisions accept a recorded answer or rejection reason.", { uuid, kind, status });
+      }
+      if (kind === "decision") {
+        const invalid = (message: string): never => {
+          throw new ToolError("decision_transition_invalid", message, { uuid, kind, status, currentStatus: stored.status ?? null });
+        };
+        if (stored.status === "rejected" || stored.status === "withdrawn") invalid("Rejected and withdrawn records are final.");
+        if (stored.status === "decided" && (status === "open" || status === "withdrawn")) invalid("A decided record cannot reopen or withdraw; create a successor.");
+        if (answer !== undefined && status !== "decided" && status !== "rejected") invalid("An answer approves or rejects a proposal; open and withdrawn do not record answers.");
+        if (reason !== undefined && status !== "rejected") invalid("A rejection reason is accepted only when rejecting a proposal.");
+        if (status === "withdrawn" && stored.status !== "open") invalid("Only an existing open proposal can be withdrawn.");
+        if (status === "rejected") {
+          const topic = decisionRelations(replicas.directory().doc, uuid).resolution;
+          const conflict = topic?.conflicts.some(record => record.uuid === uuid) ?? false;
+          if (stored.status !== "open" && !(stored.status === "decided" && (stored.agentStance === true || conflict))) {
+            invalid("Only an open proposal, an agent stance or a decided record in conflict can be rejected.");
+          }
+          if (reason === undefined || reason.trim() === "") {
+            throw new ToolError("decision_reason_required", "Rejecting a proposal requires a non-empty reason.", { uuid, kind, status });
+          }
+          if (answer === undefined) {
+            throw new ToolError("decision_answer_required", "Rejecting a proposal requires recording a person's answer (who, when, where).", { uuid, kind, status });
+          }
+        }
+        if (status === "decided" && stored.status !== "decided" && answer === undefined) {
+          const first = stored.supersedes === undefined && (stored.topic ?? uuid) === uuid;
+          const answered = stored.decidedBy !== undefined || stored.decidedAt !== undefined || stored.decidedWhere !== undefined || stored.approvalFingerprint !== undefined;
+          if (!first || answered) {
+            throw new ToolError("decision_answer_required", "Deciding this record requires recording a person's answer (who, when, where).", { uuid, kind, status });
+          }
         }
       }
 
@@ -2025,6 +2083,11 @@ export function registerTools(
           setKind(replica.doc, kind);
         }
         setStatus(replica.doc, status);
+        if (kind === "decision") {
+          if (answer !== undefined) recordAnswer(replica, answer);
+          else if (status === "decided" && stored.status !== "decided") getMetaMap(replica.doc).set("agentStance", true);
+          if (status === "rejected") getMetaMap(replica.doc).set("rejectionReason", reason);
+        }
       });
 
       const failure = replicas.persistenceError();
@@ -2053,7 +2116,7 @@ export function registerTools(
         );
       }
 
-      return json({ uuid, kind, status, ...durability(replica) });
+      return json({ uuid, kind, status, ...decisionAuthorityJson(replica), ...durability(replica) });
     }),
   );
 
@@ -2393,6 +2456,8 @@ export function registerTools(
         "`doclink_target_not_known_locally` and writes nothing. An archived target is accepted.\n\n" +
         "The edge shows up in backlinks without touching `meta.links`, which stays the curated doc-level list " +
         "set_links owns.\n\n" +
+        DECIDED_IS_READ_ONLY +
+        "\n\n" +
         ARCHIVED_IS_READ_ONLY +
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
@@ -2412,7 +2477,7 @@ export function registerTools(
     guarded("link_range", async ({ uuid, block_id, start, end, doc_id, rev }) => {
       await replicas.settle();
       briefing.require();
-      const replica = requireWritableDoc(uuid);
+      const replica = requireWritableDoc(uuid, true);
       // Before the mark: an unknown target refuses with nothing written.
       const title = linkTitle(doc_id);
       setInlineLink(replica.doc, block_id, { start, end }, doc_id, { rev });
