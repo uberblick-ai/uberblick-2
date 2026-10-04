@@ -1,8 +1,10 @@
 /** Public identity flows cannot invoke or collect host setup; command results are honest. */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createConnection, type Socket } from "node:net";
+import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import { adminSocketPath } from "../src/admin-setup.js";
 import { createHub, type Hub } from "../src/server.js";
 import { removeTempDatabases, tempDatabasePath, TEST_SECRET, WORKSPACE } from "./helpers.js";
@@ -13,6 +15,7 @@ const processes: ChildProcess[] = [];
 const CLIENT_ID = "Iv23AbCdEF0123456789";
 const TOKEN = "ghu_never-output";
 let now = 1000;
+let originalDirectory: string;
 
 function host(path: string, body: unknown) {
   const socket = createConnection(path);
@@ -85,17 +88,25 @@ function snapshot(hub: Hub) {
   } finally { db.close(); }
 }
 
+beforeEach(() => {
+  originalDirectory = process.cwd();
+  // Keep actual Unix sockets within the private scratch directory while
+  // avoiding the platform's absolute sockaddr path-length limit.
+  process.chdir(tmpdir());
+});
 afterEach(async () => {
-  for (const process of processes.splice(0)) {
-    if (process.exitCode === null && process.signalCode === null) {
-      const exited = new Promise((resolve) => process.once("exit", resolve));
-      process.kill("SIGKILL");
-      await exited;
+  try {
+    for (const process of processes.splice(0)) {
+      if (process.exitCode === null && process.signalCode === null) {
+        const exited = new Promise((resolve) => process.once("exit", resolve));
+        process.kill("SIGKILL");
+        await exited;
+      }
     }
-  }
-  for (const socket of sockets.splice(0)) socket.destroy();
-  for (const hub of hubs.splice(0)) await hub.stop();
-  removeTempDatabases();
+    for (const socket of sockets.splice(0)) socket.destroy();
+    for (const hub of hubs.splice(0)) await hub.stop();
+    removeTempDatabases();
+  } finally { process.chdir(originalDirectory); }
 });
 
 it("public sign-in remains membership-neutral before/during/after setup and cannot collect/cancel it", async () => {
@@ -132,8 +143,9 @@ it("public sign-in remains membership-neutral before/during/after setup and cann
 }, 10_000);
 
 function command(hub: Hub, args: string[]) {
-  const child = spawn(process.execPath, ["--import", "tsx", "src/admin-setup-command.ts", ...args], {
-    cwd: new URL("../", import.meta.url), env: { ...process.env, HUB_DB_PATH: hub.databasePath }, stdio: ["ignore", "pipe", "pipe"],
+  const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"),
+    fileURLToPath(new URL("../src/admin-setup-command.ts", import.meta.url)), ...args], {
+    cwd: tmpdir(), timeout: 5000, env: { ...process.env, HUB_DB_PATH: hub.databasePath }, stdio: ["ignore", "pipe", "pipe"],
   });
   processes.push(child);
   let output = "";
