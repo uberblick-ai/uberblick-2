@@ -627,6 +627,71 @@ keep their downloaded documents and pending edits locally; sign-in or restored
 membership resumes sharing without re-joining. Loopback-only hubs retain local
 signing-secret admission and need no GitHub, membership or login.
 
+### Manage members and devices
+
+The shared HTTP interface is `POST /auth/manage` with a JSON body
+`{protocolVersion, token, operation, ...targets}`. It requires configured
+GitHub sign-in, but a management request makes no GitHub call. Use
+`mintRequestProof` from `@uberblick/hub/token` with the current device key,
+its credential UUID as `kid`, the operation and all targets below, and
+`lifetimeSeconds` (clients should use 60 seconds). The signed payload carries
+`typ: "request"`, those exact fields, and `iat` and `exp` in epoch seconds.
+The key stays on the device. The hub verifies against its own issued,
+unrevoked, unreplaced credential and current membership. A proof cannot
+authorize a different operation, workspace, device, person or role. Renewal
+proofs, room tokens, GitHub tokens, another hub's credentials and the local
+signing secret authorize no management. Management proofs open no room and
+cannot renew. Repeating the identical request within its proof's lifetime
+may repeat its effect; there is no replay cache.
+
+| Operation | Targets in both body and proof | Successful answer |
+| --- | --- | --- |
+| `list-devices` | none | `{status: "ok", devices}` |
+| `revoke-device` | `deviceId` | `{status: "ok"}` |
+| `own-role` | `workspaceId` | `{status: "ok", role}` |
+| `list-members` | `workspaceId` | `{status: "ok", members}` |
+| `change-role` | `workspaceId`, `principalId`, `role` | `{status: "ok"}` |
+| `remove-member` | `workspaceId`, `principalId` | `{status: "ok"}` |
+
+Workspace IDs are bare UUIDs; roles are `admin` or `member`. Workspace
+operations require both current membership and a credential naming that
+workspace. Only its current admins can list or change members; any member
+can read their own role. Member rows contain `principalId`,
+`githubAccountId`, `githubUsername` (the latest GitHub login seen at sign-in),
+and `role`. The final admin cannot be demoted or removed. No operation here
+adds membership or lets a member leave on their own.
+
+Every person can list and revoke only their own devices, including with a
+credential naming no workspace. Workspace admins have no authority over
+another person's devices. Device rows contain `deviceId`, `signedInAt`
+(epoch milliseconds of that device's sign-in, preserved through renewal),
+`workspaces` (its current credential's limits), and `current` (whether it is
+making the request). Only devices with a current credential appear.
+Revocation retires every credential of that device, including a replacement
+from a racing renewal. Its other devices keep working. Revoking the requesting
+device succeeds, then its future proofs are refused. An authorized retry
+from another device repeats closure, even if the target is already revoked.
+
+On a remote hub, revoking a device closes its live sync connections and fences
+pending updates. Removing a member does the same for that person's workspace
+connections on every device, preserving their access to other workspaces.
+Neither operation erases downloaded documents or local edits. Management
+changes no loopback admission, including the local hub served by `ub open`.
+
+All answers are `no-store`. Send proofs only in JSON bodies of at most 4096
+bytes, never URLs or an `Authorization` header. Successful operations return
+HTTP 200. Invalid bodies or methods return 400 `invalid-request`; protocol
+skew returns 409 `protocol-mismatch` with the hub's version. Failed proof
+authentication returns 401 `sign-in-required`. Missing workspace authority
+returns 403 `forbidden`, revealing no members. A foreign or unknown device
+returns the same 404 `device-not-found`; an admin changing an absent member's
+role receives 404 `member-not-found`. The final-admin guard returns 409
+`last-admin`. Without GitHub sign-in configured every management request
+returns 503 `not-configured`, as sign-in does. A storage or internal failure
+returns 500 `failed`; 500 `{status: "closure-failed", applied: true}` means
+the access change committed but a live closure listener failed. It is not a
+refusal or rollback; retry from a credential that still has authority.
+
 ## Establish a workspace's first administrator
 
 For an existing deployment, or a workspace other than a fresh hub's default,
