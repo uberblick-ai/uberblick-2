@@ -94,20 +94,25 @@ considered, so no diff is waived out of a boundary it crosses.
 
 The implementer routes by the reviews owed: it finishes `review` when the
 `agent` review is owed, or `integrate` with `none owed (<reason>)`. The
-integrator may require more agent review with `review`. The `agent` review always runs on a
-different runtime from the author and is never started by the role that owes
-it. It hunts for counterexamples, missing failure paths, incorrect
+integrator may require more agent review with `review`. The `agent` review
+always runs on a different runtime from the author and is never started by
+the role that owes it. It hunts for counterexamples, missing failure paths, incorrect
 assumptions, overengineering and overtesting; gate work never substitutes for
 it.
 
-Copilot is optional until an explicit owner decision reinstates its gate.
-Do not request it automatically; request it only when a person asks. A missing,
-pending, stale-head or unavailable Copilot review never by itself defers,
-escalates or blocks integration, even if an older handoff calls it required.
-Record a refusal once; do not retry it without a person's request. Every finding
-already posted still falls under the no-unanswered-remarks gate. Independent
-agent review, required correction rounds, CI and all other validation and merge
-gates remain unchanged.
+Copilot is optional ([owner decision](https://github.com/uberblick-ai/uberblick-2/issues/1217)).
+Reinstating its gate requires an explicit owner decision and a corresponding
+policy update. Do not request it automatically; request it only when a person
+asks. A missing, pending, stale-head or unavailable Copilot review never by
+itself defers, escalates or blocks integration, even if an older handoff calls
+it required. An explicit owner instruction to hold a merge still applies;
+requesting an optional review does not itself impose that hold.
+
+Record a refusal once using its existing review record, or a PR comment if
+none exists; do not retry it without a person's request. Every Copilot remark
+posted before merge, including late ones, falls under the no-unanswered-remarks
+gate. Independent agent review, required correction rounds, CI and all other
+validation and merge gates remain unchanged.
 
 ## Merge policy — the rules are the authority, not a session
 

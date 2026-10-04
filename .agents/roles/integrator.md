@@ -79,8 +79,9 @@ for a Copilot review that already exists or for a no-comment result.
 
 `merged`, `changes` (naming the failed gate or the remark that needs a fix),
 `review` (naming what the review must cover), `needs-human` (naming the tier-3
-trigger or the question), or `defer` (a temporary wait allowed by the delivery
-policy, never solely for optional Copilot review).
+trigger or the question), or `defer` (a wait allowed by
+`.agents/roles/README.md`, such as pending CI; never solely for optional
+Copilot review).
 
 Last, run the host housekeeping `integration.md` names for isolated-review
 artifacts. Retrospectives go to the integrator board, under the rule in
