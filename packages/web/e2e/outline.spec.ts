@@ -230,7 +230,8 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     // from both rendering and keyboard navigation, and its portal closes.
     await page.locator(".ub-editor .ub-paragraph").last().click();
     await page.keyboard.type("annotate me");
-    await page.keyboard.press("Shift+Home");
+    await page.locator(".ub-editor .ub-paragraph").last().selectText();
+    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("annotate me");
     await page.getByRole("button", { name: "Comment", exact: true }).click();
     await page.getByPlaceholder(/Comment as/).fill("a thread");
     await page.keyboard.press("Enter");
@@ -327,16 +328,16 @@ for (const width of [390, 820, 1024, 1194, 1279]) {
       await page.keyboard.insertText("second");
       // Prepare both unmarked ranges before annotating either: typing at an
       // existing comment's edge would extend its mark into the new fixture.
-      await page.locator(".ub-editor .ub-paragraph").first().click();
-      await page.keyboard.press("Home");
-      await page.keyboard.press("Shift+End");
+      await page.locator(".ub-editor .ub-paragraph").first().selectText();
+      await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("first");
       await page.getByRole("button", { name: "Comment", exact: true }).click();
       await page.getByPlaceholder(/Comment as/).fill("first conversation");
       await page.keyboard.press("Enter");
 
-      await page.locator(".ub-editor .ub-paragraph").last().click();
-      await page.keyboard.press("Home");
-      await page.keyboard.press("Shift+End");
+      // Wait for Tiptap's deferred focus before setting the next range.
+      await expect(editor(page)).toBeFocused();
+      await page.locator(".ub-editor .ub-paragraph").last().selectText();
+      await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("second");
       await page.getByRole("button", { name: "Comment", exact: true }).click();
       await page.getByPlaceholder(/Comment as/).fill("second conversation");
       await page.keyboard.press("Enter");
@@ -404,9 +405,7 @@ test("touch reveals a low thread in the sheet while its close control stays in v
       await page.keyboard.insertText(anchor);
     }
     for (const [index, anchor] of anchors.entries()) {
-      await page.locator(".ub-editor .ub-paragraph").nth(index).click();
-      await page.keyboard.press("Home");
-      await page.keyboard.press("Shift+End");
+      await page.locator(".ub-editor .ub-paragraph").nth(index).selectText();
       await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(anchor);
       await page.getByRole("button", { name: "Comment", exact: true }).click();
       await page.getByPlaceholder(/Comment as/).fill(`conversation ${index + 1}`);
