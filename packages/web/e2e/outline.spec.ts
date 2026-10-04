@@ -216,7 +216,15 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     // from both rendering and keyboard navigation, and its portal closes.
     await page.locator(".ub-editor .ub-paragraph").last().click();
     await page.keyboard.type("annotate me");
-    await page.keyboard.press("Shift+Home");
+    // Home selects different ranges across platforms; this setup needs only
+    // the paragraph's text before exercising the drawer-covered outline.
+    await page.locator(".ub-editor .ub-paragraph").last().evaluate((paragraph) => {
+      const range = document.createRange();
+      range.selectNodeContents(paragraph);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
     await page.getByRole("button", { name: "Comment", exact: true }).click();
     await page.getByPlaceholder(/Comment as/).fill("a thread");
     await page.keyboard.press("Enter");
