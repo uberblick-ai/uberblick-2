@@ -9,7 +9,7 @@
  * foreign-content panes never mount it.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactElement, ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 import { autoUpdate, computePosition, flip, hide, inline, offset, shift, size } from "@floating-ui/dom";
@@ -221,10 +221,8 @@ export function CommentComposer({
   const dismissed = useRef<string | null>(null);
   const composing = useRef(false);
   const floating = useRef<HTMLDivElement | null>(null);
-  const draftNow = useRef<Draft | null>(null);
-  const modeNow = useRef(mode);
-  draftNow.current = draft;
-  modeNow.current = mode;
+  const readDraft = useEffectEvent(() => draft);
+  const readMode = useEffectEvent(() => mode);
 
   useEffect(() => {
     // Capture once: the editor can destroy its view before React runs this
@@ -260,7 +258,7 @@ export function CommentComposer({
         setError(null);
       }
       if (
-        modeNow.current === "link" &&
+        readMode() === "link" &&
         (target.clamped || !isProseBlockType(target.blockType))
       ) {
         setMode("toolbar");
@@ -278,7 +276,8 @@ export function CommentComposer({
       });
     };
     const dismiss = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape" || draftNow.current === null) return;
+      const currentDraft = readDraft();
+      if (event.key !== "Escape" || currentDraft === null) return;
       const path = event.composedPath();
       if (!path.includes(editorDom) && !(floating.current && path.includes(floating.current))) return;
       // This listener runs before the fields. A composing Escape belongs to
@@ -286,13 +285,13 @@ export function CommentComposer({
       if (event.isComposing || event.keyCode === 229) return;
       event.preventDefault();
       event.stopPropagation();
-      if (modeNow.current !== "toolbar") {
+      if (readMode() !== "toolbar") {
         setMode("toolbar");
         setHref("");
         setError(null);
         return;
       }
-      dismissed.current = rangeOf(draftNow.current.target);
+      dismissed.current = rangeOf(currentDraft.target);
       setDraft(null);
       setMode("toolbar");
       setHref("");

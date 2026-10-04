@@ -473,8 +473,7 @@ export async function readClientConfig(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
   timeoutMs: number = HUB_CONFIG_TIMEOUT_MS,
 ): Promise<ClientConfig & { rejected?: string }> {
-  const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(), timeoutMs);
+  const deadline = AbortSignal.timeout(timeoutMs);
   let status: number;
   let contentType: string;
   let body: string;
@@ -489,19 +488,17 @@ export async function readClientConfig(
       headers: { Accept: "application/json" },
       // Covers reading the body too, not just the headers: aborting the signal
       // rejects an in-flight `text()`, which is the other place this can hang.
-      signal: deadline.signal,
+      signal: deadline,
     });
     status = response.status;
     contentType = response.headers.get("content-type") ?? "";
     body = await response.text();
   } catch (error) {
-    if (deadline.signal.aborted) {
+    if (deadline.aborted) {
       return { ...BUILT_IN, rejected: `it did not answer within ${timeoutMs}ms` };
     }
     const reason = error instanceof Error ? error.message : String(error);
     return { ...BUILT_IN, rejected: `it could not be fetched (${reason})` };
-  } finally {
-    clearTimeout(timer);
   }
 
   const outcome = readDocument(status, contentType, body);

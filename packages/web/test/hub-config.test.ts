@@ -76,13 +76,26 @@ const LATE_SECRET = "late-arriving-signing-secret";
  * a real `fetch` does and what makes this a genuine test of the deadline: drop
  * the signal and this promise is never settled by anything.
  */
-function stalling(): typeof globalThis.fetch {
-  return (async (_input: string, init?: RequestInit) =>
-    new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener("abort", () => {
-        reject(new DOMException("The operation was aborted", "AbortError"));
+function stalling(stage: "headers" | "body"): typeof globalThis.fetch {
+  return (async (_input: string, init?: RequestInit) => {
+    if (stage === "headers") {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation was aborted", "AbortError"));
+        });
       });
-    })) as unknown as typeof globalThis.fetch;
+    }
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          init?.signal?.addEventListener("abort", () => {
+            controller.error(new DOMException("The operation was aborted", "AbortError"));
+          });
+        },
+      }),
+      { headers: { "content-type": "application/json" } },
+    );
+  }) as unknown as typeof globalThis.fetch;
 }
 
 /** A stub `fetch` for `HUB_CONFIG_PATH`, answering from a queue of responses. */
@@ -205,18 +218,27 @@ describe("the served configuration", () => {
     }
   });
 
-  it("gives the read a deadline, so a hung request cannot wedge every room", async () => {
-    // Nothing acquires a room until this settles, so "never settles" is the
-    // worst outcome available, worse than dialling a stale address.
-    const { hubUrl: url, hubUrlSource, workspaces, rejected } = await readClientConfig(
-      stalling(),
-      20,
-    );
+  it.each(["headers", "body"] as const)(
+    "gives stalled %s a deadline, so a hung request cannot wedge every room",
+    async (stage) => {
+      // Nothing acquires a room until this settles, so "never settles" is the
+      // worst outcome available, worse than dialling a stale address.
+      const builtIn = await readClientConfig(serving({ status: 404, body: "not found" }).fetch);
+      const config = await readClientConfig(stalling(stage), 20);
+
+      expect(config).toEqual({
+        ...builtIn,
+        rejected: "it did not answer within 20ms",
+      });
+    },
+  );
+
+  it("distinguishes a fetch failure from an expired deadline", async () => {
+    const { hubUrl: url, hubUrlSource, rejected } = await readClientConfig(serving().fetch);
 
     expect(url).toBe(INJECTED);
     expect(hubUrlSource).toBe("define");
-    expect(workspaces).toEqual(await builtInWorkspaces());
-    expect(rejected).toContain("did not answer within 20ms");
+    expect(rejected).toBe("it could not be fetched (Failed to fetch)");
   });
 
   it("supplies the endpoint when the document names one, and falls back the same way for every response it cannot use", async () => {
