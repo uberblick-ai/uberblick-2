@@ -11,7 +11,13 @@
     "./config": "./src/config.ts",
     "./protocol": "./src/protocol.ts",
     "./storage": "./src/storage.ts",
-    "./token": "./src/token.ts"
+    "./token": "./src/token.ts",
+    "./auth-store": "./src/auth-store.ts",
+    "./safe-write": "./src/safe-write.ts",
+    "./init-lock": "./src/init-lock.ts",
+    "./remote-url": "./src/remote-url.ts",
+    "./device-login": "./src/device-login.ts",
+    "./test-device-sync": "./test/device-sync-hub.ts"
   },
   "scripts": {
     "start": "tsx src/main.ts",

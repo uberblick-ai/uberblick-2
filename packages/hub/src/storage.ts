@@ -119,3 +119,10 @@ export function resolveStorage(options: StorageOptions = {}): StoragePaths {
     workspaceDir: dataDir,
   };
 }
+
+/** The private machine credential store shared by CLI and sync clients. */
+export const CREDENTIALS_FILE = "credentials.json";
+
+export function credentialsPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(resolveStorage({ env }).configDir, CREDENTIALS_FILE);
+}

@@ -118,6 +118,7 @@ export function createMcpServer(
       }
       closed = true;
       replicas.destroy();
+      await replicas.sync.waitForDeviceWork();
       await server.close().catch((error: unknown) => {
         log.warn("closing the MCP server failed", error);
       });

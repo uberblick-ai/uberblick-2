@@ -468,6 +468,7 @@ export async function inspectRemote(
     };
   } finally {
     sync.destroy();
+    await sync.waitForDeviceWork();
     for (const { doc, awareness } of opened.values()) {
       awareness.destroy();
       doc.destroy();
@@ -557,6 +558,7 @@ export async function syncWorkspace(config: McpConfig): Promise<Corpus> {
     return readCorpus(replicas);
   } finally {
     replicas.destroy();
+    await replicas.sync.waitForDeviceWork();
     store.close();
   }
 }

@@ -208,6 +208,7 @@ describe("no live credential or membership admission switch", () => {
     (file) => {
       const source = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8");
       expect(source).not.toMatch(/(?:from\s+|import\s*\(?\s*)["']\.\/credential-admission(?:\.[^"']*)?["']/);
+      expect(source).not.toMatch(/(?:test-device-sync|device-sync-hub)/);
     },
   );
 });
