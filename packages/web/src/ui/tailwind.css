@@ -59,6 +59,7 @@
 @source "./CommentComposer.tsx";
 @source "./Sidebar.tsx";
 @source "./App.tsx";
+@source "./RemoteHubGuide.tsx";
 @source "./ThreadsPane.tsx";
 @source "./BlockMenu.tsx";
 @source "./CaretMenu.tsx";
