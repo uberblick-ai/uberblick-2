@@ -12,7 +12,7 @@ The commands that build, run and validate a change:
 | `mise run review <sha>` | the immutable review, when delivery policy requires it |
 | `mise exec -- pnpm run test:agent-cleanup`, `mise exec -- pnpm run test:housekeeping` | focused run-scratch cleanup and Docker housekeeping contract tests |
 | `python3 scripts/cleanup-agent-worktree.py` | ub-agents hook before private-worktree removal; uses `UB_AGENTS_RUN` and `UB_AGENTS_WORKTREE` |
-| `sh scripts/housekeeping.sh <review sha>...` | the host cleanup an integrator runs after a durable outcome |
+| `sh bin/housekeeping.sh <review sha>...` | the host cleanup an integrator runs after a durable outcome |
 
 Prefer these to direct package-manager invocations, and run a command that needs
 the project's configuration through `fnox exec -- ub env -- <command>`. Do not

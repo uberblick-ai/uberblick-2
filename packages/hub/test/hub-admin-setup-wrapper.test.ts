@@ -1,12 +1,12 @@
 /** The operator wrapper enters the running hub through the deployment gate. */
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
-const SCRIPT = fileURLToPath(new URL("../../../hub-admin-setup.sh", import.meta.url));
+const SCRIPT = fileURLToPath(new URL("../../../bin/hub-admin-setup.sh", import.meta.url));
 const WORKSPACE = "3f6a1c20-9d84-4b1e-8a77-2c5e9b0d4411";
 const SETUP = "5b2d7e10-4c33-4f92-9e08-71a6d3c85220";
 const directories: string[] = [];
@@ -18,13 +18,15 @@ afterAll(() => {
 function run(args: string[], exitCode = 0, terminal = false) {
   const directory = mkdtempSync(join(tmpdir(), `uberblick-${process.env.UB_AGENTS_RUN ?? "test"}-admin-wrapper-`));
   directories.push(directory);
-  copyFileSync(SCRIPT, join(directory, "hub-admin-setup.sh"));
+  const bin = join(directory, "bin");
+  mkdirSync(bin);
+  copyFileSync(SCRIPT, join(bin, "hub-admin-setup.sh"));
   const capture = join(directory, "compose-arguments");
-  writeFileSync(join(directory, "remote-compose.sh"), `#!/bin/sh
+  writeFileSync(join(bin, "remote-compose.sh"), `#!/bin/sh
 printf '%s\\n' "$PWD" "$@" > "$UB_TEST_ADMIN_CAPTURE"
 exit "$UB_TEST_ADMIN_EXIT"
 `);
-  const command = [join(directory, "hub-admin-setup.sh"), ...args];
+  const command = [join(bin, "hub-admin-setup.sh"), ...args];
   // Use the same cross-platform PTY utility as the CLI's welcome-script tests.
   const scriptArgs = process.platform === "darwin"
     ? ["-q", "/dev/null", "/bin/sh", ...command]
@@ -40,7 +42,7 @@ exit "$UB_TEST_ADMIN_EXIT"
 }
 
 describe("first-admin host wrapper", () => {
-  it.each([[WORKSPACE], ["status", SETUP]])("runs %j inside the hub through remote-compose.sh", (...args) => {
+  it.each([[WORKSPACE], ["status", SETUP]])("runs %j inside the hub through bin/remote-compose.sh", (...args) => {
     const { directory, capture, result } = run(args, 7);
     expect(result.status).toBe(7);
     expect(readFileSync(capture, "utf8").trimEnd().split("\n")).toEqual([
@@ -59,6 +61,6 @@ describe("first-admin host wrapper", () => {
   it.each([[], ["status"], [WORKSPACE, "extra"], ["status", SETUP, "extra"]])("refuses an incomplete invocation %j", (...args) => {
     const { result } = run(args);
     expect(result.status).toBe(2);
-    expect(result.stderr).toContain("usage:");
+    expect(result.stderr).toContain("usage: sh bin/hub-admin-setup.sh");
   });
 });

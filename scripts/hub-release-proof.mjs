@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import https from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -126,7 +126,7 @@ async function main() {
   const compose = (args, options = {}) => command("docker", ["compose", "--project-name", project, ...args], {
     cwd: deployment, env: { ...environment, COMPOSE_FILE: "docker-compose.yml:proof.override.yml" }, ...options,
   });
-  const operator = (name, args, options = {}) => command("sh", [name, ...args], {
+  const operator = (name, args, options = {}) => command("sh", [join("bin", name), ...args], {
     cwd: deployment, env: { ...environment, COMPOSE_FILE: "docker-compose.yml:proof.override.yml" }, ...options,
   });
   const offline = (source) => compose(["run", "--rm", "--no-deps", "-T", "--entrypoint", "node", "hub", "-e", source]);
@@ -156,6 +156,10 @@ db.close(); console.log(JSON.stringify(result));`;
     await command("docker", ["cp", `${name}:/release/.`, directory]);
     await command("docker", ["rm", name]);
     extractionContainers.delete(name);
+    assert.deepEqual(readdirSync(directory).sort(), ["REMOTE.md", "RELEASING.md", "bin", "docker-compose.yml",
+      "release.json", "remote-settings.sh", "remote.env.example"].sort());
+    assert.deepEqual(readdirSync(join(directory, "bin")).sort(),
+      ["remote-compose.sh", "hub-backup.sh", "hub-restore.sh", "hub-admin-setup.sh"].sort());
     const metadata = JSON.parse(readFileSync(join(directory, "release.json"), "utf8"));
     assert.equal(metadata.version, version);
     if (expectedSha !== undefined) assert.equal(metadata.sourceCommit, expectedSha);

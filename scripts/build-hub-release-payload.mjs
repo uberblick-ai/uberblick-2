@@ -50,9 +50,12 @@ async function main() {
 	}
 	const release = join(destination, "release");
 	mkdirSync(release);
-	for (const file of ["remote.env.example", "remote-compose.sh", "remote-settings.sh", "hub-backup.sh",
-		"hub-restore.sh", "hub-admin-setup.sh", "REMOTE.md", "RELEASING.md"]) {
+	for (const file of ["remote.env.example", "remote-settings.sh", "REMOTE.md", "RELEASING.md"]) {
 		cpSync(join(root, file), join(release, file));
+	}
+	mkdirSync(join(release, "bin"));
+	for (const file of ["remote-compose.sh", "hub-backup.sh", "hub-restore.sh", "hub-admin-setup.sh"]) {
+		cpSync(join(root, "bin", file), join(release, "bin", file));
 	}
 	const compose = readFileSync(join(root, "compose.release.yml"), "utf8")
 		.replaceAll("__HUB_IMAGE__", hubImage).replaceAll("__WEB_IMAGE__", webImage);

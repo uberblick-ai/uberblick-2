@@ -12,11 +12,12 @@
 !scripts/build-hub-release-payload.mjs
 !compose.release.yml
 !remote.env.example
-!remote-compose.sh
 !remote-settings.sh
-!hub-backup.sh
-!hub-restore.sh
-!hub-admin-setup.sh
+!bin/
+!bin/remote-compose.sh
+!bin/hub-backup.sh
+!bin/hub-restore.sh
+!bin/hub-admin-setup.sh
 !hub-release-entrypoint.sh
 !web-release-entrypoint.sh
 !Caddyfile

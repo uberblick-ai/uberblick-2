@@ -39,7 +39,7 @@ agents:
       - "Bash(ub-agents *)"
       - "Bash(mise *)"
       - "mcp__uberblick__*"
-      - "Bash(sh scripts/housekeeping.sh *)"
+      - "Bash(sh bin/housekeeping.sh *)"
       - "Bash(docker *)"
       # Read-only and scratch helpers, so compound commands such as `cd /tmp/ub-x && mise run review SHA`
       # or `… | tail` are not denied part by part in headless runs.

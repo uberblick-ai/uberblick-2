@@ -102,7 +102,7 @@ if [ "$mode" = remote-init-rerun ]; then
   git fetch --quiet origin main || exit 102
   git merge --ff-only origin/main || exit 102
   mv "$staged_env" .env || exit 103
-  sh remote-compose.sh up --build --detach || exit 104
+  sh bin/remote-compose.sh up --build --detach || exit 104
   git update-ref "$deployed_ref" HEAD || exit 105
   # Private proof consumed by `ub remote init`; an older updater cannot emit it
   # and therefore cannot turn an ignored configuration payload into success.
@@ -133,7 +133,7 @@ printf 'uberblick-update: deploying %s (deployed: %s)\n' "$target" "${deployed:-
 # code it started with; the new version takes over on the next run.
 git reset --hard --quiet "$target"
 
-sh remote-compose.sh up --build --detach
+sh bin/remote-compose.sh up --build --detach
 
 # Only now, and only because the build exited 0.
 git update-ref "$deployed_ref" "$target"

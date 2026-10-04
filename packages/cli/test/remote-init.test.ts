@@ -231,7 +231,7 @@ function init(rig: Harness, args: string[] = [TARGET]): Promise<number> {
 
 describe("ub remote init", () => {
   it("keeps every accepted workspace spelling inside the compose charset", () => {
-    // remote-compose.sh interpolates this value into JSON, so schema's accepted
+    // bin/remote-compose.sh interpolates this value into JSON, so schema's accepted
     // grammar must remain a subset of its explicit deployment rule.
     const composeWebWorkspaces = /^[A-Za-z0-9,-]+$/;
     const accepted = [
@@ -277,7 +277,7 @@ describe("ub remote init", () => {
         `WEB_WORKSPACES=${WORKSPACE}\n`,
     );
     expect(stepFor(rig, "uberblick:up").args.join("\n")).toContain(
-      "sh remote-compose.sh up --build --detach",
+      "sh bin/remote-compose.sh up --build --detach",
     );
     // The title carries a fingerprint, so two hosts called `box` never alias.
     const added = rig.steps().find((step) => step.args[1] === "deploy-key") as Step;
@@ -369,6 +369,9 @@ describe("ub remote init", () => {
     });
     expect(await init(rig)).toBe(1);
     expect(rig.err()).toContain("hub | boom");
+    expect(stepFor(rig, "uberblick:logs").args.join("\n")).toContain(
+      "sh bin/remote-compose.sh logs --tail=50 hub caddy",
+    );
     expect(existsSync(join(rig.box.configHome, "uberblick", "config.json"))).toBe(false);
   });
 

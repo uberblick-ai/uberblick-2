@@ -66,7 +66,7 @@ const KEY_PATH = "~/.ssh/uberblick-deploy";
  */
 const SSH_COMMAND = `ssh -i ${KEY_PATH} -o IdentitiesOnly=yes`;
 
-/** The character set `remote-compose.sh` enforces on the deployed secret. */
+/** The character set `bin/remote-compose.sh` enforces on the deployed secret. */
 const SAFE_SECRET = /^[A-Za-z0-9._-]+$/;
 
 const HOSTNAME = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
@@ -251,7 +251,7 @@ function upScript(dir: string): string {
   return `# uberblick:up
 set -eu
 cd ${hostPath(dir)}
-sh remote-compose.sh up --build --detach
+sh bin/remote-compose.sh up --build --detach
 git update-ref refs/uberblick/deployed HEAD
 `;
 }
@@ -259,7 +259,7 @@ git update-ref refs/uberblick/deployed HEAD
 function logsScript(dir: string): string {
   return `# uberblick:logs
 cd ${hostPath(dir)}
-sh remote-compose.sh logs --tail=50 hub caddy
+sh bin/remote-compose.sh logs --tail=50 hub caddy
 `;
 }
 
@@ -422,7 +422,7 @@ function parseFacts(text: string): Facts {
   return facts;
 }
 
-/** Compose 2.6 is the minimum `remote-compose.sh` accepts; check it early. */
+/** Compose 2.6 is the minimum `bin/remote-compose.sh` accepts; check it early. */
 function composeTooOld(version: string): boolean {
   const [major, minor] = version.replace(/^v/, "").split(".");
   const first = Number(major);
@@ -684,7 +684,7 @@ export async function remoteInitCommand(
   if (!SAFE_SECRET.test(secret)) {
     io.err(
       "ub remote init: the configured signing secret contains characters " +
-        "`remote-compose.sh` refuses (only A-Z a-z 0-9 . _ - are safe, because " +
+        "`bin/remote-compose.sh` refuses (only A-Z a-z 0-9 . _ - are safe, because " +
         "the shell and Compose parse `.env` differently). Regenerate it before " +
         "deploying.\n",
     );
@@ -928,7 +928,7 @@ export async function remoteInitCommand(
     io.err(`ub remote: building and starting the stack on ${flags.target}…\n`);
     const up = ssh(flags.target, upScript(flags.dir), { env });
     if (up.status !== 0) {
-      io.err(`ub remote init: ${failed("sh remote-compose.sh up", up)}.\n`);
+      io.err(`ub remote init: ${failed("sh bin/remote-compose.sh up", up)}.\n`);
       io.err(ssh(flags.target, logsScript(flags.dir), { env }).stdout);
       io.err("Nothing was persisted here.\n");
       return 1;
