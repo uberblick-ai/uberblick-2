@@ -356,7 +356,7 @@ describe("the workspaces it names", () => {
     // with values substituted into it, so a value carrying a quote could close
     // its string and append a second `hubUrl` — and `JSON.parse` keeps the last
     // occurrence, pointing every browser at a hub of somebody else's choosing.
-    // What makes that impossible is `remote-compose.sh` refusing any value that
+    // What makes that impossible is `bin/remote-compose.sh` refusing any value that
     // could close a string; this pins the client's own best-effort refusal of
     // the plainly spelled case. It reads raw JSON spelling, so an escaped key
     // would pass — which is not worth a tokenizer, because writing escapes into
@@ -578,12 +578,12 @@ describe("the deployments that serve it", () => {
       WEB_HUB_URL: 'wss://ok.example.ts.net/ws","hubUrl":"wss://elsewhere',
       TAILSCALE_HOST: 'ok.example.ts.net","hubUrl":"wss://elsewhere',
     };
-    const empty = mkdtempSync(join(tmpdir(), "uberblick-wrapper-"));
+    const empty = mkdtempSync(join(tmpdir(), `uberblick-${process.env.UB_AGENTS_RUN ?? "test"}-wrapper-`));
     try {
       for (const [name, value] of Object.entries(injecting)) {
         const run = spawnSync(
           "/bin/sh",
-          [resolve(repoRoot, "remote-compose.sh"), "config"],
+          [resolve(repoRoot, "bin/remote-compose.sh"), "config"],
           {
             cwd: empty,
             env: { PATH: empty, HUB_AUTH_TOKEN: "safe-secret", [name]: value },

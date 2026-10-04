@@ -7,6 +7,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	readdirSync,
+	realpathSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -16,22 +17,23 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const script = join(here, "run-e2e.sh");
+const repoRoot = realpathSync(dirname(here));
+const script = join(repoRoot, "bin/run-e2e.sh");
 
 function fixture() {
-	const root = mkdtempSync(join(tmpdir(), "uberblick-e2e-runner-"));
+	const root = mkdtempSync(join(tmpdir(), `uberblick-${process.env.UB_AGENTS_RUN ?? "test"}-e2e-runner-`));
 	const bin = join(root, "bin");
 	mkdirSync(bin);
-	const cacheParent = join(homedir(), ".cache");
+	const cacheParent = process.env.UB_AGENTS_SCRATCH ?? join(homedir(), ".cache");
 	mkdirSync(cacheParent, { recursive: true });
-	const cache = mkdtempSync(join(cacheParent, "uberblick-e2e-runner-test-"));
+	const cache = mkdtempSync(join(cacheParent, `uberblick-${process.env.UB_AGENTS_RUN ?? "test"}-e2e-runner-test-`));
 	const log = join(root, "commands.log");
 
 	for (const command of ["pnpm", "fnox"]) {
 		const path = join(bin, command);
 		writeFileSync(
 			path,
-			`#!/bin/sh\nprintf '%s' "$TMPDIR" >> "$E2E_TEST_LOG"\nfor arg do printf '\\t%s' "$arg" >> "$E2E_TEST_LOG"; done\nprintf '\\n' >> "$E2E_TEST_LOG"\nexit "\${E2E_TEST_STATUS:-0}"\n`,
+			`#!/bin/sh\nprintf '%s\\t%s' "$TMPDIR" "$PWD" >> "$E2E_TEST_LOG"\nfor arg do printf '\\t%s' "$arg" >> "$E2E_TEST_LOG"; done\nprintf '\\n' >> "$E2E_TEST_LOG"\nexit "\${E2E_TEST_STATUS:-0}"\n`,
 		);
 		chmodSync(path, 0o755);
 	}
@@ -44,6 +46,7 @@ function fixture() {
 
 	function run({ args = [], available = "2097152", status = "0" } = {}) {
 		return spawnSync("sh", [script, ...args], {
+			cwd: root,
 			encoding: "utf8",
 			env: {
 				...process.env,
@@ -75,8 +78,10 @@ test("the browser install and suite share private storage that is always removed
 	assert.equal(result.status, 0, result.stderr);
 	const calls = readFileSync(first.log, "utf8").trim().split("\n");
 	assert.equal(calls.length, 2);
-	const [installTmp] = calls[0].split("\t");
-	const [suiteTmp] = calls[1].split("\t");
+	const [installTmp, installCwd] = calls[0].split("\t");
+	const [suiteTmp, suiteCwd] = calls[1].split("\t");
+	assert.equal(installCwd, repoRoot);
+	assert.equal(suiteCwd, repoRoot);
 	assert.equal(suiteTmp, installTmp);
 	assert.match(installTmp, /\/uberblick\/e2e\/run\.[^/]+$/);
 	assert.doesNotMatch(installTmp, /^\/(?:private\/)?tmp(?:\/|$)/);

@@ -125,7 +125,7 @@ or restart another session's development processes.
 
 **Housekeeping, last** (owner direction, 2026-09-01). On every durable outcome —
 merge or escalation — once the probes on the retained review image are done,
-run `sh scripts/housekeeping.sh` with every review SHA this run built — each
+run `sh bin/housekeeping.sh` with every review SHA this run built — each
 exact head it gated and each merged-tree commit from an observed base advance —
 from the same freshly fetched base-ref checkout used for the container review,
 and record a concise summary on the PR. Besides the named review images, the

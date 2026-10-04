@@ -1,7 +1,7 @@
 #!/bin/sh
 #
-# Put a backup taken by `hub-backup.sh` back into this host's deployment. Run it
-# in the deployment directory: `sh hub-restore.sh ~/hub-2026-08-28.sqlite`.
+# Put a backup taken by `bin/hub-backup.sh` back into this host's deployment. Run it
+# in the deployment directory: `sh bin/hub-restore.sh ~/hub-2026-08-28.sqlite`.
 #
 # **Verified before anything is touched.** A restore runs on the worst day
 # somebody has, against a file nobody has opened since it was written, and it
@@ -44,20 +44,20 @@
 # both restart attempts fail the script exits non-zero however well the restore
 # went.
 #
-# Every compose call goes through `remote-compose.sh`, which resolves and checks
+# Every compose call goes through `bin/remote-compose.sh`, which resolves and checks
 # this deployment's settings in both a checkout and an extracted hub release.
 
 set -eu
 
 case "${1-}" in
   -h | --help)
-    printf 'usage: sh hub-restore.sh <backup-file>\n'
+    printf 'usage: sh bin/hub-restore.sh <backup-file>\n'
     exit 0
     ;;
 esac
 
 if [ $# -ne 1 ]; then
-  printf 'usage: sh hub-restore.sh <backup-file>\n' >&2
+  printf 'usage: sh bin/hub-restore.sh <backup-file>\n' >&2
   exit 2
 fi
 
@@ -76,11 +76,11 @@ fi
 
 umask 077
 
-deployment=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+deployment=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$deployment"
 
 compose() {
-  sh remote-compose.sh "$@"
+  sh bin/remote-compose.sh "$@"
 }
 
 # One argument for the container's `sh -c`: read the candidate off stdin, then
@@ -154,7 +154,7 @@ finish() {
     hub_stopped=
     if ! compose start hub; then
       if ! compose up --detach hub; then
-        printf 'hub-restore: THE HUB IS STILL DOWN. Start it with: sh remote-compose.sh up --detach hub\n' >&2
+        printf 'hub-restore: THE HUB IS STILL DOWN. Start it with: sh bin/remote-compose.sh up --detach hub\n' >&2
         if [ "$status" -eq 0 ]; then
           status=1
         fi
@@ -207,7 +207,7 @@ compose run --rm --no-deps --entrypoint sh hub \
 if [ "$probe" -eq 3 ]; then
   printf 'hub-restore: there is a rollback journal beside the hub database.\n' >&2
   printf 'hub-restore: nothing was copied and the volume was not touched. Let SQLite finish that transaction — start the hub once and stop it cleanly, then run this restore again:\n' >&2
-  printf '  sh remote-compose.sh up --detach hub\n  sh remote-compose.sh stop hub\n  sh hub-restore.sh %s\n' "$backup" >&2
+  printf '  sh bin/remote-compose.sh up --detach hub\n  sh bin/remote-compose.sh stop hub\n  sh bin/hub-restore.sh %s\n' "$backup" >&2
   exit 1
 fi
 

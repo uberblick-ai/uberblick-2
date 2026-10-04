@@ -1,6 +1,6 @@
 #!/bin/sh
 # Integrator housekeeping, run last (owner direction, 2026-09-01):
-#   sh scripts/housekeeping.sh <review sha>... [--dry-run]
+#   sh bin/housekeeping.sh <review sha>... [--dry-run]
 # Docker — this run's review images go at once; other review images go after
 #   24 hours. Dangling images go too, as does build cache older than a week. Cache is
 #   also pruned for a free-space floor and capped at 1 GB by default (tunable via
@@ -13,7 +13,7 @@
 # Every prune reports what it reclaimed, so a 0 B reclaim is visible in the run
 # record instead of looking like success.
 set -fu
-usage='usage: housekeeping.sh <review sha>... [--dry-run]'
+usage='usage: sh bin/housekeeping.sh <review sha>... [--dry-run]'
 if [ "$#" -lt 1 ]; then
   echo "$usage" >&2
   exit 2

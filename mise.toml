@@ -43,14 +43,14 @@ _.path = ["{{config_root}}/node_modules/.bin"]
 # `mise activate` — shims alone never run hooks. The script decides whether to
 # say anything at all; see its header.
 [hooks]
-enter = { run = 'sh "{{config_root}}/scripts/mise-welcome.sh"' }
+enter = { run = 'sh "{{config_root}}/bin/mise-welcome.sh"' }
 
 [tasks.welcome]
 description = "Show the contributor quick-start"
 # `quiet` keeps mise's own "[welcome] $ sh ..." banner off the output, so the
 # hook and the task print the same thing.
 quiet = true
-run = 'sh "{{config_root}}/scripts/mise-welcome.sh"'
+run = 'sh "{{config_root}}/bin/mise-welcome.sh"'
 
 [tasks.setup]
 description = "Fresh checkout to running: pinned toolchain, frozen dependencies, then `ub init`"
@@ -186,7 +186,7 @@ description = "Run the browser end-to-end proof points (Playwright, Chromium onl
 # `playwright install` runs first because the browser is a download, not a
 # dependency pnpm can fetch: it is a no-op once the pinned Chromium is in the
 # local cache, and the alternative is a first run that fails with instructions.
-run = 'sh "{{config_root}}/scripts/run-e2e.sh"'
+run = 'sh "{{config_root}}/bin/run-e2e.sh"'
 
 [tasks.fue]
 description = "First-user experience: run the documented install path on a clean machine, then assert what it promised"

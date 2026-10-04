@@ -96,7 +96,7 @@ describe("ub init", () => {
     const run = runUb(["init", "--yes"], box);
     expect(run.status).toBe(0);
 
-    // At least 32 random bytes, over the alphabet `remote-compose.sh` accepts
+    // At least 32 random bytes, over the alphabet `bin/remote-compose.sh` accepts
     // (`A-Za-z0-9._-`) so the same secret survives a shell and Docker Compose.
     const secret = storedSecret(box);
     expect(secret).toMatch(/^[A-Za-z0-9._-]+$/);
