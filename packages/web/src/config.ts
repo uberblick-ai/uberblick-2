@@ -35,15 +35,12 @@
  * best-effort defence in depth; what guarantees it cannot happen is the deploy
  * wrapper refusing a value that could close a JSON string in the first place.
  *
- * **This document is the credential channel, by design (#426, #410).** For a
- * remote host or development server, `hubAuthToken` is the hub's signing
- * secret: anyone who can fetch it has full read-write on the named workspaces
- * at that hub. The boundary is the private network (REMOTE.md); `mise run web`
- * also serves that secret to anything that can reach the dev server.
- * Bound `ub open` instead supplies a stable, independent workspace browser key.
- * It admits only that workspace's loopback rooms and read API, never the
- * upstream hub; neither upstream signing secrets nor device credentials are
- * served. Unbound `ub open` supplies no workspace or key.
+ * Remote hosts serve no signing secret or device credential. Direct remote
+ * browser sign-in is unavailable; use ub auth login and ub open on a computer.
+ * A loopback development server still supplies its local signing secret.
+ * Bound ub open supplies a stable, independent workspace browser key, admitting
+ * only that workspace's loopback rooms and read API, never the upstream hub.
+ * Unbound ub open supplies no workspace or key.
  *
  * Configuration invariant: no hardcoded hub addresses anywhere except the in-code
  * fallback default. There are still exactly two, both fallbacks behind the
@@ -57,6 +54,7 @@
  * only their served document can supply a deployment value.
  */
 
+import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
 import { parseWorkspaceId } from "@uberblick/schema";
 
 // Injected as string literals at build time. Declared, never imported.
@@ -102,7 +100,7 @@ export interface ClientConfig {
   workspacesSource: "document" | "define";
   /**
    * The document's token-signing key: the workspace browser key for `ub open`,
-   * or the upstream signing secret for a remote host or development server.
+   * or the local signing secret for a loopback development server.
    * Empty when the document supplied none.
    *
    * No source field and no built-in alternative: this is the one value with
@@ -385,7 +383,7 @@ function readDocument(
   // the Caddyfile), so a value carrying a quote could close its string and
   // append `,"hubUrl":"wss://elsewhere"` — which `JSON.parse` would then keep,
   // last occurrence winning. The *guarantee* against that is `bin/remote-compose.sh`
-  // refusing any `WEB_WORKSPACES` or `HUB_AUTH_TOKEN` outside a safe alphabet:
+  // refusing any document substitution outside a safe alphabet:
   // no quote and no backslash ever reaches the body, so no escape can be
   // written into it.
   //
@@ -515,14 +513,19 @@ export async function readClientConfig(
     notes.push(outcome.localServing.rejected);
   }
 
+  const endpoint = "rejected" in outcome.hubUrl
+    ? BUILT_IN_HUB_URL
+    : { hubUrl: outcome.hubUrl.url, hubUrlSource: "document" as const };
   return {
-    ...("rejected" in outcome.hubUrl
-      ? BUILT_IN_HUB_URL
-      : { hubUrl: outcome.hubUrl.url, hubUrlSource: "document" as const }),
+    ...endpoint,
     ...("rejected" in outcome.workspaces
       ? { workspaces: BUILT_IN_WORKSPACES, workspacesSource: "define" as const }
       : { workspaces: outcome.workspaces.list, workspacesSource: "document" as const }),
-    hubAuthToken: outcome.hubAuthToken,
+    // Development may supply only its key and use the compiled loopback
+    // endpoint. A stale deployed document cannot restore remote access.
+    hubAuthToken: isLoopbackEndpoint(endpoint.hubUrl)
+      ? outcome.hubAuthToken
+      : "",
     localServing:
       outcome.localServing === null || "rejected" in outcome.localServing
         ? null
@@ -590,7 +593,7 @@ export function hubUrl(): string {
 /**
  * The token-signing key in force, for the one caller that mints tokens with it.
  * It is a local workspace browser key under `ub open`, or an upstream signing
- * secret when this page connects directly to a hub.
+ * secret when this page connects directly to a loopback development hub.
  *
  * Gated exactly like {@link hubUrl}, and for the same reason: it is not known
  * until a `fetch` completes. Empty means the served document carried none —
@@ -637,4 +640,10 @@ export function localServing(): LocalServing | null {
  */
 export function configuredWorkspaces(): readonly string[] {
   return resolved?.workspaces ?? [];
+}
+
+/** Direct remote browser sign-in is unavailable until that client flow ships. */
+export function browserSignInRequired(): boolean {
+  const config = settled();
+  return config.hubUrl !== "" && !isLoopbackEndpoint(config.hubUrl);
 }

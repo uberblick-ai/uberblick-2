@@ -2,9 +2,8 @@
  * `ub remote init` — stand up the Tailscale-only remote from this machine, and
  * `ub remote update` — deploy on demand.
  *
- * The machine running this already holds everything the host needs: the signing
- * secret (`credentials.json`), SSH access to the host, and a GitHub login.
- * Nothing is copied by hand.
+ * The machine running this has SSH access to the host and a GitHub login.
+ * The remote stack uses device credentials and requires no signing secret.
  *
  * **Nothing is deployed *from* here.** The host clones `main` from GitHub and
  * is updated by running `remote-update.sh` in that checkout — never on its own,
@@ -16,11 +15,6 @@
  * command, run by a person or by an agent session over SSH; nothing installs a
  * timer (owner decision, 2026-08-25). A five-minute auto-updater would apply a
  * commit that changes wire semantics to production with nobody present.
- *
- * **The signing secret travels over stdin and nowhere else.** Never in argv on
- * either side — argv is in every `ps` listing and every shell history — never
- * echoed, and never in an error message. The deploy key's private half is
- * generated on the host and never leaves it.
  *
  * Every step is idempotent, because the second run of a command that stood up a
  * host is how somebody repairs one: the key is generated only when absent and
@@ -66,9 +60,6 @@ const KEY_PATH = "~/.ssh/uberblick-deploy";
  */
 const SSH_COMMAND = `ssh -i ${KEY_PATH} -o IdentitiesOnly=yes`;
 
-/** The character set `bin/remote-compose.sh` enforces on the deployed secret. */
-const SAFE_SECRET = /^[A-Za-z0-9._-]+$/;
-
 const HOSTNAME = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
 const IPV4 = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 
@@ -76,7 +67,7 @@ export const REMOTE_INIT_HELP = `usage: ub remote init <ssh-target> [options]
 
 Stand up the remote hub and web stack on a tailnet host, from this machine: the
 host is given a deploy key, clones ${REPO}
-from GitHub, and is brought up with this machine's signing secret. Idempotent —
+from GitHub, and is brought up with GitHub sign-in. Idempotent —
 running it again repairs a host rather than rebuilding it.
 
 operands:
@@ -88,9 +79,8 @@ options:
   --ip <v4>          the host's Tailscale IPv4, likewise
   -h, --help         show this help
 
-The signing secret travels over stdin and is never in argv, never echoed and
-never in an error message. Keep the host on the tailnet: everyone who can reach
-the served app holds the credential.
+The host needs no signing secret. Sign in with \`ub auth login <hub>\` on each
+machine, then use \`ub open\` for browser editing on a computer.
 `;
 
 export const REMOTE_UPDATE_HELP = `usage: ub remote update <ssh-target> [--dir <path>]
@@ -123,8 +113,7 @@ interface Ran {
  * `HUB_AUTH_TOKEN` is routinely exported into this process — that is what
  * `fnox exec` and the mise tasks do — and an inherited environment is readable
  * from `/proc/<pid>/environ` and lands in whatever the child spawns next. The
- * secret has exactly one route to the host, the `.env` payload on stdin, so it
- * is removed here rather than trusted not to be looked at.
+ * local-only secret has no role in deploying a remote host, so it is removed.
  *
  * Nothing else is stripped: `gh` authenticates with `GH_TOKEN`/`GITHUB_TOKEN`
  * and `ssh` with `SSH_AUTH_SOCK`, so removing the vendors' own credentials
@@ -585,10 +574,7 @@ function printable(text: string): string {
  * status alone sends the reader to this file. The bound is against a vendor
  * that hands back a whole build log.
  *
- * It is not a redaction: the signing secret does reach one vendor, on the
- * stdin of the step that writes `.env`, and a host that echoed its stdin back
- * would echo the secret. That one call site quotes nothing, which is why
- * nothing here has to be scrubbed.
+ * Host-controlled output from configuration writes is handled separately.
  */
 function stderrTail(stderr: string): string {
   const lines = printable(stderr)
@@ -671,26 +657,6 @@ export async function remoteInitCommand(
   }
 
   const webWorkspace = base.workspaceId;
-  const secret = base.authSecret;
-  if (secret === null) {
-    io.err(
-      "ub remote init: no signing secret is configured, so there is nothing " +
-        "for the host to authenticate with. Run `ub init` first.\n",
-    );
-    return 2;
-  }
-  // Checked here so the failure is early and readable rather than a compose
-  // wrapper's refusal after everything else has already happened on the host.
-  if (!SAFE_SECRET.test(secret)) {
-    io.err(
-      "ub remote init: the configured signing secret contains characters " +
-        "`bin/remote-compose.sh` refuses (only A-Z a-z 0-9 . _ - are safe, because " +
-        "the shell and Compose parse `.env` differently). Regenerate it before " +
-        "deploying.\n",
-    );
-    return 2;
-  }
-
   // This machine has to be able to reach the host over the tailnet to verify
   // the deployment. Discovering that after the stack is up would report a
   // failure that is not one.
@@ -864,12 +830,12 @@ export async function remoteInitCommand(
   }
 
   const existing = facts.checkout === "present";
-  // Over stdin: the secret is never an argument, on either side.
+  // Configuration travels over stdin; no credential is part of this payload.
   // resolveConfig's workspace grammar is a strict subset of the compose
   // script's JSON-interpolation charset, pinned by the companion contract test.
   // The host updater preserves its operator-owned GitHub app setting under the
   // checkout lock; this machine supplies only the four init-managed values.
-  const envPayload = `# Written by \`ub remote init\`. Untracked, so updates never touch it.\nTAILSCALE_HOST=${magicDns}\nTAILSCALE_IP=${address}\nHUB_AUTH_TOKEN=${secret}\nWEB_WORKSPACES=${webWorkspace}\n`;
+  const envPayload = `# Written by \`ub remote init\`. Untracked, so updates never touch it.\nTAILSCALE_HOST=${magicDns}\nTAILSCALE_IP=${address}\nWEB_WORKSPACES=${webWorkspace}\n`;
 
   if (existing) {
     io.err(`ub remote: updating and rebuilding the checkout on ${flags.target}…\n`);
@@ -878,7 +844,7 @@ export async function remoteInitCommand(
       input: envPayload,
     });
     if (deployed.status !== 0) {
-      // This SSH connection carried the secret on stdin. Never quote any host
+      // Configuration is private operator input. Never quote any host
       // bytes from it: the updater reserves statuses so the CLI names the
       // target, checkout and cause in words it owns.
       io.err(
@@ -916,7 +882,7 @@ export async function remoteInitCommand(
       input: envPayload,
     });
     if (wrote.status !== 0) {
-      // The one step handed the secret, and the only one whose words are not
+      // The configuration-write step is the only one whose words are not
       // quoted: a host that echoed its stdin back on stderr would put the
       // payload in this line. A shell's error message is not worth that.
       io.err(

@@ -44,6 +44,7 @@ export interface IssuedCredential {
 
 export type CredentialRenewal =
   | { status: "renewed"; credential: { record: CredentialRecord; key: string } }
+  | { status: "unchanged" }
   | { status: "already-replaced" }
   | { status: "sign-in-required" };
 
@@ -99,8 +100,7 @@ function recordFromRow(row: CredentialRow): CredentialRecord {
 /**
  * This internal API fixes authorization at issuance. There is no mutation that
  * widens or restores a credential. Renewal issues a replacement and retires
- * the old key. Configured sign-in and renewal share this registry; live room
- * admission still uses the root secret until the coordinated client cutover.
+ * the old key. Remote admission, sign-in and renewal share this registry.
  */
 export class CredentialRegistry {
   private readonly db: DatabaseSync;
@@ -210,7 +210,9 @@ export class CredentialRegistry {
   }
 
   /** A request proof grants this exchange only, never room admission. */
-  async renew(token: string, memberships: MembershipRegistry): Promise<CredentialRenewal> {
+  async renew(token: string, memberships: MembershipRegistry, options: {
+    ifWorkspacesChanged?: boolean;
+  } = {}): Promise<CredentialRenewal> {
     const refusal = { status: "sign-in-required" } as const;
     const lookup = readTokenKeyId(token);
     if ("failure" in lookup || lookup.kid === null) return refusal;
@@ -239,8 +241,17 @@ export class CredentialRegistry {
         this.db.exec("ROLLBACK");
         return { status: "already-replaced" };
       }
+      const workspaces = memberships.workspacesFor(current.principalId).sort();
+      if (options.ifWorkspacesChanged === true &&
+        workspaces.length === current.workspaces.length &&
+        workspaces.every((workspace, index) => workspace === current.workspaces[index])) {
+        // A denied workspace can be polled without retiring this machine's
+        // credential and closing its healthy rooms on every check.
+        this.db.exec("COMMIT");
+        return { status: "unchanged" };
+      }
       issued = this.issue({ principalId: current.principalId, deviceId: current.deviceId,
-        workspaces: memberships.workspacesFor(current.principalId) });
+        workspaces });
       this.markReplaced.run({ id: current.id, replacedAt: Date.now() });
       this.db.exec("COMMIT");
     } catch (error) {

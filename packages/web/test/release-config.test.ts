@@ -54,6 +54,7 @@ it("builds without deployment values and has no endpoint or workspace fallback",
     expect(invalid.workspaces).toEqual([]);
     expect(runtime.hubUrl).toBe("wss://runtime.tailnet.ts.net/ws");
     expect(runtime.hubUrlSource).toBe("document");
+    expect(runtime.hubAuthToken).toBe("");
     expect(runtime.workspaces).toEqual(["00000000-0000-4000-8000-000000000001"]);
     expect(runtime.workspacesSource).toBe("document");
   } finally {

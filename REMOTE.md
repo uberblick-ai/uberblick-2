@@ -7,7 +7,7 @@ all host files. Caddy serves the app and `/uberblick-config.json`, proxies `/ws`
 and `/auth/*` to the hub, and asks the host's Tailscale daemon for the HTTPS
 certificate. The hub is not published directly.
 
-> The host serves the shared write-token signing secret to the app in `/uberblick-config.json`; anyone who can fetch that document has full read-write. Keep this deployment on a private Tailscale network while live clients still use that shared secret. GitHub sign-in issues separate device credentials but does not change live admission. An unguessable public hostname is not a security boundary.
+> Remote sync admits only device credentials with current workspace membership. Run `ub auth login` on each computer and unattended agent host, then use the MCP server or `ub open`. The host's web page receives no credential and shows no documents: direct browser sign-in is not available yet. A signing secret left in an old `.env` grants no access. Revocation stops live sync but cannot erase data already downloaded.
 
 The access-control boundary and broader-access requirements are described in
 the corpus Configuration and auth (62c70b7c-6e4c-40a4-a6bb-a7edbee08360).
@@ -156,6 +156,218 @@ every open browser tab so it takes its bundle and configuration from the host.
 If you cannot finish both halves now, do neither now. Check the protocol
 version recorded by the hub release before choosing it.
 
+### Upgrade an existing deployment to device credentials
+
+Use this procedure when the operator chooses to upgrade that deployment. A
+source checkout advancing or a candidate passing acceptance does not authorize
+an existing hub upgrade. To keep an existing installation on its current
+protocol while trying a candidate, first
+[pin its corpus client](README.md#keep-the-corpus-client-independent-of-the-checkout)
+and use the [isolated candidate procedure below](#try-a-candidate-on-a-fresh-isolated-hub).
+
+Prepare the old deployment before switching either side:
+
+1. Configure GitHub sign-in on the existing hub (the public Uberblick Login app
+   is the standalone default).
+2. Run host-only first-admin setup for each existing workspace, retaining its UUID.
+3. Run `ub auth login <TAILSCALE_HOST>` on **every** computer and unattended agent
+   host that syncs here. Confirm access, or allow renewal to pick up a later grant.
+4. Update the hub and all clients to the matching protocol in one sitting. Restart
+   MCP servers and `ub open` processes, and reload host-served pages.
+
+There is no compatibility window or shared-secret fallback. A pre-switch client
+against a switched hub says to update the client. A switched client against a
+pre-switch hub says to update the hub; restart that process after updating.
+Neither reading says the secret is wrong.
+
+An upgraded machine that has not signed in keeps its local documents and
+unacknowledged edits. MCP and `ub open` serve them and report **not shared with
+hub**, with `ub auth login` as the action. After sign-in with workspace access,
+those pending edits reach the hub using the existing binding; do not re-join,
+re-create or discard them. Missing membership names the administrator and
+renewal detects a later grant with the existing login.
+
+Host-opened browsers, including phones and tablets, have no document access
+until direct web sign-in is available. The supported browser route is
+`ub auth login` followed by `ub open` on a computer. Revocation and membership
+removal stop live sync but cannot erase downloaded data or local edits.
+
+### Keep an existing installation while testing a candidate
+
+Keep each corpus connection on an explicitly installed, compatible client whose
+files live outside the source checkout. The selected package must preserve both
+the existing hub's protocol and the corpus tools the delivery workflow uses;
+finding an older executable on PATH does not prove either. Follow
+[the corpus-client pin procedure](README.md#keep-the-corpus-client-independent-of-the-checkout)
+before new launcher definitions become active, including its actual worker MCP
+check from a private checkout. For an existing `ub open`, use that same explicit
+installed client. Leave the existing hub, bindings, credentials, local stores
+and running workers alone.
+
+Record the installed package identity and the executable that the actual MCP
+launcher starts on each relevant host. A remaining host-side installation or
+pin check is an operational handoff, not completed isolation. Candidate
+acceptance uses a different hub and entirely fresh client state below; a later
+attended upgrade of the existing installation uses the coordinated procedure
+above.
+
+### Try a candidate on a fresh, isolated hub
+
+This attended rehearsal leaves existing hubs, client state and running MCP
+servers alone. Build the hub and its matching client from one reviewed full
+commit. Both run on a new Docker network: the hub binds `0.0.0.0:1234` inside
+its container, and the client dials `ws://candidate-hub:1234`. No host port is
+published. That hostname selects remote device authentication; a client
+dialling `127.0.0.1` or `localhost` would instead select loopback admission.
+
+Start a separate Bash session in a repository checkout. Set `candidate_sha` to
+the exact reviewed candidate, then run the following. Keep this shell open
+until the rehearsal ends; its exit trap removes only the resources it names.
+An agent run uses its private scratch and run id. An attended operator session
+can use its own temporary-directory root.
+
+```bash
+set -euo pipefail
+candidate_sha='<full-reviewed-commit>'
+git cat-file -e "$candidate_sha^{commit}"
+test "$(git rev-parse "$candidate_sha^{commit}")" = "$candidate_sha"
+candidate_root=$(mktemp -d "${UB_AGENTS_SCRATCH:-${TMPDIR:-$PWD}}/uberblick-candidate-${UB_AGENTS_RUN:-attended}-XXXXXXXX")
+candidate_id=$(basename "$candidate_root")
+candidate_network="$candidate_id-network"
+candidate_hub="$candidate_id-hub"
+candidate_hub_data="$candidate_id-hub-data"
+candidate_writer="$candidate_id-writer"
+candidate_reader="$candidate_id-reader"
+candidate_tag="uberblick-candidate:$candidate_sha"
+
+candidate_cleanup() {
+  docker rm --force "$candidate_hub" "$candidate_writer-command" "$candidate_reader-command" \
+    "$candidate_writer-mcp" "$candidate_reader-mcp" >/dev/null 2>&1 || true
+  docker volume rm "$candidate_hub_data" "$candidate_writer" "$candidate_reader" >/dev/null 2>&1 || true
+  docker network rm "$candidate_network" >/dev/null 2>&1 || true
+  rm -rf "$candidate_root"
+}
+trap candidate_cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' HUP TERM
+
+mkdir "$candidate_root/source"
+git archive "$candidate_sha" | tar -x -C "$candidate_root/source"
+docker build --target hub --label "org.opencontainers.image.revision=$candidate_sha" \
+  --tag "$candidate_tag" "$candidate_root/source"
+candidate_image=$(docker image inspect "$candidate_tag" --format '{{.Id}}')
+docker network create "$candidate_network"
+docker volume create "$candidate_hub_data"
+docker volume create "$candidate_writer"
+docker volume create "$candidate_reader"
+docker run --detach --name "$candidate_hub" --network "$candidate_network" \
+  --network-alias candidate-hub \
+  --mount "type=volume,src=$candidate_hub_data,dst=/data" "$candidate_image"
+docker exec "$candidate_hub" node --input-type=module -e '
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    try {
+      const response = await fetch("http://127.0.0.1:1234/auth/claim-state", {
+        signal: AbortSignal.timeout(1_000),
+      });
+      const state = await response.json();
+      if (response.status === 200 && state.unclaimed === true && state.canClaim === true) {
+        console.log("candidate hub ready: fresh and claimable");
+        break;
+      }
+    } catch {}
+    if (Date.now() >= deadline) throw new Error("candidate hub did not become fresh and claimable");
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+'
+docker logs "$candidate_hub"
+
+candidate_client="$candidate_writer"
+candidate_ub() {
+  docker run --rm --interactive --name "$candidate_client-command" --network "$candidate_network" \
+    --mount "type=volume,src=$candidate_client,dst=/data" \
+    --env XDG_CONFIG_HOME=/data/config --env XDG_DATA_HOME=/data/data \
+    --env XDG_CACHE_HOME=/data/cache --workdir /data \
+    --entrypoint node "$candidate_image" /app/packages/cli/bin/ub.mjs "$@"
+}
+candidate_mcp_launcher() {
+  printf '#!/usr/bin/env bash\nexec '
+  printf '%q ' docker run --rm --interactive --name "$1-mcp" --network "$candidate_network" \
+    --mount "type=volume,src=$1,dst=/data" \
+    --env XDG_CONFIG_HOME=/data/config --env XDG_DATA_HOME=/data/data \
+    --env XDG_CACHE_HOME=/data/cache --workdir /data \
+    --entrypoint node "$candidate_image" /app/packages/cli/bin/ub.mjs mcp serve
+  printf '\n'
+}
+candidate_mcp_launcher "$candidate_writer" > "$candidate_root/writer-mcp"
+candidate_mcp_launcher "$candidate_reader" > "$candidate_root/reader-mcp"
+chmod 700 "$candidate_root/writer-mcp" "$candidate_root/reader-mcp"
+candidate_ub auth login ws://candidate-hub:1234
+```
+
+The checkout hub image contains the candidate CLI source and its dependencies,
+so the image id fixes both sides even if a tag moves. The client containers
+mount only their fresh volume, with separate configuration, credentials, data
+and cache roots. No host home, existing credentials, database, deployment
+directory or Docker socket enters them; no signing secret is passed. The
+network still permits the hub's outbound GitHub requests.
+
+Approve only this login's displayed GitHub URL and code. The approval page
+names **Uberblick Login**, while the terminal names
+`http://candidate-hub:1234`. The first completed sign-in claims this fresh hub's
+default workspace. Record its UUID from the successful login; do not reuse the
+corpus workspace UUID. After approval:
+
+```bash
+candidate_workspace='<uuid-reported-by-this-login>'
+candidate_ub remote join "ws://candidate-hub:1234/$candidate_workspace"
+candidate_ub auth status ws://candidate-hub:1234
+candidate_ub status --json
+```
+
+`auth status` is an offline record check. Require the live `status` reading to
+name this endpoint and UUID, report a connected hub with matching protocol,
+and have no pending changes. In a disposable MCP configuration, set the command
+to the absolute path of `$candidate_root/writer-mcp`, with no arguments. This
+launcher supplies the same Docker isolation to `ub mcp serve`. Create one
+clearly synthetic document and retain its returned UUID. Wait for `sync_status`
+to report its changes acknowledged. Close that MCP process before switching the
+volume:
+
+```bash
+candidate_client="$candidate_reader"
+candidate_ub auth login ws://candidate-hub:1234
+candidate_ub remote join "ws://candidate-hub:1234/$candidate_workspace"
+candidate_ub status --json
+```
+
+Approve this second login with the same GitHub account; it obtains its own
+credential for the membership already established by the claim. Change the
+disposable MCP command to `$candidate_root/reader-mcp`, `get_doc` the writer's
+UUID and verify its text. An edit through this reader must also arrive at the
+writer after closing the reader and restarting its `$candidate_root/writer-mcp`
+launcher. Read installed tool schemas first; keep this temporary MCP
+configuration separate from the corpus entries. Never copy a credential from
+one client volume to another.
+
+Record the full candidate SHA, immutable image id, Docker resource names,
+successful GitHub claim and second sign-in, live admission and both document
+directions. Also record actual corpus-launcher resolution against the pinned
+installed client on each relevant host. These are distinct proofs: a candidate
+login does not establish existing-installation isolation, and a pin check does
+not complete a GitHub login. An unattended start or an expired approval is not
+a successful roundtrip. Report any remaining attended approval or host pin as
+an operational handoff before integration; documentation alone establishes
+neither. Existing corpus and development hubs remain on their old version
+until a later attended upgrade is chosen.
+
+Close every candidate MCP process, record the evidence outside the temporary
+source directory, then exit this Bash session to delete its fresh containers,
+volumes and network. The local build image may be retained for another
+rehearsal or removed by its exact tag once unused. Use the normal `ub open`
+and two-computer checks below for a deployment chosen for upgrade; this
+container-only rehearsal exposes no local browser server.
+
 ### Switch an existing checkout host to a release
 
 The old and released stacks use the same Compose project and volume names.
@@ -163,8 +375,8 @@ Take [a backup](#backing-the-hub-up) from the checkout first, then extract your
 chosen release into a separate empty directory using the launch commands above,
 with `~/uberblick-hub-release` in place of `~/uberblick-remote`.
 Instead of copying `remote.env.example`, copy the checkout's `.env` to that
-release directory and retain mode `0600`. This preserves the signing secret,
-host settings, workspaces and any `HUB_GITHUB_CLIENT_ID` override.
+release directory and retain mode `0600`. This preserves host settings, workspaces and any `HUB_GITHUB_CLIENT_ID` override.
+An old `HUB_AUTH_TOKEN` line is ignored and may be removed.
 
 For example, with the checkout at `~/uberblick-remote` and the extracted files
 at `~/uberblick-hub-release`, pull before interrupting the existing stack:
@@ -374,9 +586,7 @@ closes claiming. Claiming and host setup racing for the default workspace
 can establish only one initial administrator.
 
 A claim made by someone else cannot be recovered in place. There is no operator
-override, administrator recovery or supported way to reopen claiming. Claiming
-does not change live admission: clients still use the shared signing secret and
-the private tailnet boundary.
+override, administrator recovery or supported way to reopen claiming. The resulting membership admits that account's device credentials to its default workspace.
 
 `GET /auth/claim-state` needs no credential and changes nothing. It reports
 only `unclaimed` and `canClaim`, the latter requiring configured GitHub sign-in.
@@ -397,22 +607,25 @@ Renewal needs no GitHub approval or GitHub connection. It retires the presented
 credential and returns `renewed` with `credential: {record, key}` once, for the
 same principal and device and exactly its current memberships, including none.
 It grants no membership. Retirement closes and fences any rooms admitted under
-the old credential when credential admission is composed with the server.
+the old credential on a remote hub.
 Replaying a verified proof under that retired credential returns
 `already-replaced`; unknown, revoked or unverifiable credentials return
 `sign-in-required`, revealing no identity or workspace. If the replacement
 answer is lost, sign in again: its key cannot be collected a second time.
 Malformed requests return `invalid-request`, version skew returns
 `protocol-mismatch` with the hub's version, and an unconfigured hub returns
-the same `not-configured` result as sign-in. Clients do not renew yet.
+the same `not-configured` result as sign-in. Remote clients renew stored logins
+without another GitHub approval, including to discover later membership grants.
 
 Sign-in identifies the durable GitHub account and issues one Uberblick device
 credential for its workspace memberships. Only the first completed sign-in
 on a fresh, unclaimed hub creates the default workspace's admin membership;
 later sign-ins grant no membership.
-These credentials are not accepted by the live hub or `ub open` yet; configuring
-sign-in never activates credential admission. Existing clients continue using
-the shared signing secret and the private tailnet boundary.
+Remote hubs require these credentials for live sync and re-check membership.
+Revocation or membership removal closes existing sessions. MCP and `ub open`
+keep their downloaded documents and pending edits locally; sign-in or restored
+membership resumes sharing without re-joining. Loopback-only hubs retain local
+signing-secret admission and need no GitHub, membership or login.
 
 ## Establish a workspace's first administrator
 
@@ -469,9 +682,10 @@ with claiming under the same membership check. Once membership exists, setup
 cannot add, replace or remove anyone there; access management belongs to that
 workspace's admins. After claiming closes, ordinary sign-in grants no membership.
 
-Setup also leaves live sync admission unchanged: the live hub and `ub open`
-still use the shared signing secret. Setup activates no credential or
-membership admission, and local-only work needs none of it.
+Setup grants the approving account access to that workspace. A machine that
+signed in before setup discovers the new membership through renewal, without
+new GitHub approval. Running MCP and ub open processes resume sharing with the
+existing login even if they previously reported no workspace access.
 
 ### Cancellation and a missing result
 
@@ -526,10 +740,10 @@ requires a separate owner decision.
 The extracted `docker-compose.yml` is the release's recipe: it identifies the
 images, persistent volumes and the sole published port. Caddy's configuration
 is inside the web image; no host Caddyfile is needed. The host supplies `.env`
-at mode `0600`, because it holds the signing secret.
+at mode `0600`. It carries host settings, never a remote signing secret.
 
 Edit `.env` using `remote.env.example`. Set `TAILSCALE_HOST`, `TAILSCALE_IP`
-and `HUB_AUTH_TOKEN`, and choose the `WEB_WORKSPACES` list. `WEB_HUB_URL` is
+and choose the `WEB_WORKSPACES` list. `WEB_HUB_URL` is
 optional (see [Pointing the client at another hub](#pointing-the-client-at-another-hub)).
 Set `HUB_GITHUB_CLIENT_ID` only for an operator-owned app (see
 [GitHub sign-in](#github-sign-in)); unset or empty uses Uberblick Login.
@@ -554,14 +768,7 @@ Set `HUB_GITHUB_CLIENT_ID` only for an operator-owned app (see
   deployment's threat model.
 - `TAILSCALE_IP` is the IPv4 address printed by `tailscale ip -4`. Compose binds
   port 443 only to this address, not to the host's public or LAN interfaces.
-- `HUB_AUTH_TOKEN` is the existing shared signing secret used by the local MCP
-  clients that will sync to this hub. On a trusted machine with the repository's
-  age key, `fnox get HUB_AUTH_TOKEN` prints that value so it can be transferred
-  to the host's `.env`. Never copy the age key to the host. The secret
-  must consist only of letters, digits, `.`, `_`, and `-`; `bin/remote-compose.sh`
-  refuses other characters because the shell and Compose parse `.env`
-  differently — and because the value is substituted into the JSON
-  configuration document Caddy serves, where a quote could inject further keys.
+
 
 `bin/remote-compose.sh` reads `.env` and refuses unsafe values before calling
 Docker. The web container checks them again before Caddy starts, including when
@@ -573,10 +780,8 @@ served JSON. A refusal names the setting. The allowed alphabets are:
 | `TAILSCALE_HOST` | Letters, digits, `.`, `-` |
 | `WEB_HUB_URL` | Letters, digits, `:`, `/`, `.`, `_`, `-` |
 | `WEB_WORKSPACES` | Letters, digits, `,`, `-` |
-| `HUB_AUTH_TOKEN` | Letters, digits, `.`, `_`, `-` |
 
-Use the wrapper for operator commands in either deployment layout. Validate
-without printing the secret with `sh bin/remote-compose.sh config --quiet`.
+Use the wrapper for operator commands in either deployment layout. Validate with `sh bin/remote-compose.sh config --quiet`.
 
 ### Check the deployment
 
@@ -596,74 +801,50 @@ curl -sS -o /dev/null -D - https://<TAILSCALE_HOST>/ws \
 `/ws` is Caddy up and the hub down — expected while the hub is stopped for a
 backup, and otherwise a job for `sh bin/remote-compose.sh logs hub`.
 
-Then open `https://<TAILSCALE_HOST>` from a second computer on the same tailnet.
-It opens the first workspace in `WEB_WORKSPACES`. In the browser developer tools,
-`https://<TAILSCALE_HOST>/uberblick-config.json` must return
-`{"hubUrl":"wss://<TAILSCALE_HOST>/ws","workspaces":"<the list from .env>","hubAuthToken":"<the secret from .env>"}`
-and the collaboration WebSocket must be that same address. A release bundle
-has no deployment endpoint fallback: check this document if the browser has
-no usable hub endpoint. That document is a credential — do not paste it
-anywhere. If the status line reads "no hub token", the document arrived without
-`hubAuthToken`: check the container settings and its startup refusal in the
-logs. The client logs one line naming both sources in force,
-which shows whether the document supplied its configuration. The directory
-should hydrate after the socket connects.
-
-Do not run `docker compose config` without `--quiet`: the rendered
-configuration contains `HUB_AUTH_TOKEN` in the hub environment.
+Then open `https://<TAILSCALE_HOST>` from another device. It shows **Sign-in
+required**, explains that this browser cannot sign in yet, and names
+`ub auth login` with `ub open` on a computer. It shows no documents and opens
+no collaboration socket. In browser developer tools,
+`https://<TAILSCALE_HOST>/uberblick-config.json` must return only:
+`{"hubUrl":"wss://<TAILSCALE_HOST>/ws","workspaces":"<the list from .env>"}`.
+It contains no signing secret or device credential. A release bundle has no
+deployment endpoint fallback; the browser console names the configuration
+sources in force.
 
 ### Pointing the client at another hub
 
-The release bundle takes `hubUrl`, `workspaces` and `hubAuthToken` only from
-`/uberblick-config.json` on its serving origin. No deployment value or secret
-is compiled into it. Caddy renders that document from its runtime environment:
-Compose supplies `WEB_HUB_URL` (default `wss://<TAILSCALE_HOST>/ws`),
-`WEB_WORKSPACES` (default empty) and `HUB_AUTH_TOKEN` from the host settings.
-Startup validates them before serving.
-
-So retargeting the client, or changing which workspaces it offers, is an edit to
-that document, not a rebuild — set the value in `.env` and recreate the Caddy
-container:
+The release bundle takes `hubUrl` and `workspaces` from `/uberblick-config.json`
+on its serving origin. No deployment value or credential is compiled into it.
+Caddy renders that public document from its checked runtime environment:
+`WEB_HUB_URL` (default `wss://<TAILSCALE_HOST>/ws`) and `WEB_WORKSPACES`
+(default empty). Changing either needs a Caddy container recreate, never a bundle
+rebuild:
 
 ```sh
 sh bin/remote-compose.sh up --detach caddy
 ```
 
 The document is served with `Cache-Control: no-store`, so the next page load
-picks up the change. The client reads `hubUrl`, `workspaces` and `hubAuthToken`
-and ignores every other key. `hubUrl` must be a plain `ws://` or `wss://`
-address — one carrying userinfo, a query string or a fragment is refused, and
-the release client has no deployment endpoint to fall back to. An entry of
-`workspaces` that is not a workspace id is dropped
-rather than offered. With no usable workspace list, `/` says there is no
-workspace while document links keep working. A document with no `hubAuthToken`
-leaves the page with no document content and says "no hub token"; there is no
-browser cache or fallback secret, and the client re-reads the document on its
-next connect attempt rather than giving up for the life of the tab.
-
-Rotating the secret is the same edit: set it in `.env` and recreate the two
-containers with `sh bin/remote-compose.sh up --detach`. Every open tab keeps
-minting with the one it was served until it is reloaded.
+picks up the change. `hubUrl` must be a plain `ws://` or `wss://` address without
+userinfo, query or fragment. Invalid workspace entries are dropped. Direct
+remote browser sign-in remains unavailable, regardless of workspace list;
+opening the host shows the supported computer route and no documents. Use
+`ub open` after binding and signing in to edit from a computer's local replica.
 
 ## Two-computer verification protocol
 
-Use computers A and B on the same tailnet. Before starting, open the remote URL
-on both, choose the same document, and give each browser a distinct awareness
-name/color if prompted.
+Use computers A and B on the same tailnet. Before starting, run `ub auth login <TAILSCALE_HOST>` and join the workspace
+on each, then run `ub open`, choose the same document, and give each browser a
+distinct awareness name/color if prompted.
 
 1. **Live edit and cursor:** type a distinctive sentence on A. Confirm it
    appears on B without reloading and that B renders A's remote cursor or
    selection.
-2. **Local MCP to remote browser:** on the computer that launches the MCP
-   client, bind that machine first —
-   `ub remote join wss://<TAILSCALE_HOST>/ws/<workspace id>`, with
-   `--secret-file <path>` when it does not hold the remote's secret yet — which
-   persists the endpoint and the credential. An endpoint exported as `HUB_URL`
-   is not read at all. A `HUB_AUTH_TOKEN` in the client's own environment still
-   outranks the stored credential, so where one is set it must equal the value
-   in the remote `.env`. Then launch the client, use `edit_block` on the open
-   document and confirm the edit appears live on B. `sync_status` must report
-   the remote URL and a connected hub.
+2. **Local MCP to locally served browser:** bind and sign in on the computer
+   launching MCP, then use `edit_block` on the open document and confirm the edit
+   appears live in B's `ub open` page. `sync_status` must report the remote URL
+   and a connected hub. No signing secret or GitHub token is copied or sent.
+
 3. **Offline convergence:** disconnect A from the network, then edit the same
    document on A and B (use different blocks for an unambiguous merge). Restore
    A's network. Confirm both browsers converge to the same text and neither
@@ -738,17 +919,16 @@ The file lands at mode `0600`, and it lands whole: the copy goes to a temporary
 sibling and is renamed onto the name you gave, so an interrupted run leaves the
 previous backup exactly as it was rather than a truncated file wearing its name.
 It contains the documents, default workspace and claim state, and private access
-records of every workspace in one readable file; treat it exactly like the
-signing secret. Naming an existing
+records of every workspace in one readable file; keep it private like a device
+credential. Naming an existing
 directory, or a directory that is not writable, is refused before the hub is
 stopped.
 
-**Agents keep working while the hub is stopped; browser tabs pause.** Caddy
-stays up and serves the app; `/ws` answers 502 for those seconds. Every MCP
-server keeps editing its local replica offline and converges when the socket
-returns. An open browser keeps the document this page already received but is
-read-only until the socket returns. The window is a few seconds — but take
-backups when you would take a deploy, not mid-sentence for somebody.
+**Local replicas keep working while the hub is stopped.** Caddy stays up and
+serves the app; `/ws` answers 502 for those seconds. MCP and `ub open` keep
+reading and editing their local copies and converge when the connection returns.
+A browser opened at the remote host has no document access. The window is a few
+seconds, but take backups when you would take a deploy.
 
 ### Restoring one
 
@@ -841,12 +1021,11 @@ There is one verb for joining a workspace that exists, and it is the same on
 every machine:
 
 ```sh
-ub remote join wss://<TAILSCALE_HOST>/ws/<WORKSPACE_ID> \
-  --secret-file ~/uberblick-remote-secret
+ub auth login <TAILSCALE_HOST>
+ub remote join wss://<TAILSCALE_HOST>/ws/<WORKSPACE_ID>
 ```
 
-The URL is the endpoint with the workspace id as its last path segment. Nothing
-precedes it — no `ub init`, no `--workspace`, no clone. The id is what a second machine has to be told, because a workspace id is
+The URL is the endpoint with the workspace id as its last path segment. Sign in first; no `ub init`, `--workspace` or clone is needed. The id is what a second machine has to be told, because a workspace id is
 a uuid: a machine that invented its own would join the hub and find nothing of
 yours there, the rooms being keyed by a different id. Carrying it in the URL is
 what makes that one string, and one paste, rather than two.
@@ -861,58 +1040,23 @@ nothing at all.
 
 A machine that already had a workspace of its own keeps it. It is not merged and
 not moved: `ub workspace list` shows both, and `ub workspace use <id>`
-switches back. The endpoint, though, is machine-wide — after a join, the
-workspace that was here syncs with this hub too, under its own rooms.
+switches back. The endpoint, though, is machine-wide — after a join, another local workspace can sync with this hub only when the
+stored login and current membership allow that UUID.
 
 A URL with no workspace id, or with something that is not one, is refused before
 anything is written, and the refusal names the form.
 
-**A workspace that does not exist yet is the other verb.** To put another *new*
-workspace on this hub, the machine that
-creates it runs:
+`ub init <TAILSCALE_HOST> --workspace <uuid>` also authenticates with this hub's
+stored login before writing, and requires workspace access. Without an existing
+workspace or `--workspace`, its new random UUID has no membership and is refused. It never overwrites an existing endpoint;
+use `ub remote join` to move a binding. No signing secret grants remote access.
+For an existing workspace, use the join route above and keep its UUID.
 
-```sh
-fnox exec -- ub init <TAILSCALE_HOST>
-```
-
-The bare host is read as `wss://<TAILSCALE_HOST>/ws`, this deployment's
-endpoint, and the `wss://` form in full works the same; `ub init` dials and
-authenticates before it writes anything, stores the endpoint, generates the
-workspace id and has its starter documents on the hub by the time it returns —
-if the hub does not acknowledge them it says so and exits non-zero rather than
-reporting a workspace the hub does not hold.
-
-The hub's secret has to reach that command's **environment**, because a secret
-generated locally is random and this hub would refuse it. `fnox exec` is how
-this repository supplies it; any other way of exporting `HUB_AUTH_TOKEN` into
-the shell works, and a `credentials.json` this machine already holds is read
-without any of that. Never put the secret in the command itself: a command line
-is in every `ps` listing and every shell history. Every *other* machine then joins that workspace with the URL
-above — `ub status` on this one names the id. `ub init` never replaces an
-endpoint already stored: the same one changes nothing, and a different one is
-refused, naming `ub remote join` as the move. Neither command asks anybody to
-edit `config.json`.
-
-To run the web client on this machine against the remote hub, from a clone:
-
-```sh
-mise trust && mise run setup -- --yes   # a checkout, its own local workspace
-ub remote join wss://<TAILSCALE_HOST>/ws/<WORKSPACE_ID> \
-  --secret-file ~/uberblick-remote-secret
-mise run web
-```
-
-`ub init` with no hub argument (which is how `mise run setup` runs it) creates a
-*local* workspace with its starter documents; the join then binds this machine
-to the remote one, and
-`mise run web` serves it because the task runs its command through `ub env`,
-which resolves this machine's own configuration. Nothing is written into the
-checkout.
-
-The secret that reached the remote replaces whatever this machine had, at mode
-0600, and the command says so — on a second machine that is the point, since a
-locally generated secret is random and the remote verifies with the first
-machine's.
+To edit this workspace in a browser on the computer, run `ub open`. It serves
+the machine's local replica, uses the stored login for upstream sync, and gives
+the browser a separate loopback key. It serves neither a device credential nor
+an upstream secret. `mise run dev` is the loopback development path and does not
+support remote sync.
 
 Persisting the endpoint — and, after a join, the workspace binding — writes
 `$XDG_CONFIG_HOME/uberblick/config.json`, which is the only place `ub`,
@@ -925,12 +1069,11 @@ claiming a switch that did not take effect. The deployed web client here reads
 its endpoint at runtime from the served `/uberblick-config.json`, not from any
 of them.
 
-The `--secret-file` argument is a path, never the secret: it must be a file only
-you can read (mode 0600), holding either the bare value from the host's `.env`
-or a `credentials.json` carrying it. Without the flag, the secret already
-configured is tried first and a terminal is prompted with one `*` per character
-entered, without displaying the secret.
-Nothing here prints the secret or a token signed with it.
+Remote commands accept no signing secret and send no GitHub token. A missing
+login names `ub auth login`; a refused renewal requires signing in again; missing
+workspace access names the workspace administrator. Refusal keeps the command's
+existing no-write promise. The signing secret in `credentials.json` stays for
+loopback hubs and is never sent to this remote.
 
 Archived documents move with their content and stay archived until restored.
 Merging two independently populated workspaces is not supported: the URL says
@@ -948,8 +1091,8 @@ These requirements belong only to the checkout path.
 
 ### Initialize or re-run a checkout host
 
-One command, from your own machine — the one that already holds the signing
-secret, SSH access to the host and a GitHub login:
+One command, from your own machine with SSH access to the host and a GitHub
+login for repository administration:
 
 ```sh
 ub remote init uberblick@box.tailnet.ts.net
@@ -970,16 +1113,16 @@ It does, over that one SSH target, the compatibility checkout deployment:
 3. Clones `main` into `~/uberblick-remote` (`--dir` to change) with
    `core.sshCommand` set on the clone, so the updater needs no environment of
    its own. An existing checkout is fast-forwarded instead.
-4. Writes the host's `.env` — `TAILSCALE_HOST`, `TAILSCALE_IP`,
-   `HUB_AUTH_TOKEN` from your local signing secret, and `WEB_WORKSPACES` with
-   this machine's resolved workspace uuid — **over stdin**. The secret is never
-   an argument on either side, never echoed, and never reaches a shell history.
+4. Writes the host's `.env` — `TAILSCALE_HOST`, `TAILSCALE_IP` and
+   `WEB_WORKSPACES` with this machine's resolved workspace UUID — over stdin.
+   It preserves an operator's `HUB_GITHUB_CLIENT_ID` override and writes no
+   signing secret.
 5. Runs `sh bin/remote-compose.sh up --build --detach`, then verifies from your
    machine: it polls `https://<host>/` for up to 90 seconds — the first request
    is what makes Tailscale issue the certificate, so an immediate check is a
    false negative — and confirms `/ws` upgrades to a WebSocket. A failure exits
    non-zero with the last hub and Caddy log lines, and persists nothing.
-6. Points this machine's clients at the new hub, and prints the **join URL** a
+6. Records the endpoint and prints the **join URL** a
    second computer binds to — `wss://<host>/ws/<workspace id>`, the endpoint
    with this workspace's id on the end.
 

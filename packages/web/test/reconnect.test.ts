@@ -531,7 +531,12 @@ it("paces live name rooms below the hub ceiling, including after a reconnect", a
       setWorkspaceName(doc, `Workspace ${index}`);
       provider.awareness?.setLocalStateField("user", { name: "test" });
     }
-    await expect.poll(() => providers.every((provider) => provider.isSynced), { timeout: 10_000 }).toBe(true);
+    // The handshake alone does not acknowledge the queued names' upload.
+    await waitFor(
+      "all name rooms to sync and upload their names",
+      () => providers.every((provider) => provider.isSynced && provider.unsyncedChanges === 0),
+      10_000,
+    );
     expect(disconnects).toBe(0);
     for (const [index, provider] of providers.entries()) {
       expect(getWorkspaceName(hub.hocuspocus.documents.get(provider.configuration.name)!)).toBe(`Workspace ${index}`);
@@ -586,7 +591,11 @@ it("discards a token that resolves after its socket generation ended", async () 
     socket.disconnect();
     await expect.poll(() => disconnects).toBe(1);
     await socket.connect();
-    await expect.poll(() => provider.isSynced, { timeout: 10_000 }).toBe(true);
+    await waitFor(
+      "the replacement room to sync and upload its name",
+      () => provider.isSynced && provider.unsyncedChanges === 0,
+      10_000,
+    );
     expect(authFrames).toBe(1);
     finishOld(await admissionToken());
     await oldToken;

@@ -592,32 +592,14 @@ describe("ub mcp install cursor", () => {
   });
 });
 
-describe("the checkout's own .mcp.json", () => {
-  /**
-   * The spawn the committed file has to carry, stated here independently.
-   *
-   * This is the whole point of the test: with the expectation written out, the
-   * committed file and the generator are each checked against *it*, so changing
-   * either one alone fails. Reading the arguments out of the file and feeding
-   * them back in would only ever prove the generator agrees with itself.
-   */
-  const CHECKOUT_SPAWN = ["ub", "mcp", "serve"];
-
-  it("is what this command prints, rather than hand-maintained", () => {
-    // The same line every other client gets, and for the same reason: `ub mcp
-    // serve` resolves workspace, endpoint and credential itself, so this file
-    // never needs an override or a wrapper to carry them.
-    const committed = read(join(REPO_ROOT, ".mcp.json"));
-    const entry = JSON.parse(committed).mcpServers.uberblick;
-    expect([entry.command, ...entry.args]).toEqual(CHECKOUT_SPAWN);
-
-    // Byte for byte, which is what "generated rather than hand-maintained"
-    // actually means: a file somebody edited by hand would differ in its
-    // spacing long before it differed in what it registers. Against the snippet
-    // now, because `claude mcp add` writes bytes of its own — so running
-    // `ub mcp install claude --project` in this checkout must never be what
-    // keeps this file current.
-    expect(committed).toBe(snippet("json", DEFAULT_ENTRY));
+describe("MCP install and the checkout's deployment override", () => {
+  it("keeps the generic installed entry independent of the corpus deployment pin", () => {
+    // Generic users still receive the public ub mcp serve route. This project's
+    // deployment deliberately pins an installed version while its source and
+    // corpus hub upgrade independently; the launcher contract is tested in
+    // scripts/corpus-mcp.test.mjs.
+    const entry = JSON.parse(snippet("json", DEFAULT_ENTRY)).mcpServers.uberblick;
+    expect([entry.command, ...entry.args]).toEqual(["ub", "mcp", "serve"]);
   });
 
   it("carries no workspace pin, so this checkout follows the machine default", () => {

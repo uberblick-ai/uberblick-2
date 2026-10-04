@@ -59,6 +59,7 @@ import {
 } from "./config.js";
 import type { HubLogger } from "./log.js";
 import { CredentialRegistry } from "./credentials.js";
+import { CredentialAdmission, type CredentialContext } from "./credential-admission.js";
 import { handleCredentialRenewal } from "./credential-renewal.js";
 import { startAdminSetup } from "./admin-setup.js";
 import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
@@ -80,13 +81,13 @@ import type {
   TokenIdentity,
 } from "./token.js";
 import { clampToken, importRootSecret, inspectToken } from "./token.js";
+import { isLoopbackHost } from "./remote-url.js";
 
 /**
- * Connection context. The claims *are* the context: everything downstream
- * (readOnly, future awareness identity) should derive from what the token
- * asserted, never from what the client says about itself.
+ * Local connections carry verified claims. Remote connections carry the
+ * hub-owned credential and principal, with an access fence shared by hooks.
  */
-export type HubContext = TokenClaims;
+export type HubContext = TokenClaims | CredentialContext;
 
 export interface Hub {
   /** The bound port. The real one, even when `config.port` was 0. */
@@ -94,6 +95,10 @@ export interface Hub {
   readonly databasePath: string;
   readonly server: Server<HubContext>;
   readonly hocuspocus: Hocuspocus<HubContext>;
+  /** Hub-internal authorities; never exposed through a public route. */
+  readonly credentials?: CredentialRegistry;
+  readonly memberships?: MembershipRegistry;
+  readonly principals?: PrincipalRegistry;
   /**
    * Execute every pending debounced `onStoreDocument` now and await it, so
    * that everything currently in memory is on disk when this resolves.
@@ -574,9 +579,13 @@ async function listen(
 export async function createHub(config: HubConfig, options: {
   operatorSetup?: boolean;
   initializeDefaultWorkspace?: boolean;
+  /** Test seam that can only make loopback admission stricter. */
+  deviceCredentials?: true;
 } = {}): Promise<Hub> {
   if (config.github !== undefined) validateGithubClientId(config.github.clientId);
-  if (config.authSecret === "") {
+  const address = config.address ?? DEFAULT_HOST;
+  const deviceCredentials = !isLoopbackHost(address) || options.deviceCredentials === true;
+  if (!deviceCredentials && (config.authSecret === undefined || config.authSecret === "")) {
     throw new Error(
       "createHub: authSecret must not be empty — it is the HMAC secret tokens are signed with",
     );
@@ -593,13 +602,12 @@ export async function createHub(config: HubConfig, options: {
       `createHub: protocolVersion must be an integer between 1 and 999999, got ${protocolVersion}`,
     );
   }
-  const authenticate = await createRoomAuthenticator({
-    authSecret: config.authSecret,
+  const authenticate = deviceCredentials ? undefined : await createRoomAuthenticator({
+    authSecret: config.authSecret ?? "",
     protocolVersion,
     log,
   });
   const databasePath = config.databasePath ?? defaultDatabasePath();
-  const address = config.address ?? DEFAULT_HOST;
   const shutdownTimeoutMs = config.shutdownTimeoutMs ?? 10_000;
 
   // Sticky on purpose: once a store has failed, the hub cannot claim that what
@@ -646,6 +654,7 @@ export async function createHub(config: HubConfig, options: {
   let principals: PrincipalRegistry | undefined;
   let memberships: MembershipRegistry | undefined;
   let claims: HubClaimState | undefined;
+  let admission: CredentialAdmission | undefined;
   try {
     // Standalone entry points opt in. ub open's embedded hub never initializes
     // or claims, even when it offers an explicitly configured GitHub sign-in.
@@ -657,6 +666,9 @@ export async function createHub(config: HubConfig, options: {
         credentials = new CredentialRegistry(database);
         signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims);
       }
+    }
+    if (deviceCredentials && credentials !== undefined && memberships !== undefined) {
+      admission = new CredentialAdmission(credentials, memberships, { protocolVersion, log });
     }
   } catch (error) {
     closeDatabase();
@@ -681,7 +693,7 @@ export async function createHub(config: HubConfig, options: {
     ...(config.maxDebounce === undefined
       ? {}
       : { maxDebounce: config.maxDebounce }),
-    extensions: [database],
+    extensions: [database, ...(admission === undefined ? [] : [admission])],
 
     /**
      * Stamp the direct peer's address onto the upgrade request, the one place
@@ -693,7 +705,16 @@ export async function createHub(config: HubConfig, options: {
       request.headers[PEER_ADDRESS_HEADER] = request.socket?.remoteAddress ?? "";
     },
 
-    onAuthenticate: authenticate,
+    ...(authenticate !== undefined ? { onAuthenticate: authenticate } :
+      admission !== undefined ? {} : {
+        async onAuthenticate({ token }: onAuthenticatePayload<HubContext>): Promise<never> {
+          const envelope = readAuthEnvelope(token);
+          const reason = envelope === null || envelope.protocolVersion !== protocolVersion
+            ? protocolMismatchReason(protocolVersion) : "device-sign-in-unavailable";
+          log({ event: "hub.auth.rejected", cause: "sign-in-not-configured" });
+          throw new AuthError(reason, "Remote hub requires configured GitHub sign-in");
+        },
+      }),
 
     async onRequest({ request, response }) {
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return Promise.reject();
@@ -727,7 +748,7 @@ export async function createHub(config: HubConfig, options: {
       log({
         event: "hub.room.connected",
         room: documentName,
-        sub: context.sub,
+        sub: "principalId" in context ? context.principalId : context.sub,
         socketId,
       });
 
@@ -735,7 +756,7 @@ export async function createHub(config: HubConfig, options: {
         log({
           event: "hub.room.closed",
           room: documentName,
-          sub: context.sub,
+          sub: "principalId" in context ? context.principalId : context.sub,
           socketId,
           code: event?.code ?? null,
           reason: event?.reason || "client-gone",
@@ -770,6 +791,9 @@ export async function createHub(config: HubConfig, options: {
   const port = server.address.port;
 
   log({ event: "hub.listen", address, port, database: databasePath });
+  if (deviceCredentials && signIn === undefined) {
+    log({ event: "hub.auth.unavailable", reason: "GitHub sign-in is not configured; this remote hub admits no clients" });
+  }
 
   /** The sticky store failure, as the error a durability claim should not hide. */
   const storeError = (): Error | undefined =>
@@ -863,6 +887,9 @@ export async function createHub(config: HubConfig, options: {
     databasePath,
     server,
     hocuspocus,
+    ...(credentials === undefined ? {} : { credentials }),
+    ...(memberships === undefined ? {} : { memberships }),
+    ...(principals === undefined ? {} : { principals }),
     flush,
     stop() {
       stopping ??= runStop();

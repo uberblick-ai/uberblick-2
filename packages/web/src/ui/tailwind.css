@@ -65,6 +65,7 @@
 @source "./MentionMenu.tsx";
 @source "./WorkspaceSettings.tsx";
 @source "./WorkspaceSwitcher.tsx";
+@source "./UserMenu.tsx";
 @source "./OutlinePane.tsx";
 @source "./DocChrome.tsx";
 @source "./EditorPane.tsx";

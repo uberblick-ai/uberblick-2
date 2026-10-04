@@ -91,7 +91,7 @@ describe("the human status overview", () => {
   });
 
   it.each(["auth-failed", "update-required", "hub-down", "quarantined"] as const)(
-    "counts %s and sends its details to doctor",
+    "counts %s and shows its recovery detail",
     (status) => {
       const text = renderStatus(
         report({
@@ -108,7 +108,7 @@ describe("the human status overview", () => {
       );
       expect(row(text, "failures")).toContain("1 detected failure");
       expect(row(text, "failures")).toContain("`ub doctor`");
-      expect(text).not.toContain("failure detail that belongs in doctor");
+      expect(row(text, "recovery")).toContain("failure detail that belongs in doctor");
     },
   );
 

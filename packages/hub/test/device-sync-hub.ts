@@ -1,5 +1,5 @@
 /**
- * Test-only composition for clients built ahead of the remote cutover. Keeping
+ * Test-only composition for exercising stored-login remote clients. Keeping
  * issuance, admission and renewal here preserves the hub-only authority seam;
  * no live server entry point imports this fixture.
  */

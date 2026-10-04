@@ -105,7 +105,7 @@ describe("signed-in credentials on composed admission", () => {
     expect(membershipSnapshot(rig.database)).toEqual(before);
     for (const workspace of [WORKSPACE, OTHER_WORKSPACE]) {
       const refused = connect(rig.port, testRoom(workspace), await credentialToken(signedIn, workspace));
-      await expect(refused.denied).resolves.toBe("invalid-token");
+      await expect(refused.denied).resolves.toBe("device-credential-refused");
     }
   });
 
@@ -133,7 +133,7 @@ describe("signed-in credentials on composed admission", () => {
       await waitForText("own-workspace observer", observer.text, "member can edit own workspace");
     }
     const refused = connect(rig.port, testRoom(FOREIGN_WORKSPACE), await credentialToken(signedIn, FOREIGN_WORKSPACE));
-    await expect(refused.denied).resolves.toBe("invalid-token");
+    await expect(refused.denied).resolves.toBe("device-credential-refused");
     expect(membershipSnapshot(rig.database)).toEqual(before);
   });
 });

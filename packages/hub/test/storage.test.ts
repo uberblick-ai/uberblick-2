@@ -185,7 +185,7 @@ describe("the hub database", () => {
       const root = home();
       const relocated = join(root, "opt", "uberblick-1.2.3", "hub");
       mkdirSync(relocated, { recursive: true });
-      for (const file of ["config.ts", "storage.ts", "log.ts"]) {
+      for (const file of ["config.ts", "storage.ts", "log.ts", "loopback.ts"]) {
         copyFileSync(join(PACKAGE_ROOT, "src", file), join(relocated, file));
       }
       writeFileSync(

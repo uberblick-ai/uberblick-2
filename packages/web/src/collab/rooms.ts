@@ -252,7 +252,7 @@ function dropSocket(): void {
  * Once, not per connect: it is derived from the secret the *first* usable
  * document supplied, so a secret rotated under a tab that already has one keeps
  * minting with the old one until the page is reloaded. Stated rather than
- * solved — a rotation is a redeploy, and a redeploy is a reload (REMOTE.md).
+ * solved — replacing a loopback browser key needs a page reload.
  */
 let signingKey: Promise<CryptoKey> | null = null;
 

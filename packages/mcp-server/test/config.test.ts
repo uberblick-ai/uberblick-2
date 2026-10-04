@@ -19,6 +19,7 @@ import {
   resolveMcpConfig,
 } from "../src/config.js";
 import { PACKAGE_ROOT, mainTsProcess } from "./helpers.js";
+import { bridgeConfig } from "../src/remote.js";
 
 const WORKSPACE = "9c1f0b4a-6d27-4e83-9b5a-1f2e3d4c5b6a";
 const DATA_HOME = "/tmp/uberblick-config-test";
@@ -49,6 +50,25 @@ function runServer(
 }
 
 describe("resolveMcpConfig", () => {
+  it.each(["wss://hub.example/ws", "ws://0.0.0.0:1234", "ws://[::]:1234", "ws://127.attacker.example:1234"])("requires stored login and suppresses the secret for %s", hubUrl => {
+    const config = resolveMcpConfig(env({ HUB_URL: hubUrl, HUB_AUTH_TOKEN: "local-only-secret" }));
+    expect(config.authSecret).toBeNull();
+    expect(config.deviceLogin).toBeDefined();
+  });
+
+  it.each(["ws://localhost:1234", "ws://127.42.0.9:1234", "ws://[::1]:1234"])("keeps loopback secret admission for %s", hubUrl => {
+    const config = resolveMcpConfig(env({ HUB_URL: hubUrl, HUB_AUTH_TOKEN: "local-only-secret" }));
+    expect(config.authSecret).toBe("local-only-secret");
+    expect(config.deviceLogin).toBeUndefined();
+  });
+
+  it("reclassifies bridge endpoint overrides without moving a login between hubs", () => {
+    const local = resolveMcpConfig(env({ HUB_AUTH_TOKEN: "local-only-secret" }));
+    const remote = bridgeConfig(local, { hubUrl: "wss://hub.example/ws", authSecret: "never-send-this" });
+    expect(remote.authSecret).toBeNull();
+    expect(remote.deviceLogin).toBeDefined();
+    expect(bridgeConfig(remote, { hubUrl: "ws://127.0.0.1:1234" }).deviceLogin).toBeUndefined();
+  });
   it("keys the rooms and the database by the workspace uuid", () => {
     const config = resolveMcpConfig(env());
     expect(config.workspaceId).toBe(WORKSPACE);

@@ -38,13 +38,15 @@
  * JSON-RPC transport.
  *
  * `HUB_AUTH_TOKEN` holds the hub's HMAC **signing secret**, not a token (see
- * `packages/hub/src/token.ts`). It is read from `credentials.json`, passed to the
- * server in its environment, and never printed. A `credentials.json` other users
+ * `packages/hub/src/token.ts`). It remains in `credentials.json` for loopback
+ * hubs, is passed to a child only for loopback sync, and is never printed. A `credentials.json` other users
  * can read is refused rather than used — see {@link credentialsAreExposed}. The
- * one endpoint left is the one the user's own `config.json` names, so the stored
- * secret always belongs to the hub in force.
+ * endpoint comes from `config.json`; remote clients read the login for its
+ * authentication origin from the private store themselves.
  */
 
+
+import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { StoragePaths } from "@uberblick/hub/storage";
@@ -511,6 +513,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   // a prefix. Compared after the exposure refusal above, so a file nobody may
   // read costs one warning — its mode — rather than two.
   if (
+    (hubUrl.value === null || isLoopbackEndpoint(hubUrl.value)) &&
     secretFromEnv !== null &&
     secretFromFile !== null &&
     secretFromEnv !== secretFromFile
@@ -545,7 +548,10 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   } else {
     resolvedEnv.HUB_URL = hubUrl.value;
   }
-  if (secret !== null) {
+  if (hubUrl.value !== null && !isLoopbackEndpoint(hubUrl.value)) {
+    delete resolvedEnv.HUB_AUTH_TOKEN;
+    credentialOrigin = null;
+  } else if (secret !== null) {
     resolvedEnv.HUB_AUTH_TOKEN = secret;
   }
 

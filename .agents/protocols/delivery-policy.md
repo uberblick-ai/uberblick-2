@@ -73,8 +73,8 @@ routes do not change the review or merge tiers below.
    - **Independent review**, per "Reviews owed" below, settled under
      `review-protocol.md`.
    - **No unanswered remarks.** Immediately before merging, every review
-     comment — human or bot, including any that arrived after the other gates
-     passed — is fixed or answered.
+     comment from a trusted author (`AGENTS.md`), including any that arrived
+     after the other gates passed, is fixed or answered.
 4. **Merge, then docs.** Merge under the merge policy below, then apply the
    pull request's `Corpus update` through the corpus MCP tools, so the
    product docs describe the new state.

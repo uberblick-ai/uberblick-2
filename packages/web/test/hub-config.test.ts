@@ -20,17 +20,9 @@
  * - **Freshness.** A cached document keeps a retargeted deployment dialling the
  *   old hub.
  *
- * **The secret is the exception, and the overturn (#426).** This file used to
- * pin the opposite: that the document carried configuration and nothing else,
- * so no credential could ride along. That is now the mechanism. The secret was
- * compiled into the bundle, which pinned every image to one hub and is the
- * single reason the image cannot be published; serving it changes where the
- * same secret is published, not whether. Anyone who can fetch this document has
- * full read-write, and the boundary that makes that acceptable is the tailnet
- * (REMOTE.md) — the owner's own devices, nothing else. It has
- * no fallback and one further contract of its own: a read that carried no
- * secret is *not* remembered, because a tab that could never authenticate for
- * as long as it stayed open would be worse than one that tries again.
+ * Remote hosts serve public configuration only. A stale shared signing secret
+ * is ignored for non-loopback endpoints; local dev and ub open browser keys
+ * retain their loopback path.
  *
  * The fetch itself is a stub: what is defended is the decision, not whether
  * `fetch` works. The Caddy half of the no-store contract is checked against the
@@ -42,6 +34,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { devConfigDocument } from "../dev-config-document.js";
 import {
@@ -144,7 +137,7 @@ describe("the served configuration", () => {
     // Then the same read, after the deployment came up.
     const { fetch, calls } = serving(
       { body: '<!doctype html>\n<html lang="en">' },
-      { body: `{"hubUrl":"wss://hub.example/ws","hubAuthToken":"${LATE_SECRET}"}` },
+      { body: `{"hubUrl":"ws://127.0.0.1:4321","hubAuthToken":"${LATE_SECRET}"}` },
     );
 
     // The only `resolveClientConfig` calls in this file — it memoises per
@@ -188,7 +181,7 @@ describe("the served configuration", () => {
     const again = await resolveClientConfig(fetch);
     expect(calls).toHaveLength(2);
     expect(again.hubAuthToken).toBe(LATE_SECRET);
-    expect(hubUrl()).toBe("wss://hub.example/ws");
+    expect(hubUrl()).toBe("ws://127.0.0.1:4321/");
   });
 
   it("refuses a hubUrl that is not a bare ws(s) address, without echoing it", async () => {
@@ -278,16 +271,25 @@ describe("the served configuration", () => {
     for (const call of calls) expect(call.cache).toBe("no-store");
   });
 
-  it("carries the signing secret, and refuses one that is not a string", async () => {
-    // The overturn (#426, see the file comment): this key used to be ignored on
-    // purpose. It is now how the secret reaches the client at all, which is
-    // what lets one bundle serve every deployment.
+  it("keeps loopback keys and ignores stale secrets for every remote endpoint", async () => {
     const carried = await readClientConfig(
       serving({
         body: '{"hubUrl":"wss://hub.example/ws","hubAuthToken":"s3cret"}',
       }).fetch,
     );
-    expect(carried.hubAuthToken).toBe("s3cret");
+    expect(carried.hubAuthToken).toBe("");
+    for (const endpoint of ["ws://127.2.3.4:4321", "ws://localhost:4321", "ws://[::1]:4321"]) {
+      const local = await readClientConfig(serving({ body: JSON.stringify({
+        hubUrl: endpoint, hubAuthToken: "local-key",
+      }) }).fetch);
+      expect(local.hubAuthToken).toBe("local-key");
+    }
+    for (const endpoint of ["ws://0.0.0.0:4321", "ws://[::]:4321", "wss://remote.example/ws"]) {
+      const remote = await readClientConfig(serving({ body: JSON.stringify({
+        hubUrl: endpoint, hubAuthToken: "stale-remote-secret",
+      }) }).fetch);
+      expect(remote.hubAuthToken).toBe("");
+    }
 
     // A non-string is refused rather than coerced: `String(42)` would be minted
     // with, and a client authenticating with a plausible-looking wrong secret
@@ -306,6 +308,18 @@ describe("the served configuration", () => {
       expect(config.hubUrl, kind).toBe("wss://hub.example/ws");
       expect(JSON.stringify(config), kind).not.toContain("s3cret");
     }
+  });
+
+  it("keeps the development key when an unbound checkout uses its compiled loopback endpoint", async () => {
+    // Plain ub init stores no hub binding. ub env supplies its signing key,
+    // while the dev server's document names no endpoint and the bundle falls
+    // back to its compiled value.
+    const config = await readClientConfig(serving({
+      body: devConfigDocument({ HUB_AUTH_TOKEN: "dev-secret" }),
+    }).fetch);
+    expect(config.hubUrl).toBe(INJECTED);
+    expect(config.hubUrlSource).toBe("define");
+    expect(config.hubAuthToken).toBe(isLoopbackEndpoint(INJECTED) ? "dev-secret" : "");
   });
 });
 
@@ -421,14 +435,14 @@ describe("the workspaces it names", () => {
       const config = await readClientConfig(
         serving({
           body: JSON.stringify({
-            hubUrl: "wss://hub.example/ws",
+            hubUrl: "ws://127.0.0.1:4321",
             workspaces: [FIRST],
             hubAuthToken: secret,
           }),
         }).fetch,
       );
       expect(config.hubAuthToken, secret).toBe(secret);
-      expect(config.hubUrl, secret).toBe("wss://hub.example/ws");
+      expect(config.hubUrl, secret).toBe("ws://127.0.0.1:4321/");
       expect(config.rejected, secret).toBeUndefined();
     }
   });
@@ -539,7 +553,7 @@ describe("the deployments that serve it", () => {
     // run time — so retargeting the client, giving it its workspaces or
     // rotating the secret is not a bundle rebuild.
     expect(caddyfile).toContain(
-      'respond `{"hubUrl":"{$HUB_URL}","workspaces":"{$WORKSPACES}","hubAuthToken":"{$HUB_AUTH_TOKEN}"}`',
+      'respond `{"hubUrl":"{$HUB_URL}","workspaces":"{$WORKSPACES}"}`',
     );
 
     // Both the wrapper and the image use the same guard. Plain Compose passes
@@ -550,14 +564,14 @@ describe("the deployments that serve it", () => {
     expect(compose).toContain('WEB_HUB_URL: "${WEB_HUB_URL:-}"');
     // biome-ignore lint/suspicious/noTemplateCurlyInString: literal Compose expression
     expect(compose).toContain('WEB_WORKSPACES: "${WEB_WORKSPACES:-}"');
-    expect(compose).toContain('HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?');
+    expect(compose).not.toContain("HUB_AUTH_TOKEN:");
     expect(readFileSync(resolve(repoRoot, "remote.env.example"), "utf8")).toContain(
       "WEB_WORKSPACES=",
     );
     const guard = readFileSync(resolve(repoRoot, "remote-settings.sh"), "utf8");
     expect(guard).toContain("WEB_WORKSPACES");
     expect(guard).toContain("*[!A-Za-z0-9,-]*)");
-    expect(guard).toContain("*[!A-Za-z0-9._-]*)");
+    expect(guard).not.toContain("HUB_AUTH_TOKEN");
 
     // The dev server answers the same path from one middleware, out of the
     // environment `ub env` resolves — `mise run web`, `mise run dev`, the e2e
@@ -608,7 +622,7 @@ describe("the deployments that serve it", () => {
           [resolve(repoRoot, "bin/remote-compose.sh"), "config"],
           {
             cwd: empty,
-            env: { PATH: empty, HUB_AUTH_TOKEN: "safe-secret", [name]: value },
+            env: { PATH: empty, [name]: value },
             encoding: "utf8",
           },
         );

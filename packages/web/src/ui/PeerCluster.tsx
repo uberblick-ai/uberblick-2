@@ -14,6 +14,10 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./shadcn/tooltip.js";
 
 const VISIBLE_PEERS = 3;
+const PEER_CONTROL_CLASS = "ub-peer-control relative box-border size-[28px] flex-none cursor-pointer rounded-full m-0 p-0 not-first:-ml-[6px] hover:z-4 focus-visible:z-4 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-(--ring) focus-visible:outline-offset-2";
+// Earlier circles paint above their overlapping siblings; hover and keyboard
+// focus use a higher stack level than any circle's resting order.
+const PEER_STACK_CLASSES = ["z-3", "z-2", "z-1"];
 
 function peerKey(clientId: number): string {
   return String(clientId);
@@ -103,14 +107,14 @@ export function PeerCluster({
         }}
       >
         <span className="ub-peers" ref={cluster}>
-          {visible.map((session) => {
+          {visible.map((session, index) => {
             const label = presenceLabel(session);
             return (
               <Tooltip key={session.clientId}>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    className="ub-peer-control"
+                    className={`${PEER_CONTROL_CLASS} border-0 bg-(--background) text-(--foreground) [font:inherit] ${PEER_STACK_CLASSES[index]}`}
                     data-peer-id={peerKey(session.clientId)}
                     aria-label={label}
                     onFocus={() => {
@@ -134,7 +138,7 @@ export function PeerCluster({
               <button
                 ref={overflowTrigger}
                 type="button"
-                className="ub-peer-control ub-peer-more"
+                className={`${PEER_CONTROL_CLASS} ub-peer-more border border-solid border-(--border) bg-(--secondary) text-(--secondary-foreground) font-(family-name:--font-sans) text-[0.7rem] font-semibold [line-height:inherit]`}
                 aria-label={`${remaining.length} more active ${
                   remaining.length === 1 ? "collaborator" : "collaborators"
                 }`}
@@ -171,7 +175,7 @@ export function PeerCluster({
               <button
                 key={session.clientId}
                 type="button"
-                className="ub-peer-overflow-row"
+                className="ub-peer-overflow-row flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-(--radius-sm) border-0 bg-transparent p-[0.35rem] text-left text-inherit [font:inherit] hover:bg-(--card-accent) focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-(--ring) focus-visible:outline-offset-2"
                 data-peer-id={peerKey(session.clientId)}
                 aria-label={presenceLabel(session)}
                 onFocus={() => {

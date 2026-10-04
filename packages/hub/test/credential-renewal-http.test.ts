@@ -49,6 +49,25 @@ async function post(hub: Hub, body: unknown, options: { raw?: string; headers?: 
 const envelope = (token: string, protocolVersion = SYNC_PROTOCOL_VERSION) => ({ protocolVersion, token });
 
 describe("public credential renewal", () => {
+  it("returns no key when conditional renewal finds unchanged memberships", async () => {
+    const { hub, proof, issued } = await rig();
+    const renewed = await post(hub, { ...envelope(proof), ifWorkspacesChanged: true });
+    if (!("credential" in renewed.result)) throw new Error("grant did not renew");
+    const credential = renewed.result.credential;
+    const request = await mintRequestProof(await importCredentialKey(Buffer.from(credential.key, "base64url")), {
+      kid: credential.record.id, operation: "renew-credential", lifetimeSeconds: 60,
+    });
+    expect(await post(hub, { ...envelope(request), ifWorkspacesChanged: true }))
+      .toEqual({ code: 200, result: { status: "unchanged" } });
+    expect(hub.credentials?.get(credential.record.id)?.replacedAt).toBeNull();
+    hub.credentials?.revoke(credential.record.id);
+    expect(await post(hub, { ...envelope(request), ifWorkspacesChanged: true }))
+      .toEqual({ code: 401, result: { status: "sign-in-required" } });
+    expect(await post(hub, { ...envelope(proof), ifWorkspacesChanged: false }))
+      .toEqual({ code: 400, result: { status: "invalid-request" } });
+    expect(hub.credentials?.get(issued.record.id)?.replacedAt).toBeTypeOf("number");
+  });
+
   it("renews a zero-workspace device against current membership with GitHub unreachable, and delivers its key once", async () => {
     const { hub, github, logs, issued, proof } = await rig();
     const renewed = await post(hub, envelope(proof));
