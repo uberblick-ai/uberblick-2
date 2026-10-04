@@ -40,6 +40,7 @@ import { useDroppable } from "@dnd-kit/react";
 import { SidebarDragProvider, sidebarRowSensors, useSidebarDragInstructions, useSidebarRowClickGuard } from "./sidebar-drag.js";
 import { Sidebar as SidebarFrame, SidebarHeader, SidebarContent as SidebarScrollContent, SidebarFooter, SIDEBAR_TOGGLE_CLASSES, useSidebar } from "./shadcn/sidebar.js";
 import { Input } from "./shadcn/input.js";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle, AlertDialogTrigger } from "./shadcn/alert-dialog.js";
 import { UserMenu } from "./UserMenu.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 import { workspaceLabel } from "./workspace-names.js";
@@ -50,6 +51,8 @@ const FIRST_GROUP_NAME = "Pinned";
 
 /** What `+ group` creates, before the reader types over it. */
 const NEW_GROUP_NAME = "New group";
+
+const GROUP_ACTION_CLASSES = "ub-group-act flex-none border-0 bg-transparent cursor-pointer rounded-(--radius-sm) px-[0.3rem] py-[0.15rem] font-[inherit] text-[0.75rem]/[inherit] [font-weight:inherit] [font-style:inherit] text-(--sidebar-muted-foreground) opacity-0 [@media(hover:none)]:opacity-100 [@media(hover:hover)]:[.ub-group-head:hover_&]:opacity-100 [.ub-group-head:focus-within_&]:opacity-100 hover:text-foreground hover:bg-sidebar-accent transition-opacity duration-[120ms] ease-[ease] motion-reduce:transition-none";
 
 // Both modes share a grid cell; only each mode's middle content scrolls.
 const SIDEBAR_PANE_CLASSES = "ub-sidebar-pane [grid-area:1/1] min-w-0 min-h-0 flex flex-col transition-[transform,opacity] duration-[180ms] ease-[ease] motion-reduce:transition-none motion-reduce:duration-0 [&[inert]]:pointer-events-none [&[inert]_*]:pointer-events-none";
@@ -346,6 +349,12 @@ function SidebarContent({
                   selected={selected}
                   onSelect={onSelect}
                   canWrite={canWriteSidebar}
+                  onDeleteCloseFocus={() => {
+                    const root = sidebarRoot.current;
+                    const target = root?.querySelector<HTMLButtonElement>(".ub-group-add:not(:disabled)")
+                      ?? root?.querySelector<HTMLButtonElement>(".ub-document-sidebar .ub-nav button");
+                    target?.focus();
+                  }}
                   editing={renaming?.id === group.id}
                   onEdit={() => setRenaming({ id: group.id, fresh: false })}
                   onCancel={cancelRename}
@@ -704,6 +713,7 @@ function GroupSection({
   selected,
   onSelect,
   canWrite,
+  onDeleteCloseFocus,
   editing,
   onEdit,
   onCancel,
@@ -719,6 +729,8 @@ function GroupSection({
   onSelect: (uuid: string) => void;
   /** Recheck the live room at the write boundary, not only at render time. */
   canWrite: () => boolean;
+  /** The persistent sidebar control to focus when Delete's trigger is gone. */
+  onDeleteCloseFocus: () => void;
   /** Whether this group's name is the one being edited — one field at a time. */
   editing: boolean;
   onEdit: () => void;
@@ -726,6 +738,10 @@ function GroupSection({
   onCancel: () => void;
   onCommit: (name: string) => void;
 }): ReactElement {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteRefused, setDeleteRefused] = useState(false);
+  const deleteTrigger = useRef<HTMLButtonElement | null>(null);
+  const deleteUnavailable = ydoc === null || deleteRefused;
   const sortable = useSortable({
     id: `group:${group.id}`,
     index,
@@ -766,6 +782,10 @@ function GroupSection({
   }, []);
 
   return (
+    <AlertDialog open={confirmingDelete} onOpenChange={(open) => {
+      setDeleteRefused(false);
+      setConfirmingDelete(open);
+    }}>
     <section className="ub-group" ref={sortable.ref}>
       <div className="ub-group-head data-[drop-target=true]:bg-(--sidebar-accent)" ref={append.ref} data-drop-target={append.isDropTarget}>
         {editing ? (
@@ -814,26 +834,24 @@ function GroupSection({
           <>
             <button
               type="button"
-              className="ub-group-act"
+              className={GROUP_ACTION_CLASSES}
               aria-label={`Rename group ${group.name}`}
               title="Rename group"
               onClick={onEdit}
             >
               <span aria-hidden="true">✎</span>
             </button>
-            {/* Deletes the group and its pins — never the documents, which the
-                sidebar only ever held the uuids of. */}
-            <button
-              type="button"
-              className="ub-group-act"
-              aria-label={`Delete group ${group.name}`}
-              title="Delete group"
-              onClick={() => {
-                if (canWrite()) deleteGroup(ydoc, group.id);
-              }}
-            >
-              <span aria-hidden="true">×</span>
-            </button>
+            <AlertDialogTrigger asChild>
+              <button
+                ref={deleteTrigger}
+                type="button"
+                className={GROUP_ACTION_CLASSES}
+                aria-label={`Delete group ${group.name}`}
+                title="Delete group"
+              >
+                <span aria-hidden="true">×</span>
+              </button>
+            </AlertDialogTrigger>
           </>
         )}
       </div>
@@ -854,6 +872,34 @@ function GroupSection({
         </ul>
       </div>
     </section>
+      {/* Keep the confirmation while writability is lost and its trigger retires. */}
+      <AlertDialogContent onCloseAutoFocus={(event) => {
+        if (deleteTrigger.current?.isConnected) return;
+        event.preventDefault();
+        onDeleteCloseFocus();
+      }}>
+        <AlertDialogTitle>Delete group {group.name}?</AlertDialogTitle>
+        <AlertDialogDescription>
+          {deleteUnavailable
+            ? "Delete unavailable — sidebar is not ready to write. Nothing has been deleted."
+            : "The group and its pins will be removed. Its documents are preserved."}
+        </AlertDialogDescription>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" disabled={deleteUnavailable} onClick={(event) => {
+            // The room can refuse writes between paint and confirmation.
+            if (ydoc === null || !canWrite()) {
+              event.preventDefault();
+              setDeleteRefused(true);
+              return;
+            }
+            deleteGroup(ydoc, group.id);
+          }}>
+            Delete group
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

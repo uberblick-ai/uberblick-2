@@ -22,7 +22,7 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
@@ -72,18 +72,23 @@ function parseRecord(line: string): Record<string, unknown> | null {
 
 /** Start `packages/hub/src/main.ts` as its own process and read back its port. */
 async function startHubProcess(databasePath: string): Promise<HubProcess> {
-  const { command, args } = mainTsProcess();
-  const child = spawn(command, args, {
-    cwd: HUB_ROOT,
-    env: {
-      ...process.env,
-      HUB_AUTH_TOKEN: TEST_SECRET,
-      HUB_HOST: "127.0.0.1",
-      HUB_DB_PATH: databasePath,
-      PORT: "0",
+  const child = spawn(
+    process.execPath,
+    ["--import", import.meta.resolve("tsx"), join(HUB_ROOT, "src", "main.ts")],
+    {
+      // The scratch root may be deep; a relative Unix socket path from the
+      // database directory stays within the hub's existing length limit.
+      cwd: dirname(databasePath),
+      env: {
+        ...process.env,
+        HUB_AUTH_TOKEN: TEST_SECRET,
+        HUB_HOST: "127.0.0.1",
+        HUB_DB_PATH: databasePath,
+        PORT: "0",
+      },
+      stdio: ["ignore", "ignore", "pipe"],
     },
-    stdio: ["ignore", "ignore", "pipe"],
-  });
+  );
   hubProcesses.push(child);
 
   const port = await new Promise<number>((resolve, reject) => {

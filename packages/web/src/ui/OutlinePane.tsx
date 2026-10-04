@@ -68,7 +68,7 @@ export function OutlinePane({
         align="end"
         side="bottom"
         collisionPadding={8}
-        className="ub-outline-panel flex w-[min(20rem,calc(100vw_-_2rem))] max-h-[min(calc(100vh_-_2rem),var(--radix-dropdown-menu-content-available-height))]! flex-col overflow-hidden! p-0!"
+        className="ub-outline-panel flex w-[min(20rem,calc(100vw_-_2rem))] max-h-[min(calc(100dvh_-_2rem),var(--radix-dropdown-menu-content-available-height))]! flex-col overflow-hidden! p-0!"
         onCloseAutoFocus={(event) => {
           if (closingFromTab.current) {
             closingFromTab.current = false;

@@ -18,8 +18,8 @@ Workflow state is not the run's to write. The table below is this
 repository's workflow, and ub-agents applies it: it moves the labels, posts the
 handoff, records which runtime did the work, and ensures only one run holds an
 item at a time. A role never changes a workflow label on an existing item,
-posts a claim, or starts the `agent` review itself; it may request the Copilot
-review (`.agents/protocols/delivery-policy.md`). What the task produces is the
+posts a claim, or starts the `agent` review itself. Optional Copilot requests
+follow `.agents/protocols/delivery-policy.md`. What the task produces is the
 run's to write: issue bodies and relationships, commits and pull requests,
 findings, the merge, corpus updates and new issues.
 
@@ -84,7 +84,8 @@ Finish `needs-human`. The summary is the question, ready to answer:
 - what is blocked, and the one decision needed;
 - the answers to pick from, and your recommendation;
 - an @-mention of who can answer: the person who opened the issue (for a pull
-  request, its issue), otherwise `@bk-one`;
+  request, its issue) when they have write access, otherwise
+  `@uberblick-ai/maintainers`;
 - the closing line `Answer here, then replace needs-human with <label>.`,
   naming `needs-preparation` on an issue or `needs-changes` on a pull request.
 
