@@ -70,6 +70,8 @@ describe("token minting sites", () => {
     // Browser-shaped integration token: maximum lifetime, no credential kid.
     "packages/cli/test/open.test.ts",
     "packages/cli/test/remote.test.ts",
+    // Management proofs cannot admit rooms; management closes live device rooms.
+    "packages/hub/test/access-management-http.test.ts",
     "packages/hub/test/credential-admission.test.ts",
     "packages/hub/test/credential-compatibility.test.ts",
     "packages/hub/test/credential-registry.test.ts",
@@ -107,6 +109,9 @@ describe("token minting sites", () => {
     expect(mentioning("mintRequestProof(")).toEqual([
       // Client renewal proof: operation-bound, 60 seconds, stored credential kid.
       "packages/hub/src/device-login.ts",
+      // Request and target bound management proofs, issued credential kid, 60 seconds.
+      "packages/hub/test/access-management-http.test.ts",
+      "packages/hub/test/access-registry.test.ts",
       "packages/hub/test/credential-admission.test.ts",
       "packages/hub/test/credential-compatibility.test.ts",
       "packages/hub/test/credential-renewal-http.test.ts",
