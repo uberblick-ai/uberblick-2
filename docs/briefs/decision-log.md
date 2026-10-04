@@ -430,7 +430,7 @@ topics, chains, agent stances and conflicts.
 
 - Off-the-shelf first: shadcn/ui components on Tailwind, reusing what the web
   already ships (`ui/shadcn/dialog.tsx`, `sheet.tsx`, `popover.tsx`,
-  `Disclosure`, `LifecycleBadge`, the Threads rail and comment composer).
+  `LifecycleBadge`, the Threads rail and comment composer).
   Custom components need a reason the standard one cannot meet.
 - iPhone, iPad and a 13-inch MacBook, with touch as a first-class input; the
   phone and iPad layouts are designed, not left to shrink.

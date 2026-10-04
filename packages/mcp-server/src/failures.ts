@@ -142,6 +142,7 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "list_docs",
   "search",
   "backlinks",
+  "find_decisions",
   "export_markdown",
   "sync_status",
   "get_sidebar",
@@ -162,6 +163,11 @@ interface Recovery {
  * the call that finishes it — but never contradict the class.
  */
 const RECOVERIES: Record<string, Recovery> = {
+  invalid_github_reference: {
+    recoveryClass: "manual",
+    guidance:
+      "Correct github_ref to one owner/repo#n reference or an http(s) github.com URL naming /issues/n or /pull/n, then call find_decisions again.",
+  },
   guidance_required: {
     recoveryClass: "reread",
     guidance: "Read each unread guidance document with get_doc, then retry the refused tool call.",
@@ -254,11 +260,28 @@ const RECOVERIES: Record<string, Recovery> = {
       "The document's stored kind is fixed through MCP. Choose a status in that kind's lifecycle; if the kind " +
       "itself is wrong, retrying cannot change or clear it through this interface.",
   },
-  revival_trigger_missing: {
+  decision_read_only: {
     recoveryClass: "manual",
     guidance:
-      "Add a heading whose text is exactly `Reconsidering`, immediately followed by a non-heading block with " +
-      "non-whitespace text, then call set_status again.",
+      "A decided record's title, decision line and blocks are read-only. Create an open superseding record " +
+      "for any content change, then record a person's answer to decide it. Comments stay open.",
+  },
+  decision_answer_required: {
+    recoveryClass: "manual",
+    guidance:
+      "Record the person's answer with answer: {who, when, where}, then call again. No proposal or " +
+      "lifecycle change was written by this refused call.",
+  },
+  decision_reason_required: {
+    recoveryClass: "manual",
+    guidance: "Supply a non-empty rejection reason and the person's answer, then call set_status again.",
+  },
+  decision_transition_invalid: {
+    recoveryClass: "manual",
+    guidance:
+      "Create a decision as open or decided. Only an open proposal can withdraw; rejection is for an open " +
+      "proposal, an agent stance or a decided record in conflict and records a person's answer and reason. " +
+      "Decided records cannot reopen or withdraw, and rejected and withdrawn records are final.",
   },
   governs_not_requirement: {
     recoveryClass: "reread",

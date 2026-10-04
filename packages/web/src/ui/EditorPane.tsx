@@ -3,7 +3,7 @@
  * loud read-only fallback when the palette gate is closed.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import {
   getAnnotation,
@@ -643,7 +643,10 @@ function CodeLanguageField({
   );
 }
 
-function BoundEditor({
+// The shell's presence reading also changes when a caret crosses blocks. Keep
+// that parent update outside the editor; its own peer-name/status readers stay
+// live, and actual binding inputs still pass through React's props comparison.
+const BoundEditor = memo(function BoundEditor({
   connection,
   author,
   archived,
@@ -672,8 +675,7 @@ function BoundEditor({
    * not rebind (see the effect below), and those two are only compatible if the
    * effect can read the flag without re-running when it moves.
    */
-  const archivedNow = useRef(archived);
-  archivedNow.current = archived;
+  const readArchived = useEffectEvent(() => archived);
 
   useEffect(() => {
     const element = host.current;
@@ -686,7 +688,7 @@ function BoundEditor({
       element,
       fragment: getBlocksFragment(connection.ydoc),
       awareness: connection.provider.awareness,
-      editable: !archivedNow.current && connection.status.writable,
+      editable: !readArchived() && connection.status.writable,
       canWrite: () => connection.status.writable,
       docLinks,
     });
@@ -864,7 +866,7 @@ function BoundEditor({
       </div>
     </>
   );
-}
+});
 
 export function EditorPane({
   connection,
@@ -980,7 +982,7 @@ export function EditorPane({
       {threads.length > 0 && onToggleThreads !== undefined && (
         <button
           type="button"
-          className="ub-threads-toggle ub-pane-threads-toggle"
+          className="ub-threads-toggle ub-pane-threads-toggle hidden max-xl:inline-flex items-center gap-[0.35rem] [font-family:inherit] [font-weight:inherit] text-xs leading-[1.6] border border-border rounded-full py-[0.1rem] px-[0.55rem] bg-(--card-accent) text-secondary-foreground whitespace-nowrap cursor-pointer"
           aria-expanded={threadsOpen}
           aria-controls="ub-rail"
           onClick={onToggleThreads}

@@ -569,6 +569,27 @@ describe("the prose selection toolbar", () => {
     }
   });
 
+  it("leaves link mode when the selection changes to a cross-block range", () => {
+    const { ydoc } = annotatedDoc();
+    const view = mountComposer(ydoc);
+    try {
+      select(view.editor, 1, 4, 15);
+      act(() => tool(view, "External link").click());
+      linkValue(view, "https://example.com/pending");
+      expect(view.query('[aria-label="External link URL"]')).not.toBeNull();
+
+      select(view.editor, 1, 20, 6, 2);
+      expect(view.query('[aria-label="External link URL"]')).toBeNull();
+      expect(view.query('[role="toolbar"]')).toBeNull();
+
+      select(view.editor, 1, 4, 15);
+      expect(view.query('[role="toolbar"]')).not.toBeNull();
+      expect(view.query('[aria-label="External link URL"]')).toBeNull();
+    } finally {
+      view.unmount();
+    }
+  });
+
   it("dismisses on Escape and stays out of an active IME composition", () => {
     const { ydoc } = annotatedDoc();
     const view = mountComposer(ydoc);
@@ -601,7 +622,13 @@ describe("the prose selection toolbar", () => {
       expect(view.query(".ub-composer")).toBeNull();
       expect(view.editor.state.selection.empty).toBe(false);
 
+      // A transaction at the dismissed range must not reopen it; only a new
+      // selection ends the dismissal.
+      act(() => view.editor.view.dispatch(view.editor.state.tr));
+      expect(view.query(".ub-composer")).toBeNull();
+
       select(view.editor, 1, 20, 25);
+      expect(view.query('[role="toolbar"]')).not.toBeNull();
       act(() => {
         view.editor.view.dom.dispatchEvent(
           new CompositionEvent("compositionstart", { bubbles: true }),

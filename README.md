@@ -170,7 +170,7 @@ mise run dev          # hub + web in parallel
 mise run lint         # Biome lint across the workspace (no formatter)
 mise run typecheck    # tsc --noEmit across all packages
 mise run test         # all test suites
-mise run e2e          # browser proof points (Playwright, Chromium, on demand)
+mise run e2e          # browser proof points (Chromium and tagged WebKit, on demand)
 mise run fue          # the documented install path, executed on a clean machine
 mise run review <commit>  # immutable Docker review of one commit
 ```
@@ -187,7 +187,13 @@ two live clients converging on one block, a rendered remote cursor, and fresh
 and reloaded browsers receiving only what their server sends. Everything else
 belongs in `mise run test`. Arguments after `--` go to Playwright unchanged; for
 example, `mise run e2e -- --repeat-each=3 outline.spec.ts` runs only that spec
-three times.
+three times. The full suite runs in Chromium; a tagged device and engine set
+also runs in WebKit at iPhone, iPad and 13-inch MacBook sizes. WebKit requires
+host system libraries, which CI installs separately; the task downloads engines
+without installing system packages. A missing library fails the full run.
+`mise run e2e -- --project=chromium` runs Chromium alone. Real-device checks for
+the keyboard, native selection menu and composition are in the
+[manual input checklist](packages/web/e2e/device-input.md).
 
 `mise run dev` deliberately runs **hub + web only**. The MCP server speaks JSON-RPC
 over stdio and is normally spawned by its client (Claude Code and friends, via
@@ -358,8 +364,8 @@ ub init            # identity, workspace, signing secret
 ub init <hub-url>  # the same, with the new workspace created on that hub
 ub update          # update this copy — Homebrew, or a checkout on main
 ub open            # serve the web app and a hub, and open the browser
-ub status          # workspace, hub, credential, sync state
-ub status --json   # the same, as one JSON object
+ub status          # workspace, hub, connection, pending work, local log, failures
+ub status --json   # full report, including rooms, configuration and storage paths
 ub workspace       # the workspace in force, and which layer chose it
 ub workspace list  # workspaces this machine has a database for
 ub workspace use   # make a workspace this machine's default
@@ -463,10 +469,10 @@ so setting `XDG_CONFIG_HOME` alone leaves the databases under
 requires. There is nothing to detect and nothing that can fail, so resolution
 cannot throw and no command has an opinion about which layout is in force.
 
-`ub status` names the data root; `ub status --json` carries a `storage` object
-with every resolved path — the directories and database files, never the
-credential. `HUB_DB_PATH` and `UBERBLICK_DB` name a database file outright and
-outrank all of it, which is what this checkout's mise tasks use:
+`ub status --json` carries a `storage` object with every resolved path — the
+directories and database files, never the credential. `HUB_DB_PATH` and
+`UBERBLICK_DB` name a database file outright and outrank all of it, which is what
+this checkout's mise tasks use:
 `[env] HUB_DB_PATH` points at a checkout-local file, so `mise run hub` never
 opens a packaged install's database.
 
@@ -580,9 +586,9 @@ pnpm, no age key, no secrets — copies the working tree in, and runs
 with `--network none`, `scripts/fue-assert.mjs` checks what a new user was
 promised:
 
-- `ub status` exits 0, names the workspace `ub init` just generated, and reports
-  a signing secret — the `fnox --if-missing warn` path, which is every
-  contributor's path.
+- `ub status` exits 0 and names the workspace `ub init` just generated, and
+  `ub status --json` reports a signing secret — the `fnox --if-missing warn`
+  path, which is every contributor's path.
 - `list_docs` answers over `ub mcp serve`, spoken as a real client speaks it:
   newline-delimited JSON-RPC on stdio. An empty corpus passes; so does one with
   starter documents in it.

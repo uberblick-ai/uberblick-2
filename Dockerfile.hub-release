@@ -1,0 +1,64 @@
+# syntax=docker/dockerfile:1.7
+
+FROM node:26-bookworm-slim AS build
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+WORKDIR /source
+COPY package.json ./
+RUN npm install --global "$(node -p "require('./package.json').packageManager")"
+COPY pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY patches patches
+COPY packages/cli/package.json packages/cli/package.json
+COPY packages/hub/package.json packages/hub/package.json
+COPY packages/mcp-server/package.json packages/mcp-server/package.json
+COPY packages/schema/package.json packages/schema/package.json
+COPY packages/web/package.json packages/web/package.json
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile
+COPY packages packages
+COPY scripts/build-hub-release-payload.mjs scripts/build-hub-release-payload.mjs
+COPY compose.release.yml remote.env.example remote-settings.sh REMOTE.md RELEASING.md ./
+COPY bin/remote-compose.sh bin/hub-backup.sh bin/hub-restore.sh bin/hub-admin-setup.sh bin/
+ARG HUB_RELEASE_VERSION
+ARG HUB_RELEASE_COMMIT
+ARG HUB_SYNC_PROTOCOL_VERSION
+ARG HUB_RELEASE_HUB_IMAGE
+ARG HUB_RELEASE_WEB_IMAGE
+RUN node scripts/build-hub-release-payload.mjs /out "$HUB_RELEASE_VERSION" "$HUB_RELEASE_COMMIT" \
+    "$HUB_SYNC_PROTOCOL_VERSION" "$HUB_RELEASE_HUB_IMAGE" "$HUB_RELEASE_WEB_IMAGE"
+
+# No source checkout, package manager, dependencies or deployment config are
+# copied into either runtime image. Node's builtin SQLite, sh and the node user
+# remain available for the operator backup/restore/setup commands.
+FROM node:26-bookworm-slim AS hub
+ARG HUB_RELEASE_VERSION
+ARG HUB_RELEASE_COMMIT
+ARG HUB_SYNC_PROTOCOL_VERSION
+LABEL org.opencontainers.image.version=$HUB_RELEASE_VERSION \
+    org.opencontainers.image.revision=$HUB_RELEASE_COMMIT \
+    org.opencontainers.image.source="https://github.com/uberblick-ai/uberblick-2" \
+    io.uberblick.sync-protocol-version=$HUB_SYNC_PROTOCOL_VERSION
+ENV NODE_ENV=production HUB_HOST=0.0.0.0 PORT=1234 HUB_DB_PATH=/data/hub.sqlite
+WORKDIR /app
+COPY --from=build /out/hub.mjs /out/hub-admin-setup.mjs ./
+COPY --from=build /out/release /release
+COPY hub-release-entrypoint.sh remote-settings.sh /usr/local/bin/
+RUN install -d -o node -g node /data
+USER node
+EXPOSE 1234
+ENTRYPOINT ["sh", "/usr/local/bin/hub-release-entrypoint.sh"]
+CMD ["node", "/app/hub.mjs"]
+
+FROM caddy:2.10.2-alpine AS web
+ARG HUB_RELEASE_VERSION
+ARG HUB_RELEASE_COMMIT
+ARG HUB_SYNC_PROTOCOL_VERSION
+LABEL org.opencontainers.image.version=$HUB_RELEASE_VERSION \
+    org.opencontainers.image.revision=$HUB_RELEASE_COMMIT \
+    org.opencontainers.image.source="https://github.com/uberblick-ai/uberblick-2" \
+    io.uberblick.sync-protocol-version=$HUB_SYNC_PROTOCOL_VERSION
+COPY Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /out/web /srv
+COPY --from=build /out/release/release.json /release/release.json
+COPY web-release-entrypoint.sh remote-settings.sh /usr/local/bin/
+ENTRYPOINT ["sh", "/usr/local/bin/web-release-entrypoint.sh"]
+CMD ["run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

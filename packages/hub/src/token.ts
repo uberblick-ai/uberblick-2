@@ -54,9 +54,8 @@ export type TokenScope = "read-write" | "read-only";
 export const TOKEN_SCOPES: readonly TokenScope[] = ["read-write", "read-only"];
 
 /**
- * What the token authorises. `room` is the only type today; the audience-bound
- * `admin` type arrives with the hub's admin HTTP surface, and the field exists
- * now so that surface is a new value rather than a new shape.
+ * What a room token authorises. HTTP request proofs use a separate claims
+ * shape and cannot authenticate a room.
  */
 export type TokenType = "room";
 
@@ -119,6 +118,23 @@ export interface TokenClaims {
  * long a token should live.
  */
 export type TokenRequest = Omit<TokenClaims, "iat" | "exp"> & {
+  lifetimeSeconds: number;
+  iat?: number;
+};
+
+/** An HTTP proof authorizes only the operation it names. */
+export type RequestOperation = "renew-credential";
+
+export interface RequestProofClaims {
+  typ: "request";
+  /** A credential key, never the shared root secret. */
+  kid: string;
+  operation: RequestOperation;
+  iat: number;
+  exp: number;
+}
+
+export type RequestProofRequest = Omit<RequestProofClaims, "typ" | "iat" | "exp"> & {
   lifetimeSeconds: number;
   iat?: number;
 };
@@ -493,6 +509,53 @@ export async function mintToken(
     iat,
     exp,
   };
+  return signClaims(key, payload, "mintToken");
+}
+
+/**
+ * Prove possession of a credential key for one HTTP operation. Workspace and
+ * subject authority come from the hub's record, so even a credential issued
+ * with no workspaces can authorize this request.
+ */
+export async function mintRequestProof(
+  key: CryptoKey,
+  claims: RequestProofRequest,
+): Promise<string> {
+  if (typeof claims.kid !== "string" || !UUID.test(claims.kid)) {
+    throw new Error("mintRequestProof: kid must be a credential uuid");
+  }
+  if (!isRequestOperation(claims.operation)) {
+    throw new Error("mintRequestProof: unknown operation");
+  }
+  if (claims.iat !== undefined && !isEpochSeconds(claims.iat)) {
+    throw new Error("mintRequestProof: iat must be a non-negative integer");
+  }
+  if (
+    !Number.isInteger(claims.lifetimeSeconds) ||
+    claims.lifetimeSeconds <= 0 ||
+    claims.lifetimeSeconds > MAX_TOKEN_LIFETIME_SECONDS
+  ) {
+    throw new Error(
+      `mintRequestProof: lifetimeSeconds must be a positive integer no greater than ${MAX_TOKEN_LIFETIME_SECONDS}`,
+    );
+  }
+  const iat = claims.iat ?? Math.floor(Date.now() / 1000);
+  const exp = iat + claims.lifetimeSeconds;
+  if (!isEpochSeconds(exp)) {
+    throw new Error("mintRequestProof: iat + lifetimeSeconds is not a whole second");
+  }
+  return signClaims(
+    key,
+    { typ: "request", kid: claims.kid, operation: claims.operation, iat, exp },
+    "mintRequestProof",
+  );
+}
+
+async function signClaims(
+  key: CryptoKey,
+  payload: TokenClaims | RequestProofClaims,
+  source: "mintToken" | "mintRequestProof",
+): Promise<string> {
   const payloadPart = base64urlEncode(
     textEncoder.encode(JSON.stringify(payload)),
   );
@@ -507,10 +570,34 @@ export async function mintToken(
   // token past this length, and `sub` is the one claim long enough to reach it.
   if (minted.length > MAX_TOKEN_LENGTH) {
     throw new Error(
-      `mintToken: the token would be ${minted.length} characters, past the ${MAX_TOKEN_LENGTH} a token may be — sub is too long`,
+      `${source}: the token would be ${minted.length} characters, past the ${MAX_TOKEN_LENGTH} a token may be`,
     );
   }
   return minted;
+}
+
+function isRequestOperation(value: unknown): value is RequestOperation {
+  return value === "renew-credential";
+}
+
+function parseRequestProofClaims(
+  payload: Record<string, unknown>,
+  operation: RequestOperation,
+): RequestProofClaims | null {
+  const { typ, kid, iat, exp } = payload;
+  if (
+    typ !== "request" ||
+    typeof kid !== "string" ||
+    !UUID.test(kid) ||
+    !isRequestOperation(payload.operation) ||
+    payload.operation !== operation ||
+    !isEpochSeconds(iat) ||
+    !isEpochSeconds(exp) ||
+    exp <= iat
+  ) {
+    return null;
+  }
+  return { typ, kid, operation, iat, exp };
 }
 
 function parseClaims(payload: Record<string, unknown>): TokenClaims | null {
@@ -659,17 +746,8 @@ export async function inspectToken(
 ): Promise<TokenClaims | TokenRejection> {
   const parsed = parseToken(token);
   if (parsed === null) return UNPARSEABLE;
-  let signed: boolean;
-  try {
-    signed = await globalThis.crypto.subtle.verify(
-      "HMAC",
-      key,
-      parsed.signature,
-      textEncoder.encode(parsed.payloadPart),
-    );
-  } catch {
-    return UNPARSEABLE;
-  }
+  const signed = await verifySignature(key, parsed);
+  if (signed === null) return UNPARSEABLE;
   const claims = parsed.payload;
   const identity: TokenIdentity = {
     typ: logString(claims.typ),
@@ -679,6 +757,46 @@ export async function inspectToken(
     return { failure: "bad-signature", identity };
   }
   return parseClaims(claims) ?? { failure: "unsupported-claims", identity };
+}
+
+async function verifySignature(
+  key: CryptoKey,
+  parsed: ParsedToken,
+): Promise<boolean | null> {
+  try {
+    return await globalThis.crypto.subtle.verify(
+      "HMAC",
+      key,
+      parsed.signature,
+      textEncoder.encode(parsed.payloadPart),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Verify an operation-bound request proof, using the same bounded canonical
+ * wire format as room tokens. Time is checked separately with clampToken.
+ * Rejections reflect no caller-supplied claims or key material.
+ */
+export async function inspectRequestProof(
+  key: CryptoKey,
+  token: string,
+  operation: RequestOperation,
+): Promise<RequestProofClaims | TokenRejection> {
+  const parsed = parseToken(token);
+  if (parsed === null) return UNPARSEABLE;
+  const signed = await verifySignature(key, parsed);
+  if (signed === null) return UNPARSEABLE;
+  const identity: TokenIdentity = { typ: null, sub: null };
+  if (!signed) return { failure: "bad-signature", identity };
+  return (
+    parseRequestProofClaims(parsed.payload, operation) ?? {
+      failure: "unsupported-claims",
+      identity,
+    }
+  );
 }
 
 /**
@@ -720,7 +838,7 @@ export type ClampFailure =
  * first: this decides freshness, not authenticity.
  */
 export function clampToken(
-  claims: TokenClaims,
+  claims: Pick<TokenClaims, "iat" | "exp">,
   nowSeconds: number,
 ): ClampFailure | null {
   if (claims.exp - claims.iat > MAX_TOKEN_LIFETIME_SECONDS) {

@@ -1,5 +1,5 @@
 /**
- * `scripts/mise-welcome.sh`, run for real.
+ * `bin/mise-welcome.sh`, run for real.
  *
  * The script is a convenience, so the properties worth defending are the ones
  * that keep it from becoming a nuisance: it is silent wherever its output would
@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { REPO_ROOT } from "./helpers.js";
 
-const WELCOME = join(REPO_ROOT, "scripts", "mise-welcome.sh");
+const WELCOME = join(REPO_ROOT, "bin", "mise-welcome.sh");
 
 /** Exactly what a contributor sees, and the only copy of it outside the script. */
 const EXPECTED = `uberblick

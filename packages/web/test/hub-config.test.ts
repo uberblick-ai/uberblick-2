@@ -76,13 +76,26 @@ const LATE_SECRET = "late-arriving-signing-secret";
  * a real `fetch` does and what makes this a genuine test of the deadline: drop
  * the signal and this promise is never settled by anything.
  */
-function stalling(): typeof globalThis.fetch {
-  return (async (_input: string, init?: RequestInit) =>
-    new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener("abort", () => {
-        reject(new DOMException("The operation was aborted", "AbortError"));
+function stalling(stage: "headers" | "body"): typeof globalThis.fetch {
+  return (async (_input: string, init?: RequestInit) => {
+    if (stage === "headers") {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation was aborted", "AbortError"));
+        });
       });
-    })) as unknown as typeof globalThis.fetch;
+    }
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          init?.signal?.addEventListener("abort", () => {
+            controller.error(new DOMException("The operation was aborted", "AbortError"));
+          });
+        },
+      }),
+      { headers: { "content-type": "application/json" } },
+    );
+  }) as unknown as typeof globalThis.fetch;
 }
 
 /** A stub `fetch` for `HUB_CONFIG_PATH`, answering from a queue of responses. */
@@ -205,18 +218,27 @@ describe("the served configuration", () => {
     }
   });
 
-  it("gives the read a deadline, so a hung request cannot wedge every room", async () => {
-    // Nothing acquires a room until this settles, so "never settles" is the
-    // worst outcome available, worse than dialling a stale address.
-    const { hubUrl: url, hubUrlSource, workspaces, rejected } = await readClientConfig(
-      stalling(),
-      20,
-    );
+  it.each(["headers", "body"] as const)(
+    "gives stalled %s a deadline, so a hung request cannot wedge every room",
+    async (stage) => {
+      // Nothing acquires a room until this settles, so "never settles" is the
+      // worst outcome available, worse than dialling a stale address.
+      const builtIn = await readClientConfig(serving({ status: 404, body: "not found" }).fetch);
+      const config = await readClientConfig(stalling(stage), 20);
+
+      expect(config).toEqual({
+        ...builtIn,
+        rejected: "it did not answer within 20ms",
+      });
+    },
+  );
+
+  it("distinguishes a fetch failure from an expired deadline", async () => {
+    const { hubUrl: url, hubUrlSource, rejected } = await readClientConfig(serving().fetch);
 
     expect(url).toBe(INJECTED);
     expect(hubUrlSource).toBe("define");
-    expect(workspaces).toEqual(await builtInWorkspaces());
-    expect(rejected).toContain("did not answer within 20ms");
+    expect(rejected).toBe("it could not be fetched (Failed to fetch)");
   });
 
   it("supplies the endpoint when the document names one, and falls back the same way for every response it cannot use", async () => {
@@ -356,7 +378,7 @@ describe("the workspaces it names", () => {
     // with values substituted into it, so a value carrying a quote could close
     // its string and append a second `hubUrl` — and `JSON.parse` keeps the last
     // occurrence, pointing every browser at a hub of somebody else's choosing.
-    // What makes that impossible is `remote-compose.sh` refusing any value that
+    // What makes that impossible is `bin/remote-compose.sh` refusing any value that
     // could close a string; this pins the client's own best-effort refusal of
     // the plainly spelled case. It reads raw JSON spelling, so an escaped key
     // would pass — which is not worth a tokenizer, because writing escapes into
@@ -520,29 +542,22 @@ describe("the deployments that serve it", () => {
       'respond `{"hubUrl":"{$HUB_URL}","workspaces":"{$WORKSPACES}","hubAuthToken":"{$HUB_AUTH_TOKEN}"}`',
     );
 
-    // The first two are host-side `.env` values, renamed on the way in for the
-    // same reason: the undecorated names already mean "what my local tools
-    // use". The secret arrives under a name only the wrapper sets, and its
-    // `:?` gate is what forces every deployment command through the wrapper's
-    // checks — the chokehold must not lapse exactly when the document starts
-    // carrying a credential.
+    // Both the wrapper and the image use the same guard. Plain Compose passes
+    // native operator names; the container validates before aliasing them into
+    // the Caddyfile, so it cannot bypass the wrapper's alphabets.
     const compose = readFileSync(resolve(repoRoot, "docker-compose.yml"), "utf8");
-    expect(compose).toContain('HUB_URL: "${WEB_HUB_URL:-wss://');
-    expect(compose).toContain('WORKSPACES: "${WEB_WORKSPACES');
-    expect(compose).toContain('HUB_AUTH_TOKEN: "${CHECKED_HUB_AUTH_TOKEN:?');
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal Compose expression
+    expect(compose).toContain('WEB_HUB_URL: "${WEB_HUB_URL:-}"');
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal Compose expression
+    expect(compose).toContain('WEB_WORKSPACES: "${WEB_WORKSPACES:-}"');
+    expect(compose).toContain('HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?');
     expect(readFileSync(resolve(repoRoot, "remote.env.example"), "utf8")).toContain(
       "WEB_WORKSPACES=",
     );
-
-    // …and both are substituted *inside* a JSON string, so the wrapper that
-    // renders it refuses anything that could close that string and append a
-    // second `hubUrl`. The client refuses such a document too, but this is
-    // where the value is stopped before it is ever served.
-    const wrapper = readFileSync(resolve(repoRoot, "remote-compose.sh"), "utf8");
-    expect(wrapper).toContain("WEB_WORKSPACES");
-    expect(wrapper).toContain("*[!A-Za-z0-9,-]*)");
-    expect(wrapper).toContain("*[!A-Za-z0-9._-]*)");
-    expect(wrapper).toContain("CHECKED_HUB_AUTH_TOKEN=$HUB_AUTH_TOKEN");
+    const guard = readFileSync(resolve(repoRoot, "remote-settings.sh"), "utf8");
+    expect(guard).toContain("WEB_WORKSPACES");
+    expect(guard).toContain("*[!A-Za-z0-9,-]*)");
+    expect(guard).toContain("*[!A-Za-z0-9._-]*)");
 
     // The dev server answers the same path from one middleware, out of the
     // environment `ub env` resolves — `mise run web`, `mise run dev`, the e2e
@@ -585,12 +600,12 @@ describe("the deployments that serve it", () => {
       WEB_HUB_URL: 'wss://ok.example.ts.net/ws","hubUrl":"wss://elsewhere',
       TAILSCALE_HOST: 'ok.example.ts.net","hubUrl":"wss://elsewhere',
     };
-    const empty = mkdtempSync(join(tmpdir(), "uberblick-wrapper-"));
+    const empty = mkdtempSync(join(tmpdir(), `uberblick-${process.env.UB_AGENTS_RUN ?? "test"}-wrapper-`));
     try {
       for (const [name, value] of Object.entries(injecting)) {
         const run = spawnSync(
           "/bin/sh",
-          [resolve(repoRoot, "remote-compose.sh"), "config"],
+          [resolve(repoRoot, "bin/remote-compose.sh"), "config"],
           {
             cwd: empty,
             env: { PATH: empty, HUB_AUTH_TOKEN: "safe-secret", [name]: value },

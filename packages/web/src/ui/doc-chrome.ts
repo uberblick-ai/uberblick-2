@@ -9,7 +9,7 @@
 import * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
 import { blockRev, getBlock, getBlocks, getBlocksFragment } from "@uberblick/schema";
-import { AGENT_CLIENT, AWARENESS_FALLBACK_COLOR } from "../collab/identity.js";
+import { parseRemoteAwareness } from "../collab/remote-awareness.js";
 
 /** What kind of session a peer is, as the session itself says. */
 export type SessionKind = "agent" | "human";
@@ -125,15 +125,10 @@ export function readPresence(ydoc: Y.Doc, awareness: Awareness): RemotePresence[
   const blocks = visibleBlocks(getBlocksFragment(ydoc));
   const found: RemotePresence[] = [];
   awareness.getStates().forEach((state, clientId) => {
-    if (clientId === awareness.clientID) return;
-    const fields = state as {
-      user?: Partial<{ name: string; color: string }>;
-      client?: unknown;
-      session?: unknown;
-      cursor?: { anchor?: unknown } | null;
-    };
-    const anchor = fields.cursor?.anchor;
-    if (fields.user === undefined && (anchor === undefined || anchor === null)) {
+    const peer = parseRemoteAwareness(awareness, clientId, state);
+    if (peer === null) return;
+    const { anchor } = peer;
+    if (!peer.hasUser && (anchor === undefined || anchor === null)) {
       return;
     }
     const location =
@@ -142,16 +137,10 @@ export function readPresence(ydoc: Y.Doc, awareness: Awareness): RemotePresence[
         : blockOf(ydoc, blocks, anchor);
     found.push({
       clientId,
-      name:
-        typeof fields.user?.name === "string"
-          ? fields.user.name
-          : `client ${clientId}`,
-      color:
-        typeof fields.user?.color === "string"
-          ? fields.user.color
-          : AWARENESS_FALLBACK_COLOR,
-      kind: fields.client === AGENT_CLIENT ? "agent" : "human",
-      session: typeof fields.session === "string" ? fields.session : null,
+      name: peer.name,
+      color: peer.color,
+      kind: peer.kind,
+      session: peer.session,
       block: location?.block ?? null,
       blockId: location?.blockId ?? null,
     });

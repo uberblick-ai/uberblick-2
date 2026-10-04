@@ -40,7 +40,6 @@ function client(
   read: DocumentSearchClient["status"],
 ): DocumentSearchClient {
   return {
-    search: vi.fn(async () => ({ hits: [], limit: 100, capped: false })),
     status: vi.fn(read),
   };
 }

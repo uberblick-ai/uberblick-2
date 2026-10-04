@@ -22,7 +22,7 @@
  * never a quieter version of the truth.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { RoomStatus } from "../collab/rooms.js";
 
 export type SyncState = "offline" | "syncing" | "synced";
@@ -105,15 +105,16 @@ export function useCalmSyncState(
     source: object | null;
     state: SyncState | null;
   }>(() => ({ source: key, state: scoped ? null : raw }));
-  const latestRaw = useRef(raw);
-  latestRaw.current = raw;
+  const settleInitial = useEffectEvent((source: object) => {
+    setSettled({ source, state: raw });
+  });
   const boundary = useRef({ source: key, raw });
   if (boundary.current.source !== key) boundary.current = { source: key, raw };
   const firstRaw = boundary.current.raw;
   const shown = settled.source === key ? settled.state : null;
 
   // A source gets one bounded initial window. This effect intentionally does
-  // not follow `raw`: its timer reads the latest value through the ref, while
+  // not follow `raw`: its effect event reads the latest value, while
   // its deadline remains anchored to the source change.
   useEffect(() => {
     if (!scoped) return;
@@ -124,7 +125,7 @@ export function useCalmSyncState(
       return;
     }
     const timer = setTimeout(
-      () => setSettled({ source: key, state: latestRaw.current }),
+      () => settleInitial(key),
       settleMs[firstRaw],
     );
     return () => clearTimeout(timer);

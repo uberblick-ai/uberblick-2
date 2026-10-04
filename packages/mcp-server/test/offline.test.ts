@@ -55,6 +55,7 @@ describe("with the hub stopped", () => {
       "delete_block",
       "edit_block",
       "export_markdown",
+      "find_decisions",
       "get_doc",
       "get_sidebar",
       "insert_block",
@@ -189,6 +190,11 @@ describe("with the hub stopped", () => {
     expect(links.backlinks.map((row: { uuid: string }) => row.uuid)).toEqual([
       created.uuid,
     ]);
+
+    expect(await rig.ok("find_decisions", { github_ref: "Owner/Repo#1" })).toEqual({
+      github_ref: "owner/repo#1",
+      decisions: [],
+    });
 
     const annotated = await rig.ok("annotate", {
       uuid: created.uuid,

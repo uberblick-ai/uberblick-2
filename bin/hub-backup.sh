@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # Copy the hub's SQLite database out of this host's deployment, into a file you
-# name. Run it in the host's checkout: `sh hub-backup.sh ~/hub-2026-08-28.sqlite`.
+# name. Run it in the deployment directory: `sh bin/hub-backup.sh ~/hub-2026-08-28.sqlite`.
 #
 # **Stop, then copy.** Hocuspocus debounces the store (2s, at most 10s; the hub
 # leaves both at their defaults), so a document edited a moment ago may exist
@@ -18,10 +18,8 @@
 # not complete, and no file is written at all: a backup nobody can trust is
 # worse than none, because it is the one that gets restored.
 #
-# Every compose call goes through `remote-compose.sh`. That is not a style
-# choice: `docker-compose.yml` gates Caddy's secret on a variable only the
-# wrapper exports, and Compose interpolates the whole model for every
-# subcommand, so a bare `docker compose stop hub` fails on this host.
+# Every compose call goes through `bin/remote-compose.sh`, which resolves and checks
+# this deployment's settings in both a checkout and an extracted hub release.
 #
 # The hub is restarted from a trap on every path after the stop — on the normal
 # exit and on HUP/INT/TERM, because in POSIX `sh` an EXIT-only trap does not run
@@ -43,18 +41,18 @@ set -eu
 
 case "${1-}" in
   -h | --help)
-    printf 'usage: sh hub-backup.sh <target-file>\n'
+    printf 'usage: sh bin/hub-backup.sh <target-file>\n'
     exit 0
     ;;
 esac
 
 if [ $# -ne 1 ]; then
-  printf 'usage: sh hub-backup.sh <target-file>\n' >&2
+  printf 'usage: sh bin/hub-backup.sh <target-file>\n' >&2
   exit 2
 fi
 
 # Resolved before the `cd` below, so a relative path means what the operator
-# typed it in, not something inside the checkout.
+# typed it in, not something inside the deployment directory.
 target=$1
 case "$target" in
   /*) ;;
@@ -80,11 +78,11 @@ fi
 # readable by anyone else, not even for the instant before the chmod.
 umask 077
 
-checkout=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-cd "$checkout"
+deployment=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$deployment"
 
 compose() {
-  sh remote-compose.sh "$@"
+  sh bin/remote-compose.sh "$@"
 }
 
 hub_stopped=
@@ -108,7 +106,7 @@ finish() {
     hub_stopped=
     if ! compose start hub; then
       if ! compose up --detach hub; then
-        printf 'hub-backup: THE HUB IS STILL DOWN. Start it with: sh remote-compose.sh up --detach hub\n' >&2
+        printf 'hub-backup: THE HUB IS STILL DOWN. Start it with: sh bin/remote-compose.sh up --detach hub\n' >&2
         if [ "$status" -eq 0 ]; then
           status=1
         fi
@@ -140,7 +138,7 @@ fi
 
 for code in $codes; do
   if [ "$code" -ne 0 ]; then
-    printf 'hub-backup: the hub exited %s, so its shutdown flush did not complete and the database may be missing recent edits; no backup written. Check `sh remote-compose.sh logs hub`.\n' "$code" >&2
+    printf 'hub-backup: the hub exited %s, so its shutdown flush did not complete and the database may be missing recent edits; no backup written. Check `sh bin/remote-compose.sh logs hub`.\n' "$code" >&2
     exit 1
   fi
 done

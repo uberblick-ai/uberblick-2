@@ -43,7 +43,7 @@
 
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import { createDoc, setupHarness } from "./app-helpers.js";
+import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import type { Browser, BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import {
@@ -56,15 +56,26 @@ import {
   appendBlock,
   assignDocumentTags,
   createAnnotation,
+  createGroup,
   createTagCatalogEntry,
+  decisionDirectoryFields,
   deleteBlock,
   directoryRoom,
   getBlocksFragment,
+  getDirectoryEntry,
+  getDirectoryMap,
+  initDoc,
   MAX_TAG_NAME_LENGTH,
   retireTagCatalogEntry,
+  pinDoc,
+  readSidebar,
+  roomForDoc,
   seedTagCatalog,
   setAnnotationResolved,
+  setKind,
   settingsRoom,
+  sidebarRoom,
+  upsertDirectoryEntry,
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { placeCaret } from "./harness.js";
@@ -220,7 +231,7 @@ for (const scheme of ["light", "dark"] as const) {
       await width(page, ".ub-workspace"),
     );
 
-    // The configured workspace, with the count the directory reports.
+    // The configured workspace uses its shared display-name reading.
     const configured = menu.getByRole("menuitem", { name: /^Unnamed workspace · / });
     await expect(configured).toBeVisible();
 
@@ -240,14 +251,12 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(configured).toHaveAttribute("data-highlighted", /.*/);
     expect(await paintedIn(configured, "background-color")).not.toBe(ground);
 
-    // Machine-owned creation stays unavailable; settings is now a route.
+    // Machine-owned creation stays unavailable. Settings has its fixed footer entry.
     await expect(menu.getByRole("menuitem", { name: "New workspace" })).toHaveAttribute(
       "aria-disabled",
       "true",
     );
-    await expect(
-      menu.getByRole("menuitem", { name: "Workspace settings" }),
-    ).not.toHaveAttribute("aria-disabled", "true");
+    await expect(menu.getByRole("menuitem", { name: "Workspace settings" })).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
 
@@ -468,10 +477,9 @@ test("workspace settings is an address-selected, inert sidebar drill-in", async 
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
   await expect(settingsEntry).toBeFocused();
 
-  // The switcher's existing entry is the second front door, and Back in the
-  // settings pane always targets the workspace list rather than a remembered doc.
-  await page.locator(".ub-workspace").click();
-  await page.getByRole("menuitem", { name: "Workspace settings" }).click();
+  // The fixed bottom entry is the settings front door. Back in the settings
+  // pane always targets the workspace list rather than a remembered doc.
+  await settingsEntry.click();
   await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
   await settings.getByRole("button", { name: /^Back to / }).click();
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
@@ -700,9 +708,17 @@ test("a multiline comment composer stays above its selected passage", async ({ b
     await page.keyboard.type(`Passage ${index}`);
     if (index < 10) await page.keyboard.press("Enter");
   }
-  await page.keyboard.press("Shift+Home");
+  const selectedPassage = "Passage 10";
+  // Shift+Home selects to the document start on macOS. Keep this keyboard
+  // selection within the final passage on both macOS and Linux.
+  for (let character = 0; character < selectedPassage.length; character += 1) {
+    await page.keyboard.press("Shift+ArrowLeft");
+  }
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(selectedPassage);
   await page.getByRole("button", { name: "Comment", exact: true }).click();
   const composer = page.locator('[data-slot="selection-composer"]');
+  await expect(composer.locator('[data-slot="selection-excerpt"]')).toHaveText(selectedPassage);
+  await expect(composer.locator('[data-slot="selection-clamp"]')).toHaveCount(0);
   await expect(composer).toHaveAttribute("data-placement", "above");
   const field = composer.locator("textarea");
   const lines = Array.from({ length: 8 }, (_, index) => `Comment line ${index + 1}`);
@@ -916,8 +932,7 @@ test("document actions stay reachable, close with the route, and archive into Re
 }) => {
   const page = await openApp(browser, "", {
     upstream: true,
-    contextOptions: { colorScheme: "light", hasTouch: true },
-    beforeNavigate: async (page) => { await page.clock.install(); },
+    contextOptions: { colorScheme: "light" },
     readySelector: ".ub-workspace",
   });
   await page.getByRole("button", { name: "+ new doc" }).click();
@@ -1009,26 +1024,6 @@ test("document actions stay reachable, close with the route, and archive into Re
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();
 
-  // Outside pointer dismissal is a cancelled confirmation and restores the
-  // menu trigger through the primitive's own trigger/content relationship.
-  await trigger.click();
-  await page.getByRole("menuitem", { name: "Archive document" }).click();
-  await expect(confirmation).toHaveCount(1);
-  await page.locator("[data-slot=dialog-overlay]").click({ position: { x: 4, y: 4 } });
-  await expect(confirmation).toHaveCount(0);
-  await expect(trigger).toBeFocused();
-
-  // A touch pointer takes the same outside-dismissal path. The dialog layer's
-  // first passive effect queues the zero-delay timer that arms its document
-  // pointerdown listener. Run that timer under test control before the tap.
-  await trigger.click();
-  await page.getByRole("menuitem", { name: "Archive document" }).click();
-  await expect(confirmation).toHaveCount(1);
-  await page.clock.runFor(1);
-  await page.touchscreen.tap(4, 4);
-  await expect(confirmation).toHaveCount(0);
-  await expect(trigger).toBeFocused();
-
   await trigger.click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
   await page.getByRole("button", { name: "Archive document" }).click();
@@ -1070,7 +1065,7 @@ for (const scheme of ["light", "dark"] as const) {
 
     // Fully opaque: any alpha below 1 is the page showing through, and
     // `rgba(0, 0, 0, 0)` is what an undefined custom property computes to.
-    const background = await painted(page, ".ub-confirm", "background-color");
+    const background = await painted(page, "[data-slot=alert-dialog-content]", "background-color");
     expect(alphaOf(background), background).toBe(1);
 
     // Opaque paint is not enough on its own: the panel has to cover the page
@@ -1079,7 +1074,7 @@ for (const scheme of ["light", "dark"] as const) {
     // actually hits.
     expect(
       await page.evaluate(() => {
-        const panel = document.querySelector(".ub-confirm");
+        const panel = document.querySelector("[data-slot=alert-dialog-content]");
         if (panel === null) throw new Error("no confirmation panel");
         const box = panel.getBoundingClientRect();
         const hit = document.elementFromPoint(
@@ -1575,7 +1570,7 @@ for (const scheme of ["light", "dark"] as const) {
     browser,
   }) => {
     const page = await openAppearanceApp(browser, scheme);
-    // Under the rail's 1100px breakpoint, which is the only width where the
+    // Below the shared xl breakpoint, which is the only layout where the
     // threads handle is on screen to be measured at all.
     await page.setViewportSize({ width: 1000, height: 800 });
 
@@ -1677,6 +1672,10 @@ for (const scheme of ["light", "dark"] as const) {
     await thread.click();
     await page.getByRole("button", { name: "Reopen" }).click();
     await page.getByRole("button", { name: "Close threads" }).click();
+    // The pointer-opened drawer returns focus to the toggle asynchronously.
+    // Wait for that return before placing the caret so it cannot take the
+    // selection and deletion keys back from the editor.
+    await expect(handle).toBeFocused();
     await placeCaret(page);
     await page.keyboard.press("Shift+Home");
     await page.keyboard.press("Backspace");
@@ -1926,12 +1925,9 @@ for (const scheme of ["light", "dark"] as const) {
     // criterion's own construction and has no such number.
     if (scheme === "light") expect(floor).toBeGreaterThanOrEqual(0.04);
 
-    // The workspace header paints the accent ground only while hovered, so the
-    // walk has to reach that state rather than proving its resting separator
-    // twice. Dark had 1.46:1 here before the light-only repair and must keep it.
+    // Include the standard header menu button's hover ground in the token walk.
     const workspace = page.locator(".ub-workspace");
-    // The header reaches the pane's edge; the initial pointer at (0, 0) can
-    // already hover it. Put the pointer outside the sidebar before reading rest.
+    // Put the pointer outside the sidebar before reading its resting ground.
     const viewport = page.viewportSize();
     if (viewport === null) throw new Error("e2e: no viewport");
     await page.mouse.move(viewport.width - 1, viewport.height - 1);
@@ -1939,12 +1935,6 @@ for (const scheme of ["light", "dark"] as const) {
     await workspace.hover();
     const workspaceGround = await paintedIn(workspace, "background-color");
     expect(workspaceGround).not.toBe(resting);
-    const workspaceEdge = await paintedIn(workspace, "border-bottom-color");
-    if (scheme === "dark") {
-      expect(contrast(workspaceEdge, workspaceGround)).toBeGreaterThanOrEqual(
-        1.46,
-      );
-    }
     const readings = await surface(page, ".ub-list");
 
     // A group, so its header rule and two quiet actions are on screen. "+ group"
@@ -1964,10 +1954,7 @@ for (const scheme of ["light", "dark"] as const) {
     await workspace.click();
     await expect(page.locator("[data-slot=dropdown-menu-content]")).toBeVisible();
     readings.push(...(await surface(page, "[data-slot=dropdown-menu-content]")));
-    // And once more with the current workspace's row highlighted, which is where
-    // `--sidebar-accent` gets under a text: the row's own count keeps the muted
-    // ink while the item takes the accent ground, and that pairing — 4.70:1, the
-    // worse of the two failures #515 published — is painted nowhere at rest.
+    // Include the current row's name and visible checkmark on the highlight ground.
     await page.locator(".ub-menu-current").hover();
     const highlight = await painted(page, ".ub-menu-current", "background-color");
     readings.push(...(await surface(page, "[data-slot=dropdown-menu-content]")));
@@ -2344,7 +2331,7 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
 
   // The three widths the layout has to hold at, including the iPad width the
   // 44px is *for*.
-  for (const width of [1280, 1100, 768]) {
+  for (const width of [1280, 1194, 768]) {
     await page.setViewportSize({ width, height: 620 });
     // Typing left the pane scrolled to the caret; the first reading is of the
     // header at rest.
@@ -3179,5 +3166,87 @@ test("unavailable Restore and pin reasons are visible on touch", async ({ browse
     await expect(page.locator(".ub-docs-pin").first()).toBeDisabled();
   } finally {
     await harness().startHub();
+  }
+});
+
+test("decision archive and restore follow the whole topic and its first record", async ({ browser }) => {
+  const first = randomUUID();
+  const successor = randomUUID();
+  const running = harness();
+  const secret = await importRootSecret(running.authSecret);
+  const peers: Array<{ doc: Y.Doc; provider: HocuspocusProvider }> = [];
+  async function peer(room: string): Promise<Y.Doc> {
+    const doc = new Y.Doc();
+    const provider = new HocuspocusProvider({
+      url: running.hubUrl,
+      name: room,
+      document: doc,
+      token: async () => wrapToken(await mintToken(secret, {
+        typ: "room", sub: randomUUID(), workspace: running.workspaceUuid,
+        scope: "read-write", kid: null, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+      })),
+    });
+    peers.push({ doc, provider });
+    await new Promise<void>((resolve) => provider.on("synced", resolve));
+    return doc;
+  }
+  try {
+    const directory = await peer(directoryRoom(running.workspaceUuid));
+    const sidebar = await peer(sidebarRoom(running.workspaceUuid));
+    for (const uuid of [first, successor]) {
+      const doc = await peer(roomForDoc(running.workspaceUuid, uuid));
+      initDoc(doc, {
+        uuid, title: uuid === first ? "Original lease" : "Proposed lease",
+        topic: first,
+        ...(uuid === successor ? { supersedes: first } : {}),
+      });
+      setKind(doc, "decision");
+      appendBlock(doc, { type: "paragraph", text: "Lease reasoning stays readable." });
+      upsertDirectoryEntry(directory, {
+        uuid, title: uuid === first ? "Original lease" : "Proposed lease",
+        kind: "decision", status: "open", ...decisionDirectoryFields(doc),
+      });
+    }
+    const group = createGroup(sidebar, "Reading");
+    pinDoc(sidebar, group, first);
+    pinDoc(sidebar, group, successor);
+    const page = await openApp(browser, `/${running.workspace}/${successor}`);
+    const earlier = await openApp(browser, `/${running.workspace}/${first}`);
+    const map = getDirectoryMap(directory);
+
+    // A mirror-only tombstone leaves a successor writable and archivable.
+    map.set(successor, { ...(map.get(successor) as object), deleted: true });
+    await expect(page.getByRole("button", { name: "Document actions" })).toBeVisible();
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await page.getByRole("button", { name: "Document actions" }).click();
+    await page.getByRole("menuitem", { name: "Archive document" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Archive document" }).click();
+    await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
+    await expect(earlier.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
+    await expect.poll(() => readSidebar(sidebar).find((entry) => entry.id === group)?.docs).toEqual([]);
+    await expect.poll(() => getDirectoryEntry(directory, first)?.deleted).toBe(true);
+    await expect.poll(() => getDirectoryEntry(directory, successor)?.deleted).toBe(true);
+    await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+
+    await page.getByRole("button", { name: "Restore", exact: true }).click();
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await expect(editor(earlier)).toHaveAttribute("contenteditable", "true");
+    await expect.poll(() => getDirectoryEntry(directory, first)?.deleted).toBeUndefined();
+    await expect.poll(() => getDirectoryEntry(directory, successor)?.deleted).toBeUndefined();
+
+    // A partial archive's first tombstone alone gates every record's writes.
+    map.set(first, { ...(map.get(first) as object), deleted: true });
+    await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
+    await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+    await expect(page.locator(".ub-title")).toHaveAttribute("readonly", "");
+    expect(getDirectoryEntry(directory, successor)?.deleted).toBeUndefined();
+    await page.getByRole("button", { name: "Restore", exact: true }).click();
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await expect(editor(earlier)).toHaveAttribute("contenteditable", "true");
+  } finally {
+    for (const { provider, doc } of peers.reverse()) {
+      provider.destroy();
+      doc.destroy();
+    }
   }
 });

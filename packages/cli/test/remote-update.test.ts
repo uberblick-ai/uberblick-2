@@ -7,7 +7,7 @@
  * build at once, and a commit that rewrites the updater must not tear the run
  * that is applying it in half. None of that survives being mocked, so these
  * tests give the real script a real git repository — a local bare "origin", a
- * clone standing in for the host's checkout — and a stub `remote-compose.sh`
+ * clone standing in for the host's checkout — and a stub `bin/remote-compose.sh`
  * committed where the real one lives, which is the only thing a checkout ever
  * invokes docker through.
  *
@@ -28,7 +28,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { REPO_ROOT, removeTempDirs, sandbox } from "./helpers.js";
 
@@ -88,16 +88,26 @@ interface Fixture {
   failFile: string;
 }
 
-function fixture(): Fixture {
+function fixture(legacy = false): Fixture {
   const root = sandbox().cwd;
   const bare = join(root, "origin.git");
   git(root, "init", "--quiet", "--bare", "--initial-branch=main", bare);
 
   const work = join(root, "work");
   git(root, "clone", "--quiet", bare, work);
-  writeFileSync(join(work, "remote-compose.sh"), COMPOSE_STUB, "utf8");
-  // The real updater, verbatim — the file under test.
-  copyFileSync(join(REPO_ROOT, "remote-update.sh"), join(work, "remote-update.sh"));
+  mkdirSync(join(work, "bin"));
+  if (legacy) {
+    writeFileSync(join(work, "remote-compose.sh"), COMPOSE_STUB, "utf8");
+    // Before the move, both updater modes called the root wrapper. Opening this
+    // version before it fetches the new layout exercises an in-flight updater.
+    writeFileSync(join(work, "remote-update.sh"),
+      readFileSync(join(REPO_ROOT, "remote-update.sh"), "utf8")
+        .replaceAll("sh bin/remote-compose.sh", "sh remote-compose.sh"));
+  } else {
+    writeFileSync(join(work, "bin/remote-compose.sh"), COMPOSE_STUB, "utf8");
+    copyFileSync(join(REPO_ROOT, "remote-compose.sh"), join(work, "remote-compose.sh"));
+    copyFileSync(join(REPO_ROOT, "remote-update.sh"), join(work, "remote-update.sh"));
+  }
   writeFileSync(join(work, "marker.txt"), "one\n", "utf8");
   git(work, "add", "-A");
   git(work, "commit", "--quiet", "-m", "one");
@@ -121,6 +131,7 @@ function fixture(): Fixture {
 /** Author a new commit upstream and return its sha. */
 function push(fix: Fixture, files: Record<string, string>): string {
   for (const [name, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(fix.work, name)), { recursive: true });
     writeFileSync(join(fix.work, name), content, "utf8");
   }
   git(fix.work, "add", "-A");
@@ -275,6 +286,57 @@ async function startHeldInitRerun(
 }
 
 describe("remote-update.sh", () => {
+  it("keeps an installed client's fresh init and logs working at the root path", () => {
+    const fix = fixture();
+    const ran = spawnSync("sh", ["-c", `set -eu
+sh remote-compose.sh up --build --detach
+git update-ref refs/uberblick/deployed HEAD
+sh remote-compose.sh logs --tail=50 hub caddy
+`], { cwd: fix.checkout, encoding: "utf8", env: updateEnv(fix), timeout: 20_000 });
+
+    expect(ran.status).toBe(0);
+    expect(builds(fix)).toEqual(["up --build --detach", "logs --tail=50 hub caddy"]);
+    expect(deployedRef(fix)).toBe(git(fix.checkout, "rev-parse", "HEAD"));
+  });
+
+  it("forwards arguments, working directory and exit status without interpreting them", () => {
+    const fix = fixture();
+    writeFileSync(join(fix.checkout, "bin/remote-compose.sh"), `#!/bin/sh
+printf '%s\\n' "$PWD" "$@"
+exit 17
+`);
+    const ran = spawnSync("sh", [join(fix.checkout, "remote-compose.sh"),
+      "up", "argument with spaces", "--detach"], {
+      cwd: fix.root, encoding: "utf8", env: updateEnv(fix), timeout: 20_000,
+    });
+
+    expect(ran.status).toBe(17);
+    expect(ran.stdout.trimEnd().split("\n")).toEqual([
+      fix.root, "up", "argument with spaces", "--detach",
+    ]);
+  });
+
+  it.each(["update", "init re-run"])("finishes a pre-move %s across the bin layout transition", (mode) => {
+    const fix = fixture(true);
+    const next = push(fix, {
+      "bin/remote-compose.sh": COMPOSE_STUB,
+      "remote-compose.sh": readFileSync(join(REPO_ROOT, "remote-compose.sh"), "utf8"),
+      "remote-update.sh": readFileSync(join(REPO_ROOT, "remote-update.sh"), "utf8"),
+    });
+
+    const ran = mode === "update" ? update(fix) : initRerun(fix);
+
+    expect(ran.status).toBe(0);
+    expect(builds(fix)).toEqual(["up --build --detach"]);
+    expect(deployedRef(fix)).toBe(next);
+    expect(readFileSync(join(fix.checkout, ".env"), "utf8")).toBe(
+      mode === "update" ? HOST_ENV : RERUN_ENV + GITHUB_SETTING,
+    );
+    // The next call runs the new updater against the same checkout.
+    expect(initRerun(fix).status).toBe(0);
+    expect(builds(fix)).toEqual(["up --build --detach", "up --build --detach"]);
+  });
+
   it("deploys an init re-run's env under the lock, preserving the host's GitHub app", () => {
     const fix = fixture();
     const next = push(fix, { "marker.txt": "two\n" });
@@ -291,7 +353,7 @@ describe("remote-update.sh", () => {
     expect(deployedRef(fix)).toBe(next);
   });
 
-  it("leaves sign-in unconfigured when an init re-run has no host GitHub app", () => {
+  it("leaves app selection to the hub default when an init re-run has no operator app", () => {
     const fix = fixture();
     writeFileSync(
       join(fix.checkout, ".env"),
@@ -408,6 +470,7 @@ describe("remote-update.sh", () => {
     expect(builds(fix)).toEqual(["up --build --detach"]);
     expect(deployedRef(fix)).toBe(next);
     expect(readFileSync(join(fix.checkout, "marker.txt"), "utf8")).toBe("two\n");
+    expect(readFileSync(join(fix.checkout, ".env"), "utf8")).toBe(HOST_ENV);
   });
 
   /**

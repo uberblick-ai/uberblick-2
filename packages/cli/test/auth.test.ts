@@ -218,6 +218,10 @@ describe("ub auth local selection and command surface", () => {
       expect(help.status).toBe(0);
       expect(help.stdout).toContain(`ub ${args.join(" ")}`);
       expect(help.stderr).toBe("");
+      if (args[1] === "login") {
+        expect(help.stdout).toContain("GitHub's approval page shows the app's name, not the hub.");
+        expect(help.stdout.replace(/\s+/g, " ")).toContain("Approve only a login you started for the displayed hub");
+      }
     }
     for (const args of [["auth", "unknown"], ["auth", "login", "--json"], ["auth", "logout", "a", "b"]]) {
       expect((await runUbAsync(args, box)).status).toBe(2);
@@ -346,8 +350,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const login = await runUbAsync(["auth", "login"], box);
     expect(login.status, login.stderr).toBe(0);
     expect(login.stdout.split("\n")[0]).toBe(`Hub: ${remote.origin}`);
-    expect(login.stdout).toContain("https://github.com/login/device");
-    expect(login.stdout).toContain("ABCD-EFGH");
+    expect(login.stdout).toContain(`GitHub sign-in for ${remote.origin}\nApprove in a browser: https://github.com/login/device\nCode: ABCD-EFGH\n`);
     expect(login.stdout).toContain(USERNAME);
     for (const workspace of [WORKSPACE, OTHER_WORKSPACE]) expect(login.stdout).toContain(workspace);
     const stored = savedLogin(box, remote.origin);
@@ -413,6 +416,10 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const binding = readFileSync(configPath(box));
     const login = await runUbAsync(["auth", "login", remote.origin], box);
     expect(login.status, login.stderr).toBe(0);
+    expect(login.stdout).toContain(`GitHub sign-in for ${remote.origin}\nApprove in a browser: https://github.com/login/device\nCode: ABCD-EFGH\n`);
+    expect(login.stdout).toContain("GitHub's approval page shows the app's name, not the hub.");
+    expect(login.stdout).toContain(`Approve only if you started this login for ${remote.origin}; the app does not vouch for this hub.`);
+    expect(login.stdout).not.toContain("http://127.0.0.1:1");
     expect(login.output).toContain(USERNAME);
     expect(login.output).toMatch(/no.*workspace|workspaces.*none/i);
     expect(login.output).toMatch(/sign.in.*no membership|sign.in.*does not.*membership|no.*membership/i);

@@ -4,10 +4,10 @@
 	# #426). Served rather than baked into the bundle, so pointing this
 	# deployment at another hub — or giving it its workspaces, or rotating the
 	# secret — is `up --detach caddy`, not a rebuild. `WEB_HUB_URL` and
-	# `WEB_WORKSPACES` are the names operators set in `.env`; compose passes them
-	# into this container as `HUB_URL` and `WORKSPACES` (see docker-compose.yml,
-	# which explains why the names differ), and `HUB_AUTH_TOKEN` reaches it
-	# through the wrapper's checked copy.
+	# `WEB_WORKSPACES` are the names operators set in `.env`; container startup
+	# validates
+	# them before assigning Caddy's `HUB_URL` and `WORKSPACES`. It also validates
+	# `HUB_AUTH_TOKEN`, including when started with plain Docker Compose.
 	#
 	# Serving the secret is the recorded model, not an oversight: anyone who can
 	# fetch this document has full read-write, and the tailnet is the boundary
@@ -21,7 +21,7 @@
 	#
 	# All three values land *inside* a JSON string, so a quote or a backslash in
 	# any of them would close it and append further keys — a second `hubUrl` wins
-	# on parse and retargets every browser. `remote-compose.sh` refuses such a
+	# on parse and retargets every browser. The shared startup guard refuses such a
 	# `WEB_WORKSPACES` or `HUB_AUTH_TOKEN` before it reaches this file, and the
 	# client refuses a document that names a key twice; neither is the whole
 	# guard on its own.

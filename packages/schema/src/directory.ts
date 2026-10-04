@@ -4,7 +4,7 @@
  * Discovery is itself a synced doc: one Y.Doc per workspace, in the well-known
  * room `<workspaceId>/_directory` (see `rooms.ts`), holding a Y.Map of
  * uuid → {title, tags, deleted?, createdAt?, updatedAt?, description?, kind?,
- * status?} stubs.
+ * status?} stubs, plus decision-only relationship and history display caches.
  * It travels over the same sync channel as every other document, so a fresh
  * client with empty local state learns the corpus by joining one more room.
  * There is no other discovery mechanism — never enumerate locally-observed
@@ -35,6 +35,10 @@
 
 import type * as Y from "yjs";
 import { readDocumentLifecycle } from "./types.js";
+import { canonicalDocumentUuid } from "./rooms.js";
+import { getMeta } from "./doc.js";
+import { listAnnotations } from "./annotations.js";
+import { decisionApprovalChanged } from "./approval.js";
 import type {
   DirectoryEntry,
   DocMeta,
@@ -57,6 +61,15 @@ interface StoredEntry {
   description?: string;
   kind?: DocumentKind;
   status?: DocumentStatus;
+  governs?: string;
+  topic?: string;
+  supersedes?: string;
+  tldr?: string;
+  agentStance?: boolean;
+  decidedBy?: string;
+  decidedAt?: string;
+  approvalChanged?: boolean;
+  commentCount?: number;
 }
 
 function sameSet(a: readonly string[], b: readonly string[]): boolean {
@@ -70,20 +83,21 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
 
 /**
  * Shared web/MCP cache-repair rule: the document's metadata is authoritative.
- * A missing stub or a different title, tag set, description, kind or status
- * needs repair. Tag order is immaterial; absent and empty descriptions agree.
+ * A missing stub or different metadata or decision cache needs repair. Tag order is immaterial; absent and empty descriptions agree.
  * Each repair states all these fields from its replica's document, even if that
  * copy lags another replica's stub: the cache heals on observed updates rather
  * than arbitrating which copy is newer.
  *
- * Callers leave observed tombstones alone and also write a live stub missing
- * `createdAt`, even when its metadata agrees. Every repair supplies that stamp;
+ * Callers leave non-decision tombstones alone; decision caches still repair.
+ * They also write a stub missing `createdAt`, even when its metadata agrees.
+ * Every repair supplies that stamp;
  * `upsertDirectoryEntry` preserves an existing one. Authorship, clocks,
  * `updatedAt` coarseness and write gates remain the writer's responsibility.
  */
 export function directoryStubDiffers(
   stub: DirectoryEntry | null,
   meta: DocMeta,
+  fields?: DecisionDirectoryFields,
 ): boolean {
   return (
     stub === null ||
@@ -91,7 +105,18 @@ export function directoryStubDiffers(
     !sameSet(stub.tags, meta.tags) ||
     (stub.description ?? "") !== (meta.description ?? "") ||
     stub.kind !== meta.kind ||
-    stub.status !== meta.status
+    stub.status !== meta.status ||
+    (meta.kind === "decision" && (
+      stub.governs !== meta.governs ||
+      stub.topic !== meta.topic ||
+      stub.supersedes !== meta.supersedes ||
+      (stub.tldr ?? null) !== (meta.tldr ?? null) ||
+      stub.agentStance !== meta.agentStance ||
+      stub.decidedBy !== meta.decidedBy ||
+      stub.decidedAt !== meta.decidedAt ||
+      (fields !== undefined && stub.approvalChanged !== fields.approvalChanged) ||
+      (fields !== undefined && stub.commentCount !== fields.commentCount)
+    ))
   );
 }
 
@@ -172,6 +197,31 @@ function withResolvedUpdatedAt(
   };
 }
 
+const DECISION_CACHE_KEYS = [
+  "governs", "topic", "supersedes", "tldr", "agentStance", "decidedBy",
+  "decidedAt", "approvalChanged", "commentCount",
+] as const;
+
+/** Tolerant reads of the decision-only cache; unknown foreign values vanish. */
+function readDecisionFields(value: Record<string, unknown>): Partial<StoredEntry> {
+  const fields: Partial<StoredEntry> = {};
+  for (const key of ["governs", "topic", "supersedes"] as const) {
+    const uuid = canonicalDocumentUuid(value[key]);
+    if (uuid !== null) fields[key] = uuid;
+  }
+  if (typeof value.tldr === "string" && value.tldr !== "") fields.tldr = value.tldr;
+  for (const key of ["decidedBy", "decidedAt"] as const) {
+    const text = value[key];
+    if (typeof text === "string" && text.trim() !== "") fields[key] = text;
+  }
+  if (typeof value.agentStance === "boolean") fields.agentStance = value.agentStance;
+  if (typeof value.approvalChanged === "boolean") fields.approvalChanged = value.approvalChanged;
+  if (typeof value.commentCount === "number" && Number.isSafeInteger(value.commentCount) && value.commentCount >= 0) {
+    fields.commentCount = value.commentCount;
+  }
+  return fields;
+}
+
 function readStored(value: unknown): StoredEntry | null {
   if (typeof value !== "object" || value === null) return null;
   const candidate = value as Partial<StoredEntry>;
@@ -191,12 +241,13 @@ function readStored(value: unknown): StoredEntry | null {
     ...(updatedAt === undefined ? {} : { updatedAt }),
     ...(description === undefined ? {} : { description }),
     ...lifecycle,
+    ...(lifecycle.kind === "decision" ? readDecisionFields(value as Record<string, unknown>) : {}),
   };
 }
 
 /**
  * Carry the fields of an entry that is being rewritten but not restated: its
- * timestamps and its description.
+ * timestamps, description, lifecycle and decision caches.
  *
  * Every writer here replaces the whole object, so a field that is not copied
  * forward is a field that is erased.
@@ -211,6 +262,7 @@ function carryForward(next: StoredEntry, from: StoredEntry | null): StoredEntry 
       : { description: from.description }),
     ...(from?.kind === undefined ? {} : { kind: from.kind }),
     ...(from?.status === undefined ? {} : { status: from.status }),
+    ...(from?.kind === "decision" ? readDecisionFields(from as unknown as Record<string, unknown>) : {}),
   };
 }
 
@@ -249,6 +301,37 @@ export interface DirectoryUpsert {
    * string clears only status. Pair validation belongs to the document setters.
    */
   status?: DocumentStatus | "";
+  /** Decision-only fields: omission preserves, null/empty clears. */
+  governs?: string | null;
+  topic?: string | null;
+  supersedes?: string | null;
+  tldr?: string | null;
+  agentStance?: boolean | null;
+  decidedBy?: string | null;
+  decidedAt?: string | null;
+  approvalChanged?: boolean | null;
+  commentCount?: number | null;
+}
+
+export type DecisionDirectoryFields = Pick<DirectoryUpsert,
+  "governs" | "topic" | "supersedes" | "tldr" | "agentStance" |
+  "decidedBy" | "decidedAt" | "approvalChanged" | "commentCount">;
+
+/** Hydrated writers restate every decision cache, including deliberate clears. */
+export function decisionDirectoryFields(doc: Y.Doc): DecisionDirectoryFields {
+  const meta = getMeta(doc);
+  if (meta.kind !== "decision") return {};
+  return {
+    governs: meta.governs ?? null,
+    topic: meta.topic ?? meta.uuid,
+    supersedes: meta.supersedes ?? null,
+    tldr: meta.tldr ?? null,
+    agentStance: meta.agentStance ?? null,
+    decidedBy: meta.decidedBy ?? null,
+    decidedAt: meta.decidedAt ?? null,
+    approvalChanged: decisionApprovalChanged(doc),
+    commentCount: listAnnotations(doc).reduce((count, thread) => count + thread.comments.length, 0),
+  };
 }
 
 /**
@@ -298,6 +381,8 @@ export function upsertDirectoryEntry(
       entry.kind === "" || entry.status === ""
         ? undefined
         : (entry.status ?? existing?.status);
+    const cache: Record<string, unknown> = {};
+    for (const key of DECISION_CACHE_KEYS) cache[key] = entry[key] === undefined ? existing?.[key] : entry[key];
     const next: StoredEntry = {
       title: entry.title,
       tags: [...(entry.tags ?? [])],
@@ -307,6 +392,7 @@ export function upsertDirectoryEntry(
       ...(description === undefined ? {} : { description }),
       ...(kind === undefined ? {} : { kind }),
       ...(status === undefined ? {} : { status }),
+      ...(kind === "decision" ? readDecisionFields(cache) : {}),
     };
     docs.set(entry.uuid, next);
   });
@@ -316,7 +402,7 @@ export function upsertDirectoryEntry(
  * Tombstone a directory entry: sets `deleted: true` and keeps the entry, so the
  * deletion itself replicates. Entries are never removed from the map.
  */
-export function tombstoneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
+function tombstoneOneDirectoryEntry(dirDoc: Y.Doc, uuid: string, topic?: string): void {
   const docs = getDirectoryMap(dirDoc);
   dirDoc.transact(() => {
     const existing = withResolvedUpdatedAt(
@@ -330,6 +416,8 @@ export function tombstoneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
           title: existing?.title ?? "",
           tags: existing?.tags ?? [],
           deleted: true,
+          // A missing first record still owns its decision topic's lifecycle.
+          ...(existing === null && topic !== undefined ? { kind: "decision" as const, topic } : {}),
         },
         existing,
       ) satisfies StoredEntry,
@@ -357,7 +445,7 @@ export function tombstoneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
  * converges on whichever update Yjs orders last — not on whichever human meant
  * it more recently.
  */
-export function restoreDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
+function restoreOneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
   const docs = getDirectoryMap(dirDoc);
   const existing = withResolvedUpdatedAt(
     readStored(docs.get(uuid)),
@@ -375,6 +463,40 @@ export function restoreDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
       ) satisfies StoredEntry,
     );
   });
+}
+
+/** First-record authority for a decision topic; ordinary records own their state. */
+export function decisionTopicArchived(dirDoc: Y.Doc, uuid: string): boolean {
+  const entry = getDirectoryEntry(dirDoc, uuid);
+  if (entry?.kind !== "decision") return entry?.deleted === true;
+  return getDirectoryEntry(dirDoc, entry.topic ?? entry.uuid)?.deleted === true;
+}
+
+/** All observed topic records, including the authority even if its stub is missing. */
+function archiveTargets(dirDoc: Y.Doc, uuid: string): string[] {
+  const entry = getDirectoryEntry(dirDoc, uuid);
+  if (entry?.kind !== "decision") return [uuid];
+  const topic = entry.topic ?? entry.uuid;
+  const records = listDirectory(dirDoc, { includeDeleted: true })
+    .filter((record) => record.kind === "decision" && (record.topic ?? record.uuid) === topic)
+    .map((record) => record.uuid).sort();
+  return [topic, ...records.filter((record) => record !== topic)];
+}
+
+/** Archive a decision's whole topic; directory-only writes retain all caches. */
+export function tombstoneDirectoryEntry(dirDoc: Y.Doc, uuid: string): string[] {
+  const targets = archiveTargets(dirDoc, uuid);
+  const entry = getDirectoryEntry(dirDoc, uuid);
+  const topic = entry?.kind === "decision" ? (entry.topic ?? entry.uuid) : undefined;
+  dirDoc.transact(() => { for (const target of targets) tombstoneOneDirectoryEntry(dirDoc, target, topic); });
+  return targets;
+}
+
+/** Restore a decision's whole topic; no document room needs hydration. */
+export function restoreDirectoryEntry(dirDoc: Y.Doc, uuid: string): string[] {
+  const targets = archiveTargets(dirDoc, uuid);
+  dirDoc.transact(() => { for (const target of targets) restoreOneDirectoryEntry(dirDoc, target); });
+  return targets;
 }
 
 export interface ListDirectoryOptions {
@@ -395,6 +517,7 @@ function toEntry(uuid: string, stored: StoredEntry): DirectoryEntry {
       : { description: stored.description }),
     ...(stored.kind === undefined ? {} : { kind: stored.kind }),
     ...(stored.status === undefined ? {} : { status: stored.status }),
+    ...(stored.kind === "decision" ? readDecisionFields(stored as unknown as Record<string, unknown>) : {}),
   };
 }
 
@@ -430,7 +553,12 @@ export function listDirectory(
       updatedAts.get(uuid),
     );
     if (stored === null) continue;
-    if (stored.deleted === true && !includeDeleted) continue;
+    if (!includeDeleted) {
+      const archived = stored.kind === "decision"
+        ? readStored(getDirectoryMap(dirDoc).get(stored.topic ?? uuid))?.deleted === true
+        : stored.deleted === true;
+      if (archived) continue;
+    }
     out.push(toEntry(uuid, stored));
   }
   out.sort((a, b) => {

@@ -256,10 +256,27 @@ export async function openUpstreamApp(
  */
 export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Promise<void> {
   const editor = page.locator(".ub-editor .ProseMirror");
+  const webkit = page.context().browser()?.browserType().name() === "webkit";
   await expect
     .poll(async () => {
       await editor.focus();
-      await page.keyboard.press(edge === "start" ? "Home" : "End");
+      if (webkit) {
+        // iOS does not give Home/End desktop block-edge semantics. Native
+        // range setup avoids a pointer gesture while retaining real selection
+        // geometry and selectionchange; the test supplies the input it proves.
+        await editor.evaluate((element, at) => {
+          const block = element.firstElementChild;
+          if (block === null) throw new Error("e2e: prose has no block");
+          const range = element.ownerDocument.createRange();
+          range.selectNodeContents(block);
+          range.collapse(at === "start");
+          const selection = element.ownerDocument.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+        }, edge);
+      } else {
+        await page.keyboard.press(edge === "start" ? "Home" : "End");
+      }
       await page.evaluate(
         () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
       );

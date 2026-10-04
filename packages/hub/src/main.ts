@@ -9,7 +9,7 @@
  * the shutdown can also be logged and bounded.
  */
 
-import { resolveHubConfig } from "./config.js";
+import { resolveRemoteHubConfig } from "./config.js";
 import { stderrLogger } from "./log.js";
 import { createHub } from "./server.js";
 import { isEphemeralDatabase } from "./persistence.js";
@@ -17,7 +17,7 @@ import { isEphemeralDatabase } from "./persistence.js";
 const SIGNALS = ["SIGTERM", "SIGINT"] as const;
 
 async function main(): Promise<void> {
-  const config = resolveHubConfig();
+  const config = resolveRemoteHubConfig();
   const hub = await createHub(config, {
     operatorSetup: process.platform !== "win32" &&
       !isEphemeralDatabase(config.databasePath ?? "durable-default"),

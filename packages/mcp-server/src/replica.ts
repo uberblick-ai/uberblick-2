@@ -31,6 +31,8 @@ import {
   SIDEBAR_SUFFIX,
   directoryRoom,
   directoryStubDiffers,
+  decisionDirectoryFields,
+  decisionTopicArchived,
   getBlocksFragment,
   getBlocksWithInline,
   getDirectoryEntry,
@@ -47,6 +49,7 @@ import {
 } from "@uberblick/schema";
 import type { Block, DocMeta, InlineRun } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
+import { githubReference } from "./github-reference.js";
 import { log } from "./log.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
 import { HubSync } from "./sync.js";
@@ -476,6 +479,14 @@ export class Replicas {
       getDirectoryMap(doc).observe((event) => {
         for (const uuid of event.keysChanged) {
           this.staleStubs.add(uuid);
+          const first = getDirectoryEntry(doc, uuid);
+          if (first?.kind === "decision" && (first.topic ?? first.uuid) === uuid) {
+            for (const record of listDirectory(doc, { includeDeleted: true })) {
+              if (record.kind === "decision" && (record.topic ?? record.uuid) === uuid) {
+                this.staleStubs.add(record.uuid);
+              }
+            }
+          }
         }
       });
     }
@@ -673,7 +684,7 @@ export class Replicas {
         if (meta.uuid === "") continue;
         try {
           if (
-            getDirectoryEntry(this.directory().doc, meta.uuid)?.deleted === true
+            decisionTopicArchived(this.directory().doc, meta.uuid)
           ) {
             if (this.store.isIndexed(meta.uuid)) this.store.unindexDoc(meta.uuid);
             continue;
@@ -701,11 +712,12 @@ export class Replicas {
       }
       // A tombstoned document must not come back through the index — not on a
       // live update, and not on a rebuild.
-      if (getDirectoryEntry(this.directory().doc, meta.uuid)?.deleted === true) {
+      if (meta.kind === "decision") this.repairStub(meta, authored);
+      if (decisionTopicArchived(this.directory().doc, meta.uuid)) {
         this.store.unindexDoc(meta.uuid);
         return;
       }
-      this.repairStub(meta, authored);
+      if (meta.kind !== "decision") this.repairStub(meta, authored);
       this.indexRows(replica, meta);
     } catch (error) {
       log.warn("failed to mirror a document change", error);
@@ -720,6 +732,8 @@ export class Replicas {
    * backlinks answer for it without anyone duplicating the edge by hand.
    * `meta.links` itself is never touched — it stays the curated list a human or
    * an agent wrote. The store de-dupes the union and drops a self-link.
+   * Decision GitHub references come only from external hrefs in prose, using
+   * the schema's inline runs so a concurrent docLink retains precedence.
    *
    * One traversal for both the body text and the marks: looking each block's
    * inline runs up by id would rescan the fragment per block.
@@ -740,6 +754,18 @@ export class Replicas {
             docLinkRanges(block, inline).map((range) => range.docId),
           ),
         ],
+        githubRefs:
+          meta.kind === "decision"
+            ? blocks.flatMap(({ block, inline }) => {
+              if (!isProseBlockType(block.type)) return [];
+              return inline.flatMap((run) => {
+                const ref = run.marks.link === undefined
+                  ? null
+                  : githubReference(run.marks.link);
+                return ref === null ? [] : [ref];
+              });
+            })
+            : [],
         body: blocks.map(({ block }) => block.text).join("\n"),
       },
       replica.indexedThroughSeq,
@@ -813,7 +839,7 @@ export class Replicas {
       if (entry === null) {
         return;
       }
-      if (entry.deleted === true) {
+      if (decisionTopicArchived(this.directory().doc, entry.uuid)) {
         // Ask before deleting: the usual tombstone has no rows left, and a
         // delete that finds nothing still queues behind a write lock.
         if (this.store.isIndexed(uuid)) {
@@ -973,11 +999,12 @@ export class Replicas {
   private repairStub(meta: DocMeta, authored: boolean): void {
     const directory = this.directory();
     const stub = getDirectoryEntry(directory.doc, meta.uuid);
-    if (stub?.deleted === true) {
+    if (meta.kind !== "decision" && stub?.deleted === true) {
       return;
     }
     const now = Date.now();
-    const metaChanged = directoryStubDiffers(stub, meta);
+    const decisionFields = decisionDirectoryFields(this.replica(meta.uuid).doc);
+    const metaChanged = directoryStubDiffers(stub, meta, decisionFields);
     const staleStamp =
       stub?.updatedAt === undefined ||
       now - stub.updatedAt >= this.config.updatedAtCoarsenessMs;
@@ -1005,6 +1032,7 @@ export class Replicas {
       // carrying it forward.
       kind: meta.kind ?? "",
       status: meta.status ?? "",
+      ...decisionFields,
       createdAt: now,
       ...(stamp ? { updatedAt: now } : {}),
     });
@@ -1016,7 +1044,7 @@ export class Replicas {
     for (const entry of listDirectory(this.directory().doc, {
       includeDeleted: true,
     })) {
-      if (entry.deleted === true) {
+      if (decisionTopicArchived(this.directory().doc, entry.uuid)) {
         // A doc deleted elsewhere leaves the derived index; `list_docs` reads
         // the directory, and search must not surface a tombstoned doc. This is
         // the safety net for rows the observer never saw go stale — a mirror

@@ -449,10 +449,10 @@ export function BlockMenu({
         title="Insert block below"
         aria-hidden={!visible}
         tabIndex={-1}
-        // The caret stays where it is until an entry is picked.
-        onPointerDown={(event) => {
+        // Keep the touch target through blur without cancelling its native
+        // click. Mouse-down cancellation keeps the caret until a pick.
+        onPointerDown={() => {
           gutterPressed.current = true;
-          event.preventDefault();
         }}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => {

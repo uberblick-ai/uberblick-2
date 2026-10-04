@@ -23,13 +23,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import {
   appendBlock,
+  addComment,
+  createAnnotation,
   editBlock,
   getDirectoryEntry,
+  getMetaMap,
   initDoc,
   setDescription,
   setKind,
   setStatus,
   setTags,
+  setTldr,
   setTitle,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
@@ -121,6 +125,71 @@ afterEach(() => {
 });
 
 describe("directory stamps from the web", () => {
+  it("repairs decision relationships, summary and discussion counts from the document", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Lease duration" });
+    setKind(doc, "decision");
+    const meta = getMetaMap(doc);
+    const governs = "19c76b4a-3be9-45ca-8023-445699bf7cf1";
+    const predecessor = "74af8725-e3bc-47a5-a292-1ba64d7c168e";
+    doc.transact(() => {
+      // Approval writers belong to the rules change; these are foreign state.
+      meta.set("governs", governs);
+      meta.set("topic", predecessor);
+      meta.set("supersedes", predecessor);
+      meta.set("agentStance", true);
+      meta.set("decidedBy", "Reviewer");
+      meta.set("decidedAt", "2031-01-01T00:00:00.000Z");
+    });
+    setTldr(doc, "Renew a short lease.");
+    const block = appendBlock(doc, { type: "paragraph", text: "lease duration" });
+    const thread = createAnnotation(doc, block, 0, 5, "Author", "First comment");
+    const second = createAnnotation(doc, block, 6, 14, "Reviewer", "Second thread");
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, {
+      uuid: UUID, title: "Stale", kind: "decision", topic: predecessor,
+      commentCount: 90, agentStance: false, tldr: "stale",
+      createdAt: T0, updatedAt: T0,
+    });
+    tombstoneDirectoryEntry(directory, UUID);
+    const peer = peerOf(directory);
+    const stop = watchDocumentStub(doc, directory);
+    try {
+      expect(getDirectoryEntry(peer, UUID)).toMatchObject({
+        title: "Lease duration", governs, topic: predecessor, supersedes: predecessor,
+        tldr: "Renew a short lease.", agentStance: true, decidedBy: "Reviewer",
+        decidedAt: "2031-01-01T00:00:00.000Z", commentCount: 2, deleted: true,
+      });
+      addComment(doc, thread.id, "Reviewer", "A reply");
+      addComment(doc, second.id, "Author", "Another reply");
+      expect(getDirectoryEntry(peer, UUID)?.commentCount).toBe(4);
+      doc.transact(() => {
+        meta.delete("agentStance");
+        meta.delete("decidedBy");
+        meta.delete("decidedAt");
+      });
+      setTldr(doc, null);
+      const repaired = getDirectoryEntry(peer, UUID);
+      expect(repaired?.agentStance).toBeUndefined();
+      expect(repaired?.decidedBy).toBeUndefined();
+      expect(repaired?.decidedAt).toBeUndefined();
+      expect(repaired?.tldr).toBeUndefined();
+      expect(repaired?.deleted).toBe(true);
+    } finally {
+      stop();
+    }
+  });
+
+  it("keeps an ordinary document's TL;DR and comments out of its stub", () => {
+    const client = rig("Ordinary");
+    setTldr(client.doc, "A regular summary.");
+    const block = appendBlock(client.doc, { type: "paragraph", text: "prose" });
+    createAnnotation(client.doc, block, 0, 5, "Author", "A comment");
+    expect(stub(client)).not.toHaveProperty("tldr");
+    expect(stub(client)).not.toHaveProperty("commentCount");
+    expect(stub(client)).not.toHaveProperty("topic");
+  });
+
   it("defers stub repair and its authored stamp until the directory is writable", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Before" });

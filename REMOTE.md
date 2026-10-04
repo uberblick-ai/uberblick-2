@@ -1,9 +1,10 @@
 # Remote deployment over Tailscale
 
-This deployment runs one hub and one prebuilt web client on a Linux host that
-is already in a private Tailscale network. Caddy serves the single-page app,
-serves the client's runtime configuration at `/uberblick-config.json`, proxies
-`/ws` and `/auth/*` to the hub, and asks the host's Tailscale daemon for the HTTPS
+Run a published hub release on a Linux x86_64 host with Docker and Tailscale.
+The host needs no repository checkout, build tools, `ub`, GitHub account or
+registry login. One version supplies the hub image, the prebuilt web image and
+all host files. Caddy serves the app and `/uberblick-config.json`, proxies `/ws`
+and `/auth/*` to the hub, and asks the host's Tailscale daemon for the HTTPS
 certificate. The hub is not published directly.
 
 > The host serves the shared write-token signing secret to the app in `/uberblick-config.json`; anyone who can fetch that document has full read-write. Keep this deployment on a private Tailscale network while live clients still use that shared secret. GitHub sign-in issues separate device credentials but does not change live admission. An unguessable public hostname is not a security boundary.
@@ -13,170 +14,211 @@ the corpus Configuration and auth (62c70b7c-6e4c-40a4-a6bb-a7edbee08360).
 
 ## Host prerequisites
 
-`ub remote init` probes most of this over SSH before it changes anything on the
-host, and refuses naming the piece that is missing rather than guessing. Two
-entries are marked **not probed** — check those yourself, with the commands
-given, before you deploy.
+Check these before deploying:
 
-- **SSH access to the host**, as the user the target names
-  (`uberblick@box.tailnet.ts.net`). Tailscale SSH is enough. The same access is
-  how the host is updated later, since nothing on it updates itself.
-- **That user able to reach the Docker socket** — *not probed*. What the probe
-  runs, `docker compose version --short`, asks the CLI plugin its own version
-  and never contacts the daemon, so a user outside the host's `docker` group
-  passes it and then fails at the first command that does any work. Check it by
-  hand with something that changes nothing:
+- **A Linux x86_64 host with Docker Engine and Docker Compose 2.6.0 or newer.**
+  Only `linux/amd64` images are published. Compose 5 satisfies the floor too.
+  `docker compose version --short` checks the plugin; `docker info` checks that
+  your host user can reach the daemon. If the Docker socket refuses access,
+  add that user to the host's `docker` group and open a new session.
+- **Tailscale, connected to a private tailnet**, with MagicDNS and HTTPS enabled.
+  Read the full `*.ts.net` hostname from `tailscale status --json` and the IPv4
+  address from `tailscale ip -4`. Enabling HTTPS publishes the certificate's
+  machine name to a public certificate transparency log; see
+  [Tailscale's HTTPS guide](https://tailscale.com/docs/how-to/set-up-https-certificates).
+- **TCP port 443 free on that Tailscale IPv4 address.** Compose publishes only
+  `<TAILSCALE_IP>:443`, keeping Caddy off public and LAN interfaces, and publishes
+  no hub port. Docker binds it before Caddy starts; an address-in-use error is
+  reported by the daemon, so empty Caddy logs do not diagnose it.
+- **An operator session on the host**, locally or over SSH. Tailscale SSH is
+  sufficient. The operator deliberately launches and updates the stack; no
+  timer, webhook or polling loop does it. Use `ssh -t` for setup cancellation
+  through Ctrl-C.
 
-  ```sh
-  ssh uberblick@box.tailnet.ts.net docker info
-  ```
+The stack uses the standard `/var/run/tailscale/tailscaled.sock`, bind-mounted
+into Caddy, which runs as root inside its container to reach it. This is one of
+the certificate access modes in
+[Tailscale's Caddy guide](https://tailscale.com/docs/integrations/web-servers/caddy/caddy-certificates).
+Every other process runs in the published containers, including backup,
+restore and first-admin setup. The host needs no Node, pnpm or `sqlite3`.
 
-  A permission error on `/var/run/docker.sock` is fixed on the host by adding
-  the user to the `docker` group (and opening a new session).
-- **Docker Engine, with Docker Compose 2.6.0 or newer.** Compose 5 satisfies it
-  too; `docker compose version --short` is what both the probe and
-  `remote-compose.sh` read. The build secrets and the environment-backed secret
-  source that first set this floor are gone with #426; what the compose file
-  still uses beyond long-standing Compose v2 features is the top-level project
-  `name`. The floor stays at 2.6 because that is the oldest version this
-  deployment has been verified on, not because a lower one is known to fail.
-- **`git`.** `ub remote init` clones this repository onto the host and
-  `ub remote update` fetches into that checkout: the deployment is *built there,
-  from source*, so the host always holds a checkout and there is no registry and
-  no published image anywhere in this procedure. Only the by-hand walk-through
-  below needs a checkout you made yourself.
-- **Tailscale, connected to the private tailnet**, with MagicDNS and HTTPS
-  enabled for the tailnet — that is where the certificate comes from. Enabling
-  HTTPS publishes the machine names used in certificates to a public certificate
-  transparency log; Tailscale documents that tradeoff in
-  [Enabling HTTPS](https://tailscale.com/docs/how-to/set-up-https-certificates).
-  The probe also reads `tailscale status --json` and `tailscale ip -4` for the
-  MagicDNS name and the address.
-- **TCP port 443 free on the host's Tailscale IPv4 address** — *not probed*
-  either. Compose publishes `<TAILSCALE_IP>:443`, and Docker binds that port
-  *before* the container starts, so an address already in use fails
-  `sh remote-compose.sh up` outright with the daemon's bind error. Read that
-  error, not the logs: Caddy never ran, so `logs caddy` is empty and says
-  nothing.
+## Stand it up from a release
 
-Nothing else belongs on the host: no Node, no pnpm, no `sqlite3`. Every process
-here runs in a container built from the checkout, which is why the backup and
-restore procedures below borrow the hub's own image rather than asking for tools
-of their own.
-
-`ub remote init` runs from your own machine, which must itself be on the tailnet
-(it is what verifies the deployment afterwards) and must hold a GitHub login with
-admin rights on this repository and a `repo`-scoped token, so it can register the
-host's deploy key while the repository is private (`gh auth login --scopes repo`).
-
-Caddy supports Tailscale certificates without an ACME challenge when it can
-reach the local Tailscale daemon. The compose file bind-mounts the standard
-`/var/run/tailscale/tailscaled.sock` and runs Caddy as root inside its container,
-which is one of the access modes documented by
-[Caddy certificates on Tailscale](https://tailscale.com/docs/integrations/web-servers/caddy/caddy-certificates).
-
-## Stand it up
-
-One command, from your own machine — the one that already holds the signing
-secret, SSH access to the host and a GitHub login:
+Choose an existing published hub version explicitly. The version below is an
+example, not a moving channel. Run these commands **on the hub host**, in an
+empty deployment directory:
 
 ```sh
-ub remote init uberblick@box.tailnet.ts.net
+mkdir -p ~/uberblick-remote
+cd ~/uberblick-remote
+HUB_VERSION=0.1.0
+docker pull "ghcr.io/uberblick-ai/hub:$HUB_VERSION"
+release_container=$(docker create "ghcr.io/uberblick-ai/hub:$HUB_VERSION")
+docker cp "$release_container:/release/." .
+docker rm "$release_container"
+cp remote.env.example .env
+chmod 600 .env
 ```
 
-It does, over that one SSH target, what the rest of this document describes by
-hand:
+`docker create` does not start the container. The copied files include the
+version's `docker-compose.yml`, `remote.env.example` template,
+`remote-settings.sh`, operator commands in `bin/`, this manual, RELEASING.md and
+`release.json`. The Compose file names both exact versioned images; it has
+no host build. The same prebuilt web image serves every host, with its endpoint
+and workspace list supplied only by `/uberblick-config.json`.
 
-1. Checks the host — Docker Compose 2.6+, `git`, and `tailscale status --json`
-   for the MagicDNS name and `tailscale ip -4` for the address. Detection
-   failing is a prompt or `--host <fqdn> --ip <v4>`, never a guess, and it says
-   which of the three it was: tailscale absent, tailscaled not up, or the local
-   API refused because the SSH user is not the tailscale operator (fixed on the
-   host with `tailscale set --operator=<user>`).
-2. Generates an ed25519 deploy key **on the host** — it never leaves it — and
-   registers its public half read-only with `gh repo deploy-key add`, titled
-   `uberblick-<hostname>-<short-fingerprint>`. A key already registered is
-   detected by the key itself, never by its title, so a second run adds nothing.
-3. Clones `main` into `~/uberblick-remote` (`--dir` to change) with
-   `core.sshCommand` set on the clone, so the updater needs no environment of
-   its own. An existing checkout is fast-forwarded instead.
-4. Writes the host's `.env` — `TAILSCALE_HOST`, `TAILSCALE_IP`,
-   `HUB_AUTH_TOKEN` from your local signing secret, and `WEB_WORKSPACES` with
-   this machine's resolved workspace uuid — **over stdin**. The secret is never
-   an argument on either side, never echoed, and never reaches a shell history.
-5. Runs `sh remote-compose.sh up --build --detach`, then verifies from your
-   machine: it polls `https://<host>/` for up to 90 seconds — the first request
-   is what makes Tailscale issue the certificate, so an immediate check is a
-   false negative — and confirms `/ws` upgrades to a WebSocket. A failure exits
-   non-zero with the last hub and Caddy log lines, and persists nothing.
-6. Points this machine's clients at the new hub, and prints the **join URL** a
-   second computer binds to — `wss://<host>/ws/<workspace id>`, the endpoint
-   with this workspace's id on the end.
+Fill in `.env` using [the settings below](#configure-and-check-the-stack), then:
 
-Every step is idempotent: re-running `ub remote init` against a host it already
-stood up adds no second deploy key and re-clones nothing. The re-run locks that
-checkout continuously while it fast-forwards, replaces `.env`, rebuilds, and
-records the deployed commit, so it cannot interleave with another re-run or
-`ub remote update`. A contending re-run refuses as an operational failure.
+```sh
+sh bin/remote-compose.sh config --quiet
+sh bin/remote-compose.sh pull
+sh bin/remote-compose.sh up --detach
+sh bin/remote-compose.sh ps
+sh bin/remote-compose.sh logs --tail=100 hub caddy
+```
 
-That guarantee starts once the checkout already exists. The first invocation
-creates the directory before it writes `.env` and builds, so do not overlap a
-second invocation with that initial stand-up.
+[Check HTTPS and the WebSocket upgrade](#check-the-deployment) from another
+machine on the tailnet. Startup makes no workspace and changes no computer's
+workspace binding. For a fresh hub, establish a workspace's
+[first administrator](#establish-a-workspaces-first-administrator) and bind
+clients as described [below](#binding-a-computer-to-this-hubs-workspace).
+
+### Read a release's identity
+
+Anyone who can pull the public image can read its source commit and sync
+protocol version, without access to this repository:
+
+```sh
+docker run --rm --entrypoint cat "ghcr.io/uberblick-ai/hub:$HUB_VERSION" \
+  /release/release.json
+```
+
+The JSON records `version`, `sourceCommit`, `syncProtocolVersion` and the two
+`images` references. Both images also carry version, source revision and
+protocol metadata as image labels. Client release numbers and hub release
+numbers are independent; matching protocol versions decide wire compatibility,
+not matching package version strings.
 
 ### Updating the host — deliberately
 
-**The host does not update itself.** It stays on the commit it was last deployed
-at until somebody deploys another one. Nothing is scheduled: no timer, no
-webhook, no polling loop (owner decision, 2026-08-25 — an unattended updater
-would apply a commit that changes wire semantics to production with nobody
-present).
-
-One command, from your own machine, run by you or by an agent session over SSH:
+**The host does not update itself.** Name a newer published hub version, extract
+its host files to a staging directory, inspect its identity, then replace the
+release files and pull and recreate the containers. Keep the deployment's
+`.env`; no release contains that file. Run one operator session at a time:
 
 ```sh
-ub remote update uberblick@box.tailnet.ts.net
+cd ~/uberblick-remote
+HUB_VERSION=0.2.0
+mkdir ".release-$HUB_VERSION"
+docker pull "ghcr.io/uberblick-ai/hub:$HUB_VERSION"
+release_container=$(docker create "ghcr.io/uberblick-ai/hub:$HUB_VERSION")
+docker cp "$release_container:/release/." ".release-$HUB_VERSION/"
+docker rm "$release_container"
+cat ".release-$HUB_VERSION/release.json"
+cp -R ".release-$HUB_VERSION/." .
+sh bin/remote-compose.sh config --quiet
+sh bin/remote-compose.sh pull
+sh bin/remote-compose.sh up --detach --force-recreate
 ```
 
-It runs `remote-update.sh` in the host's checkout — the same script you would
-run by hand there — and reports either "up to date" or the commit it moved to.
-A `flock` on the checkout keeps every deployment of an existing checkout — this
-script or an `ub remote init` re-run, whichever sessions or users they run as —
-from interleaving. Updater contention remains the successful no-op "already
-running; nothing to do"; an explicit init re-run that cannot apply its
-configuration refuses non-zero. A second checkout on the same host remains free
-to deploy itself, and a host that cannot take a lock at all refuses non-zero
-rather than reporting an update it never ran as success.
+If the previous release had its operator scripts at the top level, remove
+only those four leftover files after the new `bin/` commands work:
 
-Both an update and an init re-run preserve the host's `HUB_GITHUB_CLIENT_ID`.
-The re-run reads that setting under the checkout lock rather than copying it
-from the machine running init.
+```sh
+rm -f remote-compose.sh hub-backup.sh hub-restore.sh hub-admin-setup.sh
+```
 
-**When to update:** when a merged change is one you want live — a fix you are
-waiting on, a feature you are about to demonstrate, a deployment you are about
-to verify. Deploy while you are present to watch it, never as the last thing
-before walking away.
+This cleanup is for a release directory. A compatibility checkout keeps its
+root `remote-compose.sh` forwarder for older installed clients and an updater
+already running across the move.
+
+Check HTTPS and `/ws` again. The project remains `uberblick-remote`, and its
+`hub-data`, `caddy-data` and `caddy-config` volumes keep documents, private access
+records and Caddy's certificate state across replacement. Do not pass
+`--volumes` to `down`, rename the project or change these volume names.
+Nothing follows `latest`, a moving branch or a schedule.
+
+**When to update:** choose a release containing a change you want live, and
+stay present to verify it. Deploying a release neither creates, moves nor
+deletes a workspace.
 
 **The wire-semantics rule.** A change to what travels over the socket — the auth
 token's shape or claims, the sync protocol, the room key, the served
-`/uberblick-config.json` contract — breaks every client still on the old code.
-Deploy such a change and update the clients in the **same sitting**: after
-`ub remote update`, pull `main` on each machine that syncs to this hub (and
-reload every open browser tab, which takes its bundle and its configuration from
-the host). If you cannot finish both halves now, do neither now.
+`/uberblick-config.json` contract — requires a matching client release. Such a
+hub release is published together with that client release. Move the host to
+the new hub release and update all clients in the **same sitting**, and reload
+every open browser tab so it takes its bundle and configuration from the host.
+If you cannot finish both halves now, do neither now. Check the protocol
+version recorded by the hub release before choosing it.
 
-Nothing is deployed *from* your checkout: the host fetches `origin/main` itself
-and resets to it, so what runs there is always a commit that is on `main`.
-The updater compares against `refs/uberblick/deployed`, which moves only after a
-build exits 0 — never against `HEAD`. A commit whose build fails is therefore
-retried on the next run rather than remembered as deployed, which is what keeps
-one bad commit from wedging the host with its containers on the old code.
-`git reset --hard` discards host-local edits to **tracked** files, deliberately —
-the host mirrors `main` and is not a place to edit — and prints what it
-discarded. The host's `.env` is untracked and survives; nothing runs `git clean`.
+### Switch an existing checkout host to a release
 
-## Enable GitHub sign-in
+The old and released stacks use the same Compose project and volume names.
+Take [a backup](#backing-the-hub-up) from the checkout first, then extract your
+chosen release into a separate empty directory using the launch commands above,
+with `~/uberblick-hub-release` in place of `~/uberblick-remote`.
+Instead of copying `remote.env.example`, copy the checkout's `.env` to that
+release directory and retain mode `0600`. This preserves the signing secret,
+host settings, workspaces and any `HUB_GITHUB_CLIENT_ID` override.
 
-Each hub operator registers their own **GitHub App** on github.com. Follow
+For example, with the checkout at `~/uberblick-remote` and the extracted files
+at `~/uberblick-hub-release`, pull before interrupting the existing stack:
+
+```sh
+cp ~/uberblick-remote/.env ~/uberblick-hub-release/.env
+chmod 600 ~/uberblick-hub-release/.env
+cd ~/uberblick-hub-release
+sh bin/remote-compose.sh config --quiet
+sh bin/remote-compose.sh pull
+cd ~/uberblick-remote
+if [ -f bin/remote-compose.sh ]; then
+  sh bin/remote-compose.sh down
+else
+  sh remote-compose.sh down # compatibility for a checkout predating bin/
+fi
+cd ~/uberblick-hub-release
+sh bin/remote-compose.sh up --detach
+```
+
+Check HTTPS, `/ws` and the existing documents. No database is copied or moved:
+the release containers reopen `uberblick-remote_hub-data`, and Caddy reuses its
+existing named volumes. Keep the backup. Use only the release directory for
+future operations; running the old checkout updater would replace these
+containers with checkout builds. The compatibility commands remain available
+[for hosts still on checkouts](#existing-checkout-deployments-compatibility).
+
+## GitHub sign-in
+
+Remote hubs offer GitHub sign-in through the public
+[Uberblick Login](https://github.com/apps/uberblick-login) GitHub App, owned by
+uberblick-ai, by default. You do not need to register an app or copy a client ID:
+leave `HUB_GITHUB_CLIENT_ID` unset or empty in the host's `.env`. This applies to
+the release stack and to existing checkout deployments.
+
+Each hub runs [GitHub's device flow](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app#using-the-device-flow-to-generate-a-user-access-token)
+directly with GitHub, using only the public client ID and no scope. It needs no
+client secret, private key or callback URL, and no Uberblick-operated service is
+in the path. No GitHub configuration is served to browsers or compiled into the
+web bundle. Sharing the app shares no hub authority: principals, memberships,
+device credentials and revocation belong to each hub alone.
+
+GitHub's approval page shows the app name, **Uberblick Login**, for every hub on
+the default. It neither identifies nor vouches for the hub. `ub auth login`
+displays the selected hub's origin next to the URL and code: approve only a login
+you started for that hub. Give a first-admin setup code only to the intended
+administrator, because the account approving it receives the grant.
+
+A malformed `HUB_GITHUB_CLIENT_ID` prevents hub startup and names that setting;
+it never falls back to the shared app. GitHub refusing or being unreachable
+fails only the attempt in progress. Local-only work never contacts GitHub. The
+hub started by `ub open` retains explicit-only sign-in: it offers it only when
+`HUB_GITHUB_CLIENT_ID` is set to a valid app client ID.
+
+### Use an operator-owned app
+
+Choose your own GitHub App when you want to control its approval name and
+settings, or keep your hubs apart from the shared app's device-flow budget and
+availability. Follow
 [GitHub's registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app):
 
 1. Open your account or organization's **Settings → Developer settings → GitHub
@@ -192,7 +234,7 @@ Each hub operator registers their own **GitHub App** on github.com. Follow
    it. This makes the app public so people outside its owner can authorize it;
    see [GitHub's app visibility rules](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/making-a-github-app-public-or-private).
 5. Copy **Client ID** from the app's settings page, then add this one line to
-   the remote checkout's `.env` on the host:
+   the deployment's `.env` on the host:
 
    ```dotenv
    HUB_GITHUB_CLIENT_ID=Iv23AbCdEF0123456789
@@ -201,19 +243,65 @@ Each hub operator registers their own **GitHub App** on github.com. Follow
    Replace the example with your actual client ID (the legacy `Iv1.` form or the newer
    alphanumeric `Iv23…` form). The numeric **App ID** is a different value.
 
-The hub uses [GitHub's device flow](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app#using-the-device-flow-to-generate-a-user-access-token).
-It needs no client secret, private key or callback URL. Only the client ID goes
-to the hub container; no GitHub configuration is served to browsers or compiled
-into the web bundle. After saving `.env`, recreate the hub from that checkout:
+Only the client ID goes to the hub container. Both `ub remote init` re-runs and
+`ub remote update` preserve this host setting. After saving `.env`, recreate the
+hub from the deployment directory:
 
 ```sh
-sh remote-compose.sh up --detach hub
+sh bin/remote-compose.sh up --detach hub
 ```
 
-Omitting the setting, or leaving it empty, disables sign-in with a distinct
-`not-configured` response. A malformed client ID prevents hub startup and names
-`HUB_GITHUB_CLIENT_ID`; GitHub refusing or being unreachable fails only the
-attempt in progress. Local-only work and `ub open` need no GitHub app.
+To return to Uberblick Login, remove the line or leave its value empty and
+recreate the hub with the same command. An update that redeploys the hub also
+applies the change; an "up to date" update does not recreate containers. Check
+that the host shell does not still export the override when you recreate it.
+
+### Shared app limits and controls
+
+These GitHub limits include both ordinary login and first-admin setup:
+
+- [Device flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#rate-limits-for-the-device-flow)
+  permits 50 verification-code submissions per hour per application, shared by
+  every hub using Uberblick Login. An operator-owned app has its own budget;
+  hubs sharing that app still share it. Token polling must follow GitHub's
+  returned interval; `slow_down` adds five seconds. A separate app does not
+  remove this polling rule.
+- [Secondary rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#about-secondary-rate-limits)
+  include 2,000 OAuth access-token requests per hour for GitHub Apps and OAuth
+  apps, plus abuse controls that can change without notice. GitHub does not
+  specify the accounting key for that ceiling there, so a separate app is no
+  guarantee against it. Repeated violations can cause the integration to be
+  banned, affecting every hub using it.
+- Reading `/user` uses the
+  [user's REST API budget](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#primary-rate-limit-for-authenticated-users):
+  normally 5,000 requests per hour, combined with that person's other GitHub
+  Apps, OAuth apps and personal access tokens. The documented Enterprise Cloud
+  exception can raise it. An operator-owned app does not give each hub or token
+  a separate user budget. The hub discards GitHub tokens after reading identity.
+- The app owner controls its
+  [Device Flow, name and permissions](https://docs.github.com/en/apps/maintaining-github-apps/modifying-a-github-app-registration),
+  [visibility](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/making-a-github-app-public-or-private)
+  and [user-token expiration](https://docs.github.com/en/apps/maintaining-github-apps/activating-optional-features-for-github-apps).
+  Disabling Device Flow or making the app private can prevent new sign-ins;
+  extra permissions can change approval prompts. These changes affect every
+  default hub. An operator-owned app puts those choices under your control.
+- [Deleting the app](https://docs.github.com/en/apps/maintaining-github-apps/deleting-a-github-app),
+  or [GitHub suspending its API access](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service#h-api-terms),
+  can stop new sign-ins at every default hub. An operator-owned app avoids
+  dependence on Uberblick Login's availability, while remaining subject to
+  GitHub's controls.
+- [Revoking GitHub App authorization](https://docs.github.com/en/apps/using-github-apps/reviewing-and-revoking-authorization-of-github-apps)
+  revokes that person's GitHub tokens for the shared app across hubs. They can
+  authorize it again for a later login. This does not revoke already-issued
+  Uberblick credentials; each hub owns that revocation. An operator-owned app
+  separates its GitHub authorization from Uberblick Login.
+
+GitHub documents the ten-token and ten-sign-in-per-hour rules specifically for
+[OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/rate-limits-for-oauth-apps#rate-limits-for-signing-in-users);
+those are not documented GitHub App limits.
+
+### Complete sign-in
+
 Failed attempts emit `hub.github.sign-in.failed` in the hub's stderr JSON log,
 with the failing step, a fixed code and the upstream HTTP status when available.
 No GitHub token, response body or upstream exception is logged. Check the app's
@@ -244,6 +332,29 @@ statuses expire no later than fifteen minutes after the attempt's expiry; at
 most 100 are retained when new attempts start, evicting oldest requests first. Evicted or restarted
 requests return `unknown-request`.
 
+Device renewal is `POST /auth/credential/renew`, beside those sign-in routes.
+Its JSON body is `{protocolVersion, token}`: `token` is an HMAC-SHA256 request
+proof signed with the presented credential's key, with `typ: "request"`,
+`operation: "renew-credential"`, its credential UUID as `kid`, and `iat` and
+`exp` in epoch seconds. The hub applies the same fifteen-minute proof lifetime
+ceiling and sixty-second clock skew as room tokens. A request proof opens no
+room, and a room token authorizes no renewal. Send secrets only in JSON bodies,
+never URLs or an `Authorization` header; bodies are limited to 4096 bytes and
+all answers are `no-store`.
+
+Renewal needs no GitHub approval or GitHub connection. It retires the presented
+credential and returns `renewed` with `credential: {record, key}` once, for the
+same principal and device and exactly its current memberships, including none.
+It grants no membership. Retirement closes and fences any rooms admitted under
+the old credential when credential admission is composed with the server.
+Replaying a verified proof under that retired credential returns
+`already-replaced`; unknown, revoked or unverifiable credentials return
+`sign-in-required`, revealing no identity or workspace. If the replacement
+answer is lost, sign in again: its key cannot be collected a second time.
+Malformed requests return `invalid-request`, version skew returns
+`protocol-mismatch` with the hub's version, and an unconfigured hub returns
+the same `not-configured` result as sign-in. Clients do not renew yet.
+
 Sign-in identifies the durable GitHub account and issues one Uberblick device
 credential for its existing workspace memberships. It grants no membership.
 These credentials are not accepted by the live hub or `ub open` yet; configuring
@@ -252,11 +363,11 @@ the shared signing secret and the private tailnet boundary.
 
 ## Establish a workspace's first administrator
 
-After [enabling GitHub sign-in](#enable-github-sign-in), run setup in the
-repository checkout **on the hub host**, for example over SSH:
+With [GitHub sign-in](#github-sign-in) available by default, run setup in the
+deployment directory **on the hub host**, for example over SSH:
 
 ```sh
-sh hub-admin-setup.sh <workspace-uuid>
+sh bin/hub-admin-setup.sh <workspace-uuid>
 ```
 
 Name exactly one bare workspace UUID. For an existing workspace, use the UUID
@@ -270,13 +381,15 @@ The command prints a setup ID, GitHub's approval URL and a short code. Keep
 the ID for checking the result, and keep the code private: the GitHub account
 that approves **that code** becomes the administrator. Open the URL in a
 browser on any machine, sign in to the intended account and approve the code.
+Give the code only to the intended administrator. GitHub's page names the app,
+not the hub, and does not identify or vouch for the setup's hub or workspace.
 The hub host needs no browser. The command waits for approval and reports the
 GitHub login and durable account ID, the named workspace, and whether the hub
 already held documents for that workspace. The hub logs the committed grant.
 Approval expires within fifteen minutes.
 
 Host access is the authority for this operation. The script runs a command in
-the running hub container through `remote-compose.sh`; the command connects to
+the running hub container through `bin/remote-compose.sh`; the command connects to
 a private Unix socket beside the hub database. No deployment HTTP or WebSocket
 route can start setup, complete it or retrieve its result. A shared signing
 secret, device credential or supplied GitHub token cannot authorize setup.
@@ -302,8 +415,7 @@ anyone there; access management belongs to that workspace's admins.
 
 Setup also leaves live sync admission unchanged: the live hub and `ub open`
 still use the shared signing secret. Setup activates no credential or
-membership admission, and local-only work needs none of it. A hub without
-GitHub configuration refuses setup distinctly as `not-configured`.
+membership admission, and local-only work needs none of it.
 
 ### Cancellation and a missing result
 
@@ -322,17 +434,17 @@ dropped SSH connection. Treat these interruptions as unknown results and check
 status; they do not prove cancellation.
 
 Losing the result does **not** establish that nothing changed. Reconnect to
-the host checkout and use the setup ID printed by the original command:
+the host deployment directory and use the setup ID printed by the original command:
 
 ```sh
-sh hub-admin-setup.sh status <setup-uuid>
+sh bin/hub-admin-setup.sh status <setup-uuid>
 ```
 
 The committed receipt is private hub data and survives a hub restart. This
 lookup retrieves what that setup committed without granting or changing
 anything. An unknown result never proves that nothing changed: for example,
 a database restore can replace the recorded history. Check the hub's grant
-logs with `sh remote-compose.sh logs hub` and the applicable backups when the
+logs with `sh bin/remote-compose.sh logs hub` and the applicable backups when the
 receipt is unavailable. Do not interpret a connection failure or an unknown
 result as permission to replace an administrator.
 
@@ -353,35 +465,18 @@ workspace, not just the affected workspace. Use the
 backup, this version offers no supported recovery. Any operator recovery route
 requires a separate owner decision.
 
-## What the command does, by hand
+## Configure and check the stack
 
-The manual procedure, kept as the reference for what `ub remote init` automates
-and for repairing a host by hand.
+The extracted `docker-compose.yml` is the release's recipe: it identifies the
+images, persistent volumes and the sole published port. Caddy's configuration
+is inside the web image; no host Caddyfile is needed. The host supplies `.env`
+at mode `0600`, because it holds the signing secret.
 
-**`docker-compose.yml` in this repository is the recipe** — the one canonical
-copy of what runs, which image each service is built from, which volume holds
-what, and which port is published where. It is not restated here and there is no
-second copy to keep in step: read it when you want the shape of the deployment.
-Caddy's configuration is the same story — `Caddyfile` is `COPY`'d into the web
-image from the checkout (see `Dockerfile`) and is fully `{$VAR}`-parameterised,
-so nothing writes or edits a Caddyfile on the host. **The only file the host
-supplies is `.env`.**
-
-From the repository checkout on the remote host:
-
-```sh
-cp remote.env.example .env
-chmod 600 .env
-tailscale ip -4
-```
-
-Mode `0600`, because that file holds the signing secret — `ub remote init`
-writes it under `umask 077` and chmods it for exactly this reason.
-
-Then edit `.env`. Its keys are the ones `docker-compose.yml` and
-`remote.env.example` name: four required, plus optional `WEB_HUB_URL` (see
-[Pointing the client at another hub](#pointing-the-client-at-another-hub)) and
-`HUB_GITHUB_CLIENT_ID` (see [Enable GitHub sign-in](#enable-github-sign-in)).
+Edit `.env` using `remote.env.example`. Set `TAILSCALE_HOST`, `TAILSCALE_IP`
+and `HUB_AUTH_TOKEN`, and choose the `WEB_WORKSPACES` list. `WEB_HUB_URL` is
+optional (see [Pointing the client at another hub](#pointing-the-client-at-another-hub)).
+Set `HUB_GITHUB_CLIENT_ID` only for an operator-owned app (see
+[GitHub sign-in](#github-sign-in)); unset or empty uses Uberblick Login.
 
 - `TAILSCALE_HOST` is the host's full `*.ts.net` MagicDNS name, with no scheme
   or trailing slash.
@@ -391,7 +486,7 @@ Then edit `.env`. Its keys are the ones `docker-compose.yml` and
   for, optionally decorated with a display slug (`<slug>-<uuid>`). Left at the
   placeholder, the root address has nothing to open and says so — document links
   still work, and the switcher shows only the workspace the address names. The
-  value may contain only letters, digits, `,` and `-`; `remote-compose.sh`
+  value may contain only letters, digits, `,` and `-`; `bin/remote-compose.sh`
   refuses anything else, because the list is substituted into the JSON
   configuration document and a quote there could inject a second `hubUrl` that
   retargets every browser. That refusal is the guarantee: no quote and no
@@ -406,32 +501,32 @@ Then edit `.env`. Its keys are the ones `docker-compose.yml` and
 - `HUB_AUTH_TOKEN` is the existing shared signing secret used by the local MCP
   clients that will sync to this hub. On a trusted machine with the repository's
   age key, `fnox get HUB_AUTH_TOKEN` prints that value so it can be transferred
-  to the host's ignored `.env`. Never copy the age key to the host. The secret
-  must consist only of letters, digits, `.`, `_`, and `-`; `remote-compose.sh`
+  to the host's `.env`. Never copy the age key to the host. The secret
+  must consist only of letters, digits, `.`, `_`, and `-`; `bin/remote-compose.sh`
   refuses other characters because the shell and Compose parse `.env`
   differently — and because the value is substituted into the JSON
   configuration document Caddy serves, where a quote could inject further keys.
 
-The wrapper reads `.env`, checks both substituted values against that alphabet,
-and re-exports the secret under a name only it sets, which `docker-compose.yml`
-requires. Always use it for this deployment: that requirement is what makes a
-bare `docker compose up` fail rather than serve an unchecked value into the
-document.
+`bin/remote-compose.sh` reads `.env` and refuses unsafe values before calling
+Docker. The web container checks them again before Caddy starts, including when
+started by plain `docker compose up`: an unchecked value never enters the
+served JSON. A refusal names the setting. The allowed alphabets are:
 
-Validate the configuration without rendering its secret values, build the web
-bundle, and start both services:
+| Setting | Allowed characters |
+| --- | --- |
+| `TAILSCALE_HOST` | Letters, digits, `.`, `-` |
+| `WEB_HUB_URL` | Letters, digits, `:`, `/`, `.`, `_`, `-` |
+| `WEB_WORKSPACES` | Letters, digits, `,`, `-` |
+| `HUB_AUTH_TOKEN` | Letters, digits, `.`, `_`, `-` |
 
-```sh
-sh remote-compose.sh config --quiet
-sh remote-compose.sh up --build --detach
-sh remote-compose.sh ps
-sh remote-compose.sh logs --tail=100 hub caddy
-```
+Use the wrapper for operator commands in either deployment layout. Validate
+without printing the secret with `sh bin/remote-compose.sh config --quiet`.
 
-Two things say the deployment is up, and they are what `ub remote init` checks
-for you: **the site answers** on `https://<TAILSCALE_HOST>/`, and **`/ws`
-upgrades** to a WebSocket. The first request is what makes Tailscale issue the
-certificate, so a check that fails immediately after `up` is a false negative —
+### Check the deployment
+
+Two things say the deployment is up: **the site answers** on
+`https://<TAILSCALE_HOST>/`, and **`/ws` upgrades** to a WebSocket. The first
+request is what makes Tailscale issue the certificate, so a check that fails immediately after `up` is a false negative —
 give it up to 90 seconds. From another machine on the tailnet:
 
 ```sh
@@ -443,19 +538,19 @@ curl -sS -o /dev/null -D - https://<TAILSCALE_HOST>/ws \
 
 `200` from the first, `101 Switching Protocols` from the second. A `502` on
 `/ws` is Caddy up and the hub down — expected while the hub is stopped for a
-backup, and otherwise a job for `sh remote-compose.sh logs hub`.
+backup, and otherwise a job for `sh bin/remote-compose.sh logs hub`.
 
 Then open `https://<TAILSCALE_HOST>` from a second computer on the same tailnet.
 It opens the first workspace in `WEB_WORKSPACES`. In the browser developer tools,
 `https://<TAILSCALE_HOST>/uberblick-config.json` must return
 `{"hubUrl":"wss://<TAILSCALE_HOST>/ws","workspaces":"<the list from .env>","hubAuthToken":"<the secret from .env>"}`
-and the collaboration WebSocket must be that same address; a `ws://localhost`
-request means the document did not arrive and the client fell back to the values
-compiled into the bundle. That document is a credential — do not paste it
+and the collaboration WebSocket must be that same address. A release bundle
+has no deployment endpoint fallback: check this document if the browser has
+no usable hub endpoint. That document is a credential — do not paste it
 anywhere. If the status line reads "no hub token", the document arrived without
-`hubAuthToken`: check that the deployment commands went through
-`remote-compose.sh`. The client logs one line naming both sources in force,
-which is the fastest way to tell a served value from a fallback. The directory
+`hubAuthToken`: check the container settings and its startup refusal in the
+logs. The client logs one line naming both sources in force,
+which shows whether the document supplied its configuration. The directory
 should hydrate after the socket connects.
 
 Do not run `docker compose config` without `--quiet`: the rendered
@@ -463,41 +558,36 @@ configuration contains `HUB_AUTH_TOKEN` in the hub environment.
 
 ### Pointing the client at another hub
 
-Nothing about this deployment is baked into the bundle. The client fetches
-`/uberblick-config.json` from the origin it was served from and takes `hubUrl`,
-`workspaces` and `hubAuthToken` from it; the compiled-in endpoint is only the
-fallback for when no such document is deployed, and there is no compiled-in
-secret at all. Caddy renders that document from the `HUB_URL`, `WORKSPACES` and
-`HUB_AUTH_TOKEN` it is given, which `docker-compose.yml` fills from
-`WEB_HUB_URL` and `WEB_WORKSPACES` in `.env` — the first defaulting to
-`wss://<TAILSCALE_HOST>/ws`, the second to empty — and from the checked secret
-`remote-compose.sh` exports.
+The release bundle takes `hubUrl`, `workspaces` and `hubAuthToken` only from
+`/uberblick-config.json` on its serving origin. No deployment value or secret
+is compiled into it. Caddy renders that document from its runtime environment:
+Compose supplies `WEB_HUB_URL` (default `wss://<TAILSCALE_HOST>/ws`),
+`WEB_WORKSPACES` (default empty) and `HUB_AUTH_TOKEN` from the host settings.
+Startup validates them before serving.
 
 So retargeting the client, or changing which workspaces it offers, is an edit to
 that document, not a rebuild — set the value in `.env` and recreate the Caddy
 container:
 
 ```sh
-sh remote-compose.sh up --detach caddy
+sh bin/remote-compose.sh up --detach caddy
 ```
 
 The document is served with `Cache-Control: no-store`, so the next page load
 picks up the change. The client reads `hubUrl`, `workspaces` and `hubAuthToken`
 and ignores every other key. `hubUrl` must be a plain `ws://` or `wss://`
 address — one carrying userinfo, a query string or a fragment is refused, and
-the client falls back to the endpoint compiled into the bundle rather than
-dialling it. An entry of `workspaces` that is not a workspace id is dropped
-rather than offered, and a list with nothing usable in it degrades to the
-bundle's own — which on this deployment is empty, so `/` says there is no
+the release client has no deployment endpoint to fall back to. An entry of
+`workspaces` that is not a workspace id is dropped
+rather than offered. With no usable workspace list, `/` says there is no
 workspace while document links keep working. A document with no `hubAuthToken`
 leaves the page with no document content and says "no hub token"; there is no
 browser cache or fallback secret, and the client re-reads the document on its
 next connect attempt rather than giving up for the life of the tab.
 
 Rotating the secret is the same edit: set it in `.env` and recreate the two
-containers with `sh remote-compose.sh up --detach`. It is no longer a rebuild —
-the bundle carries no secret (#426) — but every open tab keeps minting with the
-one it was served until it is reloaded.
+containers with `sh bin/remote-compose.sh up --detach`. Every open tab keeps
+minting with the one it was served until it is reloaded.
 
 ## Two-computer verification protocol
 
@@ -523,11 +613,11 @@ name/color if prompted.
    A's network. Confirm both browsers converge to the same text and neither
    edit disappears.
 4. **Hub restart durability:** make one more edit and wait until it appears on
-   both computers. On the host run `sh remote-compose.sh restart hub`, then
+   both computers. On the host run `sh bin/remote-compose.sh restart hub`, then
    reload B. Confirm the document and the last edit remain.
 5. **Named-volume durability:** record a distinctive document title, then run
-   `sh remote-compose.sh down` followed by
-   `sh remote-compose.sh up --detach`. Reload B and confirm the title remains
+   `sh bin/remote-compose.sh down` followed by
+   `sh bin/remote-compose.sh up --detach`. Reload B and confirm the title remains
    and the directory hydrates. Do not pass `--volumes` to `down`; that flag
    intentionally deletes the named SQLite volume.
 
@@ -538,13 +628,13 @@ they are not replaced by the repository's local test suite.
 ## Operations
 
 ```sh
-sh remote-compose.sh logs --follow hub caddy
-sh remote-compose.sh restart hub
-sh remote-compose.sh down
-sh remote-compose.sh up --detach
+sh bin/remote-compose.sh logs --follow hub caddy
+sh bin/remote-compose.sh restart hub
+sh bin/remote-compose.sh down
+sh bin/remote-compose.sh up --detach
 ```
 
-Deploying a new commit is [its own runbook](#updating-the-host--deliberately).
+Deploying a newer release is [its own runbook](#updating-the-host--deliberately).
 A host stood up before 2026-08-25 carries the retired `uberblick-update.timer`;
 retire it once, on that host:
 
@@ -558,16 +648,18 @@ systemctl --user list-timers --all | grep uberblick   # expect no output
 
 The hub handles Compose's `SIGTERM` by flushing pending document updates before
 it exits. SQLite is `/data/hub.sqlite` in the `hub-data` named volume, so normal
-container replacement and `sh remote-compose.sh down` preserve it.
+container replacement and `sh bin/remote-compose.sh down` preserve it.
 
 ### Backing the hub up
 
 ```sh
-sh hub-backup.sh ~/uberblick-hub-$(date +%Y-%m-%d).sqlite
+sh bin/hub-backup.sh ~/uberblick-hub-$(date +%Y-%m-%d).sqlite
 ```
 
-In the host's checkout, beside `remote-compose.sh`. It **stops the hub, copies,
-and starts it again** — and the stop is the point, not an inconvenience.
+Run it from the host's deployment directory, which contains `bin/`. You can
+also invoke the script by its absolute path from any directory; a relative
+backup filename is resolved in your current directory. It **stops the
+hub, copies, and starts it again** — and the stop is the point, not an inconvenience.
 Hocuspocus debounces the store (2s, at most 10s; the hub leaves both at their
 defaults), so a document edited a moment ago may exist only in the hub's memory.
 The only flush an operator can reach is a shutdown: `SIGTERM` makes the hub
@@ -604,7 +696,7 @@ backups when you would take a deploy, not mid-sentence for somebody.
 ### Restoring one
 
 ```sh
-sh hub-restore.sh ~/uberblick-hub-2026-08-28.sqlite
+sh bin/hub-restore.sh ~/uberblick-hub-2026-08-28.sqlite
 ```
 
 **Verified before anything is touched.** A restore runs on somebody's worst day,
@@ -641,9 +733,9 @@ Clearing it is one line, and SQLite does the work: a journal is recovered on the
 next clean open.
 
 ```sh
-sh remote-compose.sh up --detach hub
-sh remote-compose.sh stop hub
-sh hub-restore.sh ~/uberblick-hub-2026-08-28.sqlite
+sh bin/remote-compose.sh up --detach hub
+sh bin/remote-compose.sh stop hub
+sh bin/hub-restore.sh ~/uberblick-hub-2026-08-28.sqlite
 ```
 
 A hub that exited non-zero but left no journal is not blocked — that is often
@@ -654,10 +746,10 @@ just as well as over an existing one, which is the case the drill on #404
 exercises: `down --volumes`, `up`, restore, and a fresh client with empty local
 state enumerating and reading the pre-backup corpus.
 
-Both scripts drive Compose only through `sh remote-compose.sh`. That is not
-style: `docker-compose.yml` gates Caddy's secret on a variable only the wrapper
-exports, and Compose interpolates the whole model for every subcommand, so a bare
-`docker compose stop hub` fails on this host.
+Both scripts drive Compose through the shared `sh bin/remote-compose.sh`, in a
+release directory or a compatibility checkout. Restore uses the same shell,
+Node runtime and `node` user included in the hub image; it needs no host
+database utility.
 
 ### What a backup is actually for
 
@@ -679,8 +771,8 @@ the host. Nothing here schedules a backup, rotates one, or sends one anywhere.
 
 ## Binding a computer to this hub's workspace
 
-The hub this deployment starts is empty; `ub remote init` pointed the machine
-that ran it at the new endpoint. Every other computer joins. Which process runs
+A fresh release hub starts empty and changes no client binding. Each computer
+that will use an existing workspace joins it explicitly. Which process runs
 where matters: everything in this section runs on **your** computers, not on the
 remote host, which runs the deployment and operator scripts.
 
@@ -692,9 +784,8 @@ ub remote join wss://<TAILSCALE_HOST>/ws/<WORKSPACE_ID> \
   --secret-file ~/uberblick-remote-secret
 ```
 
-That is the URL `ub remote init` printed: the endpoint with the workspace id as
-its last path segment. Nothing precedes it — no `ub init`, no `--workspace`, no
-clone. The id is what a second machine has to be told, because a workspace id is
+The URL is the endpoint with the workspace id as its last path segment. Nothing
+precedes it — no `ub init`, no `--workspace`, no clone. The id is what a second machine has to be told, because a workspace id is
 a uuid: a machine that invented its own would join the hub and find nothing of
 yours there, the rooms being keyed by a different id. Carrying it in the URL is
 what makes that one string, and one paste, rather than two.
@@ -784,3 +875,110 @@ Archived documents move with their content and stay archived until restored.
 Merging two independently populated workspaces is not supported: the URL says
 which workspace `join` is about — that one's two replicas reconcile as CRDTs,
 and the others on the machine are left alone.
+
+## Existing checkout deployments (compatibility)
+
+The release procedure above is the supported launch and update path. Existing
+checkout hosts can still use these shipped commands until they switch to a
+release. They need `git` on the host and a repository checkout; initial setup
+also needs a GitHub login with repository admin rights on your own machine
+(`gh auth login --scopes repo`) to register the host’s read-only deploy key.
+These requirements belong only to the checkout path.
+
+### Initialize or re-run a checkout host
+
+One command, from your own machine — the one that already holds the signing
+secret, SSH access to the host and a GitHub login:
+
+```sh
+ub remote init uberblick@box.tailnet.ts.net
+```
+
+It does, over that one SSH target, the compatibility checkout deployment:
+
+1. Checks the host — Docker Compose 2.6+, `git`, and `tailscale status --json`
+   for the MagicDNS name and `tailscale ip -4` for the address. Detection
+   failing is a prompt or `--host <fqdn> --ip <v4>`, never a guess, and it says
+   which of the three it was: tailscale absent, tailscaled not up, or the local
+   API refused because the SSH user is not the tailscale operator (fixed on the
+   host with `tailscale set --operator=<user>`).
+2. Generates an ed25519 deploy key **on the host** — it never leaves it — and
+   registers its public half read-only with `gh repo deploy-key add`, titled
+   `uberblick-<hostname>-<short-fingerprint>`. A key already registered is
+   detected by the key itself, never by its title, so a second run adds nothing.
+3. Clones `main` into `~/uberblick-remote` (`--dir` to change) with
+   `core.sshCommand` set on the clone, so the updater needs no environment of
+   its own. An existing checkout is fast-forwarded instead.
+4. Writes the host's `.env` — `TAILSCALE_HOST`, `TAILSCALE_IP`,
+   `HUB_AUTH_TOKEN` from your local signing secret, and `WEB_WORKSPACES` with
+   this machine's resolved workspace uuid — **over stdin**. The secret is never
+   an argument on either side, never echoed, and never reaches a shell history.
+5. Runs `sh bin/remote-compose.sh up --build --detach`, then verifies from your
+   machine: it polls `https://<host>/` for up to 90 seconds — the first request
+   is what makes Tailscale issue the certificate, so an immediate check is a
+   false negative — and confirms `/ws` upgrades to a WebSocket. A failure exits
+   non-zero with the last hub and Caddy log lines, and persists nothing.
+6. Points this machine's clients at the new hub, and prints the **join URL** a
+   second computer binds to — `wss://<host>/ws/<workspace id>`, the endpoint
+   with this workspace's id on the end.
+
+Every step is idempotent: re-running `ub remote init` against a host it already
+stood up adds no second deploy key and re-clones nothing. The re-run locks that
+checkout continuously while it fast-forwards, replaces `.env`, rebuilds, and
+records the deployed commit, so it cannot interleave with another re-run or
+`ub remote update`. A contending re-run refuses as an operational failure.
+
+That guarantee starts once the checkout already exists. The first invocation
+creates the directory before it writes `.env` and builds, so do not overlap a
+second invocation with that initial stand-up.
+
+### Updating a checkout host
+
+**The host does not update itself.** It stays on the commit it was last deployed
+at until somebody deploys another one. Nothing is scheduled: no timer, no
+webhook, no polling loop (owner decision, 2026-08-25 — an unattended updater
+would apply a commit that changes wire semantics to production with nobody
+present).
+
+One command, from your own machine, run by you or by an agent session over SSH:
+
+```sh
+ub remote update uberblick@box.tailnet.ts.net
+```
+
+It runs `remote-update.sh` in the host's checkout — the same script you would
+run by hand there — and reports either "up to date" or the commit it moved to.
+A `flock` on the checkout keeps every deployment of an existing checkout — this
+script or an `ub remote init` re-run, whichever sessions or users they run as —
+from interleaving. Updater contention remains the successful no-op "already
+running; nothing to do"; an explicit init re-run that cannot apply its
+configuration refuses non-zero. A second checkout on the same host remains free
+to deploy itself, and a host that cannot take a lock at all refuses non-zero
+rather than reporting an update it never ran as success.
+
+Both an update and an init re-run preserve the host's `HUB_GITHUB_CLIENT_ID`.
+The re-run reads that setting under the checkout lock rather than copying it
+from the machine running init.
+
+**When to update:** when a merged change is one you want live — a fix you are
+waiting on, a feature you are about to demonstrate, a deployment you are about
+to verify. Deploy while you are present to watch it, never as the last thing
+before walking away.
+
+**The wire-semantics rule.** A change to what travels over the socket — the auth
+token's shape or claims, the sync protocol, the room key, the served
+`/uberblick-config.json` contract — breaks every client still on the old code.
+Deploy such a change and update the clients in the **same sitting**: after
+`ub remote update`, pull `main` on each machine that syncs to this hub (and
+reload every open browser tab, which takes its bundle and its configuration from
+the host). If you cannot finish both halves now, do neither now.
+
+Nothing is deployed *from* your checkout: the host fetches `origin/main` itself
+and resets to it, so what runs there is always a commit that is on `main`.
+The updater compares against `refs/uberblick/deployed`, which moves only after a
+build exits 0 — never against `HEAD`. A commit whose build fails is therefore
+retried on the next run rather than remembered as deployed, which is what keeps
+one bad commit from wedging the host with its containers on the old code.
+`git reset --hard` discards host-local edits to **tracked** files, deliberately —
+the host mirrors `main` and is not a place to edit — and prints what it
+discarded. The host's `.env` is untracked and survives; nothing runs `git clean`.

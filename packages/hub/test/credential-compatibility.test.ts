@@ -11,7 +11,7 @@ import type { GithubSignIn, SignInCollection } from "../src/github-sign-in.js";
 import { silentLogger } from "../src/log.js";
 import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
 import { createHub, createRoomAuthenticator, type Hub, type HubContext } from "../src/server.js";
-import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "../src/token.js";
+import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintRequestProof, mintToken } from "../src/token.js";
 import {
   createClient,
   removeTempDatabases,
@@ -116,12 +116,20 @@ beforeAll(async () => {
   if (collected.status !== "complete") throw new Error("sign-in did not complete");
   expect(collected.identity.id).toBe(setup.identity.id);
   expect(collected.credential.record.workspaces).toEqual([WORKSPACE]);
-  issuedToken = await mintToken(await importCredentialKey(Buffer.from(collected.credential.key, "base64url")), {
+  const proof = await mintRequestProof(await importCredentialKey(Buffer.from(collected.credential.key, "base64url")), {
+    kid: collected.credential.record.id, operation: "renew-credential", lifetimeSeconds: 60,
+  });
+  const renewed = await (await post("/auth/credential/renew", { protocolVersion: SYNC_PROTOCOL_VERSION, token: proof })).json() as {
+    status: string; credential: typeof collected.credential;
+  };
+  expect(renewed.status).toBe("renewed");
+  expect(renewed.credential.record.deviceId).toBe(collected.credential.record.deviceId);
+  issuedToken = await mintToken(await importCredentialKey(Buffer.from(renewed.credential.key, "base64url")), {
     typ: "room",
     sub: collected.identity.id,
     workspace: WORKSPACE,
     scope: "read-write",
-    kid: collected.credential.record.id,
+    kid: renewed.credential.record.id,
     lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
   });
 

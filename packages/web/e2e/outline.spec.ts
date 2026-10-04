@@ -7,7 +7,7 @@
  * long-list containment, and the smooth scroll call into the rendered block.
  */
 
-import { expect, test } from "@playwright/test";
+import { chromium, expect, test } from "@playwright/test";
 import type { Browser, Page } from "@playwright/test";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
@@ -16,7 +16,7 @@ const { harness } = setupHarness();
 
 async function openDocument(page: Page): Promise<void> {
   await page.goto(harness().appUrl);
-  if ((page.viewportSize()?.width ?? 1280) < 1280) {
+  if (await page.evaluate(() => matchMedia("(width < 80rem)").matches)) {
     await page.getByRole("button", { name: "Show document list", exact: true }).click();
   }
   await expect(page.locator(".ub-list-head")).toBeVisible();
@@ -27,6 +27,20 @@ async function openDocument(page: Page): Promise<void> {
 async function typeHeading(page: Page, level: 1 | 2 | 3, text: string): Promise<void> {
   await page.keyboard.type(`${"#".repeat(level)} ${text}`);
   await page.keyboard.press("Enter");
+}
+
+/** Notify the editor in the same task, before deferred focus can restore its old range. */
+async function selectParagraph(paragraph: ReturnType<Page["locator"]>): Promise<void> {
+  await paragraph.evaluate((node) => {
+    const doc = node.ownerDocument;
+    const range = doc.createRange();
+    range.selectNodeContents(node);
+    const selection = doc.getSelection();
+    if (selection === null) throw new Error("e2e: paragraph selection is unavailable");
+    selection.removeAllRanges();
+    selection.addRange(range);
+    doc.dispatchEvent(new Event("selectionchange"));
+  });
 }
 
 /** Reach a control through the browser's real sequential focus order. */
@@ -210,10 +224,10 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
   const context = await browser.newContext({ hasTouch: true });
   const page = await context.newPage();
   try {
-    await page.setViewportSize({ width: 720, height: 540 });
+    await page.setViewportSize({ width: 1194, height: 540 });
     await openDocument(page);
     await typeHeading(page, 1, "Touch target");
-    const trigger = page.getByRole("button", { name: "Contents 1" });
+    const trigger = page.locator(".ub-outline-trigger");
     const panel = page.getByRole("menu", { name: "Contents 1" });
     await trigger.tap();
     await expect(panel).toBeVisible();
@@ -230,7 +244,8 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     // from both rendering and keyboard navigation, and its portal closes.
     await page.locator(".ub-editor .ub-paragraph").last().click();
     await page.keyboard.type("annotate me");
-    await page.keyboard.press("Shift+Home");
+    await selectParagraph(page.locator(".ub-editor .ub-paragraph").last());
+    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("annotate me");
     await page.getByRole("button", { name: "Comment", exact: true }).click();
     await page.getByPlaceholder(/Comment as/).fill("a thread");
     await page.keyboard.press("Enter");
@@ -240,25 +255,79 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     await trigger.tap();
     await expect(panel).toBeVisible();
     await threads.tap();
-    await expect(page.locator(".ub-rail-open")).toBeVisible();
+    const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
+    await expect(sheet).toBeVisible();
+    await expect(page.locator('[data-slot="sheet-overlay"]')).toBeVisible();
     await expect(trigger).toBeHidden();
     await expect(panel).toBeHidden();
+    expect(await trigger.evaluate((node) => {
+      node.focus();
+      return node === document.activeElement;
+    })).toBe(false);
 
     // The drawer stays open across the breakpoint. If Contents opens while
     // wide, narrowing again must close its portal when CSS hides the trigger.
-    await page.setViewportSize({ width: 1400, height: 540 });
+    await page.setViewportSize({ width: 1280, height: 540 });
+    await expect(sheet).toHaveCount(0);
+    await expect(page.locator("aside.ub-rail")).toBeVisible();
+    await expect(threads).toBeHidden();
+    await expect(page.locator('[data-slot="sheet-overlay"]')).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Hide document list" })).toBeVisible();
     await expect(trigger).toBeVisible();
     await trigger.tap();
     await expect(panel).toBeVisible();
-    await page.setViewportSize({ width: 720, height: 540 });
+    await page.setViewportSize({ width: 1279, height: 540 });
+    await expect(sheet).toBeVisible();
     await expect(trigger).toBeHidden();
     await expect(panel).toBeHidden();
+    await sheet.getByRole("button", { name: "Close threads" }).tap();
+    await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
   } finally {
     await context.close();
   }
 });
 
-for (const width of [390, 820, 1024]) {
+test.describe("fractional layout", () => {
+  // Let the native window supply its device scale instead of fixture emulation.
+  test.use({ deviceScaleFactor: async ({ browserName: _browserName }, use) => { await use(undefined); } });
+
+  test("both panes use drawers at a fractional width just below xl", async () => {
+    // A native window scaled to device pixels has a fractional CSS layout width.
+    // Playwright's viewport emulation accepts only integer CSS dimensions.
+    const browser = await chromium.launch({
+      args: ["--force-device-scale-factor=1.25", "--window-size=1279,1000"],
+    });
+    try {
+      const context = await browser.newContext({ viewport: null });
+      const page = await context.newPage();
+      expect(await page.evaluate(() =>
+        matchMedia("(width > 1279px)").matches && matchMedia("(width < 1280px)").matches,
+      )).toBe(true);
+      await openDocument(page);
+      await page.keyboard.type("fractional layout");
+      await page.keyboard.press("Shift+Home");
+      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      await page.getByPlaceholder(/Comment as/).fill("fractional conversation");
+      await page.keyboard.press("Enter");
+      const toggle = page.locator(".ub-threads-toggle");
+      await expect(toggle).toBeVisible();
+      await expect(page.locator("aside.ub-rail")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
+      await toggle.click();
+      const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
+      await expect(sheet).toBeVisible();
+      await expect(sheet).toContainText("fractional conversation");
+      await expect(page.locator('[data-slot="sheet-overlay"]')).toBeVisible();
+      await sheet.getByRole("button", { name: "Close threads" }).click();
+      await page.getByRole("button", { name: "Show document list", exact: true }).click();
+      await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
+for (const width of [390, 820, 1024, 1194, 1279]) {
   test(`the threads sheet closes by touch without selecting covered prose at ${width}px`, async ({
     browser,
   }) => {
@@ -274,15 +343,17 @@ for (const width of [390, 820, 1024]) {
       // Prepare both unmarked ranges before annotating either: typing at an
       // existing comment's edge would extend its mark into the new fixture.
       await page.locator(".ub-editor .ub-paragraph").first().click();
-      await page.keyboard.press("Home");
-      await page.keyboard.press("Shift+End");
+      await selectParagraph(page.locator(".ub-editor .ub-paragraph").first());
+      await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("first");
       await page.getByRole("button", { name: "Comment", exact: true }).click();
       await page.getByPlaceholder(/Comment as/).fill("first conversation");
       await page.keyboard.press("Enter");
 
+      // Wait for Tiptap's deferred focus before setting the next range.
+      await expect(editor(page)).toBeFocused();
       await page.locator(".ub-editor .ub-paragraph").last().click();
-      await page.keyboard.press("Home");
-      await page.keyboard.press("Shift+End");
+      await selectParagraph(page.locator(".ub-editor .ub-paragraph").last());
+      await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("second");
       await page.getByRole("button", { name: "Comment", exact: true }).click();
       await page.getByPlaceholder(/Comment as/).fill("second conversation");
       await page.keyboard.press("Enter");
@@ -296,6 +367,7 @@ for (const width of [390, 820, 1024]) {
       // The thread selected while wide is retained when its column becomes a
       // sheet. Its close control remains reachable on the touch viewport.
       await expect(sheet).toBeVisible();
+      await expect(sheet.locator('.ub-thread[aria-current="true"]')).toContainText("second conversation");
       await sheet.getByRole("button", { name: "Close threads" }).tap();
       await expect(sheet).toBeHidden();
 
@@ -350,8 +422,7 @@ test("touch reveals a low thread in the sheet while its close control stays in v
     }
     for (const [index, anchor] of anchors.entries()) {
       await page.locator(".ub-editor .ub-paragraph").nth(index).click();
-      await page.keyboard.press("Home");
-      await page.keyboard.press("Shift+End");
+      await selectParagraph(page.locator(".ub-editor .ub-paragraph").nth(index));
       await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(anchor);
       await page.getByRole("button", { name: "Comment", exact: true }).click();
       await page.getByPlaceholder(/Comment as/).fill(`conversation ${index + 1}`);

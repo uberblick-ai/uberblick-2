@@ -26,6 +26,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   createGroup,
+  decisionTopicArchived,
   deleteGroup,
   getDirectoryEntry,
   moveDoc,
@@ -169,7 +170,7 @@ function sidebarPayload(
     return {
       uuid,
       title: stub.title,
-      status: stub.deleted === true ? "archived" : "ok",
+      status: decisionTopicArchived(directory, uuid) ? "archived" : "ok",
     };
   };
   return {

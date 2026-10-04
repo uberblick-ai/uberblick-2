@@ -1,175 +1,138 @@
-# Issue preparation — ground, classify, challenge, recheck
+# Issue preparation — ground, decide, recheck
 
-This provider-neutral procedure owns grounding, challenge, and recheck after a
-GitHub intake enters the preparation queue. `.agents/protocols/issue-shaping.md`
-owns the earlier conversation; `.github/ISSUE_SPEC.md` owns the final body and
-lifecycle; `.agents/roles/issue-preparer.md` owns the run and its outcome.
-
-The preparer owns one grounded pass, applying correctable findings before its
-final recheck. Independent challenge protects the contract before implementation;
-it does not replace implementation correctness review.
+Turn a confirmed intake into implementable work. `issue-shaping.md` owns user
+intent and MVP boundaries; `.github/ISSUE_SPEC.md` owns the body, sizing and
+lifecycle; `.agents/roles/issue-preparer.md` owns the run and handoff.
+Preparation adds technical grounding, not unrequested product scope. Its review
+does not replace implementation correctness review.
 
 ## Ground it at a commit
 
-Scan the corpus catalog with `list_docs` and use descriptions,
-issue context and targeted search to select relevant product, architecture,
-principle and decision documents. Read those documents, following links where
-they govern the outcome; a catalog scan is not a read of every document body.
-In the existing Pointers section, link each document the implementer needs by
-title and UUID, with a short reason or relevant section. Preserve governing
-constraints through those citations rather than copying the documents into the
-issue. Mark a missing source as a gap; do not invent its intended content.
-For a resumed pass, refresh only the affected discovery and links.
+Read the issue, thread and prior handoffs first. A review verdict, first
+implementer return, or human answer resumes existing preparation: refresh only
+the disputed contract, affected evidence and upstream changes. Do not repeat
+broad discovery or reclassify that work.
 
-Fetch `origin/main` and record the exact SHA you ground
-against — every later statement in the preflight is a claim about that commit,
-not about your memory of the repo. Against it, read what the issue targets: the
-current behavior, the modules, interfaces, invariants and tests it lives in,
-related open issues and PRs, and the files the change is likely to touch. Read
-the intended outcome of the effort this issue belongs to, and the human
-decisions already recorded for it, from the records that exist: the parent
-issue and its thread, the milestone, an `Implements:` requirement document, and
-the Pointers citations — draft inside those decisions instead of
-reopening them. Where none of those records exists that read is a no-op; an
-ordinary issue needs no parent, planning map or overview. Verify each
-load-bearing noun and promised outcome has a current substrate: shipped concepts
-exist in current code, and settled targets exist in the current corpus.
-Closed issue history is evidence only when a pointer or a missing substrate
-makes it relevant; do not sweep `NOT_PLANNED` work as a separate gate.
+Fetch `origin/main` and record its SHA. Ground claims in that revision's code,
+interfaces, invariants and tests. Read existing parent, milestone, requirement
+and decision records where relevant; do not require new planning artifacts or
+reopen settled intent. Verify shipped concepts against current code and agreed targets against
+the corpus. Use closed history only when a pointer or missing
+substrate makes it relevant; do not sweep closed-as-not-planned work.
 
-When the issue is an investigation, its contract names the decision that
-investigation informs, the uncertain assumption, and an observation that could
-support or overturn it — the frame `.agents/protocols/issue-shaping.md` states
-under "Keep the effort oriented", sized by `.github/ISSUE_SPEC.md`'s Sizing
-rule. A bounded negative result resolves it, so neither the eventual feature
-working nor the design that would follow it is a deliverable. This binds
-investigations only; every other issue states its outcomes as usual.
+For new preparation, scan the corpus catalog and select documents by their
+descriptions and targeted search. Read relevant documents and governing links;
+a catalog scan is not a content read. Put title, UUID and a short reading reason
+in Pointers, without copying the source. Mark missing context honestly. A proven
+mechanical correction with no governing product document may stop at the
+catalog scan; explain why. Resumed work refreshes only affected sources.
 
-Before drafting on **every** route, self-check included, list the files changed by
-every open PR and compare them with the likely footprint. A file-list hit is the
-start of the check: inspect the relevant PR diff before deciding whether the
-overlap is a dependency, semantic conflict or mechanical reconciliation. Record real
-overlap while it is still cheap to reshape or defer the issue. Prefer tracked
-file searches (`git ls-files`, `rg`) and exclude `.claude/worktrees/` and
-`.worktrees/`; copied agent worktrees are not additional grounding evidence. The
-same question runs one step wider before `ready`: where this outcome affects
-related planned work, record the affected contract or dependency in the prepared
-issue itself — its Pointers, or a blocked-by relationship for a real
-prerequisite (`gh issue edit <N> --add-blocked-by <M>`). The other issue is not
-edited.
+Include relevant decisions in that reading guide, including open records the
+implementation would build on: cite the topic and record UUIDs with the reading
+reason. Read the topic's answer in force and pending records under **Decision
+logs** (`b7fdc6d7-ce5c-4733-a083-3fc30196f0b3`); an open recommendation never
+supplies the approved outcome required by ISSUE_SPEC. A challenge to a decided
+record follows the successor and affected-work stop in the preparer's role.
 
-Grounding is proportional, not exhaustive — enough to establish the outcome,
-approach and material risks. A proven mechanical, local correction may stop after the catalog scan
-when no product document governs the change; say why in the handoff. Repeating MCP
-calls to prove an absence is not grounding. If the base advances while you are
-here, refresh only the grounding and challenge the new commits actually affect;
-a merge elsewhere in the tree does not invalidate a challenge about this one.
+Before drafting on every route, compare the likely footprint with the files in
+all open PRs. Inspect overlapping diffs to distinguish a dependency, semantic
+conflict or mechanical reconciliation. Use tracked-file searches; exclude copied
+worktrees. Record material overlap and affected planned contracts in this issue's
+Pointers, or a native blocked-by relationship for a real prerequisite; do not
+edit the other issue.
 
-When that fetch advances the base, inspect the changed paths. If the new commits
-touch this role contract or the procedure files this run is executing, re-read
-those files before continuing; refreshing the issue's code while following
-stale workflow rules is not a valid recheck.
+Keep grounding proportional. If main advances, inspect changed paths and refresh
+only affected evidence, including role or protocol files the run is following.
+An unrelated merge does not invalidate prior review.
 
-## Classify the route
+## Decide the work shape and route
 
-First check for an implementer `returned` outcome, or a review verdict, after
-the latest preparer handoff. On a review verdict, or the first consecutive
-return since a human answer, use route `resumed`: read the prior preparation and
-review evidence, refresh the reported conflict and affected upstream grounding,
-and correct only that part of the issue. Do not reclassify, repeat broad
-grounding, or require another review. A second consecutive return is already
-parked on `needs-human`; after a person answers, resume the same way and treat
-that answer as resetting the count. A return that exposes a new owner boundary
-is an escalation rather than a way back to `ready`.
+Preserve the agreed useful outcome, constraints and non-goals. Resolve factual
+uncertainty from evidence, leave ordinary engineering choices to implementation,
+and escalate only unresolved human choices or the existing review limits.
+Do not turn implementation preferences into requirements or enumerate every
+edge case. An investigation names its decision, uncertain assumption and
+confirming or refuting observation; a bounded negative result can complete it.
+The eventual feature is not its deliverable.
 
-Classify from current evidence, not paths, labels or keywords. Self-check only
-when the change is mechanical (no behavior or contract choice), understood,
-local and easily reversed. Every other new preparation gets one independent
-review. A spike has no automatic exemption.
+Grounded dispositions include:
 
-| Route | Grounded condition | Reviews |
-|---|---|---|
-| `trivial` | mechanical, low uncertainty, local blast radius, easy reversal | none |
-| `challenged` | any other combination | `agent` |
+- **`wontfix`:** grounding shows only a low-impact theoretical finding and no
+  current supported-usage failure. Record why delivery is disproportionate and
+  close as not planned before route classification, without review. Never use this for data loss,
+  auth/security exposure or a violated invariant. Concrete later evidence may
+  justify reopening or a new issue.
+- **`split`:** the request cannot fit one independently reviewable PR. Follow
+  ISSUE_SPEC's sizing rule: substantial, independently useful pieces rather
+  than tiny technical steps. Create native sub-issues with `needs-preparation`,
+  the source milestone and only real ordering blockers. Keep the source open
+  as their parent, blocked by each child so priority inherits. Product-changing
+  decomposition requires a human decision.
 
-State the concrete route reason briefly in the handoff; the signals are not an
-additional report.
+For a new, unsplit issue that remains worth doing:
 
-## Challenge
+| Route | Condition | Outcome |
+| --- | --- | --- |
+| `trivial` | Mechanical, no behavior or contract choice, understood, local and easily reversed | Self-check, then `ready` |
+| `challenged` | Every other combination | `review` |
 
-During preparation, challenge a proposed custom web UI mechanism that the
-framework, an existing dependency or a qualifying library would cover. Use
-**Web UI system** (`fd874b38-eea8-4754-a2e7-cffa5f4372b1`) for library selection
-and the evidenced, owner-confirmed custom-mechanics exception; point to that
-source in the issue rather than copying its criteria. This applies on every
-route, before handing the contract off.
+Classify from evidence, not paths, labels or keywords; state the route reason
+briefly. A spike has no automatic review exemption. A resumed pass uses the
+existing classification and review evidence.
 
-For `trivial`, verify the grounded contract directly without a review and
-finish `ready`. For `challenged`, finish `review`: `.agents/roles/reviewer.md`
-runs on another runtime before `ready` lands. The
-reviewer reconstructs from GitHub and tests the assumptions that could change the outcome, violate an invariant or waste
-substantial work: missing failure boundaries, simpler approaches, real conflicts
-with current work, and a coherent, independently useful work shape. Apply
-ISSUE_SPEC's intent and sizing rules. Both preparer and reviewer distinguish
-missing outcomes or invariants from optional engineering approaches; correct the
-former without making the latter requirements or enumerating every edge case.
-They also separate an empirical uncertainty from a human choice and from
-ordinary engineering judgment, as `.agents/protocols/issue-shaping.md` defines
-those three: answer the first from repository and corpus evidence, send only the
-second to a human, and leave the third to implementation.
+## Challenge and resume
 
-The reviewer classifies each material finding as `correctable` when settled
-intent or repository evidence is enough, or `owner-boundary` for product or
-agent authority, safety, or a fundamentally unsafe work shape, and escalates an
-owner-boundary finding itself. A clean review lets `ready` land. Otherwise the
-issue comes back with correctable findings, and the resumed pass applies them,
-repeats the affected grounding and final recheck, and finishes `ready`. An
-issue gets one review pass: a finding the preparer cannot settle without
-another review or a person's choice is escalated.
+On every route, challenge custom web UI mechanics against the framework,
+existing dependencies and qualifying libraries. Read **Web UI system**
+(`fd874b38-eea8-4754-a2e7-cffa5f4372b1`) for selection and the evidenced,
+owner-confirmed exception; cite it rather than copying its policy.
+
+A challenged issue receives one independently dispatched review on another
+runtime under `.agents/roles/reviewer.md`. The reviewer reconstructs the contract
+from GitHub and challenges wrong assumptions, missing outcomes or invariants,
+unsafe or wasteful work shapes and conflicts with current work.
+
+Findings are `correctable` when evidence or settled intent resolves them, or
+`owner-boundary` for unresolved product/authority, safety or fundamentally unsafe
+scope. The reviewer escalates owner boundaries itself. A clean review permits
+`ready`; otherwise the preparer applies correctable findings, repeats affected
+grounding and the final recheck, then finishes `ready`. Explain rejected findings.
+If another review or a person's choice is needed to settle one, escalate; there
+is no second preparation review.
+
+The first consecutive implementer return resumes the same way. A second return
+without an intervening human answer stops at `needs-human`; an answer resets
+that count and resumes affected work. A newly exposed owner boundary escalates
+immediately. Use the shared role rules for the focused question, options and
+recommendation. There is no extra approval ceremony for already-authorized work.
 
 ## Recheck, then decide
 
-Last thing before finishing, fetch `origin/main` again. Refresh only grounding
-affected by an upstream change, then re-read the issue, its thread and any
-review verdict.
+Before finishing, fetch main again and refresh affected grounding; re-read the
+issue, thread and review verdict. Fold material corrections into the body,
+remove superseded wording and link decisions where traceability matters.
 
-Where a comment amends or contradicts the body, fold it into the body and
-delete what it replaces, linking the comment only where traceability matters.
-Check the final body against ISSUE_SPEC, including distinct observable outcomes.
-Keep What to the outcome, acceptance criteria to the guarantees, and Pointers to
-useful source locations and non-obvious traps. Remove discovery narration and
-repeated rationale; preserve constraints and failure boundaries that change what
-must be built. Corpus pointers give title, UUID and a short reason to read the
-live source, not excerpts or summaries of it. Record material work-in-flight
-overlap and its consequence, not a snapshot of every changed file. Length follows
-the contract's complexity; neither a word target nor an exhaustive inventory is
-required.
+Check the final contract against ISSUE_SPEC: What describes the outcome,
+acceptance criteria distinct observable guarantees, and Pointers useful sources
+and non-obvious traps. Preserve constraints and failure boundaries that affect
+what must be built. Remove discovery narration, copied corpus text, repeated
+rationale and file inventories. Length follows the contract, not a word target.
 
-| Final finding state | Outcome |
-|---|---|
-| `challenged`, before its review | `review` |
-| none, or all correctable findings applied | `ready` |
-| unresolved product, authority, safety or unsafe-shape boundary | `needs-human` |
-| request split into a parent and its sub-issues | `split` |
-
-`ready` is the preparer's final verdict, within recorded owner-approved
-authority; there is no later approval ceremony.
-An owner boundary is the only normal preparation stop. It carries concrete
-options and a recommendation, not another automatic review.
+Finish with the disposition above: `review` before a challenged issue's review,
+`ready` when no findings remain or all correctable ones are applied, or
+`needs-human` for an unresolved owner boundary or exhausted review/return limit.
+A `wontfix` run closes the issue itself with `gh issue close <N> --reason
+"not planned"`; the launcher only changes labels.
 
 ## Record once
 
-Give each durable record one job: the issue body carries the final contract,
-the review verdict carries the challenge and its evidence, and the preparer
-handoff links that verdict and states the disposition. When all findings were
-applied, say so once; do not explain each finding again. Explain an individual
-disposition only when it is not evident from the final body and linked verdict,
-such as a rejected finding or an unresolved owner choice. Retain the required
-handoff fields and route reason. A review verdict, a human answer or the first
-implementer return resumes from durable work, refreshing only affected evidence.
+The issue body is the final contract; the review verdict holds findings and
+evidence; the handoff states the disposition and links the verdict. Say once
+when all corrections are applied. Explain individual dispositions only when
+not clear from those records, such as a rejected finding or unresolved choice.
+Retain the role's handoff fields and route reason; do not copy the original
+intake into a comment or narrate the run.
 
-Preparer-authored prose names an issue by a descriptive title alongside its
-`#N`: the prepared body's What, Why and Out of scope, a `needs-human`
-question, and this handoff. Machine-read records and reference lists keep bare
-identifiers and their own grammar — `Implements:`, `Outcome:` summaries,
-`Closes`, and the Pointers list.
+In preparer-authored prose, use a descriptive title alongside an issue number
+in What, Why, Out of scope, human questions and handoffs. Machine-readable
+records and reference lists retain their own grammar and bare identifiers.

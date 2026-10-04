@@ -35,19 +35,24 @@ import {
   appendBlock,
   createGroup,
   directoryRoom,
+  getDirectoryMap,
   getDirectoryEntry,
   getMeta,
+  getMetaMap,
   initDoc,
+  listAnnotations,
   listDirectory,
   pinDoc,
   readSidebar,
   restoreDirectoryEntry,
   roomForDoc,
+  setKind,
   sidebarRoom,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
+import * as guardedBinding from "../src/editor/guarded-binding.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const UUID = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
@@ -256,6 +261,62 @@ function action(label: string): HTMLElement | undefined {
 }
 
 describe("an archived document is readable, says so, and offers one way back", () => {
+  it("archives and restores a whole decision topic from a successor, with first-record authority", async () => {
+    const directory = room(directoryRoom(WORKSPACE)).ydoc;
+    const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+    const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
+    initDoc(ydoc, { uuid: UUID, title: "New lease" });
+    setKind(ydoc, "decision");
+    getMetaMap(ydoc).set("topic", OTHER);
+    getMetaMap(ydoc).set("supersedes", OTHER);
+    appendBlock(ydoc, { type: "paragraph", text: "The proposed lease." });
+    for (const uuid of [OTHER, UUID]) {
+      upsertDirectoryEntry(directory, {
+        uuid, title: uuid === UUID ? "New lease" : "Original lease",
+        kind: "decision", status: "open", topic: OTHER,
+        ...(uuid === UUID ? { supersedes: OTHER } : {}),
+      });
+    }
+    const group = createGroup(sidebar, "Reading");
+    pinDoc(sidebar, group, OTHER);
+    pinDoc(sidebar, group, UUID);
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+
+    // A foreign/partial write to a mirror cannot make the record read-only.
+    const map = getDirectoryMap(directory);
+    act(() => {
+      map.set(UUID, { ...(map.get(UUID) as object), deleted: true });
+    });
+    expect(banner(host)).toBeNull();
+    expect(prose(host)?.getAttribute("contenteditable")).toBe("true");
+    openActions(host);
+    act(() => action("Archive document")?.click());
+    act(() => document.querySelector<HTMLButtonElement>(
+      '[data-slot=alert-dialog-action]',
+    )?.click());
+    expect(getDirectoryEntry(directory, OTHER)?.deleted).toBe(true);
+    expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
+    expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
+
+    act(() => restoreButton(host)?.click());
+    expect(getDirectoryEntry(directory, OTHER)?.deleted).toBeUndefined();
+    expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
+    expect(banner(host)).toBeNull();
+    expect(prose(host)?.getAttribute("contenteditable")).toBe("true");
+
+    // A first-record tombstone alone closes the successor's editing surface.
+    act(() => map.set(OTHER, { ...(map.get(OTHER) as object), deleted: true }));
+    expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
+    expect(banner(host)).not.toBeNull();
+    expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
+    expect(host.querySelector<HTMLInputElement>(".ub-title")?.readOnly).toBe(true);
+    act(() => typeInto(host.querySelector<HTMLInputElement>(".ub-title"), "changed"));
+    expect(getMeta(ydoc).title).toBe("New lease");
+    act(() => restoreButton(host)?.click());
+    expect(banner(host)).toBeNull();
+  });
+
   it("curates and archives from the identity-row menu, taking the pin with it", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
@@ -283,6 +344,8 @@ describe("an archived document is readable, says so, and offers one way back", (
     act(() => action("Pin to sidebar")?.click());
     expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
 
+    act(() => trigger?.click());
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
     openActions(host);
     act(() => action("Archive document")?.click());
     const dialog = document.querySelector('[role="alertdialog"]');
@@ -306,7 +369,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     act(() => action("Archive document")?.click());
     act(() => {
       document
-        .querySelector<HTMLButtonElement>('[role="alertdialog"] .ub-tool-danger')
+        .querySelector<HTMLButtonElement>('[data-slot=alert-dialog-action]')
         ?.click();
     });
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
@@ -405,7 +468,7 @@ describe("an archived document is readable, says so, and offers one way back", (
       emitStatus(roomName, { writable: false });
       act(() => {
         document
-          .querySelector<HTMLButtonElement>('[role="alertdialog"] .ub-tool-danger')
+          .querySelector<HTMLButtonElement>('[data-slot=alert-dialog-action]')
           ?.click();
       });
 
@@ -420,7 +483,7 @@ describe("an archived document is readable, says so, and offers one way back", (
       emitStatus(roomName, { writable: true });
       act(() => {
         document
-          .querySelector<HTMLButtonElement>('[role="alertdialog"] .ub-tool-danger')
+          .querySelector<HTMLButtonElement>('[data-slot=alert-dialog-action]')
           ?.click();
       });
       expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
@@ -454,6 +517,7 @@ describe("an archived document is readable, says so, and offers one way back", (
   });
 
   it("follows the directory tombstone in both directions, under an open pane", async () => {
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
     initDoc(ydoc, { uuid: UUID, title: "Retired protocol" });
@@ -465,6 +529,8 @@ describe("an archived document is readable, says so, and offers one way back", (
     tombstoneDirectoryEntry(peer, UUID);
 
     const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    expect(binding).toHaveBeenCalledOnce();
+    expect(binding.mock.calls[0]?.[0].editable).toBe(false);
 
     // ---- the deep link says what it opened ----
     expect(banner(host)?.textContent).toContain("Archived");
@@ -480,6 +546,7 @@ describe("an archived document is readable, says so, and offers one way back", (
 
     // ---- Restore is the one action, and it is a real restore ----
     act(() => restoreButton(host)?.click());
+    expect(binding).toHaveBeenCalledOnce();
     expect(banner(host)).toBeNull();
     expect(prose(host)?.getAttribute("contenteditable")).toBe("true");
     expect(prose(host)?.getAttribute("aria-readonly")).toBe("false");
@@ -494,6 +561,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     // No remount, no reload: the same editor element goes read-only in place.
     const bound = prose(host);
     act(() => tombstoneDirectoryEntry(peer, UUID));
+    expect(binding).toHaveBeenCalledOnce();
     expect(banner(host)).not.toBeNull();
     expect(prose(host)).toBe(bound);
     expect(bound?.getAttribute("contenteditable")).toBe("false");
@@ -546,4 +614,54 @@ describe("an archived document is readable, says so, and offers one way back", (
     act(() => root.render(<Probe uuid={UUID} />));
     expect(seen.slice(switched)).not.toContain(false);
   });
+});
+
+describe("starting a thread requires a writable document", () => {
+  for (const cause of ["archived", "not writable"] as const) {
+    it(`withholds Comment while the document is ${cause}, then offers it again`, async () => {
+      const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+      const directory = room(directoryRoom(WORKSPACE)).ydoc;
+      const docRoom = roomForDoc(WORKSPACE, UUID);
+      const ydoc = room(docRoom).ydoc;
+      initDoc(ydoc, { uuid: UUID, title: "Retired protocol" });
+      appendBlock(ydoc, { type: "paragraph", text: "still every byte of it" });
+      upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired protocol" });
+      if (cause === "archived") tombstoneDirectoryEntry(directory, UUID);
+      else roomStatus.set(docRoom, { ...LIVE, writable: false });
+
+      const host = await openApp(`/${WORKSPACE}/${UUID}`);
+      const result = binding.mock.results[0];
+      if (result?.type !== "return" || result.value.editor === null) {
+        throw new Error("fixture document did not bind an editor");
+      }
+      const editor = result.value.editor;
+      const before = Y.encodeStateAsUpdate(ydoc);
+      // Select actual prose in the bound editor, without mounting a composer
+      // independently of the App's archive and room-status wiring.
+      act(() => editor.commands.setTextSelection({ from: 1, to: 12 }));
+      expect(editor.state.selection.empty).toBe(false);
+      expect(editor.state.doc.textBetween(1, 12)).toBe("still every");
+      expect(document.querySelector('[data-slot="selection-composer"]')).toBeNull();
+      expect(document.querySelector('button[aria-label="Comment"]')).toBeNull();
+      expect(listAnnotations(ydoc)).toEqual([]);
+      expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
+
+      if (cause === "archived") expect(restoreButton(host)).not.toBeNull();
+      await act(async () => {
+        if (cause === "archived") restoreButton(host)?.click();
+        else emitStatus(docRoom, { writable: true });
+      });
+      const comment = document.querySelector<HTMLButtonElement>(
+        '[data-slot="selection-composer"] button[aria-label="Comment"]',
+      );
+      expect(comment?.textContent).toBe("Comment");
+      act(() => comment?.click());
+      expect(document.querySelector('[data-slot="selection-excerpt"]')?.textContent).toBe(
+        "still every",
+      );
+      expect(document.querySelector('[data-slot="selection-composer"] textarea')).not.toBeNull();
+      expect(listAnnotations(ydoc)).toEqual([]);
+      expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
+    });
+  }
 });

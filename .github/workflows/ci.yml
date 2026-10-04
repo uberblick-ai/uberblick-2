@@ -105,7 +105,7 @@ jobs:
   # to block a merge on them. A red e2e job is a signal to read, not a gate — if
   # it turns out to flake, it gets fixed or deleted, it does not get retried.
   #
-  # Separate from `gates` for cost too: this job downloads a browser, which the
+  # Separate from `gates` for cost too: this job downloads browsers, which the
   # other one has no reason to pay for.
   e2e:
     name: browser e2e (advisory, not a required check)
@@ -136,6 +136,10 @@ jobs:
         env:
           PNPM_STORE_DIR: ~/.pnpm-store
 
-      # The task downloads the pinned Chromium itself (a no-op on a cache hit)
+      # Cached engines do not include system packages, so provision WebKit's
+      # host libraries on every CI run. Local e2e never installs host packages.
+      - run: mise exec -- pnpm --filter @uberblick/web exec playwright install-deps webkit
+
+      # The task downloads pinned Chromium and WebKit (a no-op on a cache hit)
       # and starts its own hub and dev server, so there is nothing else to wire.
       - run: mise run e2e

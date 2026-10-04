@@ -18,6 +18,8 @@ import {
 import type { ReactElement } from "react";
 import {
   appendBlock,
+  decisionDirectoryFields,
+  decisionTopicArchived,
   directoryRoom,
   getDirectoryEntry,
   initDoc,
@@ -440,12 +442,12 @@ export function App(): ReactElement {
    * always remains a non-modal column.
    */
   const [threadsOpen, setThreadsOpen] = useState(false);
-  // Keep this query identical to the threads layout query in styles.css.
+  // Both panes use Tailwind xl; retain the rail's open state across resizing.
   const [narrowThreads, setNarrowThreads] = useState(
-    () => window.matchMedia?.("(max-width: 1100px)").matches ?? false,
+    () => window.matchMedia?.(NARROW_LAYOUT_QUERY).matches ?? false,
   );
   useEffect(() => {
-    const query = window.matchMedia?.("(max-width: 1100px)");
+    const query = window.matchMedia?.(NARROW_LAYOUT_QUERY);
     if (query === undefined) return;
     const update = (): void => setNarrowThreads(query.matches);
     update();
@@ -691,10 +693,11 @@ export function App(): ReactElement {
       return;
     }
     const entry = getDirectoryEntry(directory.ydoc, selected);
-    if (entry === null || entry.deleted === true) return;
+    if (entry === null || decisionTopicArchived(directory.ydoc, selected)) return;
     restoreFocusRoom.current = doc.room;
-    tombstoneDirectoryEntry(directory.ydoc, selected);
-    unpinDoc(sidebar.ydoc, selected);
+    for (const uuid of tombstoneDirectoryEntry(directory.ydoc, selected)) {
+      unpinDoc(sidebar.ydoc, uuid);
+    }
   }, [directory, doc, sidebar, selected]);
 
   /**
@@ -901,6 +904,7 @@ export function App(): ReactElement {
         upsertDirectoryEntry(directory.ydoc, {
           uuid,
           title: "Untitled",
+          ...decisionDirectoryFields(handle.connection.ydoc),
           createdAt,
           updatedAt: createdAt,
         });
@@ -981,7 +985,6 @@ export function App(): ReactElement {
           connection={directory}
           sidebar={sidebar}
           groups={sidebarGroups}
-          entries={entries}
           workspaces={workspaces}
           workspace={workspace}
           workspaceNames={workspaceNames}
@@ -1061,7 +1064,7 @@ export function App(): ReactElement {
             onArchive={
               selectedDirectoryEntry !== null &&
               selectedDirectoryEntry !== undefined &&
-              selectedDirectoryEntry.deleted !== true &&
+              !archived &&
               directoryStatus.writable &&
               sidebarStatus.writable &&
               sidebarStatus.synced

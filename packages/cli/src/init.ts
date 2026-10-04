@@ -133,7 +133,7 @@ function colorFor(name: string): string {
 /**
  * 32 random bytes, base64url — 43 characters over `A-Za-z0-9-_`.
  *
- * The alphabet is not cosmetic. `remote-compose.sh` refuses a secret outside
+ * The alphabet is not cosmetic. `bin/remote-compose.sh` refuses a secret outside
  * `A-Za-z0-9._-`, because a shell and Docker Compose parse the rest differently
  * and the deployed secret could then silently differ from the one clients hold.
  * What is generated here is therefore a value that can be carried to the remote
