@@ -139,12 +139,14 @@ test("touch rows expose their actions without sticky hover, and group confirmati
   await confirmation.getByRole("button", { name: "Cancel", exact: true }).tap();
   await expect(confirmation).toHaveCount(0);
   await expect(drawer(page)).toBeVisible();
+  await expect(remove).toBeFocused();
   expect(await ownTreatment(remove)).toEqual(deleteRest);
 
   // Escape from the nested confirmation must not propagate to the drawer.
   await remove.tap();
   await expect(confirmation).toBeVisible();
   await expect(confirmation).toContainText("Reading");
+  await expect(confirmation.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(confirmation).toHaveCount(0);
   await expect(drawer(page)).toBeVisible();
