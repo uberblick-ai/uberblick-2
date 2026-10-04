@@ -124,7 +124,7 @@ describe("the version exchange", () => {
     await current.synced;
     const before = "| Task | Status |\n| --- | --- |\n| Write | done |";
     const id = appendBlock(current.doc, { type: "table", text: before });
-    const status = tableCellText(tableRows(findBlockElement(current.doc, id)!)[1]?.[1])!;
+    const status = tableCellText(tableRows(findBlockElement(current.doc, id)!)[1]![1]!)!;
     status.format(0, status.length, { bold: {} });
     await waitUntil("the structured table to be acknowledged", () => !current.provider.hasUnsyncedChanges);
     const tableState = Y.encodeStateVector(current.doc);
@@ -155,14 +155,14 @@ describe("the version exchange", () => {
       await updated.synced;
       expect(Y.encodeStateVector(updated.doc)).toEqual(tableState);
       expect(findBlockElement(updated.doc, id)!.firstChild).toBeInstanceOf(Y.XmlElement);
-      expect(getBlock(updated.doc, id).text).toBe(before);
+      expect(getBlock(updated.doc, id)!.text).toBe(before);
       const after = before.replace("done", "done (blocked)");
       editBlock(updated.doc, id, before, after);
-      await waitUntil("the matching table edit to arrive", () => getBlock(current.doc, id).text === after);
+      await waitUntil("the matching table edit to arrive", () => getBlock(current.doc, id)!.text === after);
       await waitUntil("the matching table edit to be acknowledged", () => !updated.provider.hasUnsyncedChanges);
-      expect(tableCellText(tableRows(findBlockElement(current.doc, id)!)[1]?.[1])).toBe(status);
-      expect(status.toDelta().every((op) => op.attributes?.bold !== undefined)).toBe(true);
-      expect(getBlock(updated.doc, id).text).toBe(after);
+      expect(tableCellText(tableRows(findBlockElement(current.doc, id)!)[1]![1]!)).toBe(status);
+      expect(status.toDelta()).toEqual([{ insert: "done (blocked)", attributes: { bold: {} } }]);
+      expect(getBlock(updated.doc, id)!.text).toBe(after);
     } finally {
       oldDoc.destroy();
     }
