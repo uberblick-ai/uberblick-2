@@ -29,11 +29,11 @@ code or new evidence invalidates how it was settled.
 When a PR settles a choice that passes
 [`delivery-policy.md`'s when-to-record test](delivery-policy.md#decision-records)
 but has no record, raise a finding; the reviewer does not draft it. The
-implementer writes the complete record in the same PR under
+implementer supplies the complete record in the same PR under
 [`implementer.md`'s Decision records](../roles/implementer.md#decision-records),
-as an initial stance or, on a boundary topic, an `open` recommendation. Verify
-the draft like any other correction, while it is still editable; do not hold
-the PR for a person's confirmation of that record. Review and merge gates
+as a drafted initial stance or a linked boundary `open` recommendation. Verify
+the draft or open record like any other correction, while it is still editable;
+do not hold the PR for a person's confirmation of that record. Review and merge gates
 remain owed.
 
 ## Handing findings over
