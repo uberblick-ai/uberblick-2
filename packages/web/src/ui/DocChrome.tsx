@@ -227,7 +227,7 @@ function TagStrip({
         <button
           ref={trigger}
           type="button"
-          className="ub-tags ub-tag-picker-trigger"
+          className="ub-tags ub-tag-picker-trigger group/tags flex min-w-0 flex-auto cursor-pointer flex-wrap items-center gap-[0.3rem] border-0 bg-transparent p-0 text-left [font:inherit] text-inherit focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
           aria-label="Edit tags"
           aria-expanded={open}
           aria-haspopup="listbox"
@@ -236,7 +236,7 @@ function TagStrip({
           <span className="ub-tag-selected">
             {labels.length > 0 ? labels : <span className="ub-tag-placeholder">Add tags</span>}
           </span>
-          <span className="ub-tag-chevron" aria-hidden="true">
+          <span className="ub-tag-chevron flex-none text-[0.65rem] opacity-55 group-hover/tags:opacity-100" aria-hidden="true">
             ▾
           </span>
         </button>
@@ -399,7 +399,7 @@ export function CopyLink({
     <span className={`ub-copy-wrap${identity ? " ub-copy-identity" : ""}`}>
       <button
         type="button"
-        className="ub-copy-link"
+        className={`ub-copy-link inline-flex min-h-11 cursor-pointer items-center border-0 bg-transparent px-[0.15rem] py-0 [font:inherit] text-(--muted-foreground) hover:text-(--foreground) hover:underline focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 ${identity ? "min-w-[12em] justify-start" : "min-w-[max(2.75rem,6em)] justify-center"}`}
         // `title` is not reliably announced, so the accessible name carries the
         // action and the address that lands on the clipboard even where the
         // visible label is only the document's short uuid.
@@ -574,7 +574,7 @@ function DocumentActions({
             <AlertDialogTrigger asChild>
               <button
                 type="button"
-                className="ub-actions-trigger"
+                className="ub-actions-trigger size-11 cursor-pointer rounded-(--radius-sm) border border-transparent bg-transparent font-[inherit] [font-style:inherit] [font-weight:inherit] text-xl leading-none text-(--muted-foreground) hover:border-(--border) hover:bg-(--secondary) hover:text-(--foreground) data-[state=open]:border-(--border) data-[state=open]:bg-(--secondary) data-[state=open]:text-(--foreground) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1"
                 aria-label="Document actions"
                 title="Document actions"
               >
