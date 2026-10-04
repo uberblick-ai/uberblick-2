@@ -16,6 +16,24 @@ export class BlockNotFoundError extends Error {
   }
 }
 
+/** A table write did not contain exactly one supported GFM table. */
+export class InvalidTableError extends Error {
+  constructor() {
+    super("Table text must be exactly one GFM table");
+    this.name = "InvalidTableError";
+  }
+}
+
+/** New table threads await cell-text anchors; existing conversations remain usable. */
+export class TableAnnotationError extends Error {
+  readonly blockId: string;
+  constructor(blockId: string) {
+    super("New comment threads on tables are unavailable");
+    this.name = "TableAnnotationError";
+    this.blockId = blockId;
+  }
+}
+
 export interface StaleBlockDetails {
   blockId: string;
   /**
@@ -144,13 +162,14 @@ export class AnnotationRangeError extends Error {
 /**
  * Thrown when a write would put a mark where the block type cannot hold it.
  *
- * The case that exists today is a re-type: `code` and `mermaid` blocks are
+ * A re-type into `code` or `mermaid` is one case: those blocks are
  * source text and carry only `comment`, so re-typing formatted prose into one
  * has no honest outcome. Stripping the marks would contradict `setBlockType`'s
  * whole promise (it preserves the delta), and keeping them would write a
  * document the web editor refuses to bind. So the re-type is refused *before* it
  * mutates anything, and `marks` names what is in the way — a caller that means
- * it can clear the formatting first and re-type after.
+ * it can clear the formatting first and re-type after. Table-to-flat and
+ * flat-to-table conversions also refuse any marks rather than dropping them.
  */
 export class MarksNotAllowedError extends Error {
   readonly blockId: string;
@@ -161,9 +180,8 @@ export class MarksNotAllowedError extends Error {
 
   constructor(blockId: string, blockType: string, marks: string[]) {
     super(
-      `Block ${blockId} cannot become ${blockType}: its text carries inline ` +
-        `formatting (${marks.join(", ")}), and a ${blockType} block holds source ` +
-        `text — only the comment mark. Clear the formatting first.`,
+      `Block ${blockId} cannot become ${blockType} without dropping marks ` +
+        `(${marks.join(", ")}). Clear the marks before changing its type.`,
     );
     this.name = "MarksNotAllowedError";
     this.blockId = blockId;
@@ -363,9 +381,8 @@ export type InlineLinkRangeErrorReason = "empty" | "not-prose";
  * label and nothing to anchor to. The same rule {@link AnnotationRangeError}
  * has, for the same reason.
  *
- * `"not-prose"`: `code`, `mermaid`, `table` and `terminal` blocks hold source
- * text and carry only the annotation anchor, so an inline link has nowhere to
- * live in one.
+ * `"not-prose"`: source blocks and tables do not admit document links.
+ * Table-cell offsets are distinct from the block's GFM projection.
  *
  * A range already carrying an external `link` is refused with
  * {@link ConflictingLinkMarksError} instead — that error names both targets,
@@ -385,8 +402,8 @@ export class InlineLinkRangeError extends Error {
     super(
       reason === "empty"
         ? `Cannot link an empty range in block ${blockId}`
-        : `Block ${blockId} is a ${blockType ?? "source"} block: it holds source ` +
-          "text and carries no inline links. Link a prose block instead.",
+        : `Block ${blockId} is a ${blockType ?? "source"} block and cannot carry ` +
+          "document links. Link a prose block instead.",
     );
     this.name = "InlineLinkRangeError";
     this.reason = reason;

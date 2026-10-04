@@ -45,6 +45,7 @@
  * editor synchronously inside the callback. Both are load-bearing.
  */
 
+import { normalizeLegacyTables } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import type * as Y from "yjs";
 import { createUberblickEditor } from "./create-editor.js";
@@ -62,12 +63,14 @@ export interface GuardedBinding {
 export interface GuardedBindingOptions extends CreateEditorOptions {
   /** Called when the guard tears the editor down mid-session. */
   onUnbind?: (fragment: Y.XmlFragment) => void;
+  /** Only admitted and synchronized replicas may convert legacy tables. */
+  canNormalize?: () => boolean;
 }
 
 export function bindGuardedEditor(
   options: GuardedBindingOptions,
 ): GuardedBinding {
-  const { fragment, onUnbind, ...rest } = options;
+  const { fragment, onUnbind, canNormalize, ...rest } = options;
   const ydoc = fragment.doc;
   if (ydoc === null) {
     // No Y.Doc, no transactions to guard — and y-prosemirror cannot bind an
@@ -75,6 +78,7 @@ export function bindGuardedEditor(
     throw new Error("bindGuardedEditor: the fragment must belong to a Y.Doc");
   }
 
+  if (canNormalize?.() === true) normalizeLegacyTables(ydoc);
   if (findForeignBlocks(fragment).length > 0) {
     return { editor: null, refused: true, destroy: () => {} };
   }

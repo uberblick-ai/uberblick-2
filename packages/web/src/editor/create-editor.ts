@@ -74,8 +74,8 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // bindings refuse everywhere else, so the core keymap still owns those keys
     // in every other block — plus the numbers an ordered item is drawn with.
     ListBlocks,
-    // …and the table block's own two: the class that opens a table's source
-    // under the caret, and the typed and pasted doors a table comes in through.
+    // TableKit supplies cell editing and navigation; the integration limits
+    // cell content and keeps the typed and pasted GFM doors.
     TableBlocks,
     // …and the terminal block's one: the same class, opening a
     // demonstration's transcript under the caret — which is also what stops the

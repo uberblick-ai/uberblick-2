@@ -33,6 +33,7 @@ import {
   directoryStubDiffers,
   decisionDirectoryFields,
   decisionTopicArchived,
+  findBlockElement,
   getBlocksFragment,
   getBlocksWithInline,
   getDirectoryEntry,
@@ -40,11 +41,14 @@ import {
   getMeta,
   isProseBlockType,
   listDirectory,
+  normalizeLegacyTables,
   repairDuplicateBlocks,
   resolveTagAssignments,
   roomForDoc,
   settingsRoom,
   sidebarRoom,
+  tableCellText,
+  tableRows,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { Block, DocMeta, InlineRun } from "@uberblick/schema";
@@ -111,11 +115,15 @@ export class PersistenceError extends Error {
   }
 }
 
-/** The Y.XmlText holding a block's source, or null when the block is absent. */
+/** A block's text, or a table's last cell text for an agent's end-of-write caret. */
 export function blockText(doc: Y.Doc, blockId: string): Y.XmlText | null {
   for (const child of getBlocksFragment(doc).toArray()) {
     if (!(child instanceof Y.XmlElement)) continue;
     if (child.getAttribute("id") !== blockId) continue;
+    if (child.nodeName === "table") {
+      const cell = tableRows(child).at(-1)?.at(-1);
+      return cell === undefined ? null : tableCellText(cell);
+    }
     return child.firstChild instanceof Y.XmlText ? child.firstChild : null;
   }
   return null;
@@ -941,6 +949,11 @@ export class Replicas {
       return;
     }
     try {
+      // Repairs run below the tool's content gate, including on decided
+      // records and on late legacy writes from an outdated local process.
+      // Same-id replacement plus duplicate repair makes simultaneous
+      // converters converge rather than duplicating rows inside a table.
+      normalizeLegacyTables(replica.doc);
       const removed = repairDuplicateBlocks(replica.doc);
       if (removed > 0) {
         log.debug("deleted shadowed duplicate blocks", {
@@ -1292,7 +1305,16 @@ export class Replicas {
     if (!this.publishOwnPresence) {
       return;
     }
-    const text = blockText(replica.doc, blockId);
+    let text: Y.XmlText | Y.XmlElement | null = blockText(replica.doc, blockId);
+    if (text === null) {
+      // y-prosemirror leaves an empty paragraph without an XmlText. Anchor at
+      // that paragraph's start rather than creating text just for awareness.
+      const element = findBlockElement(replica.doc, blockId);
+      const paragraph = element?.nodeName === "table"
+        ? tableRows(element).at(-1)?.at(-1)?.firstChild
+        : null;
+      if (paragraph instanceof Y.XmlElement) text = paragraph;
+    }
     if (text === null) {
       return;
     }

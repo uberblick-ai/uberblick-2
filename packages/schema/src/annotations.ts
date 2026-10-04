@@ -62,7 +62,7 @@
 
 import * as Y from "yjs";
 import { getAnnotationsMap } from "./doc.js";
-import { AnnotationRangeError, BlockNotFoundError } from "./errors.js";
+import { AnnotationRangeError, BlockNotFoundError, TableAnnotationError } from "./errors.js";
 import { findBlockElement, requireBlockText } from "./blocks.js";
 import { COMMENT_MARK, isCommentMark } from "./types.js";
 import type {
@@ -190,6 +190,7 @@ export function createAnnotation(
 ): Annotation {
   const element = findBlockElement(ydoc, blockId);
   if (element === null) throw new BlockNotFoundError(blockId);
+  if (element.nodeName === "table") throw new TableAnnotationError(blockId);
 
   const ytext = requireBlockText(ydoc, element, blockId);
   const length = ytext.length;

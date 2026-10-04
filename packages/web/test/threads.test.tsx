@@ -32,6 +32,9 @@ import {
   getBlockText,
   getBlocks,
   initDoc,
+  getBlocksFragment,
+  normalizeLegacyTables,
+  setAnnotationResolved,
 } from "@uberblick/schema";
 import { ThreadsPane } from "../src/ui/ThreadsPane.js";
 import {
@@ -89,6 +92,26 @@ function replicas(): { local: Y.Doc; remote: Y.Doc; blocks: string[] } {
 }
 
 describe("a thread over a marked range becomes a card", () => {
+  it("keeps a legacy table conversation as an orphan that can be replied to, resolved and reopened", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "legacy-thread", title: "Tables" });
+    const id = appendBlock(ydoc, { type: "paragraph", text: "| Name |\n| --- |\n| Alpha |" });
+    const thread = createAnnotation(ydoc, id, 2, 6, "Reader", "Keep this conversation");
+    const fragment = getBlocksFragment(ydoc);
+    const paragraph = fragment.get(0) as Y.XmlElement;
+    const table = new Y.XmlElement("table"); table.setAttribute("id", id);
+    table.insert(0, [(paragraph.firstChild as Y.XmlText).clone()]);
+    ydoc.transact(() => { fragment.insert(0, [table]); fragment.delete(1, 1); });
+    normalizeLegacyTables(ydoc);
+    expect(threadsFromDoc(ydoc)[0]).toMatchObject({ id: thread.id, blockRef: "Table 1", orphaned: true });
+    addComment(ydoc, thread.id, "Reader", "Still replyable");
+    setAnnotationResolved(ydoc, thread.id, true);
+    expect(threadsFromDoc(ydoc)[0]).toMatchObject({ replyCount: 1, resolved: true });
+    setAnnotationResolved(ydoc, thread.id, false);
+    expect(threadsFromDoc(ydoc)[0]).toMatchObject({ replyCount: 1, resolved: false, orphaned: true });
+    ydoc.destroy();
+  });
+
   it("carries the quoted range, its block, and every comment", () => {
     const { ydoc, blocks } = annotatedDoc();
     const paragraph = blocks[1]!;

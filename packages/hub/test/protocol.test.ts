@@ -117,11 +117,13 @@ async function maximalToken(): Promise<string> {
 describe("the version exchange", () => {
   it("refuses another version, and a bare token, with the same exact reason", async () => {
     const newer = client(await token("read-write"), SYNC_PROTOCOL_VERSION + 1);
+    const older = client(await token("read-write"), SYNC_PROTOCOL_VERSION - 1);
     // What every client that has not been updated looks like on the flag day.
     const bare = client(await token("read-write"), null);
 
     const reason = protocolMismatchReason(SYNC_PROTOCOL_VERSION);
     await expect(newer.denied).resolves.toBe(reason);
+    await expect(older.denied).resolves.toBe(reason);
     await expect(bare.denied).resolves.toBe(reason);
   });
 });

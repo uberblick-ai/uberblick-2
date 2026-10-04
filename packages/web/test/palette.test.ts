@@ -48,6 +48,9 @@ describe("the palette is exactly the schema's block types", () => {
       "paragraph",
       "quote",
       "table",
+      "tableCell",
+      "tableHeader",
+      "tableRow",
       "terminal",
       "text",
     ]);
@@ -69,10 +72,8 @@ describe("the palette is exactly the schema's block types", () => {
 
     // Stated the other way round, because a node or mark that quietly exists is
     // one the editor could normalise foreign content into. The list and table
-    // nodes are the pointed ones: a list here is a *run of blocks* and a table
-    // is *source text* (#59), so the wrapper-and-tree spellings stock Tiptap
-    // ships — including the cell nodes its table extension brings — must not
-    // exist here.
+    // nodes are the pointed ones: a list here remains a run of flat blocks.
+    // Tables alone use TableKit's nested row and cell tree.
     for (const absent of [
       "bulletList",
       "orderedList",
@@ -82,9 +83,6 @@ describe("the palette is exactly the schema's block types", () => {
       "horizontalRule",
       "hardBreak",
       "image",
-      "tableRow",
-      "tableCell",
-      "tableHeader",
     ]) {
       expect(uberblickSchema.nodes[absent]).toBeUndefined();
     }
@@ -96,7 +94,7 @@ describe("the palette is exactly the schema's block types", () => {
   it("allows the comment mark inside code and mermaid blocks, and nothing else there", () => {
     // A `marks: ""` node spec would make y-prosemirror throw while building the
     // node — and its catch block deletes the Y.XmlText from the document.
-    for (const name of BLOCK_NODE_NAMES) {
+    for (const name of BLOCK_NODE_NAMES.filter((name) => name !== "table")) {
       const type = uberblickSchema.nodes[name];
       expect(type).toBeDefined();
       expect(type?.allowsMarkType(uberblickSchema.marks[COMMENT_MARK]!)).toBe(true);

@@ -20,6 +20,7 @@ import {
   addComment,
   appendBlock,
   createAnnotation,
+  findBlockElement,
   getBlocks,
   getMeta,
   initDoc,
@@ -33,6 +34,8 @@ import {
   setTags,
   setTldr,
   setTitle,
+  tableCellText,
+  tableRows,
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
@@ -82,6 +85,29 @@ function entry(ydoc: Y.Doc, overrides: Partial<CorpusDoc> = {}): CorpusDoc {
 }
 
 describe("docFingerprint", () => {
+  it("covers table cell text, formatting and anchors while remaining stable after replication", () => {
+    const doc = source();
+    const id = appendBlock(doc, { type: "table", text: "| Header |\n| --- |\n| Cell |" });
+    const copy = replicate(doc);
+    const cells = tableRows(findBlockElement(doc, id)!);
+    const text = tableCellText(cells[1]![0]!)!;
+    expect(docFingerprint(copy)).toBe(docFingerprint(doc));
+    text.insert(text.length, " changed");
+    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc));
+    expect(docFingerprint(copy)).toBe(docFingerprint(doc));
+    const rev = getBlocks(doc).find(block => block.id === id)!.rev;
+    text.format(0, 4, { bold: true, [COMMENT_MARK]: { threadId: "synthetic-cell-anchor" } });
+    expect(getBlocks(doc).find(block => block.id === id)!.rev).toBe(rev);
+    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc));
+    text.format(0, 4, { [COMMENT_MARK]: null });
+    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc));
+    expect(docFingerprint(copy)).toBe(docFingerprint(doc));
+    doc.destroy();
+    copy.destroy();
+  });
   it("is stable across replication", () => {
     const doc = source();
     expect(docFingerprint(replicate(doc))).toBe(docFingerprint(doc));

@@ -57,10 +57,12 @@ import {
   BlockNotFoundError,
   ConflictingLinkMarksError,
   InvalidDocumentLifecycleError,
+  InvalidTableError,
   InvalidTagAssignmentError,
   InlineLinkRangeError,
   OldTextMismatchError,
   StaleBlockError,
+  TableAnnotationError,
 } from "@uberblick/schema";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
@@ -163,6 +165,16 @@ interface Recovery {
  * the call that finishes it — but never contradict the class.
  */
 const RECOVERIES: Record<string, Recovery> = {
+  invalid_table: {
+    recoveryClass: "manual",
+    guidance:
+      "Supply exactly one GFM table, with a header and matching delimiter row, then call again. Alignment markers are accepted but not stored; inline markdown remains literal cell text.",
+  },
+  table_comments_unavailable: {
+    recoveryClass: "manual",
+    guidance:
+      "New table threads are temporarily unavailable. Read existing threads with get_doc; use annotate with thread_id to reply, resolve or reopen them.",
+  },
   invalid_github_reference: {
     recoveryClass: "manual",
     guidance:
@@ -492,6 +504,16 @@ function stamped(
  * caller can re-diff and retry without another round trip.
  */
 export function toFailure(tool: string, error: unknown): CallToolResult {
+  if (error instanceof InvalidTableError) {
+    return stamped(tool, { error: "invalid_table", message: error.message });
+  }
+  if (error instanceof TableAnnotationError) {
+    return stamped(tool, {
+      error: "table_comments_unavailable",
+      message: error.message,
+      blockId: error.blockId,
+    });
+  }
   if (error instanceof PersistenceError) {
     // Fail-stop: every later call lands here too, until the server is restarted
     // — reads included, because a replica ahead of its own log may not hand out

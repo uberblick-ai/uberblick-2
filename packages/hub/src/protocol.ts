@@ -28,7 +28,7 @@ import { MAX_TOKEN_LENGTH } from "./token.js";
  * a bump nobody needed costs a hand update of every machine, and one that was
  * needed and skipped costs the silent divergence this replaces.
  */
-export const SYNC_PROTOCOL_VERSION = 1;
+export const SYNC_PROTOCOL_VERSION = 2;
 
 /** Room for the JSON around the token — `{"protocolVersion":1,"token":""}` is 32 characters. */
 const ENVELOPE_ALLOWANCE = 128;

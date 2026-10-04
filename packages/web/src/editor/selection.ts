@@ -7,9 +7,10 @@
  *
  * Two facts make the translation exact rather than approximate:
  *
- * 1. The document is a flat sequence of blocks (see editor/nodes.ts), so an
+ * 1. The supported comment targets are flat text blocks (see editor/nodes.ts), so an
  *    inline position always resolves at depth 1 and `parentOffset` is already
- *    the offset into the block's text.
+ *    the offset into the block's text. Structured tables are refused until
+ *    table-cell anchoring supplies its own index space.
  * 2. The palette has no inline nodes other than text, so a ProseMirror content
  *    offset counts the same characters a Y.XmlText index does. An inline node
  *    would count as one position and two indices would drift apart — which is
@@ -144,6 +145,7 @@ export function commentTargetOf(editor: Editor, ydoc: Y.Doc): CommentTarget | nu
   if (block === null) return null;
 
   const type = block.type.name;
+  if (type === "table") return null;
   if (!(BLOCK_TYPES as readonly string[]).includes(type)) return null;
   const blockId = block.attrs.id;
   if (typeof blockId !== "string" || blockId === "") return null;

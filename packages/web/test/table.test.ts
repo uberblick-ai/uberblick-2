@@ -1,23 +1,4 @@
-/**
- * The table block: one text, two representations.
- *
- * The contracts worth defending, all of them about the fact that the *source is
- * the storage*:
- *
- * 1. **A typed table becomes one block.** A header row and the delimiter row
- *    under it merge into a single `table` block holding both lines — and it
- *    keeps the header's block id, so nothing pointing at that block is orphaned.
- * 2. **The drawing follows the document, live.** An agent's `edit_block`
- *    rewriting one cell's text arrives as an ordinary update and the rendered
- *    table redraws — there is no second copy of the table to keep in step.
- * 3. **Clicking it opens the source**, which is the whole editing model: the
- *    caret lands in the block and the source appears where the drawing was.
- * 4. **Nothing is a table by accident.** Pipes without a delimiter row stay the
- *    prose they are.
- *
- * Read back through the schema package, as everywhere: the document is the
- * deliverable, the DOM is what a reader happens to see.
- */
+/** Structured tables: GFM doors, direct cell edits, and CRDT merges. */
 
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
@@ -33,11 +14,14 @@ import {
   listAnnotationRanges,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
-import { EDITING_CLASS } from "../src/editor/table.js";
+import { getBlocksFragment, tableRows, tableCellText } from "@uberblick/schema";
+import { commentTargetOf } from "../src/editor/selection.js";
+import { BLOCK_MENU_ENTRIES, convertBlockAtTrigger, insertBlockBelow, slashTriggerAt } from "../src/editor/block-menu.js";
+import { findForeignBlocks } from "../src/editor/palette.js";
 import { mountEditor } from "./helpers.js";
 
 const HEADER = "| name | count |";
-const DELIMITER = "| --- | ---: |";
+const DELIMITER = "| --- | --- |";
 
 function docWith(texts: string[]): { ydoc: Y.Doc; ids: string[] } {
   const ydoc = new Y.Doc();
@@ -69,7 +53,7 @@ function caret(editor: Editor, index: number, offset: number): void {
 
 /** The cell texts of the drawn table, header row first. */
 function drawn(editor: Editor): string[][] {
-  const table = editor.view.dom.querySelector(".ub-table-render table");
+  const table = editor.view.dom.querySelector(".ub-table");
   if (table === null) return [];
   return [...table.querySelectorAll("tr")].map((row) =>
     [...row.querySelectorAll("th, td")].map((cell) => cell.textContent ?? ""),
@@ -137,35 +121,45 @@ describe("the table block", () => {
     }
   });
 
-  it("shows the source under the caret, and the drawing everywhere else", () => {
+  it("keeps the table drawn while editing its one-paragraph cells", () => {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: "table-open", title: "Tables" });
-    appendBlock(ydoc, { type: "table", text: `${HEADER}\n${DELIMITER}` });
-    appendBlock(ydoc, { type: "paragraph", text: "elsewhere" });
+    const id = appendBlock(ydoc, { type: "table", text: `${HEADER}\n${DELIMITER}\n| alpha | 1 |` });
+    let writes = 0;
+    ydoc.on("update", () => { writes += 1; });
     const { editor } = mountEditor(ydoc);
     try {
-      const block = (): Element | null =>
-        editor.view.dom.querySelector(".ub-table");
-      // The caret is not in the table: it is a table.
-      caret(editor, 1, 0);
-      expect(block()?.classList.contains(EDITING_CLASS)).toBe(false);
+      expect(writes).toBe(0);
+      editor.commands.setTextSelection(4);
+      expect(editor.state.selection.$head.parent.type.name).toBe("paragraph");
+      editor.commands.insertContent("Edited ");
+      expect(drawn(editor)[0]?.[0]).toBe("Edited name");
+      expect(editor.view.dom.querySelector(".ub-table-source")).toBeNull();
+      for (const key of ["Enter", "Shift-Enter"]) editor.commands.keyboardShortcut(key);
+      expect(getBlocks(ydoc)).toHaveLength(1);
+      expect(tableRows(getBlocksFragment(ydoc).get(0) as Y.XmlElement)[0]?.[0]?.length).toBe(1);
+      editor.commands.setTextSelection({ from: 4, to: 10 });
+      expect(commentTargetOf(editor, ydoc)).toBeNull();
+      expect(getBlocks(ydoc)[0]?.id).toBe(id);
+    } finally { editor.destroy(); ydoc.destroy(); }
+  });
 
-      // Clicking the drawing is what opens the source — the NodeView puts the
-      // caret in the block, because a `contenteditable="false"` drawing would
-      // otherwise only get itself selected.
-      const rendered = editor.view.dom.querySelector(".ub-table-render");
-      rendered?.dispatchEvent(
-        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
-      );
-
-      expect(editor.state.selection.$head.parent.type.name).toBe("table");
-      expect(block()?.classList.contains(EDITING_CLASS)).toBe(true);
-      // Source that is not a table yet keeps itself visible rather than hiding
-      // a reader's half-typed text behind an empty drawing.
-      expect(block()?.getAttribute("data-parsed")).toBe("true");
-    } finally {
-      editor.destroy();
-    }
+  it("creates the menu's three-column header and two body rows and supports undo", () => {
+    const { ydoc, ids } = docWith(["/table"]);
+    const { editor } = mountEditor(ydoc);
+    try {
+      caret(editor, 0, 6);
+      const entry = BLOCK_MENU_ENTRIES.find((item) => item.type === "table")!;
+      const trigger = slashTriggerAt(editor)!;
+      expect(convertBlockAtTrigger(editor, trigger, entry)).toBe(true);
+      expect(drawn(editor)).toEqual([["", "", ""], ["", "", ""], ["", "", ""]]);
+      expect(getBlocks(ydoc)[0]?.id).toBe(ids[0]);
+      expect(editor.state.selection.from).toBe(4);
+      editor.commands.keyboardShortcut("Mod-z");
+      expect(getBlocks(ydoc)[0]).toMatchObject({ type: "paragraph", text: "/table" });
+      expect(insertBlockBelow(editor, ids[0]!, entry)).toBe(true);
+      expect(drawn(editor)).toHaveLength(3);
+    } finally { editor.destroy(); ydoc.destroy(); }
   });
 
   it("pastes GFM table text into a table block, and leaves other text alone", () => {
@@ -285,4 +279,96 @@ describe("the table block", () => {
       editor.destroy();
     }
   });
+
+  it("keeps edits in different cells and concurrent text in the same cell", () => {
+    const a = new Y.Doc();
+    initDoc(a, { uuid: "table-pair", title: "Tables" });
+    appendBlock(a, { type: "table", text: `${HEADER}\n${DELIMITER}\n| alpha | one |` });
+    const b = new Y.Doc();
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+    const ea = mountEditor(a).editor;
+    const eb = mountEditor(b).editor;
+    try {
+      const position = (editor: Editor, row: number, col: number): number => {
+        let found = 0;
+        let index = 0;
+        editor.state.doc.descendants((node, pos) => {
+          if (node.type.name === "paragraph") {
+            if (index === row * 2 + col) found = pos + 1;
+            index += 1;
+          }
+        });
+        return found;
+      };
+      ea.view.dispatch(ea.state.tr.insertText("A", position(ea, 1, 0)));
+      eb.view.dispatch(eb.state.tr.insertText("B", position(eb, 1, 1)));
+      const ua = Y.encodeStateAsUpdate(a);
+      const ub = Y.encodeStateAsUpdate(b);
+      Y.applyUpdate(a, ub); Y.applyUpdate(b, ua);
+      expect(drawn(ea)).toEqual(drawn(eb));
+      expect(drawn(ea)[1]).toEqual(["Aalpha", "Bone"]);
+      ea.view.dispatch(ea.state.tr.insertText("X", position(ea, 1, 0)));
+      eb.view.dispatch(eb.state.tr.insertText("Y", position(eb, 1, 0)));
+      const va = Y.encodeStateAsUpdate(a); const vb = Y.encodeStateAsUpdate(b);
+      Y.applyUpdate(a, vb); Y.applyUpdate(b, va);
+      expect(drawn(ea)).toEqual(drawn(eb));
+      expect(drawn(ea)[1]?.[0]).toContain("X");
+      expect(drawn(ea)[1]?.[0]).toContain("Y");
+    } finally { ea.destroy(); eb.destroy(); a.destroy(); b.destroy(); }
+  });
+
+  it("merges Tab's added row with an agent column without duplicated padding or rewrite loops", () => {
+    const a = new Y.Doc();
+    initDoc(a, { uuid: "table-structure", title: "Tables" });
+    const source = `${HEADER}\n${DELIMITER}\n| alpha | one |`;
+    const id = appendBlock(a, { type: "table", text: source });
+    const b = new Y.Doc(); Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+    const ea = mountEditor(a).editor; const eb = mountEditor(b).editor;
+    try {
+      ea.commands.setTextSelection(ea.state.doc.content.size - 4);
+      expect(ea.commands.keyboardShortcut("Tab")).toBe(true);
+      expect(drawn(ea)).toHaveLength(3);
+      editBlock(b, id, source, "| name | count | extra |\n| --- | --- | --- |\n| alpha | one | new |" );
+      const ua = Y.encodeStateAsUpdate(a); const ub = Y.encodeStateAsUpdate(b);
+      Y.applyUpdate(a, ub); Y.applyUpdate(b, ua);
+      const expected = [["name", "count", "extra"], ["alpha", "one", "new"], ["", ""]];
+      expect(drawn(ea)).toEqual(expected); expect(drawn(eb)).toEqual(expected);
+      expect(findForeignBlocks(getBlocksFragment(a))).toEqual([]);
+      expect(getBlocks(a)).toEqual(getBlocks(b));
+      expect(getBlocks(a)[0]?.text).toContain("|  |  |  |");
+      let writes = 0;
+      a.on("update", () => { writes += 1; });
+      let position = 0;
+      ea.state.doc.descendants((node, pos) => {
+        if (node.type.name === "paragraph" && position === 0 && node.textContent === "") position = pos + 1;
+      });
+      ea.commands.setTextSelection(position);
+      ea.view.dispatch(ea.state.tr.insertText("kept"));
+      expect(writes).toBe(1);
+      expect(drawn(ea).map((row) => row.length)).toEqual([3, 3, 2]);
+      Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+      expect(drawn(eb)).toEqual(drawn(ea));
+      const rows = tableRows(getBlocksFragment(a).get(0) as Y.XmlElement);
+      expect(tableCellText(rows[2]![0]!)?.toString()).toBe("kept");
+    } finally { ea.destroy(); eb.destroy(); a.destroy(); b.destroy(); }
+  });
+
+  it("pastes multiple lines into one cell and refuses unsupported local marks and spans", () => {
+    const ydoc = new Y.Doc(); initDoc(ydoc, { uuid: "cell-paste", title: "Tables" });
+    appendBlock(ydoc, { type: "table", text: `${HEADER}\n${DELIMITER}` });
+    const { editor } = mountEditor(ydoc);
+    try {
+      editor.commands.setTextSelection(4);
+      expect(editor.view.someProp("handlePaste", (handler) => handler(editor.view,
+        { clipboardData: { getData: (type: string) => type === "text/plain" ? "two\nlines" : "" } } as unknown as ClipboardEvent,
+        editor.state.selection.content()))).toBe(true);
+      expect(drawn(editor)[0]?.[0]).toBe("two linesname");
+      const before = getBlocks(ydoc);
+      editor.view.dispatch(editor.state.tr.addMark(4, 7, editor.schema.marks.docLink!.create({ docId: "00000000-0000-4000-8000-000000000001" })));
+      expect(getBlocks(ydoc)).toEqual(before);
+      editor.view.dispatch(editor.state.tr.setNodeAttribute(2, "colspan", 2));
+      expect(getBlocks(ydoc)).toEqual(before);
+    } finally { editor.destroy(); ydoc.destroy(); }
+  });
+
 });

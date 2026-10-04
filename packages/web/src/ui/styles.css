@@ -1391,39 +1391,46 @@ h3.ub-heading {
   font-style: italic;
 }
 
-.ub-table,
+.tableWrapper,
 .ub-mermaid,
 .ub-terminal {
   position: relative;
   margin: 0.7em 0;
 }
 
-.ub-table-render {
+.tableWrapper {
+  max-width: 100%;
   overflow-x: auto;
-  cursor: text;
+  overscroll-behavior-x: contain;
 }
 
-.ub-table table,
+.ub-table,
 .ub-docs-table {
   border-collapse: collapse;
   width: 100%;
 }
 
-.ub-table table {
-  font-size: 0.9rem;
+.ub-table {
+  font-size: 1rem;
 }
 
 .ub-table th,
 .ub-table td {
+  position: relative;
+  min-width: 120px;
   border: 1px solid var(--border);
   padding: 0.3rem 0.55rem;
   text-align: left;
   vertical-align: top;
 }
 
+.ub-table p {
+  margin: 0;
+}
+
 .ub-table th {
   background: var(--muted);
-  font-weight: 500;
+  font-weight: 600;
   color: var(--foreground);
 }
 
@@ -1431,7 +1438,10 @@ h3.ub-heading {
   color: var(--prose-text);
 }
 
-.ub-table-source,
+.ub-table .selectedCell {
+  box-shadow: inset 0 0 0 2px var(--brand);
+}
+
 .ub-code,
 .ub-mermaid pre,
 .ub-terminal-source,
@@ -1441,7 +1451,6 @@ h3.ub-heading {
   white-space: pre-wrap;
 }
 
-.ub-table-source,
 .ub-code,
 .ub-mermaid pre,
 .ub-terminal-source {
@@ -1451,24 +1460,6 @@ h3.ub-heading {
   border-radius: var(--radius-sm);
   padding: 0.6rem 0.75rem;
   overflow-x: auto;
-}
-
-/* Reveal GFM source while editing or when parsing fails; otherwise show
-   the table. Incomplete source must stay visible instead of becoming an
-   empty rendered box. */
-.ub-table-source {
-  display: none;
-  margin: 0;
-}
-
-.ub-table.ub-table-editing .ub-table-source,
-.ub-table[data-parsed="false"] .ub-table-source {
-  display: block;
-}
-
-.ub-table.ub-table-editing .ub-table-render,
-.ub-table[data-parsed="false"] .ub-table-render {
-  display: none;
 }
 
 .ub-code,
