@@ -29,6 +29,19 @@ esac
 . "$settings_dir/../remote-settings.sh"
 validate_remote_settings
 
+# Route selection uses the operator's .env. Passing a different env file only
+# to Compose would give the containers settings for a route we did not select.
+if [ -f release.json ]; then
+  for argument in "$@"; do
+    case "$argument" in
+      --env-file | --env-file=*)
+        printf 'Released hub wrapper does not support --env-file; put settings in .env, or use plain Compose with the route files in REMOTE.md.\n' >&2
+        exit 1
+        ;;
+    esac
+  done
+fi
+
 compose_version=$(docker compose version --short)
 compose_version=${compose_version#v}
 compose_major=${compose_version%%.*}

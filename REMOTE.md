@@ -819,9 +819,10 @@ sh bin/remote-compose.sh config --quiet
 sh bin/remote-compose.sh up --detach --force-recreate
 ```
 
-The wrapper chooses the release's optional Compose files automatically. Plain
-Compose can select the same routes explicitly, with `.env` in the deployment
-directory:
+The wrapper chooses the release's optional Compose files from `.env` automatically.
+It refuses `--env-file`; put route settings in the deployment's `.env`. If you
+set `COMPOSE_FILE`, you select the files yourself. Plain Compose can select the
+same routes explicitly, with `.env` in the deployment directory:
 
 ```sh
 # Default, same computer.

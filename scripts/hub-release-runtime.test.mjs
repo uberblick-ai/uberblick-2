@@ -82,6 +82,8 @@ test("release defaults to loopback HTTP and HTTPS replaces that publication with
 	assert.match(https, /\$\{TAILSCALE_IP:-\$\{HTTPS_BIND_IP:-0\.0\.0\.0\}\}:443:443/);
 	assert.doesNotMatch(https, /tailscaled\.sock|:80/);
 	assert.match(readFileSync(join(root, "remote.tailscale.yml"), "utf8"), /create_host_path: false/);
+	// The shared entrypoint also validates the unchanged checkout route.
+	assert.match(readFileSync(join(root, "docker-compose.yml"), "utf8"), /TAILSCALE_IP: "\$\{TAILSCALE_IP:\?set TAILSCALE_IP in \.env\}"/);
 	for (const volume of ["hub-data", "caddy-data", "caddy-config"]) assert.match(compose, new RegExp(`^  ${volume}:$`, "m"));
 });
 
@@ -129,8 +131,15 @@ else printf '%s\\n' "$@"; fi
 		for (const version of ["2.6.0", "2.24.3"]) assert.equal(run({ TEST_COMPOSE_VERSION: version }).status, 1);
 		assert.equal(run({ TEST_ENGINE_VERSION: "27.5.0" }, ["up", "--detach"]).status, 1);
 		assert.equal(run({ TEST_ENGINE_VERSION: "28.0.0" }, ["up", "--detach"]).status, 0);
+		for (const args of [["--env-file", "network.env", "config"], ["--env-file=network.env", "config"]]) {
+			const result = run({}, args);
+			assert.equal(result.status, 1);
+			assert.match(result.stderr, /--env-file.*\.env/);
+			assert.equal(result.stdout, "");
+		}
 		// The checkout compatibility route retains Compose 2.6 and its own file.
 		rmSync(join(scratch, "release.json"));
 		assert.equal(run({ TEST_COMPOSE_VERSION: "2.6.0" }).stdout, "compose\nconfig\n");
+		assert.equal(run({}, ["--env-file", "network.env", "config"]).stdout, "compose\n--env-file\nnetwork.env\nconfig\n");
 	} finally { rmSync(scratch, { recursive: true, force: true }); }
 });
