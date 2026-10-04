@@ -34,6 +34,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { devConfigDocument } from "../dev-config-document.js";
 import {
@@ -307,6 +308,18 @@ describe("the served configuration", () => {
       expect(config.hubUrl, kind).toBe("wss://hub.example/ws");
       expect(JSON.stringify(config), kind).not.toContain("s3cret");
     }
+  });
+
+  it("keeps the development key when an unbound checkout uses its compiled loopback endpoint", async () => {
+    // Plain ub init stores no hub binding. ub env supplies its signing key,
+    // while the dev server's document names no endpoint and the bundle falls
+    // back to its compiled value.
+    const config = await readClientConfig(serving({
+      body: devConfigDocument({ HUB_AUTH_TOKEN: "dev-secret" }),
+    }).fetch);
+    expect(config.hubUrl).toBe(INJECTED);
+    expect(config.hubUrlSource).toBe("define");
+    expect(config.hubAuthToken).toBe(isLoopbackEndpoint(INJECTED) ? "dev-secret" : "");
   });
 });
 

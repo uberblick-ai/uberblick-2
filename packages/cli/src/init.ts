@@ -181,10 +181,14 @@ Settle what every other command needs: your awareness identity, the workspace
 this machine works in, and a signing secret for local hubs. Idempotent — it never replaces
 a secret that already exists, and it is safe to run again.
 
-Given a hub, it puts the new workspace on that hub: the endpoint is dialled and
-stored, and the starter documents are there by the time this returns — nothing
-syncs in the background afterwards. Given none, nothing is dialled and the
-workspace is local to this machine.
+Given a loopback hub, it can create a workspace there and wait for its starter
+documents to be acknowledged. A remote hub requires an existing workspace that
+this machine's stored login may access. It uses the workspace already selected
+here; otherwise pass --workspace <id>. \`ub remote join <url-with-workspace-id>\`
+hydrates and verifies an existing workspace without adding starter documents.
+A newly chosen endpoint is checked before it is stored. Without a hub binding,
+the workspace stays local to this machine. Nothing syncs in the background
+afterwards.
 
 When creating a workspace interactively, the optional workspace name is shared
 with its replicas. It must be 1–64 characters after trimming, with no control
@@ -193,11 +197,12 @@ it unnamed. Rename it later in Workspace Settings → General. The UUID remains
 its identity, with a cosmetic ASCII slug derived from a name when possible.
 
 operands:
-  [hub-url]          the hub to create this workspace on. A bare host or an
+  [hub-url]          the hub for this workspace. A bare host or an
                      https:// address is read as the deployed wss://<host>/ws;
                      a ws:// or wss:// endpoint is stored as given. That hub's
                      login must be stored here already — run \`ub auth login
-                     <hub>\` and obtain workspace membership. A loopback hub
+                     <hub>\` and obtain membership in the selected existing
+                     workspace. A loopback hub
                      uses HUB_AUTH_TOKEN or credentials.json. An endpoint
                      this machine already stores is never replaced: the same one changes nothing, and a different
                      one is refused, because moving a workspace between hubs is
@@ -211,7 +216,9 @@ options:
   --color <#rrggbb>  awareness cursor colour, 6-digit hex (default: one of the
                      eight the web client uses, picked for you)
   --workspace <id>   the workspace to work in, as <uuid> or <slug>-<uuid>
-                     (default: a fresh uuid, with an optional name asked for)
+                     (default: the selected workspace, or a fresh local uuid)
+                     required for a remote hub if no workspace is selected;
+                     that existing workspace must grant this login membership
                      joining by id never writes or infers a workspace name
   --mcp, --no-mcp    whether to end by printing the MCP client snippet to paste
                      — the question this ends on, answered up front. It prints;

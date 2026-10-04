@@ -52,13 +52,13 @@ test.afterAll(async () => {
 test("a release bundle makes no implicit connection and uses a valid served endpoint", async ({ browser }) => {
   if (hub === undefined) throw new Error("release test hub did not start");
   const endpoint = `ws://127.0.0.1:${hub.port}`;
-  for (const kind of ["missing", "invalid", "valid"] as const) {
+  for (const kind of ["missing", "empty", "invalid", "valid"] as const) {
     const context = await browser.newContext();
     try {
       await context.route("**/uberblick-config.json", async (route) => {
         await route.fulfill({ status: kind === "missing" ? 404 : 200,
           contentType: "application/json", body: JSON.stringify({
-            hubUrl: kind === "invalid" ? "https://not-a-websocket.invalid" : endpoint,
+            hubUrl: kind === "empty" ? "" : kind === "invalid" ? "https://not-a-websocket.invalid" : endpoint,
             workspaces: [WORKSPACE], hubAuthToken: SECRET,
           }) });
       });

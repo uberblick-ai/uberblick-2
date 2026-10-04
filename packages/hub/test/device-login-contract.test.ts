@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { credentialsPath, readHubLogins, writeHubLogin } from "../src/auth-store.js";
 import { DEVICE_RENEWAL_COOLDOWN_MS, ensureDeviceLogin } from "../src/device-login.js";
 import { acquireInitLock } from "../src/init-lock.js";
+import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
 import { startDeviceSyncHub } from "./device-sync-hub.js";
 
 const WORKSPACE = randomUUID();
@@ -14,11 +15,11 @@ const OTHER_WORKSPACE = randomUUID();
 const directories: string[] = [];
 const hubs: Awaited<ReturnType<typeof startDeviceSyncHub>>[] = [];
 
-async function setup() {
+async function setup(protocolVersion?: number) {
   const directory = mkdtempSync(join(tmpdir(), `device-login-contract-${process.env.UB_AGENTS_RUN ?? "test"}-`));
   directories.push(directory);
   const env = { ...process.env, XDG_CONFIG_HOME: directory };
-  const hub = await startDeviceSyncHub({ directory });
+  const hub = await startDeviceSyncHub({ directory, ...(protocolVersion === undefined ? {} : { protocolVersion }) });
   hubs.push(hub);
   const login = hub.issue({ workspaces: [] });
   await writeHubLogin(hub.origin, login, env);
@@ -37,6 +38,83 @@ function expireCooldown(): void {
 }
 
 describe("device renewal response and recovery contracts", () => {
+  it("diagnoses a pre-switch hub after its two-field parser refuses conditional renewal", async () => {
+    const { hub, env, login } = await setup(SYNC_PROTOCOL_VERSION - 1);
+    const send = globalThis.fetch;
+    const requests: unknown[] = [];
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const body = JSON.parse(options?.body as string) as Record<string, unknown>;
+      requests.push(body);
+      // The previous handler checks this exact envelope shape before version.
+      if (Object.keys(body).length !== 2) return Response.json({ status: "invalid-request" }, { status: 400 });
+      return send(input, options);
+    });
+    const result = await ensureDeviceLogin(hub.url, WORKSPACE, { env });
+    expect(result).toMatchObject({ status: "update-required", hubVersion: SYNC_PROTOCOL_VERSION - 1 });
+    if (result.status !== "update-required") throw new Error("hub skew was not diagnosed");
+    expect(result.message).toContain("update the hub");
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toEqual({ protocolVersion: SYNC_PROTOCOL_VERSION, token: "" });
+    expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
+    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("update-required");
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a working credential when a current hub spuriously refuses a conditional envelope", async () => {
+    const { hub, env } = await setup();
+    hub.grant(OTHER_WORKSPACE);
+    const login = hub.issue({ workspaces: [OTHER_WORKSPACE] });
+    await writeHubLogin(hub.origin, login, env);
+    const send = globalThis.fetch;
+    const requests: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      requests.push(JSON.parse(options?.body as string));
+      if (requests.length === 1) return Response.json({ status: "invalid-request" }, { status: 400 });
+      return send(input, options);
+    });
+    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("hub-down");
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toEqual({ protocolVersion: SYNC_PROTOCOL_VERSION, token: "" });
+    expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
+    expect((await ensureDeviceLogin(hub.url, OTHER_WORKSPACE, { env })).status).toBe("ready");
+    expireCooldown();
+    // An unchanged real renewal proves the original key remains usable, not retired.
+    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
+    expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
+    expect(requests).toHaveLength(3);
+  });
+
+  it.each([
+    { status: 200, body: { status: "unchanged" } },
+    { status: 401, body: { status: "sign-in-required" } },
+    { status: 409, body: { status: "protocol-mismatch", reason: "protocol-mismatch:01" } },
+    { status: 409, body: { status: "protocol-mismatch", reason: `protocol-mismatch:${SYNC_PROTOCOL_VERSION}` } },
+    { status: 400, body: { status: "invalid-request" } },
+  ])("accepts only a strict mismatch from the credential-free protocol probe: $status/$body.status", async (reply) => {
+    const { hub, env, login } = await setup();
+    const fetch = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ status: "invalid-request" }, { status: 400 }))
+      .mockResolvedValueOnce(Response.json(reply.body, { status: reply.status }));
+    const result = await ensureDeviceLogin(hub.url, WORKSPACE, { env });
+    expect(result.status).toBe("hub-down");
+    expect(JSON.stringify(result)).not.toContain(login.credential.key);
+    expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("never publishes a replacement credential supplied to the protocol probe", async () => {
+    const { hub, env, login } = await setup();
+    const replacement = hub.issue({ workspaces: [WORKSPACE], deviceId: login.credential.record.deviceId });
+    const fetch = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ status: "invalid-request" }, { status: 400 }))
+      .mockResolvedValueOnce(Response.json({ status: "renewed", credential: replacement.credential }));
+    const result = await ensureDeviceLogin(hub.url, WORKSPACE, { env });
+    expect(result.status).toBe("hub-down");
+    expect(JSON.stringify(result)).not.toContain(replacement.credential.key);
+    expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it.each(["principal", "device", "credential id", "key", "revocation"])(
     "refuses a renewed response with mismatched %s without losing the recorded login",
     async (changed) => {

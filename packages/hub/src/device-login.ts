@@ -111,6 +111,27 @@ function cachedResult(cached: Outcome, origin: string, workspace: string, login:
   return cached.status === "hub-down" ? offline(origin) : unavailable(origin);
 }
 
+async function readRenewalReply(response: Response): Promise<Record<string, unknown> | null> {
+  if (response.body === null) return null;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      size += chunk.value.length;
+      if (size > MAX_RESPONSE_BYTES) return null;
+      chunks.push(chunk.value);
+    }
+  } finally {
+    await reader.cancel();
+  }
+  let body: unknown;
+  try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return null; }
+  return object(body) ? body : null;
+}
+
 /** Bound both headers and body; proof goes only to the stored authentication origin. */
 async function renew(origin: string, login: StoredHubLogin, ifWorkspacesChanged: boolean, signal?: AbortSignal): Promise<StoredHubLogin | DeviceLoginFailure | "already-replaced" | "unchanged"> {
   const requestSignal = AbortSignal.any([...(signal === undefined ? [] : [signal]), AbortSignal.timeout(REQUEST_MS)]);
@@ -121,30 +142,24 @@ async function renew(origin: string, login: StoredHubLogin, ifWorkspacesChanged:
       kid: login.credential.record.id, operation: "renew-credential", lifetimeSeconds: 60,
     });
     requestSignal.throwIfAborted();
-    const response = await fetch(`${origin}/auth/credential/renew`, {
+    const request = (body: string) => fetch(`${origin}/auth/credential/renew`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: ifWorkspacesChanged ? JSON.stringify({ ...JSON.parse(wrapToken(proof)), ifWorkspacesChanged: true }) : wrapToken(proof),
+      body,
       redirect: "error", signal: requestSignal,
     });
+    let response = await request(ifWorkspacesChanged ? JSON.stringify({ ...JSON.parse(wrapToken(proof)), ifWorkspacesChanged: true }) : wrapToken(proof));
     const invalid = () => offline(origin);
-    if (response.body === null) return invalid();
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    try {
-      for (;;) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        size += chunk.value.length;
-        if (size > MAX_RESPONSE_BYTES) return invalid();
-        chunks.push(chunk.value);
-      }
-    } finally {
-      await reader.cancel();
+    let body = await readRenewalReply(response);
+    if (body === null) return invalid();
+    if (ifWorkspacesChanged && response.status === 400 && body.status === "invalid-request" && Object.keys(body).length === 1) {
+      // A pre-switch hub rejects the conditional field before checking version.
+      // One credential-free envelope diagnoses that version within this request's
+      // deadline. No proof is retried: even a same-version hub cannot retire the
+      // working credential, and only a protocol mismatch is read from this probe.
+      response = await request(wrapToken(""));
+      body = await readRenewalReply(response);
+      if (body === null || response.status !== 409 || body.status !== "protocol-mismatch") return invalid();
     }
-    let body: unknown;
-    try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return invalid(); }
-    if (!object(body)) return invalid();
     if (ifWorkspacesChanged && response.status === 200 && body.status === "unchanged" && Object.keys(body).length === 1) return "unchanged";
     if (response.status === 200 && body.status === "renewed") {
       const replacement = { identity: login.identity, credential: body.credential };

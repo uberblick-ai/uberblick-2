@@ -34,6 +34,7 @@
 
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import { devConfigDocument } from "../dev-config-document.js";
 import { createDoc, docButton, docTitle, editor, openPath, setupHarness } from "./app-helpers.js";
 import type { Page } from "@playwright/test";
 
@@ -283,6 +284,30 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
   await page.getByRole("menuitem", { name: unnamedLabel(ws()) }).click();
   await expect(page).toHaveURL(new RegExp(`/${ws()}$`));
   await expect(docButton(page, title)).toBeVisible();
+});
+
+test("an unbound development config keeps its local key with the compiled loopback endpoint", async ({ browser }) => {
+  const context = trackContext(await browser.newContext());
+  await context.route("**/uberblick-config.json", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json",
+      body: devConfigDocument({
+        WORKSPACE_ID: ws(), HUB_AUTH_TOKEN: harness().authSecret,
+      }),
+    });
+  });
+  const page = await context.newPage();
+  await page.goto(harness().appUrl);
+  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+  const title = docTitle("unbound-dev");
+  const uuid = await createDoc(page, title);
+  await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+  await editor(page).fill("A development write reaches the hub.");
+
+  // A separate upstream browser receives the new document and edit, proving
+  // admission and transport through the fallback rather than only a UI state.
+  const observer = await openApp(browser, `/${ws()}/${uuid}`, { upstream: true });
+  await expect(observer.locator(".ub-title")).toHaveValue(title);
+  await expect(editor(observer)).toHaveText("A development write reaches the hub.");
 });
 
 test("the served configuration names the workspaces, and the build's define is only the fallback", async ({

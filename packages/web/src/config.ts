@@ -513,15 +513,17 @@ export async function readClientConfig(
     notes.push(outcome.localServing.rejected);
   }
 
+  const endpoint = "rejected" in outcome.hubUrl
+    ? BUILT_IN_HUB_URL
+    : { hubUrl: outcome.hubUrl.url, hubUrlSource: "document" as const };
   return {
-    ...("rejected" in outcome.hubUrl
-      ? BUILT_IN_HUB_URL
-      : { hubUrl: outcome.hubUrl.url, hubUrlSource: "document" as const }),
+    ...endpoint,
     ...("rejected" in outcome.workspaces
       ? { workspaces: BUILT_IN_WORKSPACES, workspacesSource: "define" as const }
       : { workspaces: outcome.workspaces.list, workspacesSource: "document" as const }),
-    // A stale deployed document cannot restore remote shared-secret access.
-    hubAuthToken: "url" in outcome.hubUrl && isLoopbackEndpoint(outcome.hubUrl.url)
+    // Development may supply only its key and use the compiled loopback
+    // endpoint. A stale deployed document cannot restore remote access.
+    hubAuthToken: isLoopbackEndpoint(endpoint.hubUrl)
       ? outcome.hubAuthToken
       : "",
     localServing:
