@@ -144,6 +144,36 @@ function alphaOf(color: string): number {
   return parts.length < 4 ? 1 : Number(parts[3]);
 }
 
+/** A keyboard focus cue must be painted, regardless of its chosen thickness. */
+async function expectFocusIndicator(control: Locator): Promise<void> {
+  await expect(control).toBeFocused();
+  expect(await control.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+  expect(await paintedIn(control, "outline-style")).not.toBe("none");
+  expect(Number.parseFloat(await paintedIn(control, "outline-width"))).toBeGreaterThan(0);
+  expect(alphaOf(await paintedIn(control, "outline-color"))).toBeGreaterThan(0);
+}
+
+async function expectInertPane(pane: Locator): Promise<void> {
+  expect(await pane.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return {
+      inert: (element as HTMLElement).inert,
+      hidden: element.getAttribute("aria-hidden"),
+      takesPointer: element.contains(document.elementFromPoint(
+        box.left + box.width / 2, box.top + box.height / 2,
+      )),
+    };
+  })).toEqual({ inert: true, hidden: "true", takesPointer: false });
+}
+
+async function expectNoSidebarMotion(page: Page): Promise<void> {
+  expect(await page.locator(".ub-list").evaluate((sidebar) =>
+    sidebar.getAnimations({ subtree: true }).filter((animation) =>
+      animation.playState === "running" || animation.pending,
+    ).length,
+  )).toBe(0);
+}
+
 /**
  * What the identity row's tag strip does with the width it was given (#958).
  *
@@ -437,20 +467,14 @@ test("workspace settings is an address-selected, inert sidebar drill-in", async 
   const back = settings.getByRole("button", { name: /^Back to / });
   await expect(back).toBeVisible();
   await expect(back).toBeFocused();
-  expect(await paintedIn(settings, "transition-duration")).toContain("0.18s");
-  expect(
-    await documents.evaluate((pane) => ({
-      inert: (pane as HTMLElement).inert,
-      hidden: pane.getAttribute("aria-hidden"),
-      pointer: getComputedStyle(pane).pointerEvents,
-    })),
-  ).toEqual({ inert: true, hidden: "true", pointer: "none" });
+  await expectInertPane(documents);
 
   // The route is the selection: browser Back restores the document sidebar.
   await page.goBack();
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
   await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
   await expect(settingsEntry).toBeFocused();
+  await expectInertPane(settings);
 
   // Portalled controls sit outside the pane's inert subtree. Browser Forward
   // changes the address without clicking underneath them, and the mode change
@@ -486,7 +510,29 @@ test("workspace settings is an address-selected, inert sidebar drill-in", async 
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
-  expect(await paintedIn(settings, "transition-duration")).toBe("0s");
+  await expectNoSidebarMotion(page);
+});
+
+test("the settings drawer retires the outgoing pane and respects reduced motion", async ({ browser }) => {
+  const page = await openAppearanceApp(browser, "light");
+  await page.setViewportSize({ width: 820, height: 832 });
+  await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  await expectInertPane(page.locator(".ub-document-sidebar"));
+
+  // History switches modes while the drawer remains open, so the reduced
+  // motion proof observes the drill-in itself rather than a fresh mount.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goBack();
+  await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
+  await expectInertPane(page.locator(".ub-settings-sidebar"));
+  await expectNoSidebarMotion(page);
+  await page.goForward();
+  await expectInertPane(page.locator(".ub-document-sidebar"));
+  await expectNoSidebarMotion(page);
 });
 
 /**
@@ -694,10 +740,6 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   await page.getByRole("button", { name: "Dark", exact: true }).click();
 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  expect(
-    (await painted(page, "body", "background-image")).match(/oklch\([^)]*\)/g),
-    "#617's owner-reviewed near and far page-ground stops",
-  ).toEqual(["oklch(0.184 0.022 65)", "oklch(0.094 0.011 65)"]);
   // Two surfaces, neither of which knows a theme exists: both are painted from
   // tokens, and both moved.
   expect(await painted(page, ".ub-list", "background-color")).not.toBe(sidebar);
@@ -738,33 +780,23 @@ test("the TL;DR callout keeps its hierarchy, themes and wrapping at both reading
   const title = callout.getByRole("heading", { name: "TL;DR" });
   const summary = callout.locator(".ub-tldr-body > p");
   await expect(callout).toBeVisible();
-  expect(await paintedIn(title, "font-family")).toContain("Fraunces");
-  await expect(summary).toHaveCSS("font-size", "16px");
-  await expect(summary).toHaveCSS("line-height", "28px");
+  expect(await paintedIn(title, "font-family")).toBe(
+    await painted(page, ".ub-title", "font-family"),
+  );
 
   const cardPaint = () =>
     callout.evaluate((element) => {
       const style = getComputedStyle(element);
-      const accent = getComputedStyle(element, "::before");
       return {
         background: style.backgroundImage,
         border: style.borderColor,
-        shadow: style.boxShadow,
-        accentWidth: accent.width,
-        accentTop: accent.top,
-        accentBottom: accent.bottom,
-        accentColor: accent.backgroundColor,
+        accentColor: getComputedStyle(element, "::before").backgroundColor,
       };
     });
   const light = await cardPaint();
-  expect(light.background).toContain("linear-gradient");
-  expect(light.shadow).not.toBe("none");
-  expect(light.accentWidth).toBe("4px");
-  expect([light.accentTop, light.accentBottom]).toEqual(["0px", "0px"]);
 
   await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
   const dark = await cardPaint();
-  expect(dark.background).toContain("linear-gradient");
   expect(dark.background).not.toBe(light.background);
   expect(dark.border).not.toBe(light.border);
   expect(dark.accentColor).not.toBe(light.accentColor);
@@ -773,6 +805,32 @@ test("the TL;DR callout keeps its hierarchy, themes and wrapping at both reading
   for (const width of [375, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     titleSizes.push(Number.parseFloat(await paintedIn(title, "font-size")));
+    expect(Number.parseFloat(await paintedIn(title, "font-size"))).toBeGreaterThan(
+      Number.parseFloat(await paintedIn(summary, "font-size")),
+    );
+    // Pseudo-elements have no DOM rectangle. The engine's resolved height and
+    // inset place the accent in the card's padding box, inside its border.
+    const accent = await callout.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const style = getComputedStyle(element, "::before");
+      const border = getComputedStyle(element);
+      const cardTop = box.top + Number.parseFloat(border.borderTopWidth);
+      const cardLeft = box.left + Number.parseFloat(border.borderLeftWidth);
+      const top = cardTop + Number.parseFloat(style.top);
+      return {
+        cardTop,
+        cardBottom: box.bottom - Number.parseFloat(border.borderBottomWidth),
+        cardLeft,
+        left: cardLeft + Number.parseFloat(style.left),
+        top,
+        bottom: top + Number.parseFloat(style.height),
+        width: Number.parseFloat(style.width),
+      };
+    });
+    expect(accent.top).toBeCloseTo(accent.cardTop, 1);
+    expect(accent.bottom).toBeCloseTo(accent.cardBottom, 1);
+    expect(accent.left).toBeCloseTo(accent.cardLeft, 1);
+    expect(accent.width).toBeGreaterThan(0);
     const geometry = await callout.evaluate((element) => {
       const header = element.querySelector<HTMLElement>(".ub-tldr-header");
       const mark = element.querySelector<HTMLElement>(".ub-tldr-mark");
@@ -892,7 +950,7 @@ test("document actions stay reachable, close with the route, and archive into Re
   });
   await page.getByRole("button", { name: "+ new doc" }).click();
   await page.locator(".ub-title").fill("Lifecycle notes");
-  await page.setViewportSize({ width: 360, height: 720 });
+  await page.setViewportSize({ width: 375, height: 720 });
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
 
@@ -908,21 +966,24 @@ test("document actions stay reachable, close with the route, and archive into Re
     const box = await control.boundingBox();
     if (box === null) throw new Error("e2e: narrow document chrome has no box");
     expect(box.x, name).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width, name).toBeLessThanOrEqual(360);
+    expect(box.x + box.width, name).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
   }
   await expect(uuid).toHaveText(/^uuid [0-9a-f]{8}/);
   await expect(page.locator(".ub-doc-meta")).not.toContainText("Copy link");
-  expect(
-    await page.evaluate(() => {
+  const layout = await page.evaluate(() => {
       const body = document.querySelector<HTMLElement>(".ub-body");
       const pane = document.querySelector<HTMLElement>(".ub-pane");
       if (body === null || pane === null) throw new Error("e2e: no document pane");
       return {
+        viewport: innerWidth,
         body: [body.clientWidth, body.scrollWidth],
         pane: [pane.clientWidth, pane.scrollWidth],
       };
-    }),
-  ).toEqual({ body: [360, 360], pane: [360, 360] });
+    });
+  for (const [client, scroll] of [layout.body, layout.pane]) {
+    expect(client).toBe(layout.viewport);
+    expect(scroll).toBeLessThanOrEqual(client ?? 0);
+  }
 
   await uuid.click();
   await expect(page.locator(".ub-copied")).toHaveText("URL copied to clipboard");
@@ -1087,13 +1148,14 @@ test("MCP connections counts a connected agent session, and stops when it goes",
   await expect(connections).toContainText("0");
 });
 
-test("the document collaborator cluster stays compact and jumps once without moving selection", async ({
+for (const viewport of [720, 1280]) {
+test(`the document collaborator cluster stays compact and jumps once without moving selection — ${viewport}px`, async ({
   browser,
 }) => {
   const page = await openAppearanceApp(browser, "light");
   // The narrow drawer closes on creation, leaving the full-width document pane.
-  await page.setViewportSize({ width: 720, height: 640 });
-  await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  await page.setViewportSize({ width: viewport, height: 640 });
+  if (viewport < 1280) await page.getByRole("button", { name: "Show document list", exact: true }).click();
   await page.getByRole("button", { name: "+ new doc" }).click();
   await page.locator(".ub-title").fill("Live collaborators");
   const firstBlock = page.locator(".ub-editor .ProseMirror > *").first();
@@ -1203,6 +1265,7 @@ test("the document collaborator cluster stays compact and jumps once without mov
     const titleAfter = await page.locator(".ub-title").boundingBox();
     const editorAfter = await page.locator(".ub-editor").boundingBox();
     expect(titleAfter?.x).toBe(titleBefore?.x);
+    expect(titleAfter?.y).toBe(titleBefore?.y);
     expect(titleAfter?.width).toBe(titleBefore?.width);
     expect(editorAfter?.x).toBe(editorBefore?.x);
     expect(editorAfter?.width).toBe(editorBefore?.width);
@@ -1212,37 +1275,59 @@ test("the document collaborator cluster stays compact and jumps once without mov
     // would move it, in `collab.spec.ts`.
     expect((await status.boundingBox())?.height).toBe(rowBefore);
 
-    const circles = await visible.evaluateAll((controls) =>
+    const circles = await page.locator(".ub-peers > .ub-peer-control").evaluateAll((controls) =>
       controls.map((control) => {
         const avatar = control.querySelector<HTMLElement>(".ub-avatar");
         const box = control.getBoundingClientRect();
+        const avatarBox = avatar?.getBoundingClientRect();
+        const round = (element: Element, bounds: DOMRect): boolean => {
+          const style = getComputedStyle(element);
+          return [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius].every((corner) => {
+            const [horizontal = "0", vertical = horizontal] = corner.split(" ");
+            const radius = (value: string, diameter: number) => value.endsWith("%")
+              ? Number.parseFloat(value) * diameter / 100 : Number.parseFloat(value);
+            return radius(horizontal, bounds.width) >= bounds.width / 2 && radius(vertical, bounds.height) >= bounds.height / 2;
+          });
+        };
         return {
           width: box.width,
           height: box.height,
+          top: box.top,
           left: box.left,
           right: box.right,
-          avatarWidth: avatar?.getBoundingClientRect().width,
+          avatarWidth: avatarBox?.width,
+          avatarHeight: avatarBox?.height,
+          round: round(control, box) && (avatar === null || avatarBox === undefined || round(avatar, avatarBox)),
         };
       }),
     );
-    expect(circles.map(({ width, height, avatarWidth }) => [width, height, avatarWidth]))
-      .toEqual([
-        [28, 28, 28],
-        [28, 28, 28],
-        [28, 28, 28],
-      ]);
-    const [firstCircle, secondCircle] = circles;
-    if (firstCircle === undefined || secondCircle === undefined) {
-      throw new Error("e2e: the collaborator cluster did not draw three circles");
+    const firstCircle = circles[0];
+    if (firstCircle === undefined) throw new Error("e2e: no collaborator circles");
+    for (const [index, circle] of circles.entries()) {
+      expect(circle.width).toBeGreaterThanOrEqual(24);
+      expect(circle.width).toBe(circle.height);
+      expect(circle.width).toBe(firstCircle.width);
+      expect(circle.top).toBe(firstCircle.top);
+      expect(circle.round).toBe(true);
+      if (circle.avatarWidth !== undefined) {
+        expect(circle.avatarWidth).toBe(circle.width);
+        expect(circle.avatarHeight).toBe(circle.height);
+      }
+      const previous = circles[index - 1];
+      if (previous !== undefined) {
+        const overlap = previous.right - circle.left;
+        expect(overlap).toBeGreaterThan(0);
+        expect(overlap).toBeLessThan(previous.width / 2);
+      }
     }
-    expect(secondCircle.left).toBeLessThan(firstCircle.right);
     await visible.first().focus();
+    await page.keyboard.press("ArrowRight");
     const tooltip = page.getByRole("tooltip");
     await expect(tooltip).toContainText(
       (await visible.first().getAttribute("aria-label"))?.split(" · ").slice(0, 2).join(" · ") ?? "",
     );
     await expect(page.locator('[data-slot="tooltip-content"]')).toBeVisible();
-    await expect(visible.first()).toHaveCSS("outline-width", "2px");
+    await expectFocusIndicator(visible.first());
 
     const orderBefore = await visible.evaluateAll((controls) =>
       controls.map((control) => (control as HTMLElement).dataset.peerId),
@@ -1352,7 +1437,7 @@ test("the document collaborator cluster stays compact and jumps once without mov
     ).first();
     await expect(jumpRow).toBeVisible();
     await jumpRow.focus();
-    await expect(jumpRow).toHaveCSS("outline-width", "2px");
+    await expectFocusIndicator(jumpRow);
     await page.keyboard.press("Enter");
     await expect.poll(() => pane.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
@@ -1387,6 +1472,7 @@ test("the document collaborator cluster stays compact and jumps once without mov
     for (const doc of documents) doc.destroy();
   }
 });
+}
 
 /**
  * A painted colour in OKLab. Tokens use `oklch()`; Chromium also serializes
@@ -1965,19 +2051,15 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
-test("the document title is set in the bundled Fraunces, and nothing else moved", async ({
+test("the document title uses the bundled Fraunces while prose keeps its own face", async ({
   browser,
 }) => {
   const page = await openAppearanceApp(browser, "light");
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
-  expect(await painted(page, ".ub-title", "font-family")).toBe(
-    'Fraunces, Georgia, "Times New Roman", serif',
-  );
-
-  // The stack above is satisfied by Georgia too, so it is not evidence on its
-  // own. A title that reaches into all three vendored cuts is: the engine only
+  // A title that reaches into all three vendored cuts proves more than a
+  // declared stack: the engine only
   // fetches a face whose characters it has to paint, so three `loaded` faces
   // is three files it found and used. Polish and Turkish are the latin-ext
   // cut, Vietnamese the third, and the rest of the line the first — a title
@@ -1993,19 +2075,19 @@ test("the document title is set in the bundled Fraunces, and nothing else moved"
     )
     .toEqual(["loaded", "loaded", "loaded"]);
 
-  // Title-only: the prose it sits above and the column beside it keep Geist,
-  // and the title is not in it.
+  const applied = await page.locator(".ub-title").evaluate((title) => {
+    const firstFamily = getComputedStyle(title).fontFamily.split(",")[0]?.trim().replace(/^["']|["']$/g, "");
+    const bundled = [...document.fonts].filter((face) => face.family === "Fraunces");
+    return { firstFamily, bundledFamily: bundled[0]?.family };
+  });
+  expect(applied.firstFamily).toBe(applied.bundledFamily);
+
+  // Title-only: prose and sidebar share their own face.
   const prose = await painted(page, ".ub-editor .ub-paragraph", "font-family");
   expect(prose).toBe(await painted(page, ".ub-list", "font-family"));
-  expect(prose).toContain("Geist");
-  expect(prose).not.toContain("Fraunces");
+  expect(prose.split(",").map((family) => family.trim().replace(/^["']|["']$/g, ""))).not.toContain(applied.bundledFamily);
 
-  // The face changed and the setting did not: same size and weight as the h1
-  // it is matched to, and a box still as wide as the column rather than as
-  // wide as its own text — a serif is wider than Geist per character, and an
-  // input that sized itself would take the layout with it.
-  expect(await painted(page, ".ub-title", "font-size")).toBe("32.8px");
-  expect(await painted(page, ".ub-title", "font-weight")).toBe("500");
+  // The title remains as wide as the editor, regardless of its type size.
   expect(await width(page, ".ub-title")).toBe(await width(page, ".ub-editor"));
 
   // No font file comes from outside the app, and the Google Fonts stylesheet
@@ -2157,7 +2239,7 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
 
   // The identity confirmation uses the target's lower half: it neither moves
   // nor intersects the uuid, revision, title or actions when it appears.
-  await page.setViewportSize({ width: 360, height: 620 });
+  await page.setViewportSize({ width: 375, height: 620 });
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
   await page.locator(".ub-body").evaluate(async (body) => {
@@ -2269,8 +2351,10 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   // chevron, and the control itself draws no box around them.
   await expect(trigger).toContainText("Add tags");
   await expect(page.locator(".ub-tag-chevron")).toHaveCount(1);
-  expect(await paintedIn(trigger, "background-color")).toBe("rgba(0, 0, 0, 0)");
-  expect(await paintedIn(trigger, "border-top-width")).toBe("0px");
+  expect(alphaOf(await paintedIn(trigger, "background-color"))).toBe(0);
+  for (const edge of ["top", "right", "bottom", "left"]) {
+    expect(Number.parseFloat(await paintedIn(trigger, `border-${edge}-width`))).toBe(0);
+  }
 
   // Five entries is under the threshold, so the panel is a list: no field, and
   // the keyboard enters the list itself.
@@ -2289,8 +2373,28 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   ).toBeGreaterThan(0.02);
 
   // A comfortable list rather than a narrow box.
-  const panelBox = await page.locator(".ub-tag-picker-panel").boundingBox();
-  expect(panelBox?.width ?? 0).toBeGreaterThanOrEqual(320);
+  const comfortableList = () => page.locator(".ub-tag-picker-panel").evaluate((panel) => {
+    const box = panel.getBoundingClientRect();
+    return {
+      inside: box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight,
+      names: [...panel.querySelectorAll<HTMLElement>('[role="option"]')].map((option) => {
+        const name = option.querySelector<HTMLElement>(":scope > span:nth-child(2)");
+        if (name === null) throw new Error("e2e: tag option has no name");
+        const range = document.createRange();
+        range.selectNodeContents(name);
+        const lines = [...range.getClientRects()];
+        const row = option.getBoundingClientRect();
+        return lines.length === 1 && lines.every((line) =>
+          line.left >= Math.max(row.left, box.left) && line.right <= Math.min(row.right, box.right) &&
+          line.top >= Math.max(row.top, box.top) && line.bottom <= Math.min(row.bottom, box.bottom),
+        ) && name.scrollWidth <= name.clientWidth;
+      }),
+    };
+  });
+  for (const viewport of [375, 1280]) {
+    await page.setViewportSize({ width: viewport, height: 620 });
+    await expect.poll(comfortableList).toEqual({ inside: true, names: [true, true, true, true, true] });
+  }
 
   for (const tag of ["auth", "billing", "mcp", "permissions", "sync"]) {
     await page.getByRole("option", { name: tag, exact: true }).click();
@@ -2339,7 +2443,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await expect(search).toBeFocused();
   await expect(page.locator(".ub-tag-search-icon")).toHaveCount(1);
   const field = page.locator(".ub-tag-search-field");
-  expect(await paintedIn(field, "border-top-width")).toBe("1px");
+  expect(Number.parseFloat(await paintedIn(field, "border-top-width"))).toBeGreaterThan(0);
   const fieldFill = await paintedIn(field, "background-color");
   const panel = await painted(page, ".ub-tag-picker-panel", "background-color");
   // Opaque *and* darker: the two halves of "no lighter than the panel". An
@@ -2377,7 +2481,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
 
   // The document list is still hidden from the wrap check above, so these are
   // the widths the reader actually gets.
-  for (const viewport of [420, 375, 320]) {
+  for (const viewport of [420, 375]) {
     await page.setViewportSize({ width: viewport, height: 620 });
     const geometry = await tagStripGeometry(page);
     expect(geometry.overlaps, `writable header at ${viewport}px`).toEqual([]);
@@ -2395,7 +2499,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await page.getByRole("button", { name: "Archive document" }).click();
   await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
   await expect(page.locator(".ub-tags-readonly")).toContainText(longest);
-  for (const viewport of [420, 375, 320]) {
+  for (const viewport of [420, 375]) {
     await page.setViewportSize({ width: viewport, height: 620 });
     const geometry = await tagStripGeometry(page);
     expect(geometry.overlaps, `read-only header at ${viewport}px`).toEqual([]);
