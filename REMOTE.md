@@ -659,7 +659,8 @@ workspace. Only its current admins can list or change members; any member
 can read their own role. Member rows contain `principalId`,
 `githubAccountId`, `githubUsername` (the latest GitHub login seen at sign-in),
 and `role`. The final admin cannot be demoted or removed. No operation here
-adds membership or lets a member leave on their own.
+adds membership. A non-admin member cannot remove themselves; an admin can
+leave while another admin remains.
 
 Every person can list and revoke only their own devices, including with a
 credential naming no workspace. Workspace admins have no authority over

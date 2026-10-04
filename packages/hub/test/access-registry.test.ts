@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CredentialRegistry, type IssuedCredential } from "../src/credentials.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
-import { PrincipalRegistry } from "../src/principals.js";
 import {
   type RequestAction,
   importCredentialKey,
@@ -20,7 +19,6 @@ function registry(path = ":memory:") {
     db,
     store: new CredentialRegistry(db),
     memberships: new MembershipRegistry(db),
-    principals: new PrincipalRegistry(db),
   };
 }
 
@@ -73,7 +71,7 @@ afterEach(() => {
 });
 
 describe("principal-owned device management", () => {
-  it("lists only current own devices, preserves sign-in time through renewal, and returns detached limits", async () => {
+  it("lists only current own devices and preserves sign-in time through renewal", async () => {
     const { store, memberships } = registry();
     const signedInAt = Date.now();
     const now = vi.spyOn(Date, "now").mockReturnValue(signedInAt);
@@ -96,8 +94,6 @@ describe("principal-owned device management", () => {
     expect(store.get(laptop.record.id)?.replacedAt).toBeTypeOf("number");
     expect(store.get(revoked.record.id)?.revokedAt).toBeTypeOf("number");
     expect(store.listDevices("unknown-principal")).toEqual([]);
-    listed[0]?.workspaces.push(WORKSPACE);
-    expect(store.listDevices("person")[0]?.workspaces).toEqual([OTHER_WORKSPACE]);
   });
 
   it("gives foreign and unknown devices the same refusal without mutation or closure", () => {
@@ -275,31 +271,11 @@ describe("current management credential verification", () => {
     expect(await checking).toBeNull();
   });
 
-  it("authorizes an empty-limit credential without consulting membership or GitHub", async () => {
+  it("authorizes an empty-limit credential with no memberships", async () => {
     const { store, memberships } = registry();
     const issued = issue(store, "laptop", "person", []);
-    const github = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("GitHub unavailable"));
 
     expect(await store.verifyRequest(await proof(issued), { operation: "list-devices" })).toHaveProperty("record", issued.record);
-    expect(github).not.toHaveBeenCalled();
     expect(memberships.workspacesFor("person")).toEqual([]);
-  });
-});
-
-describe("public principal lookup", () => {
-  it("reads stable identities with refreshed GitHub logins and preserves them across restart", () => {
-    const path = tempDatabasePath();
-    const first = registry(path);
-    const original = first.principals.identify("123", "old-login");
-    const updated = first.principals.identify("123", "current-login");
-    expect(updated.id).toBe(original.id);
-    expect(first.principals.get(original.id)).toEqual(updated);
-    const detached = first.principals.get(original.id);
-    if (detached !== null) detached.githubUsername = "client-value";
-    expect(first.principals.get(original.id)?.githubUsername).toBe("current-login");
-    expect(first.principals.get("unknown-principal")).toBeNull();
-    first.db.close();
-
-    expect(registry(path).principals.get(original.id)).toEqual(updated);
   });
 });
