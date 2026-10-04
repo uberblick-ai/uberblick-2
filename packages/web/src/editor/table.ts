@@ -3,7 +3,8 @@
  * Cells are one paragraph, and table state lives only in the Yjs cell tree.
  */
 import { Extension } from "@tiptap/core";
-import { Table as TiptapTable, TableCell, TableHeader, TableRow, TableKit } from "@tiptap/extension-table";
+import { Table as TiptapTable, TableCell, TableHeader, TableRow, TableKit, TableView } from "@tiptap/extension-table";
+import { DOMParser as ProseMirrorDOMParser } from "@tiptap/pm/model";
 import type { Node as ProseMirrorNode, Schema } from "@tiptap/pm/model";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 import type { EditorState } from "@tiptap/pm/state";
@@ -27,6 +28,17 @@ const cellAttributes = () => ({
   colspan: { default: 1 }, rowspan: { default: 1 }, colwidth: { default: null },
 });
 
+// ProseMirror can reuse a table view for a different stable block. TableKit
+// refreshes its columns on update; mirror our identity too, as other blocks do.
+class IdentifiedTableView extends TableView {
+  override update(node: ProseMirrorNode): boolean {
+    if (!super.update(node)) return false;
+    if (typeof node.attrs.id === "string") this.table.id = node.attrs.id;
+    else this.table.removeAttribute("id");
+    return true;
+  }
+}
+
 export const Table = TiptapTable.extend({
   addAttributes() {
     return { id: { default: null, parseHTML: (element: HTMLElement) => element.getAttribute("id") } };
@@ -43,6 +55,7 @@ export const Table = TiptapTable.extend({
   },
 }).configure({
   resizable: false, renderWrapper: true, cellMinWidth: 120,
+  View: IdentifiedTableView,
   HTMLAttributes: { class: "ub-table", "data-block-type": "table" },
 });
 
@@ -201,6 +214,34 @@ function convertToTable(
 export function tableFromTextPlugin(): Plugin {
   return new Plugin({
     props: {
+      transformPastedHTML(html, view) {
+        if (!/<table[\s>]/i.test(html)) return html;
+        const dom = document.implementation.createHTMLDocument().body;
+        dom.innerHTML = html;
+        const parser = ProseMirrorDOMParser.fromSchema(view.state.schema);
+        for (const table of dom.querySelectorAll("table")) {
+          // An outer table already includes its nested tables' text.
+          if (!dom.contains(table)) continue;
+          const replacement = document.createDocumentFragment();
+          const cells: HTMLElement[] = [
+            ...(table.caption === null ? [] : [table.caption]),
+            ...Array.from(table.rows).flatMap((row) => Array.from(row.cells)),
+          ];
+          for (const cell of cells) {
+            // Let the ordinary parser retain HTML block boundaries and handle
+            // line breaks. Only table content loses its formatting/structure;
+            // surrounding headings, lists and link marks use normal rich paste.
+            const parsed = parser.parse(cell);
+            for (const line of parsed.textBetween(0, parsed.content.size, "\n").split(/\r\n?|\n/)) {
+              const paragraph = document.createElement("p");
+              paragraph.textContent = line;
+              replacement.appendChild(paragraph);
+            }
+          }
+          table.replaceWith(replacement);
+        }
+        return dom.innerHTML;
+      },
       handleKeyDown(view, event) {
         if (event.key !== "Enter" || event.isComposing) return false;
         const { $from } = view.state.selection;
@@ -264,14 +305,12 @@ export function tableFromTextPlugin(): Plugin {
           view.dispatch(view.state.tr.insertText(singleLine(plain)).scrollIntoView());
           return true;
         }
-        // HTML tables are deliberately pasted as text. This avoids accepting
-        // spans or multiple blocks through ProseMirror's table paste repair.
+        // transformPastedHTML turns only HTML tables into text paragraphs.
+        // Let the standard rich-paste path insert that slice, including any
+        // surrounding blocks and marks, rather than treating its plain text as
+        // an exact-GFM-table clipboard.
         const html = event.clipboardData?.getData("text/html") ?? "";
-        if (/<table[\s>]/i.test(html)) {
-          const plain = event.clipboardData?.getData("text/plain") ?? "";
-          view.dispatch(view.state.tr.insertText(plain));
-          return true;
-        }
+        if (/<table[\s>]/i.test(html)) return false;
         const text = event.clipboardData?.getData("text/plain") ?? "";
         const source = text.replace(/\r\n?/g, "\n").replace(/\s+$/, "");
         // The *whole* clipboard has to be one table, not merely start as one.

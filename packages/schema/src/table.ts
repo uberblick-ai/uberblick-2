@@ -122,11 +122,15 @@ export function tableRows(element: Y.XmlElement): Y.XmlElement[][] {
   ));
 }
 
-export function tableCellText(cell: Y.XmlElement): Y.XmlText | null {
+/** First writes into an empty paragraph can concurrently create several texts. */
+export function tableCellTexts(cell: Y.XmlElement): Y.XmlText[] {
   const paragraph = cell.firstChild;
-  if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph") return null;
-  const text = paragraph.firstChild;
-  return text instanceof Y.XmlText ? text : null;
+  if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph") return [];
+  return paragraph.toArray().filter((text): text is Y.XmlText => text instanceof Y.XmlText);
+}
+
+export function tableCellText(cell: Y.XmlElement): Y.XmlText | null {
+  return tableCellTexts(cell)[0] ?? null;
 }
 
 /** Read plain text without rendering XmlText's formatting as XML tags. */
@@ -152,7 +156,7 @@ export function writeGfmTable(
 }
 
 export function tableText(element: Y.XmlElement): string {
-  return writeGfmTable(tableRows(element).map((row) => row.map((cell) => plainXmlText(tableCellText(cell)))));
+  return writeGfmTable(tableRows(element).map((row) => row.map((cell) => tableCellTexts(cell).map(plainXmlText).join(""))));
 }
 
 /** Bindable cell grammar. Rectangularity is deliberately not a read invariant. */
@@ -167,12 +171,11 @@ export function isSupportedTable(element: Y.XmlElement): boolean {
       if (Object.keys(attrs).some((key) => !["colspan", "rowspan"].includes(key)) || attrs.colspan !== 1 || attrs.rowspan !== 1 || cell.length !== 1) return false;
       const paragraph = cell.firstChild;
       if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph" || Object.keys(paragraph.getAttributes()).length !== 0 || paragraph.length > 1) return false;
-      if (paragraph.length === 0) return true; // y-prosemirror represents an empty paragraph this way.
-      const text = tableCellText(cell);
-      if (text === null) return false;
-      return (text.toDelta() as Array<{ insert?: unknown; attributes?: Record<string, unknown> }>).every((op) =>
+      return paragraph.toArray().every((text) => text instanceof Y.XmlText &&
+        (text.toDelta() as Array<{ insert?: unknown; attributes?: Record<string, unknown> }>).every((op) =>
         typeof op.insert === "string" && !/[\r\n]/.test(op.insert) && Object.entries(op.attributes ?? {}).every(([key, value]) =>
           (TABLE_CELL_MARKS as readonly string[]).includes(key) && readsAsMark(key, value),
+        ),
         ),
       );
     });
@@ -187,7 +190,10 @@ export function buildTableCell(text: string, header: boolean): Y.XmlElement {
   attrs.setAttribute("rowspan", 1);
   // ProseMirror's colwidth default is null. y-prosemirror omits null attrs.
   const paragraph = new Y.XmlElement("paragraph");
-  if (text !== "") paragraph.insert(0, [new Y.XmlText(text)]);
+  // Even an empty cell needs a shared text before its first writers arrive.
+  // Independently inserting texts on the first keystroke loses later writes
+  // when y-prosemirror consolidates the adjacent types.
+  paragraph.insert(0, [new Y.XmlText(text)]);
   cell.insert(0, [paragraph]);
   return cell;
 }
@@ -203,6 +209,24 @@ export function buildTableElement(id: string, table: GfmTable): Y.XmlElement {
   element.setAttribute("id", id);
   element.insert(0, [buildTableRow(table.header, true), ...table.rows.map((row) => buildTableRow(row, false))]);
   return element;
+}
+
+/** Seed cells created by TableKit in the same local transaction as their row. */
+export function seedNewTableCells(transaction: Y.Transaction): void {
+  if (!transaction.local) return;
+  const doc = transaction.doc;
+  const start = transaction.beforeState.get(doc.clientID) ?? 0;
+  for (const table of doc.getXmlFragment("blocks").toArray()) {
+    if (!(table instanceof Y.XmlElement) || table.nodeName !== "table") continue;
+    for (const cell of tableRows(table).flat()) {
+      const paragraph = cell.firstChild;
+      if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph" || paragraph.length !== 0) continue;
+      const id = Y.createRelativePositionFromTypeIndex(paragraph, 0).type;
+      // Never seed a previously received empty cell on several replicas: that
+      // would reproduce the first-write race. Its creator owns this insertion.
+      if (id?.client === doc.clientID && id.clock >= start) paragraph.insert(0, [new Y.XmlText()]);
+    }
+  }
 }
 
 /** Splice changed characters only, preserving marks and unseen concurrent edits. */
@@ -222,59 +246,78 @@ export function spliceTableCell(cell: Y.XmlElement, value: string): void {
   }
 }
 
+type EntryMatch = { cells: number; characters: number };
+
 /**
- * Match unchanged structural entries, then pair substitutions between anchors.
- * An insertion/removal keeps the surviving Yjs subtree rather than replaying it.
+ * Align the complete edit, maximizing unchanged cells before substitutions.
+ * Character overlap breaks repeated-value ties, such as Ship becoming Ship2.
  */
 function alignEntries(
-  oldKeys: readonly string[], newKeys: readonly string[],
-  matches?: (oldIndex: number, newIndex: number) => boolean,
+  oldLength: number, newLength: number,
+  matchingCells: (oldIndex: number, newIndex: number) => EntryMatch,
 ): Array<number | null> {
-  const positions = new Map<string, number[]>();
-  oldKeys.forEach((key, index) => {
-    const entries = positions.get(key) ?? [];
-    entries.push(index);
-    positions.set(key, entries);
-  });
-  const anchors: Array<[number, number]> = [];
-  let oldCursor = 0;
-  newKeys.forEach((key, index) => {
-    const match = matches === undefined
-      ? positions.get(key)?.find((candidate) => candidate >= oldCursor)
-      : oldKeys.findIndex((_, candidate) => candidate >= oldCursor && matches(candidate, index));
-    if (match !== undefined && match !== -1) { anchors.push([match, index]); oldCursor = match + 1; }
-  });
-  anchors.push([oldKeys.length, newKeys.length]);
-  const result: Array<number | null> = Array<number | null>(newKeys.length).fill(null);
-  let oldStart = 0;
-  let newStart = 0;
-  for (const [oldEnd, newEnd] of anchors) {
-    for (let offset = 0; offset < Math.min(oldEnd - oldStart, newEnd - newStart); offset += 1) {
-      result[newStart + offset] = oldStart + offset;
+  let maxCharacters = 0;
+  const matches = Array.from({ length: oldLength }, (_, oldIndex) => Array.from({ length: newLength }, (_, newIndex) => {
+    const match = matchingCells(oldIndex, newIndex);
+    maxCharacters = Math.max(maxCharacters, match.characters);
+    return match;
+  }));
+  const stride = newLength + 1;
+  const scores = new Float64Array((oldLength + 1) * stride);
+  const score = (oldIndex: number, newIndex: number): number => scores[oldIndex * stride + newIndex] ?? 0;
+  const pairs = Math.min(oldLength, newLength);
+  const characterWeight = pairs + 1;
+  // A single unchanged cell outweighs all character overlap; one matching
+  // character outweighs all substitutions. Neither can displace a better match.
+  const cellWeight = (pairs * maxCharacters + 1) * characterWeight;
+  const pairScore = (oldIndex: number, newIndex: number): number => {
+    const match = matches[oldIndex]?.[newIndex];
+    return (match?.cells ?? 0) * cellWeight + (match?.characters ?? 0) * characterWeight + 1;
+  };
+  for (let oldIndex = oldLength - 1; oldIndex >= 0; oldIndex -= 1) {
+    for (let newIndex = newLength - 1; newIndex >= 0; newIndex -= 1) {
+      scores[oldIndex * stride + newIndex] = Math.max(
+        pairScore(oldIndex, newIndex) + score(oldIndex + 1, newIndex + 1),
+        score(oldIndex + 1, newIndex), score(oldIndex, newIndex + 1),
+      );
     }
-    if (newEnd < newKeys.length) result[newEnd] = oldEnd;
-    oldStart = oldEnd + 1;
-    newStart = newEnd + 1;
+  }
+  const result: Array<number | null> = Array<number | null>(newLength).fill(null);
+  let oldIndex = 0;
+  let newIndex = 0;
+  while (oldIndex < oldLength && newIndex < newLength) {
+    const paired = pairScore(oldIndex, newIndex) + score(oldIndex + 1, newIndex + 1);
+    if (score(oldIndex, newIndex) === paired) {
+      result[newIndex] = oldIndex;
+      oldIndex += 1;
+      newIndex += 1;
+    } else if (score(oldIndex, newIndex) === score(oldIndex + 1, newIndex)) oldIndex += 1;
+    else newIndex += 1;
   }
   return result;
 }
 
-function isSubsequence(shorter: readonly string[], longer: readonly string[]): boolean {
-  let matched = 0;
-  for (const value of longer) {
-    if (value === shorter[matched]) matched += 1;
-  }
-  return matched === shorter.length;
+function matchCell(before: string, after: string): EntryMatch {
+  return {
+    cells: before === after ? 1 : 0,
+    characters: fastDiff(before, after).reduce((count, [operation, text]) => operation === 0 ? count + text.length : count, 0),
+  };
 }
 
-function countFeatures(entries: readonly (readonly string[])[], indexed: boolean): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const entry of entries) {
-    for (const key of new Set(entry.map((value, index) => indexed ? JSON.stringify([index, value]) : value))) {
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-  }
-  return counts;
+function countMatchingCells(before: readonly string[], after: readonly string[], columnsChanged = false): EntryMatch {
+  // Column changes shift positions. Match surviving cells in order while
+  // allowing a neighbouring cell to be edited in the same structural mutation.
+  const columns = columnsChanged
+    ? alignEntries(before.length, after.length, (oldCol, newCol) => matchCell(before[oldCol] ?? "", after[newCol] ?? ""))
+    : after.map((_, column) => column < before.length ? column : null);
+  const result: EntryMatch = { cells: 0, characters: 0 };
+  columns.forEach((oldCol, newCol) => {
+    if (oldCol === null) return;
+    const match = matchCell(before[oldCol] ?? "", after[newCol] ?? "");
+    result.cells += match.cells;
+    result.characters += match.characters;
+  });
+  return result;
 }
 
 /**
@@ -289,53 +332,15 @@ export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: G
   const storedRows = element.toArray() as Y.XmlElement[];
   const oldCells = tableRows(element);
   const widthChanged = oldTable.header.length !== newTable.header.length;
-  const oldRowKeys = oldTable.rows.map((row) => JSON.stringify(row));
-  const newRowKeys = newTable.rows.map((row) => JSON.stringify(row));
-  const oldRowFeatures = countFeatures(oldTable.rows, !widthChanged);
-  const newRowFeatures = countFeatures(newTable.rows, !widthChanged);
-  // A row unchanged except for inserted/removed columns is still an anchor.
-  // This also handles a combined row+column insertion with repeated headers.
   const rowMap = [0, ...alignEntries(
-    oldRowKeys, newRowKeys,
-    (oldRow, newRow) => {
-      const before = oldTable.rows[oldRow] ?? [];
-      const after = newTable.rows[newRow] ?? [];
-      if (oldRowKeys[oldRow] === newRowKeys[newRow]) return true;
-      if (widthChanged && (before.length < after.length ? isSubsequence(before, after) : isSubsequence(after, before))) return true;
-      // A surviving cell can identify a row even when another cell is edited
-      // in the same GFM mutation. Ignore values repeated across several rows.
-      return before.some((value, col) => value !== "" &&
-        (widthChanged ? after.includes(value) : after[col] === value) &&
-        oldRowFeatures.get(widthChanged ? value : JSON.stringify([col, value])) === 1 &&
-        newRowFeatures.get(widthChanged ? value : JSON.stringify([col, value])) === 1,
-      );
-    },
+    oldTable.rows.length, newTable.rows.length,
+    (oldRow, newRow) => countMatchingCells(oldTable.rows[oldRow] ?? [], newTable.rows[newRow] ?? [], widthChanged),
   ).map((index) => index === null ? null : index + 1)];
   const matchedRows = rowMap.flatMap((oldIndex, newIndex) => oldIndex === null ? [] : [{ oldIndex, newIndex }]);
   const oldColumns = oldTable.header.map((_, col) => matchedRows.map(({ oldIndex }) => oldValues[oldIndex]?.[col] ?? ""));
   const newColumns = newTable.header.map((_, col) => matchedRows.map(({ newIndex }) => newValues[newIndex]?.[col] ?? ""));
-  const oldColumnKeys = oldColumns.map((col) => JSON.stringify(col));
-  const newColumnKeys = newColumns.map((col) => JSON.stringify(col));
-  const oldColumnFeatures = countFeatures(oldColumns, true);
-  const newColumnFeatures = countFeatures(newColumns, true);
-  const oldHeaders = countFeatures(oldTable.header.map((value) => [value]), false);
-  const newHeaders = countFeatures(newTable.header.map((value) => [value]), false);
   const columnMap = widthChanged
-    ? alignEntries(
-      oldColumnKeys, newColumnKeys,
-      (oldCol, newCol) => {
-        const before = oldColumns[oldCol] ?? [];
-        const after = newColumns[newCol] ?? [];
-        if (oldColumnKeys[oldCol] === newColumnKeys[newCol]) return true;
-        const header = oldTable.header[oldCol];
-        if (header !== undefined && header === newTable.header[newCol] &&
-          oldHeaders.get(header) === 1 && newHeaders.get(header) === 1) return true;
-        return before.some((value, row) => row > 0 && value !== "" && value === after[row] &&
-          oldColumnFeatures.get(JSON.stringify([row, value])) === 1 &&
-          newColumnFeatures.get(JSON.stringify([row, value])) === 1,
-        );
-      },
-    )
+    ? alignEntries(oldColumns.length, newColumns.length, (oldCol, newCol) => countMatchingCells(oldColumns[oldCol] ?? [], newColumns[newCol] ?? []))
     : newTable.header.map((_, col) => col);
 
   const retainedRows = new Set(rowMap);

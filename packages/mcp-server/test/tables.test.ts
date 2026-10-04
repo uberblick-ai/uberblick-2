@@ -4,6 +4,7 @@ import {
   appendBlock,
   createAnnotation,
   decisionApprovalFingerprint,
+  editBlock,
   findBlockElement,
   getBlocksFragment,
   getMetaMap,
@@ -96,8 +97,56 @@ describe("structured tables through MCP", () => {
     const emptyParagraph = tableRows(emptyTable)[1]![0]!.firstChild;
     const emptyCursor = rig.instance.replicas.replica(created.uuid).awareness.getLocalState()!.cursor;
     const emptyPosition = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(emptyCursor.head), doc);
-    expect(emptyPosition?.type).toBe(emptyParagraph);
-    expect((emptyParagraph as Y.XmlElement).length).toBe(0);
+    expect(emptyPosition?.type).toBe((emptyParagraph as Y.XmlElement).firstChild);
+    expect((emptyParagraph as Y.XmlElement).length).toBe(1);
+  });
+
+  it("keeps first and delayed writers in one empty cell visible to every agent reader", async () => {
+    const rig = await localRig();
+    const source = "| h | x |\n| --- | --- |\n|  | keep |";
+    const created = await rig.ok("create_doc", {
+      title: "Empty cell", description: "First writers share the empty cell text.",
+      blocks: [{ type: "table", text: source }],
+    });
+    const id = created.blocks[0].id;
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const remote = new Y.Doc();
+    const delayed = new Y.Doc();
+    try {
+      Y.applyUpdate(remote, Y.encodeStateAsUpdate(doc));
+      const original = cell(doc, id, 1, 0);
+      const remoteText = cell(remote, id, 1, 0);
+      const originalPosition = Y.createRelativePositionFromTypeIndex(original, 0).type;
+      expect(Y.createRelativePositionFromTypeIndex(remoteText, 0).type).toEqual(originalPosition);
+      await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
+        old_text: source, new_text: source.replace("|  | keep |", "| Ann | keep |"), rev: created.blocks[0].rev });
+      original.format(0, 3, { bold: {} });
+      editBlock(remote, id, source, source.replace("|  | keep |", "| Ben | keep |"));
+      remoteText.format(0, 3, { italic: {} });
+      Y.applyUpdate(delayed, Y.encodeStateAsUpdate(remote));
+      const localWrite = Y.encodeStateAsUpdate(doc);
+      const remoteWrite = Y.encodeStateAsUpdate(remote);
+      Y.applyUpdate(doc, remoteWrite); Y.applyUpdate(remote, localWrite);
+      const delayedBefore = cell(delayed, id, 1, 0).length;
+      cell(delayed, id, 1, 0).insert(delayedBefore, " later");
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(delayed));
+      const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
+      for (const value of ["Ann", "Ben", "later"]) expect(read.text).toContain(value);
+      expect(read.rev).not.toBe(created.blocks[0].rev);
+      expect(cell(doc, id, 1, 0)).toBe(original);
+      const paragraph = tableRows(findBlockElement(doc, id)!)[1]![0]!.firstChild as Y.XmlElement;
+      expect(paragraph.length).toBe(1);
+      const exported = (await rig.ok("export_markdown", { uuid: created.uuid, frontmatter: false })).markdown;
+      expect(exported).toContain("**Ann**"); expect(exported).toContain("*Ben");
+      expect((await rig.ok("search", { query: parseGfmTable(read.text)?.rows[0]?.[0] ?? "" })).hits.map((hit: { uuid: string }) => hit.uuid)).toContain(created.uuid);
+      const stale = await rig.call("edit_block", { uuid: created.uuid, block_id: id,
+        old_text: read.text, new_text: read.text, rev: created.blocks[0].rev });
+      expect(stale.payload.error).toBe("stale_block");
+      const changed = await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
+        old_text: read.text, new_text: read.text.replace("keep", "kept"), rev: read.rev });
+      expect(changed.block.text).toContain("kept");
+      expect(cell(doc, id, 1, 0)).toBe(original);
+    } finally { remote.destroy(); delayed.destroy(); }
   });
 
   it("refuses non-table text before any create, insert or edit write", async () => {

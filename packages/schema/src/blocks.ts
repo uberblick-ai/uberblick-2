@@ -47,7 +47,7 @@ import {
 } from "./marks.js";
 import { blockRev } from "./rev.js";
 import { canonicalDocumentUuid } from "./rooms.js";
-import { buildTableElement, editTable, parseGfmTable, parseTableInput, tableCellText, tableRows, tableText } from "./table.js";
+import { buildTableElement, editTable, parseGfmTable, parseTableInput, tableCellTexts, tableRows, tableText } from "./table.js";
 import {
   MAX_LIST_INDENT,
   isBlockType,
@@ -317,7 +317,7 @@ export function getBlocksWithInline(
     block: toBlock(element),
     inline: readInlineRuns(textOf(element)),
     ...(element.nodeName === "table" ? {
-      table: tableRows(element).map((row) => row.map((cell) => readInlineRuns(tableCellText(cell)))),
+      table: tableRows(element).map((row) => row.map((cell) => tableCellTexts(cell).flatMap(readInlineRuns))),
     } : {}),
   }));
 }
@@ -596,7 +596,7 @@ export function setBlockType(
     if (oldType === "table" || newType === "table") {
       if (oldType === "table" && newType === "table") return;
       const marked = oldType === "table"
-        ? tableRows(old).flat().flatMap((cell) => (tableCellText(cell)?.toDelta() as Array<{ attributes?: Record<string, unknown> }> | undefined) ?? [])
+        ? tableRows(old).flat().flatMap((cell) => tableCellTexts(cell).flatMap((text) => text.toDelta() as Array<{ attributes?: Record<string, unknown> }>))
         : (textOf(old)?.toDelta() as Array<{ attributes?: Record<string, unknown> }> | undefined) ?? [];
       const marks = [...new Set(marked.flatMap((op) => Object.keys(op.attributes ?? {})))];
       if (marks.length > 0) throw new MarksNotAllowedError(blockId, newType, marks);

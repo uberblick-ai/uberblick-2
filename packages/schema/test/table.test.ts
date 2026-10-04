@@ -190,6 +190,63 @@ describe("structured table contract", () => {
     }
   });
 
+  it.each(["delete", "insert", "insert-repeated", "delete-and-column"])("preserves repeated untouched cells during a %s and neighbouring text edit", (change) => {
+    const rows = [["Task", "Status"], ["Write", "done"], ["Test", "done"], ["Ship", "todo"], ["Fix", "todo"]];
+    const before = writeGfmTable(rows);
+    let id = "";
+    const [a, b] = replicaPair((doc) => {
+      initDoc(doc, { uuid: UUID, title: "Tables" });
+      id = appendBlock(doc, { type: "table", text: before });
+      tableCellText(tableRows(element(doc, id))[2]![1]!)!.format(0, 4, { italic: {} });
+      tableCellText(tableRows(element(doc, id))[3]![1]!)!.format(0, 4, { bold: {} });
+    });
+    const shipA = tableCellText(tableRows(element(a, id))[3]![1]!)!;
+    const shipB = tableCellText(tableRows(element(b, id))[3]![1]!)!;
+    shipB.insert(shipB.length, " (blocked)");
+    const nextRows = rows.map((row) => row.slice());
+    nextRows[3]![0] = "Ship2";
+    const insertion = change.startsWith("insert");
+    if (insertion) nextRows.splice(3, 0, ["Audit", change === "insert-repeated" ? "todo" : "later"]);
+    else nextRows.splice(2, 1);
+    if (change === "delete-and-column") nextRows.forEach((row, index) => { row.splice(1, 0, index === 0 ? "Owner" : "team"); });
+    const shipRow = insertion ? 4 : 2;
+    const statusColumn = change === "delete-and-column" ? 2 : 1;
+    editBlock(a, id, before, writeGfmTable(nextRows));
+    expect(tableCellText(tableRows(element(a, id))[shipRow]![statusColumn]!)).toBe(shipA);
+    expect(shipA.toDelta()).toEqual([{ insert: "todo", attributes: { bold: {} } }]);
+    syncDocs(a, b);
+    expect(getBlockText(a, id)).toBe(getBlockText(b, id));
+    expect(getBlockText(a, id)).toContain("todo (blocked)");
+    expect(tableCellText(tableRows(element(a, id))[shipRow]![statusColumn]!)).toBe(shipA);
+    expect(tableCellText(tableRows(element(b, id))[shipRow]![statusColumn]!)).toBe(shipB);
+    expect(shipA.toDelta()).toEqual([{ insert: "todo (blocked)", attributes: { bold: {} } }]);
+    a.destroy();
+    b.destroy();
+  });
+
+  it("preserves repeated untouched column cells when deleting a column and renaming its neighbour", () => {
+    const rows = [["Write", "Test", "Ship", "Fix"], ["done", "done", "todo", "todo"], ["no", "no", "yes", "yes"]];
+    const before = writeGfmTable(rows);
+    let id = "";
+    const [a, b] = replicaPair((doc) => {
+      initDoc(doc, { uuid: UUID, title: "Tables" });
+      id = appendBlock(doc, { type: "table", text: before });
+      tableCellText(tableRows(element(doc, id))[1]![1]!)!.format(0, 4, { italic: {} });
+      tableCellText(tableRows(element(doc, id))[1]![2]!)!.format(0, 4, { bold: {} });
+    });
+    const ship = tableCellText(tableRows(element(a, id))[1]![2]!)!;
+    const concurrentShip = tableCellText(tableRows(element(b, id))[1]![2]!)!;
+    concurrentShip.insert(concurrentShip.length, " (blocked)");
+    editBlock(a, id, before, writeGfmTable([["Write", "Ship2", "Fix"], ["done", "todo", "todo"], ["no", "yes", "yes"]]));
+    expect(tableCellText(tableRows(element(a, id))[1]![1]!)).toBe(ship);
+    syncDocs(a, b);
+    expect(getBlockText(a, id)).toBe(getBlockText(b, id));
+    expect(tableCellText(tableRows(element(b, id))[1]![1]!)).toBe(concurrentShip);
+    expect(ship.toDelta()).toEqual([{ insert: "todo (blocked)", attributes: { bold: {} } }]);
+    a.destroy();
+    b.destroy();
+  });
+
   it("keeps different-cell and same-cell concurrent typing on shared text types", () => {
     let id = "";
     const [a, b] = replicaPair((doc) => { initDoc(doc, { uuid: UUID, title: "Tables" }); id = appendBlock(doc, { type: "table", text: GFM }); });
@@ -205,6 +262,67 @@ describe("structured table contract", () => {
     syncDocs(a, b);
     expect(getBlockText(a, id)).toBe(getBlockText(b, id));
     expect(getBlockText(a, id)).toContain("X Alpha A Y");
+  });
+
+  it("shares the stored empty text across concurrent first agent writes and a delayed third writer", () => {
+    const before = writeGfmTable([["", ""], ["", ""], ["", ""]]);
+    let id = "";
+    const [a, b] = replicaPair((doc) => { initDoc(doc, { uuid: UUID, title: "Tables" }); id = appendBlock(doc, { type: "table", text: before }); });
+    const c = new Y.Doc();
+    Y.applyUpdate(c, Y.encodeStateAsUpdate(a));
+    const texts = [a, b, c].map((doc) => {
+      const paragraph = tableRows(element(doc, id))[1]![0]!.firstChild as Y.XmlElement;
+      expect(paragraph.toArray()).toHaveLength(1);
+      expect(paragraph.firstChild).toBeInstanceOf(Y.XmlText);
+      expect((paragraph.firstChild as Y.XmlText).length).toBe(0);
+      return paragraph.firstChild;
+    });
+    for (const [doc, value] of [[a, "agentA"], [b, "agentB"], [c, "agentC"]] as const) {
+      editBlock(doc, id, before, writeGfmTable([["", ""], [value, ""], ["", ""]]));
+    }
+    syncDocs(a, b);
+    const observed = getBlockText(a, id);
+    editBlock(a, id, observed, observed.replace("agentA", "agentA updated").replace("|  |  |\n", "| Header |  |\n"));
+    syncDocs(a, b);
+    // C's first write was absent when A edited the already-merged table.
+    syncDocs(a, c);
+    syncDocs(a, b);
+    const canonical = getBlockText(a, id);
+    for (const [index, doc] of [a, b, c].entries()) {
+      expect(getBlockText(doc, id)).toBe(canonical);
+      const paragraph = tableRows(element(doc, id))[1]![0]!.firstChild as Y.XmlElement;
+      expect(paragraph.toArray()).toEqual([texts[index]]);
+      expect(isSupportedTable(element(doc, id))).toBe(true);
+      const markdown = exportMarkdown(doc, { frontmatter: false });
+      for (const word of ["agentA", "agentB", "agentC", "updated", "Header"]) {
+        expect(canonical).toContain(word);
+        expect(markdown).toContain(word);
+      }
+      let updates = 0;
+      doc.on("update", () => { updates += 1; });
+      expect(normalizeLegacyTables(doc)).toBe(0);
+      expect(updates).toBe(0);
+      doc.destroy();
+    }
+  });
+
+  it("reads every malformed text child while refusing binding and marked retyping without writes", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "table", text: GFM });
+    const table = element(doc, id);
+    const paragraph = tableRows(table)[1]![0]!.firstChild as Y.XmlElement;
+    const extra = new Y.XmlText("Suffix");
+    paragraph.insert(1, [extra]);
+    extra.format(0, extra.length, { bold: {} });
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    expect(isSupportedTable(table)).toBe(false);
+    expect(getBlockText(doc, id)).toContain("AlphaSuffix");
+    expect(exportMarkdown(doc, { frontmatter: false })).toContain("Alpha**Suffix**");
+    expect(() => setBlockType(doc, id, "paragraph")).toThrow(MarksNotAllowedError);
+    expect(normalizeLegacyTables(doc)).toBe(0);
+    expect(updates).toBe(0);
+    doc.destroy();
   });
 
   it("converges a concurrent row addition and column addition without squaring or repair loops", () => {

@@ -60,6 +60,16 @@ function drawn(editor: Editor): string[][] {
   );
 }
 
+/** The native paste event path, including the framework clipboard parser. */
+function pasteHtml(editor: Editor, html: string, plain: string): void {
+  const event = new Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData", {
+    value: { getData: (type: string) => type === "text/html" ? html : type === "text/plain" ? plain : "" },
+  });
+  editor.view.dom.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+}
+
 describe("the table block", () => {
   it("merges a header row and its delimiter row into one block, keeping the id", () => {
     const { ydoc, ids } = docWith([""]);
@@ -203,6 +213,81 @@ describe("the table block", () => {
     } finally {
       editor.destroy();
     }
+  });
+
+  it("pastes an Uberblick section's table as text while retaining surrounding blocks and marks", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "table-rich-copy", title: "Tables" });
+    appendBlock(ydoc, { type: "heading", text: "Plan", level: 2 });
+    appendBlock(ydoc, { type: "paragraph", text: "See bold and target" });
+    const prose = (getBlocksFragment(ydoc).get(1) as Y.XmlElement).get(0) as Y.XmlText;
+    const target = "0189abcd-2222-4333-8444-555566667777";
+    prose.format(4, 4, { bold: true });
+    prose.format(13, 6, { docLink: { docId: target } });
+    appendBlock(ydoc, { type: "table", text: "| a | b |\n| --- | --- |\n| 1 | 2 |" });
+    appendBlock(ydoc, { type: "paragraph", text: "" });
+    const { editor } = mountEditor(ydoc);
+    try {
+      const end = editor.state.doc.content.size - editor.state.doc.lastChild!.nodeSize;
+      const copied = editor.view.serializeForClipboard(editor.state.doc.slice(0, end));
+      expect(copied.dom.innerHTML).toContain("<table");
+      caret(editor, 3, 0);
+      pasteHtml(editor, copied.dom.innerHTML, copied.text);
+      const blocks = getBlocks(ydoc).slice(3);
+      expect(blocks.map(({ type, text }) => [type, text])).toEqual([
+        ["heading", "Plan"], ["paragraph", "See bold and target"],
+        ["paragraph", "a"], ["paragraph", "b"], ["paragraph", "1"], ["paragraph", "2"],
+      ]);
+      expect(blocks[0]?.level).toBe(2);
+      expect(getBlockInline(ydoc, blocks[1]!.id)).toEqual([
+        { text: "See ", marks: {} }, { text: "bold", marks: { bold: true } },
+        { text: " and ", marks: {} }, { text: "target", marks: { docLink: target } },
+      ]);
+      expect(new Set(getBlocks(ydoc).map(({ id }) => id)).size).toBe(getBlocks(ydoc).length);
+    } finally { editor.destroy(); ydoc.destroy(); }
+  });
+
+  it("pastes external HTML tables as ordinary text blocks without flattening their neighbours", () => {
+    const { ydoc } = docWith([""]);
+    const { editor } = mountEditor(ydoc);
+    try {
+      caret(editor, 0, 0);
+      pasteHtml(editor,
+        '<h2>External</h2><p>Before <strong>bold</strong></p><table><caption>Numbers</caption><tr><td rowspan="2"><p><strong>first</strong></p><p>second<br>line</p></td><td>third</td></tr><tr><td>fourth</td></tr></table><ul><li>After <a href="https://example.test">link</a></li></ul>',
+        "External\nBefore bold\nNumbers\nfirst\nsecond\nline\nthird\nfourth\nAfter link");
+      const blocks = getBlocks(ydoc);
+      expect(blocks.map(({ type, text }) => [type, text])).toEqual([
+        ["heading", "External"], ["paragraph", "Before bold"],
+        ["paragraph", "Numbers"], ["paragraph", "first"], ["paragraph", "second line"],
+        ["paragraph", "third"], ["paragraph", "fourth"], ["list-item", "After link"],
+      ]);
+      expect(getBlockInline(ydoc, blocks[1]!.id)).toEqual([
+        { text: "Before ", marks: {} }, { text: "bold", marks: { bold: true } },
+      ]);
+      expect(getBlockInline(ydoc, blocks[3]!.id)).toEqual([{ text: "first", marks: {} }]);
+      expect(getBlockInline(ydoc, blocks[7]!.id)).toEqual([
+        { text: "After ", marks: {} }, { text: "link", marks: { link: "https://example.test" } },
+      ]);
+    } finally { editor.destroy(); ydoc.destroy(); }
+  });
+
+  it("keeps the surviving table's DOM id when ProseMirror reuses a deleted table's view", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "table-reused-view", title: "Tables" });
+    const source = "| Header |\n| --- |\n| value |";
+    const first = appendBlock(ydoc, { type: "table", text: source });
+    const surviving = appendBlock(ydoc, { type: "table", text: source });
+    const { editor } = mountEditor(ydoc);
+    try {
+      const reused = editor.view.dom.querySelector("table");
+      expect(reused?.id).toBe(first);
+      editor.view.dispatch(editor.state.tr.delete(0, editor.state.doc.firstChild!.nodeSize).insertText("Edited ", 4));
+      expect(editor.view.dom.querySelector("table")).toBe(reused);
+      expect(reused?.id).toBe(surviving);
+      expect(document.getElementById(first)).toBeNull();
+      expect(document.getElementById(surviving)).toBe(reused);
+      expect(getBlocks(ydoc)).toEqual([expect.objectContaining({ id: surviving, text: source.replace("Header", "Edited Header") })]);
+    } finally { editor.destroy(); ydoc.destroy(); }
   });
 
   /**
