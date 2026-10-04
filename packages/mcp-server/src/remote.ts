@@ -1,7 +1,7 @@
 /**
  * The two halves of a one-time bridge between a workspace and a hub.
  *
- * `ub remote join` is the one command that composes both: it reads the remote
+ * `ub workspace join` is the one command that composes both: it reads the remote
  * as a fresh client, refuses what it cannot verify, and only then attaches this
  * machine's replica to it. Each half is also used alone — `ub doctor`'s hub
  * probe inspects, `ub init`'s starter seed syncs. They live here because they
@@ -58,6 +58,11 @@
 import { createHash } from "node:crypto";
 import {
   directoryRoom,
+  sidebarRoom,
+  settingsRoom,
+  getWorkspaceName,
+  readSidebar,
+  listTagCatalog,
   getAnnotationsMap,
   getBlockInline,
   getBlocks,
@@ -143,6 +148,8 @@ export interface CorpusDoc {
 }
 
 export interface Corpus {
+  /** Settings and sidebar content/history, when explicitly inspected. */
+  workspace?: CorpusDoc[];
   /** Where this reading came from, and whether it can be believed. */
   hub: HubState;
   /** Every directory entry, live and tombstoned alike. */
@@ -370,7 +377,7 @@ function directoryOnly(entry: {
  */
 export async function inspectRemote(
   config: McpConfig,
-  options: { documents?: boolean | "sample"; silent?: boolean } = {},
+  options: { documents?: boolean | "sample"; silent?: boolean; workspace?: boolean } = {},
 ): Promise<Corpus> {
   const sync = new HubSync(config, () => {}, { silent: options.silent === true });
   const opened = new Map<string, { doc: Y.Doc; awareness: Awareness }>();
@@ -425,6 +432,8 @@ export async function inspectRemote(
       };
     }
 
+    const settings = options.workspace ? open(settingsRoom(config.workspaceId)) : null;
+    const sidebar = options.workspace ? open(sidebarRoom(config.workspaceId)) : null;
     const selected = new Set(
       (options.documents === "sample"
         ? [...dead, ...(live[0] === undefined ? [] : [live[0]])]
@@ -468,6 +477,11 @@ export async function inspectRemote(
         stateVector: Y.encodeStateVector(held.doc),
       });
     }
+    if (options.workspace) {
+      for (const room of [settingsRoom(config.workspaceId), sidebarRoom(config.workspaceId)]) {
+        if (!sync.isRoomQuiet(room)) unsettled.push(room);
+      }
+    }
     // Complete: the directory was read in full. An inspected document that did
     // not arrive lands in `missing`, which every caller already refuses on —
     // only the directory read can fail in a way that looks like emptiness.
@@ -476,6 +490,7 @@ export async function inspectRemote(
       entries,
       missing,
       unsettled,
+      ...(settings !== null && sidebar !== null ? { workspace: workspaceSnapshot(settings, sidebar) } : {}),
       complete: true,
     };
   } finally {
@@ -489,6 +504,17 @@ export async function inspectRemote(
 }
 
 /** The corpus a hydrated replica set holds, read out of its documents. */
+function workspaceSnapshot(settings: Y.Doc, sidebar: Y.Doc): CorpusDoc[] {
+  return [
+    { uuid: "_settings", doc: settings, content: { name: getWorkspaceName(settings), tags: listTagCatalog(settings) } },
+    { uuid: "_sidebar", doc: sidebar, content: readSidebar(sidebar) },
+  ].map(({ uuid, doc, content }) => ({
+    uuid, title: uuid, tags: [], deleted: false,
+    fingerprint: createHash("sha256").update(JSON.stringify(canonical(content))).digest("hex"),
+    stateVector: Y.encodeStateVector(doc),
+  }));
+}
+
 function readCorpus(replicas: Replicas): Corpus {
   const all = listDirectory(replicas.directory().doc, { includeDeleted: true });
   const attached = new Map(
@@ -524,7 +550,8 @@ function readCorpus(replicas: Replicas): Corpus {
       stateVector: Y.encodeStateVector(replica.doc),
     });
   }
-  return { hub: replicas.sync.state(), entries, missing, unsettled, complete: true };
+  return { hub: replicas.sync.state(), entries, missing, unsettled, complete: true,
+    workspace: workspaceSnapshot(replicas.settings().doc, replicas.sidebar().doc) };
 }
 
 /**
@@ -534,8 +561,8 @@ function readCorpus(replicas: Replicas): Corpus {
  * This has no direction of its own, because attaching a replica to a hub
  * reconciles the two: a populated mirror against an empty hub uploads, an empty
  * mirror against a populated hub downloads, and two populated sides merge as
- * CRDTs with neither discarded. `ub remote join` relies on all three — the
- * machine that ran `ub remote init` joins the workspace it already holds — so
+ * CRDTs with neither discarded. `ub workspace join` relies on all three — the
+ * machine that ran `ub workspace promote` joins the workspace it already holds — so
  * what is being joined is established by the caller, before this is called,
  * rather than inferred here from which side happens to be empty.
  *

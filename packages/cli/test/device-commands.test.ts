@@ -28,8 +28,8 @@ async function rig(access: boolean) {
 }
 function file(box: Sandbox, name: string) { return join(box.configHome, "uberblick", name); }
 function bind(box: Sandbox, endpoint: string) {
-  const path = join(box.env.XDG_CONFIG_HOME!, "uberblick", "config.json");
-  writeFileSync(path, JSON.stringify({ workspace: WORKSPACE, hubUrl: endpoint }));
+  const path = join(box.cwd, ".uberblick.json");
+  writeFileSync(path, JSON.stringify({ workspaceId: WORKSPACE, hubUrl: endpoint }));
 }
 
 function assertPrivate(output: string, key: string) {
@@ -41,7 +41,7 @@ describe("remote device commands", () => {
   it("joins and resumes status with a stored login, retaining the loopback secret", async () => {
     const { hub, endpoint, login, box } = await rig(true);
     const before = readFileSync(file(box, "credentials.json"));
-    const joined = await runUbAsync(["remote", "join", `${endpoint}/${WORKSPACE}`], box);
+    const joined = await runUbAsync(["workspace", "join", `${endpoint}/${WORKSPACE}`], box);
     expect(joined.status, joined.stderr).toBe(0);
     expect(readFileSync(file(box, "credentials.json"))).toEqual(before);
     const status = await runUbAsync(["status", "--json"], box);
@@ -60,7 +60,7 @@ describe("remote device commands", () => {
     const before = readFileSync(file(box, "credentials.json"));
     const initialized = await runUbAsync(["init", endpoint, "--workspace", WORKSPACE, "--yes", "--no-mcp"], box);
     expect(initialized.status, initialized.stderr).toBe(0);
-    expect(JSON.parse(readFileSync(file(box, "config.json"), "utf8")).hubUrl).toBe(endpoint);
+    expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).hubUrl).toBe(endpoint);
     expect(readFileSync(file(box, "credentials.json"))).toEqual(before);
     assertPrivate(initialized.output, login.credential.key);
   });
@@ -71,7 +71,7 @@ describe("remote device commands", () => {
     if (kind === "missing") box.env.XDG_CONFIG_HOME = sandbox({ userConfig: { workspace: WORKSPACE }, credentials: { signingSecret: SECRET } }).configHome;
     const configFile = join(box.env.XDG_CONFIG_HOME!, "uberblick", "config.json");
     const before = readFileSync(configFile);
-    for (const args of [["remote", "join", `${endpoint}/${WORKSPACE}`], ["init", endpoint, "--workspace", WORKSPACE, "--yes"]]) {
+    for (const args of [["workspace", "join", `${endpoint}/${WORKSPACE}`], ["init", endpoint, "--workspace", WORKSPACE, "--yes"]]) {
       const refused = await runUbAsync(args, box);
       expect(refused.status, refused.output).toBe(1);
       expect(refused.output).toContain(kind === "no-access" ? "administrator for access" : "ub auth login");

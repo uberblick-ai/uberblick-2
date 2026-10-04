@@ -1,4 +1,4 @@
-/** Workspace inspection and explicit project selection; never a machine default. */
+/** Workspace selection, local creation, promotion and joining. */
 
 import { readdirSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -17,10 +17,17 @@ import { processIo } from "./io.js";
 import { describeFsError } from "./safe-write.js";
 import { ORIGIN_LABELS } from "./status.js";
 
+import { createWorkspaceCommand } from "./workspace-create.js";
+import { promoteWorkspaceCommand } from "./workspace-promote.js";
+import { joinCommand } from "./remote.js";
+
 export const WORKSPACE_HELP = `usage: ub workspace [command]
 
 commands:
   (none)                      the workspace in force, and which layer chose it
+  create <name>               create and select a separate local-only workspace
+  promote <hub>               upload, verify and connect this local workspace
+  join <connection-url>       join an existing hub workspace
   list [--json]               workspaces this machine has a database for
   use <id> --hub <url|local>  select a workspace and hub in this project
 
@@ -290,7 +297,7 @@ options:
 
 The hub is required when selecting a different workspace. An existing local
 database does not identify which hub owns it. This command moves no documents
-and verifies no membership; use \`ub remote join\` to hydrate a remote workspace.
+and verifies no membership; use \`ub workspace join\` to hydrate a remote workspace.
 Complete UB_WORKSPACE_ID and UB_HUB_URL environment overrides still take priority.
 `;
 
@@ -399,6 +406,9 @@ export async function workspaceCommand(
   // command is still an unknown command, `--help` after it or not, which is what
   // the top level does too.
   const [sub, ...rest] = argv;
+  if (sub === "create") return createWorkspaceCommand(rest, io);
+  if (sub === "promote") return promoteWorkspaceCommand(rest, io);
+  if (sub === "join") return joinCommand(rest, io);
   if (sub === "list") {
     return listCommand(rest, io);
   }

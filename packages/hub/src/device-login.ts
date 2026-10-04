@@ -28,6 +28,8 @@ export interface DeviceLoginOptions {
   env?: NodeJS.ProcessEnv;
   /** Credential used by the refused connection, never a credential from configuration. */
   rejected?: StoredHubLogin;
+  /** A successful promotion just granted this workspace; refresh an older no-access snapshot. */
+  membershipGranted?: boolean;
   signal?: AbortSignal;
 }
 
@@ -215,7 +217,8 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     if (!needsRenewal(current.login)) return current;
     const recorded = readOutcome(path.outcome);
     const cached = recorded?.fingerprint === fingerprint(current.login) ? recorded : null;
-    if (cached !== null && cached.retryAt > Date.now()) {
+    if (cached !== null && cached.retryAt > Date.now() &&
+        !(options.membershipGranted && !current.login.credential.record.workspaces.includes(workspace))) {
       // A replacement with workspace access is ready for an old refused
       // connection. A refusal of the newly issued credential waits, rather than
       // repeatedly retiring every process's working credential.

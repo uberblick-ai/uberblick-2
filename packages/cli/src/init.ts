@@ -29,7 +29,7 @@
  * with no file edited by hand. It only ever *fills in* the endpoint — a
  * different one already stored is refused rather than overwritten, because
  * repointing the clients moves nothing and would leave the workspace on the old
- * hub (#376, #385); `ub remote join` is the verb that moves a machine, and the
+ * hub (#376, #385); `ub workspace join` is the verb that moves a machine, and the
  * *same* endpoint is nothing to do at all — that run prints what is bound and
  * exits without writing. What the hub argument adds beyond storing an endpoint
  * is two guarantees: the hub is dialled and authenticated before a single file
@@ -182,7 +182,7 @@ a secret that already exists, and it is safe to run again.
 Given a loopback hub, it can create a workspace there and wait for its starter
 documents to be acknowledged. A remote hub requires an existing workspace that
 this machine's stored login may access. It uses the workspace already selected
-here; otherwise pass --workspace <id>. \`ub remote join <url-with-workspace-id>\`
+here; otherwise pass --workspace <id>. \`ub workspace join <url-with-workspace-id>\`
 hydrates and verifies an existing workspace without adding starter documents.
 A newly chosen endpoint is checked before it is stored. Without a hub binding,
 the workspace stays local to this machine. Nothing syncs in the background
@@ -204,7 +204,7 @@ operands:
                      uses HUB_AUTH_TOKEN or credentials.json. An endpoint
                      this project already selects is never replaced: the same one changes nothing, and a different
                      one is refused, because moving a workspace between hubs is
-                     \`ub remote join <url-with-workspace-id>\`, which hydrates and
+                     \`ub workspace join <url-with-workspace-id>\`, which hydrates and
                      verifies first
 
 options:
@@ -254,7 +254,7 @@ function parseFlags(argv: string[]): Flags {
     workspace: values.workspace,
     mcp:
       values.mcp === true ? true : values["no-mcp"] === true ? false : undefined,
-    // The one normalizer, shared with `ub remote join`: a bare host and an
+    // The one normalizer, shared with `ub workspace join`: a bare host and an
     // https:// address are the deployment's endpoint, and this refuses
     // everything that is not an endpoint before the command does anything.
     hub: hub === undefined ? undefined : normalizeRemoteUrl(hub),
@@ -422,7 +422,7 @@ export async function initCommand(
   // a scripted setup, say. Whatever that workspace holds is not this machine's
   // to add to, and it may hold nothing *yet*, so the emptiness `starter.ts`
   // reads would be the wrong answer. (Binding to a remote workspace is
-  // `ub remote join <url>/<workspace-id>`, which needs no `ub init` first and
+  // `ub workspace join <url>/<workspace-id>`, which needs no `ub init` first and
   // seeds nothing either.) The
   // rest of the decision is read from the workspace itself, not from this run.
   const maySeed = flags.workspace === undefined;
@@ -435,7 +435,7 @@ export async function initCommand(
   // --- the hub, when one was given -----------------------------------------
   //
   // The endpoint is part of the selected project binding, and this
-  // command may only *fill it in*. Overwriting it would be `ub remote set`
+  // command may only *fill it in*. Overwriting it would change the selected workspace
   // reborn: pointing the clients at another hub moves nothing, and the
   // workspace stays on the old one with nothing dialling it (#376, #385). So a
   // stored endpoint that is not the one asked for is refused outright, and the
@@ -453,7 +453,7 @@ export async function initCommand(
       `ub init: this machine already syncs with ${bound}, and \`ub init\` never ` +
         `replaces an endpoint — pointing it at ${flags.hub} would leave this ` +
         "workspace on the old hub with nothing dialling it. Nothing was " +
-        `written. To move this machine: \`ub remote join ${flags.hub}/` +
+        `written. To move this machine: \`ub workspace join ${flags.hub}/` +
         `${inForceWorkspace ?? "<workspace-id>"}\`, which hydrates and verifies ` +
         "before it persists anything.\n",
     );
@@ -602,7 +602,7 @@ export async function initCommand(
     );
     if (problem !== null) {
       // `problem` is a sentence of its own, ending in its own newline — the
-      // same one `ub remote join` prints for the same hub.
+      // same one `ub workspace join` prints for the same hub.
       io.err(`ub init: ${problem}Nothing was written to the workspace or binding.\n`);
       return 1;
     }
@@ -661,7 +661,7 @@ export async function initCommand(
     }
     // The endpoint decision, taken again on what is on disk *now*. The one
     // above was taken before the probe and before this lock, and another run —
-    // an `ub init` or an `ub remote join` — may have bound this machine in
+    // an `ub init` or an `ub workspace join` — may have bound this machine in
     // between; writing over that would be the endpoint-only retarget this
     // command refuses by design, arrived at by a race instead of by an
     // argument. The refusal returns from inside the lock, which the `finally`
@@ -672,8 +672,8 @@ export async function initCommand(
       io.err(
         `ub init: this machine was bound to ${settledHub} while this run was ` +
           "checking " +
-          `${binding} — another \`ub init\` or \`ub remote join\` got there ` +
-          "first. Nothing was written to the workspace or binding. To move it, `ub remote join " +
+          `${binding} — another \`ub init\` or \`ub workspace join\` got there ` +
+          "first. Nothing was written to the workspace or binding. To move it, `ub workspace join " +
           `${binding}/<workspace-id>\`.\n`,
       );
       return 1;

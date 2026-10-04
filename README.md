@@ -357,20 +357,31 @@ gives the separate candidate rehearsal and later coordinated upgrade.
 
 ### A second workspace
 
-Several workspaces coexist on one hub, with separate corpora and no way to see
-across: the room key carries the workspace (`<workspaceId>/<docUuid>`, the
-directory at `<workspaceId>/_directory`), the token claim is scoped to it, and
-the local database is `<uuid>.sqlite`. There is nothing to create and nothing to
-migrate — a workspace is a uuid, and its rooms exist the moment something opens
-one. A loopback-only hub trusts its local signing secret. A deployed hub admits only
-a device credential naming the workspace with current membership, and closes
-sessions when that credential is revoked or membership is removed.
+Create a separate project workspace without changing the one you already use:
 
-Bind a project to an existing workspace with `ub remote join <workspace-url>`.
-For a local workspace use `ub init`; remote membership must already exist.
-These commands write `.uberblick.json` for the project, and never grant access
-merely by selecting a UUID. Client-side creation of another remote workspace is
-separate work.
+```sh
+ub workspace create "Project notes"
+ub open
+```
+
+Creation needs no hub or login. It generates a fresh UUID, stores the supplied
+name, seeds the same starter documents and sidebar group as `ub init`, and
+selects it in the current directory's `.uberblick.json`. An ancestor project's
+binding, other workspaces, stored logins and existing MCP registrations are
+unchanged. `ub init` remains first-time setup.
+
+To share that workspace, run `ub workspace promote <hub>`. Promotion reuses the
+stored login or runs GitHub approval when needed. Your account must already
+administer a workspace on the hub; signing in alone grants no creation rights.
+The first login on a fresh hub claims its default workspace and qualifies.
+Promotion uploads the same UUID and history, including archived documents,
+name and sidebar, verifies them through a fresh authenticated client, then
+connects the project and prints a complete `ub workspace join` URL.
+
+Several workspaces coexist on one hub with separate corpora. A deployed hub
+admits a device credential only for a workspace with current membership.
+Selection alone grants no access. Join an existing workspace with
+`ub workspace join <connection-url>`; it requires no prior local workspace.
 
 `ub workspace` prints the current binding and its source. `ub workspace list`
 lists local workspace databases. Selecting another known workspace requires an
@@ -427,7 +438,9 @@ ub status --json   # full report, including rooms, configuration and storage pat
 ub workspace       # the workspace in force, and which layer chose it
 ub workspace list  # workspaces this machine has a database for
 ub workspace use <id> --hub <url|local>  # select a complete project binding
-ub remote          # the endpoint in force, and what sharing it buys
+ub workspace create "Project notes"
+ub workspace promote http://localhost:8080
+ub workspace join <connection-url>
 ub mcp install     # register uberblick with an MCP client
 ub mcp serve       # the stdio entry point for an MCP client
 ```
@@ -457,7 +470,7 @@ can access with `--workspace <uuid>`; a random new UUID has no membership and
 is refused before anything is written. Loopback hubs retain signing-secret
 authentication. It only ever fills the endpoint in: the same one again changes
 nothing, and a *different* one is refused rather than overwritten, because
-moving a machine between hubs is `ub remote join`. `--mcp` ends by printing what
+moving a machine between hubs is `ub workspace join`. `--mcp` ends by printing what
 `ub mcp install --print` prints — the snippet and the file it goes in — and
 `--no-mcp` says not to mention it. A bootstrap never registers a server with
 somebody's agent on its own, even with a vendor CLI installed: running
@@ -489,7 +502,7 @@ Use JSON `null` for a local-only hub. A hub address is normalized to its sync
 endpoint; a workspace ID can have a display slug, but only its UUID identifies
 data. The file contains no credentials and may be committed when its selection
 is appropriate for everyone using the project. `ub status` shows the workspace,
-hub and selection source. `ub init`, `ub remote join` and `ub workspace use`
+hub and selection source. `ub init`, `ub workspace join` and `ub workspace use`
 update the nearest project file, or create one in the current directory.
 
 **Migration:** legacy `WORKSPACE_ID` / `HUB_URL` inputs and workspace/endpoint
@@ -514,8 +527,7 @@ floor: unset or unusable it changes nothing, and it cannot lengthen any
 default. Being ordinary environment it reaches everything `ub` spawns,
 children included — the reason it is a variable and not an option. Those four
 are not every remote deadline `ub` owns, and no value of this variable
-shortens the others: `ub remote init`, for one, budgets a deployment's first
-answer at 90 s and gives each of its two HTTP probes 10 s.
+shortens unrelated deadlines such as GitHub approval and lock waits.
 `packages/cli/src/budget.ts`'s header is the account of which deadlines this
 variable may cap and which it must not.
 
@@ -549,97 +561,62 @@ opens a packaged install's database.
 
 ### Going remote: local first, then a hub, then a second computer
 
-Start with local work, then join a shared hub when you need it. A published
-Docker hub runs on Linux or Docker Desktop on macOS, including Apple Silicon
-through `linux/amd64` emulation. The host needs no checkout or Homebrew client
-to run the containers. Follow [REMOTE.md](REMOTE.md) to extract an exact release,
-start it on host loopback and claim its fresh default workspace before wider
-exposure. **The host never updates itself**; its operator deliberately updates
-the release while keeping the same data volumes.
+A published Docker hub runs on Linux or Docker Desktop on macOS, including
+Apple Silicon through `linux/amd64` emulation. Follow [REMOTE.md](REMOTE.md) to
+start a release on host loopback and claim its default workspace before wider
+exposure. The operator updates the release deliberately while retaining its
+volumes. Hub deployment uses the release scripts; there is no `ub remote`
+command group.
 
-Existing Linux checkout deployments keep `ub remote init` and `ub remote update`
-with their Tailscale requirements until they switch to a release; see
-[the compatibility runbook](REMOTE.md#existing-checkout-deployments-compatibility).
-
-**On every computer**, including this one, one command binds a machine to the
-workspace, whatever is on it already:
+From the project directory:
 
 ```sh
-ub auth login http://localhost:8080
-ub remote join ws://localhost:8080/ws/<workspace id>
+ub workspace create "Project notes"
+ub workspace promote http://localhost:8080
+ub open
 ```
 
-These commands use the default Docker route from the same computer; the claim
-reports its workspace UUID. The port is configurable. For other computers,
-configure HTTPS first, then use `ub auth login https://<host>` and
-`ub remote join wss://<host>/ws/<workspace id>` on each; Tailscale is optional.
-[REMOTE.md](REMOTE.md#choose-how-clients-reach-the-hub) gives the route settings
-and exact endpoints. Sign-in stores this computer's device credential and does
-not change its binding. Join selects the existing workspace by the URL's
-**last path segment**. `ub init [hub-url]` seeds starter documents; remote
-initialization requires membership for the selected UUID. `ub remote join`
-uses a workspace that already exists and seeds nothing. There is no operator suite beside them: nothing that
-repoints the clients without moving anything. The id has to travel,
-because a workspace id is a uuid and `ub init` generates a *new* one: a machine
-that invented its own would join the remote hub and find nothing of yours on it,
-the rooms being keyed by a different id. Carrying it in the URL is what makes it
-one paste instead of two.
+Promotion includes login when needed and connection after verification; there
+is no separate join on this machine. The authenticated account must already
+administer a workspace on the hub. It becomes the promoted workspace's first
+and only member, as administrator. The default workspace, its claim state and
+other memberships do not change.
 
-`join` binds this machine to the workspace the URL names **regardless of local
-state** — no prior `ub init` is needed, and one that has run is not in the way.
-It hydrates the full remote directory and every live and archived document room
-into that workspace's replica. A fresh client then verifies the full directory,
-every archived room, and one sampled live room before the endpoint and binding
-are persisted. A replica this machine already holds for that id is attached
-rather than replaced: the two reconcile as CRDTs — what the local log holds goes
-up, what the hub holds comes down, and nothing on either side is discarded —
-which is how the machine that ran `ub remote init` joins its own populated
-workspace. An unreachable or auth-rejecting remote leaves your configuration
-exactly as it was, and a URL missing its workspace id, or carrying something
-that is not one, is refused before anything is written, with the expected form
-in the message.
+Promotion refuses a workspace already bound to a hub and any destination UUID
+with existing documents or memberships. The only exception is its own recorded
+attempt. If interrupted, rerun the same command on the same machine: its saved
+attempt and the hub's atomic grant receipt allow it to resume. The local
+workspace stays usable and the project binding stays local until a fresh client
+has verified every document, including archived content, plus settings and
+sidebar history. Close other clients while promoting so edits do not outpace
+the verified snapshot. Verification is a fresh read of acknowledged hub state,
+not a guarantee that the hub has flushed all documents to disk.
 
-A workspace on this machine under a *different* id stays. It is never merged
-into the joined one and never moved: `ub workspace list` shows both, and
-`ub workspace use <id> --hub <url|local>` selects its complete binding. A remote
-workspace is accessible only when the device credential and current membership
-allow its UUID.
+On another computer, use the full connection URL promotion printed:
 
-Run `ub open` to edit from this computer's browser after signing in and joining.
-The MCP server and `ub open` use this hub's stored login, renew it without new
-GitHub approval, and resume after restart. Device credentials never reach the
-browser; `ub open` serves a separate loopback key. `mise run dev` stays a local
-development path and does not sync its browser with a remote hub.
+```sh
+ub auth login https://hub.example.com
+ub workspace join wss://hub.example.com/ws/<workspace-id>
+ub open
+```
 
-**What "persisted" covers.** The complete binding goes into the project's
-`.uberblick.json` only after the existing verification succeeds. A complete
-environment pair can override it; commands report that selection source. No
-workspace or endpoint is borrowed from machine-wide defaults.
+For other computers, configure HTTPS as described in the
+[route table](REMOTE.md#choose-how-clients-reach-the-hub); Tailscale is optional.
+Join hydrates and verifies the existing workspace. It seeds nothing and keeps
+other local workspaces separate. Existing replicas of the same UUID reconcile
+as CRDTs. Join verifies the full directory, every archived document and one live
+sample before binding; promotion verifies all live documents as well.
 
-A deployed web client does not read any of these: it resolves its endpoint — and
-its workspaces — at runtime from the served `/uberblick-config.json`.
+Both commands persist a complete binding in `.uberblick.json`. Existing MCP
+registrations retain their pinned workspace and hub; install a new named entry
+for the new selection. A complete environment binding still takes precedence.
+Local-only browser and MCP use need no promotion or GitHub login.
 
-Archived documents travel with their content. Their tombstones replicate too,
-so they stay archived until restored on the destination.
-
-Remote commands accept no signing secret and send no GitHub token. A missing
-login names `ub auth login`; rejected renewal asks for sign-in again; missing
-workspace access names its administrator. Running MCP and `ub open` processes
-recover after a later login or membership grant without restart. Revocation or
-membership removal stops live sync while local documents and edits stay usable.
-Downloaded data cannot be erased by revocation.
-
-`ub remote` with no remote configured says so and exits 0; with one, it prints
-the endpoint and the device-login boundary. The host's web page receives no
-credential and shows no documents until direct browser sign-in is available.
-Use `ub auth login` and `ub open` on a computer. [REMOTE.md](REMOTE.md) gives
-the coordinated hub/client upgrade order; an old signing secret in the host's
-`.env` grants nothing.
-
-`ub mcp serve` resolves that configuration and runs the MCP server with it, so
-the server keeps its environment-only contract — no flags, no config file.
-Generic registration uses that command. This repository's MCP definitions
-select the compatible installed client through the corpus launcher above.
+Stored device credentials stay private. `ub open` serves the local replica with
+a separate loopback browser key; it never gives the browser an upstream key.
+MCP and `ub open` renew the saved login and recover after later login or grants.
+Revocation stops sharing while downloaded documents remain locally usable.
+Neither promotion nor join sends a signing secret to a deployed hub.
 
 ## The first-user proof
 

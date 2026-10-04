@@ -30,17 +30,9 @@ import { ENV_HELP } from "../src/env.js";
 import { INIT_HELP, INIT_OPTIONS } from "../src/init.js";
 import { INSTALL_HELP, INSTALL_OPTIONS } from "../src/install.js";
 import { OPEN_HELP, OPEN_OPTIONS } from "../src/open.js";
-import {
-  REMOTE_INIT_HELP,
-  REMOTE_INIT_OPTIONS,
-  REMOTE_UPDATE_HELP,
-  REMOTE_UPDATE_OPTIONS,
-} from "../src/remote-init.js";
-import {
-  REMOTE_BRIDGE_OPTIONS,
-  REMOTE_HELP,
-  REMOTE_JOIN_HELP,
-} from "../src/remote.js";
+import { WORKSPACE_JOIN_HELP, WORKSPACE_JOIN_OPTIONS } from "../src/remote.js";
+import { WORKSPACE_CREATE_HELP } from "../src/workspace-create.js";
+import { WORKSPACE_PROMOTE_HELP } from "../src/workspace-promote.js";
 import { STATUS_HELP, STATUS_OPTIONS } from "../src/status.js";
 import { UPDATE_HELP } from "../src/update.js";
 import {
@@ -112,19 +104,13 @@ const PATHS: Path[] = [
     argv: ["workspace"],
     help: WORKSPACE_HELP,
     options: {},
-    children: ["list", "use"],
+    children: ["create", "promote", "join", "list", "use"],
   },
   { argv: ["workspace", "list"], help: WORKSPACE_LIST_HELP, options: WORKSPACE_LIST_OPTIONS },
   { argv: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: {} },
-  {
-    argv: ["remote"],
-    help: REMOTE_HELP,
-    options: {},
-    children: ["init", "update", "join"],
-  },
-  { argv: ["remote", "init"], help: REMOTE_INIT_HELP, options: REMOTE_INIT_OPTIONS },
-  { argv: ["remote", "update"], help: REMOTE_UPDATE_HELP, options: REMOTE_UPDATE_OPTIONS },
-  { argv: ["remote", "join"], help: REMOTE_JOIN_HELP, options: REMOTE_BRIDGE_OPTIONS },
+  { argv: ["workspace", "create"], help: WORKSPACE_CREATE_HELP, options: {} },
+  { argv: ["workspace", "promote"], help: WORKSPACE_PROMOTE_HELP, options: {} },
+  { argv: ["workspace", "join"], help: WORKSPACE_JOIN_HELP, options: WORKSPACE_JOIN_OPTIONS },
   { argv: ["auth"], help: AUTH_HELP, options: {}, children: ["login", "status", "logout"] },
   { argv: ["auth", "login"], help: AUTH_LOGIN_HELP, options: {} },
   { argv: ["auth", "status"], help: AUTH_STATUS_HELP, options: {} },
@@ -144,7 +130,6 @@ const DISPATCHERS = [
   { file: "cli.ts", group: [], variable: "command" },
   { file: "cli.ts", group: ["mcp"], variable: "subcommand" },
   { file: "workspace.ts", group: ["workspace"], variable: "sub" },
-  { file: "remote.ts", group: ["remote"], variable: "sub" },
   { file: "auth.ts", group: ["auth"], variable: "sub" },
 ];
 
@@ -290,20 +275,9 @@ describe("every human-facing command path", () => {
     expect(unknownClient.status).toBe(2);
     expect(unknownClient.stderr).toMatch(/unknown client/);
 
-    expect(REMOTE_HELP).toContain("init <ssh-target>");
-    expect(REMOTE_HELP).toContain("update <ssh-target>");
-    expect(REMOTE_INIT_HELP).toMatch(/usage: ub remote init <ssh-target>/);
-    expect(REMOTE_UPDATE_HELP).toMatch(/usage: ub remote update <ssh-target>/);
-
-    for (const command of ["init", "update"]) {
-      const missingTarget = await dispatch(["remote", command]);
-      expect(missingTarget.status).toBe(2);
-      expect(missingTarget.stderr).toContain("expected exactly one <ssh-target>");
-    }
-
-    expect(REMOTE_HELP).toContain("join <url-with-workspace-id>");
-    expect(REMOTE_JOIN_HELP).toMatch(/usage: ub remote join <url-with-workspace-id>/);
-    const missingUrl = await dispatch(["remote", "join"]);
+    expect(WORKSPACE_HELP).toContain("join <connection-url>");
+    expect(WORKSPACE_JOIN_HELP).toMatch(/usage: ub workspace join <url-with-workspace-id>/);
+    const missingUrl = await dispatch(["workspace", "join"]);
     expect(missingUrl.status).toBe(2);
     expect(missingUrl.stderr).toContain("expected exactly one <url-with-workspace-id>");
   });
@@ -357,9 +331,9 @@ describe("help before the work", () => {
     ["doctor", "-h"],
     ["workspace", "use", "--help"],
     ["workspace", "use", WORKSPACE, "--help"],
-    ["remote", "init", "--help"],
-    ["remote", "update", "uberblick@example.invalid", "--help"],
-    ["remote", "join", "ws://example.invalid:1234", "-h"],
+    ["workspace", "create", "--help"],
+    ["workspace", "promote", "hub.example.invalid", "--help"],
+    ["workspace", "join", "ws://example.invalid:1234", "-h"],
     ["auth", "login", "--help"],
     ["auth", "status", "-h"],
     ["auth", "logout", "--help"],
@@ -402,7 +376,7 @@ describe("what is not a request for help", () => {
     // A group answers for itself only when its own one argument is the
     // question. `ub workspace bogus --help` is a typo, not a request, and every
     // level says so the same way — the top level always has.
-    for (const group of [[], ["workspace"], ["remote"], ["mcp"]]) {
+    for (const group of [[], ["workspace"], ["mcp"]]) {
       const argv = [...group, "bogus", "--help"];
       const run = await dispatch(argv);
       expect(run.status, argv.join(" ")).toBe(2);

@@ -102,17 +102,17 @@ function skipped(name: string, reason: string, remedy: string | null = null): Ch
 }
 
 const WORKSPACE_REMEDY =
-  "`ub init` creates a workspace; `ub remote join <hub>/<workspace-id>` binds " +
+  "`ub init` creates a workspace; `ub workspace join <hub>/<workspace-id>` binds " +
   "this project to one that already exists; `ub workspace use <id> --hub <url|local>` adopts one " +
   "this machine already has";
 
 /**
  * The hub's bind address and the endpoint the clients dial are two settings, and
  * only one of them is an environment variable: the endpoint lives in this
- * machine's config, written by `ub init` or `ub remote join`.
+ * machine's config, written by `ub init` or `ub workspace join`.
  */
 const PORT_REMEDY =
-  "the hub binds HUB_HOST:PORT — set PORT to the port the configured endpoint dials, or point this machine at the hub you meant with `ub remote join <endpoint>/<workspace-id>`";
+  "the hub binds HUB_HOST:PORT — set PORT to the port the configured endpoint dials, or point this machine at the hub you meant with `ub workspace join <endpoint>/<workspace-id>`";
 
 // --- workspace ---------------------------------------------------------------
 
@@ -479,7 +479,7 @@ function portCheck(
     return fail(
       "port",
       `the configured endpoint ${JSON.stringify(config.hubUrl)} is not a websocket URL`,
-      "give this machine a ws:// or wss:// endpoint with `ub remote join <endpoint>/<workspace-id>`",
+      "give this machine a ws:// or wss:// endpoint with `ub workspace join <endpoint>/<workspace-id>`",
     );
   }
   if (!isLocalHost(endpoint.host)) {

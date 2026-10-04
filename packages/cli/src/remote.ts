@@ -1,40 +1,4 @@
-/**
- * `ub remote` — where this workspace syncs, and the one-time bridge onto it.
- *
- * `ub remote` names the endpoint and the membership required for sharing.
- * Remote clients use this machine’s stored device login. `ub remote init` and `ub remote update` stand up and
- * deploy the host; `ub remote join <url-with-workspace-id>` binds this project to a
- * workspace that already lives on one, and hydrates it.
- *
- * **`join` binds one workspace; it never merges two, and it never seeds.** The
- * URL carries the workspace id, so nothing already on this machine is in the
- * way: the id says which rooms and which `<uuid>.sqlite` replica this is about,
- * and a workspace that was here first has a different id — it keeps its
- * documents and its entry in `ub workspace list`, and switching back to it is
- * `ub workspace use`. For the id the URL *does* name, a replica this machine
- * already holds is attached rather than replaced: {@link syncWorkspace}
- * reconciles it with the remote as CRDTs, so the local log's updates go up, the
- * hub's come down, and neither side is discarded — which is how the machine
- * that ran `ub remote init` joins its own populated workspace. A machine
- * holding nothing for that id simply hydrates. What is never written into a
- * joined workspace is a starter document: one invented here is one the
- * workspace's owner never asked for. With an id in hand there is no "is this
- * side empty" question left to get wrong, which is what makes one verb enough.
- *
- * **No binding is persisted before the far side is verified.** `join` finishes by
- * opening the remote through a *fresh* client — no mirror, no local state — and
- * comparing what it sees with what this machine holds, in both directions and
- * including tombstones. Only then are the endpoint and the workspace binding
- * written. A bounded sync wait is not a completion signal, and an endpoint
- * changed on the strength of one would strand a corpus on the old hub, which is
- * the exact failure this command exists to prevent.
- *
- * Clients resolving this project binding follow it. Explicit environment pins
- * remain independent. See {@link setRemote}.
- *
- * Login keys stay in the owner-only credential store; joining changes only
- * the workspace binding after successful reconciliation and verification.
- */
+/** Verified workspace joining and promotion share the same bridge checks. */
 
 import { parseArgs } from "node:util";
 import {
@@ -53,7 +17,6 @@ import type {
 } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { parseJoinTarget } from "@uberblick/hub/remote-url";
-import { readDeviceLogin } from "@uberblick/hub/device-login";
 export { normalizeRemoteUrl, parseJoinTarget } from "@uberblick/hub/remote-url";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import {
@@ -65,24 +28,7 @@ import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
-import { processIo } from "./io.js";
-import { remoteInitCommand, remoteUpdateCommand } from "./remote-init.js";
 import { ORIGIN_LABELS } from "./status.js";
-
-export const REMOTE_HELP = `usage: ub remote [command]
-
-commands:
-  (none)                        the endpoint in force and what sharing it buys
-  init <ssh-target>             stand up the remote hub + web stack on a
-                                tailnet host
-  update <ssh-target>           deploy origin/main onto that host now
-  join <url-with-workspace-id>  bind this machine to the remote workspace the
-                                URL names
-
-options:
-  -h, --help                    show this help; after a command, show that
-                                command's help
-`;
 
 const SHARING_BOUNDARY =
   "Remote sharing requires this machine's stored login and current workspace membership.\n" +
@@ -169,7 +115,7 @@ function remoteConfig(bridge: Bridge): McpConfig {
 async function openRemote(bridge: Bridge): Promise<Corpus> {
   const first = await inspectRemote(remoteConfig(bridge), { silent: true });
   if (first.hub.status !== "hub-down" && first.hub.status !== "connecting") return first;
-  bridge.io.err("ub remote join: initial connection did not finish; retrying once…\n");
+  bridge.io.err("ub workspace join: initial connection did not finish; retrying once…\n");
   return await inspectRemote(remoteConfig(bridge), { silent: true });
 }
 
@@ -228,9 +174,9 @@ function report(
 }
 
 /** Exported so `join`'s help can be checked against its parser. */
-export const REMOTE_BRIDGE_OPTIONS = {} as const;
+export const WORKSPACE_JOIN_OPTIONS = {} as const;
 
-export const REMOTE_JOIN_HELP = `usage: ub remote join <url-with-workspace-id>
+export const WORKSPACE_JOIN_HELP = `usage: ub workspace join <url-with-workspace-id>
 
 Bind this project to a workspace that already lives on a remote hub, whatever is
 here already: the remote's documents are hydrated into that workspace's local
@@ -247,7 +193,7 @@ operands:
   <url-with-workspace-id>
                         the endpoint with the workspace id as its last path
                         segment, like wss://hub.example.ts.net/ws/<workspace-id>.
-                        \`ub remote init\` prints it, and \`ub status\` on the
+                        \`ub workspace promote\` prints it, and \`ub status\` on the
                         machine that has the workspace names the id. ws:// or
                         wss:// is stored as given; a bare host and an https://
                         address is read as the deployed wss://<host>/ws;
@@ -270,10 +216,10 @@ interface JoinFlags {
 function parseJoinFlags(argv: string[]): JoinFlags {
   const { positionals } = parseArgs({
     args: argv,
-    // The surface `REMOTE_JOIN_HELP` is checked against: a flag added here and
+    // The surface `WORKSPACE_JOIN_HELP` is checked against: a flag added here and
     // not to the help fails in `help.test.ts` rather than in somebody's
     // terminal.
-    options: REMOTE_BRIDGE_OPTIONS,
+    options: WORKSPACE_JOIN_OPTIONS,
     allowPositionals: true,
   });
   const [url, ...rest] = positionals;
@@ -289,43 +235,6 @@ function warn(io: Io, warnings: readonly string[]): void {
   }
 }
 
-// --- ub remote -------------------------------------------------------------
-
-function showRemote(io: Io): number {
-  const resolved = resolveConfig();
-  warn(io, resolved.warnings);
-  const config = resolveMcpConfig(resolved.env);
-  const selected = resolveProjectBinding();
-  const configured = selected.binding?.hubUrl != null;
-
-  if (!configured) {
-    let text = "no remote configured\n\n";
-    text +=
-      "This project uses a local-only workspace.\n\n";
-    text +=
-      "  ub remote init <ssh-target>\n" +
-      "                           stand one up on a host you can reach\n";
-    text +=
-      "  ub remote join <url-with-workspace-id>\n" +
-      "                           bind this machine to a remote workspace\n";
-    io.out(text);
-    return 0;
-  }
-
-  let text = `remote        ${config.hubUrl} (${ORIGIN_LABELS[resolved.origins.hubUrl]})\n`;
-  text += `workspace     ${config.workspaceId}\n`;
-  text += `credential    ${
-    config.deviceLogin !== undefined
-      ? (readDeviceLogin(config.hubUrl, config.workspaceId, resolved.env).status === "ready" ? "stored device login" : "sign-in required — run `ub auth login <hub>`")
-      : config.authSecret === null
-      ? "none — local-only, no hub sync"
-      : `configured (${resolved.origins.credential})`
-  }\n`;
-  text += `\n${SHARING_BOUNDARY}`;
-  io.out(text);
-  return 0;
-}
-
 // --- the shared bridge machinery -------------------------------------------
 
 /**
@@ -336,7 +245,7 @@ function showRemote(io: Io): number {
  * every document the directory names actually arrived. Fail-closed throughout:
  * an unknown directory is not a small directory, and missing is missing.
  */
-function corpusProblem(url: string, corpus: Corpus): string | null {
+export function corpusProblem(url: string, corpus: Corpus): string | null {
   if (corpus.hub.status !== "connected") {
     return `${hubProblem(url, corpus.hub)}.\n`;
   }
@@ -378,21 +287,27 @@ function corpusProblem(url: string, corpus: Corpus): string | null {
  * the corpus this was verified against is already stale, and persisting the
  * endpoint on that basis would claim a completeness nobody checked.
  */
-async function verify(
+export async function verify(
   bridge: Bridge,
   expected: readonly CorpusDoc[],
+  workspace?: readonly CorpusDoc[],
 ): Promise<{ corpus: Corpus; problem: string | null }> {
-  bridge.io.err(`ub remote: verifying ${bridge.target} as a fresh client…\n`);
+  bridge.io.err(`ub workspace: verifying ${bridge.target} as a fresh client…\n`);
   // The directory proves the complete identity/tombstone set. Reading one live
   // room proves the fresh-client path without making the command's fixed
   // network budget grow with the corpus; archived rooms are all read because a
   // tombstone alone cannot prove their restorable content moved.
   const corpus = await inspectRemote(remoteConfig(bridge), {
-    documents: "sample",
+    documents: workspace === undefined ? "sample" : true,
+    workspace: workspace !== undefined,
   });
   const unusable = corpusProblem(bridge.target, corpus);
   if (unusable !== null) {
     return { corpus, problem: unusable };
+  }
+  if (workspace !== undefined && (corpus.workspace === undefined ||
+      !isIdentical(compareCorpus(workspace, corpus.workspace)))) {
+    return { corpus, problem: `${bridge.target} does not match this workspace's name, settings or sidebar.\n` };
   }
   const diff = compareCorpus(expected, corpus.entries);
   if (!isIdentical(diff)) {
@@ -414,7 +329,7 @@ async function verify(
   return { corpus, problem: null };
 }
 
-// --- ub remote join --------------------------------------------------------
+// --- ub workspace join --------------------------------------------------------
 
 /**
  * Bind this machine to the workspace the URL names, and hydrate it.
@@ -423,19 +338,19 @@ async function verify(
  * See the module note: the id in the URL settles which workspace this is about,
  * so there is nothing to compare, nothing to merge, and nothing to seed.
  */
-async function joinCommand(argv: string[], io: Io): Promise<number> {
-  // First statement, before the URL is even looked at: `ub remote join <url>
+export async function joinCommand(argv: string[], io: Io): Promise<number> {
+  // First statement, before the URL is even looked at: `ub workspace join <url>
   // -h` is somebody asking what the form is, and answering it by refusing the
   // form they got wrong would be the joke this help exists to stop.
-  if (takeHelp(argv, io, REMOTE_JOIN_HELP)) return 0;
+  if (takeHelp(argv, io, WORKSPACE_JOIN_HELP)) return 0;
 
   let flags: JoinFlags;
   try {
     flags = parseJoinFlags(argv);
   } catch (error) {
     io.err(
-      `ub remote join: ${error instanceof Error ? error.message : String(error)}\n\n` +
-        "usage: ub remote join <url-with-workspace-id>\n",
+      `ub workspace join: ${error instanceof Error ? error.message : String(error)}\n\n` +
+        "usage: ub workspace join <url-with-workspace-id>\n",
     );
     return 2;
   }
@@ -451,6 +366,7 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     ...resolved.env,
     WORKSPACE_ID: flags.workspace,
     HUB_URL: flags.endpoint,
+    UB_HUB_URL: flags.endpoint,
   };
   if (flags.endpoint !== resolved.env.HUB_URL) delete bridgeEnv.HUB_ADMISSION;
   // Resolution withheld the local secret while bound to a remote endpoint.
@@ -471,7 +387,7 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   try {
     base = resolveMcpConfig(bridgeEnv);
   } catch (error) {
-    io.err(`ub remote join: ${error instanceof Error ? error.message : String(error)}\n`);
+    io.err(`ub workspace join: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
   }
 
@@ -491,13 +407,13 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   const remoteProblem = corpusProblem(bridge.target, remote);
   if (remoteProblem !== null) {
     io.err(
-      `ub remote join: ${remoteProblem}Nothing was written to the workspace or binding.\n`,
+      `ub workspace join: ${remoteProblem}Nothing was written to the workspace or binding.\n`,
     );
     return 1;
   }
 
   io.err(
-    `ub remote: hydrating ${plural(remote.entries.length, "document")} from ${bridge.target}…\n`,
+    `ub workspace: hydrating ${plural(remote.entries.length, "document")} from ${bridge.target}…\n`,
   );
   const joined = await syncWorkspace(remoteConfig(bridge));
   const joinProblem = corpusProblem(bridge.target, joined);
@@ -513,11 +429,11 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
       const source = resolved.binding;
       recovery = source !== null && parseWorkspaceId(source.workspaceId).uuid === parseWorkspaceId(flags.workspace).uuid &&
           source.hubUrl !== null && source.hubUrl !== bridge.target
-        ? `Rerun \`ub remote join ${source.hubUrl}/${flags.workspace}\` against this workspace's previous hub, or retry from another replica that still holds the content.`
+        ? `Rerun \`ub workspace join ${source.hubUrl}/${flags.workspace}\` against this workspace's previous hub, or retry from another replica that still holds the content.`
         : "Retry from another replica that still holds the content.";
     }
     io.err(
-      `ub remote join: ${joinProblem}This machine's configuration is ` +
+      `ub workspace join: ${joinProblem}This machine's configuration is ` +
         `unchanged — no endpoint and no workspace were persisted. ${recovery} ` +
         "What did arrive is in the local update log already.\n",
     );
@@ -528,7 +444,7 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   const checked = await verify(bridge, joined.entries);
   if (checked.problem !== null) {
     io.err(
-      `ub remote join: ${checked.problem}This machine's configuration is ` +
+      `ub workspace join: ${checked.problem}This machine's configuration is ` +
         "unchanged — no endpoint and no workspace were persisted. Rerun this " +
         "once the hub is reachable.\n",
     );
@@ -549,7 +465,7 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   try {
     lock = await acquireInitLock();
   } catch (error) {
-    io.err(`ub remote join: ${error instanceof Error ? error.message : String(error)}\n`);
+    io.err(`ub workspace join: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
 
@@ -560,7 +476,7 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
       deviceAdmission: bridge.base.deviceLogin !== undefined || usesDeviceLogin(bridge.target, bridge.env),
     });
   } catch (error) {
-    io.err(`ub remote join: ${error instanceof Error ? error.message : String(error)}\n`);
+    io.err(`ub workspace join: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   } finally {
     lock.release();
@@ -602,31 +518,3 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   return 0;
 }
 
-export async function remoteCommand(
-  argv: string[],
-  io: Io = processIo,
-): Promise<number> {
-  // The subcommand first, so `ub remote join --help` reaches the help of the
-  // leaf it names rather than being answered by the group. A group's own
-  // argument is that one word, so only that word can ask for help — an unknown
-  // command is still an unknown command, `--help` after it or not.
-  const [sub, ...rest] = argv;
-  if (sub === "init") {
-    return await remoteInitCommand(rest, io);
-  }
-  if (sub === "update") {
-    return await remoteUpdateCommand(rest, io);
-  }
-  if (sub === "join") {
-    return await joinCommand(rest, io);
-  }
-  if (sub === undefined) {
-    return showRemote(io);
-  }
-  if (sub === "help" || sub === "--help" || sub === "-h") {
-    io.out(REMOTE_HELP);
-    return 0;
-  }
-  io.err(`ub remote: unknown command ${JSON.stringify(sub)}\n\n${REMOTE_HELP}`);
-  return 2;
-}

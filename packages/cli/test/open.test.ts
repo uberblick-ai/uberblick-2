@@ -72,7 +72,7 @@ import {
 const WORKSPACE = "b4d1f0a7-3c62-4e91-8f05-7ad2c9e61b38";
 const SECRET = "open-test-signing-secret-9d31fa";
 
-/** What a `ub remote join` mid-run leaves behind, for the #449 tests. */
+/** What a `ub workspace join` mid-run leaves behind, for the #449 tests. */
 const REBOUND_WORKSPACE = "c7e2b105-9a48-4d6f-b3e1-5f0c8a71d264";
 const REBOUND_SECRET = "open-test-rotated-secret-4b7c21";
 const FIRST_REMOTE = "wss://first.example.ts.net/ws";
@@ -576,7 +576,7 @@ function configDir(box: Sandbox): string {
 }
 
 /**
- * Rebind this project, the way `ub remote join` or `ub workspace use` leaves it:
+ * Rebind this project, the way `ub workspace join` or `ub workspace use` leaves it:
  * a different endpoint, workspace and signing secret, across both files.
  */
 function rebind(
@@ -1465,7 +1465,7 @@ describe("ub open", () => {
       servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, localBrowserKey(WORKSPACE, box.env)),
     );
 
-    // `ub remote join` completes while this `ub open` keeps running.
+    // `ub workspace join` completes while this `ub open` keeps running.
     rebind(box, {
       hubUrl: SECOND_REMOTE,
       workspace: REBOUND_WORKSPACE,
@@ -2398,4 +2398,19 @@ describe("ub open", () => {
     expect(refused.output).toContain("held by something else");
     expect(refused.output).toContain(`ws://127.0.0.1:${hubPort}`);
   });
+});
+
+
+it("opens a newly created local workspace in the browser without login or promotion", async () => {
+  const box = sandbox();
+  const created = await runUbAsync(["workspace", "create", "Local browser"], box);
+  expect(created.status, created.output).toBe(0);
+  const running = await open(box, [], {
+    UBERBLICK_WEB_DIST: fixtureBundle(box),
+    HUB_DB_PATH: join(box.cwd, "local-browser.sqlite"), BROWSER: "none",
+  });
+  expect((await get(running.url)).status).toBe(200);
+  expect(running.stdout() + running.stderr()).not.toMatch(/sign.in required|approve in a browser/i);
+  expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).hubUrl).toBeNull();
+  expect((await running.interrupt()).status).toBe(0);
 });

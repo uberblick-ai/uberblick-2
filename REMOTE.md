@@ -331,7 +331,7 @@ corpus workspace UUID. After approval:
 
 ```bash
 candidate_workspace='<uuid-reported-by-this-login>'
-candidate_ub remote join "ws://candidate-hub:1234/$candidate_workspace"
+candidate_ub workspace join "ws://candidate-hub:1234/$candidate_workspace"
 candidate_ub auth status ws://candidate-hub:1234
 candidate_ub status --json
 ```
@@ -348,7 +348,7 @@ volume:
 ```bash
 candidate_client="$candidate_reader"
 candidate_ub auth login ws://candidate-hub:1234
-candidate_ub remote join "ws://candidate-hub:1234/$candidate_workspace"
+candidate_ub workspace join "ws://candidate-hub:1234/$candidate_workspace"
 candidate_ub status --json
 ```
 
@@ -472,8 +472,8 @@ availability. Follow
    Replace the example with your actual client ID (the legacy `Iv1.` form or the newer
    alphanumeric `Iv23…` form). The numeric **App ID** is a different value.
 
-Only the client ID goes to the hub container. Both `ub remote init` re-runs and
-`ub remote update` preserve this host setting. After saving `.env`, recreate the
+Only the client ID goes to the hub container. Release updates preserve this
+host setting. After saving `.env`, recreate the
 hub from the deployment directory:
 
 ```sh
@@ -591,7 +591,7 @@ A deployed hub creates exactly one default workspace only when its database
 contains no documents, sign-in principals, credentials, memberships or setup
 receipts on its first start with this version. Its UUID, name and one-time
 claim state persist in `hub.sqlite`. Restarts, container replacement and
-`ub remote update` reuse them, including a later rename in Workspace Settings.
+release updates reuse them, including a later rename in Workspace Settings.
 The hub created by `ub open` never initializes or claims a default workspace.
 An existing deployment is never claimable, even if it has no membership; keep
 using host-only first-admin setup there.
@@ -723,8 +723,7 @@ sh bin/hub-admin-setup.sh <workspace-uuid>
 ```
 
 Name exactly one bare workspace UUID. For an existing workspace, use the UUID
-`ub status` shows on a machine that holds it, including the workspace deployed
-by `ub remote init`. Setup adopts that same workspace; it does not replace its
+`ub status` shows on a machine that holds it, including a workspace from an older deployment. Setup adopts that same workspace; it does not replace its
 identity or documents. For a new workspace, choose a fresh UUID and pass it to
 the same command. Setup establishes its first administrator without creating
 documents or selecting the workspace in host or client configuration.
@@ -845,9 +844,9 @@ All three routes enforce the same device credentials and workspace membership.
 
 | Route | Network settings in `.env` | Sign in | Bind to the existing workspace |
 | --- | --- | --- | --- |
-| Same computer, default | None; optional `LOOPBACK_PORT=8080` | `ub auth login http://localhost:8080` | `ub remote join ws://localhost:8080/ws/<WORKSPACE_ID>` |
-| HTTPS with public DNS | `WEB_HOST=hub.example.com`; optional `HTTPS_BIND_IP=<host-ipv4>` | `ub auth login https://hub.example.com` | `ub remote join wss://hub.example.com/ws/<WORKSPACE_ID>` |
-| HTTPS with Tailscale, Linux only | `WEB_HOST=machine.tailnet.ts.net`, `TAILSCALE_IP=<tailscale-ipv4>` | `ub auth login https://machine.tailnet.ts.net` | `ub remote join wss://machine.tailnet.ts.net/ws/<WORKSPACE_ID>` |
+| Same computer, default | None; optional `LOOPBACK_PORT=8080` | `ub auth login http://localhost:8080` | `ub workspace join ws://localhost:8080/ws/<WORKSPACE_ID>` |
+| HTTPS with public DNS | `WEB_HOST=hub.example.com`; optional `HTTPS_BIND_IP=<host-ipv4>` | `ub auth login https://hub.example.com` | `ub workspace join wss://hub.example.com/ws/<WORKSPACE_ID>` |
+| HTTPS with Tailscale, Linux only | `WEB_HOST=machine.tailnet.ts.net`, `TAILSCALE_IP=<tailscale-ipv4>` | `ub auth login https://machine.tailnet.ts.net` | `ub workspace join wss://machine.tailnet.ts.net/ws/<WORKSPACE_ID>` |
 
 Use the UUID reported by the claim or first-admin setup. Use the selected port
 in both loopback commands. The client's origin must be spelled consistently:
@@ -948,7 +947,7 @@ backup, and otherwise a job for `sh bin/remote-compose.sh logs hub`.
 
 Then open the selected site origin. On a claimable fresh hub it shows
 **This hub is unclaimed** and guides the first administrator through
-`ub auth login`, `ub remote join` with the default workspace UUID reported by
+`ub auth login`, `ub workspace join` with the default workspace UUID reported by
 that login, and `ub open` on their computer. An open page rechecks claim state
 after each 15-second pause until claiming closes. A closed claim says only that
 the hub can no longer be claimed; an existing installation sealed without a
@@ -994,7 +993,7 @@ local replica; its page and loopback development do not show the setup guide.
 
 Choose an HTTPS route reachable from computers A and B; a private tailnet is
 recommended. Before starting, run `ub auth login https://<WEB_HOST>` and
-`ub remote join wss://<WEB_HOST>/ws/<WORKSPACE_ID>` on each (use the legacy
+`ub workspace join wss://<WEB_HOST>/ws/<WORKSPACE_ID>` on each (use the legacy
 `TAILSCALE_HOST` for an existing deployment). Then run `ub open`, choose the same document, and give each browser a
 distinct awareness name/color if prompted.
 
@@ -1171,6 +1170,45 @@ name lives in its synchronized settings room and is included in the same backup.
 these files to keep, where they live, whether they are encrypted or copied off
 the host. Nothing here schedules a backup, rotates one, or sends one anywhere.
 
+## Create and promote a project workspace
+
+Run these commands in the project directory on the computer holding its documents:
+
+```sh
+ub workspace create "Project notes"
+ub workspace promote http://localhost:8080
+```
+
+`create` makes and selects a local-only workspace with a fresh UUID, name and
+starter documents/sidebar. `promote` reuses this hub's stored login, or runs
+GitHub approval if there is no working login. Your account must already be an
+administrator of at least one workspace on the hub. The login that claims a
+fresh hub's default workspace qualifies. Signing in otherwise grants nothing.
+
+Promotion grants this account the new workspace's sole initial admin membership,
+then renews its device credential, uploads documents (including archived
+content), name and sidebar, and verifies the copy with a fresh authenticated
+client. It preserves the UUID and CRDT history. Only after verification does it
+bind the project to the hub; no separate join or host command is needed.
+Promotion prints the complete connection URL for joining on another machine.
+
+A destination with documents or memberships is refused. The exception is the
+same recorded promotion attempt: after a failure or interruption, rerun the
+command on this machine. Keep its private saved attempt with the local data;
+the hub stores its receipt atomically with the grant. The project binding stays
+unchanged on failure and local work remains available. Close other clients while
+promoting. A workspace already bound to a hub cannot be promoted. Promotion does
+not change the hub's default workspace, first-claim state or other memberships.
+
+Host-only first-administrator setup remains a separate operation for existing
+workspaces without membership. Its Unix-socket authority and restrictions are
+unchanged. Promotion's authenticated HTTP request can reserve only a new, empty
+UUID for an existing administrator; it cannot adopt an unrelated populated one.
+
+Existing MCP registrations keep their workspace/hub pins after creation or
+promotion. Add a named entry for the new selection when needed. Browser and MCP
+use of a local-only workspace requires neither login nor promotion.
+
 ## Binding a computer to this hub's workspace
 
 A fresh release hub creates its default workspace and changes no client binding.
@@ -1184,12 +1222,12 @@ every machine:
 
 ```sh
 ub auth login http://localhost:8080
-ub remote join ws://localhost:8080/ws/<WORKSPACE_ID>
+ub workspace join ws://localhost:8080/ws/<WORKSPACE_ID>
 ```
 
 These are the default same-computer commands. For HTTPS, use
 `ub auth login https://<WEB_HOST>` and
-`ub remote join wss://<WEB_HOST>/ws/<WORKSPACE_ID>`; the
+`ub workspace join wss://<WEB_HOST>/ws/<WORKSPACE_ID>`; the
 [route table](#choose-how-clients-reach-the-hub) includes the legacy Tailscale
 route and configurable loopback port. The URL is the endpoint with the
 workspace id as its last path segment. Sign in first; no `ub init`,
@@ -1207,9 +1245,9 @@ the documents come off the wire. An unreachable or auth-rejecting remote writes
 nothing at all.
 
 A machine that already had a workspace of its own keeps it. It is not merged and
-not moved: `ub workspace list` shows both, and `ub workspace use <id>`
-switches back. The endpoint, though, is machine-wide — after a join, another local workspace can sync with this hub only when the
-stored login and current membership allow that UUID.
+not moved: `ub workspace list` shows both, and
+`ub workspace use <id> --hub <url|local>` selects the previous complete binding.
+Other projects retain their bindings. Access still requires current membership.
 
 A URL with no workspace id, or with something that is not one, is refused before
 anything is written, and the refusal names the form.
@@ -1217,7 +1255,7 @@ anything is written, and the refusal names the form.
 `ub init <hub-origin> --workspace <uuid>` also authenticates with this hub's
 stored login before writing, and requires workspace access. Without an existing
 workspace or `--workspace`, its new random UUID has no membership and is refused. It never overwrites an existing endpoint;
-use `ub remote join` to move a binding. No signing secret grants remote access.
+use `ub workspace join` to move a binding. No signing secret grants remote access.
 For an existing workspace, use the join route above and keep its UUID.
 
 To edit this workspace in a browser on the computer, run `ub open`. It serves
@@ -1249,116 +1287,3 @@ Merging two independently populated workspaces is not supported: the URL says
 which workspace `join` is about — that one's two replicas reconcile as CRDTs,
 and the others on the machine are left alone.
 
-## Existing checkout deployments (compatibility)
-
-The release procedure above is the supported launch and update path. Existing
-checkout hosts can still use these shipped commands until they switch to a
-release. This path remains Linux-only and requires Tailscale. It needs `git`
-on the host and a repository checkout; initial setup
-also needs a GitHub login with repository admin rights on your own machine
-(`gh auth login --scopes repo`) to register the host’s read-only deploy key.
-These requirements belong only to the checkout path.
-
-### Initialize or re-run a checkout host
-
-One command, from your own machine with SSH access to the host and a GitHub
-login for repository administration:
-
-```sh
-ub remote init uberblick@box.tailnet.ts.net
-```
-
-It does, over that one SSH target, the compatibility checkout deployment:
-
-1. Checks the host — Docker Compose 2.6+, `git`, and `tailscale status --json`
-   for the MagicDNS name and `tailscale ip -4` for the address. Detection
-   failing is a prompt or `--host <fqdn> --ip <v4>`, never a guess, and it says
-   which of the three it was: tailscale absent, tailscaled not up, or the local
-   API refused because the SSH user is not the tailscale operator (fixed on the
-   host with `tailscale set --operator=<user>`).
-2. Generates an ed25519 deploy key **on the host** — it never leaves it — and
-   registers its public half read-only with `gh repo deploy-key add`, titled
-   `uberblick-<hostname>-<short-fingerprint>`. A key already registered is
-   detected by the key itself, never by its title, so a second run adds nothing.
-3. Clones `main` into `~/uberblick-remote` (`--dir` to change) with
-   `core.sshCommand` set on the clone, so the updater needs no environment of
-   its own. An existing checkout is fast-forwarded instead.
-4. Writes the host's `.env` — `TAILSCALE_HOST`, `TAILSCALE_IP` and
-   `WEB_WORKSPACES` with this machine's resolved workspace UUID — over stdin.
-   It preserves an operator's `HUB_GITHUB_CLIENT_ID` override and writes no
-   signing secret.
-5. Runs `sh bin/remote-compose.sh up --build --detach`, then verifies from your
-   machine: it polls `https://<host>/` for up to 90 seconds — the first request
-   is what makes Tailscale issue the certificate, so an immediate check is a
-   false negative — and confirms `/ws` upgrades to a WebSocket. A failure exits
-   non-zero with the last hub and Caddy log lines, and persists nothing.
-6. Records the endpoint and prints the **join URL** a
-   second computer binds to — `wss://<host>/ws/<workspace id>`, the endpoint
-   with this workspace's id on the end.
-
-When that deployment starts on empty hub data, the hub also creates its own
-default workspace. It is distinct from the UUID this machine brought, and
-claiming covers only that default workspace. The brought workspace keeps
-host-only first-admin setup. Neither `ub remote init` nor `ub remote join`
-adopts an existing workspace as the default.
-
-Every step is idempotent: re-running `ub remote init` against a host it already
-stood up adds no second deploy key and re-clones nothing. The re-run locks that
-checkout continuously while it fast-forwards, replaces `.env`, rebuilds, and
-records the deployed commit, so it cannot interleave with another re-run or
-`ub remote update`. A contending re-run refuses as an operational failure.
-
-That guarantee starts once the checkout already exists. The first invocation
-creates the directory before it writes `.env` and builds, so do not overlap a
-second invocation with that initial stand-up.
-
-### Updating a checkout host
-
-**The host does not update itself.** It stays on the commit it was last deployed
-at until somebody deploys another one. Nothing is scheduled: no timer, no
-webhook, no polling loop (owner decision, 2026-08-25 — an unattended updater
-would apply a commit that changes wire semantics to production with nobody
-present).
-
-One command, from your own machine, run by you or by an agent session over SSH:
-
-```sh
-ub remote update uberblick@box.tailnet.ts.net
-```
-
-It runs `remote-update.sh` in the host's checkout — the same script you would
-run by hand there — and reports either "up to date" or the commit it moved to.
-A `flock` on the checkout keeps every deployment of an existing checkout — this
-script or an `ub remote init` re-run, whichever sessions or users they run as —
-from interleaving. Updater contention remains the successful no-op "already
-running; nothing to do"; an explicit init re-run that cannot apply its
-configuration refuses non-zero. A second checkout on the same host remains free
-to deploy itself, and a host that cannot take a lock at all refuses non-zero
-rather than reporting an update it never ran as success.
-
-Both an update and an init re-run preserve the host's `HUB_GITHUB_CLIENT_ID`.
-The re-run reads that setting under the checkout lock rather than copying it
-from the machine running init.
-
-**When to update:** when a merged change is one you want live — a fix you are
-waiting on, a feature you are about to demonstrate, a deployment you are about
-to verify. Deploy while you are present to watch it, never as the last thing
-before walking away.
-
-**The wire-semantics rule.** A change to what travels over the socket — the auth
-token's shape or claims, the sync protocol, the room key, the served
-`/uberblick-config.json` contract — breaks every client still on the old code.
-Deploy such a change and update the clients in the **same sitting**: after
-`ub remote update`, pull `main` on each machine that syncs to this hub (and
-reload every open browser tab, which takes its bundle and its configuration from
-the host). If you cannot finish both halves now, do neither now.
-
-Nothing is deployed *from* your checkout: the host fetches `origin/main` itself
-and resets to it, so what runs there is always a commit that is on `main`.
-The updater compares against `refs/uberblick/deployed`, which moves only after a
-build exits 0 — never against `HEAD`. A commit whose build fails is therefore
-retried on the next run rather than remembered as deployed, which is what keeps
-one bad commit from wedging the host with its containers on the old code.
-`git reset --hard` discards host-local edits to **tracked** files, deliberately —
-the host mirrors `main` and is not a place to edit — and prints what it
-discarded. The host's `.env` is untracked and survives; nothing runs `git clean`.

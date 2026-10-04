@@ -152,6 +152,7 @@ function trimmed(value: string | undefined): string | null {
 /** A loopback proxy can reach a hub whose own bind requires device credentials. */
 export function usesDeviceLogin(endpoint: string, env: NodeJS.ProcessEnv = process.env): boolean {
   if (!isLoopbackEndpoint(endpoint) || env.HUB_ADMISSION === "device") return true;
+  if (env.UB_HUB_URL === "local" && endpoint === DEFAULT_HUB_URL) return false;
   const origin = authenticationOrigin(endpoint);
   const store = readHubLogins(env);
   return store.logins[origin] !== undefined || store.unreadableHubs.includes(origin);
@@ -168,7 +169,7 @@ const USER_CONFIG_FILE = "config.json";
 /**
  * Every room, the token claim and the database file are keyed by this — so a
  * machine with none configured gets the whole answer in one line: where `ub`
- * takes it from, and both commands that write there. `ub remote join` is the
+ * takes it from, and both commands that write there. `ub workspace join` is the
  * one a machine binding to an existing hub runs, and the one a flag-day
  * re-bind needs.
  *
@@ -182,7 +183,7 @@ function missingWorkspace(env: NodeJS.ProcessEnv): string {
     "WORKSPACE_ID is not set. It names the rooms this server opens, the " +
     "workspace claim in its hub token, and its local database — there is no " +
     `default. \`ub\` takes it from ${path}. Run \`ub init\` to create a ` +
-    "workspace, or `ub remote join <hub>/<workspace>` to bind this machine to " +
+    "workspace, or `ub workspace join <hub>/<workspace>` to bind this machine to " +
     "one that already exists (`ub status` prints the one in force)."
   );
 }
