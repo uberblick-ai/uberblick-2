@@ -13,7 +13,7 @@ import { placeCaret } from "./harness.js";
 import { AUTH_REJECTED } from "@uberblick/hub/protocol";
 import { STORE_REFUSED, TOKEN_MISSING } from "../src/ui/status-reading.js";
 
-const { openApp } = setupHarness();
+const { harness, openApp } = setupHarness();
 const drawerWidths = [375, 390, 430, 744, 932, 1279];
 const directReadings = [
   "", "synced", "syncing…", "offline", "update required", "no hub token",
@@ -314,6 +314,24 @@ for (const upstream of [true, false]) {
       expect(left.prose, `prose moved after leaving at ${width}px`).toEqual(empty.get(width)?.prose);
       expect(await checkReadings(page, upstream), `readings moved after leaving at ${width}px`).toEqual(emptyReadings.get(width));
       expect(await checkAdditionalReadings(page, upstream), `supplementary readings moved after leaving at ${width}px`).toEqual(emptyAdditional.get(width));
+    }
+    if (upstream) {
+      // Exercise production note placement too: the label fixtures above own
+      // geometry, but must not substitute for rendering a real not-saved note.
+      await harness().stopHub();
+      try {
+        await expect(page.locator(".ub-status-word").first()).toHaveText("offline");
+        await expect(page.locator(".ub-not-saved")).toHaveText("not saved");
+        for (const width of widths) {
+          if (browserName === "chromium") await page.setViewportSize({ width, height });
+          await settlePane(page);
+          const offline = await statusGeometry(page);
+          expect(offline.scrollWidth, `offline at ${width}px`).toBe(offline.clientWidth);
+          expect(offline.problems, `offline at ${width}px`).toEqual([]);
+        }
+      } finally {
+        await harness().startHub();
+      }
     }
   });
 }
