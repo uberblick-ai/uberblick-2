@@ -66,7 +66,7 @@ export function UserMenu({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button type="button" className="ub-user-card" aria-label="You">
+        <button type="button" className="ub-user-card flex w-full items-center gap-2 mt-[0.15rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-[0.3rem] text-left text-inherit cursor-pointer hover:bg-(--sidebar-accent) hover:text-accent-foreground" aria-label="You">
           <span
             className="ub-identity-tile ub-user-tile"
             style={{ background: color }}
@@ -110,7 +110,7 @@ export function UserMenu({
               <button
                 key={option}
                 type="button"
-                className="ub-appearance-option"
+                className="ub-appearance-option rounded-(--radius-sm) border border-solid border-sidebar-border bg-transparent px-[0.4rem] py-1 text-[0.8rem]/[inherit] font-[inherit] text-inherit cursor-pointer hover:aria-[pressed=false]:bg-(--sidebar-accent) hover:text-accent-foreground aria-pressed:bg-(--brand-subtle) aria-pressed:border-foreground"
                 aria-pressed={option === appearance}
                 onClick={() => chooseAppearance(option)}
               >

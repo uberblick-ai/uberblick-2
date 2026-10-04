@@ -537,6 +537,152 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
+for (const scheme of ["light", "dark"] as const) {
+  test(`sidebar controls keep their treatment after touch — ${scheme}`, { tag: "@webkit-touch" }, async ({ browser }, info) => {
+    const page = await openApp(browser, "/", {
+      upstream: true,
+      readySelector: ".ub-pane",
+      contextOptions: {
+        colorScheme: scheme,
+        hasTouch: true,
+        ...(info.project.name === "chromium" ? { viewport: { width: 390, height: 844 } } : {}),
+      },
+    });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    expect(await page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true);
+
+    const treatment = (control: Locator): Promise<string[]> => control.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [style.backgroundColor, style.color, style.borderTopColor];
+    });
+    const openSidebar = async (settings = false): Promise<void> => {
+      if ((page.viewportSize()?.width ?? 1280) < 1280) {
+        await page.getByRole("button", { name: settings ? "Show sidebar" : "Show document list", exact: true }).tap();
+        await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
+      }
+    };
+    const checkHoverAndFocus = async (control: Locator): Promise<string[]> => {
+      await expect(control).toBeVisible();
+      await page.mouse.move(0, 0);
+      const rest = await treatment(control);
+      // Force :hover without activating navigation. A selected destination's
+      // real tap changes its ground independently of input capability.
+      await control.hover();
+      expect(await treatment(control)).toEqual(rest);
+
+      // Compare with this engine's native ring rather than pinning its values.
+      // The reference stays inside the active focus scope of the drawer/panel.
+      await control.evaluate((element) => {
+        const reference = document.createElement("button");
+        reference.type = "button";
+        reference.dataset.hoverProofReference = "";
+        reference.textContent = "Focus reference";
+        element.after(reference);
+      });
+      const reference = page.locator("[data-hover-proof-reference]");
+      const outline = (one: Locator) => one.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return [style.outlineStyle, style.outlineWidth, style.outlineOffset];
+      });
+      try {
+        await control.focus();
+        // iOS does not put every button in desktop Tab order. A harmless key
+        // establishes keyboard modality; direct focus measures the ring alone.
+        await page.keyboard.press("ArrowRight");
+        await reference.focus();
+        await expect(reference).toBeFocused();
+        expect(await reference.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+        const native = await outline(reference);
+        await control.focus();
+        await expect(control).toBeFocused();
+        expect(await control.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+        expect(await outline(control)).toEqual(native);
+      } finally {
+        await reference.evaluate((element) => element.remove());
+      }
+      return rest;
+    };
+
+    await openSidebar();
+    const create = page.getByRole("button", { name: "+ new doc", exact: true });
+    await expect(create).toBeEnabled();
+    const createRest = await checkHoverAndFocus(create);
+    await create.tap();
+    await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
+    await openSidebar();
+    expect(await treatment(create)).toEqual(createRest);
+
+    const addGroup = page.locator(".ub-group-add");
+    const addRest = await checkHoverAndFocus(addGroup);
+    await addGroup.tap();
+    await expect(page.getByLabel("Group name")).toBeVisible();
+    expect(await treatment(addGroup)).toEqual(addRest);
+    await page.getByLabel("Group name").fill(`Touch hover ${scheme}`);
+    await page.getByLabel("Group name").press("Enter");
+
+    const user = page.locator(".ub-user-card");
+    const userRest = await checkHoverAndFocus(user);
+    await user.tap();
+    const panel = page.locator(".ub-user-panel");
+    await expect(panel).toBeVisible();
+    expect(await treatment(user)).toEqual(userRest);
+    const appearance = panel.getByRole("group", { name: "Appearance" });
+    const system = appearance.getByRole("button", { name: "System", exact: true });
+    await expect(system).toHaveAttribute("aria-pressed", "true");
+    const selected = await checkHoverAndFocus(system);
+    const matching = appearance.getByRole("button", { name: scheme === "light" ? "Light" : "Dark", exact: true });
+    await checkHoverAndFocus(matching);
+    await matching.tap();
+    await expect(matching).toHaveAttribute("aria-pressed", "true");
+    expect(await treatment(matching)).toEqual(selected);
+    const pressed = await checkHoverAndFocus(matching);
+    await matching.tap();
+    expect(await treatment(matching)).toEqual(pressed);
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+
+    const allDocs = page.locator(".ub-all-open-entry");
+    await checkHoverAndFocus(allDocs);
+    await allDocs.tap();
+    await openSidebar();
+    await expect(allDocs).toHaveAttribute("aria-current", "page");
+    await checkHoverAndFocus(allDocs);
+
+    const settings = page.locator(".ub-settings-entry");
+    await checkHoverAndFocus(settings);
+    await settings.tap();
+    await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+    await openSidebar(true);
+    const navigation = page.locator(".ub-settings-nav");
+    const tags = navigation.getByRole("button", { name: "Tags", exact: true });
+    await checkHoverAndFocus(tags);
+    await tags.tap();
+    await expect(page.getByRole("heading", { name: "Tags", exact: true })).toBeVisible();
+    await openSidebar(true);
+    await expect(tags).toHaveAttribute("aria-current", "page");
+    await checkHoverAndFocus(tags);
+    const general = navigation.getByRole("button", { name: "General", exact: true });
+    await checkHoverAndFocus(general);
+    await general.tap();
+    await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+    await openSidebar(true);
+    await expect(general).toHaveAttribute("aria-current", "page");
+    await checkHoverAndFocus(general);
+
+    await page.goto(new URL("/not-a-workspace", harness().appUrl).href);
+    await openSidebar();
+    for (const disabled of [page.getByRole("button", { name: "new doc unavailable", exact: true }), page.locator(".ub-group-add")]) {
+      await expect(disabled).toBeDisabled();
+      const rest = await treatment(disabled);
+      await disabled.hover();
+      expect(await treatment(disabled)).toEqual(rest);
+      // Native disabled buttons still receive touch hit testing, but no action.
+      await disabled.tap({ force: true });
+      expect(await treatment(disabled)).toEqual(rest);
+    }
+  });
+}
+
 test("the appearance choice re-themes the app from tokens alone, and survives a reload", async ({
   browser,
 }) => {

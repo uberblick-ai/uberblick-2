@@ -54,6 +54,11 @@ const NEW_GROUP_NAME = "New group";
 // Both modes share a grid cell; only each mode's middle content scrolls.
 const SIDEBAR_PANE_CLASSES = "ub-sidebar-pane [grid-area:1/1] min-w-0 min-h-0 flex flex-col transition-[transform,opacity] duration-[180ms] ease-[ease] motion-reduce:transition-none motion-reduce:duration-0 [&[inert]]:pointer-events-none [&[inert]_*]:pointer-events-none";
 
+// Native buttons have no preflight reset. Keep their inherited type and focus
+// ring while Tailwind gates hover by the primary input's capability.
+const SIDEBAR_ROW_CLASSES = "flex min-h-8.5 items-center gap-2 rounded-[0.42rem] border border-solid border-transparent bg-transparent px-2 py-1.5 text-left text-sm/[inherit] font-[inherit] text-(--sidebar-row-foreground) cursor-pointer enabled:not-aria-disabled:hover:bg-(--sidebar-accent) enabled:not-aria-disabled:hover:text-sidebar-foreground";
+const SIDEBAR_NAV_CLASSES = `${SIDEBAR_ROW_CLASSES} w-full aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium`;
+
 /** Per-group collapse preference, persisted per browser like the sidebar's own. */
 function groupCollapsedKey(groupId: string): string {
   return `uberblick.sidebar.group.${groupId}.collapsed`;
@@ -299,6 +304,7 @@ function SidebarContent({
             <div className="ub-list-head">
               <button
                 type="button"
+                className={`${SIDEBAR_ROW_CLASSES} disabled:text-(--sidebar-muted-foreground) disabled:cursor-default`}
                 onClick={onCreate}
                 disabled={!status.writable}
                 title={
@@ -354,7 +360,7 @@ function SidebarContent({
             ))}
             <button
               type="button"
-              className="ub-group-add"
+              className={`ub-group-add ${SIDEBAR_ROW_CLASSES} self-start mt-[0.35rem] disabled:opacity-50 disabled:cursor-default`}
               onClick={addGroup}
               disabled={ydoc === null}
               title={
@@ -370,7 +376,7 @@ function SidebarContent({
             {workspace !== null && (
               <button
                 type="button"
-                className="ub-settings-entry"
+                className={`ub-settings-entry ${SIDEBAR_ROW_CLASSES} w-full`}
                 data-swap-focus
                 onClick={() => onOpenSettings("general")}
               >
@@ -448,6 +454,7 @@ function SettingsNavigation({
             <li>
               <button
                 type="button"
+                className={SIDEBAR_NAV_CLASSES}
                 aria-current={page === "general" ? "page" : undefined}
                 onClick={() => onSelect("general")}
               >
@@ -458,6 +465,7 @@ function SettingsNavigation({
             <li>
               <button
                 type="button"
+                className={SIDEBAR_NAV_CLASSES}
                 aria-current={page === "tags" ? "page" : undefined}
                 onClick={() => onSelect("tags")}
               >
@@ -507,7 +515,7 @@ function Navigation({
         <li>
           <button
             type="button"
-            className="ub-all-open-entry"
+            className={`ub-all-open-entry ${SIDEBAR_NAV_CLASSES}`}
             aria-current={allOpen ? "page" : undefined}
             onClick={onOpenAll}
           >
