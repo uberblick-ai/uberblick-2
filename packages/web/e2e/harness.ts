@@ -257,6 +257,10 @@ export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Pro
   await expect
     .poll(async () => {
       await editor.focus();
+      // ProseMirror schedules a selection-to-DOM sync 20ms after focus.
+      // Register a page timer after it so neither this caret placement nor a
+      // caller's immediate keyboard selection can be reverted by that sync.
+      await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
       if (webkit) {
         // iOS does not give Home/End desktop block-edge semantics. Native
         // range setup avoids a pointer gesture while retaining real selection
