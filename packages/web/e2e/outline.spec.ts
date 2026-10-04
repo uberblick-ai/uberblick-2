@@ -29,6 +29,20 @@ async function typeHeading(page: Page, level: 1 | 2 | 3, text: string): Promise<
   await page.keyboard.press("Enter");
 }
 
+/** Notify the editor in the same task, before deferred focus can restore its old range. */
+async function selectParagraph(paragraph: ReturnType<Page["locator"]>): Promise<void> {
+  await paragraph.evaluate((node) => {
+    const doc = node.ownerDocument;
+    const range = doc.createRange();
+    range.selectNodeContents(node);
+    const selection = doc.getSelection();
+    if (selection === null) throw new Error("e2e: paragraph selection is unavailable");
+    selection.removeAllRanges();
+    selection.addRange(range);
+    doc.dispatchEvent(new Event("selectionchange"));
+  });
+}
+
 /** Reach a control through the browser's real sequential focus order. */
 async function tabTo(page: Page, target: ReturnType<Page["locator"]>): Promise<void> {
   for (let attempts = 0; attempts < 30; attempts += 1) {
@@ -230,7 +244,7 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     // from both rendering and keyboard navigation, and its portal closes.
     await page.locator(".ub-editor .ub-paragraph").last().click();
     await page.keyboard.type("annotate me");
-    await page.locator(".ub-editor .ub-paragraph").last().selectText();
+    await selectParagraph(page.locator(".ub-editor .ub-paragraph").last());
     await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("annotate me");
     await page.getByRole("button", { name: "Comment", exact: true }).click();
     await page.getByPlaceholder(/Comment as/).fill("a thread");
@@ -329,7 +343,7 @@ for (const width of [390, 820, 1024, 1194, 1279]) {
       // Prepare both unmarked ranges before annotating either: typing at an
       // existing comment's edge would extend its mark into the new fixture.
       await page.locator(".ub-editor .ub-paragraph").first().click();
-      await page.locator(".ub-editor .ub-paragraph").first().selectText();
+      await selectParagraph(page.locator(".ub-editor .ub-paragraph").first());
       await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("first");
       await page.getByRole("button", { name: "Comment", exact: true }).click();
       await page.getByPlaceholder(/Comment as/).fill("first conversation");
@@ -338,7 +352,7 @@ for (const width of [390, 820, 1024, 1194, 1279]) {
       // Wait for Tiptap's deferred focus before setting the next range.
       await expect(editor(page)).toBeFocused();
       await page.locator(".ub-editor .ub-paragraph").last().click();
-      await page.locator(".ub-editor .ub-paragraph").last().selectText();
+      await selectParagraph(page.locator(".ub-editor .ub-paragraph").last());
       await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("second");
       await page.getByRole("button", { name: "Comment", exact: true }).click();
       await page.getByPlaceholder(/Comment as/).fill("second conversation");
@@ -408,7 +422,7 @@ test("touch reveals a low thread in the sheet while its close control stays in v
     }
     for (const [index, anchor] of anchors.entries()) {
       await page.locator(".ub-editor .ub-paragraph").nth(index).click();
-      await page.locator(".ub-editor .ub-paragraph").nth(index).selectText();
+      await selectParagraph(page.locator(".ub-editor .ub-paragraph").nth(index));
       await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(anchor);
       await page.getByRole("button", { name: "Comment", exact: true }).click();
       await page.getByPlaceholder(/Comment as/).fill(`conversation ${index + 1}`);
