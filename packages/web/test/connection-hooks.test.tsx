@@ -368,9 +368,9 @@ describe("connection-scoped readings", () => {
       expect(peers.map(({ clientId }) => clientId).sort()).toEqual(
         [fallback.clientId, agent.clientId, human.clientId].sort(),
       );
-      expect(peers.find(({ clientId }) => clientId === fallback.clientId)).toMatchObject({
+      expect(peers.find(({ clientId }) => clientId === fallback.clientId)).toEqual({
+        clientId: fallback.clientId,
         name: `client ${fallback.clientId}`,
-        color: AWARENESS_FALLBACK_COLOR,
       });
       expect(agents).toBe(1);
       const presence = readPresence(fix.ydoc, fix.awareness);

@@ -395,14 +395,22 @@ function observeLinkConflicts(
   return () => fragment.unobserveDeep(read);
 }
 
-/** A peer in the presence strip. `clientId` is its stable key: names collide. */
-export interface Peer extends AwarenessUser {
+/** A mention candidate. `clientId` distinguishes peers whose names collide. */
+export interface Peer {
   clientId: number;
+  name: string;
 }
 
-/** Awareness states other than our own, for the presence strip. */
+/** Only the identity and name matter to the editor's mention candidates. */
+function samePeerNames(previous: Peer[], next: Peer[]): boolean {
+  if (previous.length !== next.length) return false;
+  const names = new Map(next.map((peer) => [peer.clientId, peer.name]));
+  return previous.every((peer) => names.get(peer.clientId) === peer.name);
+}
+
+/** Awareness names other than our own, stable through caret/colour changes. */
 export function usePeers(connection: RoomConnection | null): Peer[] {
-  return useConnectionReading(connection, EMPTY_ARRAY, observePeers)[0];
+  return useConnectionReading(connection, EMPTY_ARRAY, observePeers, samePeerNames)[0];
 }
 
 function observePeers(
@@ -416,7 +424,7 @@ function observePeers(
     awareness.getStates().forEach((state, clientId) => {
       const peer = parseRemoteAwareness(awareness, clientId, state);
       if (peer === null || !peer.hasUser) return;
-      out.push({ clientId, name: peer.name, color: peer.color });
+      out.push({ clientId, name: peer.name });
     });
     emit(out);
   };
