@@ -284,8 +284,8 @@ function alignEntries(
       const index = oldIndex * stride + newIndex;
       cells[index] = matchingCells(oldIndex + start, newIndex + start);
       suffix[index] = Math.max(
-        cells[index]! + suffix[index + stride + 1]!,
-        suffix[index + stride]!, suffix[index + 1]!,
+        (cells[index] ?? 0) + (suffix[index + stride + 1] ?? 0),
+        (suffix[index + stride] ?? 0), (suffix[index + 1] ?? 0),
       );
     }
   }
@@ -293,7 +293,7 @@ function alignEntries(
     for (let newIndex = 0; newIndex < newLength; newIndex += 1) {
       const index = oldIndex * stride + newIndex;
       prefix[index + stride + 1] = Math.max(
-        prefix[index]! + cells[index]!, prefix[index + 1]!, prefix[index + stride]!,
+        (prefix[index] ?? 0) + (cells[index] ?? 0), (prefix[index + 1] ?? 0), (prefix[index + stride] ?? 0),
       );
     }
   }
@@ -303,10 +303,10 @@ function alignEntries(
     for (let newIndex = 0; newIndex < newLength; newIndex += 1) {
       const index = oldIndex * stride + newIndex;
       // Only a pair on an optimal exact-cell path can win. This avoids
-      // diffing every row pair (and aligning its columns) on a column edit.
-      if (prefix[index]! + cells[index]! + suffix[index + stride + 1]! !== suffix[0]) continue;
+      // diffing every pair of rows or columns during a structural edit.
+      if ((prefix[index] ?? 0) + (cells[index] ?? 0) + (suffix[index + stride + 1] ?? 0) !== suffix[0]) continue;
       characters[index] = matchingCharacters(oldIndex + start, newIndex + start);
-      maxCharacters = Math.max(maxCharacters, characters[index]!);
+      maxCharacters = Math.max(maxCharacters, (characters[index] ?? 0));
     }
   }
   const scores = new Float64Array(size);
@@ -318,8 +318,8 @@ function alignEntries(
   const cellWeight = (pairs * maxCharacters + 1) * characterWeight;
   const pairScore = (oldIndex: number, newIndex: number): number => {
     const index = oldIndex * stride + newIndex;
-    if (characters[index]! < 0) return -Infinity;
-    return cells[index]! * cellWeight + characters[index]! * characterWeight + 1;
+    if ((characters[index] ?? 0) < 0) return -Infinity;
+    return (cells[index] ?? 0) * cellWeight + (characters[index] ?? 0) * characterWeight + 1;
   };
   for (let oldIndex = oldLength - 1; oldIndex >= 0; oldIndex -= 1) {
     for (let newIndex = newLength - 1; newIndex >= 0; newIndex -= 1) {
@@ -358,12 +358,12 @@ function countEqualCells(before: readonly string[], after: readonly string[]): n
   for (const value of before) {
     let diagonal = 0;
     for (let column = 0; column < after.length; column += 1) {
-      const previous = scores[column + 1]!;
-      scores[column + 1] = Math.max(previous, scores[column]!, diagonal + (value === after[column] ? 1 : 0));
+      const previous = (scores[column + 1] ?? 0);
+      scores[column + 1] = Math.max(previous, (scores[column] ?? 0), diagonal + (value === after[column] ? 1 : 0));
       diagonal = previous;
     }
   }
-  return scores[after.length]!;
+  return (scores[after.length] ?? 0);
 }
 
 function equalEntries(before: readonly string[], after: readonly string[]): boolean {
