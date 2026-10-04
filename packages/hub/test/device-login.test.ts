@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { credentialsPath, readHubLogins, removeHubLogin, writeHubLogin } from "../src/auth-store.js";
 import { DEVICE_RENEWAL_COOLDOWN_MS, ensureDeviceLogin, readDeviceLogin } from "../src/device-login.js";
 import { acquireInitLock } from "../src/init-lock.js";
+import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
 import { startDeviceSyncHub } from "./device-sync-hub.js";
 
 const WORKSPACE = randomUUID();
@@ -206,7 +207,7 @@ describe("stored device login renewal", () => {
   it.each([
     { status: 401, body: { status: "sign-in-required" }, reading: "sign-in-required" },
     { status: 401, body: { status: "already-replaced" }, reading: "sign-in-required" },
-    { status: 409, body: { status: "protocol-mismatch", reason: "protocol-mismatch:2" }, reading: "update-required" },
+    { status: 409, body: { status: "protocol-mismatch", reason: `protocol-mismatch:${SYNC_PROTOCOL_VERSION + 1}` }, reading: "update-required" },
     { status: 503, body: { status: "not-configured" }, reading: "renewal-unavailable" },
     { status: 503, raw: "proxy unavailable", reading: "hub-down" },
     { status: 500, body: { status: "failed" }, reading: "hub-down" },
