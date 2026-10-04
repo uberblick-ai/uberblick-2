@@ -1197,8 +1197,10 @@ same recorded promotion attempt: after a failure or interruption, rerun the
 command on this machine. Keep its private saved attempt with the local data;
 the hub stores its receipt atomically with the grant. The project binding stays
 unchanged on failure and local work remains available. Close other clients while
-promoting. A workspace already bound to a hub cannot be promoted. Promotion does
-not change the hub's default workspace, first-claim state or other memberships.
+promoting. A workspace already bound to a hub cannot be promoted. The reservation
+itself does not change the hub's default workspace, first-claim state or other
+memberships. On a fresh hub, the sign-in requested by promotion can claim the
+default workspace through the normal first-login flow.
 
 Host-only first-administrator setup remains a separate operation for existing
 workspaces without membership. Its Unix-socket authority and restrictions are

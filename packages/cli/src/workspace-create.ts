@@ -9,7 +9,7 @@ import { takeHelp } from "./help.js";
 import { acquireInitLock, seedLockPath } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { TARGETS, targetFile } from "./mcp-config.js";
-import { PROJECT_CONFIG_FILE, type ProjectBinding, writeProjectBinding } from "./project-binding.js";
+import { PROJECT_CONFIG_FILE, type ProjectBinding, findProjectConfig, resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { seedStarterDocs } from "./starter.js";
 
 export const WORKSPACE_CREATE_HELP = `usage: ub workspace create <name>
@@ -56,6 +56,9 @@ export async function createWorkspaceCommand(argv: string[], io: Io): Promise<nu
   try {
     const lock = await acquireInitLock();
     try {
+      // Reject an invalid target before creating a replica. An ancestor binding
+      // is not this new project's target and is left alone.
+      if (findProjectConfig() === path) resolveProjectBinding({ env: {} });
       const env = { ...process.env, WORKSPACE_ID: uuid, UB_WORKSPACE_ID: uuid, UB_HUB_URL: "local", HUB_URL: undefined,
         HUB_AUTH_TOKEN: undefined, HUB_ADMISSION: undefined,
         UBERBLICK_DB: defaultDatabasePath(uuid, process.env) };

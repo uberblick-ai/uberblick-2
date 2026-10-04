@@ -2,11 +2,10 @@
 
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveStorage } from "@uberblick/hub";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const UB = join(repoRoot, "packages", "cli", "bin", "ub.mjs");
@@ -34,10 +33,9 @@ interface McpAgentOptions {
 /**
  * An MCP client's private machine state and every server session using it.
  *
- * `config.json` is the single authority for the hub endpoint (#385), while the
- * workspace and signing secret remain process environment. Keeping setup and
- * cleanup here prevents one spec's protocol client from drifting from another
- * or leaving a server process behind after a failed test.
+ * Each session explicitly pins the workspace and hub as a complete binding.
+ * Keeping setup and cleanup here prevents one spec's protocol client from
+ * drifting from another or leaving a server behind after a failed test.
  */
 export class McpAgent {
   private readonly state: string;
@@ -45,18 +43,7 @@ export class McpAgent {
 
   constructor(private readonly options: McpAgentOptions) {
     this.state = mkdtempSync(join(tmpdir(), options.statePrefix));
-    const { configDir } = resolveStorage({
-      env: { XDG_CONFIG_HOME: join(this.state, "config") },
-    });
-    mkdirSync(configDir, { recursive: true });
-    writeFileSync(
-      join(configDir, "config.json"),
-      `${JSON.stringify(
-        { workspace: options.workspace, hubUrl: options.hubUrl },
-        null,
-        2,
-      )}\n`,
-    );
+
   }
 
   open(clientInfo: McpClientInfo): McpSession {
@@ -101,7 +88,11 @@ export class McpSession {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
-        WORKSPACE_ID: options.workspace,
+        UB_WORKSPACE_ID: options.workspace,
+        UB_HUB_URL: options.hubUrl,
+        WORKSPACE_ID: undefined,
+        HUB_URL: undefined,
+        HUB_ADMISSION: undefined,
         HUB_AUTH_TOKEN: options.authSecret,
         UBERBLICK_DB: join(state, "agent.sqlite"),
         XDG_CONFIG_HOME: join(state, "config"),

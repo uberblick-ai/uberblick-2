@@ -600,8 +600,10 @@ ub open
 Promotion includes login when needed and connection after verification; there
 is no separate join on this machine. The authenticated account must already
 administer a workspace on the hub. It becomes the promoted workspace's first
-and only member, as administrator. The default workspace, its claim state and
-other memberships do not change.
+and only member, as administrator. The reservation itself leaves the default
+workspace, its claim state and other memberships unchanged. On a fresh hub,
+the sign-in requested by promotion can claim the default workspace through the
+normal first-login flow.
 
 Promotion refuses a workspace already bound to a hub and any destination UUID
 with existing documents or memberships. The only exception is its own recorded

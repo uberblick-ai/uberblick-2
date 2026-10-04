@@ -16,7 +16,7 @@ import { requireBinding, resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
-import { PROJECT_CONFIG_FILE, resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
+import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { corpusProblem, verify } from "./remote.js";
 import { publishOwnerOnly } from "./safe-write.js";
 import { reportWorkspacePins } from "./workspace-create.js";
@@ -115,11 +115,20 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
   process.on("SIGTERM", interrupt);
   try {
     const resolved = resolveConfig();
-    const selected = requireBinding(resolved);
+    const effective = requireBinding(resolved);
+    const selection = resolveProjectBinding({ env: {} });
+    const selected = selection.binding;
+    if (selected === null || selection.path === null) {
+      throw new Error("promotion requires a project binding; select the local workspace with `ub workspace use <id> --hub local` first");
+    }
+    if (resolved.origins.workspace === "environment" &&
+        (effective.workspaceId !== selected.workspaceId || effective.hubUrl !== selected.hubUrl ||
+         effective.hubAdmission !== selected.hubAdmission)) {
+      throw new Error("the environment selects a different binding; unset UB_WORKSPACE_ID and UB_HUB_URL or explicitly select that project with `ub workspace use <id> --hub local` first");
+    }
     if (selected.hubUrl !== null) throw new Error("the selected workspace already has a hub; only local-only workspaces can be promoted");
     const workspaceId = parseWorkspaceId(selected.workspaceId).uuid;
-    const selection = resolveProjectBinding();
-    const path = selection.path ?? join(process.cwd(), PROJECT_CONFIG_FILE);
+    const path = selection.path;
     const before = bindingBytes(path);
     const origin = authenticationOrigin(endpoint);
     const key = createHash("sha256").update(`${endpoint}\n${workspaceId}`).digest("hex");
@@ -178,7 +187,9 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
       const binding = { workspaceId: selected.workspaceId, hubUrl: endpoint, hubAdmission: "device" as const };
       try {
         interrupted.signal.throwIfAborted();
-        if (bindingBytes(path) !== before || JSON.stringify(resolveProjectBinding().binding) !== JSON.stringify(selected)) {
+        const currentProject = resolveProjectBinding({ env: {} });
+        if (currentProject.path !== path || bindingBytes(path) !== before ||
+            JSON.stringify(currentProject.binding) !== JSON.stringify(selected)) {
           throw new Error("project selection changed during promotion; select the local workspace and retry");
         }
         writeProjectBinding(binding, { path });

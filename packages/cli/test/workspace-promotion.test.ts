@@ -9,7 +9,7 @@ import { ensureDeviceLogin } from "@uberblick/hub/device-login";
 import { compareCorpus, createMcpServer, inspectRemote, isIdentical, resolveMcpConfig, syncWorkspace } from "@uberblick/mcp-server";
 import { getWorkspaceName, listDirectory, readSidebar, tombstoneDirectoryEntry } from "@uberblick/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { UB_BIN, removeTempDirs, runUb, runUbAsync, sandbox, type Sandbox } from "./helpers.js";
+import { UB_BIN, removeTempDirs, runUbAsync, sandbox, type Sandbox } from "./helpers.js";
 
 const hubs: Hub[] = [];
 afterEach(async () => {
@@ -92,6 +92,40 @@ describe("workspace creation and promotion", () => {
     } finally { await fresh.close(); }
   });
 
+  it("refuses a different environment binding before reserving or replacing the project selection", async () => {
+    const box = await localWorkspace("Project A");
+    const original = bindingBytes(box);
+    const created = await runUbAsync(["workspace", "create", "Project B"], box);
+    expect(created.status, created.output).toBe(0);
+    const other = selected(box).workspaceId;
+    writeFileSync(join(box.cwd, ".uberblick.json"), original);
+    const { hub, endpoint } = await hubFor(box);
+    const before = accessRows(hub);
+    const child = join(box.cwd, "nested");
+    mkdirSync(child);
+    for (const cwd of [box.cwd, child]) {
+      const result = await runUbAsync(["workspace", "promote", endpoint], { ...box, cwd },
+        { UB_WORKSPACE_ID: other, UB_HUB_URL: "local" });
+      expect(result.status, result.output).toBe(1);
+      expect(result.stderr).toContain("environment selects a different binding");
+      expect(bindingBytes(box)).toBe(original);
+      expect(accessRows(hub)).toEqual(before);
+    }
+    expect(existsSync(join(child, ".uberblick.json"))).toBe(false);
+  });
+
+  it("rejects an invalid project file before creating an orphan replica", async () => {
+    const box = sandbox();
+    const original = JSON.stringify({ workspaceId: randomUUID(), hubUrl: "local" });
+    writeFileSync(join(box.cwd, ".uberblick.json"), original);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await runUbAsync(["workspace", "create", "Unused workspace"], box);
+      expect(result.status, result.output).toBe(1);
+      expect(bindingBytes(box)).toBe(original);
+      expect(existsSync(join(box.dataHome, "uberblick"))).toBe(false);
+    }
+  });
+
   it("uploads the same history including archived content and joins from a machine with no local workspace", async () => {
     const box = await localWorkspace();
     const local = createMcpServer(offline(box));
@@ -104,7 +138,8 @@ describe("workspace creation and promotion", () => {
     const before = accessRows(hub);
     // An earlier no-access check must not suppress renewal after the grant.
     expect((await ensureDeviceLogin(endpoint, selected(box).workspaceId, { env: box.env })).status).toBe("no-access");
-    const result = await runUbAsync(["workspace", "promote", endpoint], box);
+    const result = await runUbAsync(["workspace", "promote", endpoint], box,
+      { UB_WORKSPACE_ID: selected(box).workspaceId, UB_HUB_URL: "local" });
     expect(result.status, result.output).toBe(0);
     expect(result.stdout).toContain(`ub workspace join ${endpoint}/${selected(box).workspaceId}`);
     expect(result.output).not.toContain("Waiting for GitHub approval");
@@ -191,10 +226,10 @@ describe("workspace creation and promotion", () => {
     expect(selected(box).hubUrl).toBe(endpoint);
   });
 
-  it("validates names and URLs without side effects or echoing pasted credentials", () => {
+  it("validates names and URLs without side effects or echoing pasted credentials", async () => {
     const box = sandbox();
-    for (const name of ["", "bad\nname", "x".repeat(65)]) expect(runUb(["workspace", "create", name], box).status).toBe(2);
-    const result = runUb(["workspace", "promote", "https://user:private-paste@hub.test"], box);
+    for (const name of ["", "bad\nname", "x".repeat(65)]) expect((await runUbAsync(["workspace", "create", name], box)).status).toBe(2);
+    const result = await runUbAsync(["workspace", "promote", "https://user:private-paste@hub.test"], box);
     expect(result.status).toBe(2);
     expect(result.output).not.toContain("private-paste");
     expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);

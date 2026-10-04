@@ -561,9 +561,9 @@ function readCorpus(replicas: Replicas): Corpus {
  * This has no direction of its own, because attaching a replica to a hub
  * reconciles the two: a populated mirror against an empty hub uploads, an empty
  * mirror against a populated hub downloads, and two populated sides merge as
- * CRDTs with neither discarded. `ub workspace join` relies on all three — the
- * machine that ran `ub workspace promote` joins the workspace it already holds — so
- * what is being joined is established by the caller, before this is called,
+ * CRDTs with neither discarded. `ub workspace join` can attach an existing
+ * replica; `ub workspace promote` first reserves an empty destination. What is
+ * being reconciled is established by the caller, before this is called,
  * rather than inferred here from which side happens to be empty.
  *
  * Hydration is the two-pass shape the seed import relies on and for the same
