@@ -10,6 +10,7 @@ export const LOCAL_HUB = "local";
 export interface ProjectBinding {
   workspaceId: string;
   hubUrl: string | null;
+  hubAdmission?: "device";
 }
 
 export interface BindingOptions {
@@ -60,7 +61,12 @@ export function validateProjectBinding(value: unknown, source: string): ProjectB
   if (typeof raw.hubUrl !== "string" || raw.hubUrl.trim() === "") {
     throw new Error(`${source}: hubUrl must be a hub URL or null for local-only`);
   }
-  return { workspaceId, hubUrl: normalizeRemoteUrl(raw.hubUrl) };
+  if (raw.hubAdmission !== undefined && raw.hubAdmission !== "device") {
+    throw new Error(`${source}: hubAdmission must be device when specified`);
+  }
+  return { workspaceId, hubUrl: normalizeRemoteUrl(raw.hubUrl),
+    ...(raw.hubAdmission === "device" ? { hubAdmission: "device" } : {}),
+  };
 }
 
 function readProject(path: string): Record<string, unknown> {
@@ -87,6 +93,7 @@ export function resolveProjectBinding(options: BindingOptions = {}): ResolvedBin
     return {
       binding: validateProjectBinding({
         workspaceId: env.UB_WORKSPACE_ID,
+        ...(env.HUB_ADMISSION === "device" ? { hubAdmission: "device" } : {}),
         hubUrl: env.UB_HUB_URL.trim() === LOCAL_HUB ? null : env.UB_HUB_URL,
       }, "environment binding"),
       origin: "environment",
@@ -117,6 +124,7 @@ export function writeProjectBinding(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
+  delete existing.hubAdmission;
   publishOwnerOnly(path, `${JSON.stringify({ ...existing, ...binding }, null, 2)}\n`);
   return path;
 }

@@ -318,7 +318,7 @@ describe("ub doctor", () => {
     expect(run.status).not.toBe(0);
   });
 
-  it("requires a stored login before contacting a remote deployment", async () => {
+  it("separates a missing login from an unreachable remote deployment", async () => {
     // A hub somebody deployed is not one this machine can start, so naming any
     // start command here would send the reader after a hub that is not theirs.
     const { checks } = await doctor(
@@ -331,12 +331,44 @@ describe("ub doctor", () => {
       }),
     );
     const hub = check(checks, "hub");
+    const credential = check(checks, "credential");
 
+    expect(credential.status).toBe("fail");
+    expect(credential.remedy).toMatch(/ub auth login/);
     expect(hub.status).toBe("fail");
     expect(hub.reason).toContain("hub.example.invalid");
-    expect(hub.remedy).toMatch(/ub auth login/);
+    expect(hub.reason).toContain("nothing answered");
+    expect(hub.remedy).toContain("check that the deployment is running");
     expect(hub.remedy).not.toMatch(/ub open/);
     expect(hub.remedy).not.toMatch(/mise/);
+  });
+
+  it.each([false, true])("names sign-in recovery for a reachable device deployment through loopback (recorded admission: %s)", async recorded => {
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const hub = await createHub({ port: 0, address: "0.0.0.0", databasePath: join(box.cwd, "device-hub.sqlite"),
+      github: { clientId: "Iv1.0123456789abcdef" }, log: silentLogger });
+    hubs.push(hub);
+    writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify({ workspaceId: WORKSPACE,
+      hubUrl: `ws://127.0.0.1:${hub.port}/custom-proxy-path`, ...(recorded ? { hubAdmission: "device" } : {}) }));
+    const { checks } = await doctor(box);
+    const upstream = check(checks, "hub");
+    expect(upstream.status).toBe("fail");
+    expect(upstream.remedy).toContain(`ub auth login http://127.0.0.1:${hub.port}`);
+    expect(upstream.remedy).not.toContain("signing secret");
+    expect(upstream.remedy).not.toContain("ub open");
+  });
+
+  it("does not recommend replacing a stopped loopback device deployment with ub open", async () => {
+    const port = await freePort();
+    const endpoint = `ws://127.0.0.1:${port}/custom-proxy-path`;
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint, hubAdmission: "device" },
+      credentials: { signingSecret: SECRET } });
+    const { checks } = await doctor(box);
+    const upstream = check(checks, "hub");
+    expect(upstream.status).toBe("fail");
+    expect(upstream.reason).toContain(`nothing answered ${endpoint}`);
+    expect(upstream.remedy).toContain("check that the deployment is running");
+    expect(upstream.remedy).not.toContain("ub open");
   });
 
   it("passes the hub check against a running hub, and says our hub holds the port", async () => {

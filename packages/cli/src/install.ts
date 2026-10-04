@@ -209,12 +209,12 @@ function commandLine(entry: Entry): string {
 }
 
 /** A complete binding, fixed for this MCP entry until explicitly replaced. */
-function pinnedTo(entry: Entry, id: string, hub: string, label: string | null): Entry {
+function pinnedTo(entry: Entry, id: string, hub: string, label: string | null, deviceAdmission = false): Entry {
   return {
     ...entry,
     name: label === null ? entry.name : `${entry.name}-${label}`,
     // Sorted like the TOML emitted by Codex's vendor command.
-    env: { UB_HUB_URL: hub, UB_WORKSPACE_ID: id },
+    env: { ...(deviceAdmission ? { HUB_ADMISSION: "device" } : {}), UB_HUB_URL: hub, UB_WORKSPACE_ID: id },
   };
 }
 
@@ -417,7 +417,7 @@ export async function installCommand(
     }
     const selected = requireBinding(resolveConfig({ env }));
     entry = pinnedTo(
-      flags.entry, selected.workspaceId, selected.hubUrl ?? "local", flags.label,
+      flags.entry, selected.workspaceId, selected.hubUrl ?? "local", flags.label, selected.hubAdmission === "device",
     );
   } catch (error) {
     io.err(`ub mcp install: ${error instanceof Error ? error.message : String(error)}\n`);

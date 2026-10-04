@@ -665,6 +665,52 @@ function bearer(auth: string): Record<string, string> {
 // --- the criteria ------------------------------------------------------------
 
 describe("ub open", () => {
+  it("discovers loopback device admission and later login keeps the same serving binding", async () => {
+    const { box, env } = configured();
+    const hub = await createHub({ port: 0, address: "0.0.0.0", databasePath: join(box.cwd, "loopback-device-hub.sqlite"),
+      github: { clientId: "Iv1.0123456789abcdef" }, log: silentLogger });
+    hubs.push(hub);
+    const origin = `http://127.0.0.1:${hub.port}`;
+    pointAt(box, `ws://127.0.0.1:${hub.port}/custom-proxy-path`);
+    const person = hub.principals!.identify("12345", "open-person");
+    hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: person.id, role: "admin" });
+    const app = await open(box, ["--port", String(await freePort())], env);
+    try {
+      expect(app.stdout()).toContain(`ub auth login ${origin}`);
+      expect(app.stdout()).not.toContain("HUB_AUTH_TOKEN");
+      const authorization = bearer(await authMessage(localBrowserKey(WORKSPACE, box.env)));
+      const status = async () => await (await fetch(`${app.url}api/status`, { headers: authorization })).json() as { caughtUp: boolean; notSharedReason: string | null };
+      await waitUntil("loopback origin sign-in reading", async () => (await status()).notSharedReason === "sign-in-required");
+      const issued = hub.credentials!.issue({ principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
+      const { replacedAt: _replaced, ...record } = issued.record;
+      await writeHubLogin(origin, { identity: person, credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") } }, box.env);
+      await waitUntil("loopback origin login resumes sharing", async () => (await status()).caughtUp);
+      expect(await (await get(`${app.url}uberblick-config.json`)).json()).not.toHaveProperty("rebound");
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
+  it.each([false, true])("keeps a stopped loopback deployment external after logout (stored login: %s)", async withLogin => {
+    const { box, env } = configured();
+    const port = await freePort();
+    const endpoint = `ws://127.0.0.1:${port}/custom-proxy-path`;
+    pointAt(box, endpoint);
+    const configPath = join(box.cwd, ".uberblick.json");
+    if (withLogin) {
+      const id = crypto.randomUUID();
+      await writeHubLogin(`http://127.0.0.1:${port}`, {
+        identity: { id, githubAccountId: "12345", githubUsername: "open-person" },
+        credential: { record: { id, principalId: id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE], issuedAt: 0, revokedAt: null }, key: Buffer.alloc(32).toString("base64url") },
+      }, box.env);
+    } else {
+      writeFileSync(configPath, JSON.stringify({ ...JSON.parse(readFileSync(configPath, "utf8")), hubAdmission: "device" }));
+    }
+    const app = await open(box, ["--port", String(await freePort())], env);
+    try {
+      expect(app.stdout()).toContain("hub unreachable; nothing started here");
+      expect((await probePort("127.0.0.1", port)).state).toBe("free");
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
   it("starts a hub, serves the bundle, and opens the browser at the served URL", async () => {
     const { box, env } = configured();
     const hubPort = await freePort();
@@ -950,7 +996,7 @@ describe("ub open", () => {
         rooms: Record<string, { hubAcked: boolean }> };
       expect(await readStatus()).toMatchObject({
         caughtUp: false,
-        notSharedReason: "sign-in-required",
+        notSharedReason: null,
         rooms: { [roomForDoc(WORKSPACE, created.uuid)]: { hubAcked: false } },
       });
       const stored = openStore(instance.store.databasePath);

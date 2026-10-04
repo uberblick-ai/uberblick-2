@@ -56,7 +56,6 @@
  */
 
 import { createHash } from "node:crypto";
-import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
 import {
   directoryRoom,
   getAnnotationsMap,
@@ -70,6 +69,7 @@ import {
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import type { McpConfig } from "./config.js";
+import { usesDeviceLogin } from "./config.js";
 import { Replicas } from "./replica.js";
 import { MirrorStore } from "./store.js";
 import type { HubState } from "./sync.js";
@@ -102,11 +102,14 @@ export function bridgeConfig(
   // An endpoint override also changes which authority can admit us. Preserve
   // an explicit stricter loopback fixture, but never carry a remote login to
   // a loopback override or a signing secret to a remote override.
-  const remote = !isLoopbackEndpoint(hubUrl);
+  const authEnv = { ...(config.authEnv ?? config.deviceLogin?.env ?? process.env) };
+  if (hubUrl !== config.hubUrl) delete authEnv.HUB_ADMISSION;
+  const remote = usesDeviceLogin(hubUrl, authEnv);
   const { deviceLogin, ...rest } = config;
   return {
     ...rest,
     hubUrl,
+    authEnv,
     ...(remote ? { deviceLogin: deviceLogin ?? {} }
       : hubUrl === config.hubUrl && deviceLogin !== undefined ? { deviceLogin } : {}),
     authSecret: remote ? null :

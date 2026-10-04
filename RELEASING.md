@@ -82,13 +82,17 @@ Docker credential configuration, without a login:
 
 ```sh
 mkdir -p anonymous-docker-config
-DOCKER_CONFIG="$PWD/anonymous-docker-config" docker pull ghcr.io/uberblick-ai/hub:0.1.0
-DOCKER_CONFIG="$PWD/anonymous-docker-config" docker pull ghcr.io/uberblick-ai/hub-web:0.1.0
+DOCKER_CONFIG="$PWD/anonymous-docker-config" docker pull --platform linux/amd64 ghcr.io/uberblick-ai/hub:0.1.0
+DOCKER_CONFIG="$PWD/anonymous-docker-config" docker pull --platform linux/amd64 ghcr.io/uberblick-ai/hub-web:0.1.0
 ```
 
-Use the version just published, then follow [REMOTE.md](REMOTE.md) on a
-linux/amd64 tailnet host with no checkout. Verify HTTPS, the `/ws` upgrade and
-operator commands there. These checks complete the first attended release;
+Use the version just published, then follow [REMOTE.md](REMOTE.md) on a Linux
+host or Docker Desktop on macOS with no checkout. Apple Silicon runs the
+`linux/amd64` images under emulation. Verify the no-Tailscale loopback launch,
+GitHub claim, installed-client login and authenticated MCP and `ub open` sync,
+then the selected HTTPS route and operator commands. Verify Tailscale daemon
+certificate retrieval on Linux and public DNS certificate issuance on a host
+with the required DNS and TCP 443 reachability. These are attended checks;
 an image push alone does not prove anonymous deployment works.
 
 ### Cut a hub release
@@ -103,9 +107,12 @@ mise run publish-hub-release -- hub-v0.1.0 --dry-run
 
 Inspect the image references and `/release/release.json` as shown in REMOTE.md,
 and run the Docker-only launch and update procedure with the local images. Confirm the
-Compose model publishes only port 443 on `TAILSCALE_IP`, has no hub port and
-builds nothing on the host. Keep full Tailscale HTTPS verification explicit
-when the test machine cannot provide it.
+default Compose model publishes only `127.0.0.1:8080`, has no hub port, mounts
+no Tailscale socket and builds nothing on the host. Verify the optional HTTPS
+model replaces that publication with port 443, and the Tailscale model adds
+only the daemon socket and its certificate access. Keep real certificate
+issuance and the fresh Mac deployment explicit when the test machine cannot
+provide them.
 
 For a repeatable local proof after building two versions, run:
 
@@ -113,13 +120,13 @@ For a repeatable local proof after building two versions, run:
 mise exec -- node scripts/hub-release-proof.mjs 0.1.0 0.2.0 "$(git rev-parse HEAD)"
 ```
 
-This contributor-side probe requires Compose 2.24.4 or newer for its test-only
-override. It extracts host files into empty directories and starts an isolated,
-disposable project with localhost HTTPS, then checks backup, restore, setup
+This probe requires Docker Engine 28.0.0 and Compose 2.24.4 or newer, the release
+floors. It extracts host files into empty directories and starts an isolated,
+disposable project on loopback HTTP, then checks backup, restore, setup
 status and replacement retaining private access and Caddy state. It cleans up
-its containers and volumes. It does not exercise Tailscale certificate issuance
-or anonymous registry pulls; the released recipe itself retains the Compose
-2.6 floor.
+its containers and volumes. It does not exercise Tailscale or public DNS
+certificate issuance, GitHub approval, the Mac Mini journey or anonymous
+registry pulls; those remain attended release checks.
 
 A person then tags the intended commit and pushes that tag:
 

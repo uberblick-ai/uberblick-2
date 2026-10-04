@@ -44,10 +44,23 @@ function mcpConfig(env: NodeJS.ProcessEnv) {
 }
 
 describe("resolveConfig", () => {
+  it("retains project device admission after logout without inheriting machine admission", () => {
+    const box = sandbox({ projectBinding: { workspaceId: FROM_USER, hubUrl: "ws://localhost:8080/ws", hubAdmission: "device" }, credentials: { signingSecret: SECRET_ON_FILE } });
+    const resolved = resolveConfig({ env: { ...box.env, HUB_AUTH_TOKEN: SECRET_IN_ENV }, cwd: box.cwd });
+    expect(resolved.env.HUB_ADMISSION).toBe("device");
+    expect(resolved.env.HUB_AUTH_TOKEN).toBeUndefined();
+    expect(mcpConfig(resolved.env).deviceLogin).toBeDefined();
+    const local = sandbox({ projectBinding: { workspaceId: FROM_USER, hubUrl: null }, userConfig: { hubAdmission: "device" }, credentials: { signingSecret: SECRET_ON_FILE } });
+    const localResolved = resolveConfig({ env: { ...local.env, HUB_ADMISSION: "device" }, cwd: local.cwd });
+    expect(localResolved.env.HUB_ADMISSION).toBeUndefined();
+    expect(mcpConfig(localResolved.env).deviceLogin).toBeUndefined();
+  });
+
   it("does not use a legacy workspace or hub, and does not pass either to children", () => {
     const box = sandbox({ userConfig: { workspace: FROM_USER, hubUrl: "wss://old.example.test/ws" } });
     const resolved = resolveConfig({ env: { ...box.env, WORKSPACE_ID: FROM_ENV, HUB_URL: "wss://ambient.example.test/ws" }, cwd: box.cwd });
     expect(resolved.binding).toBeNull();
+
     expect(resolved.env.WORKSPACE_ID).toBeUndefined();
     expect(resolved.env.HUB_URL).toBeUndefined();
     expect(resolved.warnings.join("\n")).toMatch(/Legacy machine/);

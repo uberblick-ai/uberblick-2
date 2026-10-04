@@ -355,7 +355,9 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   }
 
   try {
-    path = writeProjectBinding({ workspaceId: id, hubUrl: hub });
+    path = writeProjectBinding({ workspaceId: id, hubUrl: hub,
+      ...(hub === current?.hubUrl && current.hubAdmission === "device" ? { hubAdmission: "device" } : {}),
+    });
   } catch (error) {
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
