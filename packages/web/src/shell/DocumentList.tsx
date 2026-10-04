@@ -452,7 +452,7 @@ export function DocumentList({
                   <td className="ub-docs-pin-cell">
                     <button
                       type="button"
-                      className="ub-docs-pin cursor-pointer rounded-(--radius-sm) border-0 bg-transparent p-1 font-[inherit] text-(--muted-foreground) opacity-0 [.ub-docs-row:hover_&]:opacity-100 [.ub-docs-row:focus-within_&]:opacity-100 aria-pressed:opacity-100 [&:hover]:text-(--foreground)"
+                      className="ub-docs-pin cursor-pointer rounded-(--radius-sm) border-0 bg-transparent p-1 font-[inherit] text-(--muted-foreground) opacity-0 [@media(hover:none)]:opacity-100 [@media(hover:hover)]:[.ub-docs-row:hover_&]:opacity-100 [.ub-docs-row:focus-within_&]:opacity-100 aria-pressed:opacity-100 hover:text-(--foreground)"
                       disabled={onTogglePin === null}
                       aria-describedby={onTogglePin === null ? pinUnavailableId : undefined}
                       aria-pressed={groupOf.has(entry.uuid)}

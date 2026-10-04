@@ -209,6 +209,7 @@ test("group actions and selecting a rename draft never pick up a group", async (
   await field.press("Enter");
   await expect(groups(b)).toHaveText(["First", "Second renamed"]);
   await pressMoveRelease(a.getByRole("button", { name: "Delete group Second renamed", exact: true }));
+  await a.getByRole("alertdialog").getByRole("button", { name: "Delete group", exact: true }).click();
   for (const page of [a, b]) await expect(groups(page)).toHaveText(["First"]);
 });
 
