@@ -1,4 +1,12 @@
 import { parseWorkspaceId } from "@uberblick/schema";
+import { isLoopbackHost } from "./loopback.js";
+export { isLoopbackHost } from "./loopback.js";
+
+/** Wildcards and unrecognized host spellings always require device login. */
+export function isLoopbackEndpoint(endpoint: string): boolean {
+  try { return isLoopbackHost(new URL(endpoint).hostname); }
+  catch { return false; }
+}
 
 /** A value carrying its own scheme, as opposed to a bare host. */
 const SCHEME = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
@@ -69,15 +77,15 @@ function readRemoteUrl(value: string): RemoteUrl {
   if (url.username !== "" || url.password !== "") {
     throw new Error(
       "an endpoint must not carry a username or password. The hub is " +
-        "authenticated with a signing secret sent in the connection's auth " +
-        "message, never in the URL — pass it with --secret-file instead",
+        "authenticated in the connection's auth message, never in the URL — " +
+        "run `ub auth login` for a remote hub",
     );
   }
   if (url.search !== "") {
     throw new Error(
       "an endpoint must not carry a query string. Nothing reads one, and a " +
-        "token put there would be persisted and printed — pass a credential " +
-        "with --secret-file instead",
+        "token put there would be persisted and printed — run `ub auth login` " +
+        "for a remote hub instead",
     );
   }
   if (url.hash !== "") {

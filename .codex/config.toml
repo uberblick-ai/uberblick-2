@@ -1,4 +1,4 @@
 [mcp_servers.uberblick]
-command = "ub"
-args = ["mcp", "serve"]
+command = "sh"
+args = ["-c", 'exec "$HOME/.local/bin/uberblick-corpus-mcp"']
 default_tools_approval_mode = "approve"

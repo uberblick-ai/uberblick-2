@@ -46,7 +46,8 @@ export interface ServedRoomSyncStatus {
 
 export interface ServingSyncStatus {
   /** Why durable local edits cannot currently be shared upstream. */
-  notSharedReason: "no-hub-credentials" | null;
+  notSharedReason: "no-hub-credentials" | "sign-in-required" | "no-workspace-access"
+    | "credential-store" | "renewal-unavailable" | null;
   /** The full replica completed this hub handshake and its attach drain. */
   caughtUp: boolean;
   /** Only rooms currently loaded by the in-process browser server. */
@@ -87,7 +88,8 @@ export function collectServingSyncStatus(
     attached.map(({ room, lastSeq }) => ({ room, throughSeq: lastSeq })),
   );
   const pending = new Set(store.pendingRooms.map(({ room }) => room));
-  const hubStatus = engine.replicas.sync.state().status;
+  const hub = engine.replicas.sync.state();
+  const hubStatus = hub.status;
   const connected = hubStatus === "connected";
   const acknowledged = new Map(
     attached.map((replica) => [
@@ -106,7 +108,7 @@ export function collectServingSyncStatus(
   );
 
   return {
-    notSharedReason: hubStatus === "disabled" ? "no-hub-credentials" : null,
+    notSharedReason: hubStatus === "disabled" ? "no-hub-credentials" : hub.authRecovery ?? null,
     caughtUp:
       connected &&
       !engine.replicas.sync.isDraining() &&

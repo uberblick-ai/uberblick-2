@@ -320,16 +320,16 @@ describe("ub auth local selection and command surface", () => {
     expect(missing.output).toContain(OTHER_HUB);
   });
 
-  it("requests a new login for a bound workspace outside the credential snapshot", async () => {
+  it("explains renewal for a bound workspace outside the credential snapshot", async () => {
     const box = sandbox({
       userConfig: { workspace: OTHER_WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { hubLogins: { "http://127.0.0.1:1": fixture() } },
     });
     const status = await runUbAsync(["auth", "status"], box);
-    expect(status.status).toBe(1);
+    expect(status.status).toBe(0);
     expect(status.output).toContain(OTHER_WORKSPACE);
-    expect(status.output).toMatch(/new login|login.*needed|login.*again/i);
-    expect(status.output).toContain("ub auth login");
+    expect(status.output).toContain("renews this login");
+    expect(status.output).not.toContain("ub auth login");
   });
 
   it.each(["exposed", "unreadable", "invalid-entry"])("refuses %s local credentials without presenting identity as signed in", async (kind) => {
@@ -450,7 +450,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     assertPublicOnly(login, remote);
   });
 
-  it("keeps live sync disabled with a stored login alone and does not export its key", async () => {
+  it("keeps loopback sync disabled without a local secret and does not export its login key", async () => {
     const login = fixture();
     const box = sandbox({
       userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
@@ -477,7 +477,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     }
   });
 
-  it("stores identity and every issued workspace privately, preserves binding and other hubs, and remains unused", async () => {
+  it("stores identity and every issued workspace privately, preserving binding and other hubs", async () => {
     const remote = await rig([WORKSPACE, OTHER_WORKSPACE]);
     const other = fixture([]);
     const box = sandbox({
@@ -500,7 +500,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(readStore(box).signingSecret).toBe(SIGNING_SECRET);
     expect(statSync(credentialPath(box)).mode & 0o077).toBe(0);
     expect(readFileSync(configPath(box))).toEqual(before);
-    expect(login.output).toMatch(/not.*sync|sync.*not|does not.*sync/i);
+    expect(login.output).toContain("Remote sync uses this stored login");
     assertPublicOnly(login, remote, stored.credential.key);
     for (const request of remote.requests) {
       expect(request.method).toBe(request.path === "/auth/claim-state" ? "GET" : "POST");

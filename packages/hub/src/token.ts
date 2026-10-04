@@ -41,9 +41,8 @@
  * server or a deployed bundle from before this change must be restarted or
  * redeployed.
  *
- * Live admission still uses the root secret shared by every client. The
- * credential registry and its admission path are built separately, pending
- * the coordinated hub and client switch.
+ * Remote admission uses independent device keys. Loopback admission retains
+ * the shared local secret.
  */
 
 import { parseWorkspaceId } from "@uberblick/schema";

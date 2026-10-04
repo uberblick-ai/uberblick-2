@@ -112,7 +112,7 @@ it("holds the first connect until the endpoint resolves, without holding the ren
   await act(async () => {
     answer(
       new Response(
-        JSON.stringify({ hubUrl: "wss://hub.example/ws" }),
+        JSON.stringify({ hubUrl: "ws://127.0.0.1:4321" }),
         { status: 200 },
       ),
     );

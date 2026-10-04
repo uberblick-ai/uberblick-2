@@ -24,6 +24,7 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { HocuspocusProvider } from "@hocuspocus/provider";
+import { writeHubLogin, readHubLogins, type StoredHubLogin } from "@uberblick/hub/auth-store";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Hub, TokenClaims, TokenScope } from "@uberblick/hub";
@@ -42,6 +43,8 @@ import {
 import {
   directoryRoom,
   editBlock,
+  initDoc,
+  appendBlock,
   getBlocks,
   getDirectoryEntry,
   roomForDoc,
@@ -752,6 +755,91 @@ describe("ub open", () => {
     expect((await app.interrupt()).status).toBe(0);
   });
 
+  it.each(["revocation", "membership"] as const)("recovers remote sharing with the same local copy and keeps serving after %s", async refusal => {
+    const { box, env } = configured();
+    const hub = await createHub({
+      port: 0, address: "0.0.0.0", databasePath: join(box.cwd, "device-hub.sqlite"),
+      github: { clientId: "Iv1.0123456789abcdef" }, log: silentLogger,
+    });
+    hubs.push(hub);
+    const endpoint = `ws://0.0.0.0:${hub.port}`;
+    const origin = `http://0.0.0.0:${hub.port}`;
+    pointAt(box, endpoint);
+    const person = hub.principals!.identify("12345", "open-person");
+    const admin = hub.principals!.identify("67890", "open-admin");
+    const login = (): StoredHubLogin => {
+      const issued = hub.credentials!.issue({ principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [] });
+      const { replacedAt: _replaced, ...record } = issued.record;
+      return { identity: person, credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") } };
+    };
+    const webPort = await freePort();
+    let app = await open(box, ["--port", String(webPort)], env);
+    const localKey = localBrowserKey(WORKSPACE, box.env);
+    const authorization = bearer(await authMessage(localKey));
+    const status = async () => await (await fetch(`${app.url}api/status`, { headers: authorization })).json() as {
+      caughtUp: boolean; notSharedReason: string | null;
+    };
+    const document = new Y.Doc();
+    const room = roomForDoc(WORKSPACE, "671ed55d-36de-42a9-bd85-701eff199942");
+    const browser = new HocuspocusProvider({
+      url: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
+      name: room, document, token: await authMessage(localKey, "read-write"),
+      ...{ WebSocketPolyfill: class extends WebSocket {
+        constructor(url: string | URL) { super(url, { headers: { Origin: app.url.slice(0, -1) } } as unknown as string[]); }
+      } },
+    });
+    try {
+      await waitUntil("local browser admission", () => browser.isSynced);
+      await waitUntil("remote sign-in-required reading", async () => (await status()).notSharedReason === "sign-in-required");
+      initDoc(document, { uuid: "671ed55d-36de-42a9-bd85-701eff199942", title: "Retained browser document" });
+      appendBlock(document, { type: "paragraph", text: "pending before login" });
+      await waitUntil("local edit durable", () => !browser.hasUnsyncedChanges).catch(error => { throw new Error(`${error.message}: ${app.stderr()}`); });
+      await writeHubLogin(origin, login(), box.env);
+      await waitUntil("login-first no workspace access", async () => (await status()).notSharedReason === "no-workspace-access");
+      // Advance the persisted cooldown, leaving the process and login intact.
+      const configRoot = join(configDir(box));
+      const { readdirSync } = await import("node:fs");
+      const sidecar = readdirSync(configRoot).find(name => name.startsWith(".credential-renewal-") && name.endsWith(".json"));
+      if (sidecar === undefined) throw new Error("no renewal cooldown sidecar");
+      hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: admin.id, role: "admin" });
+      hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: person.id, role: "member" });
+      const outcomePath = join(configRoot, sidecar);
+      const outcome = JSON.parse(readFileSync(outcomePath, "utf8"));
+      outcome.retryAt = 0;
+      writeFileSync(outcomePath, JSON.stringify(outcome), { mode: 0o600 });
+      await waitUntil("later grant to sync without restart", async () => (await status()).caughtUp, 80_000);
+      await waitUntil("pending browser edit at remote hub", () => getBlocks(hub.hocuspocus.documents.get(room)!)[0]?.text === "pending before login");
+      expect(await (await get(`${app.url}uberblick-config.json`)).json()).not.toHaveProperty("rebound");
+      const stored = readHubLogins(box.env).logins[origin]!;
+      expect(await (await get(`${app.url}uberblick-config.json`)).text()).not.toContain(stored.credential.key);
+      // Changes from another admitted client travel back through the serving replica.
+      const remote = hub.hocuspocus.documents.get(room)!;
+      const initial = getBlocks(remote)[0]!;
+      editBlock(remote, initial.id, initial.text, "other client edit", { rev: initial.rev });
+      await waitUntil("remote change in browser", () => getBlocks(document)[0]?.text === "other client edit");
+      expect((await app.interrupt()).status).toBe(0);
+      app = await open(box, ["--port", String(webPort)], env);
+      await waitUntil("restart resumes stored login", async () => (await status()).caughtUp);
+      expect(localBrowserKey(WORKSPACE, box.env)).toBe(localKey);
+      const current = readHubLogins(box.env).logins[origin]!;
+      if (refusal === "revocation") hub.credentials!.revoke(current.credential.record.id);
+      else hub.memberships!.remove({ workspaceId: WORKSPACE, principalId: person.id, actorPrincipalId: admin.id });
+      // Renewal cooldown plus the random polling ceiling can span two bands.
+      await waitUntil("live remote authority ended", async () => (await status()).notSharedReason === (refusal === "revocation" ? "sign-in-required" : "no-workspace-access"), 80_000);
+      await waitUntil("browser remains locally admitted", () => browser.isSynced);
+      expect(getBlocks(document)[0]?.text).toBe("other client edit");
+      const localBlock = getBlocks(document)[0]!;
+      editBlock(document, localBlock.id, localBlock.text, "still local after refusal", { rev: localBlock.rev });
+      await waitUntil("refused remote edit durable locally", () => !browser.hasUnsyncedChanges);
+      expect((await status()).caughtUp).toBe(false);
+      const remoteAfter = hub.hocuspocus.documents.get(room);
+      expect(remoteAfter === undefined ? undefined : getBlocks(remoteAfter)[0]?.text).not.toBe("still local after refusal");
+    } finally {
+      browser.destroy(); document.destroy();
+      expect((await app.interrupt()).status).toBe(0);
+    }
+  }, 220_000);
+
   it.each(["hub-down", "no-credentials"])("bridges durable browser and MCP edits through the shared store (%s)", async (mode) => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
@@ -864,7 +952,7 @@ describe("ub open", () => {
         rooms: Record<string, { hubAcked: boolean }> };
       expect(await readStatus()).toMatchObject({
         caughtUp: false,
-        notSharedReason: mode === "no-credentials" ? "no-hub-credentials" : null,
+        notSharedReason: "sign-in-required",
         rooms: { [roomForDoc(WORKSPACE, created.uuid)]: { hubAcked: false } },
       });
       const stored = openStore(instance.store.databasePath);
@@ -923,7 +1011,7 @@ describe("ub open", () => {
         const hubUrl = `ws://127.0.0.1:${hub.port}`;
         writeCredentials(box, SECRET);
         expect(await (await get(`${app.url}uberblick-config.json`)).json())
-          .toMatchObject({ hubAuthToken: key, rebound: true });
+          .toMatchObject({ hubAuthToken: key });
         pointAt(box, hubUrl);
         expect((await app.interrupt()).status).toBe(0);
         app = await open(box, ["--port", String(webPort)], env);
@@ -2216,33 +2304,19 @@ describe("ub open", () => {
     expect(await whoHoldsPort(silentPort)).toBe("unidentified");
   });
 
-  it("never binds a hub off loopback, whatever the endpoint says", async () => {
+  it.each(["0.0.0.0", "::", "127.attacker.example"])("serves locally without starting a hub at remote endpoint %s", async host => {
     const { box, env } = configured();
     const port = await freePort();
-
-    // 0.0.0.0 is an address to *listen* on, and a hub bound there is on every
-    // interface — offering the whole network a hub whose only credential is one
-    // shared signing secret.
-    pointAt(box, `ws://0.0.0.0:${port}`);
-    const refused = await openFails(box, ["--port", String(await freePort())], env);
-    expect(refused.status).toBe(1);
-    expect(refused.output).toContain("binds loopback only");
-    expect(refused.output).toContain("0.0.0.0");
-    // Exposing a hub deliberately is the remote deployment's job, and that is
-    // what the refusal points at — no contributor task stands in for it.
-    expect(refused.output).toContain("REMOTE.md");
-    expect(refused.output).not.toMatch(/mise/);
-    // Refused means refused: nothing was left listening there.
-    expect((await probePort("0.0.0.0", port)).state).toBe("free");
-
-    // And a *name* that merely looks like loopback is not one: where
-    // `127.attacker.example` resolves is somebody else's decision, so a prefix
-    // test on the string would bind the shared-secret hub wherever they say.
-    pointAt(box, `ws://127.attacker.example:${port}`);
-    const named = await openFails(box, ["--port", String(await freePort())], env);
-    expect(named.status).toBe(1);
-    expect(named.output).toContain("binds loopback only");
-    expect(named.output).toContain("127.attacker.example");
+    const endpoint = `ws://${host === "::" ? "[::]" : host}:${port}`;
+    pointAt(box, endpoint);
+    const app = await open(box, ["--port", String(await freePort())], env);
+    try {
+      expect(app.stdout()).toContain("remote — nothing started here");
+      expect((await probePort("127.0.0.1", port)).state).toBe("free");
+      const document = await (await get(`${app.url}uberblick-config.json`)).json() as { hubUrl: string; remoteHubUrl: string };
+      expect(document).toMatchObject({ remoteHubUrl: endpoint });
+      expect(document.hubUrl).toMatch(/^ws:\/\/127\.0\.0\.1:/);
+    } finally { expect((await app.interrupt()).status).toBe(0); }
   });
 
   it("starts a hub only for an endpoint the hub it starts could answer", async () => {

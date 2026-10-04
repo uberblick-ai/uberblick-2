@@ -29,6 +29,13 @@ describe("local status answers", () => {
     });
   });
 
+  it.each(["sign-in-required", "no-workspace-access", "credential-store", "renewal-unavailable"])(
+    "keeps the remote device recovery %s without assuming any acknowledgement", async (notSharedReason) => {
+      await expect(read({ caughtUp: false, rooms: {}, notSharedReason }))
+        .resolves.toEqual({ caughtUp: false, rooms: {}, notSharedReason });
+    },
+  );
+
   it("accepts an older server without inventing a not-shared cause", async () => {
     await expect(read({ caughtUp: true, rooms: {} })).resolves.toEqual({
       caughtUp: true,

@@ -11,9 +11,10 @@
     "build": "pnpm -r build",
     "lint": "biome lint --error-on-warnings .",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test && pnpm run test:e2e-runner && pnpm run test:agent-cleanup && pnpm run test:housekeeping && pnpm run test:homebrew-release && pnpm run test:hub-release",
+    "test": "pnpm -r test && pnpm run test:e2e-runner && pnpm run test:agent-cleanup && pnpm run test:corpus-mcp && pnpm run test:housekeeping && pnpm run test:homebrew-release && pnpm run test:hub-release",
     "test:e2e-runner": "node --test scripts/run-e2e.test.mjs",
     "test:agent-cleanup": "node --test scripts/cleanup-agent-worktree.test.mjs",
+    "test:corpus-mcp": "node --test scripts/corpus-mcp.test.mjs",
     "test:housekeeping": "node --test scripts/housekeeping.test.mjs",
     "test:hub-release": "node --test scripts/publish-hub-release.test.mjs scripts/check-hub-image.test.mjs scripts/hub-release-runtime.test.mjs",
     "test:homebrew-release": "node --test scripts/publish-homebrew-release.test.mjs scripts/homebrew-proof.test.mjs"

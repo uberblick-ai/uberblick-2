@@ -24,7 +24,7 @@ import {
 import { credentialsPath, resolveConfig, userConfigPath } from "../src/config.js";
 import { acquireInitLock, initLockPath, tryAcquireInitLock } from "../src/init-lock.js";
 import * as safeWrite from "@uberblick/hub/safe-write";
-import { PACKAGE_ROOT, SECRET_IN_ENV, SECRET_ON_FILE, removeTempDirs, sandbox, waitUntil, type Sandbox } from "./helpers.js";
+import { PACKAGE_ROOT, SECRET_ON_FILE, removeTempDirs, sandbox, waitUntil, type Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 afterEach(() => vi.restoreAllMocks());
@@ -56,7 +56,7 @@ function login(): StoredHubLogin {
 
 type Mutation = { command: "write"; origin: string; login: StoredHubLogin }
   | { command: "remove"; origin: string }
-  | { command: "remote"; secret: string };
+  | { command: "remote" };
 
 /**
  * Pause independent writers after their real credential read. Without mutual
@@ -117,7 +117,7 @@ process.once("message", async () => {
     else {
       // The persistence phase used by ub remote join, under its real lock.
       const lock = await acquireInitLock();
-      try { setRemote("wss://new.example.test/ws", { secret: job.secret }); }
+      try { setRemote("wss://new.example.test/ws"); }
       finally { lock.release(); }
     }
   } catch (error) {
@@ -263,15 +263,15 @@ describe("hub login store", () => {
     });
   });
 
-  it("keeps a concurrent remote signing-secret update and unrelated credential fields", async () => {
+  it("keeps the loopback secret and unrelated fields across concurrent remote binding", async () => {
     const box = sandbox({ credentials: {
       signingSecret: SECRET_ON_FILE, future: { opaque: true }, hubLogins: { [OTHER_HUB]: login() },
     } });
     await interleaveWriters(box,
       { command: "write", origin: HUB, login: login() },
-      { command: "remote", secret: SECRET_IN_ENV });
+      { command: "remote" });
     expect(JSON.parse(readFileSync(credentialsPath(box.env), "utf8"))).toEqual({
-      signingSecret: SECRET_IN_ENV, future: { opaque: true },
+      signingSecret: SECRET_ON_FILE, future: { opaque: true },
       hubLogins: { [HUB]: login(), [OTHER_HUB]: login() },
     });
     expect(JSON.parse(readFileSync(userConfigPath(box.env), "utf8")).hubUrl).toBe("wss://new.example.test/ws");

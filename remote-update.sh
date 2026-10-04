@@ -76,13 +76,13 @@ cd "$checkout"
 
 # An existing `ub remote init` checkout uses this internal mode so its fetch,
 # replacement `.env`, build and deployed ref share this script's one lock. Read
-# the secret-bearing stdin into a private staging file before any child runs;
+# the host settings on stdin into a private staging file before any child runs;
 # no later command inherits payload bytes it could mistake for its own input.
 # Each failure has a reserved status so the local CLI can name the cause in its
-# own words without relaying bytes from the secret-bearing SSH connection.
+# own words without relaying bytes from the SSH connection.
 if [ "$mode" = remote-init-rerun ]; then
   staged_env=.env.uberblick-init
-  # HUP/INT/TERM remove a still-staged secret but deliberately do not exit: once
+  # HUP/INT/TERM remove still-staged settings but deliberately do not exit: once
   # the build has started, it finishes under this lock rather than being
   # orphaned while another deploy begins.
   trap 'rm -f "$staged_env"' 0 HUP INT TERM
@@ -90,7 +90,7 @@ if [ "$mode" = remote-init-rerun ]; then
   chmod 600 "$staged_env" || exit 103
   # This app belongs to the hub operator, not the machine running init. Read it
   # only while holding the checkout lock; a preflight copy could race another
-  # deployment. Preserve the operator's spelling without sourcing secret-bearing
+  # deployment. Preserve the operator's spelling without sourcing
   # configuration or sending it back to the client.
   if [ -f .env ]; then
     sed -n \

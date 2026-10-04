@@ -28,6 +28,7 @@ export async function handleCredentialRenewal(
     return true;
   }
   let envelope: AuthEnvelope;
+  let ifWorkspacesChanged = false;
   try {
     let size = 0;
     const chunks: Buffer[] = [];
@@ -40,8 +41,11 @@ export async function handleCredentialRenewal(
     const raw = Buffer.concat(chunks).toString("utf8");
     const body: unknown = JSON.parse(raw);
     const parsed = readAuthEnvelope(raw);
-    if (body === null || typeof body !== "object" || Array.isArray(body) ||
-      Object.keys(body).length !== 2 || parsed === null) throw new Error();
+    if (body === null || typeof body !== "object" || Array.isArray(body) || parsed === null) throw new Error();
+    const fields = body as Record<string, unknown>;
+    if (Object.keys(fields).some(key => !["protocolVersion", "token", "ifWorkspacesChanged"].includes(key)) ||
+      (fields.ifWorkspacesChanged !== undefined && fields.ifWorkspacesChanged !== true)) throw new Error();
+    ifWorkspacesChanged = fields.ifWorkspacesChanged === true;
     envelope = parsed;
   } catch {
     reply(400, { status: "invalid-request" });
@@ -52,8 +56,8 @@ export async function handleCredentialRenewal(
     return true;
   }
   try {
-    const result = await credentials.renew(envelope.token, memberships);
-    reply(result.status === "renewed" ? 200 : 401, result);
+    const result = await credentials.renew(envelope.token, memberships, { ifWorkspacesChanged });
+    reply(result.status === "renewed" || result.status === "unchanged" ? 200 : 401, result);
   } catch {
     // Storage or connection closure failed, rather than an invalid request.
     // Neither the input, key, crypto exception nor database error is logged.

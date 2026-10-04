@@ -54,6 +54,7 @@ import {
 } from "@uberblick/hub/protocol";
 import { ensureDeviceLogin, readDeviceLogin, type DeviceLoginFailure } from "@uberblick/hub/device-login";
 import type { StoredHubLogin } from "@uberblick/hub/auth-store";
+import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
 import type * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
 import type { McpConfig } from "./config.js";
@@ -79,7 +80,7 @@ export interface HubState {
   reason?: string;
   /** Recovery keeps the established status meanings; no new status values. */
   recoveryClass?: "retry" | "manual";
-  /** Safe detail for the inactive device-login path, never credential contents. */
+  /** Safe device-login recovery detail, never credential contents. */
   authRecovery?: "sign-in-required" | "no-workspace-access" | "credential-store" | "renewal-unavailable";
   /**
    * The sync protocol this client speaks. Reported on every reading, including
@@ -527,6 +528,9 @@ export class HubSync {
     onConnected: () => void,
     options: HubSyncOptions = {},
   ) {
+    if (!isLoopbackEndpoint(config.hubUrl)) {
+      config = { ...config, authSecret: null, deviceLogin: config.deviceLogin ?? {} };
+    }
     this.config = config;
     this.onConnected = onConnected;
     this.enabled = config.deviceLogin !== undefined || config.authSecret !== null;
@@ -579,6 +583,9 @@ export class HubSync {
           }
         }
         if (status === "connected") {
+          // The provider repeats this status after its first inbound message.
+          // Only a new socket may reset room state or cancel a recovery poll.
+          if (previous === "connected") return;
           if (this.deviceRetryTimer !== null) {
             clearTimeout(this.deviceRetryTimer);
             this.deviceRetryTimer = null;
@@ -812,9 +819,17 @@ export class HubSync {
     this.deviceRetryAttempts += 1;
     this.deviceRetryTimer = setTimeout(() => {
       this.deviceRetryTimer = null;
-      if (this.stopped || this.socketStatus !== "connected") return;
-      this.rebuilding = true;
-      this.socket?.disconnect();
+      if (this.stopped) return;
+      if (this.socketStatus === "connected") {
+        this.rebuilding = true;
+        this.socket?.disconnect();
+      } else {
+        // Refusal can close the socket before this timer fires. connect() also
+        // re-enables a disconnected provider, so a later login is observed even
+        // after its ordinary reconnect loop has stopped.
+        void this.socket?.connect().catch(() => {});
+        this.retryDeviceConnection();
+      }
     }, delay);
   }
 

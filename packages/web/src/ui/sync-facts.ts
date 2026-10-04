@@ -70,7 +70,16 @@ export function documentSyncFacts(
     primaryTone: state,
     hub,
     hubTone: hubAcked === null ? null : localOnly || !hubAcked ? "offline" : "synced",
-    hubDetail: localOnly ? "this machine has no credentials for its hub" : null,
+    hubDetail: notSharedReason === null ? null : NOT_SHARED_DETAIL[notSharedReason],
     twoFact: true,
   };
 }
+
+/** Locally composed actions: the remote hub supplies no prose to the page. */
+const NOT_SHARED_DETAIL: Record<NotSharedReason, string> = {
+  "no-hub-credentials": "this machine has no credentials for its hub",
+  "sign-in-required": "sign-in required — run ub auth login for this hub on this machine",
+  "no-workspace-access": "no access to this workspace — ask its administrator for membership; this machine will retry with its existing login",
+  "credential-store": "this machine cannot read its login — run ub auth status and follow its credential-store recovery",
+  "renewal-unavailable": "this hub cannot renew the login — ask its operator to configure sign-in",
+};

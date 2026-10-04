@@ -58,6 +58,16 @@ describe("ub env", () => {
     });
   });
 
+  it("withholds a legacy signing secret from remote children and preserves it on disk", () => {
+    const box = sandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: "wss://hub.invalid/ws" },
+      credentials: { signingSecret: SECRET },
+    });
+    expect(injected(box, { HUB_AUTH_TOKEN: SECRET })).toEqual({
+      WORKSPACE_ID: WORKSPACE, HUB_URL: "wss://hub.invalid/ws", HUB_AUTH_TOKEN: null,
+    });
+  });
+
   it("puts the configured endpoint in front of an ambient one", () => {
     // The island trap (#376): a checkout that exported an endpoint took every
     // process born in it — including a task's — off the hub this machine is

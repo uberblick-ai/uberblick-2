@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { credentialsPath, readHubLogins, removeHubLogin, writeHubLogin } from "../src/auth-store.js";
+import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
 import { DEVICE_RENEWAL_COOLDOWN_MS, ensureDeviceLogin, readDeviceLogin } from "../src/device-login.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import { startDeviceSyncHub } from "./device-sync-hub.js";
@@ -145,30 +146,30 @@ describe("stored device login renewal", () => {
     expect(test.hub.renewalCount).toBe(1);
   });
 
-  it("preserves confirmed denials across later grants and fresh processes after cooldown", async () => {
+  it("polls denied access across processes without retirement and recovers a later grant", async () => {
     const test = await setup();
-    await writeHubLogin(test.hub.origin, test.hub.issue({ workspaces: [] }), test.env);
+    test.hub.grant(OTHER_WORKSPACE);
+    const before = test.hub.issue({ workspaces: [OTHER_WORKSPACE] });
+    await writeHubLogin(test.hub.origin, before, test.env);
     expect(await workers(test.hub.url, WORKSPACE, test, false)).toEqual(Array(3).fill({ status: "no-access", id: null }));
     expect(test.hub.renewalCount).toBe(1);
+    expect(readHubLogins(test.env).logins[test.hub.origin]).toEqual(before);
 
     let now = Date.now();
     vi.spyOn(Date, "now").mockImplementation(() => now);
-    const laterWorkspace = randomUUID();
-    for (const granted of [OTHER_WORKSPACE, laterWorkspace]) {
-      // Each grant happens after the preceding renewal. Unchecked workspaces
-      // get a new exchange, while the confirmed denial survives replacement.
-      test.hub.grant(granted);
-      now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
-      const joined = await workers(test.hub.url, granted, test, false, now);
-      const stored = readHubLogins(test.env).logins[test.hub.origin]!;
-      expect(joined).toEqual(Array(3).fill({ status: "ready", id: stored.credential.record.id }));
-      expect(stored.credential.record.workspaces).toContain(granted);
-      const renewals = test.hub.renewalCount;
-      now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
-      expect(await workers(test.hub.url, WORKSPACE, test, false, now)).toEqual(Array(3).fill({ status: "no-access", id: null }));
-      expect(test.hub.renewalCount).toBe(renewals);
-      expect(readHubLogins(test.env).logins[test.hub.origin]).toEqual(stored);
-    }
+    now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
+    expect(await workers(test.hub.url, WORKSPACE, test, false, now)).toEqual(Array(3).fill({ status: "no-access", id: null }));
+    expect(test.hub.renewalCount).toBe(2);
+    expect(readHubLogins(test.env).logins[test.hub.origin]).toEqual(before);
+    expect((await ensureDeviceLogin(test.hub.url, OTHER_WORKSPACE, { env: test.env })).status).toBe("ready");
+
+    test.hub.grant(WORKSPACE);
+    now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
+    const answers = await workers(test.hub.url, WORKSPACE, test, false, now);
+    const after = readHubLogins(test.env).logins[test.hub.origin]!;
+    expect(answers).toEqual(Array(3).fill({ status: "ready", id: after.credential.record.id }));
+    expect(after.credential.record.id).not.toBe(before.credential.record.id);
+    expect(after.credential.record.workspaces).toEqual([WORKSPACE, OTHER_WORKSPACE].sort());
     expect(test.hub.renewalCount).toBe(3);
   });
 
@@ -206,7 +207,7 @@ describe("stored device login renewal", () => {
   it.each([
     { status: 401, body: { status: "sign-in-required" }, reading: "sign-in-required" },
     { status: 401, body: { status: "already-replaced" }, reading: "sign-in-required" },
-    { status: 409, body: { status: "protocol-mismatch", reason: "protocol-mismatch:2" }, reading: "update-required" },
+    { status: 409, body: { status: "protocol-mismatch", reason: `protocol-mismatch:${SYNC_PROTOCOL_VERSION + 1}` }, reading: "update-required" },
     { status: 503, body: { status: "not-configured" }, reading: "renewal-unavailable" },
     { status: 503, raw: "proxy unavailable", reading: "hub-down" },
     { status: 500, body: { status: "failed" }, reading: "hub-down" },

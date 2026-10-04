@@ -9,7 +9,18 @@ export interface DocumentSearchStatus {
   readonly notSharedReason?: NotSharedReason | null;
 }
 
-export type NotSharedReason = "no-hub-credentials";
+export type NotSharedReason =
+  | "no-hub-credentials"
+  | "sign-in-required"
+  | "no-workspace-access"
+  | "credential-store"
+  | "renewal-unavailable";
+
+function isNotSharedReason(value: unknown): value is NotSharedReason {
+  return value === "no-hub-credentials" || value === "sign-in-required" ||
+    value === "no-workspace-access" || value === "credential-store" ||
+    value === "renewal-unavailable";
+}
 
 export interface DocumentSearchClient {
   status(signal: AbortSignal): Promise<DocumentSearchStatus>;
@@ -36,7 +47,7 @@ function searchStatus(body: Record<string, unknown>): DocumentSearchStatus {
     Array.isArray(body.rooms) ||
     (body.notSharedReason !== undefined &&
       body.notSharedReason !== null &&
-      body.notSharedReason !== "no-hub-credentials")
+      !isNotSharedReason(body.notSharedReason))
   ) {
     throw new Error("ub open returned a malformed status answer");
   }
@@ -52,7 +63,7 @@ function searchStatus(body: Record<string, unknown>): DocumentSearchStatus {
     caughtUp: body.caughtUp,
     rooms: parsed,
     notSharedReason:
-      body.notSharedReason === "no-hub-credentials" ? body.notSharedReason : null,
+      isNotSharedReason(body.notSharedReason) ? body.notSharedReason : null,
   };
 }
 

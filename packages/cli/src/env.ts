@@ -1,8 +1,8 @@
 /**
  * `ub env -- <command…>` — run a command under uberblick's configuration.
  *
- * The checkout's mise tasks need `WORKSPACE_ID` and `HUB_AUTH_TOKEN` (the hub
- * refuses to start without a secret) and the endpoint every client dials. There
+ * The checkout tasks need `WORKSPACE_ID`, the endpoint every client dials and
+ * a signing secret for loopback sync. Remote clients read their private login. There
  * is exactly one authority for those — this machine's `{config,credentials}.json`,
  * resolved by `config.ts` — and this command is how anything that is not `ub`
  * consumes it. `mise run hub` and `mise run web` wrap their command in this
@@ -30,13 +30,12 @@ import type { Io } from "./io.js";
 export const ENV_HELP = `usage: ub env -- <command> [args...]
 
 Run a command with uberblick's resolved configuration in its environment —
-WORKSPACE_ID, the hub endpoint and the signing secret, exactly as \`ub mcp
-serve\` hands them to the MCP server. The command inherits stdin, stdout and
-stderr, signals are forwarded to it, and \`ub\` exits with its status.
+WORKSPACE_ID and the hub endpoint, exactly as \`ub mcp serve\` hands them to the
+MCP server. The command inherits stdin, stdout and stderr, signals are forwarded to it, and \`ub\` exits with its status.
 
 The \`--\` is required and there is no form that prints the environment: it
-carries the hub's signing secret, and a secret on stdout is a secret in a shell
-history and a CI log.
+can carry a loopback hub’s signing secret. Remote credentials stay in this
+machine’s private store and are never passed to a child.
 
 options:
   -h, --help        show this help

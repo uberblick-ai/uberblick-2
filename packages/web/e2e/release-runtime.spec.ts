@@ -52,13 +52,13 @@ test.afterAll(async () => {
 test("a release bundle makes no implicit connection and uses a valid served endpoint", async ({ browser }) => {
   if (hub === undefined) throw new Error("release test hub did not start");
   const endpoint = `ws://127.0.0.1:${hub.port}`;
-  for (const kind of ["missing", "invalid", "valid"] as const) {
+  for (const kind of ["missing", "empty", "invalid", "valid"] as const) {
     const context = await browser.newContext();
     try {
       await context.route("**/uberblick-config.json", async (route) => {
         await route.fulfill({ status: kind === "missing" ? 404 : 200,
           contentType: "application/json", body: JSON.stringify({
-            hubUrl: kind === "invalid" ? "https://not-a-websocket.invalid" : endpoint,
+            hubUrl: kind === "empty" ? "" : kind === "invalid" ? "https://not-a-websocket.invalid" : endpoint,
             workspaces: [WORKSPACE], hubAuthToken: SECRET,
           }) });
       });
@@ -83,5 +83,35 @@ test("a release bundle makes no implicit connection and uses a valid served endp
     } finally {
       await context.close();
     }
+  }
+});
+
+
+test("a remote page shows the supported computer route and opens no documents @webkit", async ({ browser }) => {
+  const context = await browser.newContext();
+  try {
+    await context.route("**/uberblick-config.json", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        hubUrl: "wss://remote.example/ws", workspaces: [WORKSPACE],
+        // Old host config must not restore a remote browser's shared-secret path.
+        hubAuthToken: SECRET,
+      }) });
+    });
+    const page = await context.newPage();
+    const sockets: string[] = [];
+    page.on("websocket", (socket) => sockets.push(socket.url()));
+    for (const path of ["/", `/${WORKSPACE}/00000000-0000-4000-8000-000000000002`]) {
+      await page.goto(`${appUrl}${path}`);
+      const notice = page.getByRole("status");
+      await expect(notice).toContainText("This hub needs a sign-in that this browser cannot do yet");
+      await expect(notice).toContainText("ub auth login");
+      await expect(notice).toContainText("ub open");
+      await expect(notice).toBeInViewport({ ratio: 1 });
+      await expect(page.getByRole("button", { name: "+ new doc" })).toHaveCount(0);
+      await expect(page.locator('[contenteditable="true"]')).toHaveCount(0);
+      expect(sockets).toEqual([]);
+    }
+  } finally {
+    await context.close();
   }
 });

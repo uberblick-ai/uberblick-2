@@ -164,3 +164,57 @@ test("local-only status answers leave the readings and prose in place", async ({
     await page.close();
   }
 });
+
+
+test("device recovery readings keep local editing usable on the open page @webkit", async ({ browser }) => {
+  test.setTimeout(90_000);
+  await harness().restartOpen({ authenticated: true });
+  let notSharedReason: "sign-in-required" | "no-workspace-access" | null = null;
+  const page = await openApp(browser, "/", {
+    readySelector: ".ub-docs-heading",
+    beforeNavigate: async (opening) => {
+      await opening.route("**/api/status", async (route) => {
+        const response = await route.fetch();
+        const body = await response.json();
+        body.notSharedReason = notSharedReason;
+        if (notSharedReason !== null) {
+          body.caughtUp = false;
+          for (const room of Object.values(body.rooms) as Array<{ hubAcked: boolean }>) {
+            room.hubAcked = false;
+          }
+        }
+        await route.fulfill({ response, json: body });
+      });
+    },
+  });
+  if ((page.viewportSize()?.width ?? 1280) < 1280) {
+    await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  }
+  await createDoc(page, docTitle("device-recovery"));
+  await placeCaret(page);
+  await page.keyboard.type("kept here");
+  const saved = page.locator(".ub-status-word--saved");
+  const shared = page.locator(".ub-status-word--hub");
+  await expect(shared).toHaveText("synced with hub");
+  const pageInstance = await page.evaluate(() => performance.timeOrigin);
+
+  notSharedReason = "sign-in-required";
+  await expect(saved).toHaveText("saved here");
+  await expect(shared).toHaveText("not shared with hub");
+  await expect(page.locator(".ub-status").getByText(/run ub auth login/)).toBeInViewport();
+  await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+  await placeCaret(page);
+  await page.keyboard.type("; edited while sign-in is required");
+  await expect(saved).toHaveText("saved here");
+
+  notSharedReason = "no-workspace-access";
+  await expect(page.locator(".ub-status").getByText(/ask its administrator for membership/)).toBeInViewport();
+  await expect(saved).toHaveText("saved here");
+  await expect(shared).toHaveText("not shared with hub");
+  await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+
+  notSharedReason = null;
+  await expect(shared).toHaveText("synced with hub");
+  await expect(page.locator(".ub-status").getByText(/ask its administrator for membership/)).toHaveCount(0);
+  expect(await page.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
+});

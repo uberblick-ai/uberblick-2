@@ -1,4 +1,4 @@
-/** Credential and membership admission stay unwired until the client cutover. */
+/** Loopback admission retains the local shared-secret security model. */
 
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -182,7 +182,7 @@ function connect(
   return client;
 }
 
-describe("current admission is unchanged", () => {
+describe("loopback admission is unchanged", () => {
   it("claiming a fresh hub changes no live admission decisions", async () => {
     let now = 1000;
     const fresh = await createHub({ authSecret: TEST_SECRET, databasePath: tempDatabasePath(), address: "127.0.0.1", port: 0,
@@ -248,8 +248,8 @@ describe("current admission is unchanged", () => {
   });
 });
 
-describe("no live credential or membership admission switch", () => {
-  it.each(["server.ts", "config.ts", "main.ts", "local-browser-server.ts"])(
+describe("local browser admission stays local", () => {
+  it.each(["config.ts", "main.ts", "local-browser-server.ts"])(
     "%s does not import credential admission",
     (file) => {
       const source = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8");

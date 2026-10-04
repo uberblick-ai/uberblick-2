@@ -33,8 +33,7 @@ Approve the displayed GitHub URL and code in a browser on any machine;
 this command completes automatically and never asks for keyboard input.
 GitHub's approval page shows the app's name, not the hub. Approve only a
 login you started for the displayed hub; the app does not vouch for it.
-Store the issued device credential privately on this machine. Sync does
-not use this login yet. A replacement does not revoke the previous device.
+Store the issued device credential privately on this machine for remote sync. A replacement does not revoke the previous device.
 Local-only work needs no login. The machine's binding stays unchanged.
 On a fresh, unclaimed hub, the first GitHub account to complete approval
 claims its default workspace as administrator. Claiming is one-time; this
@@ -112,7 +111,7 @@ function describeLogin(login: StoredHubLogin, io: Io): void {
     : `Credential covers workspaces: ${workspaces.join(", ")}\n`);
 }
 
-function needsWorkspaceLogin(selection: Selection, login: StoredHubLogin, io: Io): boolean {
+function describeMissingWorkspace(selection: Selection, login: StoredHubLogin, io: Io): boolean {
   if (!selection.bound || selection.workspace === undefined) return false;
   let workspace: string;
   try { workspace = parseWorkspaceId(selection.workspace).uuid; } catch {
@@ -120,8 +119,8 @@ function needsWorkspaceLogin(selection: Selection, login: StoredHubLogin, io: Io
     return true;
   }
   if (login.credential.record.workspaces.includes(workspace)) return false;
-  io.err(`ub auth: a new login is needed for bound workspace ${workspace}. Run \`ub auth login ${selection.origin}\` after membership is granted.\n`);
-  return true;
+  io.out(`The bound workspace ${workspace} is absent from the recorded credential. Remote sync renews this login to discover current memberships; ask a workspace administrator for access if it remains unavailable.\n`);
+  return false;
 }
 
 function status(selection: Selection, io: Io): number {
@@ -141,7 +140,7 @@ function status(selection: Selection, io: Io): number {
     io.err(`ub auth: this stored credential is recorded as revoked. Run \`ub auth login ${selection.origin}\`.\n`);
     return 1;
   }
-  return needsWorkspaceLogin(selection, login, io) ? 1 : 0;
+  return describeMissingWorkspace(selection, login, io) ? 1 : 0;
 }
 
 async function logout(selection: Selection, io: Io): Promise<number> {
@@ -341,7 +340,7 @@ async function login(selection: Selection, io: Io): Promise<number> {
       io.out(`Stored login for ${selection.origin}.\n`);
       describeLogin(credential, io);
       if (replaced) io.out("The replaced device keeps its hub access until it is revoked through device management.\n");
-      io.out("Sync does not use this stored login yet.\n");
+      io.out("Remote sync uses this stored login. Run `ub open` to edit in this computer’s browser.\n");
       return 0;
     }
   } catch (error) {

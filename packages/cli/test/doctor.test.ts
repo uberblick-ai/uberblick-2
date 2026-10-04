@@ -324,7 +324,7 @@ describe("ub doctor", () => {
     expect(run.status).not.toBe(0);
   });
 
-  it("sends a remote hub-down at the deployment, never at a local start command", async () => {
+  it("requires a stored login before contacting a remote deployment", async () => {
     // A hub somebody deployed is not one this machine can start, so naming any
     // start command here would send the reader after a hub that is not theirs.
     const { checks } = await doctor(
@@ -340,7 +340,7 @@ describe("ub doctor", () => {
 
     expect(hub.status).toBe("fail");
     expect(hub.reason).toContain("hub.example.invalid");
-    expect(hub.remedy).toMatch(/deployment/);
+    expect(hub.remedy).toMatch(/ub auth login/);
     expect(hub.remedy).not.toMatch(/ub open/);
     expect(hub.remedy).not.toMatch(/mise/);
   });
