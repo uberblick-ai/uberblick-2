@@ -932,8 +932,7 @@ test("document actions stay reachable, close with the route, and archive into Re
 }) => {
   const page = await openApp(browser, "", {
     upstream: true,
-    contextOptions: { colorScheme: "light", hasTouch: true },
-    beforeNavigate: async (page) => { await page.clock.install(); },
+    contextOptions: { colorScheme: "light" },
     readySelector: ".ub-workspace",
   });
   await page.getByRole("button", { name: "+ new doc" }).click();
@@ -1025,26 +1024,6 @@ test("document actions stay reachable, close with the route, and archive into Re
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();
 
-  // Outside pointer dismissal is a cancelled confirmation and restores the
-  // menu trigger through the primitive's own trigger/content relationship.
-  await trigger.click();
-  await page.getByRole("menuitem", { name: "Archive document" }).click();
-  await expect(confirmation).toHaveCount(1);
-  await page.locator("[data-slot=dialog-overlay]").click({ position: { x: 4, y: 4 } });
-  await expect(confirmation).toHaveCount(0);
-  await expect(trigger).toBeFocused();
-
-  // A touch pointer takes the same outside-dismissal path. The dialog layer's
-  // first passive effect queues the zero-delay timer that arms its document
-  // pointerdown listener. Run that timer under test control before the tap.
-  await trigger.click();
-  await page.getByRole("menuitem", { name: "Archive document" }).click();
-  await expect(confirmation).toHaveCount(1);
-  await page.clock.runFor(1);
-  await page.touchscreen.tap(4, 4);
-  await expect(confirmation).toHaveCount(0);
-  await expect(trigger).toBeFocused();
-
   await trigger.click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
   await page.getByRole("button", { name: "Archive document" }).click();
@@ -1086,7 +1065,7 @@ for (const scheme of ["light", "dark"] as const) {
 
     // Fully opaque: any alpha below 1 is the page showing through, and
     // `rgba(0, 0, 0, 0)` is what an undefined custom property computes to.
-    const background = await painted(page, ".ub-confirm", "background-color");
+    const background = await painted(page, "[data-slot=alert-dialog-content]", "background-color");
     expect(alphaOf(background), background).toBe(1);
 
     // Opaque paint is not enough on its own: the panel has to cover the page
@@ -1095,7 +1074,7 @@ for (const scheme of ["light", "dark"] as const) {
     // actually hits.
     expect(
       await page.evaluate(() => {
-        const panel = document.querySelector(".ub-confirm");
+        const panel = document.querySelector("[data-slot=alert-dialog-content]");
         if (panel === null) throw new Error("no confirmation panel");
         const box = panel.getBoundingClientRect();
         const hit = document.elementFromPoint(

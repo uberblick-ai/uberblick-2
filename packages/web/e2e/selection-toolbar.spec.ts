@@ -71,7 +71,7 @@ async function controlCenter(control: Locator) {
 async function expectModalOverControl(
   page: Page,
   point: { x: number; y: number },
-  slot: "sheet" | "dialog",
+  slot: "sheet" | "alert-dialog",
 ): Promise<void> {
   await expect.poll(() => page.evaluate(({ point, slot }) => {
     const hit = document.elementFromPoint(point.x, point.y);
@@ -142,7 +142,7 @@ test("a human selection keeps its range through pointer, keyboard, link and comm
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
   await expect(page.getByRole("alertdialog")).toBeVisible();
-  await expectModalOverControl(page, coveredControl, "dialog");
+  await expectModalOverControl(page, coveredControl, "alert-dialog");
   await page.getByRole("alertdialog").getByRole("button", {
     name: "Archive document",
   }).click();
