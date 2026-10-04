@@ -138,11 +138,15 @@ shaping session recording the value the person stated.
 ## Retrospectives
 
 Post one to your role's board (`AGENTS.md`, Project facts) only when the run
-lost something — a session, a review round, rework, a long discovery, tokens
-burned for nothing — or missed something it needed, such as a corpus document,
+lost something real — an extra session or review round, rework, or about fifteen
+minutes of discovery — or missed something it needed, such as a corpus document,
 a pointer or a check, and only when you can say why and name the change that
-would have prevented it. Otherwise post nothing. In a short paragraph, link the
-item, state the cost and its cause, and the smallest useful change. A
+would have prevented it. Otherwise post nothing, and post at most once per item:
+a retry does not repeat what an earlier run of yours already posted. In a short
+paragraph, link the item, state the cost and its cause, and the smallest useful
+change. The boards are public: never include credentials, environment values,
+local paths, hostnames or log excerpts. Write the body file in private scratch,
+never the worktree, where it could be committed. A
 retrospective is telemetry, never a gate.
 
 ## Every process a run starts is that run's to end
