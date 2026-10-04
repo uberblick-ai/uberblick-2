@@ -83,6 +83,7 @@ describe("token minting sites", () => {
     // Local browser admission refuses independently signed device credentials.
     "packages/hub/test/local-browser-server.test.ts",
     "packages/hub/test/membership-registry.test.ts",
+    "packages/hub/test/remote-admission.test.ts",
     "packages/hub/test/request-proof.test.ts",
     // Cross-hub verification probes: 60-second tokens with issued credential kids.
     "packages/hub/test/shared-github-login.test.ts",
@@ -104,12 +105,13 @@ describe("token minting sites", () => {
 
   it("enumerates operation-bound request proof minting sites separately", () => {
     expect(mentioning("mintRequestProof(")).toEqual([
-      // Inactive client renewal proof: operation-bound, 60 seconds, stored credential kid.
+      // Client renewal proof: operation-bound, 60 seconds, stored credential kid.
       "packages/hub/src/device-login.ts",
       "packages/hub/test/credential-admission.test.ts",
       "packages/hub/test/credential-compatibility.test.ts",
       "packages/hub/test/credential-renewal-http.test.ts",
       "packages/hub/test/credential-renewal.test.ts",
+      "packages/hub/test/remote-admission.test.ts",
       "packages/hub/test/request-proof.test.ts",
     ]);
   });

@@ -1,5 +1,6 @@
-/** The device client is composed explicitly; live entry points stay inactive. */
-import { chmodSync, writeFileSync } from "node:fs";
+/** Remote clients keep local tools usable across device admission failures. */
+import { chmodSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { readHubLogins, writeHubLogin } from "@uberblick/hub/auth-store";
@@ -44,20 +45,95 @@ async function caughtUp(rig: Rig): Promise<void> {
     const status = await rig.ok("sync_status");
     return status.hub.status === "connected" && status.pendingRooms.length === 0 &&
       status.rooms.every((room: { synced: boolean }) => room.synced);
-  });
+  }, 70_000);
 }
 
-describe("inactive stored-login sync", () => {
-  it("has no environment selector and never falls back to a supplied signing secret", async () => {
+function expireRenewalCooldown(env: NodeJS.ProcessEnv): void {
+  const directory = join(env.XDG_CONFIG_HOME!, "uberblick");
+  for (const name of readdirSync(directory).filter(name => name.startsWith(".credential-renewal-") && name.endsWith(".json"))) {
+    const path = join(directory, name);
+    const outcome = JSON.parse(readFileSync(path, "utf8"));
+    outcome.retryAt = 0;
+    writeFileSync(path, JSON.stringify(outcome), { mode: 0o600 });
+  }
+}
+
+describe("stored-login sync", () => {
+  it("selects stored login for remote endpoints and never falls back to a supplied signing secret", async () => {
     const fixture = await hub();
     const env = environment();
     const login = fixture.issue({ workspaces: [WORKSPACE] });
     await writeHubLogin(fixture.origin, login, env);
     expect(resolveMcpConfig({ WORKSPACE_ID: WORKSPACE, DEVICE_LOGIN: "true" }).deviceLogin).toBeUndefined();
+    const remote = resolveMcpConfig({ ...env, WORKSPACE_ID: WORKSPACE, HUB_URL: "wss://hub.example/ws", HUB_AUTH_TOKEN: "a-root-secret" });
+    expect(remote.deviceLogin).toEqual({ env: expect.any(Object) });
+    expect(remote.authSecret).toBeNull();
     const rig = await client({ ...config(fixture, environment()), authSecret: "a-root-secret" });
     await waitUntil("missing login reading", () => rig.instance.replicas.sync.state().authRecovery === "sign-in-required");
     expect(fixture.authentications).toHaveLength(0);
     expect(rig.instance.replicas.sync.mintCount).toBe(0);
+  });
+
+  it.each(["missing", "revoked", "store-refused"] as const)("resumes a running refused process after later login (%s)", async kind => {
+    const fixture = await hub();
+    fixture.grant(WORKSPACE);
+    const env = environment();
+    if (kind !== "missing") {
+      const old = fixture.issue({ workspaces: [WORKSPACE] });
+      await writeHubLogin(fixture.origin, old, env);
+      if (kind === "revoked") fixture.revoke(old.credential.record.id);
+      else chmodSync(readHubLogins(env).path, 0o644);
+    }
+    const rig = await client(config(fixture, env));
+    await waitUntil("refused login reading", () => rig.instance.replicas.sync.state().authRecovery === (kind === "store-refused" ? "credential-store" : "sign-in-required"));
+    if (kind === "missing") {
+      // onOpen and the first inbound message both announce connected. The
+      // second announcement must preserve the poll that can discover login.
+      const sync = rig.instance.replicas.sync as unknown as {
+        socketStatus: string; deviceRetryTimer: unknown;
+        socket: { emit(name: string, event: { status: string }): void };
+      };
+      await waitUntil("missing login recovery scheduled", () => sync.socketStatus === "connected" && sync.deviceRetryTimer !== null);
+      sync.socket.emit("status", { status: "connected" });
+    }
+    const written = await rig.ok("create_doc", { title: `Pending ${kind}`, description: "Local edits survive sign-in." });
+    expect(written.synced).toBe(false);
+    if (kind === "store-refused") chmodSync(readHubLogins(env).path, 0o600);
+    await writeHubLogin(fixture.origin, fixture.issue({ workspaces: [WORKSPACE] }), env);
+    await caughtUp(rig);
+    expect(getMeta(fixture.readRoom(roomForDoc(WORKSPACE, written.uuid))!).title).toBe(`Pending ${kind}`);
+  });
+
+  it("discovers a grant after a confirmed denial without login or restart", async () => {
+    const fixture = await hub();
+    const env = environment();
+    await writeHubLogin(fixture.origin, fixture.issue({ workspaces: [] }), env);
+    const rig = await client(config(fixture, env));
+    await waitUntil("initial no access", () => rig.instance.replicas.sync.state().authRecovery === "no-workspace-access");
+    const written = await rig.ok("create_doc", { title: "Granted later", description: "Same login, same log." });
+    await rig.instance.replicas.sync.waitForDeviceWork();
+    fixture.grant(WORKSPACE);
+    expireRenewalCooldown(env);
+    await caughtUp(rig);
+    expect(getMeta(fixture.readRoom(roomForDoc(WORKSPACE, written.uuid))!).title).toBe("Granted later");
+  });
+
+  it.each(["revoke", "membership"] as const)("ends live sync and retains downloaded documents (%s)", async kind => {
+    const fixture = await hub();
+    fixture.grant(WORKSPACE);
+    const env = environment();
+    const login = fixture.issue({ workspaces: [WORKSPACE] });
+    await writeHubLogin(fixture.origin, login, env);
+    const rig = await client(config(fixture, env));
+    const written = await rig.ok("create_doc", { title: "Downloaded stays", description: "Access cannot erase local data." });
+    await caughtUp(rig);
+    if (kind === "revoke") fixture.revoke(login.credential.record.id);
+    else fixture.removeMembership(WORKSPACE);
+    await waitUntil("live access ended", () => rig.instance.replicas.sync.state().authRecovery === (kind === "revoke" ? "sign-in-required" : "no-workspace-access"));
+    expect((await rig.ok("get_doc", { uuid: written.uuid })).title).toBe("Downloaded stays");
+    const next = await rig.ok("create_doc", { title: "After removal", description: "Still editable locally." });
+    expect(next).toMatchObject({ applied: true, synced: false });
+    expect(fixture.readRoom(roomForDoc(WORKSPACE, next.uuid))).toBeUndefined();
   });
 
   it("syncs every workspace room, reads fresh logins on reconnect and resumes after restart", async () => {
@@ -188,6 +264,27 @@ describe("inactive stored-login sync", () => {
     expect(JSON.stringify(await rig.ok("sync_status"))).not.toContain(login.credential.key);
   });
 
+  it("keeps both signed-in hubs independent when one revokes this machine", async () => {
+    const first = await hub();
+    const second = await hub();
+    first.grant(WORKSPACE); second.grant(WORKSPACE);
+    const env = environment();
+    const one = first.issue({ workspaces: [WORKSPACE] });
+    const two = second.issue({ workspaces: [WORKSPACE] });
+    await writeHubLogin(first.origin, one, env);
+    await writeHubLogin(second.origin, two, env);
+    const a = await client(config(first, env));
+    const b = await client(config(second, env));
+    await Promise.all([caughtUp(a), caughtUp(b)]);
+    first.revoke(one.credential.record.id);
+    await waitUntil("only first hub to require sign-in", () => a.instance.replicas.sync.state().authRecovery === "sign-in-required");
+    await caughtUp(b);
+    expect(readHubLogins(env).logins[second.origin]).toEqual(two);
+    expect(second.renewalCount).toBe(0);
+    expect(second.authentications.every(auth => auth.claims?.kid === two.credential.record.id)).toBe(true);
+    expect(first.authentications.every(auth => auth.claims?.kid === one.credential.record.id)).toBe(true);
+  });
+
   it("reports a missing stored login locally even when the hub cannot be reached", async () => {
     const fixture = await hub();
     const cfg = config(fixture, environment());
@@ -308,15 +405,16 @@ describe("inactive stored-login sync", () => {
     }
   });
 
-  it("keeps a protocol mismatch terminal on both room admission and renewal", async () => {
+  it.each([SYNC_PROTOCOL_VERSION - 1, SYNC_PROTOCOL_VERSION + 1])("keeps a protocol mismatch with hub %s terminal on room admission and renewal", async hubVersion => {
     for (const workspaces of [[WORKSPACE], []]) {
-      const fixture = await hub(SYNC_PROTOCOL_VERSION + 1);
+      const fixture = await hub(hubVersion);
       const env = environment();
       fixture.grant(WORKSPACE);
       await writeHubLogin(fixture.origin, fixture.issue({ workspaces }), env);
       const rig = await client(config(fixture, env));
       await waitUntil("update-required reading", () => rig.instance.replicas.sync.state().status === "update-required");
-      expect(rig.instance.replicas.sync.state()).toMatchObject({ recoveryClass: "manual", hubProtocolVersion: SYNC_PROTOCOL_VERSION + 1 });
+      expect(rig.instance.replicas.sync.state()).toMatchObject({ recoveryClass: "manual", hubProtocolVersion: hubVersion });
+      expect(rig.instance.replicas.sync.state().reason).not.toMatch(/secret/i);
       const count = fixture.renewalCount;
       await sleep(1_500);
       expect(fixture.renewalCount).toBe(count);

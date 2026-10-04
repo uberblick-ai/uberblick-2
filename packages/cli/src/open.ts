@@ -80,7 +80,6 @@ import { spawn } from "node:child_process";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
-import { isIPv4 } from "node:net";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -98,6 +97,7 @@ import {
   readAuthEnvelope,
 } from "@uberblick/hub/protocol";
 import { clampToken } from "@uberblick/hub/token";
+import { isLoopbackEndpoint, isLoopbackHost } from "@uberblick/hub/remote-url";
 import {
   DIRECTORY_SUFFIX,
   SIDEBAR_SUFFIX,
@@ -713,10 +713,11 @@ interface Binding {
 }
 
 function bindingOf(resolved: ReturnType<typeof resolveConfig>): Binding {
+  const hubUrl = trimmed(resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
   return {
-    hubUrl: trimmed(resolved.env.HUB_URL) ?? DEFAULT_HUB_URL,
+    hubUrl,
     workspace: trimmed(resolved.env.WORKSPACE_ID),
-    hubAuthToken: trimmed(resolved.env.HUB_AUTH_TOKEN) ?? "",
+    hubAuthToken: isLoopbackEndpoint(hubUrl) ? trimmed(resolved.env.HUB_AUTH_TOKEN) ?? "" : "",
   };
 }
 
@@ -1170,34 +1171,6 @@ interface HubDecision {
 }
 
 /**
- * Addresses a hub started *here* may bind: loopback, and nothing else.
- *
- * Deliberately narrower than {@link isLocalHost}, which also admits the
- * wildcards `0.0.0.0` and `::` — those are addresses to *listen* on, and a hub
- * bound to one is on every interface. The hub's only credential is a single
- * shared signing secret, so that would hand the whole network a hub which
- * trusts anyone holding it. Offering a hub beyond this machine is the remote
- * deployment's job (`ub remote init`, REMOTE.md), and `ub open` is not it.
- * Probing such an endpoint for a hub somebody else started stays fine: this
- * governs only what this command starts.
- *
- * **A literal, or one of two exact names — never a prefix.** `/^127\./` also
- * matches the *DNS name* `127.attacker.example`, whose resolution somebody else
- * controls: the string looks like loopback, the socket binds wherever that name
- * resolves, and the shared-secret hub is off loopback again by another door. So
- * the only things accepted here are an actual IPv4 literal in 127.0.0.0/8
- * (`isIPv4` rejects every name, so the `127.` test is then genuinely a first
- * octet), the IPv6 loopback literal, and the name `localhost` — which resolves
- * to loopback by definition rather than by lookup.
- */
-function isLoopbackHost(host: string): boolean {
-  if (host === "localhost" || host === "::1" || host === "[::1]") {
-    return true;
-  }
-  return isIPv4(host) && host.startsWith("127.");
-}
-
-/**
  * Why no hub may be started for this endpoint, or null when one may.
  *
  * {@link createHub} starts a plain websocket listener on one address and one
@@ -1229,8 +1202,7 @@ function whyNotStartable(hubUrl: string, parsed: URL): string | null {
   if (!isLoopbackHost(host)) {
     return (
       `${preamble}\`ub open\` binds loopback only, and ${host} is not a loopback ` +
-      "address. A hub's only credential is one shared signing secret, so binding " +
-      "it there would offer that hub to every interface — reaching a hub from " +
+      "address. This command starts only loopback hubs; reaching a hub from " +
       "another machine is the remote deployment's job (`ub remote init`, and " +
       "REMOTE.md)"
     );

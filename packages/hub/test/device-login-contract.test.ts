@@ -1,4 +1,4 @@
-/** Failure boundaries of the inactive client path, against a credential hub. */
+/** Failure boundaries of stored-login sync, against a credential hub. */
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -69,7 +69,7 @@ describe("device renewal response and recovery contracts", () => {
     expect(hub.renewalCount).toBe(1);
   });
 
-  it("keeps confirmed missing access manual until the stored credential changes", async () => {
+  it("recovers confirmed missing access through renewal after cooldown", async () => {
     const { hub, env } = await setup();
     expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
     const withoutAccess = readHubLogins(env).logins[hub.origin]!;
@@ -77,17 +77,12 @@ describe("device renewal response and recovery contracts", () => {
     expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
     expect(hub.renewalCount).toBe(1);
     expireCooldown();
-    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
-    expect(hub.renewalCount).toBe(1);
-    expect(readHubLogins(env).logins[hub.origin]).toEqual(withoutAccess);
-    const replacement = hub.issue({ workspaces: [WORKSPACE] });
-    await writeHubLogin(hub.origin, replacement, env);
     const recovered = await ensureDeviceLogin(hub.url, WORKSPACE, { env });
     expect(recovered.status).toBe("ready");
     if (recovered.status !== "ready") throw new Error("membership recovery failed");
     expect(recovered.login.credential.record.id).not.toBe(withoutAccess.credential.record.id);
     expect(recovered.login.credential.record.workspaces).toContain(WORKSPACE);
-    expect(hub.renewalCount).toBe(1);
+    expect(hub.renewalCount).toBe(2);
   });
 
   it("renews for a later workspace grant after an unrelated renewal", async () => {
@@ -107,9 +102,9 @@ describe("device renewal response and recovery contracts", () => {
     expect(hub.renewalCount).toBe(2);
   });
 
-  it("retains confirmed omissions as the machine uses more workspaces", async () => {
+  it("shares cooldown checks across missing workspaces without retiring credentials", async () => {
     const { hub, env } = await setup();
-    const denied = Array.from({ length: 30 }, () => randomUUID());
+    const denied = Array.from({ length: 3 }, () => randomUUID());
     let now = Date.now();
     vi.spyOn(Date, "now").mockImplementation(() => now);
     for (const workspace of denied) {
@@ -122,11 +117,11 @@ describe("device renewal response and recovery contracts", () => {
     for (const workspace of denied) {
       expect((await ensureDeviceLogin(hub.url, workspace, { env })).status).toBe("no-access");
     }
-    expect(hub.renewalCount).toBe(denied.length);
+    expect(hub.renewalCount).toBe(denied.length + 1);
     expect(readHubLogins(env).logins[hub.origin]).toEqual(stored);
   });
 
-  it("preserves confirmed denials through transient failures while reporting a shared sign-in refusal", async () => {
+  it("retries unavailable access checks and shares sign-in refusals", async () => {
     const { hub, env } = await setup();
     expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
     let now = Date.now();
@@ -135,13 +130,14 @@ describe("device renewal response and recovery contracts", () => {
     now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
     expect((await ensureDeviceLogin(hub.url, OTHER_WORKSPACE, { env })).status).toBe("hub-down");
     now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
-    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
-    expect(hub.renewalCount).toBe(2);
+    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("hub-down");
+    expect(hub.renewalCount).toBe(3);
 
+    now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
     hub.setRenewalReply({ status: 401, body: { status: "sign-in-required" } });
     expect((await ensureDeviceLogin(hub.url, OTHER_WORKSPACE, { env })).status).toBe("sign-in-required");
     expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("sign-in-required");
-    expect(hub.renewalCount).toBe(3);
+    expect(hub.renewalCount).toBe(4);
   });
 
   it("stores an issued replacement despite cancellation while configuration publication waits", async () => {

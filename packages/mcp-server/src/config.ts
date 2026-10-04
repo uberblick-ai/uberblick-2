@@ -6,7 +6,7 @@
  *
  * `HUB_URL` is plaintext config (an endpoint is not a secret) and the only
  * hardcoded address in this package is {@link DEFAULT_HUB_URL}. `HUB_AUTH_TOKEN`
- * is the HMAC *secret* tokens are signed with, delivered by `fnox exec`.
+ * is used only for loopback hubs; remote hubs use this machine's stored login.
  *
  * `WORKSPACE_ID` is required and has no default: it names the rooms, the token
  * claim and the local database, and a wrong guess would quietly open somebody
@@ -14,16 +14,15 @@
  * decorated as `<slug>-<uuid>` for display — schema owns that parse, and only
  * the uuid survives it.
  *
- * A missing secret is not a startup error here, unlike in the hub: this server
- * is offline-first by construction, so it starts and serves every tool with no
- * secret and no hub — it just cannot sync, and `sync_status` says so. A hub that
- * cannot verify tokens would accept anything; an MCP server that cannot mint one
- * simply stays local.
+ * Missing admission credentials never prevent local operation. Every tool
+ * remains available against the durable store; sync_status names the sign-in,
+ * workspace access or loopback secret needed to share pending edits.
  */
 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { resolveStorage } from "@uberblick/hub/storage";
+import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
 import { parseWorkspaceId } from "@uberblick/schema";
 
 /**
@@ -61,10 +60,9 @@ export interface McpConfig {
    */
   authSecret: string | null;
   /**
-   * Inactive device-login composition. Only programmatic callers can select
-   * it until the coordinated remote cutover; configuration resolution and
-   * every live entry point leave it absent. The process reads the private
-   * credential store itself, never a key supplied in configuration.
+   * Remote endpoints use this machine's stored login. The process reads the
+   * private credential store itself, never a key supplied in configuration.
+   * Programmatic loopback callers may select the same stricter admission.
    */
   deviceLogin?: { env?: NodeJS.ProcessEnv };
   /** SQLite file holding the update log, snapshots and the derived index. */
@@ -188,11 +186,14 @@ export function resolveMcpConfig(
   // uuid is the identity, and only the identity goes any further.
   const workspaceId = parseWorkspaceId(configured).uuid;
   const sessionId = `agent-${randomUUID()}`;
+  const hubUrl = trimmed(env.HUB_URL) ?? DEFAULT_HUB_URL;
+  const remote = !isLoopbackEndpoint(hubUrl);
 
   return {
     workspaceId,
-    hubUrl: trimmed(env.HUB_URL) ?? DEFAULT_HUB_URL,
-    authSecret: trimmed(env.HUB_AUTH_TOKEN),
+    hubUrl,
+    authSecret: remote ? null : trimmed(env.HUB_AUTH_TOKEN),
+    ...(remote ? { deviceLogin: { env } } : {}),
     databasePath:
       trimmed(env.UBERBLICK_DB) ??
       defaultDatabasePath(workspaceId, env),

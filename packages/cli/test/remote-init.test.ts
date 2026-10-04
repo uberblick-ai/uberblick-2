@@ -273,7 +273,7 @@ describe("ub remote init", () => {
     // The payload, exactly — and on stdin.
     expect(stepFor(rig, "uberblick:env").stdin).toBe(
       "# Written by `ub remote init`. Untracked, so updates never touch it.\n" +
-        `TAILSCALE_HOST=${MAGIC_DNS}\nTAILSCALE_IP=${TAILSCALE_IP}\nHUB_AUTH_TOKEN=${SECRET}\n` +
+        `TAILSCALE_HOST=${MAGIC_DNS}\nTAILSCALE_IP=${TAILSCALE_IP}\n` +
         `WEB_WORKSPACES=${WORKSPACE}\n`,
     );
     expect(stepFor(rig, "uberblick:up").args.join("\n")).toContain(
@@ -301,7 +301,7 @@ describe("ub remote init", () => {
     }
     expect(rig.output()).not.toContain(SECRET);
     // It travelled, though — on the one channel that is not argv.
-    expect(stepFor(rig, "uberblick:env").stdin).toContain(SECRET);
+    expect(stepFor(rig, "uberblick:env").stdin).not.toContain(SECRET);
     // And the private half of the deploy key was never in a payload either.
     expect(rig.steps().map((step) => step.stdin).join("\n")).not.toContain("PRIVATE KEY");
   });
@@ -517,9 +517,7 @@ describe("ub remote init", () => {
     expect(stepFor(rig, "uberblick:init-rerun").args.join("\n")).toContain(
       "sh remote-update.sh --remote-init-rerun",
     );
-    expect(stepFor(rig, "uberblick:init-rerun").stdin).toContain(
-      `HUB_AUTH_TOKEN=${SECRET}`,
-    );
+    expect(stepFor(rig, "uberblick:init-rerun").stdin).not.toContain("HUB_AUTH_TOKEN");
   });
 
   it("owns the reserved re-run diagnostics", () => {
@@ -551,7 +549,7 @@ describe("ub remote init", () => {
     const deploy = stepFor(rig, "uberblick:init-rerun");
     expect(deploy.args.join("\n")).not.toContain(SECRET);
     expect(deploy.env.join("\n")).not.toContain(SECRET);
-    expect(deploy.stdin).toContain(SECRET);
+    expect(deploy.stdin).not.toContain(SECRET);
     expect(rig.labels().at(-1)).toBe(`ssh ${TARGET} uberblick:logs`);
   });
 

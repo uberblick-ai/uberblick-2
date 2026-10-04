@@ -36,9 +36,9 @@
  * is written, so a refusal leaves the machine exactly as it was, and the seed
  * below runs against the endpoint just stored and *reports whether the hub
  * acknowledged it*, so a run that exits 0 is a hub that holds the workspace.
- * The secret it authenticates with has to be here already — a generated one is
- * random, and a hub that exists has its own, which is why no machine with an
- * endpoint in force ever reaches the generating branch below.
+ * Remote hubs use the login already stored for their authentication origin,
+ * renewed to current memberships. A loopback hub uses its local signing secret;
+ * none is invented for a hub that already exists.
  *
  * It is convenience, never a precondition. Every other command works without it
  * — absent configuration is a default, not an error (see `config.ts`) — so
@@ -54,9 +54,8 @@
  * below, not by an error path, not by a warning. The one thing said about it is
  * where it came from.
  *
- * The generated secret is deliberately a trusted single-user arrangement: one
- * workspace, one trusted user, multiple clients and machines; no login and no
- * tenant isolation.
+ * The generated secret is for a loopback-only hub, with no GitHub login or
+ * membership requirement.
  *
  * **No TTY required.** `--yes` takes every default, and a non-interactive stdin
  * behaves like `--yes` rather than blocking — which
@@ -64,6 +63,8 @@
  */
 
 import { randomBytes, randomUUID } from "node:crypto";
+import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/hub/device-login";
+import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
 import { userInfo } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
@@ -133,12 +134,7 @@ function colorFor(name: string): string {
 /**
  * 32 random bytes, base64url — 43 characters over `A-Za-z0-9-_`.
  *
- * The alphabet is not cosmetic. `bin/remote-compose.sh` refuses a secret outside
- * `A-Za-z0-9._-`, because a shell and Docker Compose parse the rest differently
- * and the deployed secret could then silently differ from the one clients hold.
- * What is generated here is therefore a value that can be carried to the remote
- * hub unchanged — and one that needs no escaping in the TOML file it is written
- * to either.
+ * Generated only for loopback admission, and never copied to a remote hub.
  */
 function generateSecret(): string {
   return randomBytes(32).toString("base64url");
@@ -182,7 +178,7 @@ export const INIT_OPTIONS = {
 export const INIT_HELP = `usage: ub init [hub-url] [options]
 
 Settle what every other command needs: your awareness identity, the workspace
-this machine works in, and a hub signing secret. Idempotent — it never replaces
+this machine works in, and a signing secret for local hubs. Idempotent — it never replaces
 a secret that already exists, and it is safe to run again.
 
 Given a hub, it puts the new workspace on that hub: the endpoint is dialled and
@@ -200,11 +196,10 @@ operands:
   [hub-url]          the hub to create this workspace on. A bare host or an
                      https:// address is read as the deployed wss://<host>/ws;
                      a ws:// or wss:// endpoint is stored as given. That hub's
-                     signing secret has to be here already — in HUB_AUTH_TOKEN
-                     (fnox, or your shell) or in credentials.json — since one
-                     generated here would be random and the hub would refuse
-                     it. An endpoint this machine already stores is never
-                     replaced: the same one changes nothing, and a different
+                     login must be stored here already — run \`ub auth login
+                     <hub>\` and obtain workspace membership. A loopback hub
+                     uses HUB_AUTH_TOKEN or credentials.json. An endpoint
+                     this machine already stores is never replaced: the same one changes nothing, and a different
                      one is refused, because moving a workspace between hubs is
                      \`ub remote join <url-with-workspace-id>\`, which hydrates and
                      verifies first
@@ -223,10 +218,9 @@ options:
                      registering a client is \`ub mcp install\`
   -h, --help         show this help
 
-The signing secret is generated only when none is visible *and* no endpoint is
-stored: a machine bound to a hub needs that hub's secret, so one that has none
-in HUB_AUTH_TOKEN or credentials.json is refused rather than given a random
-value the hub would reject. What is generated is written to
+The signing secret is generated only for local use when none is visible and
+no endpoint is stored. Remote hubs use this machine’s stored login, never a
+signing secret. What is generated is written to
 $XDG_CONFIG_HOME/uberblick/credentials.json at mode 0600, and is never printed.
 
 A WORKSPACE_ID in the environment — a project .mcp.json's pin, or your own
@@ -331,6 +325,7 @@ function credentialRefusal(
   endpoint: string,
   credential: Credential,
 ): string | null {
+  if (!isLoopbackEndpoint(endpoint)) return null;
   if (credential.secret === null) {
     return (
       `${endpoint} needs that hub's signing secret, and this machine has none ` +
@@ -489,7 +484,7 @@ export async function initCommand(
   if (endpoint !== null) {
     const refusal = credentialRefusal(endpoint, credential);
     if (refusal !== null) {
-      io.err(`ub init: ${refusal} Nothing was written.\n`);
+      io.err(`ub init: ${refusal} Nothing was written to the workspace or binding.\n`);
       return 1;
     }
   }
@@ -563,6 +558,13 @@ export async function initCommand(
     io.err(`ub init: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
   }
+  if (endpoint !== null && !isLoopbackEndpoint(endpoint)) {
+    const login = await ensureDeviceLogin(endpoint, parseWorkspaceId(workspace).uuid);
+    if (login.status !== "ready") {
+      io.err(`ub init: ${login.message} Nothing was written to the workspace or binding.\n`);
+      return 1;
+    }
+  }
   // The hub is read before anything is written, and as a real client: a
   // machine bound to an endpoint that never answers, or that refuses its
   // credential, is a machine whose every later command reports a hub problem
@@ -586,7 +588,7 @@ export async function initCommand(
     if (problem !== null) {
       // `problem` is a sentence of its own, ending in its own newline — the
       // same one `ub remote join` prints for the same hub.
-      io.err(`ub init: ${problem}Nothing was written.\n`);
+      io.err(`ub init: ${problem}Nothing was written to the workspace or binding.\n`);
       return 1;
     }
   }
@@ -659,7 +661,7 @@ export async function initCommand(
         `ub init: this machine was bound to ${settledHub} while this run was ` +
           "checking " +
           `${binding} — another \`ub init\` or \`ub remote join\` got there ` +
-          "first. Nothing was written. To move it, `ub remote join " +
+          "first. Nothing was written to the workspace or binding. To move it, `ub remote join " +
           `${binding}/<workspace-id>\`.\n`,
       );
       return 1;
@@ -677,19 +679,26 @@ export async function initCommand(
     // probe proved nothing about what would be written, so this refuses rather
     // than writing with a secret no hub has answered for. Neither value is
     // printed.
-    if (binding !== null && settledCredential.secret !== credential.secret) {
+    if (binding !== null && isLoopbackEndpoint(binding) && settledCredential.secret !== credential.secret) {
       io.err(
         `ub init: the signing secret changed while this run was checking ` +
           `${binding} — that hub verified one value and this would write with ` +
-          "another. Nothing was written. Run this again.\n",
+          "another. Nothing was written to the workspace or binding. Run this again.\n",
       );
       return 1;
     }
     credential = settledCredential;
+    if (hubInForce !== null && !isLoopbackEndpoint(hubInForce)) {
+      const login = readDeviceLogin(hubInForce, parseWorkspaceId(workspace).uuid);
+      if (login.status !== "ready") {
+        io.err(`ub init: ${login.message} Nothing was written to the workspace or binding.\n`);
+        return 1;
+      }
+    }
     if (hubInForce !== null) {
       const refusal = credentialRefusal(hubInForce, credential);
       if (refusal !== null) {
-        io.err(`ub init: ${refusal} Nothing was written.\n`);
+        io.err(`ub init: ${refusal} Nothing was written to the workspace or binding.\n`);
         return 1;
       }
     }
@@ -734,7 +743,10 @@ export async function initCommand(
     // — and `resolved.env` includes the one in `credentials.json`.
     const supplied = trimmed(process.env.HUB_AUTH_TOKEN);
 
-    if (stored.signingSecret !== null) {
+    if (hubInForce !== null && !isLoopbackEndpoint(hubInForce)) {
+      secret = null;
+      credentialNote = "stored device login for remote sync";
+    } else if (stored.signingSecret !== null) {
       secret = stored.signingSecret;
       credentialNote = "already on this machine";
       // An exposed file was refused by every other command. Repairing the mode
@@ -805,7 +817,7 @@ export async function initCommand(
   // *added* one — a local secret generated where there was none — never
   // replaced it, so there is no path where the hub is authenticated to with one
   // value and written to with another.
-  const seedSecret = credential.secret ?? secret;
+  const seedSecret = hubInForce !== null && !isLoopbackEndpoint(hubInForce) ? null : credential.secret ?? secret;
   mcpEnv = {
     ...resolved.env,
     WORKSPACE_ID: persistedWorkspace,

@@ -8,7 +8,6 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const settings = {
-	HUB_AUTH_TOKEN: "synthetic_token-42",
 	TAILSCALE_HOST: "synthetic.tailnet.ts.net",
 	WEB_HUB_URL: "wss://synthetic.tailnet.ts.net/ws",
 	WEB_WORKSPACES: "synthetic-00000000-0000-4000-8000-000000000001",
@@ -35,8 +34,8 @@ test("service entrypoints refuse every unsafe document setting before executing 
 	}
 });
 
-test("hub guard preserves valid startup command and exit status", () => {
-	const result = execute("hub-release-entrypoint.sh", {}, ["sh", "-c", "printf SERVICE_STARTED; exit 7"]);
+test("hub startup needs no signing secret and ignores a legacy secret", () => {
+	const result = execute("hub-release-entrypoint.sh", { HUB_AUTH_TOKEN: 'unused"legacy-secret' }, ["sh", "-c", "printf SERVICE_STARTED; exit 7"]);
 	assert.equal(result.status, 7);
 	assert.equal(result.stdout, "SERVICE_STARTED");
 });

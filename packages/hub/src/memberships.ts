@@ -53,7 +53,7 @@ function validateRole(role: MembershipRole): void {
  * Checks and each single-statement mutation stay synchronous on the hub's one
  * database connection, so another operation cannot interleave between them.
  * Sign-in grants only when claiming a fresh deployed hub; afterwards it reads
- * this registry. Live credential and membership admission await the cutover.
+ * this registry. Remote admission uses these same membership records.
  */
 export class MembershipRegistry {
   private readonly insert: StatementSync;

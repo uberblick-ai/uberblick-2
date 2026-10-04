@@ -16,13 +16,12 @@ import { join } from "node:path";
 const WORKSPACE = "00000000-0000-4000-8000-000000001172";
 const PRINCIPAL = "00000000-0000-4000-8000-000000001173";
 const SETUP = "00000000-0000-4000-8000-000000001174";
-const TOKEN = "synthetic-hub-release-proof-token";
 const PRIVATE_TABLES = ["hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants"];
 // Y.encodeStateAsUpdate(doc), with clientID 1172 and a Y.Text named
 // release-proof containing "Synthetic hub release continuity". No host Yjs or
 // checkout dependency is needed to seed this valid v1 document snapshot.
 const UPDATE = "AQGUCQAEAQ1yZWxlYXNlLXByb29mIFN5bnRoZXRpYyBodWIgcmVsZWFzZSBjb250aW51aXR5AA==";
-const ENVIRONMENT = `TAILSCALE_HOST=localhost\nTAILSCALE_IP=100.64.0.2\nWEB_WORKSPACES=${WORKSPACE}\nHUB_AUTH_TOKEN=${TOKEN}\n`;
+const ENVIRONMENT = `TAILSCALE_HOST=localhost\nTAILSCALE_IP=100.64.0.2\nWEB_WORKSPACES=${WORKSPACE}\n`;
 const OVERRIDE = `services:
   caddy:
     ports: !override
@@ -188,7 +187,7 @@ db.close(); console.log(JSON.stringify(result));`;
         const config = await request(port, "/uberblick-config.json");
         assert.equal(config.status, 200);
         assert.equal(config.headers["cache-control"], "no-store");
-        assert.deepEqual(JSON.parse(config.body), { hubUrl: "wss://localhost/ws", workspaces: WORKSPACE, hubAuthToken: TOKEN });
+        assert.deepEqual(JSON.parse(config.body), { hubUrl: "wss://localhost/ws", workspaces: WORKSPACE });
         assert.equal((await request(port, "/ws", true)).status, 101);
         return;
       } catch (error) { lastError = error; }
@@ -215,12 +214,12 @@ db.close(); console.log(JSON.stringify(result));`;
       [{ host_ip: "100.64.0.2", target: 443, published: "443" }]);
     console.log("Extracted host files; original stack publishes only Tailscale-address HTTPS and has no host builds.");
     for (const [key, value] of Object.entries({ TAILSCALE_HOST: 'bad"host', WEB_HUB_URL: 'wss://bad"host/ws',
-      WEB_WORKSPACES: 'bad"workspace', HUB_AUTH_TOKEN: 'bad"token' })) {
+      WEB_WORKSPACES: 'bad"workspace' })) {
       const refused = await compose(["run", "--rm", "--no-deps", "-T", "-e", `${key}=${value}`, "caddy", "version"], { allowFailure: true });
       assert.notEqual(refused.code, 0);
       assert.match(refused.stdout + refused.stderr, new RegExp(key));
     }
-    console.log("Plain Compose container entrypoints refuse all four unsafe configuration inputs by name.");
+    console.log("Plain Compose container entrypoints refuse all three unsafe configuration inputs by name.");
     await compose(["up", "--detach", "--no-build", "--pull", "never"]);
     await serving();
     await compose(["stop", "hub"]);

@@ -33,6 +33,8 @@
  * what is said about it.
  */
 
+
+import { readDeviceLogin } from "@uberblick/hub/device-login";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
@@ -159,7 +161,14 @@ function modeOf(path: string): string {
 function credentialCheck(
   resolved: ResolvedConfig | null,
   env: NodeJS.ProcessEnv,
+  config: McpConfig | null,
 ): Check {
+  if (config?.deviceLogin !== undefined) {
+    const login = readDeviceLogin(config.hubUrl, config.workspaceId, env);
+    return login.status === "ready"
+      ? pass("credential", "stored device login; hub acceptance is checked below")
+      : fail("credential", login.message, login.message);
+  }
   const credentials = readCredentials(env);
   if (credentials.exposed) {
     return fail(
@@ -328,7 +337,7 @@ async function hubCheck(
   if (config === null) {
     return skipped("hub", "no workspace configured, so no hub token could be minted");
   }
-  if (config.authSecret === null) {
+  if (config.deviceLogin === undefined && config.authSecret === null) {
     return skipped(
       "hub",
       `no signing secret, so ${config.hubUrl} was not dialled — this machine is local-only`,
@@ -344,6 +353,9 @@ async function hubCheck(
     return pass("hub", `${config.hubUrl} answered and served the directory room`);
   }
   if (status === "auth-failed") {
+    if (config.deviceLogin !== undefined) {
+      return fail("hub", `${config.hubUrl} refused remote sync`, hub.reason ?? "Run `ub auth login <hub>` and obtain workspace access.");
+    }
     // Narrower here than for a long-running client: this probe minted its
     // token seconds ago, in this process, in the current format, so the token's
     // *shape* is not in question. Three causes survive that — a secret the hub
@@ -681,7 +693,7 @@ export async function doctorReport(
 
   const checks: Check[] = [
     workspaceCheck(resolvedEnv, resolved, config, error),
-    credentialCheck(resolved, resolvedEnv),
+    credentialCheck(resolved, resolvedEnv, config),
     databaseCheck(config),
     await persistenceCheck(config),
     await hubCheck(config, endpoint, dial),
@@ -733,7 +745,7 @@ export const DOCTOR_OPTIONS = {
 export const DOCTOR_HELP = `usage: ub doctor [--json]
 
 Check the local stack against its known failure modes — configuration, the
-signing secret and its file mode, the database and a live update-log reading,
+stored remote login or local signing secret and its file mode, the database and a live update-log reading,
 whether the hub is reachable and agrees with this machine's clock, and the MCP
 client configs \`ub mcp install\` targets. Diagnoses, never repairs. The live
 reading opens an existing database and may receive hub updates; it never creates an absent

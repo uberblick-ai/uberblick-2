@@ -279,7 +279,7 @@ async function readMirror(
   workspace: string = WORKSPACE,
 ): Promise<Map<string, string[]>> {
   // No secret: sync is disabled, so every answer comes from the log alone.
-  return await withMcp(box, { WORKSPACE_ID: workspace }, async (call) => {
+  return await withMcp(box, { WORKSPACE_ID: workspace, HUB_AUTH_TOKEN: "" }, async (call) => {
     const listed = await call("list_docs", {});
     const found = new Map<string, string[]>();
     for (const doc of listed.docs as { uuid: string }[]) {
@@ -383,8 +383,8 @@ describe("ub remote", () => {
     // The boundary as it now works: the host serves the secret to the app
     // (#426), rather than the bundle carrying it. Same consequence, and it is
     // the consequence this line exists to keep on screen.
-    expect(run.stdout).toContain("the host serves it to the app");
-    expect(run.stdout).toContain("private network");
+    expect(run.stdout).toContain("stored login");
+    expect(run.stdout).toContain("current workspace membership");
     // And where it came from: the user config is the only place it can be.
     expect(run.stdout).toContain("user config");
   });
@@ -537,35 +537,30 @@ describe("ub remote", () => {
     expect(report.sources.hubUrl).toBe("user config");
   });
 
-  it("never leaves the stored credential naming a different hub", () => {
-    // The endpoint cannot be written — `config.json` is a directory — after the
-    // credential already has been. The credential must go back.
+  it("preserves credentials when binding publication fails", () => {
+    // Binding publication cannot modify the private credential store.
     const box = sandbox({ credentials: { signingSecret: SECRET } });
     mkdirSync(join(box.configHome, "uberblick", "config.json"), { recursive: true });
 
     expect(() =>
       setRemote("wss://hub.example.ts.net", {
-        secret: OTHER_SECRET,
         env: box.env,
       }),
     ).toThrow();
     expect(storedSecret(box)).toBe(SECRET);
   });
 
-  it("stores the credential that reached the endpoint being written", () => {
-    // The endpoint and the credential land together, and an ambient `HUB_URL`
-    // is not a reason to withhold one: it is not a layer any more, so the file
-    // just written *is* the endpoint in force.
+  it("preserves the loopback secret when storing a remote endpoint", () => {
+    // The endpoint is the only value published; the local secret remains for
+    // loopback use, and ambient HUB_URL still has no authority.
     const box = sandbox({ credentials: { signingSecret: SECRET } });
     box.env.HUB_URL = "ws://127.0.0.1:9999";
 
     const persistence = setRemote("wss://hub.example.ts.net", {
-      secret: OTHER_SECRET,
       env: box.env,
     });
 
-    expect(storedSecret(box)).toBe(OTHER_SECRET);
-    expect(persistence.replacedSecret).toBe(true);
+    expect(storedSecret(box)).toBe(SECRET);
     expect(persistence.warnings).toEqual([]);
     expect(persistedHubUrl(box)).toBe("wss://hub.example.ts.net");
   });
@@ -580,13 +575,37 @@ describe("ub remote join", () => {
     return `${url(hub)}/${workspace}`;
   }
 
-  /** A secret file the way `join` insists on being given one: mode 0600. */
-  function secretFile(box: Sandbox, secret: string): string {
-    const path = join(box.cwd, "remote-secret");
-    writeFileSync(path, `${secret}\n`, { mode: 0o600 });
-    chmodSync(path, 0o600);
-    return path;
+  /** Loopback admission still uses a local signing secret, never a join input. */
+  function localJoinUrl(hub: Hub, box: Sandbox, secret: string): string {
+    box.env.HUB_AUTH_TOKEN = secret;
+    return joinUrl(hub);
   }
+
+  it.each(["file", "environment"] as const)("rejoins a loopback hub from a remote binding using the retained %s secret", async (source) => {
+    const hub = await startHub(SECRET);
+    const fromHub = await webDoc(hub, "Hub document");
+    const box = sandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: "wss://previous.invalid/ws" },
+      credentials: { signingSecret: source === "file" ? SECRET : OTHER_SECRET, future: { retained: true } },
+    });
+    const mine = await withMcp(box, { WORKSPACE_ID: WORKSPACE, HUB_AUTH_TOKEN: "" }, async (call) => {
+      const created = await call("create_doc", {
+        title: "Unshared local document", description: "A local edit retained while changing endpoints.", blocks: [{ type: "paragraph", text: "Pending local edit" }],
+      });
+      return created.uuid as string;
+    });
+    const storeBefore = readFileSync(join(box.configHome, "uberblick", "credentials.json"));
+    const joined = await runUbAsync(["remote", "join", joinUrl(hub)], box,
+      source === "environment" ? { HUB_AUTH_TOKEN: SECRET } : {});
+    expect(joined.status, joined.stderr).toBe(0);
+    expect(persistedHubUrl(box)).toBe(url(hub));
+    expect(readFileSync(join(box.configHome, "uberblick", "credentials.json"))).toEqual(storeBefore);
+    const mirror = await readMirror(box);
+    expect([...mirror.keys()].sort()).toEqual([mine, fromHub].sort());
+    expect(mirror.get(mine)).toEqual(["Pending local edit"]);
+    expect(joined.output).not.toContain(SECRET);
+    expect(joined.output).not.toContain(OTHER_SECRET);
+  });
 
   it("binds a machine with no configuration at all to the workspace in the URL", async () => {
     const remote = await startHub(OTHER_SECRET);
@@ -595,15 +614,13 @@ describe("ub remote join", () => {
 
     // Nothing here: no `ub init`, no workspace, no endpoint, no credential —
     // the second machine as the owner decided it should work.
-    const box = sandbox();
+    const box = sandbox({ credentials: { signingSecret: OTHER_SECRET } });
 
     const run = await runUbAsync(
       [
         "remote",
         "join",
-        joinUrl(remote),
-        "--secret-file",
-        secretFile(box, OTHER_SECRET),
+        localJoinUrl(remote, box, OTHER_SECRET),
       ],
       box,
     );
@@ -665,9 +682,7 @@ describe("ub remote join", () => {
       [
         "remote",
         "join",
-        joinUrl(remote),
-        "--secret-file",
-        secretFile(local, OTHER_SECRET),
+        localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
     );
@@ -683,9 +698,7 @@ describe("ub remote join", () => {
       [
         "remote",
         "join",
-        joinUrl(remote),
-        "--secret-file",
-        secretFile(fresh, OTHER_SECRET),
+        localJoinUrl(remote, fresh, OTHER_SECRET),
       ],
       fresh,
     );
@@ -735,9 +748,7 @@ describe("ub remote join", () => {
       [
         "remote",
         "join",
-        joinUrl(remote),
-        "--secret-file",
-        secretFile(local, OTHER_SECRET),
+        localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
     );
@@ -749,9 +760,7 @@ describe("ub remote join", () => {
       [
         "remote",
         "join",
-        joinUrl(remote),
-        "--secret-file",
-        secretFile(fresh, OTHER_SECRET),
+        localJoinUrl(remote, fresh, OTHER_SECRET),
       ],
       fresh,
     );
@@ -791,9 +800,7 @@ describe("ub remote join", () => {
       [
         "remote",
         "join",
-        joinUrl(remote),
-        "--secret-file",
-        secretFile(local, OTHER_SECRET),
+        localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
     );
@@ -849,9 +856,7 @@ describe("ub remote join", () => {
       [
         "remote",
         "join",
-        joinUrl(remote),
-        "--secret-file",
-        secretFile(local, OTHER_SECRET),
+        localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
     );
@@ -884,9 +889,7 @@ describe("ub remote join", () => {
       [
         "remote",
         "join",
-        joinUrl(remote),
-        "--secret-file",
-        secretFile(local, OTHER_SECRET),
+        localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
     );
@@ -907,9 +910,7 @@ describe("ub remote join", () => {
       [
         "remote",
         "join",
-        joinUrl(remote),
-        "--secret-file",
-        secretFile(local, OTHER_SECRET),
+        localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
       {},
@@ -944,9 +945,7 @@ describe("ub remote join", () => {
       const args = [
         "remote",
         "join",
-        joinUrl(remote),
-        "--secret-file",
-        secretFile(local, OTHER_SECRET),
+        localJoinUrl(remote, local, OTHER_SECRET),
       ];
       const deadline = Date.now() + LARGE_CORPUS_JOIN_RECOVERY_TIMEOUT_MS;
       const runAttempt = async () => {
@@ -1007,9 +1006,7 @@ describe("ub remote join", () => {
       [
         "remote",
         "join",
-        joinUrl(remote),
-        "--secret-file",
-        secretFile(box, OTHER_SECRET),
+        localJoinUrl(remote, box, OTHER_SECRET),
       ],
       box,
     );
@@ -1030,8 +1027,7 @@ describe("ub remote join", () => {
     expect(run.stdout).toContain(`ub remote join ${DEAD_HUB_URL}/${mine}`);
     // And that rejoining it needs the secret this join replaced: a hub reads
     // HUB_AUTH_TOKEN from its own environment.
-    expect(run.stdout).toContain("HUB_AUTH_TOKEN from its own");
-    expect(run.stdout).toContain("ub open --no-browser");
+    expect(run.stdout).not.toContain("HUB_AUTH_TOKEN from its own");
 
     // Both are listed, and the first one still holds everything it held.
     const listed = await runUbAsync(["workspace", "list"], box);
@@ -1105,7 +1101,7 @@ describe("ub remote join", () => {
       box,
     );
     expect(run.status).toBe(2);
-    expect(run.stderr).toContain("lets other users read");
+    expect(run.stderr).toContain("Unknown option");
     expect(run.output).not.toContain(OTHER_SECRET);
   });
 
@@ -1212,7 +1208,7 @@ describe("ub remote join", () => {
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("rejected the credential");
     expect(run.stderr).not.toContain("retrying once");
-    expect(run.stderr).toContain("--secret-file");
+    expect(run.stderr).not.toContain("--secret-file");
     expect(persistedHubUrl(box)).toBe(DEAD_HUB_URL);
     expect(run.output).not.toContain(SECRET);
     expect(run.output).not.toMatch(TOKEN_SHAPE);
@@ -1238,8 +1234,7 @@ describe("ub remote join", () => {
     // Everything the refusal owes a person is unchanged.
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("no signing secret is configured");
-    expect(run.stderr).toContain("--secret-file");
-    expect(run.stderr).toContain("run this from a terminal");
+    expect(run.stderr).not.toContain("--secret-file");
     expect(run.stderr).not.toContain("remote signing secret (");
     expect(run.stderr).toContain("Nothing was written");
     expect(existsSync(join(box.configHome, "uberblick", "config.json"))).toBe(false);

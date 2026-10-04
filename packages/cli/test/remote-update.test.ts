@@ -54,7 +54,7 @@ const GITHUB_SETTING = "HUB_GITHUB_CLIENT_ID=Iv23AbCdEF0123456789\n";
 const HOST_ENV =
   `TAILSCALE_HOST=box.tailnet.ts.net\nHUB_AUTH_TOKEN=a-secret\n${GITHUB_SETTING}`;
 const RERUN_ENV =
-  "TAILSCALE_HOST=box.tailnet.ts.net\nHUB_AUTH_TOKEN=replaced-secret\n";
+  "TAILSCALE_HOST=box.tailnet.ts.net\nWEB_WORKSPACES=5c1f9a72-4d38-4e02-9b6a-7e3f10c85b94\n";
 
 /**
  * Stands in for the compose wrapper: records the invocation, optionally blocks
@@ -412,7 +412,7 @@ exit 17
     const updater = update(fix);
     expect(updater.status).toBe(0);
     expect(updater.stdout).toContain("already running");
-    expect(initRerun(fix, "HUB_AUTH_TOKEN=other\n").status).toBe(100);
+    expect(initRerun(fix, "TAILSCALE_HOST=other.tailnet.ts.net\n").status).toBe(100);
 
     expect(await first.release()).toBe(0);
     expect(builds(fix)).toEqual(["up --build --detach"]);

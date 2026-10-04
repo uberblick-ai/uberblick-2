@@ -110,7 +110,7 @@ beforeEach(() => {
   });
   vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
     new Response(JSON.stringify({
-      hubUrl: "wss://hub.example.test/ws",
+      hubUrl: "ws://127.0.0.1:4321",
       workspaces: [WORKSPACE, OTHER_WORKSPACE],
     })),
   );

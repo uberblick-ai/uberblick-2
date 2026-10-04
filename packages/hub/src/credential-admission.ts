@@ -1,8 +1,7 @@
 /**
- * Device-credential admission, deliberately absent from createHub and ub open.
- * Compose this extension with HubDatabase and the same CredentialRegistry
- * and MembershipRegistry used by issuance and management. The coordinated client cutover owns
- * installing it on remote hubs. It never accepts the legacy root key.
+ * Remote device admission, composed by createHub with the same registries as
+ * sign-in and renewal. Loopback and ub open retain their local admission.
+ * This extension never accepts the shared root key.
  */
 import type {
   Connection,
@@ -31,7 +30,7 @@ export interface CredentialContext {
 }
 
 class CredentialRefusal extends Error {
-  constructor(readonly reason = "invalid-token") {
+  constructor(readonly reason = "device-credential-refused") {
     super("credential access refused");
   }
 }
@@ -176,7 +175,7 @@ export class CredentialAdmission implements Extension<CredentialContext> {
       }
     }
     for (const connection of connections) {
-      connection.close({ code: 4403, reason: "invalid-token" });
+      connection.close({ code: 4403, reason: "device-credential-refused" });
     }
   }
 
@@ -203,7 +202,7 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     if (cause !== null) {
       context.authorization.active = false;
       connection.readOnly = true;
-      connection.close({ code: 4403, reason: "invalid-token" });
+      connection.close({ code: 4403, reason: "device-credential-refused" });
       this.options.log({ event: "hub.auth.rejected", cause });
       throw new CredentialRefusal();
     }

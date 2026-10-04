@@ -11,13 +11,14 @@
  * diagnostics and the MCP server's own logging all go to stderr, so the JSON
  * stays parseable by a pipe.
  *
- * No secret is ever printed. `credentialPresent` is the whole of what this
- * command says about the hub signing secret. The `storage` object is
+ * No secret or key is ever printed. `credentialPresent` states whether a
+ * local secret or selected remote login is available. The `storage` object is
  * directories and database paths, never anything out of `credentials.json`.
  */
 
 import { parseArgs } from "node:util";
 import { hubDatabasePath } from "@uberblick/hub/config";
+import { readDeviceLogin } from "@uberblick/hub/device-login";
 import { collectSyncStatus, createMcpServer } from "@uberblick/mcp-server";
 import type { McpConfig, SyncStatus } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "./budget.js";
@@ -69,7 +70,7 @@ export interface StatusReport {
    */
   hubUrl: string;
   databasePath: string;
-  /** Whether a hub signing secret is configured. Never the secret itself. */
+  /** Whether the endpoint’s local secret or stored device login is present. */
   credentialPresent: boolean;
   credentialSource: CredentialOrigin | null;
   sources: { workspace: Origin; hubUrl: Origin };
@@ -132,7 +133,7 @@ export async function statusReport(
       workspaceUuid: config.workspaceId,
       hubUrl: config.hubUrl,
       databasePath: config.databasePath,
-      credentialPresent: config.authSecret !== null,
+      credentialPresent: config.deviceLogin === undefined ? config.authSecret !== null : readDeviceLogin(config.hubUrl, config.workspaceId, resolved.env).status === "ready",
       credentialSource: resolved.origins.credential,
       sources: {
         workspace: resolved.origins.workspace,
@@ -188,6 +189,7 @@ export function renderStatus(report: StatusReport): string {
   }
   text += field("hub", report.hubUrl);
   text += field("connection", hub.status);
+  if (hub.reason !== undefined) text += field("recovery", hub.reason);
   // Two counts in two units, as `sync_status` reports them: rooms, and provider
   // sync messages. They are not expected to agree.
   text += field(
@@ -216,8 +218,8 @@ export const STATUS_HELP = `usage: ub status [--json]
 Overview of this machine's workspace, configured hub endpoint, connection state,
 pending rooms and sync messages, attached rooms, records stored in the local log and
 detected failures. Connection does not mean the hub acknowledged every change.
-Run \`ub doctor\` for failure details and recovery guidance. Nothing here changes
-any configuration.
+Recovery names the next action; \`ub doctor\` gives further diagnostics.
+Workspace and hub bindings stay unchanged; renewal may update the stored login.
 
 options:
   --json            full report as JSON, including rooms, configuration and paths

@@ -1,41 +1,13 @@
 {$TAILSCALE_HOST} {
-	# The client's runtime configuration: the hub endpoint it dials, the
-	# workspaces it offers, and the secret it mints tokens with (#91, #189,
-	# #426). Served rather than baked into the bundle, so pointing this
-	# deployment at another hub — or giving it its workspaces, or rotating the
-	# secret — is `up --detach caddy`, not a rebuild. `WEB_HUB_URL` and
-	# `WEB_WORKSPACES` are the names operators set in `.env`; container startup
-	# validates
-	# them before assigning Caddy's `HUB_URL` and `WORKSPACES`. It also validates
-	# `HUB_AUTH_TOKEN`, including when started with plain Docker Compose.
-	#
-	# Serving the secret is the recorded model, not an oversight: anyone who can
-	# fetch this document has full read-write, and the tailnet is the boundary
-	# that makes that acceptable (REMOTE.md).
-	#
-	# `workspaces` is written as one comma-separated string because that is all
-	# an environment substitution can produce; the client reads that spelling and
-	# a JSON array as the same list. Unset substitutes to `""`, which the client
-	# reads as "no workspaces named" — deep links still open, `/` says there is
-	# no workspace.
-	#
-	# All three values land *inside* a JSON string, so a quote or a backslash in
-	# any of them would close it and append further keys — a second `hubUrl` wins
-	# on parse and retargets every browser. The shared startup guard refuses such a
-	# `WEB_WORKSPACES` or `HUB_AUTH_TOKEN` before it reaches this file, and the
-	# client refuses a document that names a key twice; neither is the whole
-	# guard on its own.
-	#
-	# It must be matched before the SPA fallback below. `try_files … /index.html`
-	# exists for deep links (#68) and would answer a mis-deployed configuration
-	# path with the app's own HTML, which the client can only report as a
-	# configuration error. `no-store` is load-bearing for the same reason the
-	# document exists: a cached copy keeps a retargeted deployment dialling the
-	# old hub.
+	# Public runtime configuration contains only the endpoint and workspace list.
+	# Remote browsers have no credential and cannot sign in directly yet; use
+	# ub auth login and ub open on a computer. Never serve a signing secret.
+	# Entrypoints validate substitutions before Caddy renders these JSON strings.
+	# This route precedes the SPA fallback and is uncached so reloads see updates.
 	handle /uberblick-config.json {
 		header Cache-Control "no-store"
 		header Content-Type "application/json"
-		respond `{"hubUrl":"{$HUB_URL}","workspaces":"{$WORKSPACES}","hubAuthToken":"{$HUB_AUTH_TOKEN}"}` 200
+		respond `{"hubUrl":"{$HUB_URL}","workspaces":"{$WORKSPACES}"}` 200
 	}
 
 	handle /ws* {

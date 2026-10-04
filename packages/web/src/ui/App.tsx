@@ -33,6 +33,7 @@ import {
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
 import {
+  browserSignInRequired,
   configuredWorkspaces,
   endpointLabel,
   hubEndpoint,
@@ -346,6 +347,8 @@ export function App(): ReactElement {
   const hubReady = useHubEndpoint();
   const configured = hubReady ? configuredWorkspaces() : [];
   const serving = hubReady ? localServing() : null;
+  const remoteSignIn = hubReady && browserSignInRequired();
+  const roomReady = hubReady && !remoteSignIn;
   /** Which hub the room providers dial. */
   const endpoint = hubReady ? hubEndpoint() : null;
   /**
@@ -509,21 +512,21 @@ export function App(): ReactElement {
   }, [threadsOpen, closeThreads]);
 
   const directory = useRoom(
-    hubReady && workspace !== null ? directoryRoom(workspace.uuid) : null,
+    roomReady && workspace !== null ? directoryRoom(workspace.uuid) : null,
     identity,
   );
   const doc = useRoom(
-    hubReady && workspace !== null && selected !== null
+    roomReady && workspace !== null && selected !== null
       ? roomForDoc(workspace.uuid, selected)
       : null,
     identity,
   );
   const sidebar = useRoom(
-    hubReady && workspace !== null ? sidebarRoom(workspace.uuid) : null,
+    roomReady && workspace !== null ? sidebarRoom(workspace.uuid) : null,
     identity,
   );
   const catalog = useRoom(
-    hubReady &&
+    roomReady &&
       workspace !== null
       ? settingsRoom(workspace.uuid)
       : null,
@@ -929,6 +932,20 @@ export function App(): ReactElement {
   const sidebarName = settings ? "sidebar" : "document list";
   const sidebarToggleLabel = `${sidebarHidden ? "Show" : "Hide"} ${sidebarName}`;
   const sidebarCloseLabel = narrowSidebar ? `Close ${sidebarName}` : sidebarToggleLabel;
+
+  if (remoteSignIn) {
+    return (
+      <main className="ub-app">
+        <PaneNotice>
+          <p className="m-auto max-w-xl p-6 text-(--foreground)" role="status">
+            <strong>Sign-in required.</strong> This hub needs a sign-in that this
+            browser cannot do yet. On a computer, run <code>ub auth login</code>{" "}
+            for this hub, then <code>ub open</code> to read and edit its documents.
+          </p>
+        </PaneNotice>
+      </main>
+    );
+  }
 
   return (
     <main className="ub-app">

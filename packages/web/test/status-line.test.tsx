@@ -379,7 +379,7 @@ describe("the locally served document's two sync facts", () => {
   function localLine(
     hubAcked: boolean | null,
     patch: Partial<RoomStatus> = {},
-    notSharedReason: "no-hub-credentials" | null = null,
+    notSharedReason: import("../src/shell/document-search.js").NotSharedReason | null = null,
   ): { words: string[]; label: string | null; text: string } {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
       true;
@@ -420,6 +420,16 @@ describe("the locally served document's two sync facts", () => {
     host.remove();
     return answer;
   }
+
+  it("keeps edits saved here while naming device recovery and later clears it", () => {
+    const signIn = localLine(false, {}, "sign-in-required");
+    expect(signIn.words).toEqual(["saved here", "not shared with hub"]);
+    expect(signIn.text).toContain("ub auth login");
+    const noAccess = localLine(false, {}, "no-workspace-access");
+    expect(noAccess.words).toEqual(["saved here", "not shared with hub"]);
+    expect(noAccess.text).toContain("administrator");
+    expect(localLine(true).words).toEqual(["saved here", "synced with hub"]);
+  });
 
   it("distinguishes local durability from upstream acknowledgement", () => {
     expect(localLine(false).words).toEqual([

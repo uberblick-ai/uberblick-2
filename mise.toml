@@ -16,8 +16,8 @@ fnox = "1"
 # The hub itself binds HUB_HOST:PORT — default 127.0.0.1:1234 in code — and
 # never reads HUB_URL, so the two must be moved together when the hub runs
 # somewhere else. The bind address is loopback until someone opts into more: the
-# hub's only credential is a shared dev secret, so `HUB_HOST=0.0.0.0` is a
-# deliberate choice.
+# loopback hub trusts the local dev secret. Any non-loopback bind requires
+# device credentials with current membership and configured GitHub sign-in.
 [env]
 
 # The hub's SQLite file, checkout-local and gitignored. Absent this, a hub opens
@@ -96,14 +96,13 @@ run = "fnox exec --if-missing warn -- ub env -- pnpm --silent --filter @uberblic
 [tasks.web]
 description = "Start the Vite dev server"
 # Through `ub env` like the hub: the endpoint the bundle dials is this machine's
-# configured one, so a checkout follows a `ub remote join` without anything
-# being written into it.
+# configured one. The Vite browser path supports loopback development; a
+# remote binding uses `ub auth login` with `ub open` instead.
 #
 # The dev server serves this environment — the signing secret included — at
 # /uberblick-config.json (#426, packages/web/dev-config-document.ts). `vite`
-# binds loopback; adding `--host` would publish the owner's own secret to
-# everything on the LAN, which is acceptable only inside the tailnet boundary
-# REMOTE.md records.
+# binds loopback; keep its local development signing secret on that boundary.
+# Remote deployments serve no secret, and a dev browser does not sign in.
 run = "fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web dev"
 
 [tasks.build-web]

@@ -6,7 +6,6 @@ services:
       context: .
       target: hub
     environment:
-      HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
       # Unset/empty uses public Uberblick Login: no app registration is needed.
       # Optionally set your own Device Flow app to control its settings/budget;
       # init re-runs and updates preserve it. Remove and recreate to use the
@@ -31,7 +30,6 @@ services:
       # becoming Caddy's HUB_URL and WORKSPACES. One bundle serves every host.
       WEB_HUB_URL: "${WEB_HUB_URL:-}"
       WEB_WORKSPACES: "${WEB_WORKSPACES:-}"
-      HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
     ports:
       - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:443:443"
     restart: unless-stopped

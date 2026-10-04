@@ -1,10 +1,10 @@
-/** Inactive client credential path; callers select it only programmatically. */
+/** Stored device credentials are the sole remote client authority. */
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type StoredHubLogin, isHubLogin, readHubLogins, replaceHubLogin } from "./auth-store.js";
 import { LockWaitTimeoutError, acquireInitLock } from "./init-lock.js";
-import { SYNC_PROTOCOL_VERSION, isProtocolVersion, readProtocolMismatch, wrapToken } from "./protocol.js";
+import { SYNC_PROTOCOL_VERSION, isProtocolVersion, protocolSkew, readProtocolMismatch, wrapToken } from "./protocol.js";
 import { authenticationOrigin } from "./remote-url.js";
 import { publishOwnerOnly } from "./safe-write.js";
 import { credentialsPath } from "./storage.js";
@@ -74,8 +74,6 @@ interface Outcome {
   fingerprint: string;
   retryAt: number;
   status: "renewed" | FailureStatus;
-  /** Omitted workspaces that a renewal was actually asked to resolve. */
-  confirmedNoAccess?: string[];
   hubVersion?: number;
 }
 function object(value: unknown): value is Record<string, unknown> {
@@ -94,8 +92,6 @@ function readOutcome(path: string): Outcome | null {
     if (!object(parsed) || typeof parsed.fingerprint !== "string" || !/^[0-9a-f]{64}$/.test(parsed.fingerprint) ||
       !Number.isSafeInteger(parsed.retryAt) || typeof parsed.status !== "string" ||
       !["renewed", "sign-in-required", "hub-down", "renewal-unavailable", "update-required"].includes(parsed.status) ||
-      (parsed.confirmedNoAccess !== undefined && (!Array.isArray(parsed.confirmedNoAccess) ||
-        !parsed.confirmedNoAccess.every(workspace => typeof workspace === "string"))) ||
       (parsed.status === "update-required" && (!isProtocolVersion(parsed.hubVersion) || parsed.hubVersion === SYNC_PROTOCOL_VERSION))) return null;
     return parsed as unknown as Outcome;
   } catch {
@@ -110,12 +106,13 @@ function cachedResult(cached: Outcome, origin: string, workspace: string, login:
       ? { status: "ready", origin, login } : noAccess(origin, workspace);
   }
   if (cached.status === "sign-in-required") return signIn(origin);
-  if (cached.status === "update-required") return { status: "update-required", origin, message: "Update the client or hub to use the same sync protocol.", ...(cached.hubVersion === undefined ? {} : { hubVersion: cached.hubVersion }) };
+  if (cached.status === "update-required" && cached.hubVersion !== undefined) return { status: "update-required", origin,
+    message: protocolSkew(cached.hubVersion, SYNC_PROTOCOL_VERSION), hubVersion: cached.hubVersion };
   return cached.status === "hub-down" ? offline(origin) : unavailable(origin);
 }
 
 /** Bound both headers and body; proof goes only to the stored authentication origin. */
-async function renew(origin: string, login: StoredHubLogin, signal?: AbortSignal): Promise<StoredHubLogin | DeviceLoginFailure | "already-replaced"> {
+async function renew(origin: string, login: StoredHubLogin, ifWorkspacesChanged: boolean, signal?: AbortSignal): Promise<StoredHubLogin | DeviceLoginFailure | "already-replaced" | "unchanged"> {
   const requestSignal = AbortSignal.any([...(signal === undefined ? [] : [signal]), AbortSignal.timeout(REQUEST_MS)]);
   try {
     signal?.throwIfAborted();
@@ -125,7 +122,8 @@ async function renew(origin: string, login: StoredHubLogin, signal?: AbortSignal
     });
     requestSignal.throwIfAborted();
     const response = await fetch(`${origin}/auth/credential/renew`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: wrapToken(proof),
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: ifWorkspacesChanged ? JSON.stringify({ ...JSON.parse(wrapToken(proof)), ifWorkspacesChanged: true }) : wrapToken(proof),
       redirect: "error", signal: requestSignal,
     });
     const invalid = () => offline(origin);
@@ -147,6 +145,7 @@ async function renew(origin: string, login: StoredHubLogin, signal?: AbortSignal
     let body: unknown;
     try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return invalid(); }
     if (!object(body)) return invalid();
+    if (ifWorkspacesChanged && response.status === 200 && body.status === "unchanged" && Object.keys(body).length === 1) return "unchanged";
     if (response.status === 200 && body.status === "renewed") {
       const replacement = { identity: login.identity, credential: body.credential };
       if (!isHubLogin(replacement) || replacement.credential.record.principalId !== login.credential.record.principalId ||
@@ -161,7 +160,7 @@ async function renew(origin: string, login: StoredHubLogin, signal?: AbortSignal
     if (response.status === 409 && body.status === "protocol-mismatch" && typeof body.reason === "string") {
       const hubVersion = readProtocolMismatch(body.reason);
       if (hubVersion !== null) return { status: "update-required", origin, hubVersion,
-        message: "Update the client or hub to use the same sync protocol." };
+        message: protocolSkew(hubVersion, SYNC_PROTOCOL_VERSION) };
     }
     if (response.status === 503 && body.status === "not-configured") return unavailable(origin);
     return invalid();
@@ -201,11 +200,6 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     if (!needsRenewal(current.login)) return current;
     const recorded = readOutcome(path.outcome);
     const cached = recorded?.fingerprint === fingerprint(current.login) ? recorded : null;
-    const confirmedNoAccess = cached?.confirmedNoAccess ?? [];
-    // Polling a confirmed denial must not retire other workspaces' credentials.
-    // An unchecked workspace still gets its own renewal after the cooldown.
-    if (cached?.status !== "sign-in-required" && cached?.status !== "update-required" &&
-      confirmedNoAccess.includes(workspace) && !current.login.credential.record.workspaces.includes(workspace)) return noAccess(origin, workspace);
     if (cached !== null && cached.retryAt > Date.now()) {
       // A replacement with workspace access is ready for an old refused
       // connection. A refusal of the newly issued credential waits, rather than
@@ -215,7 +209,9 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
       return cachedResult(cached, origin, workspace, current.login);
     }
     const expected = current.login;
-    const result = await renew(origin, expected, options.signal);
+    const result = await renew(origin, expected,
+      !expected.credential.record.workspaces.includes(workspace) &&
+      (options.rejected === undefined || !sameCredential(expected, options.rejected)), options.signal);
     if (typeof result === "object" && "identity" in result) {
       try {
         // Once issued, the old key is retired. Finish bounded, conditional
@@ -231,8 +227,7 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
       // its authority. Use that newer login; its next need may renew it.
       if (!sameCredential(current.login, result)) return current.login.credential.record.workspaces.includes(workspace) ? current : offline(origin);
       publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(result), retryAt: Date.now() + DEVICE_RENEWAL_COOLDOWN_MS,
-        status: "renewed", confirmedNoAccess: [...new Set([...confirmedNoAccess, workspace])]
-          .filter(omitted => !result.credential.record.workspaces.includes(omitted)) } satisfies Outcome));
+        status: "renewed" } satisfies Outcome));
       options.signal?.throwIfAborted();
       return result.credential.record.workspaces.includes(workspace) ? current : noAccess(origin, workspace);
     }
@@ -240,9 +235,14 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     current = readDeviceLogin(endpoint, workspace, env);
     if (current.status !== "ready") return current;
     if (!sameCredential(current.login, expected)) return current.login.credential.record.workspaces.includes(workspace) ? current : offline(origin);
+    if (result === "unchanged") {
+      publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(expected), retryAt: Date.now() + DEVICE_RENEWAL_COOLDOWN_MS,
+        status: "renewed" } satisfies Outcome));
+      return noAccess(origin, workspace);
+    }
     const failure = result === "already-replaced" ? signIn(origin) : result;
     publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(expected), retryAt: Date.now() + DEVICE_RENEWAL_COOLDOWN_MS,
-      status: failure.status, confirmedNoAccess, ...(failure.hubVersion === undefined ? {} : { hubVersion: failure.hubVersion }) } satisfies Outcome));
+      status: failure.status, ...(failure.hubVersion === undefined ? {} : { hubVersion: failure.hubVersion }) } satisfies Outcome));
     return failure;
   } catch {
     options.signal?.throwIfAborted();
