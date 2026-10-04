@@ -52,6 +52,7 @@ import { CopyLink } from "./DocChrome.js";
 import { Sidebar, togglePin } from "./Sidebar.js";
 import { SidebarProvider, SIDEBAR_TOGGLE_CLASSES } from "./shadcn/sidebar.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
+import { RemoteHubGuide } from "./RemoteHubGuide.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { SyncPanel } from "./SyncPanel.js";
 import { Popover, PopoverContent } from "./shadcn/popover.js";
@@ -936,13 +937,7 @@ export function App(): ReactElement {
   if (remoteSignIn) {
     return (
       <main className="ub-app">
-        <PaneNotice>
-          <p className="m-auto max-w-xl p-6 text-(--foreground)" role="status">
-            <strong>Sign-in required.</strong> This hub needs a sign-in that this
-            browser cannot do yet. On a computer, run <code>ub auth login</code>{" "}
-            for this hub, then <code>ub open</code> to read and edit its documents.
-          </p>
-        </PaneNotice>
+        <RemoteHubGuide />
       </main>
     );
   }

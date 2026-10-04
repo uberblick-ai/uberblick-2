@@ -880,10 +880,18 @@ deadline after printing the headers. A `502` on
 `/ws` is Caddy up and the hub down — expected while the hub is stopped for a
 backup, and otherwise a job for `sh bin/remote-compose.sh logs hub`.
 
-Then open the selected site origin. It shows **Sign-in
-required**, explains that this browser cannot sign in yet, and names
-`ub auth login` with `ub open` on a computer. It shows no documents and opens
-no collaboration socket. In browser developer tools,
+Then open the selected site origin. On a claimable fresh hub it shows
+**This hub is unclaimed** and guides the first administrator through
+`ub auth login`, `ub remote join` with the default workspace UUID reported by
+that login, and `ub open` on their computer. An open page rechecks claim state
+after each 15-second pause until claiming closes. A closed claim says only that
+the hub can no longer be claimed; an existing installation sealed without a
+claim gives the same answer. Members sign in, join their workspace unless
+already bound to it, and use `ub open`. This browser is never signed in by those
+steps. A failed, timed-out or incompatible claim-state read says setup state
+could not be confirmed; an unclaimed hub unable to accept a claim says GitHub
+sign-in is not configured. Every app address shows the guide, with no documents,
+editor actions or collaboration socket. In browser developer tools,
 `/uberblick-config.json` must return only `hubUrl` and `workspaces`: by default,
 `{"hubUrl":"ws://localhost:8080/ws","workspaces":"<the list from .env>"}`.
 For HTTPS the endpoint is `wss://<WEB_HOST>/ws`, or the legacy Tailscale name.
@@ -908,9 +916,13 @@ sh bin/remote-compose.sh up --detach caddy
 The document is served with `Cache-Control: no-store`, so the next page load
 picks up the change. `hubUrl` must be a plain `ws://` or `wss://` address without
 userinfo, query or fragment. Invalid workspace entries are dropped. Direct
-remote browser sign-in remains unavailable, regardless of workspace list;
-opening the host shows the supported computer route and no documents. Use
-`ub open` after binding and signing in to edit from a computer's local replica.
+remote browser sign-in remains unavailable, regardless of workspace list.
+The host's guide reads only `GET /auth/claim-state` at its own origin, with no
+credential, and fills its computer commands with that origin, even when
+`WEB_HUB_URL` points elsewhere. The public answer contains only `unclaimed`
+and `canClaim`, never a workspace or identity. The guide grants no document
+access. Use `ub open` after signing in and binding to edit from a computer's
+local replica; its page and loopback development do not show the setup guide.
 
 ## Two-computer verification protocol
 

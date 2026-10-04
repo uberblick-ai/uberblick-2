@@ -763,6 +763,21 @@ describe("the filter", () => {
     ]);
   });
 
+  it("does not match the body of a document the page has already opened", async () => {
+    const directory = directoryDoc();
+    upsertDirectoryEntry(directory, { uuid: ONE, title: "Overview" });
+    const target = room(roomForDoc(WORKSPACE, ONE)).ydoc;
+    initDoc(target, { uuid: ONE, title: "Overview" });
+    appendBlock(target, { type: "paragraph", text: "bodyonly quasartrail" });
+
+    const host = await openApp(`/${WORKSPACE}/${ONE}`);
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>(".ub-all-open-entry")?.click(),
+    );
+    await act(async () => typeInto(filter(host), "bodyonly"));
+    expect(rowTitles(host)).toEqual([]);
+  });
+
   it("never matches the Untitled a row draws in place of an absent title", async () => {
     const host = await mount(
       <DocumentList

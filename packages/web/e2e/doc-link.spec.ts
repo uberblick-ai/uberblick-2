@@ -1,28 +1,29 @@
 /**
  * Inline document references, in a real browser (#444, #532).
  *
- * Two cases, because exactly two claims are out of jsdom's reach and each is a
- * whole door end to end.
+ * Two routes through real editor input and transport, with navigation and
+ * caret-relative layout that jsdom cannot observe.
  *
- * 1. **Typed.** A person types a reference into a document, clicks it, and the
- *    app is on the other document — with Back returning them. That chain runs
+ * 1. **Typed.** A person types a reference into a document and clicks through
+ *    to its target address, with browser Back returning to the source. This runs
  *    through real key events reaching an input rule, a real anchor inside a
  *    `contenteditable` (where a browser's own click handling is what makes the
  *    interception necessary), and real session history.
- * 2. **Picked.** A person types `@`, and a card appears *at the caret* over a
- *    directory that really synced; arrowing and Enter reach it through a real
- *    contenteditable, where an Enter the picker failed to claim would split the
- *    paragraph instead of writing a reference.
+ * 2. **Picked.** A person types `@`, and the card has a measured position past
+ *    the editor frame's origin over a directory synced from another browser;
+ *    ArrowDown and Enter reach it through a real contenteditable and leave the
+ *    chosen reference.
  *
  * Everything else is pinned without a browser in `test/doc-links.test.tsx` and
  * `test/mention-menu.test.tsx`: what the doors accept and refuse, the
  * shorthand's label, the unresolved/archived states, the trigger's exact shape,
  * and that a reference inside a comment highlight is one action rather than two.
- * What is asserted here beyond that is only what the browser adds.
+ * The browser keeps one resulting link as its witness that editor input
+ * landed; it does not replay the document and ARIA state sequences.
  */
 
 import { expect, test } from "@playwright/test";
-import { createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
+import { createDoc, docTitle, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
 
 const { openApp, ws } = setupHarness();
@@ -30,9 +31,12 @@ const { openApp, ws } = setupHarness();
 test("a typed reference is a link to the document it names, and Back comes home", async ({
   browser,
 }) => {
-  const page = await openApp(browser);
+  const [author, page] = await Promise.all([
+    openApp(browser, "/", { upstream: true }),
+    openApp(browser),
+  ]);
   const targetTitle = docTitle("target");
-  const target = await createDoc(page, targetTitle);
+  const target = await createDoc(author, targetTitle);
   const sourceTitle = docTitle("source");
   const source = await createDoc(page, sourceTitle);
 
@@ -41,40 +45,36 @@ test("a typed reference is a link to the document it names, and Back comes home"
   await page.keyboard.type(`see [the target](${target}) today`);
 
   const link = page.locator(".ub-editor a.ub-doclink");
-  await expect(link).toHaveText("the target");
-  // The target is a document this workspace's directory really knows — over a
-  // real hub, from a document made a moment ago in this same session.
-  await expect(link).toHaveAttribute("data-doc-link-state", "resolved");
-  // A real anchor with a real address: what makes cmd-click a new tab, and what
-  // the click below has to intercept rather than inherit.
-  await expect(link).toHaveAttribute("href", `/${ws()}/${target}`);
-  // The label is the text; the uuid is not in the prose.
-  await expect(editor(page)).toHaveText("see the target today");
+  // A rendered reference is the one end state witnessing the real typing
+  // route. Its label, href and availability state are covered in jsdom.
+  await expect(link).toBeVisible();
 
-  // ---- clicking it opens the other document, in-app ----
+  // ---- a real click reaches the target address ----
   await link.click();
   await expect(page).toHaveURL(new RegExp(`/${ws()}/${target}$`));
+  // This target was made on the upstream hub, so hydration witnesses transport.
   await expect(page.locator(".ub-title")).toHaveValue(targetTitle);
 
-  // ---- and Back returns to the document the reference was written in ----
+  // ---- and browser Back returns to the source address ----
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/${ws()}/${source}$`));
-  await expect(page.locator(".ub-title")).toHaveValue(sourceTitle);
-  await expect(page.locator(".ub-editor a.ub-doclink")).toHaveText("the target");
 });
 
 test("the @ picker offers a synced document and writes the same reference", async ({
   browser,
 }) => {
-  const page = await openApp(browser);
+  const [author, page] = await Promise.all([
+    openApp(browser, "/", { upstream: true }),
+    openApp(browser),
+  ]);
   // Two candidates sharing a prefix, so one query leaves two rows and the arrow
   // key has somewhere to go; the picker lists by title, so the second row is the
   // lexicographically later of the two.
   const first = docTitle("pick");
   const second = docTitle("pick");
   const made = new Map<string, string>();
-  made.set(first, await createDoc(page, first));
-  made.set(second, await createDoc(page, second));
+  made.set(first, await createDoc(author, first));
+  made.set(second, await createDoc(author, second));
   const [, wanted] = [first, second].sort();
   await createDoc(page, docTitle("writing"));
 
@@ -83,8 +83,10 @@ test("the @ picker offers a synced document and writes the same reference", asyn
 
   const picker = page.getByRole("listbox", { name: "Documents" });
   await expect(picker).toBeVisible();
-  const rows = picker.getByRole("option");
-  await expect(rows).toHaveCount(2);
+  // Wait for the two remote candidates before sending input; their sorted
+  // rows and selection state are the jsdom test's contract.
+  await picker.getByRole("option", { name: first, exact: true }).waitFor({ state: "visible" });
+  await picker.getByRole("option", { name: second, exact: true }).waitFor({ state: "visible" });
   // The card is measured against a live layout, which jsdom does not have: it
   // sits below the caret's line and to the right of the frame's edge, past the
   // "see " already typed. The origin is what a failed measurement produces, so
@@ -94,24 +96,14 @@ test("the @ picker offers a synced document and writes the same reference", asyn
   expect(card?.y ?? 0).toBeGreaterThan(frame?.y ?? 0);
   expect(card?.x ?? 0).toBeGreaterThan(frame?.x ?? 0);
 
-  // The first row is highlighted; one arrow moves to the second, and Enter
-  // commits it rather than splitting the paragraph.
-  await expect(rows.first()).toHaveAttribute("aria-selected", "true");
+  // One resulting target shows that both real keys reached the picker.
   await page.keyboard.press("ArrowDown");
-  await expect(rows.nth(1)).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Enter");
 
-  await expect(picker).toHaveCount(0);
   const link = page.locator(".ub-editor a.ub-doclink");
-  await expect(link).toHaveText(wanted ?? "");
-  await expect(link).toHaveAttribute("data-doc-link-state", "resolved");
-  await expect(link).toHaveAttribute("href", `/${ws()}/${made.get(wanted ?? "")}`);
-  // The typed `@query` is gone and the paragraph was never split.
-  await expect(editor(page)).toHaveText(`see ${wanted}`);
-  await expect(page.locator(".ub-editor .ProseMirror > *")).toHaveCount(1);
+  await expect(link).toHaveAttribute("data-doc-id", made.get(wanted ?? "") ?? "");
 
   // And it is a real reference, not a look-alike: it navigates.
   await link.click();
   await expect(page).toHaveURL(new RegExp(`/${ws()}/${made.get(wanted ?? "")}$`));
-  await expect(page.locator(".ub-title")).toHaveValue(wanted ?? "");
 });

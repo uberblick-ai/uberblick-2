@@ -358,6 +358,23 @@ describe("the terminal block", () => {
     }
   });
 
+  it("starts with the whole transcript when reduced motion was already requested", () => {
+    prefersReducedMotion(true);
+    const { ydoc } = docWithTerminal(TRANSCRIPT);
+    const editor = mount(ydoc);
+    try {
+      enterViewport();
+      expect(shown(editor)).toBe(TRANSCRIPT);
+      expect(cursorShowing(editor)).toBe(false);
+      expect(toggle(editor)?.hidden).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+      vi.advanceTimersByTime(20_000);
+      expect(shown(editor)).toBe(TRANSCRIPT);
+    } finally {
+      editor.destroy();
+    }
+  });
+
   it("gives assistive technology the complete transcript exactly once", () => {
     const { ydoc } = docWithTerminal(TRANSCRIPT);
     const editor = mount(ydoc);
@@ -461,14 +478,14 @@ describe("the terminal block", () => {
     }
   });
 
-  it("draws an empty transcript as a complete, idle panel", () => {
-    const { ydoc } = docWithTerminal("   \n  ");
+  it.each(["", "   \n  "])("draws an empty transcript %j as a complete, idle panel", (text) => {
+    const { ydoc } = docWithTerminal(text);
     const editor = mount(ydoc);
     try {
       enterViewport();
       vi.advanceTimersByTime(20_000);
       expect(block(editor)?.getAttribute("data-rendered")).toBe("true");
-      expect(shown(editor)).toBe("   \n  ");
+      expect(shown(editor)).toBe(text);
       expect(vi.getTimerCount()).toBe(0);
       expect(toggle(editor)?.hidden).toBe(true);
     } finally {
@@ -498,7 +515,7 @@ describe("the terminal block", () => {
       const panel = screen(editor);
       expect(panel?.getAttribute("role")).toBe("button");
       expect(panel?.getAttribute("tabindex")).toBe("0");
-      expect(panel?.getAttribute("aria-label")).not.toBeNull();
+      expect(panel?.getAttribute("aria-label")).toMatch(/transcript/i);
 
       panel?.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
