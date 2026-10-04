@@ -507,10 +507,10 @@ describe("ub remote", () => {
     });
     setRemote("wss://hub.example.ts.net", { env: box.env, cwd: box.cwd });
 
-    const config = readConfigFile(box, "config.json");
+    const config = JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
     expect(config.displayName).toBe("Someone");
     expect(config.color).toBe("#0e8085");
-    expect(config.hubUrl).toBe("wss://hub.example.ts.net");
+    expect(persistedHubUrl(box)).toBe("wss://hub.example.ts.net");
   });
 
   it("ignores an endpoint in the environment, in every command", async () => {
@@ -540,7 +540,7 @@ describe("ub remote", () => {
   it("preserves credentials when binding publication fails", () => {
     // Binding publication cannot modify the private credential store.
     const box = sandbox({ credentials: { signingSecret: SECRET } });
-    mkdirSync(join(box.configHome, "uberblick", "config.json"), { recursive: true });
+    mkdirSync(join(box.cwd, ".uberblick.json"), { recursive: true });
 
     expect(() =>
       setRemote("wss://hub.example.ts.net", {
@@ -879,8 +879,7 @@ describe("ub remote join", () => {
       body: "Recoverable on the old endpoint.",
     });
     await webTombstone(source, archived, title);
-    const local = sandbox({ credentials: { signingSecret: SECRET } });
-    pointAt(local, url(source));
+    const local = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: url(source) }, credentials: { signingSecret: SECRET } });
     await seedLocalTombstone(local, archived, title);
     const remote = await startHub(OTHER_SECRET);
     await webTombstone(remote, archived, title, OTHER_SECRET);
@@ -898,7 +897,7 @@ describe("ub remote join", () => {
     expect(run.stderr).toContain("another replica that still holds the content");
     expect(run.stderr).not.toContain("Rerun to finish");
     expect(run.stdout).not.toContain("moved and verified");
-    expect(readConfigFile(local, "config.json")).toEqual({ hubUrl: url(source) });
+    expect(readConfigFile(local, "config.json")).toEqual({ workspaceId: WORKSPACE, hubUrl: url(source) });
   });
 
   it("offers a local retry when the hub stops after preflight", async () => {
@@ -1018,16 +1017,8 @@ describe("ub remote join", () => {
     // …and told where the other one went, because it did not go anywhere.
     expect(run.stdout).toContain(mine);
     expect(run.stdout).toContain("was not merged into this one");
-    expect(run.stdout).toContain(`ub workspace use ${mine}`);
-    expect(run.stdout).not.toContain(`ub workspace use ${mine} --user`);
-    // Including the hazard the machine-wide endpoint creates for it: documents
-    // that only ever reached the local hub are in that hub's database, and
-    // nothing dials it any more.
-    expect(run.stdout).toContain("nothing points at it any more");
-    expect(run.stdout).toContain(`ub remote join ${DEAD_HUB_URL}/${mine}`);
-    // And that rejoining it needs the secret this join replaced: a hub reads
-    // HUB_AUTH_TOKEN from its own environment.
-    expect(run.stdout).not.toContain("HUB_AUTH_TOKEN from its own");
+    expect(run.stdout).toContain("previous workspace and its documents remain unchanged");
+    expect(run.stdout).not.toContain("endpoint, though, is machine-wide");
 
     // Both are listed, and the first one still holds everything it held.
     const listed = await runUbAsync(["workspace", "list"], box);
@@ -1293,7 +1284,7 @@ describe("preflight observation instrument", () => {
       const run = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
         const child = spawn(process.execPath, ["--import", "tsx", "test/observe-remote-join.ts", "3"], {
           cwd: PACKAGE_ROOT, timeout: 30_000,
-          env: { ...box.env, UB_TEST_MAX_WAIT_MS: undefined, UBERBLICK_DB: files[2] },
+          env: { ...box.env, UB_WORKSPACE_ID: workspace, UB_HUB_URL: endpoint, UB_TEST_MAX_WAIT_MS: undefined, UBERBLICK_DB: files[2] },
         });
         let stdout = "";
         let stderr = "";

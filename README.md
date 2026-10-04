@@ -251,24 +251,19 @@ variables in its environment — no `HUB_*`, no `UBERBLICK_*`, no `WORKSPACE_ID`
 because it has no use for them and `ub` is habitually run with a secret
 exported; the pin it does need rides in its argv.
 
-The installed line is always `ub mcp serve`. Which hub and which credential
-apply is resolved by `ub` — a client config that pinned either would be a second
-copy of configuration that already has an owner, and a project config is
-committable, so a secret has no business being in one. The **one** value an
-entry may carry is `WORKSPACE_ID`, and only when `--workspace` asks for it:
+The installed line is always `ub mcp serve`. Each new entry pins the complete
+selected binding as `UB_WORKSPACE_ID` and `UB_HUB_URL`, including `local` for a
+local-only workspace. Credentials stay in the private user store. With no
+selection, installation fails rather than creating an entry that follows an
+unrelated machine default.
 
 ```
-ub mcp install claude --project --workspace research-<uuid>
+ub mcp install claude --project
+ub mcp install claude --project --workspace research-<uuid> --hub https://hub.example.test
 ```
 
-**A project MCP entry is this repository's workspace binding.** That is the
-whole mechanism; there is no per-directory config file of uberblick's own. The
-client already reads a project-scoped MCP config to know what to spawn in this
-working directory, so the pin goes there: `WORKSPACE_ID` is the top precedence
-layer, so every agent session started in this checkout resolves that workspace
-and nothing else has to be told. Without `--workspace` the entry stays unpinned
-and follows this machine's default, which is the right answer for a repository
-that has no workspace of its own.
+Terminal commands and MCP use the same [project binding](#configuration).
+Explicit installer overrides require both `--workspace` and `--hub`.
 
 Re-pinning an entry that already exists is not this command's job any more: an
 entry pinned to another workspace is not the one it would register, so it is
@@ -280,7 +275,7 @@ there to prevent.
 This repository's MCP entries deliberately select a pinned installed client
 through a host launcher, as described below. The generic `ub mcp install
 claude --print` snippet still uses `ub mcp serve`. The repository entries carry
-no workspace or credential: they follow this machine's selected workspace.
+no credential. Existing custom launchers must provide a complete binding when upgrading to this configuration model.
 
 For a standalone smoke test of checkout source, `mise run mcp` runs it in the
 foreground. Use separate candidate configuration and data when the corpus hub
@@ -366,37 +361,31 @@ one. A loopback hub trusts its local signing secret. A remote hub admits only
 a device credential naming the workspace with current membership, and closes
 sessions when that credential is revoked or membership is removed.
 
-Give a second project its own workspace by pinning it in that checkout's project
-MCP config — committable, and never secrets. That is one command, run in the
-checkout:
+Bind a project to an existing workspace with `ub remote join <workspace-url>`.
+For a local workspace use `ub init`; remote membership must already exist.
+These commands write `.uberblick.json` for the project, and never grant access
+merely by selecting a UUID. Client-side creation of another remote workspace is
+separate work.
+
+`ub workspace` prints the current binding and its source. `ub workspace list`
+lists local workspace databases. Selecting another known workspace requires an
+explicit hub, so the selection cannot inherit an unrelated endpoint:
 
 ```
-ub mcp install claude --project --workspace research-$(uuidgen | tr A-Z a-z)
+ub workspace use <uuid> --hub https://hub.example.test
+ub workspace use <local-uuid> --hub local
 ```
 
-That registers `WORKSPACE_ID` on the `uberblick` entry of this directory's
-`.mcp.json` — through `claude mcp add -e`, which is the vendor's own way of
-saying it — and every agent session started here spawns through that entry.
-Nothing else is in it, and nothing else is copied into it.
-
-To change this *machine's* default instead — what an unpinned entry, `ub status`
-and the mise tasks all resolve to — use `ub workspace use <id>`. It writes your
-`config.json`, and every reader follows it: the tasks run through `ub env`, so
-`mise run web` and the hub pick up the switch with nothing else to keep in step.
-`ub workspace` on its own
-prints the workspace in force and which layer chose it; `ub workspace list`
-shows the workspaces this machine has a database for, so `use` and
-`--workspace` both also take a unique uuid prefix from that list.
-
-One agent session can hold **two** workspaces at once: `--label <label>` puts the
-pin on a separately named `uberblick-<label>` entry instead of the primary one,
-so two processes serve two corpora under two tool prefixes.
+A session can use several corpora through separately named MCP entries, on the
+same or different hubs:
 
 ```
-ub mcp install claude --project --workspace <other-uuid> --label research
+ub mcp install claude --project --workspace <first-uuid> --hub https://first.example.test --label product
+ub mcp install claude --project --workspace <second-uuid> --hub https://second.example.test --label research
 ```
 
-Either way it is the same server, the same hub and a different corpus.
+Each entry carries its own complete binding. Installing an existing name never
+overwrites its configuration; use the vendor's management command to replace it.
 
 The web client takes one more value, `WORKSPACES`: a comma-separated list of the
 workspaces to offer in the topbar switcher, e.g.
@@ -432,7 +421,7 @@ ub status          # workspace, hub, connection, pending work, local log, failur
 ub status --json   # full report, including rooms, configuration and storage paths
 ub workspace       # the workspace in force, and which layer chose it
 ub workspace list  # workspaces this machine has a database for
-ub workspace use   # make a workspace this machine's default
+ub workspace use <id> --hub <url|local>  # select a complete project binding
 ub remote          # the endpoint in force, and what sharing it buys
 ub mcp install     # register uberblick with an MCP client
 ub mcp serve       # the stdio entry point for an MCP client
@@ -469,35 +458,47 @@ moving a machine between hubs is `ub remote join`. `--mcp` ends by printing what
 somebody's agent on its own, even with a vendor CLI installed: running
 `claude mcp add` is `ub mcp install`, asked for on purpose.
 
-Configuration is JSON and every layer is optional — absent configuration is a
-default, never an error — with one exception: the **workspace** has no default.
-A workspace id is a uuid, optionally decorated for display as `<slug>-<uuid>`
-(the slug is cosmetic; only the uuid names a room, a token claim or the local
-database). Nothing invents one, because a guessed workspace would open a corpus
-nobody chose, so `ub init` is what creates one and `ub status`, `ub mcp serve`
-and the MCP server all refuse to run without it — naming `ub init` when they do.
-Precedence, highest first:
+### Configuration
 
-| Layer | Holds |
-| --- | --- |
-| environment (`WORKSPACE_ID`, `HUB_AUTH_TOKEN`) | wins, so a project MCP entry's `WORKSPACE_ID` pin binds the repository it travels with, and `fnox exec` can supply the secret. **Not the endpoint** |
-| `config.json` | per-user identity (display name, cursor colour), the workspace and the hub endpoint — what `ub init` and `ub remote join` write. Which directory it is in is [the layout](#where-your-files-live) |
-| `credentials.json`, mode 0600, beside it | loopback signing secret and separate device logins keyed by hub origin. Never printed by any command, and refused outright — not merely warned about — if anyone but its owner can read it |
-| built-in defaults | hub `ws://localhost:1234`. No workspace: there is no default one |
+Workspace selection is explicit and atomic: workspace ID plus hub URL. Terminal
+commands, `ub open`, `ub env` and `ub mcp serve` use one resolver:
 
-**The endpoint has one authority.** `HUB_URL` in the environment is not a layer:
-it is not read, and it is not passed on to anything `ub` spawns. Two ambient
-sources for an endpoint is what silently redirected a machine bound to a remote
-hub at a local one while its writes reported `synced` (#376) — so the value in
-`config.json` is the answer, and two commands write it: `ub init <hub-url>`
-fills it in on a machine that has none, and `ub remote join` is how it changes.
-Neither is a file to edit by hand.
+1. Both `UB_WORKSPACE_ID` and `UB_HUB_URL` in the environment override the whole
+   project binding. A missing, blank or invalid half is an error; values are never
+   borrowed from another layer. Set `UB_HUB_URL=local` for local-only use. These
+   variables work with mise, direnv and per-entry MCP environments.
+2. Otherwise, search from the current directory up to the filesystem root for
+   the nearest `.uberblick.json`. An invalid nearest file fails; it never falls
+   through to a parent.
+3. Without either, `ub status` reports **No workspace selected** without opening
+   a database. Workspace-dependent commands refuse until a binding is chosen.
 
-There is no per-directory config file either: a repository that needs its own
-workspace pins `WORKSPACE_ID` in the project MCP entry the client already reads,
-which arrives as the environment. Nothing committable carries an endpoint or a
-credential, and a checkout is not a configuration layer — its tasks *consume*
-this machine's configuration through `ub env` rather than keeping a copy.
+```json
+{
+  "workspaceId": "11111111-1111-4111-8111-111111111111",
+  "hubUrl": "https://hub.example.test"
+}
+```
+
+Use JSON `null` for a local-only hub. A hub address is normalized to its sync
+endpoint; a workspace ID can have a display slug, but only its UUID identifies
+data. The file contains no credentials and may be committed when its selection
+is appropriate for everyone using the project. `ub status` shows the workspace,
+hub and selection source. `ub init`, `ub remote join` and `ub workspace use`
+update the nearest project file, or create one in the current directory.
+
+**Migration:** legacy `WORKSPACE_ID` / `HUB_URL` inputs and workspace/endpoint
+fields in the user's `config.json` no longer select a workspace. Existing
+credentials, identity and document databases remain untouched. Add an explicit
+project file with the existing workspace and hub, or set both new environment
+variables. Existing MCP entries must be updated to include both variables;
+installation reports conflicting entries without overwriting them.
+
+The private `credentials.json` remains owner-only and holds local development
+signing secrets plus separate device logins keyed by hub origin. No credential
+belongs in a project file or MCP entry. `HUB_AUTH_TOKEN` still overrides the
+stored local development signing secret; remote sync resolves its saved login
+from the private store.
 
 One further variable is a test seam, not a configuration layer:
 `UB_TEST_MAX_WAIT_MS` caps four deadlines `ub` spends probing something
@@ -591,9 +592,9 @@ in the message.
 
 A workspace on this machine under a *different* id stays. It is never merged
 into the joined one and never moved: `ub workspace list` shows both, and
-`ub workspace use <id>` switches back. The endpoint is machine-wide,
-though, so another workspace can share with that remote only when the device
-credential and current membership allow its UUID.
+`ub workspace use <id> --hub <url|local>` selects its complete binding. A remote
+workspace is accessible only when the device credential and current membership
+allow its UUID.
 
 Run `ub open` to edit from this computer's browser after signing in and joining.
 The MCP server and `ub open` use this hub's stored login, renew it without new
@@ -601,13 +602,10 @@ GitHub approval, and resume after restart. Device credentials never reach the
 browser; `ub open` serves a separate loopback key. `mise run dev` stays a local
 development path and does not sync its browser with a remote hub.
 
-**What "persisted" covers.** The endpoint — and, after a `join`, the workspace
-binding with it — goes into your `config.json`, which is the only place `ub`,
-`ub mcp serve`, the MCP server it spawns and every checkout task running under
-`ub env` resolve them from. Nothing outranks it, so a report naming the endpoint
-is naming the one in force. A *workspace* can still be outranked, by
-`WORKSPACE_ID` in the environment — a project MCP entry's pin — and `join` says
-so when it is.
+**What "persisted" covers.** The complete binding goes into the project's
+`.uberblick.json` only after the existing verification succeeds. A complete
+environment pair can override it; commands report that selection source. No
+workspace or endpoint is borrowed from machine-wide defaults.
 
 A deployed web client does not read any of these: it resolves its endpoint — and
 its workspaces — at runtime from the served `/uberblick-config.json`.
@@ -788,7 +786,7 @@ secrets go there: plaintext local defaults such as `HUB_DB_PATH` live in
 `mise.toml`'s `[env]` block. `HUB_URL` deliberately does not — that block is
 ambient for everything in a checkout, so its `ws://localhost:1234` default lives
 in the clients' code instead, and the endpoint a machine actually dials comes
-from its own `config.json` through `ub env`.
+from its explicit project/environment binding through `ub env`.
 
 Contributors without the age key are not blocked. The task wrappers pass
 `fnox exec --if-missing warn` explicitly, so a secret fnox cannot decrypt logs a

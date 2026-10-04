@@ -407,7 +407,9 @@ export async function installCommand(
       // Full UUIDs need no current binding or local replica. Prefixes still use
       // the same local inventory and ambiguity rules as `workspace use`.
       if ("error" in resolveWorkspaceId(flags.workspace, known)) {
-        known = listWorkspaces().entries;
+        known = listWorkspaces({ env: {
+          ...process.env, UB_WORKSPACE_ID: undefined, UB_HUB_URL: undefined,
+        } }).entries;
       }
       const selected = resolveWorkspaceId(flags.workspace, known);
       if ("error" in selected) throw new Error(selected.error);

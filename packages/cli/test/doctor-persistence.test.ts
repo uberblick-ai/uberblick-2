@@ -116,8 +116,8 @@ describe("ub doctor live persistence reading", () => {
   });
 
   it("reports an absent database without creating it or its parent directories", async () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
-    const configPath = join(box.configHome, "uberblick", "config.json");
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const configPath = join(box.cwd, ".uberblick.json");
     const config = readFileSync(configPath, "utf8");
     const databasePath = join(box.cwd, "absent", "nested", "mirror.sqlite");
     const { check } = await persistence(box, { UBERBLICK_DB: databasePath });
@@ -128,11 +128,11 @@ describe("ub doctor live persistence reading", () => {
     expect(existsSync(join(box.cwd, "absent"))).toBe(false);
     expect(existsSync(box.dataHome)).toBe(false);
     expect(readFileSync(configPath, "utf8")).toBe(config);
-    expect(readdirSync(join(box.configHome, "uberblick"))).toEqual(["config.json"]);
+    expect(existsSync(box.configHome)).toBe(false);
   });
 
   it("reports a directory in place of a database without creating store files", async () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     const databasePath = join(box.cwd, "directory.sqlite");
     mkdirSync(databasePath);
     const { check } = await persistence(box, { UBERBLICK_DB: databasePath });
@@ -145,7 +145,7 @@ describe("ub doctor live persistence reading", () => {
   });
 
   it("reports a corrupt existing store as a failed reading", async () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     const databasePath = join(box.cwd, "corrupt.sqlite");
     const contents = "this is not a SQLite database";
     writeFileSync(databasePath, contents);
@@ -161,7 +161,7 @@ describe("ub doctor live persistence reading", () => {
   });
 
   it.skipIf(process.getuid?.() === 0)("reports an existing store it cannot open", async () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     const databasePath = join(box.cwd, "unreadable.sqlite");
     await emptyStore(box, databasePath);
     chmodSync(databasePath, 0o000);
@@ -178,7 +178,7 @@ describe("ub doctor live persistence reading", () => {
   });
 
   it("passes a completed local-only reading of an existing healthy store", async () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     const databasePath = join(box.cwd, "healthy.sqlite");
     await emptyStore(box, databasePath);
     const { check, report } = await persistence(box, { UBERBLICK_DB: databasePath });
@@ -190,7 +190,7 @@ describe("ub doctor live persistence reading", () => {
 
   it("explains the refused append found by status, and never repairs it", async () => {
     const box = sandbox({
-      userConfig: { workspace: WORKSPACE },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: null },
       credentials: { signingSecret: SECRET },
     });
     const databasePath = join(box.cwd, "refusing.sqlite");

@@ -1,15 +1,10 @@
 /**
  * `ub env -- <command…>` — run a command under uberblick's configuration.
  *
- * The checkout tasks need `WORKSPACE_ID`, the endpoint every client dials and
- * a signing secret for loopback sync. Remote clients read their private login. There
- * is exactly one authority for those — this machine's `{config,credentials}.json`,
- * resolved by `config.ts` — and this command is how anything that is not `ub`
- * consumes it. `mise run hub` and `mise run web` wrap their command in this
- * instead of reading a second, derived copy of the configuration, because a
- * derived copy is a second answer, and a second answer to "which hub" is the
- * island trap: writes reported as synced against a hub nobody else is reading
- * (#376).
+ * All consumers receive the same atomic project/environment selection. The
+ * legacy internal WORKSPACE_ID and HUB_URL keys are transport to the child;
+ * UB_WORKSPACE_ID and UB_HUB_URL carry the complete binding into nested `ub`
+ * invocations. Remote logins stay in the private credential store.
  *
  * **There is no bare `ub env`.** Printing the resolved environment would print
  * the hub's signing secret to stdout, where a shell history, a CI log or a

@@ -545,6 +545,7 @@ function parseInitFlags(argv: string[]): InitFlags {
 
 export interface RemoteInitDeps {
   env?: NodeJS.ProcessEnv;
+  cwd?: string;
   /** How the deployment is verified from here. Injected by the tests. */
   reach?: Reach;
 }
@@ -640,14 +641,16 @@ export async function remoteInitCommand(
 
   const env = deps.env ?? process.env;
   const reach = deps.reach ?? reachStack;
-  const resolved = resolveConfig({ env });
+  const cwd = deps.cwd ?? process.cwd();
+  const resolved = resolveConfig({ env, cwd });
   for (const warning of resolved.warnings) io.err(`ub: warning: ${warning}\n`);
   // The endpoint this machine had before the deploy. Standing a hub up and
   // pointing this machine at it is what this command does, so an endpoint that
   // was here when it started is one it may replace; one that *arrives* while it
   // is deploying belongs to a run that knows something this one does not, and
   // the publish below refuses rather than overwriting it.
-  const endpointBefore = resolveProjectBinding({ env }).binding?.hubUrl ?? null;
+  const bindingBefore = resolveProjectBinding({ env, cwd }).binding;
+  const endpointBefore = bindingBefore?.hubUrl ?? null;
 
   let base: McpConfig;
   try {
@@ -950,8 +953,9 @@ export async function remoteInitCommand(
   }
   let persistence: RemotePersistence;
   try {
-    const endpointNow = resolveProjectBinding({ env }).binding?.hubUrl ?? null;
-    if (endpointNow !== endpointBefore && endpointNow !== endpoint) {
+    const bindingNow = resolveProjectBinding({ env, cwd }).binding;
+    const endpointNow = bindingNow?.hubUrl ?? null;
+    if (bindingNow?.workspaceId !== bindingBefore?.workspaceId || (endpointNow !== endpointBefore && endpointNow !== endpoint)) {
       io.err(
         `ub remote init: this machine was bound to ${endpointNow ?? "no endpoint"} ` +
           "while the stack was being deployed, so the endpoint here was not " +
@@ -960,7 +964,7 @@ export async function remoteInitCommand(
       );
       return 1;
     }
-    persistence = setRemote(endpoint, { env, workspace: base.workspaceId });
+    persistence = setRemote(endpoint, { env, cwd, workspace: base.workspaceId });
   } finally {
     lock.release();
   }

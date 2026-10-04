@@ -778,6 +778,20 @@ describe("complete MCP bindings", () => {
     });
   });
 
+  it("resolves explicit UUID prefixes without borrowing an incomplete environment", () => {
+    const box = sandbox();
+    const directory = join(box.dataHome, "uberblick");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, `${OTHER}.sqlite`), "");
+    const run = runUb([
+      "mcp", "install", "claude", "--print", "--workspace", OTHER.slice(0, 8), "--hub", "local",
+    ], box, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: undefined });
+    expect(run.status, run.output).toBe(0);
+    expect(JSON.parse(run.stdout).mcpServers.uberblick.env).toEqual({
+      UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "local",
+    });
+  });
+
   it.each([`https://user:${SECRET}@hub.example.test`, `https://hub.example.test?token=${SECRET}`])(
     "refuses a credential-bearing hub without leaking it", (hub) => {
       const run = runUb([

@@ -16,7 +16,7 @@ import {
   writeTempBeside,
 } from "./safe-write.js";
 
-/** Per-user identity, default workspace, remote endpoint. Not committed. */
+/** Per-user identity and legacy migration information. Not a workspace selector. */
 export const USER_CONFIG_FILE = "config.json";
 
 /** The key holding the hub's HMAC signing secret in `credentials.json`. */
@@ -28,23 +28,7 @@ export type Origin = "environment" | "project config" | "user config" | "default
 /** Where a signing secret came from, or null when none is configured. */
 export type CredentialOrigin = "environment" | "credentials file";
 
-/**
- * A layer that named a value, and lost to a *different* one above it.
- *
- * Precedence is deliberate — a repository binds itself to a workspace by
- * pinning `WORKSPACE_ID` in its project MCP entry, and that pin is meant to
- * outrank this machine's default — but an ambient layer that silently
- * disagrees with a file is the failure #376/#385 removed for the endpoint:
- * `ub doctor` endorsed a workspace as healthy while `config.json` named
- * another one. So a disagreement is reported and nothing else: the same layer
- * still wins, and no disagreement is ever fatal.
- *
- * The layer above is the environment in both cases — it is the only one there
- * is — so the winner is the origin already reported for that setting. An entry
- * means the layers were compared and found to name different things: a value
- * that could not be read as a workspace id at all is a warning and no entry,
- * because nothing proves it names a *different* workspace.
- */
+/** A private credential source overridden by another explicit value. */
 export interface ShadowedLayer {
   /** The setting the layers disagree about. */
   setting: "workspace" | "credential";
@@ -171,18 +155,7 @@ function stringField(
   return value.trim();
 }
 
-interface Layer {
-  origin: Origin;
-  value: string | null;
-  /** How to name this layer in an error message. */
-  label: string;
-}
-
-/**
- * What `config.json` may hold. `ub init` writes it; {@link resolveConfig} reads
- * the two fields that resolve into an environment, and the identity fields ride
- * along for the awareness name and colour a client publishes.
- */
+/** Per-user identity plus legacy workspace fields, preserved for explicit migration. */
 export interface UserConfig {
   // `| undefined` explicitly, under `exactOptionalPropertyTypes`: a field the
   // file does not carry reads as undefined rather than being absent.
@@ -357,7 +330,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   if (selection.binding === null &&
       (env.WORKSPACE_ID !== undefined || env.HUB_URL !== undefined ||
        userConfig?.workspace !== undefined || userConfig?.hubUrl !== undefined)) {
-    warnings.push("Legacy machine workspace/endpoint settings are not used. " + NO_BINDING);
+    warnings.push(`Legacy machine workspace/endpoint settings are not used. ${NO_BINDING}`);
   }
 
   // Credentials are read last and from one file only: every layer above is one
@@ -435,7 +408,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   };
 }
 
-/** What `credentials.json` may hold today. Remote tokens arrive with #84. */
+/** Local-development credentials; remote device logins use the private auth store. */
 export interface Credentials {
   /** The hub's HMAC signing secret — not a token. */
   signingSecret?: string;

@@ -3,11 +3,8 @@
  *
  * `ub remote` names the endpoint and the membership required for sharing.
  * Remote clients use this machine’s stored device login. `ub remote init` and `ub remote update` stand up and
- * deploy the host; `ub remote join <url-with-workspace-id>` binds this machine to a
+ * deploy the host; `ub remote join <url-with-workspace-id>` binds this project to a
  * workspace that already lives on one, and hydrates it.
- *
- * There is no operator suite here: no verb that points the clients somewhere
- * without moving anything. Release 1 has one owner, one workspace, and `join`.
  *
  * **`join` binds one workspace; it never merges two, and it never seeds.** The
  * URL carries the workspace id, so nothing already on this machine is in the
@@ -32,7 +29,8 @@
  * changed on the strength of one would strand a corpus on the old hub, which is
  * the exact failure this command exists to prevent.
  *
- * **Persisting means every client, not just `ub`.** See {@link setRemote}.
+ * Clients resolving this project binding follow it. Explicit environment pins
+ * remain independent. See {@link setRemote}.
  *
  * Login keys stay in the owner-only credential store; joining changes only
  * the workspace binding after successful reconciliation and verification.
@@ -230,7 +228,7 @@ export const REMOTE_BRIDGE_OPTIONS = {} as const;
 
 export const REMOTE_JOIN_HELP = `usage: ub remote join <url-with-workspace-id>
 
-Bind this machine to a workspace that already lives on a remote hub, whatever is
+Bind this project to a workspace that already lives on a remote hub, whatever is
 here already: the remote's documents are hydrated into that workspace's local
 replica, and the endpoint and the binding are stored. Remote hubs use this
 machine’s stored login from \`ub auth login <hub>\`. No \`ub init\` is needed first.
@@ -504,16 +502,11 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     let recovery =
       `Rerun this command on this machine once ${bridge.target} can finish the sync.`;
     if (contentMissing) {
-      const sourceEndpoint = resolveMcpConfig({
-        ...resolved.env,
-        WORKSPACE_ID: flags.workspace,
-      }).hubUrl;
-      recovery =
-        sourceEndpoint === bridge.target
-          ? "Retry from another replica that still holds the content."
-          : `Rerun \`ub remote join ${sourceEndpoint}/${flags.workspace}\` against ` +
-            "the endpoint this machine was using before this command, or retry " +
-            "from another replica that still holds the content.";
+      const source = resolved.binding;
+      recovery = source !== null && parseWorkspaceId(source.workspaceId).uuid === parseWorkspaceId(flags.workspace).uuid &&
+          source.hubUrl !== null && source.hubUrl !== bridge.target
+        ? `Rerun \`ub remote join ${source.hubUrl}/${flags.workspace}\` against this workspace's previous hub, or retry from another replica that still holds the content.`
+        : "Retry from another replica that still holds the content.";
     }
     io.err(
       `ub remote join: ${joinProblem}This machine's configuration is ` +
@@ -579,22 +572,20 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     // evidence of a replica.
     note +=
       `\n${previous} was not merged into this one and nothing of it was moved. ` +
-      "Whatever this\nmachine holds for it is still here — `ub workspace list` " +
-      "shows the workspaces with\na replica on this machine — and " +
-      "The previous workspace and its documents remain unchanged.\n";
+      "The previous workspace and its documents remain unchanged. " +
+      "`ub workspace list` shows local replicas.\n";
   }
   io.out(report("joined", bridge.target, checked.corpus, persistence, takenAt, note));
 
-  // Written, and possibly overruled: `WORKSPACE_ID` in the environment outranks
-  // `.uberblick.json`, and a report naming a binding that something else outranks is
-  // the lie `ub status` then contradicts.
+  // An environment binding can still override the project file. Report both
+  // fields so the next status cannot silently point at a different destination.
   const after = resolveConfig();
   const inForce = after.env.WORKSPACE_ID?.trim();
-  if (inForce !== flags.workspace) {
+  if (inForce !== flags.workspace || after.binding?.hubUrl !== flags.endpoint) {
     io.err(
       `ub: warning: ${ORIGIN_LABELS[after.origins.workspace]} sets ${
         inForce ?? "no workspace"
-      }, which takes precedence over the binding just written — that is the ` +
+      } at ${after.binding?.hubUrl ?? "local-only"}, which takes precedence over the binding just written — that is the ` +
         "workspace in force here, whatever this joined.\n",
     );
   }

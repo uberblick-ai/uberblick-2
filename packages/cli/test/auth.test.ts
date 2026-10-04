@@ -1,8 +1,8 @@
 /** Remote sign-in contracts across the real CLI, HTTP hub and owner-only store. */
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
-  chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync,
+  chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync,
   statSync, writeFileSync,
 } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -253,39 +253,35 @@ describe("ub auth local selection and command surface", () => {
     expect(existsSync(credentialPath(box))).toBe(false);
   });
 
-  it("reports a malformed config before refusing a missing or invalid hub", async () => {
-    const box = sandbox({ raw: { userConfig: '{"hubUrl":"wss://hub.example.ts.net/ws",' } });
-    for (const invalid of [false, true]) {
-      const run = await runUbAsync(["auth", "status", ...(invalid ? ["https://hub.example.ts.net/?invalid"] : [])], box);
-      expect(run.status).toBe(invalid ? 2 : 1);
-      expect(run.stdout).toBe("");
-      expect(run.stderr).toContain(`ignoring ${configPath(box)}: invalid JSON`);
-      expect(run.stderr.indexOf("invalid JSON")).toBeLessThan(run.stderr.indexOf(invalid ? "invalid hub" : "no hub given"));
-    }
-    expect(existsSync(credentialPath(box))).toBe(false);
-  });
-
-  it.each(["login", "status", "logout"])("emits Hub before config warnings for %s with a valid explicit selection", (subcommand) => {
-    const origin = "http://127.0.0.1:1";
+  it("never uses a legacy machine hub and resolves a complete environment pair for implicit auth", async () => {
+    const origin = "https://selected.example.test";
     const box = sandbox({
-      raw: { userConfig: '{"hubUrl":"wss://hub.example.ts.net/ws",' },
+      userConfig: { workspace: WORKSPACE, hubUrl: "https://legacy.example.test" },
       credentials: { hubLogins: { [origin]: fixture() } },
     });
-    const outputPath = join(box.cwd, "auth-output.txt");
-    // One descriptor records the order the real CLI writes both streams,
-    // without relying on the parent's scheduling of two independent pipes.
-    const descriptor = openSync(outputPath, "w", 0o600);
-    let status: number | null;
-    try {
-      status = spawnSync(process.execPath, [UB_BIN, "auth", subcommand, DEAD_HUB_URL], {
-        cwd: box.cwd, env: box.env, stdio: ["ignore", descriptor, descriptor], timeout: 15_000,
-      }).status;
-    } finally { closeSync(descriptor); }
-    expect(status).toBe(subcommand === "login" ? 1 : 0);
-    const output = readFileSync(outputPath, "utf8");
-    expect(output.split("\n")[0]).toBe(`Hub: ${origin}`);
-    expect(output).toContain(`ignoring ${configPath(box)}: invalid JSON`);
-    expect(output).not.toContain("wss://hub.example.ts.net/ws");
+    const unbound = await runUbAsync(["auth", "status"], box);
+    expect(unbound.status).toBe(1);
+    expect(unbound.stderr).toContain("no hub given and none bound");
+    const selected = await runUbAsync(["auth", "status"], box, {
+      UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: origin,
+    });
+    expect(selected.status, selected.output).toBe(0);
+    expect(selected.stdout).toContain(origin);
+    expect(selected.stdout).not.toContain("legacy.example.test");
+  });
+
+  it("refuses malformed project selection for an implicit hub but permits an explicit login target", async () => {
+    const origin = "https://hub.example.test";
+    const box = sandbox({ raw: { projectBinding: '{"workspaceId":' },
+      credentials: { hubLogins: { [origin]: fixture() } },
+    });
+    const implicit = await runUbAsync(["auth", "status"], box);
+    expect(implicit.status).toBe(1);
+    expect(implicit.stderr).toContain(".uberblick.json");
+    const explicit = await runUbAsync(["auth", "status", origin], box);
+    expect(explicit.status, explicit.output).toBe(0);
+    expect(explicit.stdout).toContain(origin);
+    expect(explicit.stdout).toContain("previous-user");
   });
 
   it("finds one offline login across host case, default-port and endpoint spellings without rebinding", async () => {

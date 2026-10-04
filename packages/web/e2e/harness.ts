@@ -93,7 +93,7 @@ async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
 
 function openEnvironment(runDir: string, bundleDir: string): NodeJS.ProcessEnv {
   const env = { ...process.env };
-  for (const key of ["HOME", "HUB_AUTH_TOKEN", "HUB_URL", "WORKSPACE_ID", "WORKSPACES"]) {
+  for (const key of ["HOME", "HUB_AUTH_TOKEN", "HUB_URL", "WORKSPACE_ID", "WORKSPACES", "UB_WORKSPACE_ID", "UB_HUB_URL"]) {
     delete env[key];
   }
   env.HOME = runDir;
@@ -355,8 +355,8 @@ export async function startHarness(): Promise<Harness> {
     const configDir = join(runDir, "config", "uberblick");
     mkdirSync(configDir, { recursive: true });
     writeFileSync(
-      join(configDir, "config.json"),
-      `${JSON.stringify({ workspace, hubUrl }, null, 2)}\n`,
+      join(runDir, ".uberblick.json"),
+      `${JSON.stringify({ workspaceId: workspace, hubUrl }, null, 2)}\n`,
       { mode: 0o600 },
     );
     const credentials = join(configDir, "credentials.json");

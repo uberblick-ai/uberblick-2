@@ -27,11 +27,12 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { readUserConfig } from "../src/config.js";
+import { resolveProjectBinding } from "../src/project-binding.js";
 import type { Io } from "../src/io.js";
 import {
   initRerunFailure,
@@ -131,7 +132,7 @@ interface Harness {
   labels(): string[];
 }
 
-function harness(host: Host = {}, box: Sandbox = sandbox({ credentials: { signingSecret: SECRET } })): Harness {
+function harness(host: Host = {}, box: Sandbox = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } })): Harness {
   const stubs = join(box.cwd, "..", "stubs");
   const record = join(box.cwd, "..", "record");
   const behavior = join(box.cwd, "..", "behavior");
@@ -159,7 +160,6 @@ function harness(host: Host = {}, box: Sandbox = sandbox({ credentials: { signin
     box,
     env: {
       ...box.env,
-      WORKSPACE_ID: WORKSPACE,
       PATH: `${stubs}:${process.env.PATH ?? ""}`,
       UB_TEST_RECORD: record,
       UB_TEST_BEHAVIOR: behavior,
@@ -223,7 +223,7 @@ function stepFor(rig: Harness, marker: string): Step {
 /** A successful init, with the network verification injected. */
 function init(rig: Harness, args: string[] = [TARGET]): Promise<number> {
   return remoteInitCommand(args, rig.io, {
-    env: rig.env,
+    env: rig.env, cwd: rig.box.cwd,
     reach: async () => null,
   });
 }
@@ -346,7 +346,7 @@ describe("ub remote init", () => {
 
   it("refuses before touching the host when no workspace is configured", async () => {
     const rig = harness();
-    delete rig.env.WORKSPACE_ID;
+    rmSync(join(rig.box.cwd, ".uberblick.json"));
     expect(await init(rig)).toBe(2);
     expect(rig.err()).toContain("Run `ub init`");
     expect(rig.steps()).toEqual([]);
@@ -454,7 +454,7 @@ describe("ub remote init", () => {
   it("persists the endpoint it stood up", async () => {
     const rig = harness();
     expect(await init(rig)).toBe(0);
-    expect(readUserConfig(rig.env).raw?.hubUrl).toBe(`wss://${MAGIC_DNS}/ws`);
+    expect(resolveProjectBinding({ env: rig.env, cwd: rig.box.cwd }).binding?.hubUrl).toBe(`wss://${MAGIC_DNS}/ws`);
     expect(rig.out()).toContain(`wss://${MAGIC_DNS}/ws`);
   });
 
@@ -469,13 +469,13 @@ describe("ub remote init", () => {
     const other = "ws://127.0.0.1:2";
 
     const status = await remoteInitCommand([TARGET], rig.io, {
-      env: rig.env,
+      env: rig.env, cwd: rig.box.cwd,
       // The last thing before the publish: another `ub init` or `ub remote
       // join` binds this machine while the stack is coming up.
       reach: async () => {
         writeFileSync(
-          join(rig.box.configHome, "uberblick", "config.json"),
-          `${JSON.stringify({ workspace: WORKSPACE, hubUrl: other }, null, 2)}\n`,
+          join(rig.box.cwd, ".uberblick.json"),
+          `${JSON.stringify({ workspaceId: WORKSPACE, hubUrl: other }, null, 2)}\n`,
           "utf8",
         );
         return null;
@@ -484,7 +484,7 @@ describe("ub remote init", () => {
 
     expect(status).toBe(1);
     // One endpoint, and it is the one that got there first.
-    expect(readUserConfig(rig.env).raw?.hubUrl).toBe(other);
+    expect(resolveProjectBinding({ env: rig.env, cwd: rig.box.cwd }).binding?.hubUrl).toBe(other);
     // The stack is up, so the refusal says how to reach what was deployed.
     expect(rig.err()).toContain(`ub remote join wss://${MAGIC_DNS}/ws/${WORKSPACE}`);
   });

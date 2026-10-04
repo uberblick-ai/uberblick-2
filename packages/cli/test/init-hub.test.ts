@@ -178,7 +178,7 @@ describe("ub init <hub-url>", () => {
     // What the run that got there first left behind.
     writeFileSync(
       configPath(box),
-      `${JSON.stringify({ workspace: WORKSPACE, hubUrl: first }, null, 2)}\n`,
+      `${JSON.stringify({ workspaceId: WORKSPACE, hubUrl: first }, null, 2)}\n`,
     );
     rmSync(lock);
 
@@ -210,7 +210,7 @@ describe("ub init <hub-url>", () => {
     await waitUntil("`ub init` to say it is waiting for the lock", () => waiting);
     writeFileSync(
       configPath(box),
-      `${JSON.stringify({ workspace: WORKSPACE, hubUrl: CLOSED }, null, 2)}\n`,
+      `${JSON.stringify({ workspaceId: WORKSPACE, hubUrl: CLOSED }, null, 2)}\n`,
     );
     rmSync(lock);
 

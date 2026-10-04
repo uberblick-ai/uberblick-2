@@ -1136,16 +1136,13 @@ the browser a separate loopback key. It serves neither a device credential nor
 an upstream secret. `mise run dev` is the loopback development path and does not
 support remote sync.
 
-Persisting the endpoint — and, after a join, the workspace binding — writes
-`$XDG_CONFIG_HOME/uberblick/config.json`, which is the only place `ub`,
-`ub mcp serve`, the MCP server it spawns and every checkout task under `ub env`
-resolve them from — an endpoint in the environment is not read at all. The
-*workspace* can still be outranked by `WORKSPACE_ID` there, and a project MCP
-entry pinned with `ub mcp install --project --workspace <id>` is exactly how one
-gets into an agent session's environment; `join` names the winner instead of
-claiming a switch that did not take effect. The deployed web client here reads
-its endpoint at runtime from the served `/uberblick-config.json`, not from any
-of them.
+Persisting a selection writes the complete workspace and hub binding to the
+nearest `.uberblick.json`, or creates that file in the current folder. All CLI
+commands and MCP use it. A complete `UB_WORKSPACE_ID` and `UB_HUB_URL` environment
+pair overrides it atomically; incomplete overrides fail. New MCP installations
+pin both values, including a selected `--workspace <id> --hub <url>` override.
+Credentials remain private and separate. The deployed web client reads its
+endpoint at runtime from `/uberblick-config.json` rather than these client files.
 
 Remote commands accept no signing secret and send no GitHub token. A missing
 login names `ub auth login`; a refused renewal requires signing in again; missing

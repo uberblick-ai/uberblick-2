@@ -1,7 +1,7 @@
 /** The human overview stays bounded; the report keeps its machine detail. */
 
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { StatusReport } from "../src/status.js";
@@ -194,7 +194,7 @@ describe("project selection in ub status", () => {
 
   it("finds the same project binding when run from a nested directory", () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
-    const projectPath = join(box.cwd, ".uberblick.json");
+    const projectPath = realpathSync(join(box.cwd, ".uberblick.json"));
     const nested = join(box.cwd, "src", "nested");
     mkdirSync(nested, { recursive: true });
     const run = runUb(["status", "--json"], { ...box, cwd: nested });

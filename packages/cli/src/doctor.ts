@@ -594,7 +594,9 @@ async function bindCheck(
 /** Every scope `ub mcp install` can target, in the order it prefers them. */
 const SCOPES: Scope[] = ["project", "user"];
 
-function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
+function mcpCheck(env: NodeJS.ProcessEnv, cwd: string, resolved: ResolvedConfig | null): Check {
+  const binding = resolved?.binding;
+  const wanted = binding == null ? DEFAULT_ENTRY : { ...DEFAULT_ENTRY, env: { UB_HUB_URL: binding.hubUrl ?? "local", UB_WORKSPACE_ID: binding.workspaceId } };
   const registered: string[] = [];
   const unusable: string[] = [];
   let looked = 0;
@@ -608,7 +610,7 @@ function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
       // commands cannot disagree about what is wired up. Nothing is quoted back
       // out of a config file — not its contents, and not a parser's complaint
       // about them: a file that is there and will not read is named by path.
-      const found = presence(file, DEFAULT_ENTRY);
+      const found = presence(file, wanted);
       if (found === "absent") {
         continue;
       }
@@ -628,7 +630,7 @@ function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
     unusable.length === 0 ? "" : `; could not read ${unusable.join(", ")}`;
   const first = registered[0];
   if (first !== undefined) {
-    const note = custom ? ", running a command of its own rather than `ub mcp serve`" : "";
+    const note = custom ? ", registration differs from the selected binding or command" : "";
     const more = registered.length > 1 ? ` (and ${registered.length - 1} more)` : "";
     return pass("mcp", `registered in ${first}${more}${note}${unread}`);
   }
@@ -697,7 +699,7 @@ export async function doctorReport(
     await clockCheck(config),
     portCheck(config, endpoint, resolvedEnv),
     await bindCheck(config, endpoint, resolvedEnv, dial),
-    mcpCheck(resolvedEnv, cwd),
+    mcpCheck(resolvedEnv, cwd, resolved),
   ];
 
   return {

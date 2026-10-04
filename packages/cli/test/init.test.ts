@@ -26,7 +26,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, parse } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { findCheckoutRoot } from "../src/checkout.js";
 import {
@@ -187,6 +187,13 @@ describe("ub init", () => {
     expect(projectBinding(box).workspaceId).toMatch(UUID);
 
     const decorated = `team-b-${JOINED}`;
+    const before = projectBinding(box);
+    const ambiguous = runUb(["init", "--yes", "--workspace", decorated], box);
+    expect(ambiguous.status).toBe(2);
+    expect(ambiguous.stderr).toContain("explicit hub");
+    expect(projectBinding(box)).toEqual(before);
+    const selected = runUb(["workspace", "use", decorated, "--hub", "local"], box);
+    expect(selected.status, selected.output).toBe(0);
     const flagged = runUb(
       ["init", "--name", "Ada", "--color", "#0675c9", "--workspace", decorated],
       box,
@@ -195,7 +202,6 @@ describe("ub init", () => {
     expect(userConfig(box)).toMatchObject({
       displayName: "Ada",
       color: "#0675c9",
-      workspace: decorated,
     });
   });
 
@@ -482,7 +488,7 @@ describe("ub init", () => {
     // exist inside one, so they are not offered as a next step.
     // Scratch may itself be beneath a checkout. init only reads its cwd, so
     // use the filesystem root while keeping all config and data in scratch.
-    const box = { ...sandbox(), cwd: parse(REPO_ROOT).root };
+    const box = sandbox();
     expect(
       findCheckoutRoot(realpathSync(box.cwd)),
       "the outside-checkout fixture must have no checkout ancestor",
@@ -493,7 +499,7 @@ describe("ub init", () => {
     expect(run.stdout).not.toMatch(/mise run dev/);
   });
 
-  it.skipIf(!hasGit)("leaves a checkout with nothing for git to report", () => {
+  it.skipIf(!hasGit)("creates only the non-secret project binding inside a checkout", () => {
     // The real `.gitignore`: `ub init` writes nothing into a checkout, and this
     // is what would catch it if that ever changed.
     const box = sandbox({ checkout: true });
@@ -523,7 +529,7 @@ describe("ub init", () => {
       cwd: box.cwd,
       encoding: "utf8",
     });
-    expect(status.stdout).toBe("");
+    expect(status.stdout).toBe("?? .uberblick.json\n");
   });
 
   it("keeps the credential owner-only under a umask that would widen it", () => {

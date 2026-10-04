@@ -576,7 +576,7 @@ function configDir(box: Sandbox): string {
 }
 
 /**
- * Rebind this machine, the way `ub remote join` or `ub workspace use` leaves it:
+ * Rebind this project, the way `ub remote join` or `ub workspace use` leaves it:
  * a different endpoint, workspace and signing secret, across both files.
  */
 function rebind(
@@ -601,8 +601,6 @@ function writeCredentials(box: Sandbox, signingSecret: string): void {
 }
 
 function writeBinding(box: Sandbox, hubUrl: string, workspace: string): void {
-  const dir = configDir(box);
-  mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(box.cwd, ".uberblick.json"),
     `${JSON.stringify({ workspaceId: workspace, hubUrl }, null, 2)}\n`,
@@ -1537,16 +1535,16 @@ describe("ub open", () => {
       servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env)),
     );
 
-    // The files change underneath, naming a different workspace. The pin still
-    // wins; changes in the endpoint and secret mark this process stale, while
-    // the engine continues with its coherent startup snapshot.
+    // The complete environment pair stays selected even when both file values
+    // change. A legacy signing secret also cannot rebind a remote device login,
+    // so this unrelated file edit does not mark the browser stale.
     rebind(box, {
       hubUrl: SECOND_REMOTE,
       workspace: WORKSPACE,
       signingSecret: REBOUND_SECRET,
     });
     expect(await (await get(url)).text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env), true),
+      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env)),
     );
 
     expect((await app.interrupt()).status).toBe(0);
@@ -2200,51 +2198,26 @@ describe("ub open", () => {
     expect((await app.interrupt()).status).toBe(0);
   });
 
-  it.each([undefined, SECRET])("serves no key when unbound (configured secret: %s)", async (signingSecret) => {
-    const box = sandbox(signingSecret === undefined ? {} : { credentials: { signingSecret } });
-    const hubUrl = signingSecret === undefined ? "ws://localhost:1234" : `ws://127.0.0.1:${await freePort()}`;
-    if (signingSecret !== undefined) pointAt(box, hubUrl);
+  it.each([undefined, SECRET])("refuses to serve without a binding (configured secret: %s)", async (signingSecret) => {
+    const box = sandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: FIRST_REMOTE },
+      ...(signingSecret === undefined ? {} : { credentials: { signingSecret } }),
+    });
     const bundle = fixtureBundle(box);
     const webPort = await freePort();
-
-    const app = await open(box, ["--port", String(webPort)], {
+    const refused = await openFails(box, ["--port", String(webPort)], {
       UBERBLICK_WEB_DIST: bundle,
       BROWSER: "none",
       HUB_DB_PATH: join(box.cwd, "unbound-hub.sqlite"),
     });
 
-    // No `ub init`, so no workspace and no signing secret: the app is served
-    // against the built-in endpoint, the switcher is offered nothing, and the
-    // reason no hub was started is said out loud rather than left to look like
-    // an offline one.
-    expect(await (await get(`${app.url}uberblick-config.json`)).text()).toBe(
-      JSON.stringify({ hubUrl, workspaces: [], hubAuthToken: "" }),
-    );
-    if (signingSecret === undefined) expect(app.stdout()).toContain("no signing secret");
-    expect(app.stdout()).toContain("ub init");
-    expect(app.stdout() + app.stderr()).not.toContain(SECRET);
+    expect(refused.status).not.toBe(0);
+    expect(refused.output).toContain("No workspace selected");
+    expect(refused.output).not.toContain("uberblick is at");
+    expect(refused.output).not.toContain(SECRET);
     expect(existsSync(join(configDir(box), "browser-keys"))).toBe(false);
-
-    const refusedConfig = await getWithHost(
-      `${app.url}uberblick-config.json`,
-      `localhost:${webPort}`,
-    );
-    const refusedApi = await getWithHost(
-      `${app.url}api/status`,
-      `foreign.example:${webPort}`,
-    );
-    for (const response of [refusedConfig, refusedApi]) {
-      expect(response.status).toBe(421);
-      expect(response.headers["cache-control"]).toBe("no-store");
-      expect(response.body).toBe("misdirected request\n");
-    }
-
-    const unboundApi = await get(`${app.url}api/search?q=unchanged`);
-    expect(unboundApi.status).toBe(200);
-    expect(unboundApi.headers.get("cache-control")).toBe("no-cache");
-    expect(await unboundApi.text()).toContain("<title>uberblick</title>");
-
-    expect((await app.interrupt()).status).toBe(0);
+    expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
+    expect(existsSync(join(box.cwd, "unbound-hub.sqlite"))).toBe(false);
   });
 
   it("names a taken port and refuses a second serving replica for the store", async () => {

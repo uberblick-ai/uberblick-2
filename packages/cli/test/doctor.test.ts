@@ -219,10 +219,9 @@ describe("ub doctor", () => {
     expect(check(checks, "workspace").remedy).toMatch(/ub init/);
     expect(check(checks, "workspace").remedy).toMatch(/ub workspace use/);
     expect(check(checks, "workspace").remedy).toMatch(/ub remote join/);
-    // ...and says where a workspace is written, so the line answers "where did
-    // it look?" without a second command. Same resolver as the cli's, never a
-    // literal: a path that drifted from `ub`'s own would fail here.
-    expect(check(checks, "workspace").reason).toContain(join(box.cwd, ".uberblick.json"));
+    // The recovery explains the explicit project binding rather than directing
+    // the operator to the obsolete machine-wide default.
+    expect(check(checks, "workspace").reason).toContain(".uberblick.json");
     expect(ok).toBe(false);
     expect(run.status).not.toBe(0);
   });

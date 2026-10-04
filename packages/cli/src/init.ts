@@ -40,9 +40,8 @@
  * renewed to current memberships. A loopback hub uses its local signing secret;
  * none is invented for a hub that already exists.
  *
- * It is convenience, never a precondition. Every other command works without it
- * — absent configuration is a default, not an error (see `config.ts`) — so
- * nothing here is the thing that makes `ub status` or `ub mcp serve` possible.
+ * Explicit bindings can also be supplied by the environment. Without one,
+ * read-only status reports no selection and document commands refuse to guess.
  *
  * **The secret.** `HUB_AUTH_TOKEN` is the HMAC secret hub tokens are signed
  * with, not a token. When a secret is already in force — from fnox, or from the
@@ -177,7 +176,7 @@ export const INIT_OPTIONS = {
 export const INIT_HELP = `usage: ub init [hub-url] [options]
 
 Settle what every other command needs: your awareness identity, the workspace
-this machine works in, and a signing secret for local hubs. Idempotent — it never replaces
+this project uses, and a signing secret for local hubs. Idempotent — it never replaces
 a secret that already exists, and it is safe to run again.
 
 Given a loopback hub, it can create a workspace there and wait for its starter
@@ -203,7 +202,7 @@ operands:
                      <hub>\` and obtain membership in the selected existing
                      workspace. A loopback hub
                      uses HUB_AUTH_TOKEN or credentials.json. An endpoint
-                     this machine already stores is never replaced: the same one changes nothing, and a different
+                     this project already selects is never replaced: the same one changes nothing, and a different
                      one is refused, because moving a workspace between hubs is
                      \`ub remote join <url-with-workspace-id>\`, which hydrates and
                      verifies first
@@ -231,6 +230,8 @@ $XDG_CONFIG_HOME/uberblick/credentials.json at mode 0600, and is never printed.
 
 The complete UB_WORKSPACE_ID and UB_HUB_URL binding in the environment — a project .mcp.json's pin, or your own
 shell — outranks the complete binding in .uberblick.json, whatever this run settles.
+The project file contains only the workspace and hub; identity and credentials
+remain in the private user configuration.
 `;
 
 function parseFlags(argv: string[]): Flags {
@@ -433,7 +434,7 @@ export async function initCommand(
 
   // --- the hub, when one was given -----------------------------------------
   //
-  // The endpoint has one authority — this machine's `config.json` — and this
+  // The endpoint is part of the selected project binding, and this
   // command may only *fill it in*. Overwriting it would be `ub remote set`
   // reborn: pointing the clients at another hub moves nothing, and the
   // workspace stays on the old one with nothing dialling it (#376, #385). So a
@@ -608,7 +609,7 @@ export async function initCommand(
   }
 
   // Whether this is a checkout, which decides only whether the report below
-  // names the contributor tasks. Nothing is written into one.
+  // names the contributor tasks. The project binding is written in either case.
   const root = isInstallPayload() ? null : findCheckoutRoot(process.cwd());
 
   // --- everything that writes ---------------------------------------------
@@ -653,11 +654,7 @@ export async function initCommand(
       warnings.add(warning);
     }
 
-    // Merged over what is already there: a `hubUrl` somebody set, or a field a
-    // later version of `ub` writes, is not `ub init`'s to drop. Read again here
-    // rather than reusing the copy taken before the prompts — that one is a
-    // snapshot of a machine somebody may have changed since, and it exists only
-    // to offer defaults. What gets written is merged over what is on disk now.
+    // Preserve the private identity file independently of the project binding.
     const current = readUserConfig();
     for (const warning of current.warnings) {
       warnings.add(warning);

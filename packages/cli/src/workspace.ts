@@ -20,8 +20,8 @@ import { ORIGIN_LABELS } from "./status.js";
 export const WORKSPACE_HELP = `usage: ub workspace [command]
 
 commands:
-  (none)                    the workspace in force, and which layer chose it
-  list [--json]             workspaces this machine has a database for
+  (none)                      the workspace in force, and which layer chose it
+  list [--json]               workspaces this machine has a database for
   use <id> --hub <url|local>  select a workspace and hub in this project
 
 options:
@@ -376,7 +376,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   // nothing anyone will observe, and printing the binding without saying so
   // would be the lie `ub status` then contradicts.
   const after = inForce();
-  if (after.configured !== id) {
+  if (after.configured !== id || resolveProjectBinding().binding?.hubUrl !== hub) {
     io.err(
       `ub: warning: ${ORIGIN_LABELS[after.origin]} sets ${
         after.configured ?? "no workspace"
