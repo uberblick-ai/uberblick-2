@@ -126,6 +126,24 @@ describe("device renewal response and recovery contracts", () => {
     expect(readHubLogins(env).logins[hub.origin]).toEqual(stored);
   });
 
+  it("preserves confirmed denials through transient failures while reporting a shared sign-in refusal", async () => {
+    const { hub, env } = await setup();
+    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    hub.setRenewalReply({ status: 500, body: { status: "failed" } });
+    now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
+    expect((await ensureDeviceLogin(hub.url, OTHER_WORKSPACE, { env })).status).toBe("hub-down");
+    now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
+    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
+    expect(hub.renewalCount).toBe(2);
+
+    hub.setRenewalReply({ status: 401, body: { status: "sign-in-required" } });
+    expect((await ensureDeviceLogin(hub.url, OTHER_WORKSPACE, { env })).status).toBe("sign-in-required");
+    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("sign-in-required");
+    expect(hub.renewalCount).toBe(3);
+  });
+
   it("stores an issued replacement despite cancellation while configuration publication waits", async () => {
     const { hub, env, login } = await setup();
     hub.grant(WORKSPACE);

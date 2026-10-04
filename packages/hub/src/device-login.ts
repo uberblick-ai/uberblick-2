@@ -204,7 +204,8 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     const confirmedNoAccess = cached?.confirmedNoAccess ?? [];
     // Polling a confirmed denial must not retire other workspaces' credentials.
     // An unchecked workspace still gets its own renewal after the cooldown.
-    if (confirmedNoAccess.includes(workspace) && !current.login.credential.record.workspaces.includes(workspace)) return noAccess(origin, workspace);
+    if (cached?.status !== "sign-in-required" && cached?.status !== "update-required" &&
+      confirmedNoAccess.includes(workspace) && !current.login.credential.record.workspaces.includes(workspace)) return noAccess(origin, workspace);
     if (cached !== null && cached.retryAt > Date.now()) {
       // A replacement with workspace access is ready for an old refused
       // connection. A refusal of the newly issued credential waits, rather than
