@@ -117,7 +117,7 @@ configuration, credentials, workspaces and their databases — is untouched, and
 held. CI calls `.github/workflows/homebrew-formula.yml` to prove installation
 and upgrade on Apple Silicon macOS and Linux x86_64 runners on every pull
 request and `main` push, covering every change to the formula or its payload.
-The `gates` check requires all four proofs to succeed.
+The `gates` check requires both proofs to succeed.
 
 ### The signing secret
 
