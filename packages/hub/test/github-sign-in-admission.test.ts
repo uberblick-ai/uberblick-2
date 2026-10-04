@@ -51,7 +51,7 @@ async function startServer() {
       if (body === null) throw new Error("unexpected GitHub endpoint");
       return Response.json(body);
     },
-  }, principals, credentials, memberships);
+  }, database, principals, credentials, memberships);
   signIns.push(signIn);
   const server = new Server<CredentialContext>({
     port: 0, address: "127.0.0.1", quiet: true, stopOnSignals: false,

@@ -78,10 +78,14 @@ sh bin/remote-compose.sh logs --tail=100 hub caddy
 ```
 
 [Check HTTPS and the WebSocket upgrade](#check-the-deployment) from another
-machine on the tailnet. Startup makes no workspace and changes no computer's
-workspace binding. For a fresh hub, establish a workspace's
-[first administrator](#establish-a-workspaces-first-administrator) and bind
-clients as described [below](#binding-a-computer-to-this-hubs-workspace).
+machine on the tailnet, then [claim the fresh hub](#claim-a-fresh-hub) with
+`ub auth login <TAILSCALE_HOST>`. Confirm that the completed login reports the
+claim and the default workspace's UUID. Startup creates that workspace once,
+with the name **Default workspace**, and changes no computer's workspace
+binding. Existing deployments keep
+[host-only first-admin setup](#establish-a-workspaces-first-administrator).
+Bind clients explicitly as described
+[below](#binding-a-computer-to-this-hubs-workspace).
 
 ### Read a release's identity
 
@@ -140,7 +144,8 @@ Nothing follows `latest`, a moving branch or a schedule.
 
 **When to update:** choose a release containing a change you want live, and
 stay present to verify it. Deploying a release neither creates, moves nor
-deletes a workspace.
+deletes a workspace on existing hub data. A database holding any hub data when
+this version first opens it gets no default workspace and is never claimable.
 
 **The wire-semantics rule.** A change to what travels over the socket — the auth
 token's shape or claims, the sync protocol, the room key, the served
@@ -332,6 +337,52 @@ statuses expire no later than fifteen minutes after the attempt's expiry; at
 most 100 are retained when new attempts start, evicting oldest requests first. Evicted or restarted
 requests return `unknown-request`.
 
+### Claim a fresh hub
+
+Keep the hub on an isolated network such as Tailscale, and claim it before
+wider exposure. From any computer that can reach the running stack, run:
+
+```sh
+ub auth login <TAILSCALE_HOST>
+```
+
+The terminal says before approval when the hub is unclaimed: the GitHub account
+that completes approval first becomes administrator of its default workspace.
+Starting a login reserves nothing. If another reachable account completes
+first, it claims the hub instead. After completion, confirm the terminal's
+claim result and the default workspace UUID; this reports what the hub
+committed, even if the earlier notice has become stale. Keep that UUID for
+subsequent workspace use. Login stores a device credential covering the
+workspace and leaves this computer's hub and workspace binding unchanged.
+It does not sign a browser in.
+
+A deployed hub creates exactly one default workspace only when its database
+contains no documents, sign-in principals, credentials, memberships or setup
+receipts on its first start with this version. Its UUID, name and one-time
+claim state persist in `hub.sqlite`. Restarts, container replacement and
+`ub remote update` reuse them, including a later rename in Workspace Settings.
+The hub created by `ub open` never initializes or claims a default workspace.
+An existing deployment is never claimable, even if it has no membership; keep
+using host-only first-admin setup there.
+
+Claiming commits the first account's admin membership and device credential
+together. Failure before commit claims nothing. If the completed response is
+lost, the claim still stands: signing in again with that account receives a
+credential for its workspace. Other completed logins grant no membership.
+The first successful host-only first-admin grant, for any workspace, also
+closes claiming. Claiming and host setup racing for the default workspace
+can establish only one initial administrator.
+
+A claim made by someone else cannot be recovered in place. There is no operator
+override, administrator recovery or supported way to reopen claiming. Claiming
+does not change live admission: clients still use the shared signing secret and
+the private tailnet boundary.
+
+`GET /auth/claim-state` needs no credential and changes nothing. It reports
+only `unclaimed` and `canClaim`, the latter requiring configured GitHub sign-in.
+It reveals no workspace UUID, name, account, member or credential. A failed
+read or an older hub is never reported as unclaimed by `ub auth login`.
+
 Device renewal is `POST /auth/credential/renew`, beside those sign-in routes.
 Its JSON body is `{protocolVersion, token}`: `token` is an HMAC-SHA256 request
 proof signed with the presented credential's key, with `typ: "request"`,
@@ -356,15 +407,18 @@ Malformed requests return `invalid-request`, version skew returns
 the same `not-configured` result as sign-in. Clients do not renew yet.
 
 Sign-in identifies the durable GitHub account and issues one Uberblick device
-credential for its existing workspace memberships. It grants no membership.
+credential for its workspace memberships. Only the first completed sign-in
+on a fresh, unclaimed hub creates the default workspace's admin membership;
+later sign-ins grant no membership.
 These credentials are not accepted by the live hub or `ub open` yet; configuring
 sign-in never activates credential admission. Existing clients continue using
 the shared signing secret and the private tailnet boundary.
 
 ## Establish a workspace's first administrator
 
-With [GitHub sign-in](#github-sign-in) available by default, run setup in the
-deployment directory **on the hub host**, for example over SSH:
+For an existing deployment, or a workspace other than a fresh hub's default,
+run setup in the deployment directory **on the hub host**, for example over SSH.
+[GitHub sign-in](#github-sign-in) is available by default:
 
 ```sh
 sh bin/hub-admin-setup.sh <workspace-uuid>
@@ -409,9 +463,11 @@ Running the command does not give the host operator a role or membership. Only
 the account approving its code gains that workspace's admin membership, using
 the same principal that the account's ordinary GitHub sign-in reaches. Setup
 issues no device credential and changes no documents, credentials or other
-workspace's memberships. Ordinary sign-in grants no membership before, during
-or after setup. Once membership exists, setup cannot add, replace or remove
-anyone there; access management belongs to that workspace's admins.
+workspace's memberships. Its first committed grant closes fresh-hub claiming
+for good. Setup remains available for an unclaimed default workspace; it races
+with claiming under the same membership check. Once membership exists, setup
+cannot add, replace or remove anyone there; access management belongs to that
+workspace's admins. After claiming closes, ordinary sign-in grants no membership.
 
 Setup also leaves live sync admission unchanged: the live hub and `ub open`
 still use the shared signing secret. Setup activates no credential or
@@ -681,8 +737,9 @@ died between the stop and the start would leave the hub down for good.
 The file lands at mode `0600`, and it lands whole: the copy goes to a temporary
 sibling and is renamed onto the name you gave, so an interrupted run leaves the
 previous backup exactly as it was rather than a truncated file wearing its name.
-It contains the documents and private access records of every workspace in one
-readable file; treat it exactly like the signing secret. Naming an existing
+It contains the documents, default workspace and claim state, and private access
+records of every workspace in one readable file; treat it exactly like the
+signing secret. Naming an existing
 directory, or a directory that is not writable, is refused before the hub is
 stopped.
 
@@ -702,8 +759,9 @@ sh bin/hub-restore.sh ~/uberblick-hub-2026-08-28.sqlite
 **Verified before anything is touched.** A restore runs on somebody's worst day,
 against a file nobody has opened since it was written, over the only copy that is
 left. So the backup is read first — `PRAGMA integrity_check`, *and* documents
-or private access state. Identities, credentials, memberships and committed
-setup receipts are worth restoring even before the first document exists.
+or private access state. Identities, credentials, memberships, committed
+setup receipts and persistent claim state are worth restoring even before the
+first document exists.
 A database with neither documents nor private access records is refused:
 it passes the pragma but would restore nothing. That check runs inside the hub's
 own image through `node:sqlite`, the module the hub itself persists with (the
@@ -762,8 +820,10 @@ reconnect, and the corpus comes back off that replica.
 What no replica gives you is **point-in-time recovery** — yesterday's text of a
 document somebody has since mangled, in a system where every mangling replicates
 within a second. Backups also preserve the hub's private principal, credential
-and membership registries in `hub.sqlite`. Client replicas cannot restore
-those records; restoring an older backup also restores its older access state.
+and membership registries, default workspace identity and claim state in
+`hub.sqlite`. Client replicas cannot restore those private records; restoring
+an older backup also restores its older access state. The default workspace's
+name lives in its synchronized settings room and is included in the same backup.
 
 **Retention and encryption at rest are the owner's**, deliberately: how many of
 these files to keep, where they live, whether they are encrypted or copied off
@@ -771,7 +831,8 @@ the host. Nothing here schedules a backup, rotates one, or sends one anywhere.
 
 ## Binding a computer to this hub's workspace
 
-A fresh release hub starts empty and changes no client binding. Each computer
+A fresh release hub creates its default workspace and changes no client binding.
+Claiming it through `ub auth login` also leaves the binding unchanged. Each computer
 that will use an existing workspace joins it explicitly. Which process runs
 where matters: everything in this section runs on **your** computers, not on the
 remote host, which runs the deployment and operator scripts.
@@ -806,8 +867,8 @@ workspace that was here syncs with this hub too, under its own rooms.
 A URL with no workspace id, or with something that is not one, is refused before
 anything is written, and the refusal names the form.
 
-**A workspace that does not exist yet is the other verb.** To put a *new*
-workspace on this hub — the first one, or another one later — the machine that
+**A workspace that does not exist yet is the other verb.** To put another *new*
+workspace on this hub, the machine that
 creates it runs:
 
 ```sh
@@ -921,6 +982,12 @@ It does, over that one SSH target, the compatibility checkout deployment:
 6. Points this machine's clients at the new hub, and prints the **join URL** a
    second computer binds to — `wss://<host>/ws/<workspace id>`, the endpoint
    with this workspace's id on the end.
+
+When that deployment starts on empty hub data, the hub also creates its own
+default workspace. It is distinct from the UUID this machine brought, and
+claiming covers only that default workspace. The brought workspace keeps
+host-only first-admin setup. Neither `ub remote init` nor `ub remote join`
+adopts an existing workspace as the default.
 
 Every step is idempotent: re-running `ub remote init` against a host it already
 stood up adds no second deploy key and re-clones nothing. The re-run locks that

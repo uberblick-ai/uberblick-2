@@ -8,6 +8,7 @@ import type { HubLogger } from "./log.js";
 import type { MembershipRegistry } from "./memberships.js";
 import type { HubDatabase } from "./persistence.js";
 import type { PrincipalRecord, PrincipalRegistry } from "./principals.js";
+import type { HubClaimState } from "./hub-claim.js";
 
 export function adminSocketPath(databasePath: string): string {
   const absolute = `${resolve(databasePath)}.admin/control.sock`;
@@ -102,6 +103,7 @@ export async function startAdminSetup(options: {
   github?: GithubSignInConfig | undefined;
   log: HubLogger;
   hasLiveDocuments: (workspaceId: string) => boolean;
+  claims?: HubClaimState | undefined;
 }): Promise<{ path: string; stop(): Promise<void> }> {
   const { database, principals, memberships, github, log } = options;
   const path = adminSocketPath(database.databasePath);
@@ -183,6 +185,7 @@ export async function startAdminSetup(options: {
           grant = { status: "complete", setupId: id, workspaceId, identity, hadDocuments };
           memberships.grant({ workspaceId, principalId: identity.id, role: "admin" });
           receipts.save(grant);
+          options.claims?.close();
           db.exec("COMMIT");
         } catch (error) {
           db.exec("ROLLBACK");

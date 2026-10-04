@@ -7,7 +7,7 @@
 # somebody has, against a file nobody has opened since it was written, and it
 # overwrites the only copy left. So the backup is read first — `PRAGMA
 # integrity_check` and documents or private access state, because a hub can
-# hold identities, credentials, memberships or setup receipts before its first
+# hold identities, credentials, memberships, setup receipts or claim state before its first
 # document. A truly empty database passes the pragma but restores nothing.
 # The check runs inside the hub's own image through `node:sqlite`,
 # which is the module the hub itself persists with: the image is
@@ -103,7 +103,7 @@ try {
   // Older document-only backups need not have these private tables. Check
   // only known hub records, without reading their identities or signing keys.
   const hasPrivateAccessState = [
-    "hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants",
+    "hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants", "hub_claim_state",
   ].some((table) =>
     db.prepare("SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?").get("table", table) !== undefined &&
     db.prepare("SELECT 1 FROM " + table + " LIMIT 1").get() !== undefined

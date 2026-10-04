@@ -1,26 +1,44 @@
-/** Public sign-in identifies a person and issues a credential, never membership. */
+/** Public sign-in can claim a fresh deployed hub once, then only issues credentials. */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { CredentialRecord, CredentialRegistry } from "./credentials.js";
 import { GithubDeviceFlow, type DeviceFlowCollection, type GithubSignInConfig } from "./github-device-flow.js";
 import { type HubLogger, stderrLogger } from "./log.js";
 import type { MembershipRegistry } from "./memberships.js";
 import type { PrincipalRecord, PrincipalRegistry } from "./principals.js";
+import type { HubClaimState } from "./hub-claim.js";
+import type { HubDatabase } from "./persistence.js";
 
 export type { GithubSignInConfig } from "./github-device-flow.js";
 interface SignInResult {
   identity: PrincipalRecord;
   credential: { record: CredentialRecord; key: string };
+  claimedWorkspaceId?: string;
 }
 export type SignInCollection = DeviceFlowCollection<SignInResult>;
 
 export class GithubSignIn extends GithubDeviceFlow<SignInResult> {
-  constructor(config: GithubSignInConfig, principals: PrincipalRegistry,
-    credentials: CredentialRegistry, memberships: MembershipRegistry, log: HubLogger = stderrLogger) {
+  constructor(config: GithubSignInConfig, database: HubDatabase, principals: PrincipalRegistry,
+    credentials: CredentialRegistry, memberships: MembershipRegistry, log: HubLogger = stderrLogger,
+    claims?: HubClaimState) {
     super(config, ({ accountId, username }) => {
-      const identity = principals.identify(accountId, username);
-      const issued = credentials.issue({ principalId: identity.id, deviceId: crypto.randomUUID(),
-        workspaces: memberships.workspacesFor(identity.id) });
-      return { identity, credential: { record: issued.record, key: Buffer.from(issued.keyBytes).toString("base64url") } };
+      // Completion is synchronous and shares host setup's connection. Starting
+      // or polling a flow reserves nothing; only this commit can win the claim.
+      const db = database.connection;
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const identity = principals.identify(accountId, username);
+        const claimedWorkspaceId = claims?.claim(identity.id, memberships);
+        const issued = credentials.issue({ principalId: identity.id, deviceId: crypto.randomUUID(),
+          workspaces: memberships.workspacesFor(identity.id) });
+        const result = { identity,
+          credential: { record: issued.record, key: Buffer.from(issued.keyBytes).toString("base64url") },
+          ...(claimedWorkspaceId === undefined ? {} : { claimedWorkspaceId }) };
+        db.exec("COMMIT");
+        return result;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     }, log);
   }
 }

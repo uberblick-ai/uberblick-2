@@ -36,6 +36,9 @@ login you started for the displayed hub; the app does not vouch for it.
 Store the issued device credential privately on this machine. Sync does
 not use this login yet. A replacement does not revoke the previous device.
 Local-only work needs no login. The machine's binding stays unchanged.
+On a fresh, unclaimed hub, the first GitHub account to complete approval
+claims its default workspace as administrator. Claiming is one-time; this
+command reports whether this login claimed it and the workspace UUID.
 
 options:
   -h, --help             show this help
@@ -154,6 +157,7 @@ async function logout(selection: Selection, io: Io): Promise<number> {
 }
 
 const REQUEST_MS = 10_000;
+const CLAIM_STATE_MS = 2_000;
 const CANCEL_MS = 2_000;
 const MAX_LIFETIME_SECONDS = 900;
 const MAX_RESPONSE_BYTES = 65_536;
@@ -169,25 +173,10 @@ function seconds(value: unknown, allowZero = false): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= (allowZero ? 0 : 1);
 }
 
-/** Every byte and every network wait is bounded, including a stalled JSON body. */
-async function post(
-  origin: string, route: "start" | "collect" | "cancel", body: object,
-  signal: AbortSignal, timeoutMs: number,
-  received?: (result: Record<string, unknown>) => void,
+/** Every byte is bounded; the fetch signal also bounds a stalled JSON body. */
+async function readResponse(
+  response: Response, invalidResponse: (missingInterface?: boolean) => Error,
 ): Promise<Record<string, unknown>> {
-  const response = await fetch(`${origin}/auth/github/${route}`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body), redirect: "error",
-    signal: AbortSignal.any([signal, AbortSignal.timeout(Math.max(1, Math.ceil(timeoutMs)))]),
-  });
-  // A proxy can answer while its hub is stopped or restarting. Valid hub
-  // replies still distinguish an upstream failure or unconfigured sign-in.
-  const invalidResponse = (missingInterface = false) => new SignInFailure(
-    [502, 503, 504].includes(response.status)
-      ? "the hub is unreachable or temporarily unavailable; try login again"
-      : missingInterface ? "the hub does not offer a valid GitHub sign-in interface; update the hub"
-      : "the hub returned an invalid GitHub sign-in response; update the hub",
-  );
   if (response.body === null) throw invalidResponse(true);
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -210,6 +199,46 @@ async function post(
   if (!object(result)) {
     throw invalidResponse();
   }
+  return result;
+}
+
+async function isUnclaimed(origin: string, signal: AbortSignal): Promise<boolean> {
+  try {
+    const response = await fetch(`${origin}/auth/claim-state`, {
+      method: "GET", redirect: "error",
+      signal: AbortSignal.any([signal, AbortSignal.timeout(CLAIM_STATE_MS)]),
+    });
+    if (response.status !== 200) {
+      await response.body?.cancel();
+      return false;
+    }
+    const result = await readResponse(response, () => new Error("invalid claim state"));
+    // A failed or older interface is never evidence that the hub is unclaimed.
+    return Object.keys(result).length === 2 && typeof result.unclaimed === "boolean" &&
+      typeof result.canClaim === "boolean" && (!result.canClaim || result.unclaimed) && result.unclaimed;
+  } catch { return false; }
+}
+
+/** Every byte and every network wait is bounded, including a stalled JSON body. */
+async function post(
+  origin: string, route: "start" | "collect" | "cancel", body: object,
+  signal: AbortSignal, timeoutMs: number,
+  received?: (result: Record<string, unknown>) => void,
+): Promise<Record<string, unknown>> {
+  const response = await fetch(`${origin}/auth/github/${route}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body), redirect: "error",
+    signal: AbortSignal.any([signal, AbortSignal.timeout(Math.max(1, Math.ceil(timeoutMs)))]),
+  });
+  // A proxy can answer while its hub is stopped or restarting. Valid hub
+  // replies still distinguish an upstream failure or unconfigured sign-in.
+  const invalidResponse = (missingInterface = false) => new SignInFailure(
+    [502, 503, 504].includes(response.status)
+      ? "the hub is unreachable or temporarily unavailable; try login again"
+      : missingInterface ? "the hub does not offer a valid GitHub sign-in interface; update the hub"
+      : "the hub returned an invalid GitHub sign-in response; update the hub",
+  );
+  const result = await readResponse(response, invalidResponse);
   received?.(result);
   if (typeof result.status !== "string") throw invalidResponse();
   const allowed = route === "start"
@@ -254,6 +283,8 @@ async function login(selection: Selection, io: Io): Promise<number> {
   let collected = false;
   let stored = false;
   try {
+    const unclaimed = await isUnclaimed(selection.origin, interrupted.signal);
+    if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
     // A start interrupted before its reply has no collection secret to cancel
     // with. Finish this bounded read so a late reply can still be abandoned.
     const started = await post(selection.origin, "start", {}, new AbortController().signal, REQUEST_MS, (result) => {
@@ -274,6 +305,7 @@ async function login(selection: Selection, io: Io): Promise<number> {
     }
     deadline = performance.now() + started.expiresIn * 1000;
     if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
+    if (unclaimed) io.out("This hub is unclaimed. The first GitHub account to complete approval becomes administrator of its default workspace.\n");
     io.out(`GitHub sign-in for ${selection.origin}\nApprove in a browser: ${started.verificationUri}\nCode: ${started.userCode}\n`);
     io.out(`GitHub's approval page shows the app's name, not the hub.\nApprove only if you started this login for ${selection.origin}; the app does not vouch for this hub.\nWaiting for GitHub approval…\n`);
     let interval = started.interval;
@@ -290,6 +322,13 @@ async function login(selection: Selection, io: Io): Promise<number> {
       const credential = { identity: result.identity, credential: result.credential };
       if (!isHubLogin(credential) || credential.identity.githubUsername.includes(attempt.collectionSecret)) {
         throw new SignInFailure("the hub returned an invalid sign-in credential; run login again");
+      }
+      if (Object.hasOwn(result, "claimedWorkspaceId")) {
+        if (typeof result.claimedWorkspaceId !== "string" || !UUID.test(result.claimedWorkspaceId) ||
+            !credential.credential.record.workspaces.includes(result.claimedWorkspaceId)) {
+          throw new SignInFailure("the hub returned an invalid sign-in claim result; run login again");
+        }
+        io.out(`This login claimed the hub. Default workspace: ${result.claimedWorkspaceId}\n`);
       }
       if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
       let replaced: boolean;

@@ -19,6 +19,7 @@ const SIGNALS = ["SIGTERM", "SIGINT"] as const;
 async function main(): Promise<void> {
   const config = resolveRemoteHubConfig();
   const hub = await createHub(config, {
+    initializeDefaultWorkspace: true,
     operatorSetup: process.platform !== "win32" &&
       !isEphemeralDatabase(config.databasePath ?? "durable-default"),
   });
