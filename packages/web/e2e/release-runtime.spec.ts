@@ -87,9 +87,7 @@ test("a release bundle makes no implicit connection and uses a valid served endp
 });
 
 
-test("a remote page shows the supported computer route and opens no documents @webkit", async ({ browser }) => {
-  const context = await browser.newContext();
-  try {
+test("a remote hub guide covers every route without credentials or documents @webkit", async ({ context, page }, testInfo) => {
     await context.route("**/uberblick-config.json", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
         hubUrl: "wss://remote.example/ws", workspaces: [WORKSPACE],
@@ -97,21 +95,58 @@ test("a remote page shows the supported computer route and opens no documents @w
         hubAuthToken: SECRET,
       }) });
     });
-    const page = await context.newPage();
+    await context.addCookies([{ name: "synthetic-session", value: "not-a-credential", url: appUrl }]);
+    const claimRequests: { url: string; headers: Record<string, string> }[] = [];
+    await context.route("**/auth/claim-state", async (route) => {
+      claimRequests.push({ url: route.request().url(), headers: await route.request().allHeaders() });
+      await route.fulfill({ status: 200, contentType: "application/json",
+        body: JSON.stringify({ unclaimed: true, canClaim: true }) });
+    });
     const sockets: string[] = [];
     page.on("websocket", (socket) => sockets.push(socket.url()));
-    for (const path of ["/", `/${WORKSPACE}/00000000-0000-4000-8000-000000000002`]) {
+    for (const path of ["/", `/${WORKSPACE}`, `/${WORKSPACE}/00000000-0000-4000-8000-000000000002`]) {
       await page.goto(`${appUrl}${path}`);
-      const notice = page.getByRole("status");
-      await expect(notice).toContainText("This hub needs a sign-in that this browser cannot do yet");
-      await expect(notice).toContainText("ub auth login");
-      await expect(notice).toContainText("ub open");
-      await expect(notice).toBeInViewport({ ratio: 1 });
+      await expect(page.getByRole("heading", { name: "This hub is unclaimed", exact: true })).toBeVisible();
+      const commands = page.getByRole("region", { name: "Hub setup guide" }).locator("li code");
+      await expect(commands).toHaveText([
+        `ub auth login '${appUrl}'`, `ub remote join '${appUrl}/<workspace-id>'`, "ub open",
+      ]);
+      // Inherited WebKit viewports cover iPhone, iPad and MacBook; long origins
+      // and the placeholder must wrap, and remain native selectable text.
+      expect(await commands.evaluateAll((nodes) => nodes.every((node) => {
+        const style = getComputedStyle(node);
+        return (style.getPropertyValue("user-select") || style.getPropertyValue("-webkit-user-select")) === "text";
+      }))).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await commands.last().scrollIntoViewIfNeeded();
+      await expect(commands.last()).toBeInViewport({ ratio: 1 });
       await expect(page.getByRole("button", { name: "+ new doc" })).toHaveCount(0);
       await expect(page.locator('[contenteditable="true"]')).toHaveCount(0);
       expect(sockets).toEqual([]);
     }
-  } finally {
-    await context.close();
-  }
+    expect(claimRequests).toHaveLength(3);
+    expect(claimRequests.every(({ url, headers }) => url === `${appUrl}/auth/claim-state` &&
+      headers.cookie === undefined && headers.authorization === undefined)).toBe(true);
+    const screenshot = testInfo.outputPath("remote-hub-guide.png");
+    await page.screenshot({ path: screenshot, fullPage: true });
+    await testInfo.attach("remote-hub-guide", { path: screenshot, contentType: "image/png" });
+});
+
+test("ub open's local page ignores remote claim state and keeps its editor", async ({ context, page }) => {
+  if (hub === undefined) throw new Error("release test hub did not start");
+  let claimReads = 0;
+  await context.route("**/auth/claim-state", async (route) => {
+    claimReads += 1;
+    await route.fulfill({ json: { unclaimed: true, canClaim: true } });
+  });
+  await context.route("**/uberblick-config.json", async (route) => {
+    await route.fulfill({ json: {
+      hubUrl: `ws://127.0.0.1:${hub?.port}`, workspaces: [WORKSPACE], hubAuthToken: SECRET,
+      remoteHubUrl: "wss://remote.example/ws", rebound: false,
+    } });
+  });
+  await page.goto(`${appUrl}/${WORKSPACE}`);
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Hub setup guide" })).toHaveCount(0);
+  expect(claimReads).toBe(0);
 });
