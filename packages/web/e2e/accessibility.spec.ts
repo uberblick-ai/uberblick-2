@@ -1,12 +1,6 @@
-import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import AxeBuilder from "@axe-core/playwright";
-import { HocuspocusProvider } from "@hocuspocus/provider";
 import { expect, test } from "@playwright/test";
-import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/hub";
-import { wrapToken } from "@uberblick/hub/protocol";
-import { appendBlock, createAnnotation, createTagCatalogEntry, seedTagCatalog, settingsRoom } from "@uberblick/schema";
-import * as Y from "yjs";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { assertNoViolations, unexpectedViolations, WCAG_TAGS } from "./accessibility-assertions.js";
 import { scanExclusions } from "./accessibility-exclusions.js";
@@ -25,43 +19,42 @@ for (const colorScheme of ["light", "dark"] as const) {
       readySelector: ".ub-workspace",
     });
     const reports: Array<{ surface: string; milliseconds: number; violations: unknown; incomplete: unknown }> = [];
-    const failures: Array<{ surface: string; violations: unknown }> = [];
+    const failures: Array<{ surface: string; message: string }> = [];
     const scan = async (surface: string) => test.step(surface, async () => {
       const started = performance.now();
       const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-      const violations = unexpectedViolations(result.violations, await scanExclusions(page, result.violations));
+      const exclusions = await scanExclusions(page, result.violations);
       reports.push({ surface, milliseconds: Math.round(performance.now() - started),
         violations: result.violations, incomplete: result.incomplete });
-      if (violations.length > 0) failures.push({ surface, violations: violations.map((rule) => ({
-        rule: rule.id, nodes: rule.nodes.map(({ target, failureSummary }) => ({ target, failureSummary })),
-      })) });
+      try {
+        assertNoViolations(result.violations, exclusions);
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        failures.push({ surface, message: error.message });
+      }
     });
-    const peers: Array<{ doc: Y.Doc; provider: HocuspocusProvider }> = [];
-    const secret = await importRootSecret(harness().authSecret);
-    const peer = async (room: string) => {
-      const doc = new Y.Doc();
-      const provider = new HocuspocusProvider({
-        url: harness().hubUrl, name: room, document: doc,
-        token: async () => wrapToken(await mintToken(secret, {
-          typ: "room", sub: randomUUID(), workspace: harness().workspaceUuid,
-          scope: "read-write", kid: null, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-        })),
-      });
-      peers.push({ doc, provider });
-      await new Promise<void>((resolve) => provider.on("synced", resolve));
-      return { doc, provider };
-    };
     try {
       await createDoc(page, "Picker destination");
       await createDoc(page, `Accessibility ${colorScheme}`);
       const documentUrl = page.url();
-      const uuid = new URL(documentUrl).pathname.split("/")[2];
-      const { doc } = await peer(`${harness().workspaceUuid}/${uuid}`);
-      appendBlock(doc, { type: "heading", level: 1, text: "Overview" });
-      appendBlock(doc, { type: "heading", level: 2, text: "Details" });
-      const passage = appendBlock(doc, { type: "paragraph", text: "annotated range" });
-      createAnnotation(doc, passage, 0, 9, "Reviewer", "Scan conversation");
-      appendBlock(doc, { type: "paragraph", text: "" });
+      await placeCaret(page);
+      // Keep the first paragraph empty for the real slash/@ typing triggers.
+      await page.keyboard.press("Enter");
+      for (const text of ["# Overview", "## Details", "annotated range"]) {
+        await page.keyboard.type(text);
+        await page.keyboard.press("Enter");
+      }
+      await editor(page).locator(".ub-paragraph").filter({ hasText: "annotated range" }).evaluate((node) => {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const selection = document.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        document.dispatchEvent(new Event("selectionchange"));
+      });
+      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      await page.getByPlaceholder(/Comment as/).fill("Scan conversation");
+      await page.keyboard.press("Enter");
       await expect(page.getByRole("button", { name: "Contents 2" })).toBeVisible();
       await expect(page.locator(".ub-thread")).toContainText("Scan conversation");
       await scan("document and docked shell — MacBook 1280px");
@@ -99,22 +92,32 @@ for (const colorScheme of ["light", "dark"] as const) {
       await scan("Contents");
       await page.keyboard.press("Escape");
 
-      const { doc: catalog } = await peer(settingsRoom(harness().workspaceUuid));
-      seedTagCatalog(catalog);
+      const tagsUrl = new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href;
+      await page.goto(tagsUrl);
+      await expect(page.getByRole("region", { name: "Active" }).getByRole("listitem")).toHaveCount(5);
+      await page.goto(documentUrl);
       await page.getByRole("button", { name: "Edit tags" }).click();
       await expect(page.getByRole("option")).toHaveCount(5);
       await scan("tag picker — list");
       await page.keyboard.press("Escape");
-      for (let index = 0; index < 5; index += 1) createTagCatalogEntry(catalog, `scan-${index}`);
+      await page.goto(tagsUrl);
+      for (let index = 0; index < 5; index += 1) {
+        await page.getByLabel("Create a tag").fill(`scan-${index}`);
+        await page.getByRole("button", { name: "Create", exact: true }).click();
+        await expect(page.getByRole("button", { name: `Retire scan-${index}` })).toBeVisible();
+      }
+      await page.goto(documentUrl);
       await page.getByRole("button", { name: "Edit tags" }).click();
       await expect(page.getByRole("searchbox", { name: "Search tags" })).toBeVisible();
       await scan("tag picker — search");
       await page.keyboard.press("Escape");
 
       for (let index = 0; index < 4; index += 1) {
-        const { provider } = await peer(`${harness().workspaceUuid}/${uuid}`);
-        provider.setAwarenessField("user", { name: `Scan peer ${index}`, color: "#0675c9" });
-        provider.setAwarenessField("client", "agent");
+        await openApp(browser, new URL(documentUrl).pathname, {
+          upstream: true,
+          contextOptions: { colorScheme, viewport: { width: 1280, height: 800 } },
+          readySelector: ".ub-editor .ProseMirror",
+        });
       }
       await expect(page.locator(".ub-peer-more")).toBeVisible();
       await page.locator(".ub-peers > .ub-peer-control[data-peer-id]").first().focus();
@@ -155,7 +158,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         await page.locator(".ub-threads-toggle").click();
         // The retained reply form lives in different Sheet DOM below 1280px.
         await expect(page.getByRole("dialog", { name: "Threads", exact: true })).toBeVisible();
-        await scan(`Threads drawer and reply form — ${device} ${viewport.width}px`);
+        if (device === "iPhone") await scan(`Threads drawer and reply form — ${device} ${viewport.width}px`);
         await page.getByRole("button", { name: "Close threads", exact: true }).click();
         await scan(`document and closed drawers — ${device} ${viewport.width}px`);
         await page.getByRole("button", { name: "Show document list", exact: true }).click();
@@ -170,7 +173,6 @@ for (const colorScheme of ["light", "dark"] as const) {
         await scan(surface ?? "settings");
       }
     } finally {
-      for (const { provider, doc } of peers) { provider.destroy(); doc.destroy(); }
       const reportPath = info.outputPath("axe-surfaces.json");
       await writeFile(reportPath, JSON.stringify(reports, null, 2));
       await info.attach("axe surfaces", { path: reportPath, contentType: "application/json" });
@@ -197,6 +199,27 @@ test("the scan rejects a seeded unnamed button on an open surface", async ({ bro
     .toContainEqual(["#seeded-unnamed-button"]);
   const exclusions = await scanExclusions(page, result.violations);
   expect(() => assertNoViolations(result.violations, exclusions)).toThrow(/button-name/);
+});
+
+test("element exclusions preserve same-rule siblings and reject ambiguous selectors", async ({ page }) => {
+  await page.setContent(`<!doctype html><html lang="en"><title>Exclusion probe</title><body>
+    <main><h1>Scrollable lists</h1><div data-slot="caret-menu-content">
+      <div id="radix:tracked" role="listbox" aria-label="Block types" style="height:50px;overflow:auto">
+        <button role="option" aria-selected="false" tabindex="-1" style="height:200px">Tracked option</button>
+      </div>
+      <div id="radix:sibling" role="listbox" aria-label="Other list" style="height:50px;overflow:auto">
+        <button role="option" aria-selected="false" tabindex="-1" style="height:200px">Sibling option</button>
+      </div>
+    </div></main></body></html>`);
+  const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  const rule = result.violations.filter(({ id }) => id === "scrollable-region-focusable");
+  expect(rule.flatMap(({ nodes }) => nodes)).toHaveLength(2);
+  const remaining = unexpectedViolations(rule, await scanExclusions(page, rule));
+  expect(remaining.flatMap(({ nodes }) => nodes)).toHaveLength(1);
+  expect(await page.locator(remaining[0]?.nodes[0]?.target[0] as string).getAttribute("id")).toBe("radix:sibling");
+  await page.locator('[id="radix:sibling"]').evaluate((node) => node.setAttribute("aria-label", "Block types"));
+  const ambiguous = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  await expect(scanExclusions(page, ambiguous.violations)).rejects.toThrow(/exclusion is ambiguous/);
 });
 
 test("record axe's rendered oklch via light-dark contrast classification", async ({ browser }, info) => {

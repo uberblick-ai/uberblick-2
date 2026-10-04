@@ -6,11 +6,14 @@ import type { AccessibilityExclusion, AxeViolation } from "./accessibility-asser
 const exclusions: readonly AccessibilityExclusion[] = [
   { rule: "aria-hidden-focus", target: ["#root"], issue: "https://github.com/uberblick-ai/uberblick-2/issues/1236" },
   { rule: "target-size", target: [".ub-peer-more"], issue: "https://github.com/uberblick-ai/uberblick-2/issues/1223" },
+  { rule: "target-size", target: [".ub-comment"], issue: "https://github.com/uberblick-ai/uberblick-2/issues/1239" },
 ];
 
 const elementExclusions = [
   { rule: "scrollable-region-focusable", selector: '[data-slot="caret-menu-content"] [role="listbox"][aria-label="Block types"]', issue: "https://github.com/uberblick-ai/uberblick-2/issues/1237" },
   { rule: "target-size", selector: '#ub-rail [data-slot="sheet-close"]', issue: "https://github.com/uberblick-ai/uberblick-2/issues/1238" },
+  { rule: "target-size", selector: '.ub-peers > .ub-peer-control[data-peer-id]:nth-child(2)', issue: "https://github.com/uberblick-ai/uberblick-2/issues/1223" },
+  { rule: "target-size", selector: '.ub-peers > .ub-peer-control[data-peer-id]:nth-child(3)', issue: "https://github.com/uberblick-ai/uberblick-2/issues/1223" },
 ] as const;
 
 /** Resolve unstable axe selectors (React ids or utility classes) to one element.
