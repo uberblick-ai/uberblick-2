@@ -7,30 +7,30 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
 ## Gate mechanics
 
 - Resolve and record the PR's immutable `headRefOid`.
-- **CI, every tier.** `gh api
-  repos/{owner}/{repo}/commits/<headRefOid>/check-runs
-  --jq '.check_runs[]|select(.name=="gates")|.conclusion'` must print
-  `success`, and the record links that check run. A missing or non-green run
-  blocks agent merge; isolated review is not an alternative. If an
-  infrastructure outage keeps it non-green, escalate to a maintainer, who may
-  merge by hand.
-- **Isolated review.** Where `delivery-policy.md` requires it, run
-  `mise run review <headRefOid>` from a checkout at freshly fetched
-  `origin/main` with that task's recipe unmodified; it refuses otherwise,
-  because the base supplies the recipe. The reviewed commit contributes only
-  file contents, via `git archive`, while its manifests still install in the
-  networked build stage. So pass the SHA rather than checking the branch out,
-  never treat tests from a mutable shared checkout as evidence, and pass no
-  secrets, host mounts, privileged mode or container socket to the build or to
-  the container, which runs without network. README's "Review isolation"
-  section states the full boundary. Keep the SHA-tagged image for the
-  failure-path probes the policy requires at stateful boundaries, then remove
-  it when the PR is settled.
-- **CI as the immutable review.** Where `delivery-policy.md` permits it, the
-  successful CI check above also supplies the immutable review. Otherwise the
-  isolated review is required in addition to successful CI.
-- For a browser-observable outcome, run the relevant `e2e` proof early, in its
-  own installed worktree at that head. A failure may be called environmental only after the same failing spec is run
+- **CI, every tier.** Run `mise run ci <headRefOid>` from a checkout at
+  freshly fetched `origin/main`. It posts the `signoff` commit status only when
+  the isolated review passes, and a failing status otherwise. A failing run
+  blocks agent merge. Skip the run only when the head already carries a
+  successful `signoff` posted by a maintainer's own account, never
+  `uberblick-agent`: `gh api repos/{owner}/{repo}/commits/<headRefOid>/statuses
+  --jq '.[]|select(.context=="signoff")|"\(.state) \(.creator.login)"'`. If
+  the run cannot complete for reasons outside the change, escalate to a
+  maintainer, who may merge by hand.
+- **Isolated review.** Local CI runs it as `mise run review <headRefOid>`,
+  which refuses unless the checkout is at freshly fetched `origin/main` with
+  that task's recipe unmodified, because the base supplies the recipe. The
+  reviewed commit contributes only file contents, via `git archive`, while its
+  manifests still install in the networked build stage. So pass the SHA rather
+  than checking the branch out, never treat tests from a mutable shared
+  checkout as evidence, and pass no secrets, host mounts, privileged mode or
+  container socket to the build or to the container, which runs without
+  network. README's "Review isolation" section states the full boundary. Keep
+  the SHA-tagged image for the failure-path probes the policy requires at
+  stateful boundaries, then remove it when the PR is settled.
+- Local CI also runs browser e2e at the head, unless only documentation or
+  agent process changed, and reports it as the advisory `signoff/e2e` status.
+  For a browser-observable outcome the e2e proof is owed regardless. A
+  failure may be called environmental only after the same failing spec is run
   against the base: green at the base and red at the head is a branch
   regression to fix, even when the stale code is a test fixture rather than
   production.

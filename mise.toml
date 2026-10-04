@@ -333,3 +333,10 @@ docker build --file "$runner/Dockerfile.review" --tag "$review_tag" "$context"
 docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges "$review_tag"
 printf 'Review image retained for probes: %s\\n' "$review_tag"
 """
+
+[tasks.ci]
+description = "Local CI: run the isolated review and browser e2e on a pushed commit, then sign off"
+usage = 'arg "<commit>" help="Commit SHA or pull request number"'
+# The merge gate is the `signoff` commit status this task posts (README,
+# "Local CI"). It runs from a checkout at origin/main because `review` does.
+run = 'sh "{{config_root}}/bin/ci.sh" "${usage_commit?}"'

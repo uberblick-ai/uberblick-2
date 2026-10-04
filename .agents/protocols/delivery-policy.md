@@ -55,16 +55,15 @@ routes do not change the review or merge tiers below.
 3. **Gates, all before merge**, each at the exact head that merges. Effort
    follows semantic risk: paths and line counts are inspection signals, not
    extra rounds. Link exact-head evidence instead of repeating it.
-   - **CI.** Every tier requires a successful CI `gates` check at the merging
-     head. A missing or non-green check blocks agent merge; isolated review
-     cannot substitute for it. If an infrastructure outage keeps it non-green,
-     escalate to a maintainer, who may merge by hand.
-   - **Immutable review.** That successful CI check is enough for a
-     tier-1 change that owes no review and touches none of persistence,
-     synchronization, concurrency, process lifecycle or auth; verify its
-     conclusion and link it. Every other change, and any change where the base
-     moved under the PR, also runs the isolated review
-     (`mise run review <sha>`, `integration.md`). At stateful boundaries —
+   - **CI.** Every tier requires a `signoff` commit status of `success` at the
+     merging head, posted by local CI (`mise run ci <sha>`, `integration.md`).
+     A missing or failing status blocks agent merge. If the run cannot
+     complete for reasons outside the change, escalate to a maintainer, who
+     may merge by hand.
+   - **Immutable review.** Local CI runs the isolated review
+     (`mise run review <sha>`) at the head, so every change has one. A change
+     where the base moved under the PR also passes the merged-tree gate
+     (`integration.md`). At stateful boundaries —
      persistence, startup and shutdown, networking, concurrency — passing
      happy-path tests is not enough: run focused failure-path probes and post
      reproducible findings. Worktree tests help while building but are never
