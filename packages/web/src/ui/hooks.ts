@@ -349,20 +349,33 @@ export function useLinkConflicts(connection: RoomConnection | null): {
   return { conflicts, refresh };
 }
 
-/** A peer in the presence strip. `clientId` is its stable key: names collide. */
+/** A mention candidate. `clientId` distinguishes peers whose names collide. */
 export interface Peer extends AwarenessUser {
   clientId: number;
 }
 
-/** Awareness states other than our own, for the presence strip. */
+const NO_PEERS: Peer[] = [];
+
+/** Only the identity and name matter to the editor's mention candidates. */
+function samePeerNames(previous: Peer[], next: Peer[]): boolean {
+  if (previous.length !== next.length) return false;
+  const names = new Map(next.map((peer) => [peer.clientId, peer.name]));
+  return previous.every((peer) => names.get(peer.clientId) === peer.name);
+}
+
+/** Awareness names other than our own, stable through caret/colour changes. */
 export function usePeers(connection: RoomConnection | null): Peer[] {
-  const [peers, setPeers] = useState<Peer[]>([]);
+  const [reading, setReading] = useState<{
+    connection: RoomConnection;
+    peers: Peer[];
+  } | null>(null);
   useEffect(() => {
     const awareness = connection?.provider.awareness ?? null;
-    if (awareness === null) {
-      setPeers([]);
+    if (connection === null || awareness === null) {
+      setReading(null);
       return;
     }
+    let previous: Peer[] | null = null;
     const read = (): void => {
       const out: Peer[] = [];
       awareness.getStates().forEach((state, clientId) => {
@@ -375,13 +388,18 @@ export function usePeers(connection: RoomConnection | null): Peer[] {
           color: typeof user.color === "string" ? user.color : AWARENESS_FALLBACK_COLOR,
         });
       });
-      setPeers(out);
+      // Compare before scheduling React work: returning the same state from an
+      // updater can still invoke the component before React bails out.
+      if (previous !== null && samePeerNames(previous, out)) return;
+      previous = out;
+      setReading({ connection, peers: out });
     };
     read();
     awareness.on("change", read);
     return () => awareness.off("change", read);
   }, [connection]);
-  return peers;
+  // A replacement provider can have the same room name but different peers.
+  return reading?.connection === connection ? reading.peers : NO_PEERS;
 }
 
 /**

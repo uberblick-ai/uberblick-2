@@ -3,7 +3,7 @@
  * loud read-only fallback when the palette gate is closed.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import {
   getAnnotation,
@@ -627,7 +627,10 @@ function CodeLanguageField({
   );
 }
 
-function BoundEditor({
+// The shell's presence reading also changes when a caret crosses blocks. Keep
+// that parent update outside the editor; its own peer-name/status readers stay
+// live, and actual binding inputs still pass through React's props comparison.
+const BoundEditor = memo(function BoundEditor({
   connection,
   author,
   archived,
@@ -848,7 +851,7 @@ function BoundEditor({
       </div>
     </>
   );
-}
+});
 
 export function EditorPane({
   connection,
