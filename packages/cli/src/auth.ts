@@ -1,5 +1,7 @@
 /** Remote sign-in stores a device credential; live sync still uses its existing auth. */
 import { setTimeout as delay } from "node:timers/promises";
+import { parseArgs } from "node:util";
+import { isGithubUsername } from "@uberblick/hub";
 import { parseWorkspaceId } from "@uberblick/schema";
 import {
   type StoredHubLogin,
@@ -14,6 +16,7 @@ import { resolveProjectBinding } from "./project-binding.js";
 import { openBrowser } from "./browser.js";
 import type { Io } from "./io.js";
 import { authenticationOrigin } from "@uberblick/hub/remote-url";
+import { manageRequest, ManagementResponseError } from "./access-management.js";
 export { authenticationOrigin } from "@uberblick/hub/remote-url";
 
 export const AUTH_HELP = `usage: ub auth <command>
@@ -21,7 +24,7 @@ export const AUTH_HELP = `usage: ub auth <command>
 commands:
   login [hub]            sign in to a remote hub with GitHub
   status [hub]           show this machine's stored login
-  logout [hub]           remove this machine's stored login
+  logout [hub]           revoke this computer; --all-devices revokes all of yours
 
 options:
   -h, --help             show this help; after a command, that command's help
@@ -38,7 +41,10 @@ Over SSH or when stdout is not a terminal, only the URL and code are displayed.
 BROWSER names the opener command; BROWSER=none skips automatic opening.
 GitHub's approval page shows the app's name, not the hub. Approve only a
 login you started for the displayed hub; the app does not vouch for it.
-Store the issued device credential privately on this machine for remote sync. A replacement does not revoke the previous device.
+Store the issued device credential privately on this machine for remote sync.
+Signing in again stores the new login, then revokes the replaced device.
+If that revocation is not confirmed, login still succeeds and warns that the
+previous device is not revoked.
 Local-only work needs no login. The machine's binding stays unchanged.
 On a fresh, unclaimed hub, the first GitHub account to complete approval
 claims its default workspace as administrator. Claiming is one-time; this
@@ -60,14 +66,23 @@ options:
   -h, --help             show this help
 `;
 
-export const AUTH_LOGOUT_HELP = `usage: ub auth logout [hub]
+export const AUTH_LOGOUT_OPTIONS = { "all-devices": { type: "boolean" } } as const;
 
-Remove this machine's login for the given hub, or the hub selected by the project binding.
+export const AUTH_LOGOUT_HELP = `usage: ub auth logout [--all-devices] [hub]
+
+Revoke this computer at the given hub, then remove its login here.
+Without a hub, use the hub selected by this project's binding.
 The hub can be a bare host, an http(s) address or a ws(s) endpoint.
-No network is used. The device keeps hub access until revoked through device
-management; logout never revokes it. The machine's binding stays unchanged.
+If revocation is not confirmed, the local login is still removed; exit 1.
+Finish with \`ub auth logout --all-devices <hub>\` from a computer still signed in.
+With --all-devices, revoke every device of your signed-in GitHub account on
+that hub, this computer last. Failure keeps the local login; exit 1.
+Retry needs a login the hub still accepts: run --all-devices again, or sign in
+again with \`ub auth login <hub>\` or use another computer still signed in.
+Workspace memberships, the project binding and local workspace copies stay.
 
 options:
+  --all-devices         revoke all of your devices on this hub
   -h, --help             show this help
 `;
 
@@ -79,7 +94,7 @@ interface Selection {
 
 const GITHUB_APPROVAL_URL = "https://github.com/login/device";
 
-function selectHub(hub: string | undefined, io: Io): Selection | number {
+function selectHub(hub: string | undefined, io: Io, describe = true): Selection | number {
   // An explicit authentication target works before any project is bound.
   // Resolve a binding only for the implicit target, or to describe membership.
   let binding: ReturnType<typeof resolveProjectBinding>["binding"] = null;
@@ -104,12 +119,14 @@ function selectHub(hub: string | undefined, io: Io): Selection | number {
     io.err("ub auth: invalid hub; use a bare host, http(s) address or ws(s) endpoint without credentials, query or fragment.\n");
     return 2;
   }
-  io.out(`Hub: ${origin}\n`);
   let bound = false;
   if (binding?.hubUrl != null) {
     try { bound = authenticationOrigin(binding.hubUrl) === origin; } catch { /* Invalid binding is never rewritten. */ }
   }
-  if (!bound) io.out("This project's hub and workspace binding is unchanged.\n");
+  if (describe) {
+    io.out(`Hub: ${origin}\n`);
+    if (!bound) io.out("This project's hub and workspace binding is unchanged.\n");
+  }
   return { origin, bound, workspace: binding?.workspaceId };
 }
 
@@ -154,16 +171,112 @@ function status(selection: Selection, io: Io): number {
   return describeMissingWorkspace(selection, login, io) ? 1 : 0;
 }
 
-async function logout(selection: Selection, io: Io): Promise<number> {
+class DeviceFailure extends Error {}
+
+type DeviceAction = { operation: "list-devices" } | { operation: "revoke-device"; deviceId: string };
+
+async function deviceRequest(origin: string, action: DeviceAction, login: StoredHubLogin, io: Io) {
+  let reply: Awaited<ReturnType<typeof manageRequest>>;
+  try { reply = await manageRequest(origin, action, login); } catch (error) {
+    throw new DeviceFailure(error instanceof ManagementResponseError
+      ? "the hub returned an invalid device-management response"
+      : "the hub is unreachable or the device-management request timed out");
+  }
+  if (reply.status === 200 && reply.body.status === "ok") return reply.body;
+  if (action.operation === "revoke-device" && reply.status === 500 &&
+      reply.body.status === "closure-failed" && reply.body.applied === true) {
+    io.err("ub auth: warning: revocation committed, but the hub could not close every active connection; repair the hub before relying on access closure.\n");
+    return reply.body;
+  }
+  const refusals: Record<string, [number, string]> = {
+    "sign-in-required": [401, "sign-in-required: the hub refuses this login"],
+    forbidden: [403, "forbidden: the hub refused own-device management"],
+    "device-not-found": [404, "device-not-found: the hub did not revoke this device"],
+    "protocol-mismatch": [409, "protocol-mismatch: update the hub and client together"],
+    "not-configured": [503, "not-configured: the hub does not support authenticated device management"],
+    failed: [500, "the hub could not complete device management"],
+  };
+  const refusal = refusals[String(reply.body.status)];
+  throw new DeviceFailure(refusal?.[0] === reply.status ? refusal[1] : "the hub returned an invalid device-management response");
+}
+
+function logoutField(io: Io, label: string, value: string): void {
+  io.out(`${label.padEnd(11)}${value}\n`);
+}
+
+async function logout(selection: Selection, io: Io, allDevices: boolean): Promise<number> {
+  const { origin } = selection;
+  const stored = readHubLogins();
+  const login = stored.logins[origin];
+  const missing = stored.state === "refused" ? "stored login refused"
+    : stored.state === "unreadable" || stored.unreadableHubs.includes(origin) ? "stored login unreadable" : "no login stored";
+  let failure: string | undefined;
+  if (allDevices) {
+    if (login === undefined) {
+      io.err(`ub auth: ${missing} for ${origin}. ${stored.diagnostic ?? ""} Run \`ub auth login ${origin}\`. Local login kept.\n`);
+      return 1;
+    }
+    let devices: string[];
+    try {
+      const body = await deviceRequest(origin, { operation: "list-devices" }, login, io);
+      if (!Array.isArray(body.devices)) throw new DeviceFailure("the hub returned an invalid device list");
+      const seen = new Set<string>();
+      devices = body.devices.map(device => {
+        if (!object(device) || typeof device.deviceId !== "string" || device.deviceId.length === 0 ||
+            typeof device.current !== "boolean" || seen.has(device.deviceId) ||
+            device.current !== (device.deviceId === login.credential.record.deviceId)) {
+          throw new DeviceFailure("the hub returned an invalid device list");
+        }
+        seen.add(device.deviceId);
+        return device.deviceId;
+      });
+      if (!seen.has(login.credential.record.deviceId)) throw new DeviceFailure("the hub returned an invalid device list");
+      // The key authorizes every request. Revoking its device first would
+      // prevent the remaining requests from authenticating.
+      devices = devices.filter(id => id !== login.credential.record.deviceId).concat(login.credential.record.deviceId);
+    } catch (error) {
+      io.err(`ub auth: ${error instanceof DeviceFailure ? error.message : "could not list devices"}. Local login kept.\n`);
+      return 1;
+    }
+    let confirmed = 0;
+    try {
+      for (const deviceId of devices) {
+        await deviceRequest(origin, { operation: "revoke-device", deviceId }, login, io);
+        confirmed++;
+      }
+    } catch (error) {
+      logoutField(io, "confirmed", `${confirmed} revocations on ${origin}`);
+      logoutField(io, "kept", `login for ${origin} on this computer`);
+      io.err(`ub auth: ${error instanceof DeviceFailure ? error.message : "device revocation failed"}. This computer's revocation is uncertain; the kept login may no longer work.\n`);
+      io.err(`Run \`ub auth logout --all-devices ${origin}\` again with a login the hub still accepts. If the hub refuses this computer's login, sign in again with \`ub auth login ${origin}\` or use another computer still signed in.\n`);
+      return 1;
+    }
+    const user = login.identity.githubUsername;
+    logoutField(io, "revoked", `${confirmed} devices of ${isGithubUsername(user) ? user : JSON.stringify(user)} on ${origin}, including this computer`);
+  } else if (login !== undefined) {
+    try {
+      await deviceRequest(origin, { operation: "revoke-device", deviceId: login.credential.record.deviceId }, login, io);
+      logoutField(io, "revoked", `this computer on ${origin}`);
+    } catch (error) {
+      failure = error instanceof DeviceFailure ? error.message : "revocation not confirmed";
+    }
+  } else if (missing !== "no login stored") {
+    failure = missing;
+  }
+  if (failure !== undefined) {
+    io.err(`ub auth: this computer is not yet revoked on ${origin}: ${failure}.\n`);
+    io.err(`To finish, run \`ub auth logout --all-devices ${origin}\` from a computer that is still signed in.\n`);
+  }
   try {
-    const removed = await removeHubLogin(selection.origin);
-    io.out(removed ? "Removed this machine's stored login.\n" : "No login stored for this hub.\n");
-    io.out("The device keeps its hub access until revoked through device management. Logout revokes nothing.\n");
-    return 0;
+    const removed = await removeHubLogin(origin);
+    if (removed) logoutField(io, "removed", `login for ${origin} on this computer`);
+    else io.out("No login stored for this hub.\n");
   } catch (error) {
     io.err(`ub auth: ${error instanceof Error ? error.message : "could not remove the stored login"}\n`);
     return 1;
   }
+  if (allDevices) io.out(`sign in again on the computers you still use: ub auth login ${origin}\n`);
+  return failure === undefined ? 0 : 1;
 }
 
 const REQUEST_MS = 10_000;
@@ -350,16 +463,29 @@ async function login(selection: Selection, io: Io): Promise<number> {
         io.out(`This login claimed the hub. Default workspace: ${result.claimedWorkspaceId}\n`);
       }
       if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
-      let replaced: boolean;
+      let replaced: StoredHubLogin | null;
       try { replaced = await writeHubLogin(selection.origin, credential, process.env, interrupted.signal); } catch (error) {
         if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
         io.err(`ub auth: could not store login for ${selection.origin}: ${error instanceof Error ? error.message : "credential store write failed"}. The issued device remains on the hub; revoke it through device management if needed.\n`);
         return 1;
       }
       stored = true;
+      if (replaced !== null) {
+        try {
+          // Revoking a device revokes all its credentials, including renewals.
+          // A malformed collection must never make cleanup revoke the new one.
+          if (replaced.credential.record.deviceId === credential.credential.record.deviceId) {
+            throw new DeviceFailure("the previous and new login name the same device");
+          }
+          await deviceRequest(selection.origin, {
+            operation: "revoke-device", deviceId: replaced.credential.record.deviceId,
+          }, replaced, io);
+        } catch (error) {
+          io.err(`ub auth: warning: the previous device is not revoked on ${selection.origin}: ${error instanceof DeviceFailure ? error.message : "revocation not confirmed"}. The new login is stored.\n`);
+        }
+      }
       io.out(`Stored login for ${selection.origin}.\n`);
       describeLogin(credential, io);
-      if (replaced) io.out("The replaced device keeps its hub access until it is revoked through device management.\n");
       io.out("Remote sync uses this stored login. Run `ub open` to edit in this computer’s browser.\n");
       return 0;
     }
@@ -398,13 +524,20 @@ export async function authCommand(argv: string[], io: Io): Promise<number> {
   else if (sub === "logout") help = AUTH_LOGOUT_HELP;
   else { io.err(`ub auth: unknown command\n\n${AUTH_HELP}`); return 2; }
   if (args.includes("--help") || args.includes("-h")) { io.out(help); return 0; }
-  if (args.length > 1 || args.some(arg => arg.startsWith("-"))) {
+  let hub: string | undefined;
+  let allDevices = false;
+  try {
+    const parsed = parseArgs({ args, options: sub === "logout" ? AUTH_LOGOUT_OPTIONS : {}, allowPositionals: true });
+    if (parsed.positionals.length > 1) throw new Error();
+    hub = parsed.positionals[0];
+    allDevices = "all-devices" in parsed.values && parsed.values["all-devices"] === true;
+  } catch {
     io.err(`ub auth ${sub}: expected at most one hub\n\n${help}`);
     return 2;
   }
-  const selection = selectHub(args[0], io);
+  const selection = selectHub(hub, io, sub !== "logout");
   if (typeof selection === "number") return selection;
   if (sub === "login") return await login(selection, io);
   if (sub === "status") return status(selection, io);
-  return await logout(selection, io);
+  return await logout(selection, io, allDevices);
 }

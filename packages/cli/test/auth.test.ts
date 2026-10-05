@@ -34,13 +34,19 @@ describe("ub auth local selection and command surface", () => {
       expect(help.stdout).toContain(`ub ${args.join(" ")}`);
       expect(help.stderr).toBe("");
       if (args[1] === "login") {
+        expect(help.stdout).toMatch(/revok.*replac|replac.*revok/i);
         expect(help.stdout).toContain("GitHub's approval page shows the app's name, not the hub.");
         expect(help.stdout.replace(/\s+/g, " ")).toContain("Approve only a login you started for the displayed hub");
         expect(help.stdout.replace(/\s+/g, " ")).toContain("the first GitHub account to complete approval claims its default workspace as administrator");
       }
+      if (args[1] === "logout" || args.length === 1) expect(help.stdout).toContain("--all-devices");
     }
-    for (const args of [["auth", "unknown"], ["auth", "login", "--json"], ["auth", "logout", "a", "b"]]) {
-      expect((await runUbAsync(args, box)).status).toBe(2);
+    for (const args of [["auth", "unknown"], ["auth", "login", "--json"], ["auth", "logout", "a", "b"],
+      ["auth", "login", "--all-devices"], ["auth", "status", "--all-devices"], ["auth", "logout", "--unknown"]]) {
+      const run = await runUbAsync(args, box);
+      expect(run.status).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).not.toBe("");
     }
     expect(existsSync(credentialPath(box))).toBe(false);
   });
@@ -113,8 +119,9 @@ describe("ub auth local selection and command surface", () => {
       expect(run.output.includes(old.credential.key)).toBe(false);
     }
     const logout = await runUbAsync(["auth", "logout", "Hub.Example.TS.net:443"], box);
-    expect(logout.status).toBe(0);
-    expect(logout.stdout).toMatch(/until.*revok|revok.*device/i);
+    expect(logout.status).toBe(1);
+    expect(logout.stderr).toContain(`ub auth logout --all-devices ${origin}`);
+    expect(logout.stdout).toBe(`removed    login for ${origin} on this computer\n`);
     expect(readStore(box)).toEqual({ signingSecret: SIGNING_SECRET, hubLogins: { [OTHER_HUB]: other } });
     expect(readFileSync(configPath(box))).toEqual(binding);
     const missing = await runUbAsync(["auth", "status"], box);
@@ -335,13 +342,14 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const requestCount = remote.requests.length;
     expect((await runUbAsync(["auth", "status"], box)).status).toBe(0);
     const logout = await runUbAsync(["auth", "logout"], box);
-    expect(logout.status).toBe(0);
-    expect(logout.output).toMatch(/until.*revok|revok.*device/i);
+    expect(logout.status).toBe(1);
+    expect(logout.stderr).toContain(`ub auth logout --all-devices ${remote.origin}`);
     expect(privateDeviceRows(remote.databasePath)).toHaveLength(1);
     expect(privateDeviceRows(remote.databasePath)[0]?.revoked_at).toBeNull();
     expect(readStore(box).hubLogins?.[OTHER_HUB]).toEqual(other);
     expect(readFileSync(configPath(box))).toEqual(before);
-    expect(remote.requests).toHaveLength(requestCount);
+    expect(remote.requests).toHaveLength(requestCount + 1);
+    expect(remote.requests.at(-1)).toMatchObject({ path: "/auth/manage", body: { operation: "revoke-device" } });
   });
 
   it("signs in with zero workspaces and explicitly leaves a different hub binding unchanged", async () => {
@@ -364,11 +372,11 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(status.stdout).toMatch(/no.*workspace|workspaces.*none/i);
     const logout = await runUbAsync(["auth", "logout", remote.origin], box);
     expect(logout.status).toBe(0);
-    expect(logout.output).toMatch(/binding.*unchanged|unchanged.*binding/i);
+    expect(logout.stdout).toBe(`revoked    this computer on ${remote.origin}\nremoved    login for ${remote.origin} on this computer\n`);
     expect(readFileSync(configPath(box))).toEqual(binding);
   });
 
-  it("keeps an existing login byte-for-byte on denial and replaces it only after completion without revoking", async () => {
+  it("keeps an existing login byte-for-byte on denial and revokes it only after a replacement completes", async () => {
     const remote = await rig([WORKSPACE]);
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: remote.origin.replace("http:", "ws:") },
       userConfig: { workspace: WORKSPACE, hubUrl: remote.origin.replace("http:", "ws:") },
@@ -385,11 +393,10 @@ describe("hub-driven CLI GitHub sign-in", () => {
     remote.github.identityHook = () => { expect(readFileSync(credentialPath(box))).toEqual(before); };
     const complete = await runUbAsync(["auth", "login"], box);
     expect(complete.status, complete.stderr).toBe(0);
-    expect(complete.output).toMatch(/replaced.*device|previous.*device|old.*device/i);
-    expect(complete.output).toMatch(/until.*revok/i);
     expect(savedLogin(box, remote.origin).identity.githubUsername).toBe(USERNAME);
     expect(privateDeviceRows(remote.databasePath)).toHaveLength(2);
-    expect(privateDeviceRows(remote.databasePath).every((row) => row.revoked_at === null)).toBe(true);
+    expect(privateDeviceRows(remote.databasePath).filter((row) => row.revoked_at === null)).toHaveLength(1);
+    expect(privateDeviceRows(remote.databasePath).filter((row) => row.revoked_at !== null)).toHaveLength(1);
   });
 
   it.each(["denied", "unknown-request"])("reports terminal %s without storing or disturbing earlier state", async (outcome) => {

@@ -197,13 +197,13 @@ export function projectLoginFields(login: StoredHubLogin): StoredHubLogin {
   };
 }
 
-/** Replace only after collection succeeds; the prior device is not revoked. */
+/** Store the new login and return the replaced login for the caller to revoke. */
 export async function writeHubLogin(
   origin: string,
   login: StoredHubLogin,
   env: NodeJS.ProcessEnv = process.env,
   signal?: AbortSignal,
-): Promise<boolean> {
+): Promise<StoredHubLogin | null> {
   if (!authOrigin(origin) || !isHubLogin(login)) throw new Error("cannot store an invalid hub login");
   signal?.throwIfAborted();
   // Share the configuration writers' lock, and read only after acquiring it:
@@ -214,7 +214,7 @@ export async function writeHubLogin(
     signal?.throwIfAborted();
     const store = editableStore(env);
     const entries = (store.raw?.hubLogins ?? {}) as Record<string, unknown>;
-    const replaced = Object.hasOwn(entries, origin);
+    const replaced = store.logins[origin] ?? null;
     publish(store, { ...entries, [origin]: projectLoginFields(login) }, "ub auth login");
     return replaced;
   } finally {
@@ -222,7 +222,7 @@ export async function writeHubLogin(
   }
 }
 
-/** Remove only this machine's selected login. This never contacts the hub. */
+/** Local removal only; the caller handles revocation before discarding the key. */
 export async function removeHubLogin(origin: string, env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
   if (!authOrigin(origin)) throw new Error("cannot remove a login for an invalid hub origin");
   const lock = await acquireInitLock(env, { command: "ub auth logout" });

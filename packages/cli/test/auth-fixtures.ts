@@ -62,6 +62,7 @@ export function savedLogin(box: Sandbox, origin: string): Login {
 }
 
 export class GithubFake {
+  identity = { id: 1234, login: USERNAME };
   lifetime = 10;
   tokenResult: Record<string, unknown> = { access_token: GITHUB_TOKEN, token_type: "bearer", scope: "" };
   calls: string[] = [];
@@ -88,7 +89,7 @@ export class GithubFake {
       return this.lookupHook?.(url) ?? Response.json({ id: 1234, login: USERNAME, type: "User" });
     }
     await this.identityHook?.();
-    return Response.json({ id: 1234, login: USERNAME });
+    return Response.json(this.identity);
   };
 }
 
@@ -146,8 +147,9 @@ export async function rig(workspaces: string[] = [], configured = true, initiali
     holdCollection: boolean;
     unavailableCollection: boolean;
     claimStateFailure: "hung-body" | undefined;
-    transform: ((path: string, status: number, result: Record<string, unknown>) => { status: number; result: unknown }) | undefined;
-  } = { onStart: undefined, holdCollection: false, unavailableCollection: false, claimStateFailure: undefined, transform: undefined };
+    onManagement: ((body: Record<string, unknown>) => { status: number; result: unknown } | undefined | Promise<{ status: number; result: unknown } | undefined>) | undefined;
+    transform: ((path: string, status: number, result: Record<string, unknown>, body: Record<string, unknown>) => { status: number; result: unknown }) | undefined;
+  } = { onStart: undefined, holdCollection: false, unavailableCollection: false, claimStateFailure: undefined, onManagement: undefined, transform: undefined };
   const proxy = await serve((request, response) => {
     void (async () => {
       const chunks: Buffer[] = [];
@@ -155,6 +157,12 @@ export async function rig(workspaces: string[] = [], configured = true, initiali
       const body = chunks.length > 0 ? JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown> : {};
       const path = request.url ?? "";
       requests.push({ path, method: request.method, authorization: request.headers.authorization, body });
+      const managementReply = path === "/auth/manage" ? await controls.onManagement?.(body) : undefined;
+      if (managementReply !== undefined) {
+        response.writeHead(managementReply.status, { "Content-Type": "application/json" });
+        response.end(JSON.stringify(managementReply.result));
+        return;
+      }
       if (path === "/auth/claim-state" && controls.claimStateFailure === "hung-body") {
         response.writeHead(200, { "Content-Type": "application/json" });
         response.write('{"unclaimed":true,');
@@ -177,7 +185,7 @@ export async function rig(workspaces: string[] = [], configured = true, initiali
       const result = await upstream.json() as Record<string, unknown>;
       if (path === "/auth/github/collect") collectionStatuses.push(String(result.status));
       if (path === "/auth/github/start") await controls.onStart?.(result);
-      const reply = controls.transform?.(path, upstream.status, result) ?? { status: upstream.status, result };
+      const reply = controls.transform?.(path, upstream.status, result, body) ?? { status: upstream.status, result };
       response.writeHead(reply.status, { "Content-Type": "application/json" });
       response.end(JSON.stringify(reply.result));
     })().catch(() => {

@@ -24,7 +24,13 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { HELP, MCP_HELP, runCli } from "../src/cli.js";
-import { AUTH_HELP, AUTH_LOGIN_HELP, AUTH_LOGOUT_HELP, AUTH_STATUS_HELP } from "../src/auth.js";
+import {
+  AUTH_HELP,
+  AUTH_LOGIN_HELP,
+  AUTH_LOGOUT_HELP,
+  AUTH_LOGOUT_OPTIONS,
+  AUTH_STATUS_HELP,
+} from "../src/auth.js";
 import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
 import { ENV_HELP } from "../src/env.js";
 import { INIT_HELP, INIT_OPTIONS } from "../src/init.js";
@@ -144,7 +150,7 @@ const PATHS: Path[] = [
   { argv: ["auth"], help: AUTH_HELP, options: {}, children: ["login", "status", "logout"] },
   { argv: ["auth", "login"], help: AUTH_LOGIN_HELP, options: {} },
   { argv: ["auth", "status"], help: AUTH_STATUS_HELP, options: {} },
-  { argv: ["auth", "logout"], help: AUTH_LOGOUT_HELP, options: {} },
+  { argv: ["auth", "logout"], help: AUTH_LOGOUT_HELP, options: AUTH_LOGOUT_OPTIONS },
   { argv: ["mcp"], help: MCP_HELP, options: {}, children: ["install"] },
   { argv: ["mcp", "install"], help: INSTALL_HELP, options: INSTALL_OPTIONS },
   { argv: ["env"], help: ENV_HELP, options: {} },
@@ -329,6 +335,25 @@ describe("every human-facing command path", () => {
     expect(help).toContain("The machine's binding stays unchanged.");
   });
 
+  it("describes device revocation in auth, logout and replacement-login help", async () => {
+    const group = await dispatch(["auth", "--help"]);
+    expect(group.stdout).toContain("--all-devices");
+    expect(group.stdout).toMatch(/logout.*(?:revoke|sign out)/i);
+
+    const logout = await dispatch(["auth", "logout", "--help"]);
+    const help = logout.stdout.replace(/\s+/g, " ");
+    expect(help).toContain("--all-devices");
+    expect(help).toMatch(/revok.*this computer/i);
+    expect(help).toMatch(/this computer last/i);
+    expect(help).toMatch(/keeps? (?:the |any )?(?:local )?login/i);
+    expect(help).toContain("ub auth logout --all-devices");
+    expect(help).not.toMatch(/logout never revokes|No network is used/i);
+
+    const login = await dispatch(["auth", "login", "--help"]);
+    expect(login.stdout.replace(/\s+/g, " ")).toMatch(/revok.*(?:replaced|previous) device/i);
+    expect(login.stdout).not.toContain("does not revoke the previous device");
+  });
+
   it("keeps the hidden `mcp serve` out of the group help it is dispatched by", async () => {
     const run = await dispatch(["mcp", "--help"]);
     expect(run.status).toBe(0);
@@ -359,6 +384,7 @@ describe("help before the work", () => {
     ["open", "--port", "0", "-h"],
     ["workspace", "join", "ws://example.invalid:1234", "-h"],
     ["auth", "login", "--help"],
+    ["auth", "logout", "--all-devices", "--help"],
     ["mcp", "install", "claude", "--help"],
   ];
   for (const argv of inert) {
