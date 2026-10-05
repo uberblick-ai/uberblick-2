@@ -66,11 +66,14 @@ afterAll(async () => {
   removeTempDatabases();
 });
 
-/** Present `presented` to the hub and hand back the rejection it logged. */
+/**
+ * Present `presented` to the hub and hand back the rejection it logged, with
+ * the reason the client itself was told.
+ */
 async function rejectionFor(
   presented: string,
   options: { room?: string; headers?: Record<string, string> } = {},
-): Promise<HubLogRecord> {
+): Promise<{ record: HubLogRecord; denied: string }> {
   const client = createClient({
     port: hub.port,
     room: options.room ?? testRoom(),
@@ -79,7 +82,7 @@ async function rejectionFor(
   });
   clients.push(client);
 
-  await client.denied;
+  const denied = await client.denied;
   await waitUntil("a rejection to be logged", () =>
     records.some((record) => record.event === "hub.auth.rejected"),
   );
@@ -87,7 +90,7 @@ async function rejectionFor(
   if (record === undefined) {
     throw new Error("no hub.auth.rejected record");
   }
-  return record;
+  return { record, denied };
 }
 
 /**
@@ -109,6 +112,8 @@ function expectNoSecrets(record: HubLogRecord, presented: string): void {
 interface Case {
   name: string;
   cause: string;
+  /** What the refused client is told: one generic reason for every bad token. */
+  denied?: "workspace-mismatch";
   /** What the token said about itself, or `"unparseable"` when it said nothing. */
   identity: { typ: string | null; sub: string | null } | "unparseable";
   token: () => Promise<string>;
@@ -120,6 +125,14 @@ const cases: Case[] = [
     cause: "unparseable",
     identity: "unparseable",
     token: async () => "not-a-token",
+  },
+  {
+    // The secret signs tokens; it is not one. An opaque-string auth scheme
+    // would have accepted it.
+    name: "the hub's own secret presented as a token",
+    cause: "unparseable",
+    identity: "unparseable",
+    token: async () => TEST_SECRET,
   },
   {
     // Refused on length before anything decodes it: a real token is a few
@@ -207,6 +220,7 @@ const cases: Case[] = [
   {
     name: "a valid token for another workspace",
     cause: "workspace-mismatch",
+    denied: "workspace-mismatch",
     identity: { typ: "room", sub: "intruder" },
     token: () =>
       token("read-write", { workspace: OTHER_WORKSPACE, sub: "intruder" }),
@@ -217,8 +231,9 @@ describe("a rejected connection", () => {
   it.each(cases)("names $cause for $name", async (scenario) => {
     const presented = await scenario.token();
 
-    const record = await rejectionFor(presented);
+    const { record, denied } = await rejectionFor(presented);
 
+    expect(denied).toBe(scenario.denied ?? "invalid-token");
     expect(record.cause).toBe(scenario.cause);
     if (scenario.identity === "unparseable") {
       expect(record.token).toBe("unparseable");
@@ -266,7 +281,7 @@ describe("a rejected connection", () => {
   it("names the socket's own address when nothing is in front of the hub", async () => {
     // Sending the internal header is the obvious way to lie about the peer, so
     // the upgrade hook overwrites it rather than reading it.
-    const record = await rejectionFor("not-a-token", {
+    const { record } = await rejectionFor("not-a-token", {
       headers: { [PEER_ADDRESS_HEADER]: "8.8.8.8" },
     });
 
@@ -277,7 +292,7 @@ describe("a rejected connection", () => {
   it("names the client the proxy saw, not the proxy", async () => {
     // What the Compose deployment looks like from here: the hub's peer is the
     // local proxy, and the address that matters is the one Caddy observed.
-    const record = await rejectionFor("not-a-token", {
+    const { record } = await rejectionFor("not-a-token", {
       headers: { "x-forwarded-for": "198.51.100.9" },
     });
 
@@ -289,7 +304,7 @@ describe("a rejected connection", () => {
     // Only the last hop is the address a proxy observed; everything left of it
     // is somebody's claim about itself, which is what a `trusted_proxies`
     // configuration would let through.
-    const record = await rejectionFor("not-a-token", {
+    const { record } = await rejectionFor("not-a-token", {
       headers: { "x-forwarded-for": "203.0.113.7, 198.51.100.9" },
     });
 

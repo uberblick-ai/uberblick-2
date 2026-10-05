@@ -83,6 +83,8 @@ function fixture(room: string, title?: string): Fixture {
     room,
     ydoc,
     provider: { awareness },
+    status: { writable: false, synced: false },
+    onStatusChange: () => () => {},
   } as unknown as RoomConnection;
   const fix = { connection, ydoc, awareness, peer, peerDoc };
   fixtures.push(fix);

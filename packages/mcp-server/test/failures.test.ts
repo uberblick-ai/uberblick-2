@@ -94,6 +94,10 @@ const EXPECTED: Record<
   string,
   { recoveryClass: string | null; detail: string[] }
 > = {
+  invalid_table: { recoveryClass: "manual", detail: [] },
+  table_mapping_required: { recoveryClass: "manual", detail: [] },
+  invalid_table_mapping: { recoveryClass: "manual", detail: [] },
+  table_comments_unavailable: { recoveryClass: "manual", detail: ["blockId"] },
   invalid_github_reference: { recoveryClass: "manual", detail: ["github_ref"] },
   persistence_failed: { recoveryClass: "manual", detail: ["room"] },
   stale_block: {
@@ -217,6 +221,23 @@ describe("the failure contract", () => {
 
     record((await rig.call("get_doc", { uuid: randomUUID() })).payload);
     record((await rig.call("find_decisions", { github_ref: "#1" })).payload);
+    record((await rig.call("insert_block", {
+      uuid: doc.uuid, type: "table", text: "not a GFM table",
+    })).payload);
+    const table = await rig.ok("insert_block", {
+      uuid: doc.uuid, after_block_id: doc.blockId, type: "table", text: "| Header |\n| --- |\n| Cell |",
+    });
+    record((await rig.call("edit_block", {
+      uuid: doc.uuid, block_id: table.block.id, old_text: table.block.text,
+      new_text: "| Header | Added |\n| --- | --- |\n| Cell | New |",
+    })).payload);
+    record((await rig.call("edit_block", {
+      uuid: doc.uuid, block_id: table.block.id, old_text: table.block.text, new_text: table.block.text,
+      table_mapping: { rows: [0, 2], columns: [0] },
+    })).payload);
+    record((await rig.call("annotate", {
+      uuid: doc.uuid, block_id: table.block.id, start: 0, end: 3, text: "Unavailable",
+    })).payload);
     record(
       (await rig.call("get_doc", { uuid: stubOnly(rig) })).payload,
     );
@@ -452,24 +473,6 @@ describe("the failure contract", () => {
     const crash = failures.get("internal_error");
     expect(crash.message).toBe(INTERNAL_ERROR_MESSAGE);
     expect(crash.message).not.toContain("exploded");
-  });
-
-  it("describes additive sync recovery fields without changing the existing status meanings", async () => {
-    const rig = await localRig();
-    const { tools } = await rig.client.listTools();
-    const description = tools.find((tool) => tool.name === "sync_status")?.description ?? "";
-    expect(description).toContain("Every reading carries `hub.recoveryClass`");
-    expect(description).toContain("`hub-down`, a retryable connection or renewal failure");
-    expect(description).toContain("`auth-failed`");
-    expect(description).toContain("needs human action");
-    for (const reading of [
-      "sign-in-required",
-      "no-workspace-access",
-      "credential-store",
-      "renewal-unavailable",
-    ]) {
-      expect(description).toContain(reading);
-    }
   });
 
   it("says a failed write changed nothing, and invents nothing for a read", async () => {

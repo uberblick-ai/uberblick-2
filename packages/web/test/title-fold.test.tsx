@@ -105,7 +105,13 @@ function pickerAnswer(query: string): string[] {
 }
 
 describe("the Documents filter and the @ picker match one title one way", () => {
-  it.each([
+  /**
+   * Every case is checked against the picker, which is pure and costs nothing;
+   * the rendered list, which costs a render per query, takes the cases that
+   * differ in kind. Both surfaces fold through one function (below), so a case
+   * the picker answers is the list's answer too.
+   */
+  const cases: Array<[string, string[]]> = [
     // The two matches #956 lost, and the direction the store's index already
     // folds: a non-spacing mark is not part of what was typed.
     ["ecole", ["École"]],
@@ -129,10 +135,21 @@ describe("the Documents filter and the @ picker match one title one way", () => 
     ["I", ["ISPARTA", "İSTANBUL", "İstanbul harbour"]],
     // An empty field lists everything, on both surfaces.
     ["", EVERY_TITLE],
-  ])("answers %j with the same documents on both surfaces", async (query, expected) => {
-    const wanted = [...expected].sort();
-    expect(await listAnswer(query)).toEqual(wanted);
-    expect(pickerAnswer(query)).toEqual(wanted);
+  ];
+
+  it.each(cases.filter(([query]) => ["ecole", "istanbul", "कतब", ""].includes(query)))(
+    "answers %j with the same documents on both surfaces",
+    async (query, expected) => {
+      const wanted = [...expected].sort();
+      expect(await listAnswer(query)).toEqual(wanted);
+      expect(pickerAnswer(query)).toEqual(wanted);
+    },
+  );
+
+  it("answers every case the same way in the @ picker", () => {
+    for (const [query, expected] of cases) {
+      expect(pickerAnswer(query), JSON.stringify(query)).toEqual([...expected].sort());
+    }
   });
 
   it("folds the query and the title through one function, not two copies", () => {

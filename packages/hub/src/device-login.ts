@@ -31,6 +31,8 @@ export interface DeviceLoginOptions {
   /** A successful promotion just granted this workspace; refresh an older no-access snapshot. */
   membershipGranted?: boolean;
   signal?: AbortSignal;
+  /** How long a renewal outcome is shared; {@link DEVICE_RENEWAL_COOLDOWN_MS} unless a test shortens it. */
+  renewalCooldownMs?: number;
 }
 
 function signIn(origin: string): DeviceLoginFailure {
@@ -202,6 +204,7 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     (options.rejected !== undefined && sameCredential(login, options.rejected));
   if (!needsRenewal(current.login)) return current;
   const path = paths(origin, env);
+  const cooldownMs = options.renewalCooldownMs ?? DEVICE_RENEWAL_COOLDOWN_MS;
   let lock: Awaited<ReturnType<typeof acquireInitLock>>;
   try {
     lock = await acquireInitLock(env, { path: path.lock, waitMs: REQUEST_MS + 2_500, command: "ub auth login", ...(options.signal === undefined ? {} : { signal: options.signal }) });
@@ -244,7 +247,7 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
       // If login changed concurrently, this exchange's result does not describe
       // its authority. Use that newer login; its next need may renew it.
       if (!sameCredential(current.login, result)) return current.login.credential.record.workspaces.includes(workspace) ? current : offline(origin);
-      publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(result), retryAt: Date.now() + DEVICE_RENEWAL_COOLDOWN_MS,
+      publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(result), retryAt: Date.now() + cooldownMs,
         status: "renewed" } satisfies Outcome));
       options.signal?.throwIfAborted();
       return result.credential.record.workspaces.includes(workspace) ? current : noAccess(origin, workspace);
@@ -254,12 +257,12 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     if (current.status !== "ready") return current;
     if (!sameCredential(current.login, expected)) return current.login.credential.record.workspaces.includes(workspace) ? current : offline(origin);
     if (result === "unchanged") {
-      publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(expected), retryAt: Date.now() + DEVICE_RENEWAL_COOLDOWN_MS,
+      publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(expected), retryAt: Date.now() + cooldownMs,
         status: "renewed" } satisfies Outcome));
       return noAccess(origin, workspace);
     }
     const failure = result === "already-replaced" ? signIn(origin) : result;
-    publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(expected), retryAt: Date.now() + DEVICE_RENEWAL_COOLDOWN_MS,
+    publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(expected), retryAt: Date.now() + cooldownMs,
       status: failure.status, ...(failure.hubVersion === undefined ? {} : { hubVersion: failure.hubVersion }) } satisfies Outcome));
     return failure;
   } catch {

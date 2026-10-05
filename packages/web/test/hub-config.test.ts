@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Where the client configuration comes from, and what happens when the answer
  * is unusable.

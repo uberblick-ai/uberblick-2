@@ -32,16 +32,23 @@ import { findCheckoutRoot } from "../src/checkout.js";
 import { resolveConfig } from "../src/config.js";
 import {
   REPO_ROOT,
+  hubless,
   removeTempDirs,
   runUb,
   runUbAsync,
-  sandbox,
+  sandbox as anySandbox,
   type Sandbox,
+  type SandboxFiles,
   sleep,
   waitUntil,
 } from "./helpers.js";
 
 afterAll(removeTempDirs);
+
+/** No test here starts a hub, so none waits for one; see {@link hubless}. */
+function sandbox(files?: SandboxFiles): Sandbox {
+  return hubless(anySandbox(files));
+}
 
 const CREDENTIALS = ["uberblick", "credentials.json"] as const;
 
@@ -189,10 +196,24 @@ describe("ub init", () => {
     expect(existsSync(join(box.dataHome, "uberblick", `${fresh.workspaceId}.sqlite`))).toBe(true);
   });
 
-  it("generates an owner-only secret and prints none of it", () => {
+  it("generates an owner-only secret once, prints none of it, and keeps its workspace", () => {
+    // Under the widest umask a system will accept: `mode:` on a write is
+    // subject to the umask, so the file has to be chmodded afterwards.
     const box = sandbox({ checkout: true });
-    const run = runUb(["init", "--yes"], box);
-    expect(run.status).toBe(0);
+    const previous = process.umask(0o000);
+    let run: ReturnType<typeof runUb>;
+    let again: ReturnType<typeof runUb>;
+    try {
+      run = runUb(["init", "--yes"], box);
+      expect(run.status).toBe(0);
+      expect(statSync(credentialsPath(box)).mode & 0o777).toBe(0o600);
+
+      // A second run is not a second workspace or a second secret: what is in
+      // force is what a re-run confirms.
+      again = runUb(["init", "--yes"], box);
+    } finally {
+      process.umask(previous);
+    }
 
     // At least 32 random bytes, over the alphabet `bin/remote-compose.sh` accepts
     // (`A-Za-z0-9._-`) so the same secret survives a shell and Docker Compose.
@@ -200,12 +221,12 @@ describe("ub init", () => {
     expect(secret).toMatch(/^[A-Za-z0-9._-]+$/);
     expect(Buffer.from(secret, "base64url").length).toBeGreaterThanOrEqual(32);
 
-    expect(statSync(credentialsPath(box)).mode & 0o777).toBe(0o600);
     // One workspace, generated here because nothing else in the system will
-    // invent one.
-    expect(projectBinding(box).workspaceId).toMatch(UUID);
-    // It is in the report too, so the id is not something to go looking for.
-    expect(run.stdout).toContain(projectBinding(box).workspaceId as string);
+    // invent one. It is in the report too, so the id is not something to go
+    // looking for.
+    const workspace = projectBinding(box).workspaceId as string;
+    expect(workspace).toMatch(UUID);
+    expect(run.stdout).toContain(workspace);
 
     // Identity is recorded, and the colour is one y-prosemirror will accept.
     expect(typeof userConfig(box).displayName).toBe("string");
@@ -214,30 +235,19 @@ describe("ub init", () => {
     // The one thing this command must never do.
     expect(run.output).not.toContain(secret);
     expect(run.stdout).toMatch(/credential\s+generated for local development/);
-  });
+    // Inside the sandbox's own checkout, the contributor task is the next step.
+    const cwd = realpathSync(box.cwd);
+    expect(
+      findCheckoutRoot(cwd),
+      "the fixture must detect its own checkout, not an enclosing checkout",
+    ).toBe(cwd);
+    expect(run.stdout).toContain("mise run dev");
 
-  it("keeps the workspace it generated, rather than minting a second one", () => {
-    // A workspace id is an identity, and a second run is not a second
-    // workspace: the one in force is what a re-run confirms.
-    const box = sandbox({ checkout: true });
-    expect(runUb(["init", "--yes"], box).status).toBe(0);
-    const first = projectBinding(box).workspaceId as string;
-    expect(first).toMatch(UUID);
-
-    expect(runUb(["init", "--yes"], box).status).toBe(0);
-    expect(projectBinding(box).workspaceId).toBe(first);
-  });
-
-  it("is a no-op for the secret on a second run", () => {
-    const box = sandbox({ checkout: true });
-    expect(runUb(["init", "--yes"], box).status).toBe(0);
-    const first = storedSecret(box);
-
-    const again = runUb(["init", "--yes"], box);
     expect(again.status).toBe(0);
-    expect(storedSecret(box)).toBe(first);
+    expect(projectBinding(box).workspaceId).toBe(workspace);
+    expect(storedSecret(box)).toBe(secret);
     expect(again.stdout).toMatch(/credential\s+already on this machine/);
-    expect(again.output).not.toContain(first);
+    expect(again.output).not.toContain(secret);
   });
 
   it("generates nothing when the environment already supplies a secret", () => {
@@ -253,20 +263,26 @@ describe("ub init", () => {
     expect(run.output).not.toContain(supplied);
   });
 
-  it("repairs the mode of an exposed credentials file, keeping its value", () => {
+  it("repairs the modes of exposed credentials and config files, keeping their values", () => {
     // Every other command refuses a secret other users can read. Regenerating
     // would cut this machine off from clients holding the old one, so the fix is
     // the mode.
     const secret = "exposed-but-shared-signing-secret-77b1";
     const box = sandbox({
       checkout: true,
+      projectBinding: { workspaceId: JOINED, hubUrl: null },
+      userConfig: { workspace: JOINED },
       credentials: { signingSecret: secret },
       credentialsMode: 0o644,
     });
+    chmodSync(join(box.configHome, "uberblick", "config.json"), 0o644);
 
     const run = runUb(["init", "--yes"], box);
     expect(run.status).toBe(0);
     expect(statSync(credentialsPath(box)).mode & 0o777).toBe(0o600);
+    expect(
+      statSync(join(box.configHome, "uberblick", "config.json")).mode & 0o077,
+    ).toBe(0);
     expect(storedSecret(box)).toBe(secret);
     expect(run.output).not.toContain(secret);
   });
@@ -489,52 +505,36 @@ describe("ub init", () => {
     // a lock is stale unlink it twice, and the second unlink deletes a lock
     // somebody had just legitimately taken. A crashed holder is instead a
     // visible situation with a one-line fix, so the message has to carry it.
-    // A fresh lock and a long-dead one get the same answer, and the second case
-    // puts the lock somewhere whose name a shell would mangle: that recovery
-    // line is going to be pasted into one.
-    for (const [ageMs, home] of [
-      [0, null],
-      [120_000, "it's here/config dir"],
-    ] as const) {
-      const box = sandbox({ checkout: true });
-      const configHome =
-        home === null ? box.configHome : join(box.configHome, home);
-      const lock = join(configHome, "uberblick", ".init.lock");
-      mkdirSync(dirname(lock), { recursive: true });
-      writeFileSync(lock, "999999\n");
-      const when = new Date(Date.now() - ageMs);
-      utimesSync(lock, when, when);
+    // A long-dead lock gets the same answer as a fresh one, and this one sits
+    // somewhere whose name a shell would mangle: that recovery line is going to
+    // be pasted into one.
+    const box = sandbox({ checkout: true });
+    const configHome = join(box.configHome, "it's here/config dir");
+    const lock = join(configHome, "uberblick", ".init.lock");
+    mkdirSync(dirname(lock), { recursive: true });
+    writeFileSync(lock, "999999\n");
+    const when = new Date(Date.now() - 120_000);
+    utimesSync(lock, when, when);
 
-      const run = runUb(["init", "--yes"], box, {
-        XDG_CONFIG_HOME: configHome,
-      });
-      expect(run.status).toBe(1);
-      // The path, how old it is, and the command that fixes it.
-      expect(run.stderr).toMatch(/another `ub init` is holding .*\.init\.lock/);
-      expect(run.stderr).toMatch(/\d+s old/);
-      // Quoted for a shell: single quotes around the path, with any single
-      // quote in it spliced as '\'' — so the line survives spaces, quotes and
-      // anything else XDG_CONFIG_HOME can carry.
-      expect(run.stderr).toContain(
-        `rm -- '${lock.split("'").join(`'\\''`)}'`,
-      );
-      // Somebody else's lock is left exactly where it was, and nothing was
-      // half-written around it.
-      expect(existsSync(lock)).toBe(true);
-      expect(existsSync(join(configHome, "uberblick", "credentials.json"))).toBe(
-        false,
-      );
-    }
-  });
-
-  it("repairs the mode of a config.json that was left readable", () => {
-    const box = sandbox({ projectBinding: { workspaceId: JOINED, hubUrl: null }, checkout: true, userConfig: { workspace: JOINED } });
-    chmodSync(join(box.configHome, "uberblick", "config.json"), 0o644);
-
-    expect(runUb(["init", "--yes"], box).status).toBe(0);
-    expect(
-      statSync(join(box.configHome, "uberblick", "config.json")).mode & 0o077,
-    ).toBe(0);
+    const run = runUb(["init", "--yes"], box, {
+      XDG_CONFIG_HOME: configHome,
+    });
+    expect(run.status).toBe(1);
+    // The path, how old it is, and the command that fixes it.
+    expect(run.stderr).toMatch(/another `ub init` is holding .*\.init\.lock/);
+    expect(run.stderr).toMatch(/\d+s old/);
+    // Quoted for a shell: single quotes around the path, with any single
+    // quote in it spliced as '\'' — so the line survives spaces, quotes and
+    // anything else XDG_CONFIG_HOME can carry.
+    expect(run.stderr).toContain(
+      `rm -- '${lock.split("'").join(`'\\''`)}'`,
+    );
+    // Somebody else's lock is left exactly where it was, and nothing was
+    // half-written around it.
+    expect(existsSync(lock)).toBe(true);
+    expect(existsSync(join(configHome, "uberblick", "credentials.json"))).toBe(
+      false,
+    );
   });
 
   it("offers the MCP wiring, and honours --no-mcp instead of blocking", () => {
@@ -560,19 +560,6 @@ describe("ub init", () => {
     expect(asked.stderr).toMatch(/--print runs nothing/);
     expect(existsSync(claude.record)).toBe(false);
     expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
-  });
-
-  it("names the contributor task inside the sandbox's own checkout", () => {
-    const box = sandbox({ checkout: true });
-    const cwd = realpathSync(box.cwd);
-    expect(
-      findCheckoutRoot(cwd),
-      "the fixture must detect its own checkout, not an enclosing checkout",
-    ).toBe(cwd);
-
-    const run = runUb(["init", "--yes"], box);
-    expect(run.status).toBe(0);
-    expect(run.stdout).toContain("mise run dev");
   });
 
   it("initialises outside a checkout, and names no contributor task there", () => {
@@ -622,18 +609,5 @@ describe("ub init", () => {
       encoding: "utf8",
     });
     expect(status.stdout).toBe("?? .uberblick.json\n");
-  });
-
-  it("keeps the credential owner-only under a umask that would widen it", () => {
-    // `mode:` on a write is subject to the umask, so the file is chmodded
-    // afterwards. Prove it with the widest umask a system will accept.
-    const box = sandbox({ checkout: true });
-    const previous = process.umask(0o000);
-    try {
-      expect(runUb(["init", "--yes"], box).status).toBe(0);
-    } finally {
-      process.umask(previous);
-    }
-    expect(statSync(credentialsPath(box)).mode & 0o077).toBe(0);
   });
 });

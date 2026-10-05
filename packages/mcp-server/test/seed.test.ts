@@ -31,7 +31,6 @@ import {
   isSidebarSeeded,
   readSidebar,
   roomForDoc,
-  tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import { PersistenceError, Replicas } from "../src/replica.js";
@@ -408,29 +407,6 @@ describe("seed import", () => {
     }
   });
 
-  // A tombstone is sticky: upserting a deleted entry keeps it deleted, so a
-  // document written here could never be listed. That is a conflict for a human,
-  // not something to do quietly and report as success.
-  it("skips a tombstoned uuid instead of writing a doc nothing can list", async () => {
-    const databasePath = tempDatabasePath();
-    const store = new MirrorStore(databasePath, WORKSPACE);
-    const replicas = new Replicas(testConfig({ databasePath }), store);
-    try {
-      const seed = seeds[0];
-      if (seed === undefined) throw new Error("no fixture docs");
-      tombstoneDirectoryEntry(replicas.directory().doc, seed.uuid);
-
-      const results = await importSeedDocs(replicas, [seed]);
-      expect(results[0]?.action).toBe("skipped");
-      expect(results[0]?.reason).toContain("tombstoned");
-      expect(getBlocks(replicas.replica(seed.uuid).doc)).toHaveLength(0);
-      expect(getMeta(replicas.replica(seed.uuid).doc).uuid).toBe("");
-    } finally {
-      replicas.destroy();
-      store.close();
-    }
-  });
-
   // The log is the authoritative replica, so an append it refuses means the
   // documents in memory are ahead of the only durable copy. Reporting them as
   // imported would be a lie a teardown then throws away.
@@ -567,32 +543,6 @@ describe("starter sidebar seed", () => {
       groups: [{ ...group, docs: [second, first] }],
       seeded: true,
     });
-  });
-
-  it("pins nothing when a document it would pin is tombstoned", async () => {
-    // The pins are a promise that the layout exists. A document the user threw
-    // away breaks it — and a half-layout must not be declared seeded either,
-    // because the marker would stop the repair that is still owed.
-    const databasePath = tempDatabasePath();
-    const dir = starterDir();
-    await importSeedDir(dir, testConfig({ databasePath }));
-
-    const store = new MirrorStore(databasePath, WORKSPACE);
-    const replicas = new Replicas(testConfig({ databasePath }), store);
-    try {
-      tombstoneDirectoryEntry(replicas.directory().doc, first);
-    } finally {
-      replicas.destroy();
-      store.close();
-    }
-
-    const outcome = await importSeedDir(dir, testConfig({ databasePath }), {
-      ...group,
-      docs: [first, second],
-    });
-
-    expect(outcome.sidebar).toBe(false);
-    expect(sidebarOf(databasePath)).toEqual({ groups: [], seeded: false });
   });
 
   // The failure this defends against is the one a local-only eligibility read

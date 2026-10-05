@@ -56,11 +56,8 @@ permissions or policy.
 - **Corpus context:** Uberblick project agent workflow
   (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`) for the delivery model; Editorial
   contract (`5e0e25d8-c71f-44c3-9bf3-93662712c1fc`) before any corpus edit.
-- **MCP route:** use the registered `uberblick` server. Repository MCP entries
-  use the host-installed corpus launcher described in README, "Keep the corpus
-  client independent of the checkout". For a stdio fallback, run
-  `"$HOME/.local/bin/uberblick-corpus-mcp"` from private scratch. A missing or
-  incompatible pin stops corpus-dependent work; never substitute checkout `ub`.
+- **MCP route:** use the registered `uberblick` server (`ub mcp serve` through
+  mise, from `.mcp.json`).
 - **Commands:** `.agents/development.md`.
 - **Retrospectives and audit reports** go to one discussion per agent, posted
   with the node id below and never a guessed one, because a wrong id posts to a
@@ -70,7 +67,7 @@ permissions or policy.
   | --- | --- | --- |
   | issue-preparer | #1014 | `D_kwDOT-Zo0s4ApsUK` |
   | implementer | #1015 | `D_kwDOT-Zo0s4ApsUL` |
-  | reviewer | #1016 | `D_kwDOT-Zo0s4ApsUM` |
+  | reviewer (issue-reviewer, pr-reviewer) | #1016 | `D_kwDOT-Zo0s4ApsUM` |
   | integrator | #1017 | `D_kwDOT-Zo0s4ApsUN` |
   | workflow-audit | #540 | `D_kwDOT-Zo0s4Ao4BT` |
   | technical-audit | #541 | `D_kwDOT-Zo0s4Ao4BU` |

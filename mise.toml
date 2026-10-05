@@ -323,7 +323,12 @@ rm -rf "$context/.dockerignore"
 git -C "$root" show "$main_sha:.dockerignore" > "$context/.dockerignore"
 
 review_tag="uberblick-review:${review_sha}"
-docker build --file "$runner/Dockerfile.review" --tag "$review_tag" "$context"
+# The build log is only worth reading when the build fails.
+if ! docker build --file "$runner/Dockerfile.review" --tag "$review_tag" "$context" > "$parent/build.log" 2>&1; then
+  cat "$parent/build.log" >&2
+  printf 'review: the image build failed.\n' >&2
+  exit 1
+fi
 docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges "$review_tag"
 printf 'Review image retained for probes: %s\\n' "$review_tag"
 """

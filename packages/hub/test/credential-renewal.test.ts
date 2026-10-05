@@ -105,13 +105,15 @@ describe("device credential renewal", () => {
     expect(await store.renew(await proof(next), memberships, { ifWorkspacesChanged: true })).toEqual({ status: "sign-in-required" });
   });
 
-  it("renews an initially empty credential to exactly current memberships without GitHub or grants", async () => {
+  it("renews an initially empty credential after direct admin grants without GitHub or further grants", async () => {
     const { db, store, memberships } = registry();
     const original = issue(store, []);
     const originalRoom = await roomToken(original);
     const request = await proof(original);
-    memberships.grant({ principalId: PRINCIPAL, workspaceId: WORKSPACE, role: "member" });
-    memberships.grant({ principalId: PRINCIPAL, workspaceId: OTHER_WORKSPACE, role: "admin" });
+    memberships.grant({ principalId: "admin", workspaceId: WORKSPACE, role: "admin" });
+    memberships.grant({ principalId: "admin", workspaceId: OTHER_WORKSPACE, role: "admin" });
+    memberships.grantMember({ actorPrincipalId: "admin", principalId: PRINCIPAL, workspaceId: WORKSPACE, role: "member" });
+    memberships.grantMember({ actorPrincipalId: "admin", principalId: PRINCIPAL, workspaceId: OTHER_WORKSPACE, role: "admin" });
     memberships.grant({ principalId: "another-person", workspaceId: crypto.randomUUID(), role: "admin" });
     const membersBefore = db.connection.prepare("SELECT * FROM hub_memberships ORDER BY workspace_id, principal_id").all();
     const github = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("GitHub is unreachable"));

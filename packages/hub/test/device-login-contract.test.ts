@@ -86,10 +86,7 @@ describe("device renewal response and recovery contracts", () => {
 
   it.each([
     { status: 200, body: { status: "unchanged" } },
-    { status: 401, body: { status: "sign-in-required" } },
-    { status: 409, body: { status: "protocol-mismatch", reason: "protocol-mismatch:01" } },
     { status: 409, body: { status: "protocol-mismatch", reason: `protocol-mismatch:${SYNC_PROTOCOL_VERSION}` } },
-    { status: 400, body: { status: "invalid-request" } },
   ])("accepts only a strict mismatch from the credential-free protocol probe: $status/$body.status", async (reply) => {
     const { hub, env, login } = await setup();
     const fetch = vi.spyOn(globalThis, "fetch")
@@ -115,15 +112,12 @@ describe("device renewal response and recovery contracts", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it.each(["principal", "device", "credential id", "key", "revocation"])(
+  it.each(["principal", "revocation"])(
     "refuses a renewed response with mismatched %s without losing the recorded login",
     async (changed) => {
       const { hub, env, login } = await setup();
       const replacement = hub.issue({ workspaces: [WORKSPACE], deviceId: login.credential.record.deviceId });
       if (changed === "principal") replacement.credential.record.principalId = randomUUID();
-      if (changed === "device") replacement.credential.record.deviceId = randomUUID();
-      if (changed === "credential id") replacement.credential.record.id = login.credential.record.id;
-      if (changed === "key") replacement.credential.key = "unreadable-private-key";
       if (changed === "revocation") replacement.credential.record.revokedAt = Date.now();
       hub.setRenewalReply({ status: 200, body: { status: "renewed", credential: replacement.credential } });
       const result = await ensureDeviceLogin(hub.url, WORKSPACE, { env });

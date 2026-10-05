@@ -114,6 +114,7 @@ import {
 } from "@uberblick/mcp-server";
 import { buildLockPath } from "./build-lock.js";
 import { budget, resolveMcpConfig } from "./budget.js";
+import { openBrowser } from "./browser.js";
 import { localBrowserKey } from "./browser-key.js";
 import { resolveConfig, requireBinding } from "./config.js";
 import { takeHelp } from "./help.js";
@@ -1339,51 +1340,6 @@ async function ensureHub(
     throw error;
   }
   return { started: hub, note: `${hubUrl} (started here — Ctrl-C stops it)` };
-}
-
-// --- the browser -------------------------------------------------------------
-
-/** The command that opens a URL on this platform, or null when asked not to. */
-function browserCommand(
-  url: string,
-  env: NodeJS.ProcessEnv,
-): { command: string; args: string[] } | null {
-  const configured = trimmed(env.BROWSER);
-  if (configured === "none") {
-    return null;
-  }
-  if (configured !== null) {
-    return { command: configured, args: [url] };
-  }
-  if (process.platform === "darwin") {
-    return { command: "open", args: [url] };
-  }
-  if (process.platform === "win32") {
-    return { command: "cmd", args: ["/c", "start", "", url] };
-  }
-  return { command: "xdg-open", args: [url] };
-}
-
-/**
- * Hand the URL to a browser, and carry on regardless.
- *
- * A machine with no `xdg-open` is a headless one, and the URL is already on
- * stdout — failing the command over it would be refusing to serve because
- * nobody could be shown the door.
- */
-function openBrowser(url: string, env: NodeJS.ProcessEnv, io: Io): void {
-  const opener = browserCommand(url, env);
-  if (opener === null) {
-    return;
-  }
-  const child = spawn(opener.command, opener.args, {
-    stdio: "ignore",
-    detached: true,
-  });
-  child.on("error", (error) => {
-    io.err(`ub: warning: could not open a browser (${message(error)})\n`);
-  });
-  child.unref();
 }
 
 // --- the command -------------------------------------------------------------

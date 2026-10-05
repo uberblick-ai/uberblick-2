@@ -542,11 +542,11 @@ describe("hub sync", () => {
     expect((await rig.ok("list_docs", {})).docs[0].updatedAt).toBe(stamped);
   });
 
-  it("reports a protocol skew as update-required, and keeps serving", async () => {
+  it.each([-1, 1])("reports a protocol skew (%s) as update-required, and keeps serving", async (offset) => {
     // A hub from another release. The version is compared for exact equality
     // and refused before the token, so this is not a credential problem and no
     // retry reaches past it — which is the whole reason it is its own status.
-    const running = await hub({ protocolVersion: SYNC_PROTOCOL_VERSION + 1 });
+    const running = await hub({ protocolVersion: SYNC_PROTOCOL_VERSION + offset });
     const rig = await serverOn(running.port);
 
     await waitUntil("the hub to refuse the protocol version", async () => {
@@ -558,8 +558,8 @@ describe("hub sync", () => {
     // Both integers and, in words, which side is old: a person who can only see
     // one of the two numbers cannot tell what to update.
     expect(status.hub.protocolVersion).toBe(SYNC_PROTOCOL_VERSION);
-    expect(status.hub.hubProtocolVersion).toBe(SYNC_PROTOCOL_VERSION + 1);
-    expect(status.hub.reason).toContain("update this client");
+    expect(status.hub.hubProtocolVersion).toBe(SYNC_PROTOCOL_VERSION + offset);
+    expect(status.hub.reason).toContain(offset > 0 ? "update this client" : "update the hub");
     expect(status.rooms.every((room: { synced: boolean }) => !room.synced)).toBe(true);
 
     // Refused on the wire, and still a working replica: this is the property
@@ -718,5 +718,10 @@ describe("hub sync", () => {
     expect((await rig.ok("get_doc", { uuid: created.uuid })).title).toBe(
       "Still writable",
     );
+
+    // Past the rebuilds a refusal schedules: still a refusal, never a hub that
+    // merely looks slow.
+    await sleep(rig.config.reconnectMaxDelayMs * 3);
+    expect((await rig.ok("sync_status", {})).hub.status).toBe("auth-failed");
   });
 });

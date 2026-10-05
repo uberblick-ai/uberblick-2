@@ -44,6 +44,8 @@ import { chmodSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createDataDirectory } from "@uberblick/hub/storage";
+import { getWorkspaceName, settingsRoom } from "@uberblick/schema";
+import * as Y from "yjs";
 import type {
   SQLInputValue,
   SQLOutputValue,
@@ -345,6 +347,45 @@ function transactional<A extends unknown[], R>(
       throw error;
     }
   };
+}
+
+/**
+ * Inspect an existing local replica without constructing a store: that would
+ * create files, claim the workspace and migrate its schema. Names are optional;
+ * a missing, old or unreadable database must not hide its workspace from a list.
+ */
+export function readWorkspaceName(databasePath: string, workspaceId: string): string | null {
+  const doc = new Y.Doc();
+  try {
+    const db = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const room = settingsRoom(workspaceId);
+      // Like readSinceTx, pin snapshot and tail to one log state. A concurrent
+      // compactor may replace and prune the tail between these two queries.
+      const { snapshot, updates } = transactional(db, () => {
+        const snapshot = db.prepare(
+          "SELECT state, through_seq FROM snapshots WHERE room = ?",
+        ).get(room);
+        const updates = db.prepare(
+          "SELECT payload FROM updates WHERE room = ? AND seq > ? ORDER BY seq",
+        ).all(room, snapshot?.through_seq ?? 0);
+        return { snapshot, updates };
+      })();
+      if (snapshot !== undefined) {
+        Y.applyUpdate(doc, snapshot.state as Uint8Array);
+      }
+      for (const update of updates) {
+        Y.applyUpdate(doc, update.payload as Uint8Array);
+      }
+      return getWorkspaceName(doc);
+    } finally {
+      db.close();
+    }
+  } catch {
+    return null;
+  } finally {
+    doc.destroy();
+  }
 }
 
 export class MirrorStore {

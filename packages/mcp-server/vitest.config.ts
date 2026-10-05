@@ -4,6 +4,10 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
+    // CI output, as in packages/schema/vitest.config.ts.
+    reporters: process.env.CI ? ["dot"] : ["default"],
+    silent: "passed-only",
+    execArgv: ["--no-experimental-webstorage"],
     // The hub-backed suites bind real sockets, spawn a real stdio server and
     // open real SQLite files. Ephemeral ports and temp directories keep them
     // safe in parallel, but the timeouts have to allow a full
@@ -18,5 +22,9 @@ export default defineConfig({
     // a re-run.
     testTimeout: 120_000,
     hookTimeout: 120_000,
+    // Most of a test here is spent waiting on sockets, child processes and
+    // timers, not computing: at the default of one fewer worker than cores the
+    // suite left over half the machine idle. Oversubscribe instead.
+    maxWorkers: "150%",
   },
 });

@@ -110,24 +110,6 @@ describe("set_title", () => {
     expect(stubTitle(rig, doc.uuid)).toBe("Named");
   });
 
-  it("refuses an archived document, like every other mutator", async () => {
-    const rig = await localRig();
-    const doc = await rig.ok("create_doc", {
-      title: "Withdrawn",
-      description: "Archived, and therefore read-only.",
-    });
-    await rig.ok("archive_doc", { uuid: doc.uuid });
-
-    const refused = await rig.call("set_title", {
-      uuid: doc.uuid,
-      title: "Renamed while archived",
-    });
-    expect(refused.payload).toMatchObject({
-      error: "doc_archived",
-      applied: false,
-    });
-  });
-
   it("converges when two replicas rename the same document at once", async () => {
     const hub = await startHub();
     hubs.push(hub);

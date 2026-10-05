@@ -7,7 +7,7 @@ import { joinCommand } from "./remote.js";
 import { readdirSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/hub/storage";
-import { defaultDatabasePath, usesDeviceLogin } from "@uberblick/mcp-server";
+import { defaultDatabasePath, readWorkspaceName, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";
 import { migrateHubAdmissions, resolveConfig, writeHubAdmission } from "./config.js";
@@ -54,8 +54,10 @@ function databaseDirectory(env: NodeJS.ProcessEnv): string {
 }
 
 export interface WorkspaceEntry {
-  /** The bare uuid. Self-described names arrive with a later issue. */
+  /** The bare uuid. */
   uuid: string;
+  /** The validated name in this machine's replica, when readable. */
+  name: string | null;
   /** Whether this is the workspace configuration currently resolves to. */
   active: boolean;
   databasePath: string;
@@ -123,11 +125,15 @@ export function listWorkspaces(
     uuids.add(current.uuid);
   }
 
-  const entries = [...uuids].sort().map((uuid) => ({
-    uuid,
-    active: uuid === current.uuid,
-    databasePath: defaultDatabasePath(uuid, env),
-  }));
+  const entries = [...uuids].sort().map((uuid) => {
+    const databasePath = defaultDatabasePath(uuid, env);
+    return {
+      uuid,
+      name: readWorkspaceName(databasePath, uuid),
+      active: uuid === current.uuid,
+      databasePath,
+    };
+  });
   return { entries, warnings: current.warnings };
 }
 
@@ -178,9 +184,10 @@ export const WORKSPACE_LIST_OPTIONS = {
 
 export const WORKSPACE_LIST_HELP = `usage: ub workspace list [--json]
 
-Every workspace this machine has a local database for, with the one currently in
-force marked. Reads the database directory only — a workspace that exists
-elsewhere but has never been opened here is not listed.
+Every workspace this machine has a local database for, plus the configured one,
+with the one currently in force marked. Shows names from readable local replicas
+without changing them or connecting to a hub. A workspace that exists elsewhere
+but has never been opened here is not listed unless configured.
 
 options:
   --json            the same list as JSON on stdout, for a script to read
@@ -223,7 +230,7 @@ function listCommand(argv: string[], io: Io): number {
   }
   let text = "";
   for (const entry of entries) {
-    text += `${entry.active ? "*" : " "} ${entry.uuid}\n`;
+    text += `${entry.active ? "*" : " "} ${entry.uuid}${entry.name === null ? "" : ` | ${entry.name}`}\n`;
   }
   io.out(text);
   return 0;

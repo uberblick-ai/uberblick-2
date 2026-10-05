@@ -12,14 +12,14 @@
  * The single Y.XmlText child holds the block's plain-text source, plus its
  * formatting marks: the closed inline set (`bold`, `italic`, `strike`,
  * `inlineCode`, `link`, `docLink` — see `marks.ts`) and the `comment` mark anchoring
- * annotation threads. `code` and `mermaid` are text-source blocks too — a rich
- * block is a text block with a fancy renderer, never a different storage shape —
- * and they carry no inline marks, only `comment`.
+ * annotation threads. Source blocks carry no inline marks, only `comment`.
+ * Tables are the exception: TableKit rows and cells contain single paragraphs,
+ * with a narrower inline mark set. Their block text is a canonical GFM projection.
  *
  * `list-item` and `quote` are prose blocks like any other, and flat like every
  * other: a list is a *run* of adjacent list-item elements carrying `list` and
- * `indent` attributes, exactly markdown's own model. Nothing nests, so nothing
- * here walks a tree.
+ * `indent` attributes, exactly markdown's own model. Block order stays flat;
+ * only a table's cell content nests.
  *
  * Every read in this module is mark-blind: `text` and `rev` are plain text, so
  * formatting a range never invalidates a prepared edit. `getBlockInline` is the
@@ -34,9 +34,11 @@ import {
   ConflictingLinkMarksError,
   InlineLinkRangeError,
   InvalidDocLinkTargetError,
+  InvalidTableMappingError,
   MarksNotAllowedError,
   OldTextMismatchError,
   StaleBlockError,
+  TableAnnotationError,
 } from "./errors.js";
 import {
   applyInlineRuns,
@@ -46,6 +48,8 @@ import {
 } from "./marks.js";
 import { blockRev } from "./rev.js";
 import { canonicalDocumentUuid } from "./rooms.js";
+import { buildTableElement, editTable, parseGfmTable, parseTableInput, tableCellTexts, tableRows, tableText } from "./table.js";
+import type { TableMapping } from "./table.js";
 import {
   MAX_LIST_INDENT,
   isBlockType,
@@ -201,6 +205,7 @@ export function requireBlockText(
   element: Y.XmlElement,
   blockId: string,
 ): Y.XmlText {
+  if (element.nodeName === "table") throw new TableAnnotationError(blockId);
   const existing = textOf(element);
   if (existing !== null) return existing;
   ydoc.transact(() => {
@@ -232,7 +237,8 @@ function indentOf(element: Y.XmlElement): ListIndent {
 function toBlock(element: Y.XmlElement): Block {
   const type = elementType(element);
   const id = element.getAttribute("id") ?? "";
-  const text = readText(textOf(element));
+  const text = type === "table" && element.toArray().some((node) => node instanceof Y.XmlElement && node.nodeName === "tableRow")
+    ? tableText(element) : readText(textOf(element));
   if (type === "heading") {
     const level = levelOf(element);
     return { id, type, text, rev: blockRev({ type, text, level }), level };
@@ -274,7 +280,7 @@ export function getBlock(ydoc: Y.Doc, blockId: string): Block | null {
 export function getBlockText(ydoc: Y.Doc, blockId: string): string {
   const element = findBlockElement(ydoc, blockId);
   if (element === null) throw new BlockNotFoundError(blockId);
-  return readText(textOf(element));
+  return toBlock(element).text;
 }
 
 /** One block's content hash. Throws {@link BlockNotFoundError} if absent. */
@@ -308,10 +314,13 @@ export function getBlockInline(ydoc: Y.Doc, blockId: string): InlineRun[] {
  */
 export function getBlocksWithInline(
   ydoc: Y.Doc,
-): Array<{ block: Block; inline: InlineRun[] }> {
+): Array<{ block: Block; inline: InlineRun[]; table?: InlineRun[][][] }> {
   return partitionById(getBlocksFragment(ydoc)).visible.map((element) => ({
     block: toBlock(element),
     inline: readInlineRuns(textOf(element)),
+    ...(element.nodeName === "table" ? {
+      table: tableRows(element).map((row) => row.map((cell) => tableCellTexts(cell).flatMap(readInlineRuns))),
+    } : {}),
   }));
 }
 
@@ -329,6 +338,8 @@ function buildElement(id: string, input: BlockInput): Y.XmlElement {
   // refusal from inside one would leave a stray empty block behind.
   const runs = inlineOf(input);
   if (runs !== null) assertInlineWritable(runs);
+
+  if (input.type === "table") return buildTableElement(id, parseTableInput(input.text ?? ""));
 
   const element = new Y.XmlElement(input.type);
   element.setAttribute("id", id);
@@ -447,6 +458,49 @@ export function repairDuplicateBlocks(ydoc: Y.Doc): number {
   return indexes.length;
 }
 
+/**
+ * Normalize only legacy table content. Replacement uses the re-type primitive
+ * so simultaneous converters shadow one another instead of duplicating rows.
+ * Invalid GFM becomes same-id code with its complete source delta and anchors.
+ * Ordinary structured tables cause no update, even when merged rows are uneven.
+ */
+export function normalizeLegacyTables(ydoc: Y.Doc): number {
+  const fragment = getBlocksFragment(ydoc);
+  let changed = 0;
+  for (const element of partitionById(fragment).visible) {
+    if (element.nodeName !== "table") continue;
+    const children = element.toArray();
+    if (children.some((node) => node instanceof Y.XmlElement && node.nodeName === "tableRow")) {
+      const indexes = children.flatMap((node, index) => node instanceof Y.XmlText ? [index] : []);
+      if (indexes.length === 0) continue;
+      ydoc.transact(() => { for (const index of indexes.reverse()) element.delete(index, 1); });
+      changed += 1;
+      continue;
+    }
+    if (children.length !== 1 || !(children[0] instanceof Y.XmlText)) continue;
+    const source = readText(children[0]);
+    const delta = children[0].toDelta();
+    const parsed = parseGfmTable(source);
+    const index = fragment.toArray().indexOf(element);
+    const id = element.getAttribute("id");
+    if (index < 0 || id === undefined || id === "") continue;
+    ydoc.transact(() => {
+      if (parsed === null) {
+        const replacement = new Y.XmlElement("code");
+        replacement.setAttribute("id", id);
+        replacement.insert(0, [new Y.XmlText()]);
+        fragment.insert(index + 1, [replacement]);
+        (replacement.firstChild as Y.XmlText).applyDelta(delta);
+      } else {
+        fragment.insert(index + 1, [buildTableElement(id, parsed)]);
+      }
+      fragment.delete(index, 1);
+    });
+    changed += 1;
+  }
+  return changed;
+}
+
 /** Set a heading's level. */
 export function setBlockLevel(
   ydoc: Y.Doc,
@@ -510,8 +564,10 @@ export interface BlockTypeAttrs {
  * So the re-type is refused *before* it mutates anything — see
  * {@link MarksNotAllowedError}, which names the marks in the way. A mark from a
  * writer this package has never heard of counts: the editor cannot render that
- * either. Annotation anchors are unaffected — `comment` is legal on every block
- * type and always survives.
+ * either. Annotation anchors survive flat-block conversions. Conversion to or
+ * from a structured table refuses any marks rather than losing them: projected
+ * GFM offsets cannot preserve a cell's inline anchors. Same-type tables are a
+ * no-op. Only legacy normalization is authorized to drop old source anchors.
  *
  * Concurrency: because a re-type inserts a replacement element, two replicas
  * re-typing the same block concurrently converge on two elements sharing that
@@ -538,6 +594,25 @@ export function setBlockType(
     if (index === -1) throw new BlockNotFoundError(blockId);
     const old = fragment.get(index) as Y.XmlElement;
     const oldType = elementType(old);
+
+    if (oldType === "table" || newType === "table") {
+      if (oldType === "table" && newType === "table") return;
+      const marked = oldType === "table"
+        ? tableRows(old).flat().flatMap((cell) => tableCellTexts(cell).flatMap((text) => text.toDelta() as Array<{ attributes?: Record<string, unknown> }>))
+        : (textOf(old)?.toDelta() as Array<{ attributes?: Record<string, unknown> }> | undefined) ?? [];
+      const marks = [...new Set(marked.flatMap((op) => Object.keys(op.attributes ?? {})))];
+      if (marks.length > 0) throw new MarksNotAllowedError(blockId, newType, marks);
+      const replacement = buildElement(blockId, {
+        type: newType, text: toBlock(old).text,
+        ...(attrs.level === undefined ? {} : { level: attrs.level }),
+        ...(attrs.language === undefined ? {} : { language: attrs.language }),
+        ...(attrs.list === undefined ? {} : { list: attrs.list }),
+        ...(attrs.indent === undefined ? {} : { indent: attrs.indent }),
+      });
+      fragment.insert(index + 1, [replacement]);
+      fragment.delete(index, 1);
+      return;
+    }
 
     // Refused before anything is written: nothing to roll back, and the caller
     // still has the block it started with. Every formatting key counts, not only
@@ -589,6 +664,8 @@ export interface EditBlockOptions {
    * (a heading level, a code language) is enough to invalidate it.
    */
   rev?: string;
+  /** Surviving old GFM positions, or null for newly created rows and columns. */
+  tableMapping?: TableMapping;
 }
 
 /**
@@ -657,6 +734,13 @@ export function editBlock(
       }
       throw new StaleBlockError(details);
     }
+    if (current.type === "table") {
+      const parsedOld = parseTableInput(oldText);
+      const parsedNew = parseTableInput(newText);
+      editTable(element, parsedOld, parsedNew, options.tableMapping);
+      return;
+    }
+    if (options.tableMapping !== undefined) throw new InvalidTableMappingError("mapping applies only to a table block");
     if (oldText === newText) return;
 
     const text = requireBlockText(ydoc, element, blockId);

@@ -217,12 +217,13 @@ export function deviceRetryDelayMs(
   reconnectMaxDelayMs: number,
   afterRefusal = false,
   random: () => number = Math.random,
+  maxDelayMs = 30_000,
 ): number {
   if (afterRefusal && attempts === 0) {
     return rebuildDelayMs(0, socketBackoff(reconnectMaxDelayMs).delay, reconnectMaxDelayMs, random);
   }
   const base = Math.max(1_000, reconnectMaxDelayMs);
-  return rebuildDelayMs(attempts, base, Math.max(base, 30_000), random);
+  return rebuildDelayMs(attempts, base, Math.max(base, maxDelayMs), random);
 }
 
 export interface AttachOptions {
@@ -737,6 +738,7 @@ export class HubSync {
         ...(this.config.deviceLogin.env === undefined ? {} : { env: this.config.deviceLogin.env }),
         ...(rejected === undefined ? {} : { rejected }),
         signal: this.deviceAbort.signal,
+        ...(this.config.deviceRenewalCooldownMs === undefined ? {} : { renewalCooldownMs: this.config.deviceRenewalCooldownMs }),
       });
       this.deviceWork.add(work);
       const result = await work.finally(() => this.deviceWork.delete(work));
@@ -816,7 +818,9 @@ export class HubSync {
    */
   private retryDeviceConnection(afterRefusal = false): void {
     if (this.stopped || this.deviceRetryTimer !== null) return;
-    const delay = deviceRetryDelayMs(this.deviceRetryAttempts, this.config.reconnectMaxDelayMs, afterRefusal);
+    const delay = deviceRetryDelayMs(
+      this.deviceRetryAttempts, this.config.reconnectMaxDelayMs, afterRefusal, Math.random, this.config.deviceRetryMaxDelayMs,
+    );
     this.deviceRetryAttempts += 1;
     this.deviceRetryTimer = setTimeout(() => {
       this.deviceRetryTimer = null;

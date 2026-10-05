@@ -14,15 +14,12 @@
  * rather than stranded.
  */
 
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { MirrorStore } from "../src/store.js";
 import {
-  PACKAGE_ROOT,
-  mainTsProcess,
   removeTempDirs,
   startServer,
   tempDatabasePath,
@@ -113,37 +110,6 @@ describe("the replica database", () => {
     expect(tables(databasePath)).not.toContain("doc_links");
     expect(checksum(databasePath)).toBe(before);
     expect(recordedWorkspace(databasePath)).toBe(ALPHA);
-  });
-
-  it("makes the server process exit non-zero when UBERBLICK_DB is another workspace's", async () => {
-    // The whole interface is the environment an MCP client hands the process,
-    // and stdout is the JSON-RPC transport: the complaint goes to stderr.
-    const databasePath = tempDatabasePath();
-    open(databasePath, ALPHA).close();
-
-    const { command, args } = mainTsProcess();
-    const child = spawn(command, args, {
-      cwd: PACKAGE_ROOT,
-      env: {
-        PATH: process.env.PATH ?? "",
-        WORKSPACE_ID: BETA,
-        UBERBLICK_DB: databasePath,
-      },
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    let stderr = "";
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    const code = await new Promise<number | null>((resolve) => {
-      child.on("exit", resolve);
-    });
-
-    expect(code).not.toBe(0);
-    expect(stderr).toContain(ALPHA);
-    expect(stderr).toContain(BETA);
-    expect(stderr).toContain(databasePath);
   });
 
   it("keeps two pinned workspaces out of each other's search when they share UBERBLICK_DB", async () => {

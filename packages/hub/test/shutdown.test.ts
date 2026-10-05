@@ -13,14 +13,15 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { once } from "node:events";
 import { dirname } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import {
   TEST_SECRET,
+  acknowledged,
   createClient,
   removeTempDatabases,
-  sleep,
   storedText,
   tempDatabasePath,
   testRoom,
@@ -95,6 +96,16 @@ async function startHubProcess(databasePath: string): Promise<HubProcess> {
   };
 }
 
+/** The hub's claim-state rows, read beside the running process. */
+function claimRows(databasePath: string): Record<string, unknown>[] {
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    return database.prepare("SELECT * FROM hub_claim_state").all();
+  } finally {
+    database.close();
+  }
+}
+
 const running: HubProcess[] = [];
 const clients: TestClient[] = [];
 
@@ -110,7 +121,7 @@ afterEach(async () => {
   removeTempDatabases();
 });
 
-it("stores a debounced edit on SIGTERM and serves it after a restart", async () => {
+it("initializes a fresh hub, stores a debounced edit on SIGTERM and serves both after a restart", async () => {
   const databasePath = tempDatabasePath();
   const room = testRoom();
 
@@ -131,6 +142,15 @@ it("stores a debounced edit on SIGTERM and serves it after a restart", async () 
   expect(collect.status).toBe(404);
   expect(await collect.json()).toEqual({ status: "unknown-request" });
 
+  // A fresh deployment initializes an empty hub, claimable, exactly once.
+  const claimState = await fetch(`http://127.0.0.1:${first.port}/auth/claim-state`, {
+    signal: AbortSignal.timeout(3000),
+  });
+  expect(await claimState.json()).toEqual({ unclaimed: true, canClaim: true });
+  const initialized = claimRows(databasePath);
+  expect(initialized).toHaveLength(1);
+  expect(initialized[0]!.default_workspace_id).toEqual(expect.any(String));
+
   const writer = createClient({
     port: first.port,
     room,
@@ -140,7 +160,7 @@ it("stores a debounced edit on SIGTERM and serves it after a restart", async () 
   await writer.synced;
 
   writer.text.insert(0, "written before SIGTERM");
-  await sleep(200);
+  await acknowledged(writer);
 
   // The window this test exists for: the hub has the update, the default 2s
   // debounce has not fired, and the writer is still connected — so nothing has
@@ -166,6 +186,8 @@ it("stores a debounced edit on SIGTERM and serves it after a restart", async () 
   clients.push(reader);
   await reader.synced;
   await waitForText("the restarted hub", reader.text, "written before SIGTERM");
+  // The replacement reuses the initialized state rather than starting over.
+  expect(claimRows(databasePath)).toEqual(initialized);
 
   expect(await second.exit("SIGTERM")).toBe(0);
 });
