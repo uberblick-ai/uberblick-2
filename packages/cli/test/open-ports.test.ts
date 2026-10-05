@@ -48,7 +48,7 @@ describe("ub open: hub, ports and serving role", () => {
     expect(app.url).toBe("http://127.0.0.1:13379/");
     expect((await get(app.url)).status).toBe(200);
     const configuration = await (await get(`${app.url}uberblick-config.json`)).json();
-    expect(configuration.hubUrl).toBe("ws://127.0.0.1:13379");
+    expect(configuration).toMatchObject({ hubUrl: "ws://127.0.0.1:13379" });
     const recording = (): string =>
       existsSync(browser.opened) ? readFileSync(browser.opened, "utf8") : "";
     await waitUntil("the browser to record the default URL", () => recording().endsWith("\n"));
