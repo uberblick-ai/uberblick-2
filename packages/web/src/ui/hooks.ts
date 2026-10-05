@@ -18,6 +18,9 @@ import {
   getMeta,
   getMetaMap,
   listDirectory,
+  normalizeLegacyTables,
+  repairDuplicateBlocks,
+  tableText,
   readSidebar,
 } from "@uberblick/schema";
 import type { DirectoryEntry, DocMeta, SidebarGroup } from "@uberblick/schema";
@@ -350,10 +353,17 @@ function observeForeignBlocks(
   emit: (value: ForeignBlock[]) => void,
 ): () => void {
   const fragment = getBlocksFragment(connection.ydoc);
-  const read = (): void => emit(findForeignBlocks(fragment));
+  const read = (): void => {
+    if (connection.status.writable && connection.status.synced) {
+      repairDuplicateBlocks(connection.ydoc);
+      normalizeLegacyTables(connection.ydoc);
+    }
+    emit(findForeignBlocks(fragment));
+  };
   read();
   fragment.observeDeep(read);
-  return () => fragment.unobserveDeep(read);
+  const stopStatus = connection.onStatusChange(read);
+  return () => { fragment.unobserveDeep(read); stopStatus(); };
 }
 
 /**
@@ -575,7 +585,7 @@ function observeRawBlocks(
     return {
       nodeName: child.nodeName,
       id: child.getAttribute("id") ?? null,
-      text: plainText(blockText(child)),
+      text: child.nodeName === "table" && child.firstChild instanceof Y.XmlElement ? tableText(child) : plainText(blockText(child)),
     };
   }));
   read();

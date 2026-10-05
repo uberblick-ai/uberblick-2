@@ -61,8 +61,8 @@ function validateRole(role: MembershipRole): void {
 }
 
 /**
- * Only trusted hub callers grant a membership. Actor-facing operations cannot
- * add one, and read the actor's current authority from this database. Admission
+ * Trusted hub callers grant initial memberships; actor-facing grants and other
+ * management read the actor's current authority from this database. Admission
  * and management must share this instance so removal reaches its subscribers.
  * Checks and each single-statement mutation stay synchronous on the hub's one
  * database connection, so another operation cannot interleave between them.
@@ -86,6 +86,7 @@ export class MembershipRegistry {
     this.insert = db.prepare(`
       INSERT INTO hub_memberships (workspace_id, principal_id, role)
       VALUES ($workspaceId, $principalId, $role)
+      ON CONFLICT(workspace_id, principal_id) DO NOTHING
     `);
     this.selectRole = db.prepare(`
       SELECT role FROM hub_memberships
@@ -114,8 +115,8 @@ export class MembershipRegistry {
     `);
   }
 
-  /** Internal grant for hub claiming, first-admin setup and invitation acceptance. */
-  grant(record: MembershipRecord): void {
+  /** Internal grant for hub claiming, first-admin setup and authorized management. */
+  grant(record: MembershipRecord): MembershipRecord {
     validateIdentity(record.workspaceId, record.principalId);
     validateRole(record.role);
     // A duplicate grant never overwrites an existing role.
@@ -124,6 +125,15 @@ export class MembershipRegistry {
       principalId: record.principalId,
       role: record.role,
     });
+    const role = this.roleFor(record.workspaceId, record.principalId);
+    if (role === null) throw new Error("MembershipRegistry: membership was not persisted");
+    return { workspaceId: record.workspaceId, principalId: record.principalId, role };
+  }
+
+  /** Check current authority and insert without an intervening asynchronous step. */
+  grantMember(request: ChangeMembershipRoleRequest): MembershipRecord {
+    this.requireAdmin(request.workspaceId, request.actorPrincipalId);
+    return this.grant({ workspaceId: request.workspaceId, principalId: request.principalId, role: request.role });
   }
 
   /** Internal first-admin guard: even a non-admin membership prevents setup. */
@@ -143,7 +153,7 @@ export class MembershipRegistry {
     return this.selectWorkspaces.all({ principalId }).map((row) => row.workspace_id as string);
   }
 
-  /** Reusable by invitation creation and other workspace access management. */
+  /** Reusable by account resolution and workspace access management. */
   requireAdmin(workspaceId: string, actorPrincipalId: string): void {
     if (this.roleFor(workspaceId, actorPrincipalId) !== "admin") {
       throw new MembershipRefusal("admin-required");

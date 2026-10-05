@@ -45,14 +45,20 @@ import {
 } from "../src/starter.js";
 import {
   PACKAGE_ROOT,
+  hubless,
   removeTempDirs,
   runUb,
   runUbAsync,
-  sandbox,
+  sandbox as anySandbox,
 } from "./helpers.js";
-import type { Run, Sandbox } from "./helpers.js";
+import type { Run, Sandbox, SandboxFiles } from "./helpers.js";
 
 afterAll(removeTempDirs);
+
+/** No test here starts a hub, so none waits for one; see {@link hubless}. */
+function sandbox(files?: SandboxFiles): Sandbox {
+  return hubless(anySandbox(files));
+}
 
 /** The shipped templates, in the order the sidebar pins them. */
 const TEMPLATES = [
@@ -633,6 +639,8 @@ it("ships the templates inside the package", () => {
     execFileSync("npm", ["pack", "--dry-run", "--json"], {
       cwd: PACKAGE_ROOT,
       encoding: "utf8",
+      // npm warns about every pnpm setting it finds in the environment.
+      stdio: ["ignore", "pipe", "ignore"],
     }),
   );
   const paths = packed[0].files.map((file: { path: string }) => file.path);

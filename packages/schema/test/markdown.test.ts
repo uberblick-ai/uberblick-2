@@ -593,7 +593,7 @@ describe("lists and quotes", () => {
     ]);
   });
 
-  it("reads a table's source as one block, and writes it back verbatim", () => {
+  it("reads a table as one block, and exports canonical cells", () => {
     const source = [
       "| name | count |",
       "| :--- | ----: |",
@@ -618,9 +618,10 @@ describe("lists and quotes", () => {
       { type: "paragraph", text: "After the table." },
     ]);
 
-    // Verbatim, down to the spacing someone lined the pipes up with: the block
-    // stores GFM source, so the export has nothing to decide.
-    expect(exportMarkdown(docFrom(source), { frontmatter: false })).toBe(source);
+    expect(exportMarkdown(docFrom(source), { frontmatter: false })).toBe([
+      "| name | count |", "| --- | --- |", "| alpha | 1 |", "| beta | 2 |",
+      "", "After the table.", "",
+    ].join("\n"));
   });
 
   /**
@@ -739,14 +740,14 @@ describe("lists and quotes", () => {
   it("reads an escaped backslash before a pipe as a separator, not an escape", () => {
     // `| a\\| b |` — a cell ending in a backslash, then a real separator.
     expect(parseGfmTable("| a\\\\| b |\n| --- | --- |")).toEqual({
-      header: ["a\\\\", "b"],
+      header: ["a\\", "b"],
       align: [null, null],
       rows: [],
     });
 
     // Three backslashes: a pair, then one that escapes the pipe — one cell.
     expect(parseGfmTable("| a\\\\\\| b |\n| --- |")).toEqual({
-      header: ["a\\\\| b"],
+      header: ["a\\| b"],
       align: [null],
       rows: [],
     });
@@ -754,7 +755,7 @@ describe("lists and quotes", () => {
     // …and a row *ending* in an escaped backslash still ends with structure,
     // so the trailing pipe is decoration rather than an empty cell.
     expect(parseGfmTable("| a | b\\\\|\n| --- | --- |")).toEqual({
-      header: ["a", "b\\\\"],
+      header: ["a", "b\\"],
       align: [null, null],
       rows: [],
     });

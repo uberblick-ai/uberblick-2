@@ -1,170 +1,142 @@
 /**
- * The table block: GFM source, drawn as a real table (#59).
- *
- * A `table` block is a text-source block — its Y.XmlText holds GFM table
- * markdown and nothing else, exactly like `code` and `mermaid`. Stock Tiptap's
- * table extensions were rejected for that reason: their nested cell tree has no
- * block-scoped text, so an agent could not edit a table with `edit_block`, which
- * is the contract the whole model rests on. GFM is what an agent writes anyway.
- *
- * Three pieces, and the split matters:
- *
- * - **{@link tableBlockView}**, the NodeView, holds both representations at
- *   once: a `<table>` it draws from the source, and the editable source itself.
- *   Which one is shown is CSS, keyed off a class.
- * - **`sourceEditingPlugin`** (source-chrome.ts, shared with `terminal`) puts
- *   that class on the table block the selection is in. So the rendering is what
- *   a reader sees, and the source is what they get the moment their caret is in
- *   the block — click to edit, the same gesture a code block has, with no mode
- *   to remember and nothing stored about which table is "open".
- * - **{@link tableFromTextPlugin}** is the two doors a table comes in through:
- *   typing a header row, Enter, then a delimiter row; and pasting GFM text. Both
- *   are `prosemirror-view` props, so they fire for this reader's own gestures
- *   and never for a peer's edit or an agent's write — the same origin discipline
- *   the markdown input rules keep (see input-rules.ts).
- *
- * The rendering is *presentation over state that is already true*: it draws the
- * source and never writes to the document. An agent's `edit_block` rewriting one
- * cell arrives as an ordinary update, and `update` redraws — live, with nothing
- * to synchronise.
+ * Official TableKit nodes and interactions, with Uberblick's storage limits.
+ * Cells are one paragraph, and table state lives only in the Yjs cell tree.
  */
-
 import { Extension } from "@tiptap/core";
-import type { NodeViewRenderer, NodeViewRendererProps } from "@tiptap/core";
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { Table as TiptapTable, TableCell, TableHeader, TableRow, TableKit, TableView } from "@tiptap/extension-table";
+import { DOMParser as ProseMirrorDOMParser } from "@tiptap/pm/model";
+import type { Node as ProseMirrorNode, Schema } from "@tiptap/pm/model";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
-import type { EditorView, NodeView } from "@tiptap/pm/view";
-import { parseGfmTable } from "@uberblick/schema";
+import type { EditorState } from "@tiptap/pm/state";
+import type { EditorView } from "@tiptap/pm/view";
+import { ySyncPluginKey } from "y-prosemirror";
+import { InvalidTableError, parseTableInput, TABLE_CELL_MARKS } from "@uberblick/schema";
+import type { GfmTable } from "@uberblick/schema";
 import { endUndoCapture, findBlockById } from "./block-menu.js";
-import { retypeBlockInTransaction } from "./retype.js";
-import { sourceEditingPlugin } from "./source-chrome.js";
 
-/** On the block whose source the reader is editing. */
-export const EDITING_CLASS = "ub-table-editing";
+const CELL_MARKS = new Set<string>(TABLE_CELL_MARKS);
+const singleLine = (text: string): string => text.replace(/[\r\n]+/g, " ");
 
-/* ------------------------------------------------------------------ drawing */
+function inTable(state: EditorState): boolean {
+  return state.selection.$from.depth > 1 && state.selection.$from.node(1).type.name === "table";
+}
 
-/**
- * Draw `source` into `target` as a table, and answer whether it was one.
- *
- * A cell's text goes in as text: a source block carries no inline marks, so
- * `**bold**` in a cell is four asterisks and a word — on screen as in the model.
- */
-function drawTable(target: HTMLElement, source: string): boolean {
-  const parsed = parseGfmTable(source);
-  target.replaceChildren();
-  if (parsed === null) return false;
+// Keep TableKit's attribute defaults exactly: y-prosemirror stores numbers and
+// omits null attributes. Opening a structured table must not rewrite it. Alignment
+// is deliberately absent; this baseline does not store it.
+const cellAttributes = () => ({
+  colspan: { default: 1 }, rowspan: { default: 1 }, colwidth: { default: null },
+});
 
-  const table = document.createElement("table");
-  const head = table.appendChild(document.createElement("thead"));
-  const headRow = head.appendChild(document.createElement("tr"));
-  for (const [column, cell] of parsed.header.entries()) {
-    const th = headRow.appendChild(document.createElement("th"));
-    th.textContent = cell;
-    const align = parsed.align[column];
-    if (align !== null && align !== undefined) th.style.textAlign = align;
+// ProseMirror can reuse a table view for a different stable block. TableKit
+// refreshes its columns on update; mirror our identity too, as other blocks do.
+class IdentifiedTableView extends TableView {
+  override update(node: ProseMirrorNode): boolean {
+    if (!super.update(node)) return false;
+    if (typeof node.attrs.id === "string") this.table.id = node.attrs.id;
+    else this.table.removeAttribute("id");
+    return true;
   }
+}
 
-  const body = table.appendChild(document.createElement("tbody"));
-  for (const row of parsed.rows) {
-    const tr = body.appendChild(document.createElement("tr"));
-    for (const [column, cell] of row.entries()) {
-      const td = tr.appendChild(document.createElement("td"));
-      td.textContent = cell;
-      const align = parsed.align[column];
-      if (align !== null && align !== undefined) td.style.textAlign = align;
+export const Table = TiptapTable.extend({
+  addAttributes() {
+    return { id: { default: null, parseHTML: (element: HTMLElement) => element.getAttribute("id") } };
+  },
+  addProseMirrorPlugins() {
+    return (this.parent?.() ?? []).map((plugin) => {
+      // Stock tableEditing calls fixTables after local AND remote edits. Two
+      // replicas padding the same ragged CRDT merge insert duplicate cells.
+      // Keep its public plugin spec (selection, arrows, pointer handling and
+      // decorations), but never repair table structure as a side effect.
+      const { appendTransaction: _repair, ...spec } = plugin.spec;
+      return new Plugin(spec);
+    });
+  },
+}).configure({
+  resizable: false, renderWrapper: true, cellMinWidth: 120,
+  View: IdentifiedTableView,
+  HTMLAttributes: { class: "ub-table", "data-block-type": "table" },
+});
+
+export const TableNodes = TableKit.extend({
+  addExtensions() {
+    return [Table,
+      TableRow,
+      TableCell.extend({ content: "paragraph", addAttributes: cellAttributes }),
+      TableHeader.extend({ content: "paragraph", addAttributes: cellAttributes }),
+    ];
+  },
+});
+
+/** Build the ordinary, rectangular shape for the menu and GFM doors. */
+export function tableFromRows(schema: Schema, rows: readonly string[][], id: string | null): ProseMirrorNode {
+  const width = Math.max(1, ...rows.map((row) => row.length));
+  return schema.node("table", { id }, rows.map((row, index) =>
+    schema.node("tableRow", null, Array.from({ length: width }, (_, column) =>
+      schema.node(index === 0 ? "tableHeader" : "tableCell", null,
+        schema.node("paragraph", null, row[column] ? schema.text(singleLine(row[column] ?? "")) : [])),
+    )),
+  ));
+}
+
+function validTable(node: ProseMirrorNode, allowRagged: boolean): boolean {
+  if (node.childCount === 0) return false;
+  const width = node.child(0).childCount;
+  for (let row = 0; row < node.childCount; row += 1) {
+    const cells = node.child(row);
+    if (cells.type.name !== "tableRow" || cells.childCount === 0 || (!allowRagged && cells.childCount !== width)) return false;
+    for (let col = 0; col < cells.childCount; col += 1) {
+      const cell = cells.child(col);
+      if (cell.type.name !== (row === 0 ? "tableHeader" : "tableCell") || cell.attrs.colspan !== 1 || cell.attrs.rowspan !== 1 || cell.attrs.colwidth !== null || cell.childCount !== 1) return false;
+      const paragraph = cell.child(0);
+      if (paragraph.type.name !== "paragraph" || paragraph.attrs.id !== null) return false;
+      let valid = true;
+      paragraph.forEach((text) => {
+        if (!text.isText || /[\r\n]/.test(text.text ?? "") || text.marks.some((mark) => !CELL_MARKS.has(mark.type.name))) valid = false;
+      });
+      if (!valid) return false;
     }
   }
-
-  target.appendChild(table);
   return true;
 }
 
-/* ----------------------------------------------------------------- nodeview */
-
-/**
- * `<div class="ub-table" data-block-type="table">` holding the drawn table and
- * the source that produced it.
- *
- * Source text that is not a table yet — a half-typed one, or an agent's edit
- * mid-flight — sets `data-parsed="false"`, which is what keeps the source
- * visible instead of showing a reader an empty box with their text hidden
- * inside it.
- */
-export const tableBlockView: NodeViewRenderer = ({
-  node,
-  editor,
-  getPos,
-}: NodeViewRendererProps): NodeView => {
-  let current: ProseMirrorNode = node;
-
-  const dom = document.createElement("div");
-  dom.className = "ub-table";
-  dom.setAttribute("data-block-type", "table");
-
-  const rendered = document.createElement("div");
-  rendered.className = "ub-table-render";
-  rendered.contentEditable = "false";
-
-  const contentDOM = document.createElement("pre");
-  contentDOM.className = "ub-table-source";
-
-  dom.append(rendered, contentDOM);
-
-  const draw = (from: ProseMirrorNode): void => {
-    dom.setAttribute("data-parsed", String(drawTable(rendered, from.textContent)));
-    if (typeof from.attrs.id === "string") dom.setAttribute("id", from.attrs.id);
-    else dom.removeAttribute("id");
-  };
-  draw(current);
-
-  // Clicking the drawing is how a reader opens the source. The caret has to be
-  // put there explicitly: the drawing is `contenteditable="false"`, so the
-  // browser's own click handling would land on a node selection instead, and
-  // the reader would have selected a block rather than opened it.
-  const open = (event: Event): void => {
-    event.preventDefault();
-    const pos = typeof getPos === "function" ? getPos() : undefined;
-    if (pos === undefined) return;
-    const { view } = editor;
-    const inside = view.state.doc.resolve(pos + 1);
-    view.dispatch(view.state.tr.setSelection(TextSelection.near(inside)));
-    view.focus();
-  };
-  rendered.addEventListener("mousedown", open);
-
-  return {
-    dom,
-    contentDOM,
-    update(updated: ProseMirrorNode): boolean {
-      if (updated.type !== current.type) return false;
-      // See source-chrome.ts: a contentDOM the browser's editing engine has
-      // taken out of the tree cannot be patched in place.
-      if (contentDOM.parentNode !== dom) return false;
-      current = updated;
-      draw(current);
-      return true;
+function tableLimitsPlugin(): Plugin {
+  return new Plugin({
+    filterTransaction(tr, state) {
+      if (!tr.docChanged || tr.getMeta(ySyncPluginKey)?.isChangeOrigin === true) return true;
+      let valid = true;
+      tr.doc.forEach((node) => {
+        if (node.type.name !== "table") return;
+        const before = typeof node.attrs.id === "string" ? findBlockById(state.doc, node.attrs.id)?.node : undefined;
+        const ragged = before?.type.name === "table" && !validTable(before, false);
+        if (!validTable(node, ragged)) valid = false;
+      });
+      return valid;
     },
-    // Only the drawing's own click. Everything else — including a click in the
-    // source — must reach ProseMirror and place the caret.
-    stopEvent: (event: Event): boolean =>
-      event.type === "mousedown" &&
-      event.target instanceof Node &&
-      rendered.contains(event.target),
-    // The drawing is ours, redrawn from the document on every update; nothing
-    // in it is content. Mutations inside the source are ProseMirror's and are
-    // deliberately not ignored — see the warning in source-chrome.ts.
-    ignoreMutation: (mutation: { target: Node }): boolean =>
-      rendered.contains(mutation.target),
-    destroy: () => rendered.removeEventListener("mousedown", open),
-  };
-};
+    props: {
+      handleKeyDown(view, event) {
+        if (event.key !== "Enter" || event.isComposing || !inTable(view.state)) return false;
+        // A cell has one line. Neither Enter spelling creates a second block.
+        return true;
+      },
+    },
+  });
+}
 
-/* -------------------------------------------------------------------- doors */
+/** Use the schema's exact-one-table write rule at every GFM door. */
+function tableInput(source: string): GfmTable | null {
+  try {
+    return parseTableInput(source);
+  } catch (error) {
+    if (error instanceof InvalidTableError) return null;
+    throw error;
+  }
+}
 
 /** Whether `header` and `delimiter` are the first two lines of a GFM table. */
 function opensTable(header: string, delimiter: string): boolean {
-  return parseGfmTable(`${header}\n${delimiter}`) !== null;
+  return tableInput(`${header}\n${delimiter}`) !== null;
 }
 
 /**
@@ -173,8 +145,8 @@ function opensTable(header: string, delimiter: string): boolean {
  * The typed conversion rewrites one paragraph's text and deletes another, and
  * neither operation can carry a mark across honestly: an annotation anchored in
  * the header would lose the characters it is anchored to, and one in the
- * delimiter row would go with the block. Inline formatting cannot come either —
- * a table is source text, so `comment` is the only mark it may hold.
+ * delimiter row would go with the block. This GFM door treats inline markdown
+ * literally and therefore does not guess how prose formatting maps to cells.
  *
  * So a marked paragraph is not converted at all. Refusing is the whole fix: the
  * reader keeps their text, their thread and their formatting, and the table is
@@ -210,23 +182,16 @@ function convertToTable(
   if (found === null) return false;
 
   endUndoCapture(view.state);
+  const parsed = tableInput(source);
+  if (parsed === null) return false;
   const tr = view.state.tr;
-  const contentStart = found.pos + 1;
-  tr.replaceWith(
-    contentStart,
-    contentStart + found.node.content.size,
-    source === "" ? [] : view.state.schema.text(source),
-  );
-  if (!retypeBlockInTransaction(tr, found.pos, "table")) return false;
-
+  tr.replaceWith(found.pos, found.pos + found.node.nodeSize,
+    tableFromRows(view.state.schema, [parsed.header, ...parsed.rows], blockId));
   if (dropBlockId !== null) {
     const drop = findBlockById(tr.doc, dropBlockId);
     if (drop !== null) tr.delete(drop.pos, drop.pos + drop.node.nodeSize);
   }
-  // At the *end* of the source, which is where the reader's hands are: a
-  // delimiter row is already a valid one at `| --- | -`, so the conversion can
-  // land mid-row and the rest of what they type has to carry on after it.
-  tr.setSelection(TextSelection.near(tr.doc.resolve(contentStart + source.length)));
+  tr.setSelection(TextSelection.near(tr.doc.resolve(found.pos + 4)));
   view.dispatch(tr);
   return true;
 }
@@ -249,6 +214,46 @@ function convertToTable(
 export function tableFromTextPlugin(): Plugin {
   return new Plugin({
     props: {
+      transformPastedHTML(html, view) {
+        if (!/<table[\s>]/i.test(html)) return html;
+        const dom = document.implementation.createHTMLDocument().body;
+        dom.innerHTML = html;
+        const parser = ProseMirrorDOMParser.fromSchema(view.state.schema);
+        for (const table of dom.querySelectorAll("table")) {
+          // An outer table already includes its nested tables' text.
+          if (!dom.contains(table)) continue;
+          const replacement = document.createDocumentFragment();
+          const cells: HTMLElement[] = [
+            ...(table.caption === null ? [] : [table.caption]),
+            ...Array.from(table.rows).flatMap((row) => Array.from(row.cells)),
+          ];
+          for (const cell of cells) {
+            // Let the ordinary parser retain HTML block boundaries and handle
+            // line breaks. Only table content loses its formatting/structure;
+            // surrounding headings, lists and link marks use normal rich paste.
+            const parsed = parser.parse(cell);
+            for (const line of parsed.textBetween(0, parsed.content.size, "\n").split(/\r\n?|\n/)) {
+              const paragraph = document.createElement("p");
+              paragraph.textContent = line;
+              replacement.appendChild(paragraph);
+            }
+          }
+          table.replaceWith(replacement);
+        }
+        return dom.innerHTML;
+      },
+      handleKeyDown(view, event) {
+        if (event.key !== "Enter" || event.isComposing) return false;
+        const { $from } = view.state.selection;
+        if ($from.depth !== 1 || $from.parent.type.name !== "paragraph" || !view.state.selection.empty) return false;
+        const index = $from.index(0);
+        if (index === 0) return false;
+        const header = view.state.doc.child(index - 1);
+        const delimiter = $from.parent;
+        if (header.type.name !== "paragraph" || carriesMarks(header) || carriesMarks(delimiter) || !opensTable(header.textContent, delimiter.textContent)) return false;
+        if (typeof header.attrs.id !== "string" || typeof delimiter.attrs.id !== "string") return false;
+        return convertToTable(view, header.attrs.id, delimiter.attrs.id, `${header.textContent}\n${delimiter.textContent}`);
+      },
       handleTextInput(view, from, to, text, defaultTransaction) {
         if (view.composing || from !== to) return false;
         const $from = view.state.doc.resolve(from);
@@ -262,7 +267,7 @@ export function tableFromTextPlugin(): Plugin {
         if (index === 0) return false;
         const header = view.state.doc.child(index - 1);
         if (header.type.name !== "paragraph") return false;
-        if (!opensTable(header.textContent, delimiter)) return false;
+        if (!delimiter.trimEnd().endsWith("|") || !opensTable(header.textContent, delimiter)) return false;
 
         const headerId = header.attrs.id;
         const delimiterId = block.attrs.id;
@@ -295,14 +300,26 @@ export function tableFromTextPlugin(): Plugin {
       },
 
       handlePaste(view, event) {
+        if (inTable(view.state)) {
+          const plain = event.clipboardData?.getData("text/plain") ?? "";
+          view.dispatch(view.state.tr.insertText(singleLine(plain)).scrollIntoView());
+          return true;
+        }
+        // transformPastedHTML turns only HTML tables into text paragraphs.
+        // Let the standard rich-paste path insert that slice, including any
+        // surrounding blocks and marks, rather than treating its plain text as
+        // an exact-GFM-table clipboard.
+        const html = event.clipboardData?.getData("text/html") ?? "";
+        if (/<table[\s>]/i.test(html)) return false;
         const text = event.clipboardData?.getData("text/plain") ?? "";
         const source = text.replace(/\r\n?/g, "\n").replace(/\s+$/, "");
         // The *whole* clipboard has to be one table, not merely start as one.
         // A table with prose under it is a document, and swallowing that prose
         // into the block would store it as rows of a table nobody wrote — so it
         // falls through to the ordinary paste, which keeps it as the blocks it
-        // is. `parseGfmTable` is the same rule the renderer and the reader use.
-        if (parseGfmTable(source) === null) return false;
+        // is. The schema's writer adds block-boundary validation to its shared
+        // GFM reader, so web and agent writes accept the same input.
+        if (tableInput(source) === null) return false;
 
         const $from = view.state.selection.$from;
         if ($from.depth !== 1) return false;
@@ -322,10 +339,11 @@ export function tableFromTextPlugin(): Plugin {
   });
 }
 
-/** Tiptap wrapper around the table block's two plugins. */
+/** Integration behavior; TableKit itself supplies navigation and row commands. */
 export const TableBlocks = Extension.create({
   name: "uberblickTableBlocks",
+  priority: 1100,
   addProseMirrorPlugins() {
-    return [sourceEditingPlugin("table", EDITING_CLASS), tableFromTextPlugin()];
+    return [tableLimitsPlugin(), tableFromTextPlugin()];
   },
 });

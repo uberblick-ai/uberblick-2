@@ -26,8 +26,9 @@
     {
       // The invariant this linter exists to guard: the MCP server writes
       // nothing to stdout except JSON-RPC frames, so a stray console.* there is
-      // a protocol bug, not a style question. src/log.ts is the sanctioned path
-      // and needs no exception — it writes to process.stderr, never console.
+      // a protocol bug, not a style question. src/log.ts is the sanctioned path,
+      // and its one `console.error` (stderr, never stdout) carries the only
+      // suppression.
       "includes": ["packages/mcp-server/src/**"],
       "linter": { "rules": { "suspicious": { "noConsole": "error" } } }
     },

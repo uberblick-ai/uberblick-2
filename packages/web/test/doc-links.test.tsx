@@ -548,9 +548,21 @@ describe("following a reference", () => {
       expect(followed.defaultPrevented).toBe(true);
 
       // ---- a modified click is the browser's ----
-      const modified = click(anchor, { metaKey: true });
+      // Read whether the app left it alone once it has bubbled past the app,
+      // then stand in for the browser: jsdom cannot open a new tab, and logs
+      // "Not implemented: navigation" when a click asks it to.
+      let leftToBrowser: boolean | undefined;
+      window.addEventListener(
+        "click",
+        (event) => {
+          leftToBrowser = !event.defaultPrevented;
+          event.preventDefault();
+        },
+        { once: true },
+      );
+      click(anchor, { metaKey: true });
       expect(opened).toEqual([TARGET]);
-      expect(modified.defaultPrevented).toBe(false);
+      expect(leftToBrowser).toBe(true);
 
       // ---- and the thread is still reachable from the rest of the highlight ----
       const highlight = host.querySelector("[data-comment-thread]");

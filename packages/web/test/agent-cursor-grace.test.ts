@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * How long a departed agent's caret stays on screen (#407).
  *

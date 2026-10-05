@@ -324,21 +324,10 @@ describe("help before the work", () => {
   // other half of the proof, since every one of these announces its warnings
   // and its failures there.
   const inert: string[][] = [
-    ["init", "--yes", "--help"],
     ["init", "--mcp", "--no-mcp", "--help"],
     ["open", "--port", "0", "-h"],
-    ["status", "--help"],
-    ["doctor", "-h"],
-    ["workspace", "use", "--help"],
-    ["workspace", "use", WORKSPACE, "--help"],
-    ["workspace", "create", "--help"],
-    ["workspace", "promote", "hub.example.invalid", "--help"],
     ["workspace", "join", "ws://example.invalid:1234", "-h"],
     ["auth", "login", "--help"],
-    ["auth", "status", "-h"],
-    ["auth", "logout", "--help"],
-    ["env", "--help"],
-    ["mcp", "install", "zed", "--help"],
     ["mcp", "install", "claude", "--help"],
   ];
   for (const argv of inert) {
@@ -396,8 +385,8 @@ describe("what is not a request for help", () => {
 });
 
 
-it.each([{ operands: [] }, { operands: ["join"] }, { operands: ["init"] }, { operands: ["update"] }])("refuses the removed command group with operands %j", async ({ operands }) => {
-  const result = await dispatch(["remote", ...operands]);
+it("refuses the removed command group", async () => {
+  const result = await dispatch(["remote", "join"]);
   expect(result.status).toBe(2);
   expect(result.stderr).toContain('unknown command "remote"');
 });

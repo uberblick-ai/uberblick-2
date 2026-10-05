@@ -200,8 +200,8 @@ function childLine(child: ReturnType<typeof spawn>, prefix: string) {
   });
 }
 
-/** Run the upgrade hook in a disposable process: the throwing case must exit. */
-async function startUpgradeProbe(mode: "throw" | "reject-empty") {
+/** Run the upgrade hook in a disposable process, so a crash cannot take the suite. */
+async function startUpgradeProbe() {
   const child = spawn(
     process.execPath,
     [
@@ -210,7 +210,6 @@ async function startUpgradeProbe(mode: "throw" | "reject-empty") {
       `
         import { Server } from "@hocuspocus/server";
 
-        const mode = process.argv[1];
         const server = new Server({
           port: 0,
           address: "127.0.0.1",
@@ -218,18 +217,14 @@ async function startUpgradeProbe(mode: "throw" | "reject-empty") {
           stopOnSignals: false,
           onUpgrade: async ({ socket }) => {
             socket.destroy();
-            if (mode === "reject-empty") {
-              setImmediate(() => process.stdout.write("survived\\n"));
-              return Promise.reject();
-            }
-            throw new Error("throwing onUpgrade escapes the listener");
+            setImmediate(() => process.stdout.write("survived\\n"));
+            return Promise.reject();
           },
         });
         await server.listen();
         process.stdout.write("listening:" + server.address.port + "\\n");
         setInterval(() => {}, 60_000);
       `,
-      mode,
     ],
     {
       cwd: new URL("../", import.meta.url),
@@ -877,94 +872,16 @@ describe("MessageReceiver.ts:189-280 — beforeSync gates apply and acknowledgem
   });
 });
 
-describe("y-protocols sync.js:82-89 — update observer errors are not an apply gate", () => {
-  it("acknowledges an update whose document observer throws after apply", async () => {
-    const room = randomUUID();
-    let armed = false;
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    try {
-      const { port, hocuspocus } = await startServer({
-        afterLoadDocument: async ({ document }) => {
-          document.on("update", () => {
-            if (armed) throw new Error("an observer cannot refuse an update");
-          });
-        },
-      });
-      const sender = connect({ port, room });
-      await sender.synced;
-
-      armed = true;
-      sender.text.insert(0, "already applied");
-      await waitUntil(
-        "the applied update to be positively acknowledged",
-        () =>
-          hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString() ===
-            "already applied" && !sender.provider.hasUnsyncedChanges,
-      );
-
-      expect(logged).toHaveBeenCalled();
-    } finally {
-      logged.mockRestore();
-    }
-  });
-
-  it("positively acknowledges an ungated malformed update", async () => {
-    const room = randomUUID();
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    try {
-      const { port, hocuspocus } = await startServer({});
-      const sender = connect({ port, room });
-      await sender.synced;
-
-      // Drive the provider's public update handler so it owns both the wire
-      // framing and the outstanding-change count. This byte is not a valid Yjs
-      // update, but the sync reader catches the decoder error and returns.
-      sender.provider.documentUpdateHandler(Uint8Array.of(0xff), null);
-      expect(sender.provider.hasUnsyncedChanges).toBe(true);
-      await waitUntil("the malformed update to be positively acknowledged", () =>
-        !sender.provider.hasUnsyncedChanges,
-      );
-
-      expect(hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString()).toBe(
-        "",
-      );
-      expect(logged).toHaveBeenCalled();
-    } finally {
-      logged.mockRestore();
-    }
-  });
-});
-
 describe("Server.ts:87-105 — onUpgrade refusal distinguishes empty rejection from an error", () => {
   /**
    * The HTTP server's async upgrade listener rethrows a truthy hook error. An
    * uncaught throw from that listener terminates Node, so a refusal cannot use
-   * the usual `throw new Error(...)` form.
+   * the usual `throw new Error(...)` form: the hub's `onUpgrade` destroys the
+   * socket and rejects with no value instead, which is the form pinned here.
    */
-  it("lets a throwing onUpgrade terminate its process", async () => {
-    const { child, port } = await startUpgradeProbe("throw");
-    let stderr = "";
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    const exited = new Promise<{ code: number | null; signal: string | null }>(
-      (resolve) => {
-        child.once("exit", (code, signal) => resolve({ code, signal }));
-      },
-    );
-
-    requestUpgrade(port);
-    const result = await exited;
-
-    expect(result).toEqual({ code: 1, signal: null });
-    expect(stderr).toContain("throwing onUpgrade escapes the listener");
-  });
-
   /** Destroy the socket, then reject with no value so the listener returns. */
   it("keeps the process alive for destroy-then-empty-reject", async () => {
-    const { child, port } = await startUpgradeProbe("reject-empty");
+    const { child, port } = await startUpgradeProbe();
     const survived = childLine(child, "survived");
 
     requestUpgrade(port);

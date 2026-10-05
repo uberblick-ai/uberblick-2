@@ -1,5 +1,5 @@
 /**
- * The editor palette: eight custom block nodes, seven marks, nothing else.
+ * The editor palette: eight block types, TableKit's row/cell nodes, seven marks.
  *
  * The marks live in marks.ts — the six inline ones (`bold`, `italic`, `strike`,
  * `inlineCode`, `link`, `docLink`) plus the `comment` anchor defined below.
@@ -13,7 +13,7 @@
  *   <mermaid   id="…">        Y.XmlText
  *   <list-item id="…" list="bullet" indent="1">  Y.XmlText
  *   <quote     id="…">        Y.XmlText
- *   <table     id="…">        Y.XmlText (GFM source)
+ *   <table     id="…">        tableRow > tableHeader|tableCell > paragraph > Y.XmlText
  *   <terminal  id="…">        Y.XmlText (a scripted terminal transcript)
  *
  * A list is a *run* of adjacent `list-item` blocks, exactly as markdown means
@@ -26,7 +26,7 @@
  * Three non-obvious constraints, each of which comes from reading
  * y-prosemirror's sync-plugin rather than from taste:
  *
- * 1. **Every node declares `id`.** `updateYFragment` removes any Yjs attribute
+ * 1. **Every top-level block declares `id`.** `updateYFragment` removes any Yjs attribute
  *    that is `undefined` in `node.attrs`. An undeclared `id` would therefore be
  *    stripped from the Y.XmlElement the first time the editor wrote the block —
  *    the block would lose its identity and orphan every reference to it.
@@ -39,7 +39,7 @@
  *    reason; clamping to 1–6 happens at render time only, so the stored value
  *    round-trips untouched.
  *
- * 3. **Every node allows the `comment` mark, including `code`.** Annotation
+ * 3. **Every text block allows the `comment` mark, including `code`.** Annotation
  *    threads are anchored by a `comment` formatting mark on the block's
  *    Y.XmlText, and an agent may annotate a code block. A `marks: ""` node spec
  *    would make `schema.text(…, [commentMark])` throw, and y-prosemirror's catch
@@ -47,9 +47,11 @@
  *    failure.
  *
  *    Prose blocks take `PROSE_MARKS` on top of that — the inline set. `code`,
- *    `mermaid`, `table` and `terminal` never do: their text is source, so
+ *    `mermaid` and `terminal` never do: their text is source, so
  *    `comment` is the only mark they may hold, and an inline mark found inside
  *    one is foreign content the palette gate refuses to bind (see palette.ts).
+ *    TableKit's cells each hold one paragraph, which allows those formatting
+ *    marks and comment. The table integration refuses document links in cells.
  */
 
 import { Node, Mark, mergeAttributes } from "@tiptap/core";
@@ -61,7 +63,7 @@ import {
   mermaidChrome,
   sourceBlockView,
 } from "./source-chrome.js";
-import { tableBlockView } from "./table.js";
+import { TableNodes } from "./table.js";
 import { terminalBlockView } from "./terminal.js";
 
 /**
@@ -105,8 +107,8 @@ export function renderableIndent(raw: unknown): ListIndent {
 export const Doc = Node.create({
   name: "doc",
   topNode: true,
-  // The document is a flat sequence of blocks. No nesting, ever — the schema
-  // package's `blocks` fragment has exactly one level.
+  // The document is a flat sequence of blocks. Table blocks alone hold rows
+  // and cells below that top level.
   content: "block+",
 });
 
@@ -323,45 +325,6 @@ export const Mermaid = Node.create({
 });
 
 /**
- * A GFM table, stored as source and drawn as a table.
- *
- * A source block like `code` and `mermaid` — the node spec is theirs, and
- * everything that makes it look like a table lives in the NodeView (table.ts).
- * Stock Tiptap's table extensions are rejected: their nested cell tree has no
- * block-scoped text for `edit_block` to work on.
- */
-export const Table = Node.create({
-  name: "table",
-  group: "block",
-  content: "text*",
-  marks: COMMENT_MARK,
-  code: true,
-  defining: true,
-  whitespace: "pre",
-  addAttributes() {
-    return { id: idAttribute };
-  },
-  parseHTML() {
-    return [{ tag: "div[data-block-type=table]", preserveWhitespace: "full" }];
-  },
-  renderHTML({ HTMLAttributes }) {
-    return [
-      "div",
-      mergeAttributes(
-        { class: "ub-table", "data-block-type": "table" },
-        HTMLAttributes,
-      ),
-      ["pre", {}, 0],
-    ];
-  },
-  addNodeView() {
-    return tableBlockView;
-  },
-  // See CodeBlock: Enter is handled by the core keymap, driven by `code: true`,
-  // so a newline in the source is a newline and never a new block.
-});
-
-/**
  * A scripted terminal demonstration, stored as its transcript (#843).
  *
  * A source block like `code`, `mermaid` and `table` — the node spec is theirs.
@@ -467,7 +430,7 @@ export const paletteExtensions = [
   Mermaid,
   ListItem,
   Quote,
-  Table,
+  TableNodes,
   Terminal,
   CommentMark,
   ...inlineMarkExtensions,

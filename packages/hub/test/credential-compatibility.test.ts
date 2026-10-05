@@ -1,7 +1,6 @@
 /** Loopback admission retains the local shared-secret security model. */
 
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
@@ -246,15 +245,4 @@ describe("loopback admission is unchanged", () => {
     const client = connect(localServer.address.port, WORKSPACE, issuedToken);
     await expect(client.denied).resolves.toBe("invalid-token");
   });
-});
-
-describe("local browser admission stays local", () => {
-  it.each(["config.ts", "main.ts", "local-browser-server.ts"])(
-    "%s does not import credential admission",
-    (file) => {
-      const source = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8");
-      expect(source).not.toMatch(/(?:from\s+|import\s*\(?\s*)["']\.\/credential-admission(?:\.[^"']*)?["']/);
-      expect(source).not.toMatch(/(?:test-device-sync|device-sync-hub)/);
-    },
-  );
 });

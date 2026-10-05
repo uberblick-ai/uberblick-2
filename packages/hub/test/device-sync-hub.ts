@@ -52,6 +52,8 @@ export async function startDeviceSyncHub(options: {
   let renewalReply: DeviceSyncRenewalReply | null = null;
   let renewalDelayMs = 0;
   let closed = false;
+  /** Pending renewal delays, ended by close() so no caller waits one out. */
+  const delays = new Set<() => void>();
 
   const log = (record: HubLogRecord): void => { logs.push(record); };
   const captureAuthentication = async ({ documentName, token }: onAuthenticatePayload<CredentialContext>): Promise<void> => {
@@ -77,7 +79,17 @@ export async function startDeviceSyncHub(options: {
       async onRequest({ request, response }) {
         if (request.url !== "/auth/credential/renew") return;
         renewalCount += 1;
-        if (renewalDelayMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, renewalDelayMs));
+        if (renewalDelayMs > 0) {
+          await new Promise<void>((resolve) => {
+            const end = (): void => { clearTimeout(timer); delays.delete(end); resolve(); };
+            const timer = setTimeout(end, renewalDelayMs);
+            delays.add(end);
+          });
+          if (closed) {
+            response.destroy();
+            return Promise.reject();
+          }
+        }
         if (renewalReply !== null) {
           response.writeHead(renewalReply.status, {
             "Content-Type": "application/json", "Cache-Control": "no-store",
@@ -143,6 +155,7 @@ export async function startDeviceSyncHub(options: {
     async close(): Promise<void> {
       if (closed) return;
       closed = true;
+      for (const end of [...delays]) end();
       try { await pause(); } finally { database.close(); }
     },
   };

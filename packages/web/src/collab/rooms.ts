@@ -89,10 +89,10 @@ let redialAfterDrop = false;
  * three at once — a fixed 5s window had every tab redialling in the same
  * millisecond, wave after wave, for as long as the hub kept doing it.
  *
- * The maximum stays at the 5s this used to be, because
- * `packages/web/test/reconnect.test.ts` derives its deadlines from it: a
- * suppressed close waits out at most one window before the trailing drop, and
- * lengthening that would invalidate the derivation rather than the test.
+ * The maximum stays at the 5s this used to be: a suppressed close waits out at
+ * most one window before the trailing drop. `packages/web/test/reconnect.test.ts`
+ * narrows the band through {@link setForcedDropCooldownForTesting} rather than
+ * waiting it out.
  */
 export const FORCED_DROP_COOLDOWN = { minMs: 2_500, maxMs: 5_000 } as const;
 
@@ -101,9 +101,26 @@ export const FORCED_DROP_COOLDOWN = { minMs: 2_500, maxMs: 5_000 } as const;
  * {@link FORCED_DROP_COOLDOWN}. The source is a parameter rather than a bare
  * `Math.random` so a test can state the band's ends instead of sampling it.
  */
-export function forcedDropCooldownMs(random: () => number = Math.random): number {
-  const { minMs, maxMs } = FORCED_DROP_COOLDOWN;
+export function forcedDropCooldownMs(
+  random: () => number = Math.random,
+  band: ForcedDropBand = FORCED_DROP_COOLDOWN,
+): number {
+  const { minMs, maxMs } = band;
   return Math.round(minMs + (maxMs - minMs) * random());
+}
+
+type ForcedDropBand = { readonly minMs: number; readonly maxMs: number };
+
+/** The band {@link dropSocket} draws from: {@link FORCED_DROP_COOLDOWN} in the app. */
+let forcedDropBand: ForcedDropBand = FORCED_DROP_COOLDOWN;
+
+/**
+ * Test seam: narrow the forced-drop band for this module instance, so a test
+ * of the deferral need not wait out seconds of real cooldown. Nothing in the
+ * app calls it.
+ */
+export function setForcedDropCooldownForTesting(band: ForcedDropBand): void {
+  forcedDropBand = band;
 }
 
 /**
@@ -241,7 +258,7 @@ function dropSocket(): void {
 
   cancelPendingDrop();
   lastForcedDrop = Date.now();
-  forcedDropWindowMs = forcedDropCooldownMs();
+  forcedDropWindowMs = forcedDropCooldownMs(Math.random, forcedDropBand);
   redialAfterDrop = true;
   current.disconnect();
 }

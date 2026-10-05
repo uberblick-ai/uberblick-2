@@ -630,38 +630,33 @@ describe("directory stub metadata divergence", () => {
     description: meta.description ?? "",
   };
 
-  it("detects a missing stub and accepts matching cached metadata", () => {
+  it("detects a missing stub or a difference in any cached field alone", () => {
     expect(directoryStubDiffers(null, meta)).toBe(true);
-    expect(directoryStubDiffers(stub, meta)).toBe(false);
+    for (const [field, change] of [
+      ["title", { title: "Alpha, renamed" }],
+      ["tag set", { tags: ["draft", "reference"] }],
+      ["description", { description: "A new purpose." }],
+      ["kind", { kind: "decision" }],
+      ["status", { status: "planned" }],
+    ] satisfies Array<[string, Partial<DirectoryEntry>]>) {
+      expect(directoryStubDiffers({ ...stub, ...change }, meta), field).toBe(true);
+    }
+    // A description present on only one side.
+    expect(directoryStubDiffers(undescribedStub, meta)).toBe(true);
+    expect(directoryStubDiffers(stub, { ...meta, description: null })).toBe(true);
   });
 
-  it.each([
-    ["title", { title: "Alpha, renamed" }],
-    ["tag set", { tags: ["draft", "reference"] }],
-    ["description", { description: "A new purpose." }],
-    ["kind", { kind: "decision" }],
-    ["status", { status: "planned" }],
-  ] satisfies Array<[string, Partial<DirectoryEntry>]>)(
-    "detects a difference in %s alone",
-    (_field, change) => {
-      expect(directoryStubDiffers({ ...stub, ...change }, meta)).toBe(true);
-    },
-  );
-
-  it("compares tags without regard to order", () => {
+  it("accepts matching metadata, tags in any order and an absent or empty description", () => {
+    expect(directoryStubDiffers(stub, meta)).toBe(false);
     expect(
       directoryStubDiffers({ ...stub, tags: ["schema", "draft"] }, meta),
     ).toBe(false);
-  });
-
-  it.each([
-    [undefined, null],
-    [undefined, ""],
-    ["", null],
-    ["", ""],
-  ] satisfies Array<[string | undefined, string | null]>)(
-    "treats an absent or empty description as the same value",
-    (cached, document) => {
+    for (const [cached, document] of [
+      [undefined, null],
+      [undefined, ""],
+      ["", null],
+      ["", ""],
+    ] satisfies Array<[string | undefined, string | null]>) {
       expect(
         directoryStubDiffers(
           {
@@ -670,13 +665,9 @@ describe("directory stub metadata divergence", () => {
           },
           { ...meta, description: document },
         ),
+        `${cached}/${document}`,
       ).toBe(false);
-    },
-  );
-
-  it("detects a description present on only one side", () => {
-    expect(directoryStubDiffers(undescribedStub, meta)).toBe(true);
-    expect(directoryStubDiffers(stub, { ...meta, description: null })).toBe(true);
+    }
   });
 
   it("leaves uncached metadata, timestamps and tombstones to callers", () => {

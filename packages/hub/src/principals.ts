@@ -19,6 +19,7 @@ function fromRow(row: Record<string, unknown>): PrincipalRecord {
 export class PrincipalRegistry {
   private readonly upsert: StatementSync;
   private readonly select: StatementSync;
+  private readonly selectAccount: StatementSync;
 
   constructor(database: HubDatabase) {
     const db = database.connection;
@@ -36,6 +37,9 @@ export class PrincipalRegistry {
     this.select = db.prepare(`
       SELECT id, github_account_id, github_username FROM hub_principals WHERE id = $id
     `);
+    this.selectAccount = db.prepare(`
+      SELECT id, github_account_id, github_username FROM hub_principals WHERE github_account_id = $accountId
+    `);
   }
 
   get(id: string): PrincipalRecord | null {
@@ -43,7 +47,12 @@ export class PrincipalRegistry {
     return row === undefined ? null : fromRow(row);
   }
 
-  /** Internal only: identity comes from the hub's completed GitHub authorization. */
+  getByGithubAccountId(accountId: string): PrincipalRecord | null {
+    const row = this.selectAccount.get({ accountId });
+    return row === undefined ? null : fromRow(row);
+  }
+
+  /** Internal only: identity comes from the hub's GitHub authorization or public lookup. */
   identify(accountId: string, username: string): PrincipalRecord {
     if (!/^[1-9][0-9]*$/.test(accountId) || username.length < 1) {
       throw new Error("PrincipalRegistry: invalid GitHub public identity");

@@ -81,13 +81,37 @@ A correctable gap in a specification is not such a stop: correct it.
 
 Finish `needs-human`. The summary is the question, ready to answer:
 
-- what is blocked, and the one decision needed;
+- what is blocked, and each independent decision needed;
 - the answers to pick from, and your recommendation;
 - an @-mention of who can answer: the person who opened the issue (for a pull
   request, its issue) when they have write access, otherwise
   `@uberblick-ai/maintainers`;
 - the closing line `Answer here, then replace needs-human with <label>.`,
   naming `needs-preparation` on an issue or `needs-changes` on a pull request.
+
+Make the question scannable before the evidence. Give each independent decision
+its own short heading or numbered item. Aim for one or two plain-language
+sentences per decision: the choice and alternatives, what each means for the
+person, and the recommendation. Keep material risks and tradeoffs visible;
+brevity never justifies omitting or truncating them. Keep the @-mention and
+invitation to answer here visible too.
+
+Give the person one unambiguous next action and one place to answer. Keep the
+prescribed closing line visible outside collapsed details; it names the one
+next label required by this project's route.
+Launcher-generated steps for the stopped role apply only when that same role
+should resume; do not present them as an alternative when a correction or
+handoff requires another role.
+
+Put supporting technical evidence, commits, CI results and resume mechanics in
+a collapsed `<details>` block with a descriptive `<summary>`, or link to their
+existing record. If the launcher flattens Markdown (including ub-agents
+0.1.11), or the explanation is long, post a structured decision comment and
+link it from the concise report summary. Link the summary's invitation to answer
+to that comment, and keep the prescribed closing line visible in both records.
+The summary still names every independent choice, recommendation and material
+risk. This changes presentation only: the answer, authority, outcome and label
+rules below and above still apply.
 
 Any person with write access may answer. A comment from a person's account is
 the answer; one from `uberblick-agent` or a bot never is. The next run works
@@ -138,11 +162,15 @@ shaping session recording the value the person stated.
 ## Retrospectives
 
 Post one to your role's board (`AGENTS.md`, Project facts) only when the run
-lost something — a session, a review round, rework, a long discovery, tokens
-burned for nothing — or missed something it needed, such as a corpus document,
+lost something real — an extra session or review round, rework, or about fifteen
+minutes of discovery — or missed something it needed, such as a corpus document,
 a pointer or a check, and only when you can say why and name the change that
-would have prevented it. Otherwise post nothing. In a short paragraph, link the
-item, state the cost and its cause, and the smallest useful change. A
+would have prevented it. Otherwise post nothing, and post at most once per item:
+a retry does not repeat what an earlier run of yours already posted. In a short
+paragraph, link the item, state the cost and its cause, and the smallest useful
+change. The boards are public: never include credentials, environment values,
+local paths, hostnames or log excerpts. Write the body file in private scratch,
+never the worktree, where it could be committed. A
 retrospective is telemetry, never a gate.
 
 ## Every process a run starts is that run's to end
@@ -178,3 +206,10 @@ pull request you continue, and never rebase or force-push a pull request's
 head. A detached checkout is pushed with `git push origin
 HEAD:refs/heads/<branch>`. Leave other runs' worktrees and
 processes alone.
+
+Headless Claude runs deny, without a prompt, any shell command that is not on
+the allow list as written: shell expansion (`$VAR`, `${VAR}`, `$?`, `$(...)`,
+backticks) and loops (`for`, `while`) are denied even when every command inside
+is allowed. Run one plain command per call instead. Files outside the worktree
+and the run's `scratch` directory are not readable; read corpus documents
+through the corpus MCP tools.

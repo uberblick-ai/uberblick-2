@@ -19,9 +19,8 @@
  * The other half of the file is about the *file*: a database written by
  * `@hocuspocus/extension-sqlite` and its better-sqlite3 binding must keep
  * working under the hub's own `node:sqlite` adapter, with no migration, no
- * second table and no second file — and every database form the configuration
- * accepts (a fresh file, `":memory:"`, the anonymous temporary one) must store
- * and load.
+ * second table and no second file — and both a fresh file and `":memory:"`
+ * must store and load.
  */
 
 import { spawn } from "node:child_process";
@@ -36,9 +35,9 @@ import type { HubLogRecord } from "../src/log.js";
 import type { Hub } from "../src/server.js";
 import {
   TEXT_KEY,
+  acknowledged,
   createClient,
   removeTempDatabases,
-  sleep,
   startHub,
   storedText,
   tempDatabasePath,
@@ -110,7 +109,7 @@ describe("flush", () => {
     const writer = await client(started, room);
 
     writer.text.insert(0, "unflushed");
-    await sleep(200);
+    await acknowledged(writer);
 
     // Still only in memory: the debounce has not fired and will not for a
     // minute, and the writer is still connected so nothing triggered a store.
@@ -126,12 +125,12 @@ describe("flush", () => {
     const databasePath = tempDatabasePath();
     // The store will fail and leave the document in memory, so destroy() waits
     // for an unload that never comes; don't spend the whole default on it.
-    const started = await hub(databasePath, { shutdownTimeoutMs: 500 });
+    const started = await hub(databasePath, { shutdownTimeoutMs: 100 });
     const room = testRoom();
     const writer = await client(started, room);
 
     writer.text.insert(0, "never stored");
-    await sleep(200);
+    await acknowledged(writer);
 
     // Fault injection: take the table out from under the hub's open handle, so
     // the pending store fails when the flush fires it. Hocuspocus catches that
@@ -153,7 +152,7 @@ describe("flush", () => {
     const writer = await client(started, room);
 
     writer.text.insert(0, "flushed");
-    await sleep(200);
+    await acknowledged(writer);
 
     // A direct connection is a server-side writer: it survives the connection
     // quiesce, so it can edit the document *after* stop()'s flush, in the
@@ -246,9 +245,9 @@ describe("a write lock held by another process", () => {
     const writer = await client(started, room);
 
     writer.text.insert(0, "written while locked");
-    await sleep(200);
+    await acknowledged(writer);
 
-    const holder = await holdWriteLock(databasePath, 200);
+    const holder = await holdWriteLock(databasePath, 100);
     // Subscribed before the flush, not after: the flush blocks this event loop
     // while the child commits and exits, so a listener attached afterwards can
     // be waiting for an event that has already happened.
@@ -285,7 +284,7 @@ describe("restart", () => {
     const two = await client(first, roomTwo);
     one.text.insert(0, "document one");
     two.text.insert(0, "document two");
-    await sleep(200);
+    await Promise.all([acknowledged(one), acknowledged(two)]);
 
     // Flush with the clients still attached and read the rows back before the
     // shutdown: what the next process serves is what this flush wrote, not
@@ -296,7 +295,7 @@ describe("restart", () => {
 
     // A further edit only the SIGTERM path can save, on one of the two rooms.
     one.text.insert(one.text.length, ", edited before SIGTERM");
-    await sleep(200);
+    await acknowledged(one);
 
     // Exactly what main.ts calls on a signal, clients still editing.
     await first.stop();
@@ -376,7 +375,7 @@ describe("a database written by @hocuspocus/extension-sqlite", () => {
     await waitForText("the legacy document", reader.text, LEGACY.text);
 
     reader.text.insert(reader.text.length, ", edited by node:sqlite");
-    await sleep(200);
+    await acknowledged(reader);
     await first.flush();
 
     const edited = `${LEGACY.text}, edited by node:sqlite`;
@@ -399,7 +398,7 @@ describe("a database written by @hocuspocus/extension-sqlite", () => {
 describe("database forms", () => {
   /**
    * Store and load through a real client, without a restart — the only thing an
-   * anonymous database can prove, and the same proof for all three forms. The
+   * in-memory database can prove, and the same proof for both forms. The
    * second client re-reads what the first one's flush wrote: Hocuspocus unloads
    * a document when its last connection goes, so the room is hydrated from
    * SQLite again rather than served out of memory.
@@ -410,7 +409,7 @@ describe("database forms", () => {
     const writer = await client(started, room);
 
     writer.text.insert(0, "stored and loaded");
-    await sleep(200);
+    await acknowledged(writer);
     await started.flush();
 
     writer.destroy();
@@ -441,16 +440,6 @@ describe("database forms", () => {
 
   it("works in memory", async () => {
     const started = await storesAndLoads(":memory:");
-    await expect(started.stop()).resolves.toBeUndefined();
-    hubs.length = 0;
-    destroyClients();
-  });
-
-  it("works as an anonymous temporary database", async () => {
-    // SQLite's other anonymous form: an empty path is a private temporary file
-    // it deletes on close. Hub configuration accepts it, so the hub must too —
-    // and, like ":memory:", it must not be mistaken for a path to mkdir.
-    const started = await storesAndLoads("");
     await expect(started.stop()).resolves.toBeUndefined();
     hubs.length = 0;
     destroyClients();

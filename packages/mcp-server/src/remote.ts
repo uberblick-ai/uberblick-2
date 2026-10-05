@@ -65,6 +65,7 @@ import {
   listTagCatalog,
   getAnnotationsMap,
   getBlockInline,
+  findBlockElement,
   getBlocks,
   getMeta,
   listAnnotationRanges,
@@ -212,6 +213,19 @@ function canonical(value: unknown): unknown {
   return out;
 }
 
+/** The table subtree, including cell marks and anchors, without Yjs item ids. */
+function tableContent(element: Y.XmlElement | null): unknown {
+  if (element === null) return null;
+  return {
+    name: element.nodeName,
+    attributes: canonical(element.getAttributes()),
+    children: element.toArray().map((child) => {
+      if (child instanceof Y.XmlElement) return tableContent(child);
+      return canonical(child instanceof Y.XmlText ? child.toDelta() : child.toJSON());
+    }),
+  };
+}
+
 /**
  * A content hash of one document, over everything the schema puts in it.
  *
@@ -273,6 +287,12 @@ export function docFingerprint(doc: Y.Doc): string {
         start: run.start,
         end: run.end,
       })),
+      ...(block.type === "table" ? {
+        // GFM/rev are mark-blind and trimmed. Include every cell's stored
+        // characters and delta, including comment anchors, so verification
+        // cannot accept a replica missing cell formatting or anchor deletions.
+        cells: tableContent(findBlockElement(doc, block.id)),
+      } : {}),
     })),
     annotations: Object.keys(annotations)
       .sort()

@@ -4,6 +4,10 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
+    // CI output, as in packages/schema/vitest.config.ts.
+    reporters: process.env.CI ? ["dot"] : ["default"],
+    silent: "passed-only",
+    execArgv: ["--no-experimental-webstorage"],
     // Builds the `ub` the spawning suites run, once for the whole run. See
     // test/global-setup.ts for why a bundler, and why the output lives where
     // it does.
@@ -24,5 +28,9 @@ export default defineConfig({
     // is the difference between a diagnosis and a re-run.
     testTimeout: 150_000,
     hookTimeout: 150_000,
+    // Most of a test here is spent waiting on sockets, child processes and
+    // timers, not computing: at the default of one fewer worker than cores the
+    // suite left over half the machine idle. Oversubscribe instead.
+    maxWorkers: "150%",
   },
 });

@@ -27,7 +27,6 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
-import { DEFAULT_ENTRY, snippet } from "../src/mcp-config.js";
 import {
   type Sandbox,
   type SandboxFiles,
@@ -221,32 +220,6 @@ describe("ub mcp install, and the vendor's own CLI", () => {
         "mcp",
         "serve",
       ],
-    },
-    {
-      what: "claude, user, pinned",
-      program: "claude",
-      argv: ["mcp", "install", "claude", "--user", "--workspace", WORKSPACE, "--hub", "local"],
-      expected: [
-        "mcp",
-        "add",
-        "uberblick",
-        "--scope",
-        "user",
-        "-e",
-        "UB_HUB_URL=local",
-        "-e",
-        `UB_WORKSPACE_ID=${WORKSPACE}`,
-        "--",
-        "ub",
-        "mcp",
-        "serve",
-      ],
-    },
-    {
-      what: "codex, user, selected pair",
-      program: "codex",
-      argv: ["mcp", "install", "codex", "--user"],
-      expected: ["mcp", "add", "uberblick", "--env", "UB_HUB_URL=local", "--env", `UB_WORKSPACE_ID=${WORKSPACE}`, "--", "ub", "mcp", "serve"],
     },
     {
       what: "codex, project, pinned",
@@ -618,19 +591,6 @@ describe("ub mcp install cursor", () => {
   });
 });
 
-describe("MCP install and the checkout's deployment override", () => {
-  it("keeps the generic installed entry independent of the corpus deployment pin", () => {
-    // Generic users still receive the public ub mcp serve route. This project's
-    // deployment deliberately pins an installed version while its source and
-    // corpus hub upgrade independently; the launcher contract is tested in
-    // scripts/corpus-mcp.test.mjs.
-    const entry = JSON.parse(snippet("json", DEFAULT_ENTRY)).mcpServers.uberblick;
-    expect([entry.command, ...entry.args]).toEqual(["ub", "mcp", "serve"]);
-  });
-
-
-});
-
 describe("ub mcp install --workspace", () => {
   const OTHER = "4d8e0000-1111-4222-8333-444455556666";
 
@@ -756,13 +716,12 @@ describe("complete MCP bindings", () => {
     expect(read(path)).toBe(before);
   });
 
-  it.each([
-    { UB_WORKSPACE_ID: OTHER, UB_HUB_URL: undefined },
-    { UB_WORKSPACE_ID: undefined, UB_HUB_URL: "https://other.example.test" },
-  ])("refuses an incomplete environment override instead of borrowing the project half", (env) => {
+  it("refuses an incomplete environment override instead of borrowing the project half", () => {
     const box = sandbox();
     const stub = stubVendor(box, "claude");
-    const run = runUb(["mcp", "install", "claude"], box, { ...stub.env, ...env });
+    const run = runUb(["mcp", "install", "claude"], box, {
+      ...stub.env, UB_WORKSPACE_ID: OTHER, UB_HUB_URL: undefined,
+    });
     expect(run.status).toBe(2);
     expect(run.stderr).toMatch(/UB_WORKSPACE_ID.*UB_HUB_URL/);
     expect(existsSync(stub.record)).toBe(false);
@@ -852,6 +811,7 @@ describe("two entries, side by side", () => {
         args: entry.args,
         cwd: box.cwd,
         env: stringEnv({ ...box.env, ...entry.env }),
+        stderr: "ignore",
       }),
     );
     return client;

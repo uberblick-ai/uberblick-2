@@ -5,7 +5,7 @@ import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import type { McpConfig } from "../src/config.js";
 import { inspectRemote, syncWorkspace } from "../src/remote.js";
 import { deviceRetryDelayMs } from "../src/sync.js";
-import { removeTempDirs, sleep, tempDir, testConfig, WORKSPACE } from "./helpers.js";
+import { removeTempDirs, tempDir, testConfig, WORKSPACE } from "./helpers.js";
 
 type DeviceHub = Awaited<ReturnType<typeof startDeviceSyncHub>>;
 const hubs: DeviceHub[] = [];
@@ -25,11 +25,6 @@ async function fixture(): Promise<{ hub: DeviceHub; env: NodeJS.ProcessEnv; conf
   } };
 }
 
-const probes = [
-  { name: "inspectRemote", run: inspectRemote },
-  { name: "syncWorkspace", run: syncWorkspace },
-];
-
 it("spreads device retries through a growing band and caps long manual waits", () => {
   for (const [attempt, floor, ceiling] of [[0, 1_000, 2_000], [1, 2_000, 4_000], [5, 15_000, 30_000], [20, 15_000, 30_000]] as const) {
     expect(deviceRetryDelayMs(attempt, 2_000, false, () => 0)).toBe(floor);
@@ -41,7 +36,12 @@ it("spreads device retries through a growing band and caps long manual waits", (
   expect(deviceRetryDelayMs(1, 2_000, true, () => 1)).toBe(4_000);
 });
 
-describe.each(probes)("stored-login $name probe recovery", ({ run }) => {
+// Both probes share HubSync's recovery: each proves the revoked case, and
+// inspectRemote carries the remaining outcomes for both.
+describe.each([
+  { name: "inspectRemote", run: inspectRemote },
+  { name: "syncWorkspace", run: syncWorkspace },
+])("stored-login $name probe recovery", ({ run }) => {
   it("checks a revoked connection before returning sign-in required", async () => {
     const { hub, env, config } = await fixture();
     hub.grant(WORKSPACE);
@@ -57,7 +57,9 @@ describe.each(probes)("stored-login $name probe recovery", ({ run }) => {
     expect(hub.renewalCount).toBe(1);
     expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
   });
+});
 
+describe("stored-login inspectRemote probe recovery", () => {
   it("checks removed membership before returning no workspace access", async () => {
     const { hub, env, config } = await fixture();
     hub.grant(WORKSPACE);
@@ -65,7 +67,7 @@ describe.each(probes)("stored-login $name probe recovery", ({ run }) => {
     await writeHubLogin(hub.origin, login, env);
     hub.removeMembership(WORKSPACE);
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const result = await run(config);
+      const result = await inspectRemote(config);
       expect(result.hub).toMatchObject({
         status: "auth-failed", recoveryClass: "manual", authRecovery: "no-workspace-access",
       });
@@ -79,7 +81,7 @@ describe.each(probes)("stored-login $name probe recovery", ({ run }) => {
     const login = hub.issue({ workspaces: [WORKSPACE] });
     await writeHubLogin(hub.origin, login, env);
     hub.setRenewalReply({ status: 503, raw: "temporarily unavailable" });
-    const result = await run(config);
+    const result = await inspectRemote(config);
     expect(result.hub).toMatchObject({ status: "hub-down", recoveryClass: "retry" });
     expect(result.hub).not.toHaveProperty("authRecovery");
     expect(hub.renewalCount).toBe(1);
@@ -89,21 +91,17 @@ describe.each(probes)("stored-login $name probe recovery", ({ run }) => {
 
 it("keeps a slow refusal check inside inspectRemote's existing settle budget", async () => {
   const { hub, env, config } = await fixture();
+  const budget = { ...config, connectTimeoutMs: 500, syncTimeoutMs: 1_000 };
   const login = hub.issue({ workspaces: [WORKSPACE] });
   await writeHubLogin(hub.origin, login, env);
-  const responseDelayMs = 5_000;
+  // Longer than the whole budget; the fixture ends the delayed reply on close.
   hub.setRenewalReply({ status: 503, raw: "temporarily unavailable" });
-  hub.setRenewalDelay(responseDelayMs);
+  hub.setRenewalDelay(3_000);
   const started = Date.now();
-  try {
-    const result = await inspectRemote(config);
-    expect(Date.now() - started).toBeLessThan(config.connectTimeoutMs + config.syncTimeoutMs);
-    expect(result.hub).toMatchObject({ status: "hub-down", recoveryClass: "retry" });
-    expect(result.hub).not.toHaveProperty("authRecovery");
-    expect(hub.renewalCount).toBe(1);
-    expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
-  } finally {
-    // The fixture owns a delayed response even after the probe aborts it.
-    await sleep(responseDelayMs);
-  }
+  const result = await inspectRemote(budget);
+  expect(Date.now() - started).toBeLessThan(budget.connectTimeoutMs + budget.syncTimeoutMs);
+  expect(result.hub).toMatchObject({ status: "hub-down", recoveryClass: "retry" });
+  expect(result.hub).not.toHaveProperty("authRecovery");
+  expect(hub.renewalCount).toBe(1);
+  expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
 });

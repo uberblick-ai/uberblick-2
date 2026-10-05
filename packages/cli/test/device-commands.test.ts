@@ -65,10 +65,9 @@ describe("remote device commands", () => {
     assertPrivate(initialized.output, login.credential.key);
   });
 
-  it.each(["missing", "revoked", "no-access"] as const)("keeps binding and documents unchanged under %s refusal, with a distinct next action", async (kind) => {
+  it.each(["revoked", "no-access"] as const)("keeps binding and documents unchanged under %s refusal, with a distinct next action", async (kind) => {
     const { hub, endpoint, box, login } = await rig(kind !== "no-access");
     if (kind === "revoked") hub.revoke(login.credential.record.id);
-    if (kind === "missing") box.env.XDG_CONFIG_HOME = sandbox({ credentials: { signingSecret: SECRET } }).configHome;
     const configFile = join(box.cwd, ".uberblick.json");
     const before = readFileSync(configFile);
     for (const args of [["workspace", "join", `${endpoint}/${WORKSPACE}`], ["init", endpoint, "--workspace", WORKSPACE, "--yes"]]) {

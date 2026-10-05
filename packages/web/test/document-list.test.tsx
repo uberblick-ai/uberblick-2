@@ -1006,15 +1006,13 @@ describe("the sidebar entry", () => {
     expect(pin()?.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it.each([
-    ["offline", { connected: false, writable: false }],
-    ["connected read-only", { writable: false }],
-    ["not yet synced", { synced: false }],
-  ] as const)("visibly explains disabled pin controls while the sidebar is %s", async (_state, patch) => {
+  // One reading stands for all of them: offline and not-yet-synced disable the
+  // same pin with the same sentence (sidebar.test.tsx covers the gate itself).
+  it("visibly explains disabled pin controls while the sidebar is connected read-only", async () => {
     upsertDirectoryEntry(directoryDoc(), { uuid: ONE, title: "Overview" });
     const name = sidebarRoom(WORKSPACE);
     const connection = room(name);
-    const status = { ...LIVE, ...patch };
+    const status = { ...LIVE, writable: false };
     rooms.set(name, {
       ...connection,
       status,

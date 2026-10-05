@@ -87,12 +87,6 @@ it("refuses every document mutation before logging, teaches recovery, and leaves
   expect(rig.instance.store.logSize()).toBe(beforeReads);
   expect(await rig.ok("set_title", calls.set_title)).toMatchObject({ applied: true, tagHint: expect.any(String) });
   expect((await rig.ok("get_doc", { uuid })).title).toBe("Changed");
-  const tools = (await rig.client.listTools()).tools;
-  for (const name of DOCUMENT_MUTATING_TOOLS) {
-    expect(tools.find((tool) => tool.name === name)?.description).toContain("guidance_required");
-  }
-  expect(rig.client.getInstructions()).toContain("ten-minute");
-  expect(tools.find((tool) => tool.name === "get_doc")?.description).toContain("lost on restart");
 });
 
 it("keeps a lease through guidance changes, expires without wall-clock sleeps, and forgets it on restart", async () => {

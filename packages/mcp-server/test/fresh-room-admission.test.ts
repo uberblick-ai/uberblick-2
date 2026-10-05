@@ -26,6 +26,9 @@ import {
 } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
+/** Past the hub's pending-room ceiling, so an unbounded attach would breach it. */
+const BURST = MAX_PENDING_DOCUMENTS + 20;
+
 const hubs: Hub[] = [];
 const rigs: Rig[] = [];
 
@@ -95,7 +98,7 @@ function endsWithin<T>(label: string, promise: Promise<T>): Promise<T> {
 }
 
 describe("fresh-room admission", () => {
-  it("syncs a 300-document create burst without breaching the default hub ceiling", async () => {
+  it("syncs a create burst past the default hub ceiling without breaching it", async () => {
     const rooms: string[] = [];
     const terminations = watchForPendingRoomTermination(rooms);
     const running = await hub();
@@ -107,7 +110,7 @@ describe("fresh-room admission", () => {
     // Concurrent calls share the boot settle and then take the real
     // create_doc attach-then-write path in one burst.
     const created = await Promise.all(
-      Array.from({ length: 300 }, (_, index) =>
+      Array.from({ length: BURST }, (_, index) =>
         rig.ok("create_doc", {
           title: `Burst ${index}`,
           description: "A fresh-room admission test document.",
@@ -140,7 +143,7 @@ describe("fresh-room admission", () => {
     const running = await hub();
     const rig = await server(running.port, 3_000);
     const created = await Promise.all(
-      Array.from({ length: 150 }, (_, index) =>
+      Array.from({ length: BURST }, (_, index) =>
         rig.ok("create_doc", {
           title: `Reconnect ${index}`,
           description: "A closing-window admission test document.",

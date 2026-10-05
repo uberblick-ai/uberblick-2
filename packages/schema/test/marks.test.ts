@@ -680,7 +680,7 @@ describe("inline marks in the document", () => {
     ]);
 
     // And `inline` on a source-block input is ignored, not written.
-    for (const type of ["code", "mermaid", "table", "terminal"] as const) {
+    for (const type of ["code", "mermaid", "terminal"] as const) {
       const other = seeded();
       const id = appendBlock(other, {
         type,

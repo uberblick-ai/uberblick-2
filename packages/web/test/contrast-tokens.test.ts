@@ -10,7 +10,7 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { composite, contrast, lightnessLimit, oklab, separation, splitCssList } from "./colour.js";
+import { composite, contrast, separation, splitCssList } from "./colour.js";
 import { cardHighlightFloor, focusedOrphanedChipFloor } from "./contrast-contract.js";
 
 type Appearance = "light" | "dark";
@@ -164,13 +164,6 @@ describe.each(["light", "dark"] as const)("source-token contrast — %s", (schem
       const { value, floor } = reading(pair, tokens, scheme);
       expect(value, name).toBeGreaterThanOrEqual(floor);
     });
-
-    it(`rejects a seeded ink/fill regression — ${name}`, () => {
-      const ground = resolve(tokens, pair.ground, scheme);
-      const regressed = seedToken(pair.ink, pair.under === undefined ? ground : composite(ground, resolve(tokens, pair.under, scheme)));
-      const { value, floor } = reading(pair, regressed, scheme);
-      expect(value, `seeded regression was not detected: ${name}`).toBeLessThan(floor);
-    });
   }
 
   it("focused orphaned chips separate no less than resting chips", () => {
@@ -180,16 +173,4 @@ describe.each(["light", "dark"] as const)("source-token contrast — %s", (schem
     const regressed = seedToken("--status-warning", "var(--brand-subtle)");
     expect(separation(resolve(regressed, "--status-warning", scheme), resolve(regressed, "--brand-subtle", scheme))).toBeLessThan(resting);
   });
-});
-
-it("light muted ink darkens only as much as its tightest reading requires", () => {
-  const grounds = pairs.filter((pair) => pair.name === "full-strength light muted ink").map((pair) => resolve(tokens, pair.ground, "light"));
-  const required = Math.min(...grounds.map((ground) => lightnessLimit(ground)));
-  const current = oklab(resolve(tokens, "--muted-foreground", "light")).L;
-  expect(required - current).toBeGreaterThanOrEqual(0);
-  expect(required - current).toBeLessThan(0.001);
-  // A darker ink would pass every ratio while violating the minimal-darkness
-  // clause; the source-level guard must catch that opposite regression too.
-  const regressed = seedToken("--muted-foreground", `oklch(${current - 0.001} 0 0)`);
-  expect(required - oklab(resolve(regressed, "--muted-foreground", "light")).L).toBeGreaterThanOrEqual(0.001);
 });

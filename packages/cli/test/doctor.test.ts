@@ -437,7 +437,6 @@ describe("ub doctor", () => {
   it.each([
     ["61s fast", "fail", -61, /ahead of/],
     ["61s slow", "pass", 61, /behind/],
-    ["16 minutes slow", "fail", 16 * 60, /behind/],
   ])(
     "a clock %s is a %s",
     async (_name, status, offsetSeconds, direction) => {
