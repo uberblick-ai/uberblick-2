@@ -132,10 +132,9 @@ test("the wrapper accepts only its check operation or the fixed MCP operation", 
 	assert.equal(existsSync(current.log), false);
 });
 
-test("all project and worker MCP configurations use the host launcher independent of candidate cwd", () => {
+test("Codex and worker MCP configurations use the host launcher independent of candidate cwd", () => {
+	// .mcp.json is the maintainers' interactive Claude configuration; workers override it below.
 	const expected = { type: "stdio", command: "sh", args: ["-c", shellRoute] };
-	const json = JSON.parse(readFileSync(join(repoRoot, ".mcp.json"), "utf8"));
-	assert.deepEqual(json.mcpServers.uberblick, expected);
 	const codex = readFileSync(join(repoRoot, ".codex/config.toml"), "utf8");
 	assert.match(codex, /^command = "sh"$/m);
 	assert.ok(codex.includes(`args = ["-c", '${shellRoute}']`));
