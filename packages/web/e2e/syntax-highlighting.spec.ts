@@ -48,7 +48,11 @@ test("code tokens follow the appearance and real Enter inserts a newline", async
   expect(await ink(keyword)).not.toBe(await ink(source));
 
   await source.click();
+  // Match the harness's caret setup: let the focus sync settle, then let
+  // End's selectionchange reach the editor before sending the real Enter.
+  await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
   await page.keyboard.press("End");
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
   await page.keyboard.press("Enter");
   await page.keyboard.type("return answer;", { delay: 15 });
   await expect(source).toHaveText("const answer = 42;\nreturn answer;");

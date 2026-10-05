@@ -25,6 +25,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -312,7 +313,7 @@ exit 17
 
     expect(ran.status).toBe(17);
     expect(ran.stdout.trimEnd().split("\n")).toEqual([
-      fix.root, "up", "argument with spaces", "--detach",
+      realpathSync(fix.root), "up", "argument with spaces", "--detach",
     ]);
   });
 

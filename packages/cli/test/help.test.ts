@@ -390,7 +390,7 @@ describe("what is not a request for help", () => {
     // Only the first `--` is ours. Everything after it is the command that gets
     // written into a client config, verbatim — `--help` included.
     const run = runUb(
-      ["mcp", "install", "claude", "--print", "--", "ub", "mcp", "serve", "--help"],
+      ["mcp", "install", "claude", "--print", "--workspace", "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64", "--hub", "local", "--", "ub", "mcp", "serve", "--help"],
       sandbox(),
     );
     expect(run.status).toBe(0);

@@ -34,7 +34,8 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { resolveMcpConfig } from "./budget.js";
 import type { McpConfig } from "@uberblick/mcp-server";
-import { readUserConfig, resolveConfig } from "./config.js";
+import { requireBinding, resolveConfig } from "./config.js";
+import { resolveProjectBinding } from "./project-binding.js";
 import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
@@ -544,6 +545,7 @@ function parseInitFlags(argv: string[]): InitFlags {
 
 export interface RemoteInitDeps {
   env?: NodeJS.ProcessEnv;
+  cwd?: string;
   /** How the deployment is verified from here. Injected by the tests. */
   reach?: Reach;
 }
@@ -639,17 +641,24 @@ export async function remoteInitCommand(
 
   const env = deps.env ?? process.env;
   const reach = deps.reach ?? reachStack;
-  const resolved = resolveConfig({ env });
+  const cwd = deps.cwd ?? process.cwd();
+  const resolved = resolveConfig({ env, cwd });
   for (const warning of resolved.warnings) io.err(`ub: warning: ${warning}\n`);
   // The endpoint this machine had before the deploy. Standing a hub up and
   // pointing this machine at it is what this command does, so an endpoint that
   // was here when it started is one it may replace; one that *arrives* while it
   // is deploying belongs to a run that knows something this one does not, and
   // the publish below refuses rather than overwriting it.
-  const endpointBefore = readUserConfig(env).config.hubUrl?.trim() ?? null;
+  const bindingBefore = resolveProjectBinding({ env: {}, cwd }).binding;
+  const endpointBefore = bindingBefore?.hubUrl ?? null;
 
   let base: McpConfig;
   try {
+    const effective = requireBinding(resolved);
+    if (bindingBefore === null || effective.workspaceId !== bindingBefore.workspaceId || effective.hubUrl !== bindingBefore.hubUrl) {
+      io.err("ub remote init: select the intended project with `ub workspace use <id> --hub <url|local>` first. An environment-only or differing binding is not persisted by deployment. Nothing was done.\n");
+      return 1;
+    }
     base = resolveMcpConfig(resolved.env);
   } catch (error) {
     io.err(`ub remote init: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -949,8 +958,9 @@ export async function remoteInitCommand(
   }
   let persistence: RemotePersistence;
   try {
-    const endpointNow = readUserConfig(env).config.hubUrl?.trim() ?? null;
-    if (endpointNow !== endpointBefore && endpointNow !== endpoint) {
+    const bindingNow = resolveProjectBinding({ env: {}, cwd }).binding;
+    const endpointNow = bindingNow?.hubUrl ?? null;
+    if (bindingNow?.workspaceId !== bindingBefore?.workspaceId || (endpointNow !== endpointBefore && endpointNow !== endpoint)) {
       io.err(
         `ub remote init: this machine was bound to ${endpointNow ?? "no endpoint"} ` +
           "while the stack was being deployed, so the endpoint here was not " +
@@ -959,7 +969,7 @@ export async function remoteInitCommand(
       );
       return 1;
     }
-    persistence = setRemote(endpoint, { env });
+    persistence = setRemote(endpoint, { env, cwd, workspace: bindingBefore.workspaceId });
   } finally {
     lock.release();
   }

@@ -3,11 +3,8 @@
  *
  * `ub remote` names the endpoint and the membership required for sharing.
  * Remote clients use this machine’s stored device login. `ub remote init` and `ub remote update` stand up and
- * deploy the host; `ub remote join <url-with-workspace-id>` binds this machine to a
+ * deploy the host; `ub remote join <url-with-workspace-id>` binds this project to a
  * workspace that already lives on one, and hydrates it.
- *
- * There is no operator suite here: no verb that points the clients somewhere
- * without moving anything. Release 1 has one owner, one workspace, and `join`.
  *
  * **`join` binds one workspace; it never merges two, and it never seeds.** The
  * URL carries the workspace id, so nothing already on this machine is in the
@@ -32,7 +29,8 @@
  * changed on the strength of one would strand a corpus on the old hub, which is
  * the exact failure this command exists to prevent.
  *
- * **Persisting means every client, not just `ub`.** See {@link setRemote}.
+ * Clients resolving this project binding follow it. Explicit environment pins
+ * remain independent. See {@link setRemote}.
  *
  * Login keys stay in the owner-only credential store; joining changes only
  * the workspace binding after successful reconciliation and verification.
@@ -60,11 +58,11 @@ export { normalizeRemoteUrl, parseJoinTarget } from "@uberblick/hub/remote-url";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import {
   readCredentials,
-  readUserConfig,
+  requireBinding,
   resolveConfig,
-  userConfigPath,
-  writeUserConfig,
+  writeHubAdmission,
 } from "./config.js";
+import { resolveProjectBinding, validateProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
@@ -80,7 +78,7 @@ commands:
   init <ssh-target>             stand up the remote hub + web stack on a
                                 tailnet host
   update <ssh-target>           deploy origin/main onto that host now
-  join <url-with-workspace-id>  bind this machine to the remote workspace the
+  join <url-with-workspace-id>  bind this project to the remote workspace the
                                 URL names
 
 options:
@@ -100,42 +98,24 @@ export interface RemotePersistence {
   warnings: string[];
 }
 
-/**
- * Persist the endpoint, and say honestly who will follow it.
- *
- * `config.json` is where `ub` resolves `hubUrl`, and it is the only place: it is
- * what makes `ub status`, `ub mcp serve`, the MCP server this CLI spawns and
- * every checkout task running under `ub env` dial the new hub. Nothing ambient
- * outranks it.
- *
- * A *deployed* web client learns its endpoint at runtime from the served
- * `/uberblick-config.json` (#91), not from anything written here.
- *
- * **A workspace travels with the endpoint, when one is given.** `ub remote join`
- * binds this machine to the workspace its URL names, and that binding and the
- * endpoint have to land in the same file in the same write — a machine pointed
- * at the remote hub while still naming the workspace it had before would dial
- * the right hub for the wrong rooms.
- *
- * Deployment and initialization also publish through this helper.
- */
+/** Persist the verified complete project destination in one atomic write. */
 export function setRemote(
   url: string,
-  options: { workspace?: string | undefined; env?: NodeJS.ProcessEnv; deviceAdmission?: boolean } = {},
+  options: { workspace?: string | undefined; env?: NodeJS.ProcessEnv; cwd?: string; deviceAdmission?: boolean } = {},
 ): RemotePersistence {
   const env = options.env ?? process.env;
-  const current = readUserConfig(env);
-  const updated: Record<string, unknown> = {
-    ...current.raw,
-    hubUrl: url,
-    ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
-  };
-  // Admission belongs to the endpoint, so changing endpoints never carries a
-  // previous hub's mode. Existing non-loopback callers need no extra setting.
-  delete updated.hubAdmission;
-  if (options.deviceAdmission === true) updated.hubAdmission = "device";
-  writeUserConfig(updated, env);
-  return { written: [userConfigPath(env)], warnings: [] };
+  const current = resolveProjectBinding({ env: {}, ...(options.cwd === undefined ? {} : { cwd: options.cwd }) });
+  const workspaceId = options.workspace ?? current.binding?.workspaceId;
+  if (workspaceId === undefined) throw new Error("a workspace is required before binding a remote hub");
+  const binding = validateProjectBinding({ workspaceId, hubUrl: url }, "project binding");
+  // Failure to remember device admission must never leave the project pointing
+  // at a Docker hub that could later fall back to this computer's local secret.
+  const admission = writeHubAdmission(url, options.deviceAdmission === true, env);
+  const path = writeProjectBinding(binding, {
+    env,
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+  });
+  return { written: [...admission.written, path], warnings: admission.warnings };
 }
 
 function plural(count: number, noun: string): string {
@@ -236,7 +216,7 @@ function report(
   }
   text +=
     "\n`ub`, `ub mcp serve` and the MCP server it spawns read this endpoint from\n" +
-    "config.json. A deployed web client reads its own from the served\n" +
+    ".uberblick.json. A deployed web client reads its own from the served\n" +
     "/uberblick-config.json.\n";
   text +=
     "\nVerified here means the hub acknowledged the writes. A fresh client read the\n" +
@@ -255,14 +235,15 @@ export const REMOTE_BRIDGE_OPTIONS = {} as const;
 
 export const REMOTE_JOIN_HELP = `usage: ub remote join <url-with-workspace-id>
 
-Bind this machine to a workspace that already lives on a remote hub, whatever is
+Bind this project to a workspace that already lives on a remote hub, whatever is
 here already: the remote's documents are hydrated into that workspace's local
 replica, and the endpoint and the binding are stored. Remote hubs use this
 machine’s stored login from \`ub auth login <hub>\`. No \`ub init\` is needed first.
 
 It never merges two workspaces and it never seeds. A workspace already on this
 machine under a different id keeps its documents and its \`ub workspace list\`
-entry, and \`ub workspace use <id>\` switches back. A replica this machine
+entry. Switch back with \`ub workspace use <id> --hub <url|local>\`; the join
+report prints the previous complete binding. A replica this machine
 already holds for *this* id is attached, not replaced: it and the remote
 reconcile as CRDTs, so neither side loses anything.
 
@@ -317,25 +298,26 @@ function warn(io: Io, warnings: readonly string[]): void {
 function showRemote(io: Io): number {
   const resolved = resolveConfig();
   warn(io, resolved.warnings);
+  requireBinding(resolved);
   const config = resolveMcpConfig(resolved.env);
-  const configured = resolved.origins.hubUrl !== "default";
+  const selected = resolveProjectBinding();
+  const configured = selected.binding?.hubUrl != null;
 
   if (!configured) {
     let text = "no remote configured\n\n";
     text +=
-      `Documents sync with ${config.hubUrl}, the built-in default — a hub on ` +
-      "this machine.\n\n";
+      "This project uses a workspace local to this computer.\n\n";
     text +=
       "  ub remote init <ssh-target>\n" +
       "                           stand one up on a host you can reach\n";
     text +=
       "  ub remote join <url-with-workspace-id>\n" +
-      "                           bind this machine to a remote workspace\n";
+      "                           bind this project to a remote workspace\n";
     io.out(text);
     return 0;
   }
 
-  let text = `remote        ${config.hubUrl} (user config)\n`;
+  let text = `remote        ${config.hubUrl} (${ORIGIN_LABELS[resolved.origins.hubUrl]})\n`;
   text += `workspace     ${config.workspaceId}\n`;
   text += `credential    ${
     config.deviceLogin !== undefined
@@ -533,16 +515,11 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     let recovery =
       `Rerun this command on this machine once ${bridge.target} can finish the sync.`;
     if (contentMissing) {
-      const sourceEndpoint = resolveMcpConfig({
-        ...resolved.env,
-        WORKSPACE_ID: flags.workspace,
-      }).hubUrl;
-      recovery =
-        sourceEndpoint === bridge.target
-          ? "Retry from another replica that still holds the content."
-          : `Rerun \`ub remote join ${sourceEndpoint}/${flags.workspace}\` against ` +
-            "the endpoint this machine was using before this command, or retry " +
-            "from another replica that still holds the content.";
+      const source = resolved.binding;
+      recovery = source !== null && parseWorkspaceId(source.workspaceId).uuid === parseWorkspaceId(flags.workspace).uuid &&
+          source.hubUrl !== null && source.hubUrl !== bridge.target
+        ? `Rerun \`ub remote join ${source.hubUrl}/${flags.workspace}\` against this workspace's previous hub, or retry from another replica that still holds the content.`
+        : "Retry from another replica that still holds the content.";
     }
     io.err(
       `ub remote join: ${joinProblem}This machine's configuration is ` +
@@ -567,21 +544,8 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   // because it does not go away and is not merged — a person who has just been
   // switched out of a workspace holding their documents is owed the sentence
   // that says where those documents are and how to get back to them.
-  const previous = resolved.env.WORKSPACE_ID?.trim();
-  const switched =
-    previous !== undefined &&
-    previous !== "" &&
-    parseWorkspaceId(previous).uuid !== parseWorkspaceId(flags.workspace).uuid;
-  // The endpoint that workspace was dialling, from the snapshot taken before
-  // anything was written — the built-in default filled in, because "start the
-  // hub and point back at it" needs an address a person can paste.
-  const previousEndpoint = switched
-    ? resolveMcpConfig(resolved.env).hubUrl
-    : bridge.target;
-
-  // `config.json` is read, merged and republished here, and `ub init` and
-  // `ub workspace use` do the same to the same file — so all three run under
-  // one lock, or one of them loses a field another had just written.
+  let previous: ReturnType<typeof resolveProjectBinding>["binding"] = null;
+  // Serialize project binding writes with init and workspace selection.
   let lock: InitLock;
   try {
     lock = await acquireInitLock();
@@ -592,6 +556,7 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
 
   let persistence: RemotePersistence;
   try {
+    previous = resolveProjectBinding({ env: {} }).binding;
     persistence = setRemote(bridge.target, {
       workspace: flags.workspace,
       deviceAdmission: bridge.base.deviceLogin !== undefined || usesDeviceLogin(bridge.target, bridge.env),
@@ -612,35 +577,27 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
       "them.\n";
   }
   note += `\nworkspace     ${flags.workspace}\n`;
-  if (switched) {
+  if (previous !== null && (parseWorkspaceId(previous.workspaceId).uuid !== parseWorkspaceId(flags.workspace).uuid || previous.hubUrl !== flags.endpoint)) {
     // What this machine holds for the old workspace, rather than "its
     // documents": all this knows is that something configured it, which is not
     // evidence of a replica.
     note +=
-      `\n${previous} was not merged into this one and nothing of it was moved. ` +
-      "Whatever this\nmachine holds for it is still here — `ub workspace list` " +
-      "shows the workspaces with\na replica on this machine — and " +
-      `\`ub workspace use ${previous}\` switches back.\n` +
-      "\nThe endpoint, though, is machine-wide: that workspace now syncs with " +
-      `${bridge.target}\ntoo, under its own rooms. Documents that only ever ` +
-      "reached a local hub — written in\na browser and never pulled down by an " +
-      "MCP session — are in that hub's database and\nnowhere else, and nothing " +
-      "points at it any more. Going back to that endpoint is\n" +
-      `\`ub remote join ${previousEndpoint}/${previous}\`, which hydrates from ` +
-      "it the way this join did.\n";
+      `\n${previous.workspaceId} was not merged into this one and nothing of it was moved. ` +
+      "The previous workspace and its documents remain unchanged. " +
+      "`ub workspace list` shows local replicas.\n" +
+      `Switch back: ub workspace use ${previous.workspaceId} --hub '${(previous.hubUrl ?? "local").replaceAll("'", "'\\''")}'\n`;
   }
   io.out(report("joined", bridge.target, checked.corpus, persistence, takenAt, note));
 
-  // Written, and possibly overruled: `WORKSPACE_ID` in the environment outranks
-  // `config.json`, and a report naming a binding that something else outranks is
-  // the lie `ub status` then contradicts.
+  // An environment binding can still override the project file. Report both
+  // fields so the next status cannot silently point at a different destination.
   const after = resolveConfig();
   const inForce = after.env.WORKSPACE_ID?.trim();
-  if (inForce !== flags.workspace) {
+  if (inForce !== flags.workspace || after.binding?.hubUrl !== flags.endpoint) {
     io.err(
       `ub: warning: ${ORIGIN_LABELS[after.origins.workspace]} sets ${
         inForce ?? "no workspace"
-      }, which takes precedence over the binding just written — that is the ` +
+      } at ${after.binding?.hubUrl ?? "local-only"}, which takes precedence over the binding just written — that is the ` +
         "workspace in force here, whatever this joined.\n",
     );
   }

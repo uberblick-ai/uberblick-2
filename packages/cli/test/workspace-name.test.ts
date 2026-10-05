@@ -26,7 +26,7 @@ const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const IDENTITY = "A person's display name";
 
 function workspace(box: Sandbox): string {
-  return JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8")).workspace;
+  return JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).workspaceId;
 }
 
 /** Read only persisted Yjs state; no later reader can repair the init result. */

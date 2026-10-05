@@ -1,33 +1,18 @@
 /**
  * `ub mcp install [client]` — register uberblick with an MCP client.
  *
- * The thing being installed is always the same line, `ub mcp serve`. Which hub
- * and which credential apply is resolved by `ub` itself (see `config.ts`); a
- * client config that pinned either would be a second copy of configuration that
- * already has an owner, and it would go stale the first time somebody ran
- * `ub remote join`.
+ * Every entry pins the selected workspace and hub together. The selection comes
+ * from the shared project/environment resolver unless `--workspace` and `--hub`
+ * explicitly replace the complete binding. Credentials stay in the private
+ * user store; they never enter the committable MCP configuration.
  *
- * **The one thing an entry may pin is `--workspace`.** A project MCP entry *is*
- * the repository's workspace binding: `--project --workspace <id>` writes
- * exactly `WORKSPACE_ID`, the top precedence layer, into the entry every agent
- * session in that checkout spawns through. There is no second uberblick-specific
- * project file for this, because the client config the process already needs is
- * the one that travels with the repository.
- *
- * Without `--label` the pin lands on the primary `uberblick` entry — the ordinary
- * "this repository works in that workspace". `--label <label>` puts it on a
- * separately named `uberblick-<label>` instead, which is how one agent session
- * reads two corpora: one process per workspace, two toolsets, no workspace
- * parameter on any tool. Either way a pinned entry does not follow
- * `ub workspace use` — which every report about one says out loud.
- *
- * **Nothing else is ever written into an entry.** No endpoint, no credential, no
- * value read out of `credentials.json`: a client config is committable, and
- * `ub mcp serve` resolves all of that at spawn time anyway.
+ * `--label` gives a binding its own `uberblick-<label>` entry, so independent
+ * processes in one agent session can work with different workspaces or hubs.
+ * Later changes to the project binding do not redirect installed entries.
  *
  * **This command does not edit config files.** Claude Code ships `claude mcp
  * add` and Codex ships `codex mcp add` — including the environment flags a
- * `--workspace` pin needs — so those are run, and the vendor writes its own
+ * binding needs — so those are run, and the vendor writes its own
  * file. Cursor ships no such subcommand, so it gets the snippet to paste and
  * the path to paste it into; a client `ub` has never heard of gets the same
  * snippet and its own MCP configuration as the destination, because there is no
@@ -48,6 +33,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmdirSync } from "node:fs";
 import { parseArgs } from "node:util";
+import { requireBinding, resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
@@ -78,6 +64,8 @@ interface Flags {
   print: boolean;
   /** The workspace to pin the entry to, as it was typed. */
   workspace: string | null;
+  /** The hub paired with an explicit workspace, or "local". */
+  hub: string | null;
   /** A separately named entry to pin instead of the primary one. */
   label: string | null;
   /** The command to install, when `-- …` overrode it. */
@@ -117,15 +105,16 @@ export const INSTALL_OPTIONS = {
   user: { type: "boolean", default: false },
   print: { type: "boolean", default: false },
   workspace: { type: "string" },
+  hub: { type: "string" },
   label: { type: "string" },
 } as const;
 
 export const INSTALL_HELP = `usage: ub mcp install [client] [options] [-- <command>]
 
-Register uberblick with an MCP client, so there is no JSON to hand-edit. What is
-registered is \`ub mcp serve\`: endpoint and credential are resolved by \`ub\`
-itself, so a client config never carries a stale copy of them — and never a
-secret. The one value an entry may carry is WORKSPACE_ID, from --workspace.
+Register uberblick with an MCP client using \`ub mcp serve\`. The entry pins
+UB_WORKSPACE_ID and UB_HUB_URL from the selected project/environment binding.
+Use --workspace and --hub together to select a different pair. Credentials stay
+in the private user store and are never copied into an MCP entry.
 
 Claude Code and Codex are wired up by running their own \`mcp add\` command, so
 the vendor writes its own file. Cursor gets the snippet to paste and the path to
@@ -142,12 +131,11 @@ options:
   --project         this directory's config (the default)
   --user            the per-user config
   --print           print the snippet to paste, and run nothing
-  --workspace <id>  pin the entry to this workspace by setting WORKSPACE_ID in
-                    it, resolved the way \`ub workspace use\` resolves an id.
-                    With --project that is the repository's workspace binding
-  --label <label>   pin a second entry called "uberblick-<label>" instead of
-                    the primary one, so one session can read two corpora;
-                    needs --workspace, which is what it names
+  --workspace <id>  select a workspace UUID or a unique local UUID prefix;
+                    requires --hub
+  --hub <url|local> select the matching hub, or local-only; requires --workspace
+  --label <label>   name this entry "uberblick-<label>" instead of "uberblick",
+                    allowing several independent bindings in one project
   -h, --help        show this help
   -- <command>      register this command instead of uberblick's own. Only the
                     first \`--\` is ours; everything after it is passed through
@@ -184,10 +172,8 @@ function parseFlags(argv: string[]): Flags {
     throw new Error("`--` must be followed by the command to install");
   }
   const label = values.label ?? null;
-  if (label !== null && values.workspace === undefined) {
-    throw new Error(
-      "--label names the entry --workspace pins, so it needs a --workspace",
-    );
+  if ((values.workspace === undefined) !== (values.hub === undefined)) {
+    throw new Error("--workspace and --hub must be supplied together");
   }
   if (label !== null && !LABEL.test(label)) {
     throw new Error(
@@ -204,6 +190,7 @@ function parseFlags(argv: string[]): Flags {
     scope: values.user === true ? "user" : "project",
     print: values.print === true,
     workspace: values.workspace ?? null,
+    hub: values.hub ?? null,
     label,
     entry:
       override === null
@@ -221,38 +208,23 @@ function commandLine(entry: Entry): string {
   return [entry.command, ...entry.args].join(" ");
 }
 
-/**
- * The entry, pinned to one workspace — the primary one unless `--label` asked for
- * a second.
- *
- * The id is stored as it was typed, decoration included, exactly as
- * `ub workspace use` stores it: the slug is what makes a config file readable,
- * and only what reaches a room, a token or the database is the bare uuid.
- */
-function pinnedTo(entry: Entry, id: string, label: string | null): Entry {
+/** A complete binding, fixed for this MCP entry until explicitly replaced. */
+function pinnedTo(entry: Entry, id: string, hub: string, label: string | null): Entry {
   return {
     ...entry,
     name: label === null ? entry.name : `${entry.name}-${label}`,
-    env: { WORKSPACE_ID: id },
+    // Sorted like the TOML emitted by Codex's vendor command.
+    env: { UB_HUB_URL: hub, UB_WORKSPACE_ID: id },
   };
 }
 
-/**
- * The pin, in a report — including the sentence that says what it costs.
- *
- * A pinned entry is the one thing in a client config that `ub` will not
- * re-resolve later, so a report that named the workspace without saying that
- * would be describing something a reader will reasonably expect to follow
- * `ub workspace use`.
- */
 function pinReport(entry: Entry): { fields: string; note: string } {
-  const id = entry.env?.WORKSPACE_ID;
-  if (id === undefined) {
-    return { fields: "", note: "" };
-  }
+  const id = entry.env?.UB_WORKSPACE_ID;
+  const hub = entry.env?.UB_HUB_URL;
+  if (id === undefined || hub === undefined) return { fields: "", note: "" };
   return {
-    fields: field("entry", entry.name) + field("workspace", id),
-    note: `\nThis entry is pinned to ${id}; it does not follow \`ub workspace use\`.\n`,
+    fields: field("entry", entry.name) + field("workspace", id) + field("hub", hub),
+    note: "\nThis entry is pinned; later project selection changes do not redirect it.\n",
   };
 }
 
@@ -325,6 +297,8 @@ function vendorCli(
 function isOurs(name: string): boolean {
   return (
     name.startsWith("HUB_") ||
+    name === "UB_WORKSPACE_ID" ||
+    name === "UB_HUB_URL" ||
     name.startsWith("UBERBLICK_") ||
     name === "WORKSPACE_ID" ||
     name === "WORKSPACES"
@@ -423,30 +397,31 @@ export async function installCommand(
     return 2;
   }
 
-  // What is being installed: the entry, pinned when `--workspace` says so and
-  // under a second name when `--label` does. Resolved before anything runs, so a
-  // bad id is a usage error rather than a half-finished install — and resolved
-  // exactly as `ub workspace use` resolves one, so a prefix names the same
-  // workspace in both commands.
-  let entry = flags.entry;
-  if (flags.workspace !== null) {
-    let known: WorkspaceEntry[];
-    try {
-      known = listWorkspaces().entries;
-    } catch (error) {
-      // Refused rather than resolved against a short list: a prefix that
-      // quietly stopped matching would pin a client config to another corpus.
-      io.err(
-        `ub mcp install: ${error instanceof Error ? error.message : String(error)}\n`,
-      );
-      return 1;
+  // Resolve the complete pair before touching a vendor's files. Explicit flags
+  // replace the environment pair as a unit, never fill in a missing half.
+  let entry: Entry;
+  try {
+    let env = process.env;
+    if (flags.workspace !== null && flags.hub !== null) {
+      let known: WorkspaceEntry[] = [];
+      // Full UUIDs need no current binding or local replica. Prefixes still use
+      // the same local inventory and ambiguity rules as `workspace use`.
+      if ("error" in resolveWorkspaceId(flags.workspace, known)) {
+        known = listWorkspaces({ env: {
+          ...process.env, UB_WORKSPACE_ID: undefined, UB_HUB_URL: undefined,
+        } }).entries;
+      }
+      const selected = resolveWorkspaceId(flags.workspace, known);
+      if ("error" in selected) throw new Error(selected.error);
+      env = { ...process.env, UB_WORKSPACE_ID: selected.id, UB_HUB_URL: flags.hub };
     }
-    const resolved = resolveWorkspaceId(flags.workspace, known);
-    if ("error" in resolved) {
-      io.err(`ub mcp install: ${resolved.error}\n`);
-      return 2;
-    }
-    entry = pinnedTo(flags.entry, resolved.id, flags.label);
+    const selected = requireBinding(resolveConfig({ env }));
+    entry = pinnedTo(
+      flags.entry, selected.workspaceId, selected.hubUrl ?? "local", flags.label,
+    );
+  } catch (error) {
+    io.err(`ub mcp install: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 2;
   }
 
   // A client this command does not know is exactly what `--print` is for, and

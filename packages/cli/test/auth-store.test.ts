@@ -117,7 +117,7 @@ process.once("message", async () => {
     else {
       // The persistence phase used by ub remote join, under its real lock.
       const lock = await acquireInitLock();
-      try { setRemote("wss://new.example.test/ws"); }
+      try { setRemote("wss://new.example.test/ws", { workspace: "5c1f9a72-4d38-4e02-9b6a-7e3f10c85b94" }); }
       finally { lock.release(); }
     }
   } catch (error) {
@@ -189,7 +189,7 @@ describe("hub login store", () => {
   });
 
   it("stores at mode 0600 while keeping the binding, signing secret and unknown fields", async () => {
-    const box = sandbox({
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "wss://hub.example.test/ws" },
       userConfig: { hubUrl: "wss://hub.example.test/ws", workspace: WORKSPACE },
       credentials: { signingSecret: SECRET_ON_FILE, future: { opaque: true } },
     });
@@ -211,7 +211,7 @@ describe("hub login store", () => {
       path, state: "usable", logins: { [HUB]: login() }, unreadableHubs: [],
     });
     // Issuance and storage do not opt existing commands into credential use.
-    expect(JSON.stringify(resolveConfig({ env: box.env }))).not.toContain(login().credential.key);
+    expect(JSON.stringify(resolveConfig({ env: box.env, cwd: box.cwd }))).not.toContain(login().credential.key);
   });
 
   it("replaces and removes only the selected login, keeping malformed and future entries", async () => {
@@ -274,8 +274,8 @@ describe("hub login store", () => {
       signingSecret: SECRET_ON_FILE, future: { opaque: true },
       hubLogins: { [HUB]: login(), [OTHER_HUB]: login() },
     });
-    expect(JSON.parse(readFileSync(userConfigPath(box.env), "utf8")).hubUrl).toBe("wss://new.example.test/ws");
-    expect(readdirSync(dirname(credentialsPath(box.env)))).toEqual(["config.json", "credentials.json"]);
+    expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).hubUrl).toBe("wss://new.example.test/ws");
+    expect(readdirSync(dirname(credentialsPath(box.env)))).toEqual(["credentials.json"]);
   });
 
   it("leaves stored bytes and another writer's lock intact when its bounded wait expires", async () => {

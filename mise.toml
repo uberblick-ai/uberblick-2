@@ -5,13 +5,9 @@ fnox = "1"
 
 # Plaintext local defaults. Only real secrets belong in fnox.toml.
 #
-# No HUB_URL here, and none in a task's `env` either (#376, #385). This block is
-# ambient: it reaches every process born in an activated checkout, and an
-# endpoint is not something two sources may disagree about. There is exactly one
-# authority for it — this machine's config.json, written by `ub init` and
-# `ub remote join` — and the tasks below consume it by wrapping their command in
-# `ub env`, which hands over the same environment `ub mcp serve` gives the MCP
-# server. A checkout is not a configuration layer of its own.
+# No committed hub selection. Project-local .uberblick.json or a complete
+# UB_WORKSPACE_ID / UB_HUB_URL environment pair selects the workspace and hub.
+# Tasks consume that atomic binding through `ub env`; credentials stay private.
 #
 # The hub itself binds HUB_HOST:PORT — default 127.0.0.1:1234 in code — and
 # never reads HUB_URL, so the two must be moved together when the hub runs
@@ -80,7 +76,7 @@ run = "fnox exec --if-missing warn -- node packages/cli/bin/ub.mjs init"
 
 [tasks.hub]
 description = "Start the Hocuspocus sync hub (binds HUB_HOST:PORT, default 127.0.0.1:1234)"
-# `ub env --` puts this machine's own configuration in front of the command:
+# `ub env --` puts the project's binding and private credentials in front of the command:
 # WORKSPACE_ID, the endpoint and the signing secret, resolved exactly as
 # `ub mcp serve` resolves them for the MCP server. `fnox exec` stays outside it,
 # because a decryptable HUB_AUTH_TOKEN is the owner's path and outranks the
@@ -95,8 +91,8 @@ run = "fnox exec --if-missing warn -- ub env -- pnpm --silent --filter @uberblic
 
 [tasks.web]
 description = "Start the Vite dev server"
-# Through `ub env` like the hub: the endpoint the bundle dials is this machine's
-# configured one. The Vite browser path supports loopback development; a
+# Through `ub env` like the hub: the endpoint the bundle dials is the project's
+# selected one. The Vite browser path supports loopback development; a
 # remote binding uses `ub auth login` with `ub open` instead.
 #
 # The dev server serves this environment — the signing secret included — at
@@ -178,9 +174,8 @@ description = "Run the browser end-to-end proof points (Chromium and tagged WebK
 # The harness builds the current checkout into private storage, starts its own
 # hub on an ephemeral port, and serves that bundle through a real `ub open`
 # under private XDG homes. Nothing needs the developer's configuration and no
-# socket or artifact collides with `mise run dev` or another e2e run. It still
-# runs under the same `fnox exec -- ub env --` wrapper as every other task; the
-# spawned `ub open` removes those inherited pins and reads the run's files.
+# socket or artifact collides with `mise run dev` or another e2e run. The
+# harness supplies its own project binding; no contributor selection is needed.
 #
 # `playwright install` runs first because the browser is a download, not a
 # dependency pnpm can fetch: it is a no-op once pinned Chromium and WebKit are
