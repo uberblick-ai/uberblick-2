@@ -15,13 +15,15 @@
  * surface, not an internal-only seam: README's "The `ub` command line" section
  * names it and this contract.
  *
- * **Which deadlines it may cap, and which it must not.** What it caps are four
+ * **Which deadlines it may cap, and which it must not.** What it caps are five
  * probes of something remote: the two hub budgets below, `open.ts`'s 1 s
- * port-owner probe and `probes.ts`'s 2 s clock observation. Expiry is a
- * permitted answer for each of them, but not a free one — `whoHoldsPort` reads a
- * timeout as a holder it could not identify (never as a stranger, which would
- * accuse a slow `ub open`), `probeHubClock` reads one as no observation at all, and
- * `ub doctor` reports a hub that missed its budget as down. What makes them safe
+ * port-owner probe, `probes.ts`'s 2 s clock observation and `auth.ts`'s 2 s
+ * claim-state read. Expiry is a permitted answer for each of them, but not a
+ * free one — `whoHoldsPort` reads a timeout as a holder it could not identify
+ * (never as a stranger, which would accuse a slow `ub open`), `probeHubClock`
+ * reads one as no observation at all, `ub auth login` reads one as a hub that
+ * is not unclaimed, and `ub doctor` reports a hub that missed its budget as
+ * down. (Device recovery pacing is capped too; see {@link capped}.) What makes them safe
  * to cap is a **margin, not a category**: each waits on something that answers
  * in milliseconds when it answers at all, against the hundreds a suite sets
  * (`test/helpers.ts` uses 400). Take the ceiling far enough below that and a
@@ -89,7 +91,17 @@ export function budget(ms: number): number {
   return cap === null ? ms : Math.min(ms, cap);
 }
 
-/** The same configuration with its two hub deadlines capped. */
+/**
+ * The same configuration with its two hub deadlines capped, and with device
+ * recovery paced by the same ceiling.
+ *
+ * The device-login recovery poll and the shared renewal cooldown are not
+ * deadlines anyone holds: each is only how long this process waits before it
+ * asks the hub again (thirty seconds apiece by default). Capping them makes a
+ * suite ask sooner and changes no answer, while leaving them at thirty seconds
+ * made the remote-sharing recovery proofs in `test/open-remote.test.ts` wait out
+ * minutes of real time.
+ */
 function capped(config: McpConfig, env: NodeJS.ProcessEnv): McpConfig {
   const cap = ceiling(env);
   if (cap === null) return config;
@@ -97,6 +109,8 @@ function capped(config: McpConfig, env: NodeJS.ProcessEnv): McpConfig {
     ...config,
     connectTimeoutMs: Math.min(config.connectTimeoutMs, cap),
     syncTimeoutMs: Math.min(config.syncTimeoutMs, cap),
+    deviceRetryMaxDelayMs: Math.min(config.deviceRetryMaxDelayMs ?? 30_000, cap),
+    deviceRenewalCooldownMs: Math.min(config.deviceRenewalCooldownMs ?? 30_000, cap),
   };
 }
 

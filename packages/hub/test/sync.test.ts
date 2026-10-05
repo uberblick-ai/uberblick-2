@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Hub } from "../src/server.js";
 import {
   TEXT_KEY,
+  acknowledged,
   createClient,
   removeTempDatabases,
   sleep,
@@ -113,7 +114,8 @@ describe("offline convergence", () => {
 
     alice.text.insert(alice.text.length, "[alice-online]");
     bob.text.insert(bob.text.length, "[bob-offline]");
-    await sleep(200);
+    // The hub has applied Alice's edit, and still Bob has not received it.
+    await acknowledged(alice, "alice's online edit");
 
     expect(alice.text.toString()).not.toContain("[bob-offline]");
     expect(bob.text.toString()).not.toContain("[alice-online]");

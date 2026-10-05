@@ -11,7 +11,6 @@ import {
   MAX_TOKEN_LENGTH,
   MAX_TOKEN_LIFETIME_SECONDS,
   clampToken,
-  formatCredential,
   importRootSecret,
   mintToken,
   verifyToken,
@@ -118,11 +117,10 @@ describe("mintToken / verifyToken", () => {
   });
 
   it("rejects the raw secret, a credential string, garbage and empty input", async () => {
-    const credential = formatCredential({
-      workspaceUuid: WORKSPACE,
-      credId: CRED_ID,
-      keyBytes: new Uint8Array(32).fill(7),
-    });
+    // A device credential key as the hub issues it: base64url of 32 bytes.
+    const credential = Buffer.from(new Uint8Array(32).fill(7)).toString(
+      "base64url",
+    );
 
     // The rig: a token that does verify, so the non-canonical spellings of it
     // below prove something.
@@ -316,11 +314,10 @@ describe("clampToken", () => {
 
 describe("the key type is the contract", () => {
   it("does not typecheck a credential string, a secret or raw bytes as a key", async () => {
-    const credential = formatCredential({
-      workspaceUuid: WORKSPACE,
-      credId: CRED_ID,
-      keyBytes: new Uint8Array(32).fill(7),
-    });
+    // A device credential key as the hub issues it: base64url of 32 bytes.
+    const credential = Buffer.from(new Uint8Array(32).fill(7)).toString(
+      "base64url",
+    );
 
     // Each of these is a compile error, and `tsc` fails the typecheck if one
     // ever stops being one. That is the whole assertion: no overload of

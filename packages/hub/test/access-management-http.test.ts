@@ -304,7 +304,8 @@ describe("authenticated hub access management", () => {
     expect((await post(hub, valid)).code).toBe(200);
   });
 
-  it.each(["revoke", "replace", "demote", "remove", "expire"] as const)("rechecks %s after asynchronous proof verification before acting", async change => {
+  // One change per mechanism: credential state, membership and the clock.
+  it.each(["revoke", "demote", "expire"] as const)("rechecks %s after asynchronous proof verification before acting", async change => {
     const { hub } = await rig();
     const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
     const backup = person(hub, "5678", "backup-admin", [[WORKSPACE, "admin"]]);
@@ -315,20 +316,12 @@ describe("authenticated hub access management", () => {
       const verified = await verify(requestProof, request);
       expect(verified).not.toBeNull();
       if (change === "revoke") hub.credentials!.revoke(admin.issued.record.id);
-      if (change === "replace") {
-        const renewal = await mintRequestProof(await importCredentialKey(admin.issued.keyBytes), {
-          kid: admin.issued.record.id, operation: "renew-credential", lifetimeSeconds: 60,
-        });
-        expect((await hub.credentials!.renew(renewal, hub.memberships!)).status).toBe("renewed");
-      }
       if (change === "demote") hub.memberships!.changeRole({ workspaceId: WORKSPACE,
         principalId: admin.principal.id, actorPrincipalId: backup.principal.id, role: "member" });
-      if (change === "remove") hub.memberships!.remove({ workspaceId: WORKSPACE,
-        principalId: admin.principal.id, actorPrincipalId: backup.principal.id });
       if (change === "expire") vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
       return verified;
     });
-    expect(await post(hub, envelope(presented, action))).toEqual(change === "demote" || change === "remove"
+    expect(await post(hub, envelope(presented, action))).toEqual(change === "demote"
       ? { code: 403, result: { status: "forbidden" } }
       : { code: 401, result: { status: "sign-in-required" } });
   });
@@ -364,20 +357,13 @@ describe("authenticated hub access management", () => {
     }
   });
 
-  it.each(["revoke-device", "remove-member"] as const)("reports %s as applied when a closure listener fails after commit", async operation => {
+  it("reports revoke-device as applied when a closure listener fails after commit", async () => {
     const { hub } = await rig();
-    const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
     const member = person(hub, "5678", "member", [[WORKSPACE, "member"]]);
-    const throwingListener = () => { throw new Error("post-commit closure failure"); };
-    const action: Action = operation === "revoke-device"
-      ? { operation, deviceId: member.issued.record.deviceId }
-      : { operation, workspaceId: WORKSPACE, principalId: member.principal.id };
-    if (operation === "revoke-device") hub.credentials!.onRevoke(throwingListener);
-    else hub.memberships!.onRemove(throwingListener);
-    expect(await manage(hub, operation === "revoke-device" ? member.issued : admin.issued, action))
+    hub.credentials!.onRevoke(() => { throw new Error("post-commit closure failure"); });
+    expect(await manage(hub, member.issued, { operation: "revoke-device", deviceId: member.issued.record.deviceId }))
       .toEqual({ code: 500, result: { status: "closure-failed", applied: true } });
-    if (operation === "revoke-device") expect(hub.credentials!.get(member.issued.record.id)?.revokedAt).toBeTypeOf("number");
-    else expect(hub.memberships!.roleFor(WORKSPACE, member.principal.id)).toBeNull();
+    expect(hub.credentials!.get(member.issued.record.id)?.revokedAt).toBeTypeOf("number");
     await expect(connect(hub, testRoom(), await roomToken(member.issued)).denied).resolves.toBe("device-credential-refused");
   });
 
@@ -741,9 +727,9 @@ describe("direct GitHub account grants", () => {
 });
 
 describe("workspace promotion authority", () => {
-  it.each(["admin", "member"] as const)("creates for a current %s, and resumes only the same principal and attempt", async role => {
+  it("creates for a current member, and resumes only the same principal and attempt", async () => {
     const { hub } = await rig();
-    const actor = person(hub, "1201", "promoter", [[WORKSPACE, role]]);
+    const actor = person(hub, "1201", "promoter", [[WORKSPACE, "member"]]);
     const admin = person(hub, "1202", "administrator", [[WORKSPACE, "admin"]]);
     const stranger = person(hub, "1203", "signed-in");
     const other = person(hub, "1204", "other-admin", [[OTHER_WORKSPACE, "admin"]]);

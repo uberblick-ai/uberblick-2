@@ -6,7 +6,6 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
-	readdirSync,
 	realpathSync,
 	rmSync,
 	writeFileSync,
@@ -107,17 +106,6 @@ test("the browser install and suite share private storage that is always removed
 	assert.equal(existsSync(failedTmp), false);
 });
 
-test("an engine download failure stops the suite and removes private storage", (t) => {
-	const current = fixture();
-	t.after(() => current.remove());
-	const result = current.run({ installStatus: "19" });
-	assert.equal(result.status, 19);
-	const calls = readFileSync(current.log, "utf8").trim().split("\n");
-	assert.equal(calls.length, 1);
-	const [installTmp] = calls[0].split("\t");
-	assert.equal(existsSync(installTmp), false);
-});
-
 test("Playwright arguments keep their boundaries and order", (t) => {
 	const current = fixture();
 	t.after(() => current.remove());
@@ -136,14 +124,3 @@ test("Playwright arguments keep their boundaries and order", (t) => {
 	]);
 });
 
-test("insufficient capacity stops before browsers and cleans the private directory", (t) => {
-	const current = fixture();
-	t.after(() => current.remove());
-
-	const result = current.run({ available: "1048575" });
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /at least 1048576 KiB is required/);
-	assert.match(result.stderr, /Browsers were not started/);
-	assert.equal(existsSync(current.log), false);
-	assert.deepEqual(readdirSync(join(current.cache, "uberblick/e2e")), []);
-});

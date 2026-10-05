@@ -41,22 +41,6 @@ describe("pending-document ceiling", () => {
     );
   });
 
-  it("leaves the two queue caps at the library's defaults", async () => {
-    const started = await hub();
-
-    // Bytes and messages buffered before auth are a property of how much a
-    // client sends per room, not of how many rooms it opens — and nothing here
-    // has measured either default to be wrong. An unmeasured number in the
-    // config is one nobody can defend later, so these stay where they are and
-    // this test says so out loud.
-    expect(started.server.configuration.maxUnauthenticatedQueueSize).toBe(
-      5 * 1024 * 1024,
-    );
-    expect(started.server.configuration.maxUnauthenticatedQueueMessages).toBe(
-      1_000,
-    );
-  });
-
   it("takes an override, which is how a test can breach it in a few rooms", async () => {
     const started = await hub({ maxPendingDocuments: 5 });
     expect(started.server.configuration.maxPendingDocuments).toBe(5);

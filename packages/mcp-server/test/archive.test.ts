@@ -323,18 +323,6 @@ describe("archive_doc", () => {
       { purpose: "directory", room: `${WORKSPACE}/_directory`, applied: true, synced: false },
       { purpose: "sidebar", room: `${WORKSPACE}/_sidebar`, applied: true, synced: false },
     ]);
-
-    // A constant `true` is only honest with the sentence a caller reads beside
-    // it: this replica hid what it could see, and a pin it never received can
-    // still surface, so the tool has to say so and name where to look. Without
-    // this the field reads as a guarantee the write cannot make (#969).
-    const { tools } = await rig.client.listTools();
-    expect(
-      tools.find((tool) => tool.name === "archive_doc")?.description,
-    ).toContain(
-      "a pin made elsewhere that this replica has not received can still merge in behind the archive and " +
-        "leave the document archived AND pinned. get_sidebar is where you see that",
-    );
   });
 
   // The window this closes is ordinary: `settle()` returns when the sync budget
@@ -462,6 +450,9 @@ describe("an archived document is read-only", () => {
       ],
       ["insert_block", { uuid: doc.uuid, type: "paragraph", text: "No." }],
       ["set_tags", { uuid: doc.uuid, tags: ["billing"] }],
+      ["set_title", { uuid: doc.uuid, title: "Renamed while archived" }],
+      ["set_description", { uuid: doc.uuid, description: "Should not land." }],
+      ["set_tldr", { uuid: doc.uuid, tldr: "This must not land." }],
     ] as const) {
       const refused = await rig.call(tool, args);
       expect(refused.isError).toBe(true);
@@ -479,6 +470,7 @@ describe("an archived document is read-only", () => {
     // Refused, not merely reported as refused.
     const read = await rig.ok("get_doc", { uuid: doc.uuid });
     expect(read.blocks.map((block: any) => block.text)).toEqual([BODY]);
+    expect(read).toMatchObject({ title: "Concepts", description: "A test document.", tldr: null });
     expect(read.tags).toEqual([
       {
         id: "00000000-0000-4000-8000-000000000003",

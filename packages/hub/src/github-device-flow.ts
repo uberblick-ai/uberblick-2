@@ -9,6 +9,8 @@ export interface GithubSignInConfig {
   /** Test seams; production always uses the fixed github.com endpoints. */
   fetch?: typeof globalThis.fetch;
   now?: () => number;
+  /** Host setup's real wait between polls; GitHub's interval when absent. */
+  setupPollMs?: number;
 }
 
 const MAX_LIFETIME_MS = 15 * 60_000;

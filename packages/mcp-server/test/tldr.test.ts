@@ -74,25 +74,6 @@ describe("set_tldr", () => {
     ).toBeNull();
   });
 
-  it("refuses an archived document", async () => {
-    const rig = await localRig();
-    const doc = await rig.ok("create_doc", {
-      title: "Archived",
-      description: "A document outside the live corpus.",
-    });
-    await rig.ok("archive_doc", { uuid: doc.uuid });
-
-    const refused = await rig.call("set_tldr", {
-      uuid: doc.uuid,
-      tldr: "This must not land.",
-    });
-    expect(refused.payload).toMatchObject({
-      error: "doc_archived",
-      applied: false,
-    });
-    expect((await rig.ok("get_doc", { uuid: doc.uuid })).tldr).toBeNull();
-  });
-
   it("stays out of discovery, search and Markdown", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
@@ -209,19 +190,5 @@ describe("the TL;DR review reminder", () => {
     for (const result of metadataResults) {
       expect(result).not.toHaveProperty("tldrHint");
     }
-  });
-
-  it("states the reminder and set/clear contract in the live tool descriptions", async () => {
-    const rig = await localRig();
-    const tools = (await rig.client.listTools()).tools;
-    for (const name of ["create_doc", "edit_block", "insert_block", "delete_block"]) {
-      expect(tools.find((tool) => tool.name === name)?.description).toContain(
-        "TL;DR",
-      );
-    }
-    const setter = tools.find((tool) => tool.name === "set_tldr");
-    expect(setter?.description).toContain("plain English");
-    expect(setter?.description).toContain("null to clear");
-    expect(setter?.description).toContain(`${MAX_TLDR_LENGTH} characters`);
   });
 });

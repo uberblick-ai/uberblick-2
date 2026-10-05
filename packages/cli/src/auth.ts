@@ -9,6 +9,7 @@ import {
   removeHubLogin,
   writeHubLogin,
 } from "./auth-store.js";
+import { budget } from "./budget.js";
 import { resolveProjectBinding } from "./project-binding.js";
 import type { Io } from "./io.js";
 import { authenticationOrigin } from "@uberblick/hub/remote-url";
@@ -209,7 +210,7 @@ async function isUnclaimed(origin: string, signal: AbortSignal): Promise<boolean
   try {
     const response = await fetch(`${origin}/auth/claim-state`, {
       method: "GET", redirect: "error",
-      signal: AbortSignal.any([signal, AbortSignal.timeout(CLAIM_STATE_MS)]),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(budget(CLAIM_STATE_MS))]),
     });
     if (response.status !== 200) {
       await response.body?.cancel();
@@ -316,9 +317,9 @@ async function login(selection: Selection, io: Io): Promise<number> {
       const remaining = deadline - performance.now();
       if (remaining <= 0) throw new SignInFailure("GitHub sign-in expired; run login again");
       await delay(Math.min(interval * 1000, remaining), undefined, { signal: interrupted.signal });
-      const budget = deadline - performance.now();
-      if (budget <= 0) throw new SignInFailure("GitHub sign-in expired; run login again");
-      const result = await post(selection.origin, "collect", attempt, interrupted.signal, Math.min(REQUEST_MS, budget));
+      const left = deadline - performance.now();
+      if (left <= 0) throw new SignInFailure("GitHub sign-in expired; run login again");
+      const result = await post(selection.origin, "collect", attempt, interrupted.signal, Math.min(REQUEST_MS, left));
       if (result.status === "pending" && seconds(result.interval)) { interval = result.interval; continue; }
       if (result.status !== "complete") terminal(result);
       collected = true;

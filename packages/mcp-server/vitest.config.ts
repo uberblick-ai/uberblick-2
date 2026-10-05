@@ -18,5 +18,9 @@ export default defineConfig({
     // a re-run.
     testTimeout: 120_000,
     hookTimeout: 120_000,
+    // Most of a test here is spent waiting on sockets, child processes and
+    // timers, not computing: at the default of one fewer worker than cores the
+    // suite left over half the machine idle. Oversubscribe instead.
+    maxWorkers: "150%",
   },
 });

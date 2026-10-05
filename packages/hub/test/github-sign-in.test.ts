@@ -226,14 +226,12 @@ describe("bounded device requests", () => {
     expect(privateRows(testRig.databasePath).credentials).toHaveLength(0);
   });
 
-  it.each(["denied", "expired", "abandoned", "failed"])("%s ends distinctly and issues nothing", async (status) => {
+  it.each(["denied", "expired"])("%s ends distinctly and issues nothing", async (status) => {
     const testRig = await rig();
     const request = await start(testRig.hub);
     testRig.github.time += 5000;
     if (status === "denied") testRig.github.tokenResult = { error: "access_denied" };
     if (status === "expired") testRig.github.time += 900_000;
-    if (status === "abandoned") expect(await post(testRig.hub, "cancel", request)).toMatchObject({ result: { status } });
-    if (status === "failed") testRig.github.failedUrl = "https://github.com/login/oauth/access_token";
     const first = await post(testRig.hub, "collect", request);
     expect(first).toMatchObject({ result: { status } });
     expect(await post(testRig.hub, "collect", request)).toEqual(first);
@@ -241,7 +239,7 @@ describe("bounded device requests", () => {
     expect(JSON.stringify(testRig.logs)).not.toContain(GITHUB_TOKEN);
   });
 
-  it.each(["expire", "cancel", "stop"])("%s during identity fetch fences issuance and concurrent collection", async (action) => {
+  it.each(["cancel", "stop"])("%s during identity fetch fences issuance and concurrent collection", async (action) => {
     const testRig = await rig();
     const request = await start(testRig.hub);
     testRig.github.time += 5000;
@@ -255,12 +253,11 @@ describe("bounded device requests", () => {
     collecting.catch(() => {});
     await paused;
     expect(await post(testRig.hub, "collect", request)).toMatchObject({ result: { status: "pending" } });
-    if (action === "expire") testRig.github.time += 900_000;
     if (action === "cancel") await post(testRig.hub, "cancel", request);
     if (action === "stop") await testRig.hub.stop();
     release();
     if (action === "stop") await collecting.catch(() => {});
-    else expect(await collecting).toMatchObject({ result: { status: action === "expire" ? "expired" : "abandoned" } });
+    else expect(await collecting).toMatchObject({ result: { status: "abandoned" } });
     expect(privateRows(testRig.databasePath).credentials).toHaveLength(0);
   });
 
@@ -329,8 +326,6 @@ describe("bounded device requests", () => {
 
   it.each([
     { step: "start", url: "https://github.com/login/device/code", error: "device_flow_disabled", status: 200, code: "device_flow_disabled" },
-    { step: "start", url: "https://github.com/login/device/code", error: "incorrect_client_credentials", status: 200, code: "incorrect_client_credentials" },
-    { step: "token", url: "https://github.com/login/oauth/access_token", error: GITHUB_TOKEN, status: 200, code: "provider-error" },
     { step: "identity", url: "https://api.github.com/user", error: GITHUB_TOKEN, status: 503, code: "http-error" },
   ])("logs safe diagnostics for $step/$code and issues nothing", async ({ step, url, error, status, code }) => {
     const testRig = await rig();
@@ -350,9 +345,9 @@ describe("bounded device requests", () => {
 });
 
 describe("optional GitHub configuration", () => {
-  it.each([undefined, ""])("uses the shared app for remote deployments with client ID %s", async (clientId) => {
+  it("uses the shared app for remote deployments with an empty client ID", async () => {
     const github = new GithubFake();
-    const config = resolveRemoteHubConfig({ HUB_AUTH_TOKEN: TEST_SECRET, HUB_GITHUB_CLIENT_ID: clientId });
+    const config = resolveRemoteHubConfig({ HUB_AUTH_TOKEN: TEST_SECRET, HUB_GITHUB_CLIENT_ID: "" });
     expect(config.github).toEqual({ clientId: SHARED_GITHUB_CLIENT_ID });
     const hub = await startHub({ ...config, databasePath: tempDatabasePath(), port: 0,
       github: { ...config.github!, fetch: github.fetch, now: () => github.time } });

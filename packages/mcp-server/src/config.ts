@@ -81,6 +81,10 @@ export interface McpConfig {
   syncTimeoutMs: number;
   /** Upper bound on websocket reconnect backoff (ms). */
   reconnectMaxDelayMs: number;
+  /** Upper bound on device-login recovery polling (ms); thirty seconds when unset. */
+  deviceRetryMaxDelayMs?: number;
+  /** How long a device renewal outcome is shared across rooms and processes (ms); thirty seconds when unset. */
+  deviceRenewalCooldownMs?: number;
   /** How long an agent's published cursor lives before it is withdrawn (ms). */
   cursorTtlMs: number;
   /** Log entries per room that trigger a snapshot-and-prune. */

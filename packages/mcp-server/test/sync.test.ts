@@ -718,5 +718,10 @@ describe("hub sync", () => {
     expect((await rig.ok("get_doc", { uuid: created.uuid })).title).toBe(
       "Still writable",
     );
+
+    // Past the rebuilds a refusal schedules: still a refusal, never a hub that
+    // merely looks slow.
+    await sleep(rig.config.reconnectMaxDelayMs * 3);
+    expect((await rig.ok("sync_status", {})).hub.status).toBe("auth-failed");
   });
 });

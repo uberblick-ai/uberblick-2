@@ -273,6 +273,16 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Wait until the hub has applied and acknowledged every local edit of
+ * `client`: the event a test needs before it inspects the hub's copy.
+ */
+export function acknowledged(client: TestClient, label = "the edit"): Promise<void> {
+  return waitUntil(`the hub to acknowledge ${label}`, () =>
+    !client.provider.hasUnsyncedChanges,
+  );
+}
+
 /** Wait for a document's text to equal `expected` on both sides of a sync. */
 export function waitForText(
   label: string,

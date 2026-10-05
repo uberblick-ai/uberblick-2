@@ -5,11 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { readHubLogins, writeHubLogin } from "@uberblick/hub/auth-store";
-import { DEVICE_RENEWAL_COOLDOWN_MS } from "@uberblick/hub/device-login";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import { getMeta, roomForDoc } from "@uberblick/schema";
 import type { Rig } from "./helpers.js";
 import { sleep, startServer, testConfig, waitUntil } from "./helpers.js";
+
+const COOLDOWN_MS = 1_000;
 
 async function caughtUp(rig: Rig, timeoutMs = 20_000): Promise<void> {
   await waitUntil("all local writes to be acknowledged", async () => {
@@ -30,6 +31,10 @@ it("keeps a shared credential stable while polling denied access and resumes aft
     ...testConfig({ workspaceId, hubUrl: fixture.url, databasePath: join(directory, databaseName) }),
     deviceLogin: { env },
     reconnectMaxDelayMs: 2_000,
+    // The production cooldown and polling ceiling are thirty seconds each; a
+    // shorter pair crosses the same two cooldown boundaries in real time.
+    deviceRenewalCooldownMs: COOLDOWN_MS,
+    deviceRetryMaxDelayMs: 2_000,
   });
 
   try {
@@ -54,10 +59,10 @@ it("keeps a shared credential stable while polling denied access and resumes aft
     expect(local).toMatchObject({ applied: true, synced: false });
     expect((await second.ok("sync_status")).pendingRooms.length).toBeGreaterThan(0);
 
-    // Cross two production cooldowns with real clocks, crypto, stores and hubs.
+    // Cross two cooldowns with real clocks, crypto, stores and hubs.
     // Conditional checks discover later grants without retiring the first
     // engine's working credential while its authority is unchanged.
-    await sleep(DEVICE_RENEWAL_COOLDOWN_MS * 2 + 5_000);
+    await sleep(COOLDOWN_MS * 2 + 2_500);
     expect(fixture.renewalCount).toBeGreaterThan(1);
     expect(readHubLogins(env).logins[fixture.origin]).toEqual(shared);
     for (const { claims } of fixture.authentications.slice(admissionStart)) {
@@ -74,7 +79,7 @@ it("keeps a shared credential stable while polling denied access and resumes aft
     await second.instance.replicas.sync.waitForDeviceWork();
     const checksBeforeGrant = fixture.renewalCount;
     fixture.grant(secondWorkspace);
-    await caughtUp(second, 70_000);
+    await caughtUp(second);
     await caughtUp(first);
     const replacement = readHubLogins(env).logins[fixture.origin]!;
     expect(replacement.identity).toEqual(shared.identity);
@@ -89,4 +94,4 @@ it("keeps a shared credential stable while polling denied access and resumes aft
     await fixture.close();
     rmSync(directory, { recursive: true, force: true });
   }
-}, 180_000);
+});

@@ -3,6 +3,9 @@
  * about whether a string matched: a valid signature is not enough if the room
  * belongs to another workspace, and a read-only scope has to actually stop
  * writes at the server rather than merely being advertised to the client.
+ * Every refused token — garbage, the raw secret, a forged lifetime, an expired
+ * or foreign-workspace token — is presented in `auth-log.test.ts`, which
+ * checks what the client is told and what the hub logs.
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -11,17 +14,14 @@ import * as Y from "yjs";
 import type { Hub } from "../src/server.js";
 import {
   OTHER_WORKSPACE,
-  TEST_SECRET,
-  WORKSPACE,
   TEXT_KEY,
   createClient,
-  forgeToken,
   removeTempDatabases,
-  sleep,
   startHub,
   testRoom,
   token,
   waitForText,
+  waitUntil,
   type TestClient,
 } from "./helpers.js";
 
@@ -61,31 +61,6 @@ describe("token auth", () => {
     await expect(connected.synced).resolves.toBeUndefined();
   });
 
-  it("rejects garbage", async () => {
-    const rejected = client(testRoom(), "not-a-token");
-
-    await expect(rejected.denied).resolves.toBe("invalid-token");
-    await expect(rejected.synced).rejects.toThrow(/invalid-token/);
-  });
-
-  it("rejects the raw HUB_AUTH_TOKEN secret", async () => {
-    // The secret signs tokens; it is not one. An opaque-string auth scheme
-    // would have accepted this.
-    const rejected = client(testRoom(), TEST_SECRET);
-
-    await expect(rejected.denied).resolves.toBe("invalid-token");
-  });
-
-  it("rejects a valid token from another workspace", async () => {
-    const foreign = await token("read-write", {
-      workspace: OTHER_WORKSPACE,
-      sub: "intruder",
-    });
-    const rejected = client(testRoom(), foreign);
-
-    await expect(rejected.denied).resolves.toBe("workspace-mismatch");
-  });
-
   it("lets a token open its own workspace's rooms", async () => {
     const other = await token("read-write", { workspace: OTHER_WORKSPACE });
     const connected = client(testRoom(OTHER_WORKSPACE), other);
@@ -95,19 +70,12 @@ describe("token auth", () => {
 
   it("rejects a room name that is not <workspace>/<uuid>", async () => {
     const rejected = client("bare-room-name", await token("read-write"));
-
     await expect(rejected.denied).resolves.toBe("workspace-mismatch");
-  });
 
-  it("rejects a room whose workspace segment is not a workspace id", async () => {
-    // A slug-decorated spelling names no room: the identity is the uuid, and
-    // the token claim the hub compares against carries only that.
-    const rejected = client(
-      `uberblick-${testRoom()}`,
-      await token("read-write"),
-    );
-
-    await expect(rejected.denied).resolves.toBe("workspace-mismatch");
+    // A slug-decorated spelling names no room either: the identity is the
+    // uuid, and the token claim the hub compares against carries only that.
+    const decorated = client(`uberblick-${testRoom()}`, await token("read-write"));
+    await expect(decorated.denied).resolves.toBe("workspace-mismatch");
   });
 
   it("rejects a token passed in the URL query string", async () => {
@@ -133,43 +101,6 @@ describe("token auth", () => {
     }
   });
 
-  it("refuses a token that outlived the hub's ceiling, whatever it claimed", async () => {
-    // Signed with the hub's own secret and correct in every other way: only
-    // the lifetime is wrong. Forged rather than minted, because `mintToken`
-    // refuses to sign this — and a compromised local minter would not use it.
-    const now = Math.floor(Date.now() / 1000);
-    const decade = await forgeToken({
-      typ: "room",
-      sub: "a-compromised-machine",
-      workspace: WORKSPACE,
-      scope: "read-write",
-      kid: null,
-      iat: now,
-      exp: now + 10 * 365 * 24 * 60 * 60,
-    });
-
-    const rejected = client(testRoom(), decade);
-
-    await expect(rejected.denied).resolves.toBe("invalid-token");
-  });
-
-  it("refuses an expired token", async () => {
-    const now = Math.floor(Date.now() / 1000);
-    const stale = await forgeToken({
-      typ: "room",
-      sub: "yesterday",
-      workspace: WORKSPACE,
-      scope: "read-write",
-      kid: null,
-      iat: now - 1_800,
-      exp: now - 900,
-    });
-
-    const rejected = client(testRoom(), stale);
-
-    await expect(rejected.denied).resolves.toBe("invalid-token");
-  });
-
   describe("read-only scope", () => {
     it("syncs down but cannot write", async () => {
       const room = testRoom();
@@ -184,12 +115,20 @@ describe("token auth", () => {
       await waitForText("reader", reader.text, "written by the hub client");
 
       // Up: nothing. The update is refused at the server, so it neither
-      // reaches the writer nor the server's copy of the document.
+      // reaches the writer nor the server's copy of the document. The
+      // awareness frame sent behind it on the same socket is the barrier: the
+      // server drains a connection in order, so once that arrives the update
+      // has already been handled (see hocuspocus-seams.test.ts).
       reader.text.insert(0, "SMUGGLED ");
-      await sleep(400);
+      reader.provider.setAwarenessField("name", "the reader");
+      const serverDoc = hub.hocuspocus.documents.get(room);
+      await waitUntil("the reader's awareness to reach the hub", () =>
+        [...(serverDoc?.awareness.getStates().values() ?? [])].some(
+          (state) => (state as { name?: string }).name === "the reader",
+        ),
+      );
 
       expect(writer.text.toString()).toBe("written by the hub client");
-      const serverDoc = hub.hocuspocus.documents.get(room);
       expect(serverDoc?.getText(TEXT_KEY).toString()).toBe(
         "written by the hub client",
       );

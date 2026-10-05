@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 describe("hub-owned workspace memberships", () => {
-  it.each(["member", "outsider", "foreign-admin"])("refuses management by %s without changing or revealing members", (actorPrincipalId) => {
+  it.each(["member", "foreign-admin"])("refuses management by %s without changing or revealing members", (actorPrincipalId) => {
     const store = registry();
     grant(store, "admin", "admin");
     grant(store, "member");

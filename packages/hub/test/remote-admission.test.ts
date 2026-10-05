@@ -44,10 +44,14 @@ async function credentialToken(issued: IssuedCredential, workspace = WORKSPACE) 
 }
 
 describe("one local boundary", () => {
-  it.each(["localhost", "127.0.0.1", "127.255.12.3", "::1", "[::1]", "0:0:0:0:0:0:0:1"])(
-    "recognizes loopback %s", host => expect(isLoopbackHost(host)).toBe(true));
-  it.each(["0.0.0.0", "::", "[::]", "127.example.com", "127.1", "127.300.0.1", "127.0.0.1.example", "10.0.0.1"])(
-    "requires remote admission for %s", host => expect(isLoopbackHost(host)).toBe(false));
+  it("recognizes loopback hosts and requires remote admission for everything else", () => {
+    for (const host of ["localhost", "127.0.0.1", "127.255.12.3", "::1", "[::1]", "0:0:0:0:0:0:0:1"]) {
+      expect(isLoopbackHost(host), host).toBe(true);
+    }
+    for (const host of ["0.0.0.0", "::", "[::]", "127.example.com", "127.1", "127.300.0.1", "127.0.0.1.example", "10.0.0.1"]) {
+      expect(isLoopbackHost(host), host).toBe(false);
+    }
+  });
   it("uses endpoint host only and never treats wildcards as local", () => {
     expect(isLoopbackEndpoint("ws://127.4.3.2:1234/ws")).toBe(true);
     expect(isLoopbackEndpoint("ws://[::1]:1234/ws")).toBe(true);
