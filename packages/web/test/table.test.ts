@@ -131,6 +131,48 @@ describe("the table block", () => {
     }
   });
 
+  it("renders agent-written cell formatting through the existing marks without a binding write", () => {
+    const target = "0189abcd-2222-4333-8444-555566667777";
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "table-agent-marks", title: "Tables" });
+    appendBlock(ydoc, { type: "table", text: `| **bold** *italic* ~~strike~~ \`code\` [site](https://example.com) [hub](${target}) |\n| --- |` });
+    let writes = 0;
+    ydoc.on("update", () => { writes += 1; });
+    const { editor } = mountEditor(ydoc);
+    try {
+      expect(drawn(editor)).toEqual([["bold italic strike code site hub"]]);
+      expect(editor.view.dom.querySelector("th strong")?.textContent).toBe("bold");
+      expect(editor.view.dom.querySelector("th em")?.textContent).toBe("italic");
+      expect(editor.view.dom.querySelector("th s")?.textContent).toBe("strike");
+      expect(editor.view.dom.querySelector("th code")?.textContent).toBe("code");
+      expect(editor.view.dom.querySelector("th a[href='https://example.com']")?.textContent).toBe("site");
+      expect(editor.view.dom.querySelector("th a.ub-doclink")?.getAttribute("data-doc-id")).toBe(target);
+      expect(writes).toBe(0);
+    } finally { editor.destroy(); ydoc.destroy(); }
+  });
+
+  it("keeps inline markdown literal through the web GFM paste door and cell paste", () => {
+    const target = "0189abcd-2222-4333-8444-555566667777";
+    const source = `| **bold** [hub](${target}) |\n| --- |`;
+    const { ydoc } = docWith([""]);
+    const { editor } = mountEditor(ydoc);
+    const paste = (text: string): boolean => editor.view.someProp("handlePaste", (handler) =>
+      handler(editor.view, { clipboardData: { getData: () => text } } as unknown as ClipboardEvent,
+        editor.state.selection.content()),
+    ) === true;
+    try {
+      editor.commands.setTextSelection(1);
+      expect(paste(source)).toBe(true);
+      expect(drawn(editor)).toEqual([[`**bold** [hub](${target})`]]);
+      expect(editor.view.dom.querySelector("th strong, th a")).toBeNull();
+      editor.commands.setTextSelection(4);
+      expect(paste(`\`code\` [hub](${target})\n`)).toBe(true);
+      const cell = tableRows(getBlocksFragment(ydoc).get(0) as Y.XmlElement)[0]![0]!;
+      expect(tableCellText(cell)!.toDelta()).toEqual([{ insert: `\`code\` [hub](${target}) **bold** [hub](${target})` }]);
+      expect(editor.view.dom.querySelector("th strong, th code, th a")).toBeNull();
+    } finally { editor.destroy(); ydoc.destroy(); }
+  });
+
   it("keeps the table drawn while editing its one-paragraph cells", () => {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: "table-open", title: "Tables" });
@@ -447,7 +489,7 @@ describe("the table block", () => {
     } finally { ea.destroy(); eb.destroy(); a.destroy(); b.destroy(); }
   });
 
-  it("pastes multiple lines into one cell and refuses unsupported local marks and spans", () => {
+  it("pastes multiple lines into one cell and refuses unsupported local spans", () => {
     const ydoc = new Y.Doc(); initDoc(ydoc, { uuid: "cell-paste", title: "Tables" });
     appendBlock(ydoc, { type: "table", text: `${HEADER}\n${DELIMITER}` });
     const { editor } = mountEditor(ydoc);
@@ -458,8 +500,6 @@ describe("the table block", () => {
         editor.state.selection.content()))).toBe(true);
       expect(drawn(editor)[0]?.[0]).toBe("two linesname");
       const before = getBlocks(ydoc);
-      editor.view.dispatch(editor.state.tr.addMark(4, 7, editor.schema.marks.docLink!.create({ docId: "00000000-0000-4000-8000-000000000001" })));
-      expect(getBlocks(ydoc)).toEqual(before);
       editor.view.dispatch(editor.state.tr.setNodeAttribute(2, "colspan", 2));
       expect(getBlocks(ydoc)).toEqual(before);
     } finally { editor.destroy(); ydoc.destroy(); }

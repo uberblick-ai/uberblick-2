@@ -11,7 +11,7 @@
  *                   (types: paragraph, heading, code, mermaid, list-item,
  *                   quote, table, terminal), formatted by the closed inline-mark set
  *                   (bold, italic, strike, inlineCode, link, docLink) on
- *                   prose blocks
+ *                   prose blocks and table cells
  *   - `annotations` Y.Map of one Y.Map per thread — anchor, resolved flag and
  *                   the conversation as a nested Y.Array — anchored by
  *                   `comment` formatting marks on the block's text
@@ -101,7 +101,7 @@ export type { ListMarkerInput } from "./lists.js";
 
 export {
   TABLE_CELL_MARKS, buildTableCell, buildTableElement, buildTableRow,
-  isSupportedTable, parseGfmTable, parseTableInput, plainXmlText,
+  isSupportedTable, parseGfmTable, parseTableInput, parseTableCell, plainXmlText,
   seedNewTableCells, tableCellText, tableCellTexts, tableRows, tableText, writeGfmTable,
 } from "./table.js";
 export type { ColumnAlign, GfmTable, TableMapping } from "./table.js";

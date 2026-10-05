@@ -71,7 +71,7 @@
  */
 
 import * as Y from "yjs";
-import { BLOCK_TYPES, isBlockType, readsAsMark, isSupportedTable } from "@uberblick/schema";
+import { BLOCK_TYPES, isBlockType, readsAsMark, isSupportedTable, tableRows, tableCellTexts } from "@uberblick/schema";
 import { uberblickSchema } from "./create-editor.js";
 
 /** The node names the editor may render. Identical to the schema's block types. */
@@ -191,6 +191,9 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
     }
     if (child.nodeName === "table") {
       if (!isSupportedTable(child)) foreign.push({ index, nodeName: "#table-shape", id, preview: previewOf(child) });
+      else if (tableRows(child).some((row) => row.some((cell) =>
+        tableCellTexts(cell).some((text) => linkConflictsIn(text).length > 0),
+      ))) foreign.push({ index, nodeName: LINK_CONFLICT, id, preview: previewOf(child) });
       continue;
     }
     for (const inner of child.toArray()) {
@@ -212,7 +215,7 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
  * concurrent re-type can leave two raw elements carrying one id, and a block
  * can hold more than one text child, so an id lookup is not a collision-proof
  * way back to the range this entry describes. `blockId` is display-only;
- * `index`, `textIndex` and the range make a collision-proof render key. The
+ * `index`, the optional cell position, `textIndex` and the range make a render key. The
  * write goes through `text`.
  */
 export interface LinkConflictRange {
@@ -231,8 +234,10 @@ export interface LinkConflictRange {
 export interface LinkConflict extends LinkConflictRange {
   /** Position of the *top-level* element in the fragment, in document order. */
   index: number;
-  /** Position of the direct text child inside that top-level element. */
+  /** Position of the text child inside the block or the cell's paragraph. */
   textIndex: number;
+  /** Position of the table cell, absent for prose. Display, never lookup. */
+  cell?: { row: number; column: number };
   /** The element's `id` attribute, when it has one. Display, never lookup. */
   blockId: string | null;
   /** The text holding the range, and the handle the repair writes through. */
@@ -318,9 +323,21 @@ export function findLinkConflicts(fragment: Y.XmlFragment): LinkConflict[] {
     const child = children[index];
     if (!(child instanceof Y.XmlElement)) continue;
     if (!isBlockType(child.nodeName)) continue;
+    const blockId = child.getAttribute("id") ?? null;
+    if (child.nodeName === "table") {
+      for (const [rowIndex, row] of tableRows(child).entries()) {
+        for (const [column, cell] of row.entries()) {
+          for (const [textIndex, text] of tableCellTexts(cell).entries()) {
+            for (const range of linkConflictsIn(text)) {
+              conflicts.push({ ...range, index, textIndex, cell: { row: rowIndex, column }, blockId, text });
+            }
+          }
+        }
+      }
+      continue;
+    }
     if (!blockAllowsMark(child.nodeName, "link")) continue;
     if (!blockAllowsMark(child.nodeName, "docLink")) continue;
-    const blockId = child.getAttribute("id") ?? null;
     const innerNodes = child.toArray();
     for (let textIndex = 0; textIndex < innerNodes.length; textIndex += 1) {
       const inner = innerNodes[textIndex];

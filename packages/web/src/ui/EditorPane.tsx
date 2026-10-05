@@ -529,7 +529,7 @@ function LinkConflictRepair({
       <ul>
         {conflicts.map((conflict) => (
           <li
-            key={`${conflict.index}:${conflict.textIndex}:${conflict.start}:${conflict.end}`}
+            key={`${conflict.index}:${conflict.cell?.row ?? "prose"}:${conflict.cell?.column ?? ""}:${conflict.textIndex}:${conflict.start}:${conflict.end}`}
           >
             <q>{conflict.label}</q>
             <button

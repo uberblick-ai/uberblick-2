@@ -160,6 +160,9 @@ it.each([false, true])("keeps guarded pages bound and delayed person text in its
   const a = new Y.Doc(); const b = new Y.Doc();
   Y.applyUpdate(a, initial); Y.applyUpdate(b, initial);
   const pages = [fixture(LIVE, a), fixture(LIVE, b)];
+  const targetColumn = replaceColumn ? 2 : 1;
+  const nextSourceRows = nextRows.map((row) => [...row]);
+  nextSourceRows[2]![targetColumn] = "**done**";
   const editors = createEditor.mock.results.map((result) => result.value as Editor);
   const originalTexts = [statusCell(a, 1, 1), statusCell(b, 1, 1)];
   const appendInCell = (editor: Editor, row: number, column: number, columns: number, text: string): void => {
@@ -177,7 +180,7 @@ it.each([false, true])("keeps guarded pages bound and delayed person text in its
     // The person writes through the actual guarded editor while its replica
     // still holds the old rows and columns, before the agent edit reaches it.
     appendInCell(editors[1]!, 1, 1, beforeRows[0]!.length, " (blocked)");
-    editBlock(a, id, source, writeGfmTable(nextRows), {
+    editBlock(a, id, getBlocks(a)[0]!.text, writeGfmTable(nextSourceRows), {
       rev: getBlocks(a)[0]!.rev,
       tableMapping: {
         rows: replaceColumn ? [0, null, 1, 3] : [0, null, 1],
@@ -185,7 +188,6 @@ it.each([false, true])("keeps guarded pages bound and delayed person text in its
       },
     });
   });
-  const targetColumn = replaceColumn ? 2 : 1;
   expect(statusCell(a, 2, targetColumn)).toBe(originalTexts[0]);
   const aWrite = Y.encodeStateAsUpdate(a); const bWrite = Y.encodeStateAsUpdate(b);
   act(() => { Y.applyUpdate(a, bWrite); Y.applyUpdate(b, aWrite); });
@@ -195,7 +197,9 @@ it.each([false, true])("keeps guarded pages bound and delayed person text in its
     expect(page.host.querySelector(".ProseMirror")).not.toBeNull();
     expect(statusCell(page.ydoc, 2, targetColumn)).toBe(originalTexts[index]);
     expect(statusCell(page.ydoc, 2, targetColumn).toDelta()).toEqual([{ insert: "done (blocked)", attributes: { bold: {} } }]);
-    expect(getBlocks(page.ydoc)[0]!.text).toBe(writeGfmTable(nextRows));
+    const projectedRows = nextRows.map((row) => [...row]);
+    projectedRows[2]![targetColumn] = "**done (blocked)**";
+    expect(getBlocks(page.ydoc)[0]!.text).toBe(writeGfmTable(projectedRows));
     const table = page.host.querySelector(".ub-table")!;
     const drawn = [...table.querySelectorAll("tr")].map((row) => [...row.querySelectorAll("th, td")].map((cell) => cell.textContent));
     expect(drawn).toEqual(nextRows);

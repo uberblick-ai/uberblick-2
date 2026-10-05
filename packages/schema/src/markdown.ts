@@ -215,7 +215,7 @@ function escapeInline(text: string, context: EscapeContext): string {
   let out = "";
   for (let i = 0; i < text.length; i += 1) {
     const char = text[i] as string;
-    if (char === "\\" || char === "`" || char === "*" || char === "[" || (context.table === true && ["|", "<", ">", "&", "!", "]"].includes(char))) {
+    if (char === "\\" || char === "`" || char === "*" || char === "[" || (context.table === true && ["<", ">", "&", "!", "]"].includes(char))) {
       out += `\\${char}`;
     } else if (char === "]" && context.insideLabel) {
       out += "\\]";
@@ -420,6 +420,8 @@ interface OpenMark {
   target: string;
   /** The spelling this mark was opened with; a closer must match it. */
   spelling: string;
+  /** Where the opener starts, so a link emptied by whitespace hugging can go. */
+  start: number;
 }
 
 /**
@@ -484,7 +486,8 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
 }
 
 /**
- * Render runs as GFM.
+ * Render runs as GFM. Table mode escapes literal HTML punctuation; the outer
+ * `writeGfmTable` layer escapes pipes, including pipes in code and link targets.
  *
  * The emitter is a stack, and everything else follows from that. For each run it
  * closes marks from the top until every mark still open is one this run wants,
@@ -520,7 +523,7 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
  * with nothing writable between them. Both are the format's limits rather than this
  * code's, and `expressibleInGfm` in the test names them structurally.
  */
-function renderInline(source: readonly InlineRun[], table = false): string {
+export function renderInline(source: readonly InlineRun[], table = false): string {
   let out = "";
   const open: OpenMark[] = [];
 
@@ -549,8 +552,15 @@ function renderInline(source: readonly InlineRun[], table = false): string {
     for (let i = open.length - 1; i >= depth; i -= 1) {
       const entry = open[i];
       if (entry === undefined) continue;
-      out +=
-        entry.name === "link" ? `](${renderTarget(entry.target)})` : entry.spelling;
+      if (entry.name === "link" && out.length === entry.start + 1) {
+        // Hugging an outer emphasis can take the link's entire whitespace label
+        // out of it. An empty label is literal syntax to the reader, so drop only
+        // the link's opener and keep the held characters after the emphasis.
+        out = out.slice(0, entry.start);
+      } else {
+        out +=
+          entry.name === "link" ? `](${renderTarget(entry.target)})` : entry.spelling;
+      }
       if (i === lastEmphasis) out += held;
     }
     if (lastEmphasis === -1) out += held;
@@ -608,14 +618,15 @@ function renderInline(source: readonly InlineRun[], table = false): string {
         text = text.slice(lead.length);
       }
       const spelling = name === "link" ? "[" : DELIMITER[name];
+      const start = out.length;
       out += spelling;
-      open.push({ name, target, spelling });
+      open.push({ name, target, spelling, start });
     }
 
 
     out +=
       marks.inlineCode === true
-        ? renderCodeSpan(table ? text.replace(/\|/g, "\\|") : text)
+        ? renderCodeSpan(text)
         : escapeInline(text, {
             insideLabel: open.some((entry) => entry.name === "link"),
             hugged,
@@ -832,7 +843,7 @@ export function exportMarkdown(
     const marker = listItem ? listMarker(block, numbers[index] ?? null) : "";
     push(
       block.type === "table" && table !== undefined && table.length > 0
-        ? writeGfmTable(table.map((row) => row.map((cell) => renderInline(cell, true))), (cell) => cell)
+        ? writeGfmTable(table.map((row) => row.map((cell) => renderInline(cell, true))))
         : renderBlock(
         block,
         inline.length === 0 ? [{ text: block.text, marks: {} }] : inline,
@@ -1254,7 +1265,7 @@ function flanking(
 }
 
 /** Pass 1: `source` as text, code and delimiter tokens, with `marks` in scope. */
-function tokenizeInline(source: string, marks: InlineMarkSet): Token[] {
+function tokenizeInline(source: string, marks: InlineMarkSet, table = false): Token[] {
   const tokens: Token[] = [];
   let plain = "";
   const flush = (): void => {
@@ -1268,7 +1279,7 @@ function tokenizeInline(source: string, marks: InlineMarkSet): Token[] {
 
     if (char === "\\") {
       const next = source[i + 1];
-      if (next !== undefined && "\\`*_~[]".includes(next)) {
+      if (next !== undefined && ("\\`*_~[]".includes(next) || (table && "<>&!".includes(next)))) {
         plain += next;
         i += 2;
         continue;
@@ -1293,7 +1304,7 @@ function tokenizeInline(source: string, marks: InlineMarkSet): Token[] {
       const link = matchLink(source, i);
       if (link !== null) {
         flush();
-        tokens.push(...tokenizeInline(link.label, { ...marks, ...link.marks }));
+        tokens.push(...tokenizeInline(link.label, { ...marks, ...link.marks }, table));
         i = link.next;
         continue;
       }
@@ -1571,8 +1582,8 @@ function marksFor(
  * union of the marks covering it. Unclaimed delimiter characters come through as
  * the text they are.
  */
-function scanInline(source: string, out: InlineRun[]): void {
-  const tokens = tokenizeInline(source, {});
+function scanInline(source: string, out: InlineRun[], table = false): void {
+  const tokens = tokenizeInline(source, {}, table);
   const { spans, unclaimed } = matchNesting(tokens);
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
@@ -1583,6 +1594,13 @@ function scanInline(source: string, out: InlineRun[]): void {
         : token.char.repeat(unclaimed[i] ?? 0);
     pushInlineRun(out, text, marksFor(token, spans, i));
   }
+}
+
+/** The prose inline reader; table mode also undoes its escaped HTML punctuation. */
+export function parseInline(source: string, table = false): InlineRun[] {
+  const runs: InlineRun[] = [];
+  scanInline(source, runs, table);
+  return runs;
 }
 
 /**
