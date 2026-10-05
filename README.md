@@ -297,7 +297,7 @@ Merging source does not authorize upgrading that installation.
 The repository's `.codex/config.toml` and both ub-agents runtime definitions
 invoke `$HOME/.local/bin/uberblick-corpus-mcp`. `.mcp.json` is the maintainers'
 interactive Claude configuration and runs `ub` through mise; Claude workers
-override it. It selects a bundled,
+override it. The launcher selects a bundled,
 installed snapshot of the pre-switch operator revision
 `b574609cd5d8456a3e11ba10e3d6eeaaf1770d82`, with protocol 1 and the current
 corpus interfaces. The published Homebrew `0.2.0` client has protocol 1 but
