@@ -4,9 +4,9 @@
  *
  * A selection wholly inside one prose block gets the compact toolbar. Source
  * blocks and cross-block ranges keep the older Comment-only affordance because
- * the annotation API can clamp them honestly while inline marks cannot. The
- * component is mounted only beside a live editable editor; archived and
- * foreign-content panes never mount it.
+ * the annotation API can clamp them honestly while inline marks cannot.
+ * Decided records keep Comment without formatting or link controls. Archived
+ * and foreign-content panes never mount this component.
  */
 
 import { useEffect, useEffectEvent, useRef, useState } from "react";
@@ -117,6 +117,7 @@ function selectedProseTarget(editor: Editor, ydoc: Y.Doc): CommentTarget | null 
 }
 
 function toggleFlag(editor: Editor, ydoc: Y.Doc, name: FlagMark): void {
+  if (!editor.isEditable) return;
   if (selectedProseTarget(editor, ydoc) === null) return;
   const { from, to } = editor.state.selection;
   const type = editor.state.schema.marks[name];
@@ -137,6 +138,7 @@ function setExternalLink(
   ydoc: Y.Doc,
   href: string,
 ): LinkRefusal | null {
+  if (!editor.isEditable) return "invalid-url";
   if (selectedProseTarget(editor, ydoc) === null || !isExternalHref(href)) {
     return "invalid-url";
   }
@@ -195,6 +197,7 @@ function FormatButton({
 
 export function CommentComposer({
   editor,
+  contentReadOnly = false,
   ydoc,
   author,
   mentions,
@@ -202,6 +205,8 @@ export function CommentComposer({
   onCreated,
 }: {
   editor: Editor;
+  /** Comments remain writable while content is read-only. */
+  contentReadOnly?: boolean;
   ydoc: Y.Doc;
   /** The awareness name this client publishes — the comment's author. */
   author: string;
@@ -401,6 +406,7 @@ export function CommentComposer({
   if (draft === null) return null;
   const { target } = draft;
   const prose = !target.clamped && isProseBlockType(target.blockType);
+  const formatting = prose && !contentReadOnly;
   const blockRef = blockRefLabel(target.blockType, target.blockIndex);
 
   const close = (): void => {
@@ -439,7 +445,7 @@ export function CommentComposer({
       ref={floating}
       data-slot="selection-composer"
       data-input={touch ? "touch" : "fine"}
-      className={`ub-composer fixed top-0 left-0 z-5 flex overflow-auto text-card-foreground shadow-(--shadow-float) ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) border-l-2 border-l-brand bg-card px-[0.6rem] py-2 text-[0.85rem]" : mode === "toolbar" && !prose ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-[calc(var(--radius-sm)+2px)] border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}
+      className={`ub-composer fixed top-0 left-0 z-5 flex overflow-auto text-card-foreground shadow-(--shadow-float) ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) border-l-2 border-l-brand bg-card px-[0.6rem] py-2 text-[0.85rem]" : !formatting ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-[calc(var(--radius-sm)+2px)] border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}
     >
       {mode === "comment" ? (
         <>
@@ -459,7 +465,7 @@ export function CommentComposer({
             onCancel={close}
           />
         </>
-      ) : mode === "link" && prose ? (
+      ) : mode === "link" && formatting ? (
         <form
           className="flex min-w-0 flex-wrap items-center gap-[0.15rem]"
           aria-label="External link"
@@ -511,7 +517,7 @@ export function CommentComposer({
           </Button>
           {error !== null && <span role="alert" className="max-w-44 text-[0.68rem] leading-[1.2] text-destructive">{error}</span>}
         </form>
-      ) : prose ? (
+      ) : formatting ? (
         <div
           className="flex flex-wrap items-center gap-[0.15rem]"
           role="toolbar"
@@ -582,7 +588,7 @@ export function CommentComposer({
           onMouseDown={(event) => event.preventDefault()}
           onClick={openComment}
         >
-          Comment on {blockRef}
+          {prose ? "Comment" : `Comment on ${blockRef}`}
         </Button>
       )}
     </div>,
