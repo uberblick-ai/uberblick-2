@@ -32,6 +32,12 @@ import { INSTALL_HELP, INSTALL_OPTIONS } from "../src/install.js";
 import { OPEN_HELP, OPEN_OPTIONS } from "../src/open.js";
 import { WORKSPACE_JOIN_HELP, WORKSPACE_JOIN_OPTIONS } from "../src/remote.js";
 import { WORKSPACE_CREATE_HELP } from "../src/workspace-create.js";
+import {
+  WORKSPACE_MEMBER_HELP,
+  WORKSPACE_MEMBER_SUBCOMMAND_HELP,
+  WORKSPACE_MEMBER_ADD_OPTIONS,
+  WORKSPACE_MEMBER_LIST_OPTIONS,
+} from "../src/workspace-member.js";
 import { WORKSPACE_PROMOTE_HELP } from "../src/workspace-promote.js";
 import { STATUS_HELP, STATUS_OPTIONS } from "../src/status.js";
 import { UPDATE_HELP } from "../src/update.js";
@@ -104,13 +110,23 @@ const PATHS: Path[] = [
     argv: ["workspace"],
     help: WORKSPACE_HELP,
     options: {},
-    children: ["create", "promote", "join", "list", "use"],
+    children: ["create", "promote", "join", "member", "list", "use"],
   },
   { argv: ["workspace", "list"], help: WORKSPACE_LIST_HELP, options: WORKSPACE_LIST_OPTIONS },
   { argv: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: {} },
   { argv: ["workspace", "create"], help: WORKSPACE_CREATE_HELP, options: {} },
   { argv: ["workspace", "promote"], help: WORKSPACE_PROMOTE_HELP, options: {} },
   { argv: ["workspace", "join"], help: WORKSPACE_JOIN_HELP, options: WORKSPACE_JOIN_OPTIONS },
+  {
+    argv: ["workspace", "member"],
+    help: WORKSPACE_MEMBER_HELP,
+    options: {},
+    children: ["add", "list", "role", "remove"],
+  },
+  { argv: ["workspace", "member", "add"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.add, options: WORKSPACE_MEMBER_ADD_OPTIONS },
+  { argv: ["workspace", "member", "list"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.list, options: WORKSPACE_MEMBER_LIST_OPTIONS },
+  { argv: ["workspace", "member", "role"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.role, options: {} },
+  { argv: ["workspace", "member", "remove"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.remove, options: {} },
   { argv: ["auth"], help: AUTH_HELP, options: {}, children: ["login", "status", "logout"] },
   { argv: ["auth", "login"], help: AUTH_LOGIN_HELP, options: {} },
   { argv: ["auth", "status"], help: AUTH_STATUS_HELP, options: {} },
@@ -130,6 +146,7 @@ const DISPATCHERS = [
   { file: "cli.ts", group: [], variable: "command" },
   { file: "cli.ts", group: ["mcp"], variable: "subcommand" },
   { file: "workspace.ts", group: ["workspace"], variable: "sub" },
+  { file: "workspace-member.ts", group: ["workspace", "member"], variable: "command" },
   { file: "auth.ts", group: ["auth"], variable: "sub" },
 ];
 
