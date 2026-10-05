@@ -105,7 +105,10 @@ run = "fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web dev
 description = "Build the web client into packages/web/dist (no secret in the bundle; HUB_URL only as the fallback)"
 # `--if-missing warn`, not `error`: since #426 the build needs no secret at all,
 # so a contributor without the age key builds the same bundle the deployment
-# does.
+# does. `install` first, so a checkout whose node_modules predates the lockfile
+# (a second machine, a fresh pull) builds instead of failing in tsc on missing
+# modules; with nothing to change the frozen install is a quick no-op.
+depends = ["install"]
 run = "fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web build"
 
 [tasks.build-install-payload]
