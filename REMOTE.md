@@ -549,7 +549,12 @@ Cancellation abandons the attempt. The hub reads the authorized public account
 identity and discards GitHub's token; it accepts no supplied GitHub token or
 identity. Run `ub auth login [hub]` to complete this flow from a terminal; omit
 the hub to use this machine's bound hub. Approval works in a browser on any
-machine and the terminal completes without further input. `ub auth status [hub]`
+machine and the terminal completes without further input. In a local terminal,
+login opens GitHub's approval page once after displaying the hub, URL, code and
+approval guidance. Over SSH or with non-terminal stdout it only displays them.
+`BROWSER` names the opener command; `BROWSER=none` suppresses opening. An opener
+failure does not interrupt login, and login exits without waiting for the browser.
+`ub auth status [hub]`
 reads the locally recorded identity and workspace limits, without checking hub
 acceptance. `ub auth logout [hub]` removes only that local login; the device
 keeps hub access until revoked through device management. Credentials live in
