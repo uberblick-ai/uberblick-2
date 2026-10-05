@@ -35,8 +35,11 @@ or expired lease stops all writes under the existing coordination rules.
 
 The base must be `main`; otherwise follow the stacked-PR rule below. Create a
 private clone inside the run's supplied `scratch` directory, namespaced by its
-run id (for example `git clone --no-hardlinks REPO_URL SCRATCH/run-RUN-refresh`).
-Fetch the literal head and base into that clone and detach at OLD_SHA. Remove the
+run id, using the literal GitHub URL:
+`git clone https://github.com/uberblick-ai/uberblick-2.git SCRATCH/run-RUN-refresh`.
+Fetch the literal head and base into that clone and detach at OLD_SHA. Before
+pushing, require `git remote get-url origin` to identify this same GitHub
+repository; never push a refresh into a local operator checkout. Remove the
 clone only as best-effort housekeeping; a denied cleanup never prevents the
 handoff or changes its outcome. Scratch cleanup for this shared-checkout role
 belongs to the operator under README Records. Do not register a worktree in the
