@@ -102,6 +102,7 @@ import type {
   HeadingLevel,
   InlineMarkSet,
   InlineRun,
+  TableMapping,
 } from "@uberblick/schema";
 import { z } from "zod";
 import {
@@ -1005,12 +1006,21 @@ export function registerTools(
       return { text: title === "" ? docId : title, marks };
     });
 
-  /** Check every cell target before opening a room or starting a write. */
-  const validateTableTargets = (source: string): void => {
+  /** Check newly written targets; surviving cells may already hold unresolved links. */
+  const validateTableTargets = (source: string, previous?: string, mapping?: TableMapping): void => {
     const table = parseTableInput(source);
-    for (const cell of [table.header, ...table.rows].flat()) {
-      for (const run of parseTableCell(cell)) {
-        if (run.marks.docLink !== undefined) linkTitle(run.marks.docLink);
+    const oldTable = previous === undefined ? undefined : parseTableInput(previous);
+    const oldCells = oldTable === undefined ? [] : [oldTable.header, ...oldTable.rows];
+    for (const [row, cells] of [table.header, ...table.rows].entries()) {
+      for (const [column, cell] of cells.entries()) {
+        const oldRow = mapping === undefined ? row : mapping.rows[row];
+        const oldColumn = mapping === undefined ? column : mapping.columns[column];
+        const oldCell = oldRow == null || oldColumn == null ? undefined : oldCells[oldRow]?.[oldColumn];
+        if (oldCell === cell) continue;
+        const oldTargets = new Set(parseTableCell(oldCell ?? "").map(run => run.marks.docLink));
+        for (const run of parseTableCell(cell)) {
+          if (run.marks.docLink !== undefined && !oldTargets.has(run.marks.docLink)) linkTitle(run.marks.docLink);
+        }
       }
     }
   };
@@ -1755,8 +1765,9 @@ export function registerTools(
         "\n\n" +
         "`old_text` and `new_text` are the block text get_doc returns. For a table this is GFM: each must be " +
         "exactly one table, or `invalid_table` refuses the write. Alignment markers are accepted but not stored; " +
-        "inline markdown writes cell formatting and escaped punctuation stays literal. Document targets must be known " +
-        "to this replica's directory or `doclink_target_not_known_locally` refuses before writing. A table no-op " +
+        "inline markdown writes cell formatting and escaped punctuation stays literal. Newly added cell document targets must be known " +
+        "to this replica's directory or `doclink_target_not_known_locally` refuses before writing. Existing targets in " +
+        "surviving cells remain editable. A table no-op " +
         "keeps every stored character and mark, including those GFM cannot express. Table edits splice only changed " +
         "characters and mark keys in changed cells. Without `table_mapping`, " +
         "only a parsed no-op or exactly one positional cell change at unchanged dimensions is accepted. " +
@@ -1821,7 +1832,7 @@ export function registerTools(
       // Keep stale assertions ahead of content validation, as editBlock does.
       // Validate before its transaction: a Yjs write cannot be rolled back.
       if (current?.type === "table" && current.text === old_text &&
-          (rev === undefined || current.rev === rev)) validateTableTargets(new_text);
+          (rev === undefined || current.rev === rev)) validateTableTargets(new_text, old_text, table_mapping);
       editBlock(replica.doc, block_id, old_text, new_text, {
         ...(rev === undefined ? {} : { rev }),
         ...(table_mapping === undefined ? {} : { tableMapping: table_mapping }),

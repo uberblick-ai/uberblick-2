@@ -420,6 +420,8 @@ interface OpenMark {
   target: string;
   /** The spelling this mark was opened with; a closer must match it. */
   spelling: string;
+  /** Where the opener starts, so a link emptied by whitespace hugging can go. */
+  start: number;
 }
 
 /**
@@ -550,8 +552,15 @@ export function renderInline(source: readonly InlineRun[], table = false): strin
     for (let i = open.length - 1; i >= depth; i -= 1) {
       const entry = open[i];
       if (entry === undefined) continue;
-      out +=
-        entry.name === "link" ? `](${renderTarget(entry.target)})` : entry.spelling;
+      if (entry.name === "link" && out.length === entry.start + 1) {
+        // Hugging an outer emphasis can take the link's entire whitespace label
+        // out of it. An empty label is literal syntax to the reader, so drop only
+        // the link's opener and keep the held characters after the emphasis.
+        out = out.slice(0, entry.start);
+      } else {
+        out +=
+          entry.name === "link" ? `](${renderTarget(entry.target)})` : entry.spelling;
+      }
       if (i === lastEmphasis) out += held;
     }
     if (lastEmphasis === -1) out += held;
@@ -609,8 +618,9 @@ export function renderInline(source: readonly InlineRun[], table = false): strin
         text = text.slice(lead.length);
       }
       const spelling = name === "link" ? "[" : DELIMITER[name];
+      const start = out.length;
       out += spelling;
-      open.push({ name, target, spelling });
+      open.push({ name, target, spelling, start });
     }
 
 

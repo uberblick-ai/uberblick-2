@@ -183,6 +183,93 @@ describe("structured tables through MCP", () => {
     expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual(created.blocks);
   });
 
+  it.each(["no-op", "neighbour", "label", "format", "row", "column"])("keeps an existing unresolved cell link editable through a %s edit", async (change) => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", {
+      title: "Unresolved cell link", description: "An existing link need not be in this replica's directory.",
+      blocks: [{ type: "table", text: GFM }],
+    });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const id = created.blocks[0].id;
+    const alpha = cell(doc, id, 1, 0);
+    const unknown = randomUUID();
+    alpha.format(0, alpha.length, { docLink: { docId: unknown } });
+    const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
+    const rows = [["Name", "Value"], [`[Alpha](${unknown})`, "Beta"]];
+    let mapping;
+    if (change === "neighbour") rows[1]![1] = "Gamma";
+    if (change === "label") rows[1]![0] = `[Renamed](${unknown})`;
+    if (change === "format") rows[1]![0] = `[**Alpha**](${unknown})`;
+    if (change === "row") {
+      rows.splice(1, 0, ["New", "Row"]);
+      mapping = { rows: [0, null, 1], columns: [0, 1] };
+    }
+    if (change === "column") {
+      rows[0]!.unshift("New"); rows[1]!.unshift("Cell");
+      mapping = { rows: [0, 1], columns: [null, 0, 1] };
+    }
+    const state = Y.encodeStateAsUpdate(doc);
+    const writes = rig.instance.store.logSize();
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    const changed = await rig.ok("edit_block", {
+      uuid: created.uuid, block_id: id, old_text: read.text, new_text: writeGfmTable(rows), rev: read.rev,
+      ...(mapping === undefined ? {} : { table_mapping: mapping }),
+    });
+    expect(changed.block.text).toBe(writeGfmTable(rows));
+    const row = change === "row" ? 2 : 1;
+    const column = change === "column" ? 1 : 0;
+    expect(cell(doc, id, row, column)).toBe(alpha);
+    expect(cellRuns(doc, id, row, column)).toEqual([{
+      text: change === "label" ? "Renamed" : "Alpha",
+      marks: { docLink: unknown, ...(change === "format" ? { bold: true } : {}) },
+    }]);
+    if (change === "no-op") {
+      expect(updates).toBe(0);
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(state);
+      expect(rig.instance.store.logSize()).toBe(writes);
+    }
+  });
+
+  it.each(["neighbour", "target", "row", "column", "replacement"])("refuses an unknown target added through a %s edit beside an existing unresolved link", async (change) => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", {
+      title: "New unresolved links", description: "Only existing cell targets are exempt from validation.",
+      blocks: [{ type: "table", text: GFM }],
+    });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const id = created.blocks[0].id;
+    const unknown = randomUUID();
+    const alpha = cell(doc, id, 1, 0);
+    alpha.format(0, alpha.length, { docLink: { docId: unknown } });
+    const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
+    const rows = [["Name", "Value"], [`[Alpha](${unknown})`, "Beta"]];
+    let mapping;
+    if (change === "neighbour") rows[1]![1] = `[Copy](${unknown})`;
+    if (change === "target") rows[1]![0] = `[Alpha](${randomUUID()})`;
+    if (change === "row") {
+      rows.push([`[Copy](${unknown})`, "New"]);
+      mapping = { rows: [0, 1, null], columns: [0, 1] };
+    }
+    if (change === "column") {
+      rows[0]!.push("New"); rows[1]!.push(`[Copy](${unknown})`);
+      mapping = { rows: [0, 1], columns: [0, 1, null] };
+    }
+    if (change === "replacement") mapping = { rows: [0, null], columns: [0, 1] };
+    const state = Y.encodeStateAsUpdate(doc);
+    const writes = rig.instance.store.logSize();
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    const refused = await rig.call("edit_block", {
+      uuid: created.uuid, block_id: id, old_text: read.text, new_text: writeGfmTable(rows), rev: read.rev,
+      ...(mapping === undefined ? {} : { table_mapping: mapping }),
+    });
+    expect(refused.payload).toMatchObject({ error: "doclink_target_not_known_locally", applied: false, partial: false });
+    expect(updates).toBe(0);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(state);
+    expect(rig.instance.store.logSize()).toBe(writes);
+  });
+
   it("keeps existing literal syntax escaped and canonical insertion round trips stable while exact no-ops preserve marked edges", async () => {
     const rig = await localRig();
     const created = await rig.ok("create_doc", {
