@@ -161,7 +161,8 @@ The answer may come early. A person's answer on the issue or the PR that fixes
 the PR's intended shape — while shaping, to a question, or unprompted — covers
 that shape, its conforming fix-ups and synchronization with the base permitted
 by the role contracts, including the integrator's clean refresh under
-`integration.md`. A refresh never expands the approved shape or waives gates. A tier-3 trigger that fired only in implementation is outside it unless
+`integration.md`. A refresh never expands the approved shape or waives gates.
+A tier-3 trigger that fired only in implementation is outside it unless
 the answer named it, and so is later work that materially expands the design
 or scope: escalate again, naming the difference.
 

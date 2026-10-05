@@ -161,10 +161,16 @@ conflicts or other base synchronization through a non-rewriting merge.
   the protocol's Rounds rule requires a second round, or when a correction
   carries risk of its own; otherwise finish `integrate`.
 - **An integrator's `changes`:** fix what it names and finish `integrate`, except
-  a clean-base-refresh handoff: verify its old/base/new SHAs, adopt and validate
-  the new remote head, and finish `review` even if no new commit is needed.
-  This records current-head implementer provenance before fresh independent
-  review; old-head approvals and check evidence do not carry over.
+  feedback beginning `base-refresh old=OLD_SHA base=BASE_SHA new=NEW_SHA`:
+  independently repeat `integration.md`'s merge-base/range-diff/count preservation
+  check, adopt and validate the new remote head, then finish `review` even when
+  no additional commit or ordinary agent review would otherwise be owed. Include
+  `base-refresh-adopted old=OLD_SHA base=BASE_SHA new=NEW_SHA` in that summary only
+  when the pushed head still equals NEW_SHA. Record adoption/validation of an
+  integrator-produced refresh rather than claiming authorship of the rewrite;
+  original authorship and independent review requirements remain. A preservation
+  mismatch requires repair; when repair adds a commit, report that new candidate
+  instead. Old-head approvals and checks do not carry over.
 - **A person's answer:** act on it, and finish `review` when the answer asks
   for verification or the Rounds rule still requires a second round, otherwise
   `integrate`. When it leaves nothing to change, finish without a commit.

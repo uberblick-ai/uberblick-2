@@ -77,16 +77,18 @@ the documentation pass result. Link gate and reviewer evidence instead of
 restating it. A tier-1 record is the merge SHA, the gate links and one line per
 acceptance criterion; its documentation pass is one sentence, and no fresh
 corpus search is owed unless the issue says existing docs are stale. A
-`changes` record says only what failed and where. Do not add a wrapper comment
+`changes` record names what failed and where, or uses `integration.md`'s exact
+`base-refresh old=... base=... new=...` prefix for an automatic adoption handoff. Do not add a wrapper comment
 for a Copilot review that already exists or for a no-comment result.
 
 ## Outcomes
 
-`merged`, `changes` (naming the failed gate or the remark that needs a fix),
+`merged`, `changes` (naming a failed gate/remark or the exact base-refresh
+adoption handoff),
 `review` (naming what the review must cover), `needs-human` (naming the tier-3
 trigger or the question), or `defer` (a wait allowed by
-`.agents/roles/README.md`, such as pending CI; never solely for optional
-Copilot review).
+`.agents/roles/README.md`, such as pending CI or a concurrent PR-head update
+requiring a fresh assignment; never solely for optional Copilot review).
 
 Last, run the host housekeeping `integration.md` names for isolated-review
 artifacts. Retrospectives go to the integrator board, under the rule in

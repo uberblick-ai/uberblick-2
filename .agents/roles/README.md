@@ -205,7 +205,9 @@ and removes them. Push only that branch, or the branch of the earlier run's
 pull request you continue. The only rebase/force-push exception is an integrator's
 clean base refresh under `../protocols/integration.md`, with explicit
 expected-old-head lease and automatic implementer/review handoff. All other
-runs and branch writes remain non-rewriting. A detached checkout is pushed with `git push origin
+runs and branch writes remain non-rewriting. An integrator using the shared
+operator checkout creates only the private scratch clone `integration.md` specifies for a refresh and pushes the PR's assigned remote
+branch, never the operator checkout's branch. A detached checkout is pushed with `git push origin
 HEAD:refs/heads/<branch>`. Leave other runs' worktrees and
 processes alone.
 
