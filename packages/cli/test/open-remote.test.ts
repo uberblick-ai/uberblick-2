@@ -352,7 +352,12 @@ describe("ub open: sharing through the upstream hub", () => {
         try {
           await waitUntil("a fresh hub peer to read the same pending document", () => remote.isSynced);
           expect(getBlocks(remoteDoc)[0]?.text).toBe(currentBlock.text);
-          expect(instance.store.pendingRooms()).toEqual([]);
+          // The serving replica releases pending markers on its next quiet
+          // poll, so a room other than this document (the directory, say) can
+          // still be marked for a moment after the status reads caught up.
+          await waitUntil("the shared store to release every pending room", () =>
+            instance.store.pendingRooms().length === 0,
+          );
         } finally { remote.destroy(); remoteDoc.destroy(); }
 
         // The still-open local providers keep their original key after losing hub auth too.
