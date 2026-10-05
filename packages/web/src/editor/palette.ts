@@ -71,7 +71,7 @@
  */
 
 import * as Y from "yjs";
-import { BLOCK_TYPES, isBlockType, readsAsMark } from "@uberblick/schema";
+import { BLOCK_TYPES, isBlockType, readsAsMark, isSupportedTable } from "@uberblick/schema";
 import { uberblickSchema } from "./create-editor.js";
 
 /** The node names the editor may render. Identical to the schema's block types. */
@@ -187,6 +187,10 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
     const id = child.getAttribute("id") ?? null;
     if (!isBlockType(child.nodeName)) {
       foreign.push({ index, nodeName: child.nodeName, id, preview: previewOf(child) });
+      continue;
+    }
+    if (child.nodeName === "table") {
+      if (!isSupportedTable(child)) foreign.push({ index, nodeName: "#table-shape", id, preview: previewOf(child) });
       continue;
     }
     for (const inner of child.toArray()) {

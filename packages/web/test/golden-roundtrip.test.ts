@@ -88,7 +88,7 @@ function buildDocument(): Built {
   const quote = appendBlock(ydoc, { type: "quote", text: "as someone said" });
   const table = appendBlock(ydoc, {
     type: "table",
-    text: "| name | count |\n| --- | ---: |\n| alpha | 1 |",
+    text: "| name | count |\n| --- | --- |\n| alpha | 1 |",
   });
   const terminal = appendBlock(ydoc, {
     type: "terminal",
@@ -329,9 +329,9 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     expect(blocks[3]?.text).toBe("graph TD;\n  A-->B;");
     expect(blocks[4]).toMatchObject({ list: "ordered", indent: 2, text: "one point" });
     expect(blocks[5]?.text).toBe("as someone said");
-    // The table's newlines are its rows: a source block keeps them exactly.
+    // Table text is the canonical GFM projection, without alignment.
     expect(blocks[6]?.text).toBe(
-      "| name | count |\n| --- | ---: |\n| alpha | 1 |",
+      "| name | count |\n| --- | --- |\n| alpha | 1 |",
     );
     // The transcript's newlines are its steps, and survive the same way.
     expect(blocks[7]?.text).toBe("$ ub init\nworkspace ready");

@@ -29,9 +29,9 @@ export function isBlockType(value: string): value is BlockType {
  * The block types whose text is prose: they carry the inline mark set, and the
  * markdown reader resolves inline syntax inside them.
  *
- * The complement is source text — `code`, `mermaid`, `table` and `terminal` —
- * which carries only the `comment` anchor. Everything that has to tell the two
- * apart asks here, so the distinction is stated once.
+ * `code`, `mermaid` and `terminal` carry source text and only `comment`.
+ * Tables carry structured cells with their own narrower inline mark set; they
+ * do not expose prose-level offsets or document links.
  */
 export const PROSE_BLOCK_TYPES = [
   "paragraph",
@@ -129,8 +129,8 @@ export interface Block {
   id: string;
   type: BlockType;
   /**
-   * The block's plain-text source, marks excluded. Rich blocks render this; they
-   * do not replace it. Inline marks are read separately with `getBlockInline`.
+   * Plain text, marks excluded. For a table this is canonical GFM projected
+   * from its cells. Prose inline marks are read with `getBlockInline`.
    */
   text: string;
   /**
@@ -163,8 +163,8 @@ export interface BlockInput {
    * {@link PROSE_BLOCK_TYPES}. When present it *replaces* `text`, so a caller
    * setting both must keep them consistent; `importMarkdown` does.
    *
-   * `code`, `mermaid`, `table` and `terminal` hold source, so this is ignored
-   * for them.
+   * Ignored for source blocks and tables. A table input's `text` is GFM;
+   * markdown inside a cell stays literal rather than becoming inline marks.
    */
   inline?: InlineRun[];
 }

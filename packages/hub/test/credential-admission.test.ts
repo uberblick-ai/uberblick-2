@@ -345,16 +345,26 @@ describe("credential admission on a composed server", () => {
     expect(logText).not.toContain("client-asserted-person-and-device");
   });
 
-  it("keeps protocol skew distinct from the generic credential refusal", async () => {
+  // 0.2.9 shipped protocol 2; keep it fixed so another independent bump
+  // cannot collapse the table cutover into an already shipped version.
+  it.each([2, SYNC_PROTOCOL_VERSION + 1])("refuses protocol %s before credential room writes", async (protocolVersion) => {
     const rig = await startServer();
     const laptop = issue(rig.registry, "laptop");
+    const room = testRoom();
+    const document = new Y.Doc();
+    document.getText(TEXT_KEY).insert(0, "queued before admission");
     const client = connect({
       port: rig.port,
-      room: testRoom(),
+      room,
       token: await credentialToken(laptop),
-      protocolVersion: SYNC_PROTOCOL_VERSION + 1,
+      protocolVersion,
+      document,
     });
     expect(await waitFor("the protocol refusal", client.denied)).toBe(`protocol-mismatch:${SYNC_PROTOCOL_VERSION}`);
+    expect(client.authenticated).not.toHaveBeenCalled();
+    expect(client.provider.synced).toBe(false);
+    expect(client.provider.hasUnsyncedChanges).toBe(true);
+    expect(rig.hocuspocus.documents.has(room)).toBe(false);
     expect(rig.logs.at(-1)).toMatchObject({ cause: "protocol-mismatch" });
   });
 

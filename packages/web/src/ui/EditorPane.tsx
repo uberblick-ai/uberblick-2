@@ -662,6 +662,7 @@ const BoundEditor = memo(function BoundEditor({
   const host = useRef<HTMLDivElement | null>(null);
   const frame = useRef<HTMLDivElement | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [bindingEpoch, setBindingEpoch] = useState(0);
   const { writable } = useRoomStatus(connection);
   // The only names anyone can mention are the peers publishing awareness right
   // now — there is no registry, and a mention is plain text.
@@ -675,6 +676,7 @@ const BoundEditor = memo(function BoundEditor({
    */
   const readArchived = useEffectEvent(() => archived);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: The epoch rebinds after the synchronous guard destroys an editor that normalization immediately made bindable again.
   useEffect(() => {
     const element = host.current;
     if (element === null) return;
@@ -688,6 +690,11 @@ const BoundEditor = memo(function BoundEditor({
       awareness: connection.provider.awareness,
       editable: !readArchived() && connection.status.writable,
       canWrite: () => connection.status.writable,
+      canNormalize: () => connection.status.writable && connection.status.synced,
+      onUnbind: () => {
+        setEditor(null);
+        setBindingEpoch((epoch) => epoch + 1);
+      },
       docLinks,
     });
     // A comment highlight is a plain span ProseMirror renders from the `comment`
@@ -794,7 +801,7 @@ const BoundEditor = memo(function BoundEditor({
       setEditor(null);
       binding.destroy();
     };
-  }, [connection, docLinks, onSelectThread]);
+  }, [connection, docLinks, onSelectThread, bindingEpoch]);
 
   /**
    * Read-only is a *setting* on the live editor, never a reason to rebind.

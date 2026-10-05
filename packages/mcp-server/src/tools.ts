@@ -70,6 +70,7 @@ import {
   isProseBlockType,
   listAnnotations,
   listDirectory,
+  parseTableInput,
   readDirectoryTags,
   readDecisions,
   readDocumentTags,
@@ -417,8 +418,8 @@ const INLINE_RUNS =
   "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: " +
   "`[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) " +
   "and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the " +
-  "run texts joined together are the block's text. Source blocks — code, mermaid, table, terminal — hold source " +
-  "text and ignore it.\n\n" +
+  "run texts joined together are the block's text. Code, mermaid and terminal hold source text and ignore it; " +
+  "tables also ignore it and take exactly one GFM table through `text`.\n\n" +
   "A `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", " +
   "marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this " +
   "replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes " +
@@ -509,7 +510,9 @@ function inlineMarks(
 
 const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
-  text: z.string().optional(),
+  text: z.string().optional().describe(
+    "Block text. For a table, exactly one GFM table: alignment markers are accepted but not stored, and inline markdown stays literal cell text.",
+  ),
   level: z
     .number()
     .int()
@@ -1012,11 +1015,16 @@ export function registerTools(
    */
   const blockInputFor = (
     block: z.infer<typeof blockInputSchema>,
-  ): BlockInput =>
-    toBlockInput(
+  ): BlockInput => {
+    // Validate every seed before create_doc opens its first room. Schema also
+    // checks at its write boundary, but a bad later seed must not leave an
+    // earlier block or document metadata behind.
+    if (block.type === "table") parseTableInput(block.text ?? "");
+    return toBlockInput(
       block,
       isProseBlockType(block.type) ? resolveInline(block.inline) : undefined,
     );
+  };
 
   /**
    * A document's blocks as a read answers with them: every block exactly as it
@@ -1496,7 +1504,8 @@ export function registerTools(
         DECISION_AUTHORITY +
         "\n\n" +
         "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
-        "`text` is plain and mark-free, as it has always been. A block that carries inline references to other " +
+        "`text` is mark-free. For a table it is canonical GFM built from its cells, with pipes escaped and every " +
+        "row padded to the widest row; for other blocks it is plain text. A block that carries inline references to other " +
         "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
         "link_range speak in, and absent where there are none. Only prose blocks can hold them.\n\n" +
         "Reading eligible guidance with get_doc counts toward this process’s briefing. The last required read " +
@@ -1737,8 +1746,27 @@ export function registerTools(
         "so a concurrent human edit elsewhere in the block survives.\n\n" +
         MARKS_ANCHOR_TO_POSITIONS +
         "\n\n" +
-        "Plain text, both ways: `old_text` and `new_text` are the block's text with no markdown in it, the text " +
-        "get_doc returns. Spliced-in text inherits the formatting of the character to its left, and `rev` " +
+        "`old_text` and `new_text` are the block text get_doc returns. For a table this is GFM: each must be " +
+        "exactly one table, or `invalid_table` refuses the write. Alignment markers are accepted but not stored; " +
+        "inline markdown stays literal cell text. Table edits splice only changed cells. Without `table_mapping`, " +
+        "only a parsed no-op or exactly one positional cell change at unchanged dimensions is accepted. " +
+        "Structural and multi-cell edits require `table_mapping`, including an identity mapping for a positional batch; " +
+        "otherwise `table_mapping_required` refuses before any mutation.\n\n" +
+        "`table_mapping` applies only to tables and has both `rows` and `columns` arrays. Each new position names " +
+        "its surviving old zero-based GFM projection index, or null for a new row or column; omitted old indices " +
+        "are deleted. Rows include the header, and `rows[0]` must be 0. Array lengths must match the new table; " +
+        "non-null indices must be safe non-negative integers in old bounds, unique and strictly increasing. " +
+        "Body rows cannot reuse the header. If a retained ragged row selects only virtual empty padding, " +
+        "one fresh empty cell keeps that row editable; other padding stays virtual. Reordering is not supported. " +
+        "Untouched surviving shared cells keep their identity, " +
+        "formatting and delayed collaborator edits; null entries create fresh shared cells. An explicit nonidentity " +
+        "mapping executes even when the GFM text is unchanged. A semantically invalid mapping returns " +
+        "`invalid_table_mapping`; both mapping refusals have manual recovery and `applied: false`, " +
+        "`partial: false`, `synced: false`. Stale assertions retain precedence and invalid GFM remains `invalid_table`. " +
+        "Malformed input shapes are refused by the MCP input schema before the handler. Previously accepted " +
+        "structural and multi-cell table calls must now supply mappings as part of the coordinated table cutover. " +
+        "Other blocks use plain text with no markdown and reject `table_mapping`. " +
+        "Spliced-in text inherits the formatting of the character to its left, and `rev` " +
         "ignores marks, so formatting a range never makes a prepared edit stale.\n\n" +
         "Pass `old_text` (and the `rev` from get_doc) to assert what you are editing. A mismatched asserted rev " +
         "refuses with `stale_block`. When the rev is current but `old_text` is wrong, the refusal is " +
@@ -1765,14 +1793,21 @@ export function registerTools(
           .min(1)
           .optional()
           .describe("The block's `rev` from get_doc. Asserted alongside old_text."),
+        table_mapping: z.object({
+          rows: z.array(z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable())
+            .describe("For each new row, its old projection index or null; includes header row 0."),
+          columns: z.array(z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable())
+            .describe("For each new column, its old projection index or null."),
+        }).strict().optional().describe("Explicit surviving table positions. Both arrays are required; omitted old positions are deleted."),
       }),
     },
-    guarded("edit_block", async ({ uuid, block_id, old_text, new_text, rev }) => {
+    guarded("edit_block", async ({ uuid, block_id, old_text, new_text, rev, table_mapping }) => {
       await replicas.settle();
       briefing.require();
       const replica = requireWritableDoc(uuid, true);
       editBlock(replica.doc, block_id, old_text, new_text, {
         ...(rev === undefined ? {} : { rev }),
+        ...(table_mapping === undefined ? {} : { tableMapping: table_mapping }),
       });
       replicas.publishCursor(replica, block_id, new_text.length);
       return json({
@@ -1790,8 +1825,10 @@ export function registerTools(
       description:
         "Insert one block after `after_block_id`, or at the top of the document when it is omitted. " +
         `Block types are the closed set the schema owns — ${BLOCK_TYPES.join(", ")} — which is the editor's ` +
-        "whole palette too. Nothing nests: a list is a run of adjacent list-item blocks, a table's text is " +
-        "GFM table source, and a terminal's text is a transcript in which a line beginning `$ ` is a command " +
+        "whole palette too. A list is a run of adjacent list-item blocks. A table's `text` must be exactly one " +
+        "GFM table, or `invalid_table` refuses the write; its rows and cells are stored structurally. Alignment " +
+        "markers are accepted but not stored, and inline markdown stays literal cell text. A terminal's text is " +
+        "a transcript in which a line beginning `$ ` is a command " +
         "typed out and every other line is output shown whole — the format has no escape, so an output line " +
         "that itself begins `$ ` cannot be written. Every block has one text an agent can edit.\n\n" +
         DECIDED_IS_READ_ONLY +
@@ -2358,6 +2395,9 @@ export function registerTools(
       description:
         "Open an annotation thread over a range of a block's text, or — with `thread_id` — add a comment to an existing thread and optionally resolve or reopen it. " +
         "The range is anchored by a formatting mark on the text itself, so it survives edits, splits and re-types.\n\n" +
+        "New threads on table blocks are temporarily unavailable: `table_comments_unavailable` refuses before " +
+        "anything is written. Existing table threads, including orphaned legacy threads, remain readable and " +
+        "accept replies, resolution and reopening with `thread_id`.\n\n" +
         ANNOTATE_SHAPES +
         "\n\n" +
         ARCHIVED_IS_READ_ONLY +
@@ -2499,7 +2539,8 @@ export function registerTools(
     {
       title: "Export a document as markdown",
       description:
-        "Render the document as markdown, including fenced code, mermaid and terminal blocks. " +
+        "Render the document as markdown, including fenced code, mermaid and terminal blocks. Tables export as " +
+        "GFM padded to their widest row, with cell formatting as inline markdown and literal cell punctuation escaped. " +
         "Export only: markdown is never the storage format, and there is no import tool." +
         failureContract("export_markdown"),
       inputSchema: strictInput({

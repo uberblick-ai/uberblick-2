@@ -128,7 +128,7 @@ describe("setBlockType", () => {
     expect(getBlock(doc, item)).toMatchObject({ list: "bullet", indent: 0 });
   });
 
-  it("re-types every pair of block types without touching the text", () => {
+  it("re-types every pair of flat text block types without touching the text", () => {
     const types = [
       "paragraph",
       "heading",
@@ -136,7 +136,6 @@ describe("setBlockType", () => {
       "mermaid",
       "list-item",
       "quote",
-      "table",
       "terminal",
     ] as const;
     for (const from of types) {

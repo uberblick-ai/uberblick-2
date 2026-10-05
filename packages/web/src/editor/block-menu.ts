@@ -62,6 +62,7 @@
  * gone (see {@link findBlockById}).
  */
 
+import { tableFromRows } from "./table.js";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
@@ -442,7 +443,14 @@ export function convertBlockAtTrigger(
   const tr = editor.state.tr;
   const contentStart = found.pos + 1;
   tr.delete(contentStart, contentStart + found.node.content.size);
-  retypeBlockInTransaction(tr, found.pos, entry.type, entry.attrs);
+  if (entry.type === "table") {
+    const emptied = tr.doc.nodeAt(found.pos);
+    if (emptied === null) return false;
+    tr.replaceWith(found.pos, found.pos + emptied.nodeSize,
+      tableFromRows(editor.state.schema, [["", "", ""], ["", "", ""], ["", "", ""]], live.blockId));
+  } else {
+    retypeBlockInTransaction(tr, found.pos, entry.type, entry.attrs);
+  }
   tr.setSelection(TextSelection.near(tr.doc.resolve(contentStart)));
 
   editor.view.dispatch(tr);
@@ -470,7 +478,9 @@ export function insertBlockBelow(
 
   const nodeType = state.schema.nodes[entry.type];
   if (nodeType === undefined) return false;
-  const fresh = nodeType.createAndFill(attrsForNewBlock(entry));
+  const fresh = entry.type === "table"
+    ? tableFromRows(state.schema, [["", "", ""], ["", "", ""], ["", "", ""]], null)
+    : nodeType.createAndFill(attrsForNewBlock(entry));
   if (fresh === null) return false;
 
   endUndoCapture(state);
