@@ -1,4 +1,5 @@
 [mcp_servers.uberblick]
-command = "sh"
-args = ["-c", 'exec "$HOME/.local/bin/uberblick-corpus-mcp"']
+command = "mise"
+args = ["exec", "--", "ub", "mcp", "serve"]
+env = { UB_HUB_URL = "wss://hub.uberblick.ai/ws", UB_WORKSPACE_ID = "uberblick-722007fa-8921-45ee-a580-e20311030fef" }
 default_tools_approval_mode = "approve"
