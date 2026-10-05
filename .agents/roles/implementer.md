@@ -149,7 +149,9 @@ issue preparer; its role permits the successor write.
 
 ## Revising a pull request
 
-Continue the pull request's remote head; never rebase or force-push it.
+Continue the pull request's current remote head, including a clean refresh
+handed off by the integrator. Implementers never rebase or force-push it; repair
+conflicts or other base synchronization through a non-rewriting merge.
 
 - **Review findings:** correct clearly correct, in-scope P1 and P2 findings in
   one batch, plus P3s only when local and inexpensive, and answer the rest with
@@ -158,7 +160,11 @@ Continue the pull request's remote head; never rebase or force-push it.
   once, as `corrected in <sha>` or `answered: <evidence>`. Finish `review` when
   the protocol's Rounds rule requires a second round, or when a correction
   carries risk of its own; otherwise finish `integrate`.
-- **An integrator's `changes`:** fix what it names and finish `integrate`.
+- **An integrator's `changes`:** fix what it names and finish `integrate`, except
+  a clean-base-refresh handoff: verify its old/base/new SHAs, adopt and validate
+  the new remote head, and finish `review` even if no new commit is needed.
+  This records current-head implementer provenance before fresh independent
+  review; old-head approvals and check evidence do not carry over.
 - **A person's answer:** act on it, and finish `review` when the answer asks
   for verification or the Rounds rule still requires a second round, otherwise
   `integrate`. When it leaves nothing to change, finish without a commit.

@@ -12,6 +12,9 @@ A pull request a reviewer approved or an implementer sent to integration.
 
 ## Task
 
+First attempt the clean base refresh in `.agents/protocols/integration.md`; a
+pushed refresh ends this run with `changes` for adoption and fresh review.
+
 Run every gate `.agents/protocols/delivery-policy.md` requires at the SHA the
 merge will use, following `.agents/protocols/integration.md`: the immutable
 review, the merged-tree gate when the base moved, the acceptance criteria, the
@@ -53,8 +56,10 @@ or changed block passes the corpus test at the top of the Editorial contract.
 
 ## Boundaries
 
-No implementation and no fix-up commits: a failed gate goes back to the
-implementer with `changes`, naming what failed. Never merge a diff this
+No implementation and no fix-up commits beyond the clean base refresh explicitly
+allowed by `integration.md`; that refresh always goes back to the implementer
+with `changes` before fresh review. A failed gate also goes back with `changes`,
+naming what failed. Never merge a diff this
 session authored, past a gate the policy leaves unmet, or against the policy
 where your judgment disagrees with it. Settling review findings is the
 reviews' job, and a product question is an escalation.

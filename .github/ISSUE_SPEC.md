@@ -77,9 +77,10 @@ Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
   implementer marks its issue blocked by the issue that PR closes and finishes
   `defer`. A bounded predicted overlap in purely additive aggregation surfaces,
   such as barrel exports or files collecting independent error types, is
-  reconciled mechanically: after the earlier merge, the later branch
-  synchronizes through a non-rewriting merge only if mergeability requires it,
-  and every exact-head gate runs again.
+  reconciled mechanically: after the earlier merge, the implementer uses a
+  non-rewriting merge when needed; on integration pickup the integrator attempts
+  the clean base refresh under `.agents/protocols/integration.md`. Every owed
+  exact-head review and gate runs again after either update.
 - This includes `schema`: its keystone risk is paid by exact-head review and
   gates after upstream reconciliation, not by locking unrelated files or
   packages.

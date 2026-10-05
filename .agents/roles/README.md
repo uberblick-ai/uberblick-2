@@ -202,8 +202,10 @@ inspection, validation and GitHub bookkeeping continue on their own inputs.
 
 Work in the directory and on the branch the run was given; ub-agents creates
 and removes them. Push only that branch, or the branch of the earlier run's
-pull request you continue, and never rebase or force-push a pull request's
-head. A detached checkout is pushed with `git push origin
+pull request you continue. The only rebase/force-push exception is an integrator's
+clean base refresh under `../protocols/integration.md`, with explicit
+expected-old-head lease and automatic implementer/review handoff. All other
+runs and branch writes remain non-rewriting. A detached checkout is pushed with `git push origin
 HEAD:refs/heads/<branch>`. Leave other runs' worktrees and
 processes alone.
 

@@ -4,6 +4,56 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
 `delivery-policy.md` owns which gates exist and when each applies, and
 `review-protocol.md` owns findings and rounds. This file owns how the gates run.
 
+## Refresh the PR before final gates
+
+On every integration pickup, fetch `origin/main` and the PR's remote head.
+Confirm the base is `main`, the PR is in this repository, and the remote head
+matches the assignment's `candidate_sha`. If main is already an ancestor of
+that head, continue. Otherwise proactively attempt a clean rebase onto that
+fetched main, without another human decision. Refreshing the trusted CI runner
+or testing a prospective merged tree alone does not update the PR.
+
+This is the integrator's narrow branch-writing exception. Use a private scratch
+checkout, never the shared operator checkout or another run's worktree. Before
+writing the branch, reread coordination leases and establish that your assignment
+still owns the branch: your lease is the unexpired winner, and no other live or
+cleanup-unconfirmed issue/PR lease owns it. Forks, unknown ownership and an
+integrator configured with `different-runtime-from` are not eligible for this
+push; send maintenance to the implementer with `changes` instead. The latter
+configuration rejects success after its assigned head moves.
+
+Only rebase a linear PR-only commit sequence, disabling autosquash, rerere and
+updates to other refs and stopping on empty results, for example:
+`git -c rerere.enabled=false rebase --no-autosquash --no-update-refs
+--reapply-cherry-picks --empty=stop BASE_SHA`. Inspect `git range-diff` for the
+old/new ranges and the resulting diff against main. Abort on conflicts, empty
+or dropped commits, or substantive differences; never resolve conflicts, edit
+implementation or flatten merge commits in integration. Route these cases and
+unsupported topology to the implementer with `changes`, naming the exact task.
+
+Immediately recheck ownership and the remote head, then push only that branch
+with `git push --force-with-lease=refs/heads/BRANCH:OLD_SHA origin
+HEAD:refs/heads/BRANCH`, substituting literal branch and full SHA values. If the
+lease rejects, never change its expected SHA or use a blind force push: finish
+`defer` with the concurrent-update evidence so a new assignment observes it.
+
+After pushing, verify the remote head equals the new local SHA; if it moved
+again, finish `defer` with the race evidence. Otherwise finish
+`changes`, recording old head, fetched main and new head and saying
+`Clean base refresh; adopt and validate NEW_SHA, then finish review`.
+The launcher records the new head in the outcome; the assigned SHA stays unchanged.
+This automatic handoff lets the implementer validate and re-handoff the exact
+updated candidate with current-head runtime provenance before independent review.
+Do not merge, certify the rebased diff or reuse any old-head review, test,
+typecheck or CI evidence in this run. Every owed gate runs again at the new head;
+a later integration run uses its own assigned SHA and retains the merged-tree
+gate for any further main advance. A branch refresh grants no merge authority.
+
+If an ownership or authority gate cannot be established, finish `defer` with the
+evidence rather than writing. Human holds and product/merge approvals remain in
+force. This runs on assigned integration work; it creates no periodic scan or
+automatic resumption of `needs-human` items.
+
 ## Gate mechanics
 
 - Resolve and record the PR's immutable `headRefOid`.
