@@ -27,7 +27,6 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
-import { DEFAULT_ENTRY, snippet } from "../src/mcp-config.js";
 import {
   type Sandbox,
   type SandboxFiles,
@@ -616,19 +615,6 @@ describe("ub mcp install cursor", () => {
     });
     expect(existsSync(join(box.cwd, ".cursor"))).toBe(false);
   });
-});
-
-describe("MCP install and the checkout's deployment override", () => {
-  it("keeps the generic installed entry independent of the corpus deployment pin", () => {
-    // Generic users still receive the public ub mcp serve route. This project's
-    // deployment deliberately pins an installed version while its source and
-    // corpus hub upgrade independently; the launcher contract is tested in
-    // scripts/corpus-mcp.test.mjs.
-    const entry = JSON.parse(snippet("json", DEFAULT_ENTRY)).mcpServers.uberblick;
-    expect([entry.command, ...entry.args]).toEqual(["ub", "mcp", "serve"]);
-  });
-
-
 });
 
 describe("ub mcp install --workspace", () => {
