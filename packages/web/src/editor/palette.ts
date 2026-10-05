@@ -346,11 +346,12 @@ export function findLinkConflicts(fragment: Y.XmlFragment): LinkConflict[] {
  * `repairable` is what the conflict sentence points at. An archived document
  * takes no write at all, so it is offered no repair control — telling its
  * reader to choose below, where nothing is, would be the one thing worse than
- * the old advice to go and use the MCP tools.
+ * the old advice to go and use the MCP tools. A decided record cannot regain
+ * editing through repair or restore: a content change requires a new record.
  */
 export function describeForeignBlocks(
   foreign: ForeignBlock[],
-  options: { repairable?: boolean } = {},
+  options: { repairable?: boolean; decided?: boolean } = {},
 ): string {
   if (foreign.length === 0) return "";
   const blocks = (count: number): string =>
@@ -368,7 +369,9 @@ export function describeForeignBlocks(
   }
   if (conflicting.length > 0) {
     sentences.push(
-      options.repairable === false
+      options.decided
+        ? `${blocks(conflicting.length)} with conflicting external and document links on one range — both are retained; a change to a decided record needs a new record.`
+        : options.repairable === false
         ? `${blocks(conflicting.length)} with conflicting external and document links on one range — both are retained; restore this document to choose which link each range keeps.`
         : `${blocks(conflicting.length)} with conflicting external and document links on one range — both are retained; choose below which link each range keeps, and editing resumes.`,
     );
