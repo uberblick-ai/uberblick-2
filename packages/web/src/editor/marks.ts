@@ -43,12 +43,13 @@
  * name is its Yjs key, so the schema package uses the same name — see
  * `INLINE_MARKS` there.
  *
- * Input rules take `(?:^|\s)` before the opening delimiter rather than
- * `[^delimiter]`: `markInputRule` deletes from the start of the match up to the
- * captured text, skipping leading *whitespace* only, so a non-space prefix in the
- * pattern is eaten along with the delimiter. Underscore forms (`__b__`, `_i_`)
- * are here because people type them: markdown export always writes asterisks,
- * while the markdown *reader* understands both — a `_` delimits under
+ * Input and paste rules open at the start of text, after whitespace or after
+ * `(`, `[`, `{`, `"` or `'`, but never inside a word. Lookbehind keeps that
+ * prefix outside the match: `markInputRule` and `markPasteRule` delete from the
+ * match's start to the captured text, skipping only leading whitespace, so a
+ * punctuation prefix inside the match would be eaten with the delimiter.
+ * Underscore forms (`__b__`, `_i_`) work when typed or pasted: export writes
+ * asterisks, while the markdown *reader* understands both — a `_` delimits under
  * CommonMark's flanking rules, which is what keeps `snake_case` a word.
  */
 
@@ -73,16 +74,18 @@ import {
  */
 export const PROSE_MARKS: string = [...INLINE_MARKS, COMMENT_MARK].join(" ");
 
-const BOLD_INPUT = /(?:^|\s)(\*\*(?!\s+\*\*)([^*]+)\*\*)$/;
-const BOLD_UNDERSCORE_INPUT = /(?:^|\s)(__(?!\s+__)([^_]+)__)$/;
-const BOLD_PASTE = /(?:^|\s)(\*\*(?!\s+\*\*)([^*]+)\*\*)/g;
-const ITALIC_INPUT = /(?:^|\s)(\*(?!\s+\*)([^*]+)\*)$/;
-const ITALIC_UNDERSCORE_INPUT = /(?:^|\s)(_(?!\s+_)([^_]+)_)$/;
-const ITALIC_PASTE = /(?:^|\s)(\*(?!\s+\*)([^*]+)\*)/g;
-const STRIKE_INPUT = /(?:^|\s)(~~(?!\s+~~)([^~]+)~~)$/;
-const STRIKE_PASTE = /(?:^|\s)(~~(?!\s+~~)([^~]+)~~)/g;
-const CODE_INPUT = /(?:^|\s)(`([^`]+)`)$/;
-const CODE_PASTE = /(?:^|\s)(`([^`]+)`)/g;
+const BOLD_INPUT = /(?<=^|[\s([{"'])(\*\*(?!\s+\*\*)([^*]+)\*\*)$/;
+const BOLD_UNDERSCORE_INPUT = /(?<=^|[\s([{"'])(__(?!\s+__)([^_]+)__)$/;
+const BOLD_PASTE = /(?<=^|[\s([{"'])(\*\*(?!\s+\*\*)([^*]+)\*\*)/g;
+const BOLD_UNDERSCORE_PASTE = /(?<=^|[\s([{"'])(__(?!\s+__)([^_]+)__)/g;
+const ITALIC_INPUT = /(?<=^|[\s([{"'])(\*(?!\s+\*)([^*]+)\*)$/;
+const ITALIC_UNDERSCORE_INPUT = /(?<=^|[\s([{"'])(_(?!\s+_)([^_]+)_)$/;
+const ITALIC_PASTE = /(?<=^|[\s([{"'])(\*(?!\s+\*)([^*]+)\*)/g;
+const ITALIC_UNDERSCORE_PASTE = /(?<=^|[\s([{"'])(_(?!\s+_)([^_]+)_)/g;
+const STRIKE_INPUT = /(?<=^|[\s([{"'])(~~(?!\s+~~)([^~]+)~~)$/;
+const STRIKE_PASTE = /(?<=^|[\s([{"'])(~~(?!\s+~~)([^~]+)~~)/g;
+const CODE_INPUT = /(?<=^|[\s([{"'])(`([^`]+)`)$/;
+const CODE_PASTE = /(?<=^|[\s([{"'])(`([^`]+)`)/g;
 const LINK_INPUT = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/;
 const LINK_PASTE = /https?:\/\/[^\s<>"]+/g;
 
@@ -107,7 +110,10 @@ export const Bold = Mark.create({
     ];
   },
   addPasteRules() {
-    return [markPasteRule({ find: BOLD_PASTE, type: this.type })];
+    return [
+      markPasteRule({ find: BOLD_PASTE, type: this.type }),
+      markPasteRule({ find: BOLD_UNDERSCORE_PASTE, type: this.type }),
+    ];
   },
 });
 
@@ -132,7 +138,10 @@ export const Italic = Mark.create({
     ];
   },
   addPasteRules() {
-    return [markPasteRule({ find: ITALIC_PASTE, type: this.type })];
+    return [
+      markPasteRule({ find: ITALIC_PASTE, type: this.type }),
+      markPasteRule({ find: ITALIC_UNDERSCORE_PASTE, type: this.type }),
+    ];
   },
 });
 
