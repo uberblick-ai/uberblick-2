@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline/promises";
-import { parseArgs } from "node:util";
+import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import { isGithubAccountId, isGithubUsername } from "@uberblick/hub";
 import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/hub/device-login";
 import { authenticationOrigin } from "@uberblick/hub/remote-url";
@@ -10,25 +10,25 @@ import { requireBinding, resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 
-const MEMBER_HELP = `usage: ub workspace member <command>
+export const WORKSPACE_MEMBER_HELP = `usage: ub workspace member <command>
 
 Manage access to the project's bound hub workspace as a workspace admin.
 Uses this machine's stored device login; never starts a GitHub sign-in.
 
-commands:
-  add <github-handle> [--role admin|member]   confirm a resolved account and grant access
-  list [--json]                            list members, account IDs and roles
-  role <member> <admin|member>              change a member's role
-  remove <member>                          end a member's access on every device
-
 <member> is a GitHub login (case-insensitive) or permanent account ID.
 The project binding and UB_WORKSPACE_ID/UB_HUB_URL select the target.
+
+commands:
+  add <github-handle> [--role admin|member]  confirm a resolved account and grant access
+  list [--json]                              list members, account IDs and roles
+  role <member> <admin|member>               change a member's role
+  remove <member>                            end a member's access on every device
 
 options:
   -h, --help        show this help
 `;
 
-const HELP: Record<string, string> = {
+export const WORKSPACE_MEMBER_SUBCOMMAND_HELP = {
   add: `usage: ub workspace member add <github-handle> [--role admin|member]
 
 Resolve a GitHub user at the bound hub, then confirm the hub origin, workspace
@@ -67,7 +67,10 @@ no devices and leaves other workspaces alone. The last admin cannot be removed.
 options:
   -h, --help        show this help
 `,
-};
+} as const;
+
+export const WORKSPACE_MEMBER_ADD_OPTIONS = { role: { type: "string" } } as const;
+export const WORKSPACE_MEMBER_LIST_OPTIONS = { json: { type: "boolean" } } as const;
 
 type Role = "admin" | "member";
 interface Member {
@@ -102,20 +105,21 @@ function already(value: Member, io: Io): void {
 export async function workspaceMemberCommand(argv: string[], io: Io): Promise<number> {
   const [command, ...rest] = argv;
   if (command === undefined || ["help", "--help", "-h"].includes(command)) {
-    io.out(MEMBER_HELP); return 0;
+    io.out(WORKSPACE_MEMBER_HELP); return 0;
   }
-  const help = Object.hasOwn(HELP, command) ? HELP[command] : undefined;
+  const help = Object.hasOwn(WORKSPACE_MEMBER_SUBCOMMAND_HELP, command) ? WORKSPACE_MEMBER_SUBCOMMAND_HELP[command as keyof typeof WORKSPACE_MEMBER_SUBCOMMAND_HELP] : undefined;
   if (help === undefined) {
-    io.err(`ub workspace member: unknown command ${JSON.stringify(command)}\n\n${MEMBER_HELP}`); return 2;
+    io.err(`ub workspace member: unknown command ${JSON.stringify(command)}\n\n${WORKSPACE_MEMBER_HELP}`); return 2;
   }
   if (takeHelp(rest, io, help)) return 0;
   let positionals: string[];
   let role: Role = "member";
   let json = false;
   try {
-    const parsed = parseArgs({ args: rest, allowPositionals: true, options:
-      command === "add" ? { role: { type: "string" } } :
-      command === "list" ? { json: { type: "boolean" } } : {} });
+    const options: ParseArgsOptionsConfig =
+      command === "add" ? WORKSPACE_MEMBER_ADD_OPTIONS :
+      command === "list" ? WORKSPACE_MEMBER_LIST_OPTIONS : {};
+    const parsed = parseArgs({ args: rest, allowPositionals: true, options });
     positionals = parsed.positionals;
     const count = command === "list" ? 0 : command === "role" ? 2 : 1;
     if (positionals.length !== count) throw new Error(`expected ${count} argument${count === 1 ? "" : "s"}`);
