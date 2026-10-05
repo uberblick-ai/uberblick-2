@@ -811,6 +811,7 @@ describe("two entries, side by side", () => {
         args: entry.args,
         cwd: box.cwd,
         env: stringEnv({ ...box.env, ...entry.env }),
+        stderr: "ignore",
       }),
     );
     return client;
