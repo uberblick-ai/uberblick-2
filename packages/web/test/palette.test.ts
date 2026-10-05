@@ -23,6 +23,8 @@ import {
   getBlocks,
   getBlocksFragment,
   initDoc,
+  tableCellText,
+  tableRows,
 } from "@uberblick/schema";
 import { uberblickSchema } from "../src/editor/create-editor.js";
 import { bindGuardedEditor } from "../src/editor/guarded-binding.js";
@@ -214,6 +216,67 @@ describe("the palette is exactly the schema's block types", () => {
   it("refuses nested blocks — the document is flat", () => {
     const paragraph = uberblickSchema.node("paragraph", { id: "a" });
     expect(() => uberblickSchema.node("paragraph", { id: "b" }, paragraph)).toThrow();
+  });
+});
+
+describe("document links in table cells", () => {
+  const target = "0189abcd-2222-4333-8444-555566667777";
+  const href = "https://example.com/hub";
+
+  function tableDoc(): { ydoc: Y.Doc; text: Y.XmlText } {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "table-links", title: "References" });
+    appendBlock(ydoc, { type: "table", text: "| hub | other |\n| --- | --- |" });
+    const cell = tableRows(getBlocksFragment(ydoc).get(0) as Y.XmlElement)[0]![0]!;
+    return { ydoc, text: tableCellText(cell)! };
+  }
+
+  it("binds a supported cell link without rewriting it, and refuses a malformed target", () => {
+    const { ydoc, text } = tableDoc();
+    text.format(0, 3, { docLink: { docId: target }, bold: true });
+    const before = Y.encodeStateAsUpdate(ydoc);
+    expect(findForeignBlocks(getBlocksFragment(ydoc))).toEqual([]);
+    const { editor } = mountEditor(ydoc);
+    try {
+      expect(editor.view.dom.querySelector("th a.ub-doclink")?.getAttribute("data-doc-id")).toBe(target);
+      expect(editor.view.dom.querySelector("th strong")?.textContent).toBe("hub");
+      expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
+    } finally { editor.destroy(); }
+    text.format(0, 3, { docLink: { docId: "not-a-uuid" } });
+    expect(findForeignBlocks(getBlocksFragment(ydoc))[0]?.nodeName).toBe("#table-shape");
+    ydoc.destroy();
+  });
+
+  it("retains a merged cell link conflict and refuses binding before the editor can render it", () => {
+    const { ydoc, text } = tableDoc();
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+    const cell = tableRows(getBlocksFragment(peer).get(0) as Y.XmlElement)[0]![0]!;
+    text.format(0, 3, { link: { href } });
+    tableCellText(cell)!.format(0, 3, { docLink: { docId: target } });
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    let unbound = false;
+    const binding = bindGuardedEditor({ element, fragment: getBlocksFragment(ydoc), awareness: null,
+      onUnbind: () => { unbound = true; },
+    });
+    try {
+      Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer));
+      expect(unbound).toBe(true);
+      expect(text.toDelta()).toEqual([{ insert: "hub", attributes: { link: { href }, docLink: { docId: target } } }]);
+      expect(findForeignBlocks(getBlocksFragment(ydoc))[0]?.nodeName).toBe(LINK_CONFLICT);
+      expect(findLinkConflicts(getBlocksFragment(ydoc))).toEqual([
+        expect.objectContaining({ index: 0, textIndex: 0, cell: { row: 0, column: 0 }, text,
+          start: 0, end: 3, label: "hub", href, docId: target }),
+      ]);
+      const refused = bindGuardedEditor({ element, fragment: getBlocksFragment(ydoc), awareness: null });
+      expect(refused.editor).toBeNull();
+      expect(refused.refused).toBe(true);
+      refused.destroy();
+      text.format(0, 1, { underline: true });
+      expect(findForeignBlocks(getBlocksFragment(ydoc))[0]?.nodeName).toBe("#table-shape");
+      expect(findLinkConflicts(getBlocksFragment(ydoc))).toHaveLength(1);
+    } finally { binding.destroy(); element.remove(); ydoc.destroy(); peer.destroy(); }
   });
 });
 

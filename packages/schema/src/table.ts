@@ -2,7 +2,9 @@
 import * as Y from "yjs";
 import fastDiff from "fast-diff";
 import { InvalidTableError, InvalidTableMappingError, TableMappingRequiredError } from "./errors.js";
-import { readsAsMark } from "./marks.js";
+import { applyInlineRuns, assertInlineWritable, attributesOf, inlinePlainText, readInlineRuns, readsAsMark } from "./marks.js";
+import { parseInline, renderInline } from "./markdown.js";
+import type { InlineMarkSet, InlineRun } from "./types.js";
 
 /** A column's alignment, from its delimiter cell. `null` is the default. */
 export type ColumnAlign = "left" | "center" | "right" | null;
@@ -110,8 +112,13 @@ function startsNonTableBlock(line: string): boolean {
     /^<[A-Za-z][A-Za-z\d-]*(?:[ \t]+[A-Za-z_:][\w.:-]*(?:[ \t]*=[ \t]*(?:"[^"]*"|'[^']*'|[^ \t"'=<>`]+))?)*[ \t]*\/?>[ \t]*$/.test(text);
 }
 
-/** The formatting vocabulary in a cell. Document links stay prose-only. */
-export const TABLE_CELL_MARKS = ["bold", "italic", "strike", "inlineCode", "link", "comment"] as const;
+/** The same inline formatting vocabulary as prose, plus annotation anchors. */
+export const TABLE_CELL_MARKS = ["bold", "italic", "strike", "inlineCode", "link", "docLink", "comment"] as const;
+
+/** Read one pipe-decoded cell using the prose inline markdown reader. */
+export function parseTableCell(source: string): InlineRun[] {
+  return parseInline(source, true);
+}
 
 /** Direct row cells. Readers retain uneven rows produced by concurrent edits. */
 export function tableRows(element: Y.XmlElement): Y.XmlElement[][] {
@@ -156,7 +163,7 @@ export function writeGfmTable(
 }
 
 export function tableText(element: Y.XmlElement): string {
-  return writeGfmTable(tableRows(element).map((row) => row.map((cell) => tableCellTexts(cell).map(plainXmlText).join(""))));
+  return writeGfmTable(tableRows(element).map((row) => row.map((cell) => renderInline(tableCellTexts(cell).flatMap(readInlineRuns), true))));
 }
 
 /** Bindable cell grammar. Rectangularity is deliberately not a read invariant. */
@@ -229,8 +236,28 @@ export function seedNewTableCells(transaction: Y.Transaction): void {
   }
 }
 
-/** Splice changed characters only, preserving marks and unseen concurrent edits. */
-export function spliceTableCell(cell: Y.XmlElement, value: string): void {
+/** One mark set per UTF-16 character, matching Yjs and fast-diff offsets. */
+function characterMarks(runs: readonly InlineRun[]): InlineMarkSet[] {
+  return runs.flatMap((run) => Array<InlineMarkSet>(run.text.length).fill(run.marks));
+}
+
+/** Only mark keys whose projected values the caller changed. */
+function changedMarks(before: InlineMarkSet, after: InlineMarkSet): Record<string, unknown> {
+  const previous = attributesOf(before) ?? {};
+  const next = attributesOf(after) ?? {};
+  const changes: Record<string, unknown> = {};
+  for (const key of new Set([...Object.keys(previous), ...Object.keys(next)])) {
+    if (JSON.stringify(previous[key]) !== JSON.stringify(next[key])) changes[key] = next[key] ?? null;
+  }
+  return changes;
+}
+
+/**
+ * Splice only changed characters and mark keys. Compare the old GFM projection
+ * rather than normalizing stored runs: unexpressible marks, comments and trimmed
+ * cell-edge whitespace survive wherever the caller made no change.
+ */
+export function spliceTableCell(cell: Y.XmlElement, before: string, after: string): void {
   let text = tableCellText(cell);
   if (text === null) {
     const paragraph = cell.firstChild as Y.XmlElement;
@@ -238,12 +265,55 @@ export function spliceTableCell(cell: Y.XmlElement, value: string): void {
     text = tableCellText(cell);
   }
   if (text === null) throw new InvalidTableError();
-  let offset = 0;
-  for (const [op, chunk] of fastDiff(plainXmlText(text), value)) {
-    if (op === 0) offset += chunk.length;
-    else if (op === -1) text.delete(offset, chunk.length);
-    else { text.insert(offset, chunk); offset += chunk.length; }
+  const oldRuns = parseTableCell(before);
+  const newRuns = parseTableCell(after);
+  const oldValue = inlinePlainText(oldRuns);
+  const newValue = inlinePlainText(newRuns);
+  const oldMarks = characterMarks(oldRuns);
+  const newMarks = characterMarks(newRuns);
+  // scanRow trims only whitespace outside inline syntax. The rest of the
+  // rendered text is unchanged; keep those unprojected edge characters alive.
+  let offset = plainXmlText(text).indexOf(oldValue);
+  if (offset < 0) throw new InvalidTableError();
+  let oldOffset = 0;
+  let newOffset = 0;
+  for (const [op, chunk] of fastDiff(oldValue, newValue)) {
+    if (op === 0) {
+      let start = 0;
+      while (start < chunk.length) {
+        const changes = changedMarks(oldMarks[oldOffset + start] ?? {}, newMarks[newOffset + start] ?? {});
+        const signature = JSON.stringify(changes);
+        let end = start + 1;
+        while (end < chunk.length && JSON.stringify(changedMarks(oldMarks[oldOffset + end] ?? {}, newMarks[newOffset + end] ?? {})) === signature) end += 1;
+        if (Object.keys(changes).length > 0) text.format(offset + start, end - start, changes);
+        start = end;
+      }
+      offset += chunk.length;
+      oldOffset += chunk.length;
+      newOffset += chunk.length;
+    } else if (op === -1) {
+      text.delete(offset, chunk.length);
+      oldOffset += chunk.length;
+    } else {
+      let start = 0;
+      while (start < chunk.length) {
+        const marks = newMarks[newOffset + start] ?? {};
+        const signature = JSON.stringify(marks);
+        let end = start + 1;
+        while (end < chunk.length && JSON.stringify(newMarks[newOffset + end] ?? {}) === signature) end += 1;
+        text.insert(offset + start, chunk.slice(start, end), attributesOf(marks) ?? {});
+        start = end;
+      }
+      offset += chunk.length;
+      newOffset += chunk.length;
+    }
   }
+}
+
+/** Create a new mapped cell's inline content only after attaching its text. */
+function writeTableCell(cell: Y.XmlElement, value: string): void {
+  const text = tableCellText(cell);
+  if (text !== null) applyInlineRuns(text, parseTableCell(value));
 }
 
 /** Each output position names an old projected position, or a newly created one. */
@@ -300,6 +370,7 @@ export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: G
   const oldValues = [oldTable.header, ...oldTable.rows];
   const newValues = [newTable.header, ...newTable.rows];
   const { rows: rowMap, columns: columnMap } = tableMapping(oldValues, newValues, mapping);
+  for (const value of newValues.flat()) assertInlineWritable(parseTableCell(value));
   const storedRows = element.toArray() as Y.XmlElement[];
   const oldCells = tableRows(element);
   const mappedRows = rowMap.map((oldIndex) => {
@@ -308,6 +379,19 @@ export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: G
     if (rowElement === undefined) throw new InvalidTableMappingError("mapped row is absent from stored table");
     return { oldIndex, rowElement, cells: oldCells[oldIndex] ?? [] };
   });
+  // Validate projected offsets before any structural edits. Even a malformed
+  // old projection must refuse without leaving a partially changed table.
+  for (const [row, mapped] of mappedRows.entries()) {
+    if (mapped === null) continue;
+    for (const [column, oldColumn] of columnMap.entries()) {
+      if (oldColumn === null) continue;
+      const cell = mapped.cells[oldColumn];
+      if (cell === undefined) continue;
+      const before = oldValues[mapped.oldIndex]?.[oldColumn] ?? "";
+      const after = newValues[row]?.[column] ?? "";
+      if (before !== after && plainXmlText(tableCellText(cell)).indexOf(inlinePlainText(parseTableCell(before))) < 0) throw new InvalidTableError();
+    }
+  }
   const retainedRows = new Set(rowMap);
   const retainedCols = new Set(columnMap);
   // All validation precedes the first write: Yjs transactions do not roll back.
@@ -318,7 +402,9 @@ export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: G
     const mapped = mappedRows[row];
     const newRow = newValues[row] ?? [];
     if (mapped === null || mapped === undefined) {
-      element.insert(row, [buildTableRow(newRow, row === 0)]);
+      const inserted = buildTableRow(newRow.map(() => ""), row === 0);
+      element.insert(row, [inserted]);
+      for (const [column, cell] of inserted.toArray().entries()) writeTableCell(cell as Y.XmlElement, newRow[column] ?? "");
       continue;
     }
     const { oldIndex, rowElement, cells } = mapped;
@@ -339,9 +425,11 @@ export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: G
           rowElement.insert(actualColumn, [buildTableCell("", row === 0)]);
           actualColumn += 1;
         }
-        rowElement.insert(actualColumn, [buildTableCell(value, row === 0)]);
+        const inserted = buildTableCell("", row === 0);
+        rowElement.insert(actualColumn, [inserted]);
+        writeTableCell(inserted, value);
       } else if (previous !== value) {
-        spliceTableCell(cell, value);
+        spliceTableCell(cell, previous ?? "", value);
       }
       actualColumn += 1;
     }

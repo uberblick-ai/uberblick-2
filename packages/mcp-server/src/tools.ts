@@ -70,6 +70,7 @@ import {
   isProseBlockType,
   listAnnotations,
   listDirectory,
+  parseTableCell,
   parseTableInput,
   readDirectoryTags,
   readDecisions,
@@ -511,7 +512,7 @@ function inlineMarks(
 const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
   text: z.string().optional().describe(
-    "Block text. For a table, exactly one GFM table: alignment markers are accepted but not stored, and inline markdown stays literal cell text.",
+    "Block text. For a table, exactly one GFM table with inline markdown cell formatting (code, bold, italic, strike, external and document links). Alignment markers are accepted but not stored; escaped punctuation stays literal.",
   ),
   level: z
     .number()
@@ -1004,14 +1005,19 @@ export function registerTools(
       return { text: title === "" ? docId : title, marks };
     });
 
+  /** Check every cell target before opening a room or starting a write. */
+  const validateTableTargets = (source: string): void => {
+    const table = parseTableInput(source);
+    for (const cell of [table.header, ...table.rows].flat()) {
+      for (const run of parseTableCell(cell)) {
+        if (run.marks.docLink !== undefined) linkTitle(run.marks.docLink);
+      }
+    }
+  };
+
   /**
-   * One block input, with `inline` resolved only where it is going to be used.
-   *
-   * A source block — code, mermaid, table, terminal — carries no inline marks, so the
-   * schema writes its `text` and drops `inline` entirely. Resolving anyway
-   * would make an unknown reference target refuse a call whose inline runs were
-   * never going to be written, so the type check lives here, once, in front of
-   * both call sites.
+   * Resolve `inline` only for prose; source blocks ignore it, and tables read
+   * their cell marks from GFM. Validate all seeds before create_doc opens a room.
    */
   const blockInputFor = (
     block: z.infer<typeof blockInputSchema>,
@@ -1019,7 +1025,7 @@ export function registerTools(
     // Validate every seed before create_doc opens its first room. Schema also
     // checks at its write boundary, but a bad later seed must not leave an
     // earlier block or document metadata behind.
-    if (block.type === "table") parseTableInput(block.text ?? "");
+    if (block.type === "table") validateTableTargets(block.text ?? "");
     return toBlockInput(
       block,
       isProseBlockType(block.type) ? resolveInline(block.inline) : undefined,
@@ -1030,9 +1036,8 @@ export function registerTools(
    * A document's blocks as a read answers with them: every block exactly as it
    * has always been, plus the inline references it carries.
    *
-   * `doc_links` is additive and absent where a block has none. `text` and `rev`
-   * are untouched — they come off the same `Block` as before, and neither has
-   * ever seen a mark.
+   * `doc_links` names prose character ranges; table cell links are carried by
+   * their inline markdown in `text`, which also determines the table's `rev`.
    */
   const blocksJson = (replica: Replica): Record<string, unknown>[] =>
     getBlocksWithInline(replica.doc).map(({ block, inline }) => {
@@ -1504,10 +1509,12 @@ export function registerTools(
         DECISION_AUTHORITY +
         "\n\n" +
         "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
-        "`text` is mark-free. For a table it is canonical GFM built from its cells, with pipes escaped and every " +
-        "row padded to the widest row; for other blocks it is plain text. A block that carries inline references to other " +
+        "For a table, `text` is canonical GFM with cell formatting as inline markdown, literal punctuation and pipes " +
+        "escaped, and every row padded to the widest row; `rev` includes that formatting. For other blocks `text` " +
+        "is plain text and `rev` ignores marks. A prose block that carries inline references to other " +
         "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
-        "link_range speak in, and absent where there are none. Only prose blocks can hold them.\n\n" +
+        "link_range speak in, and absent where there are none. Table cell links count toward backlinks but do not " +
+        "have block-level `doc_links` ranges.\n\n" +
         "Reading eligible guidance with get_doc counts toward this process’s briefing. The last required read " +
         "starts a ten-minute lease; expiry requires fresh reads. This best-effort memory never fails the read " +
         "or writes usage to a room or update log, and is lost on restart." +
@@ -1678,8 +1685,8 @@ export function registerTools(
       description:
         "Documents that reference this one, by UUID and never by path or title. The answer is the union of two " +
         "kinds of edge, which it does not distinguish: the curated doc-level `links` set_links owns, and every " +
-        "inline reference in a prose block — the `doc_links` get_doc reports, written by link_range or by an " +
-        "`inline` run. A document citing this one in a sentence needs no `links` entry to appear here.\n\n" +
+        "inline reference in a prose block or table cell — written by link_range, an `inline` run, or a " +
+        "table cell's inline markdown. A citation needs no `links` entry to appear here.\n\n" +
         "Each one carries its `description` — null where it has none — so a citing document can be judged without " +
         "opening it." +
         failureContract("backlinks"),
@@ -1748,7 +1755,10 @@ export function registerTools(
         "\n\n" +
         "`old_text` and `new_text` are the block text get_doc returns. For a table this is GFM: each must be " +
         "exactly one table, or `invalid_table` refuses the write. Alignment markers are accepted but not stored; " +
-        "inline markdown stays literal cell text. Table edits splice only changed cells. Without `table_mapping`, " +
+        "inline markdown writes cell formatting and escaped punctuation stays literal. Document targets must be known " +
+        "to this replica's directory or `doclink_target_not_known_locally` refuses before writing. A table no-op " +
+        "keeps every stored character and mark, including those GFM cannot express. Table edits splice only changed " +
+        "characters and mark keys in changed cells. Without `table_mapping`, " +
         "only a parsed no-op or exactly one positional cell change at unchanged dimensions is accepted. " +
         "Structural and multi-cell edits require `table_mapping`, including an identity mapping for a positional batch; " +
         "otherwise `table_mapping_required` refuses before any mutation.\n\n" +
@@ -1766,8 +1776,10 @@ export function registerTools(
         "Malformed input shapes are refused by the MCP input schema before the handler. Previously accepted " +
         "structural and multi-cell table calls must now supply mappings as part of the coordinated table cutover. " +
         "Other blocks use plain text with no markdown and reject `table_mapping`. " +
-        "Spliced-in text inherits the formatting of the character to its left, and `rev` " +
-        "ignores marks, so formatting a range never makes a prepared edit stale.\n\n" +
+        "In other blocks, spliced-in text inherits the formatting of the character to its left, and `rev` " +
+        "ignores marks. A table's `rev` includes its projected formatting. Inserting a read table's GFM preserves " +
+        "representable cells and marks, subject to trimmed cell-edge whitespace and renderInline's marked whitespace " +
+        "and meeting code-span limits; after one round trip the text is stable.\n\n" +
         "Pass `old_text` (and the `rev` from get_doc) to assert what you are editing. A mismatched asserted rev " +
         "refuses with `stale_block`. When the rev is current but `old_text` is wrong, the refusal is " +
         "`old_text_mismatch`; without a rev, a text mismatch remains `stale_block` because the server cannot tell " +
@@ -1805,6 +1817,11 @@ export function registerTools(
       await replicas.settle();
       briefing.require();
       const replica = requireWritableDoc(uuid, true);
+      const current = getBlock(replica.doc, block_id);
+      // Keep stale assertions ahead of content validation, as editBlock does.
+      // Validate before its transaction: a Yjs write cannot be rolled back.
+      if (current?.type === "table" && current.text === old_text &&
+          (rev === undefined || current.rev === rev)) validateTableTargets(new_text);
       editBlock(replica.doc, block_id, old_text, new_text, {
         ...(rev === undefined ? {} : { rev }),
         ...(table_mapping === undefined ? {} : { tableMapping: table_mapping }),
@@ -1827,7 +1844,9 @@ export function registerTools(
         `Block types are the closed set the schema owns — ${BLOCK_TYPES.join(", ")} — which is the editor's ` +
         "whole palette too. A list is a run of adjacent list-item blocks. A table's `text` must be exactly one " +
         "GFM table, or `invalid_table` refuses the write; its rows and cells are stored structurally. Alignment " +
-        "markers are accepted but not stored, and inline markdown stays literal cell text. A terminal's text is " +
+        "markers are accepted but not stored. Inline markdown stores cell formatting and escaped punctuation stays " +
+        "literal. Document-link targets must be known to this replica's directory, otherwise " +
+        "`doclink_target_not_known_locally` refuses before any write. A terminal's text is " +
         "a transcript in which a line beginning `$ ` is a command " +
         "typed out and every other line is output shown whole — the format has no escape, so an output line " +
         "that itself begins `$ ` cannot be written. Every block has one text an agent can edit.\n\n" +

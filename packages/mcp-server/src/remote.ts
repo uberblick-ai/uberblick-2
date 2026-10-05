@@ -254,7 +254,7 @@ function tableContent(element: Y.XmlElement | null): unknown {
  *
  * `Block.rev` supplies the per-block part because it is already the schema's
  * answer to "has this block's content changed" — type, text and attributes. It
- * deliberately does **not** cover inline marks, so the marks are hashed here
+ * does not cover prose inline marks, so the marks are hashed here
  * beside it rather than assumed; a remote that received the text of every block
  * and none of its formatting, or none of its comment threads, must not be able
  * to pass verification.
@@ -288,7 +288,7 @@ export function docFingerprint(doc: Y.Doc): string {
         end: run.end,
       })),
       ...(block.type === "table" ? {
-        // GFM/rev are mark-blind and trimmed. Include every cell's stored
+        // GFM/rev can lose edge whitespace and unrepresentable marks. Include every cell's stored
         // characters and delta, including comment anchors, so verification
         // cannot accept a replica missing cell formatting or anchor deletions.
         cells: tableContent(findBlockElement(doc, block.id)),

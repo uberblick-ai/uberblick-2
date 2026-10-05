@@ -7,6 +7,7 @@ import {
   editBlock,
   findBlockElement,
   getBlocksFragment,
+  getBlocksWithInline,
   getMetaMap,
   initDoc,
   parseGfmTable,
@@ -43,6 +44,12 @@ function cell(doc: Y.Doc, id: string, row: number, column: number): Y.XmlText {
   const text = cell === undefined ? null : tableCellText(cell);
   if (text === null) throw new Error("no cell text");
   return text;
+}
+
+function cellRuns(doc: Y.Doc, id: string, row: number, column: number) {
+  const runs = getBlocksWithInline(doc).find(entry => entry.block.id === id)?.table?.[row]?.[column];
+  if (runs === undefined) throw new Error("no cell runs");
+  return runs;
 }
 
 /** Old persisted shape, including a real thread anchored in its source. */
@@ -82,7 +89,7 @@ describe("structured tables through MCP", () => {
     expect(tableRows(element).map(row => row.map(cell => cell.nodeName))).toEqual([
       ["tableHeader", "tableHeader"], ["tableCell", "tableCell"],
     ]);
-    expect(cell(doc, table.id, 1, 0).toDelta()).toEqual([{ insert: "**Alpha**" }]);
+    expect(cell(doc, table.id, 1, 0).toDelta()).toEqual([{ insert: "Alpha", attributes: { bold: {} } }]);
     expect((await rig.ok("search", { query: "Alpha" })).hits.map((hit: { uuid: string }) => hit.uuid)).toContain(created.uuid);
     const inserted = await rig.ok("insert_block", { uuid: created.uuid, type: "table", text: GFM });
     expect(inserted.block.text).toBe(GFM);
@@ -91,7 +98,7 @@ describe("structured tables through MCP", () => {
     const position = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(cursor.head), doc);
     expect(position?.type).toBe(cell(doc, inserted.block.id, 1, 1));
     const exported = await rig.ok("export_markdown", { uuid: created.uuid, frontmatter: false });
-    expect(exported.markdown).toContain("\\*\\*Alpha\\*\\*");
+    expect(exported.markdown).toContain(table.text);
     expect(exported.markdown).toContain(GFM);
     const empty = await rig.ok("insert_block", { uuid: created.uuid, type: "table", text: "|  |\n| --- |\n|  |" });
     const emptyTable = findBlockElement(doc, empty.block.id)!;
@@ -100,6 +107,164 @@ describe("structured tables through MCP", () => {
     const emptyPosition = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(emptyCursor.head), doc);
     expect(emptyPosition?.type).toBe((emptyParagraph as Y.XmlElement).firstChild);
     expect((emptyParagraph as Y.XmlElement).length).toBe(1);
+  });
+
+  it.each(["create_doc", "insert_block", "edit_block"])("stores every inline cell mark through %s and indexes document backlinks", async (door) => {
+    const rig = await localRig();
+    const target = await rig.ok("create_doc", { title: "Linked page", description: "A known table link target." });
+    const body = `\`code\` **bold** *italic* ~~strike~~ [external](https://example.com/page) [document](${target.uuid})`;
+    const source = `| **Formats** |\n| --- |\n| ${body} |`;
+    const created = await rig.ok("create_doc", {
+      title: "Formatted cells", description: "Agent cells store inline formatting.",
+      blocks: door === "insert_block" ? [] : [{ type: "table", text: door === "create_doc"
+        ? source : "| **Formats** |\n| --- |\n| placeholder |" }],
+    });
+    const block = door === "create_doc" ? created.blocks[0] : door === "insert_block"
+      ? (await rig.ok("insert_block", { uuid: created.uuid, type: "table", text: source })).block
+      : (await rig.ok("edit_block", { uuid: created.uuid, block_id: created.blocks[0].id,
+        old_text: created.blocks[0].text, new_text: source, rev: created.blocks[0].rev })).block;
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    expect(cellRuns(doc, block.id, 0, 0)).toEqual([{ text: "Formats", marks: { bold: true } }]);
+    expect(cellRuns(doc, block.id, 1, 0)).toEqual([
+      { text: "code", marks: { inlineCode: true } }, { text: " ", marks: {} },
+      { text: "bold", marks: { bold: true } }, { text: " ", marks: {} },
+      { text: "italic", marks: { italic: true } }, { text: " ", marks: {} },
+      { text: "strike", marks: { strike: true } }, { text: " ", marks: {} },
+      { text: "external", marks: { link: "https://example.com/page" } }, { text: " ", marks: {} },
+      { text: "document", marks: { docLink: target.uuid } },
+    ]);
+    const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
+    expect(read.text).toBe(source);
+    expect((await rig.ok("export_markdown", { uuid: created.uuid, frontmatter: false })).markdown).toBe(`${read.text}\n`);
+    expect((await rig.ok("backlinks", { uuid: target.uuid })).backlinks.map((row: { uuid: string }) => row.uuid)).toEqual([created.uuid]);
+    const inserted = await rig.ok("insert_block", { uuid: created.uuid, type: "table", text: read.text });
+    expect(inserted.block.text).toBe(read.text);
+    expect(cellRuns(doc, inserted.block.id, 0, 0)).toEqual(cellRuns(doc, block.id, 0, 0));
+    expect(cellRuns(doc, inserted.block.id, 1, 0)).toEqual(cellRuns(doc, block.id, 1, 0));
+    const copy = await rig.ok("create_doc", { title: "Formatted copy", description: "Representable marks round trip exactly.",
+      blocks: [{ type: "table", text: read.text }] });
+    const copyDoc = rig.instance.replicas.replica(copy.uuid).doc;
+    expect(copy.blocks[0].text).toBe(read.text);
+    expect(cellRuns(copyDoc, copy.blocks[0].id, 0, 0)).toEqual(cellRuns(doc, block.id, 0, 0));
+    expect(cellRuns(copyDoc, copy.blocks[0].id, 1, 0)).toEqual(cellRuns(doc, block.id, 1, 0));
+  });
+
+  it("refuses unknown cell document targets before any create seed, insert or edit write", async () => {
+    const rig = await localRig();
+    const target = await rig.ok("create_doc", { title: "Known", description: "The earlier table seed can link here." });
+    const known = `| Name |\n| --- |\n| [known](${target.uuid}) |`;
+    const unknown = `| Name |\n| --- |\n| [unknown](${randomUUID()}) |`;
+    const before = await rig.ok("list_docs");
+    const logSize = rig.instance.store.logSize();
+    const refusedCreate = await rig.call("create_doc", {
+      title: "No partial create", description: "Every seed target is checked first.",
+      blocks: [{ type: "paragraph", text: "Earlier seed" }, { type: "table", text: known }, { type: "table", text: unknown }],
+    });
+    expect(refusedCreate.payload).toMatchObject({ error: "doclink_target_not_known_locally", applied: false, partial: false });
+    expect(refusedCreate.payload.hub).toBeDefined();
+    expect(await rig.ok("list_docs")).toEqual(before);
+    expect(rig.instance.store.logSize()).toBe(logSize);
+    const created = await rig.ok("create_doc", {
+      title: "Guarded links", description: "Refused table links leave every cell unchanged.", blocks: [{ type: "table", text: GFM }],
+    });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const state = Y.encodeStateAsUpdate(doc);
+    const writes = rig.instance.store.logSize();
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    const inserted = await rig.call("insert_block", { uuid: created.uuid, type: "table", text: unknown });
+    expect(inserted.payload).toMatchObject({ error: "doclink_target_not_known_locally", applied: false, partial: false });
+    const edited = await rig.call("edit_block", { uuid: created.uuid, block_id: created.blocks[0].id,
+      old_text: GFM, new_text: GFM.replace("Alpha", `[unknown](${randomUUID()})`), rev: created.blocks[0].rev });
+    expect(edited.payload).toMatchObject({ error: "doclink_target_not_known_locally", applied: false, partial: false });
+    expect(updates).toBe(0);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(state);
+    expect(rig.instance.store.logSize()).toBe(writes);
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual(created.blocks);
+  });
+
+  it("keeps existing literal syntax escaped and canonical insertion round trips stable while exact no-ops preserve marked edges", async () => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", {
+      title: "Round trip boundary", description: "Literal cells and unrepresentable edges have distinct contracts.",
+      blocks: [{ type: "table", text: "| Edges | Literal |\n| --- | --- |\n| Alpha | placeholder |" }],
+    });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const id = created.blocks[0].id;
+    const edges = cell(doc, id, 1, 0);
+    edges.delete(0, edges.length);
+    edges.insert(0, "  Alpha  ");
+    edges.format(0, edges.length, { bold: true });
+    const literal = cell(doc, id, 1, 1);
+    const raw = `[command](${randomUUID()}) **bold** _italic_ ~~strike~~ <tag> & ! | \\ \`code\``;
+    literal.delete(0, literal.length);
+    literal.insert(0, raw);
+    const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
+    expect(read.text).toContain("\\[command\\]");
+    expect(read.text).toContain("\\<tag\\> \\& \\! \\|");
+    expect((await rig.ok("export_markdown", { uuid: created.uuid, frontmatter: false })).markdown).toBe(`${read.text}\n`);
+    const state = Y.encodeStateAsUpdate(doc);
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    const noop = await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
+      old_text: read.text, new_text: read.text, rev: read.rev });
+    expect(noop.block).toEqual(read);
+    expect(updates).toBe(0);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(state);
+    expect(edges.toDelta()).toEqual([{ insert: "  Alpha  ", attributes: { bold: true } }]);
+    expect(literal.toDelta()).toEqual([{ insert: raw }]);
+    const roundtrip = await rig.ok("create_doc", {
+      title: "Canonical copy", description: "A GFM copy trims only its unrepresentable cell edges.",
+      blocks: [{ type: "table", text: read.text }],
+    });
+    const copy = rig.instance.replicas.replica(roundtrip.uuid).doc;
+    expect(cellRuns(copy, roundtrip.blocks[0].id, 1, 0)).toEqual([{ text: "Alpha", marks: { bold: true } }]);
+    expect(cell(copy, roundtrip.blocks[0].id, 1, 1).toDelta()).toEqual([{ insert: raw }]);
+    const canonical = (await rig.ok("get_doc", { uuid: roundtrip.uuid })).blocks[0].text;
+    const inserted = await rig.ok("insert_block", { uuid: roundtrip.uuid, type: "table", text: canonical });
+    expect(inserted.block.text).toBe(canonical);
+    expect(cellRuns(copy, inserted.block.id, 1, 0)).toEqual(cellRuns(copy, roundtrip.blocks[0].id, 1, 0));
+    expect(cell(copy, inserted.block.id, 1, 1).toDelta()).toEqual([{ insert: raw }]);
+  });
+
+  it("changes only requested cell mark keys so concurrent marks, characters and other cells survive", async () => {
+    const rig = await localRig();
+    const source = "| Text | Other |\n| --- | --- |\n| **prefix** *Alpha* ~~tail~~ | keep |";
+    const created = await rig.ok("create_doc", {
+      title: "Cell mark merge", description: "A formatting edit retains concurrent work.", blocks: [{ type: "table", text: source }],
+    });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const id = created.blocks[0].id;
+    const original = cell(doc, id, 1, 0);
+    const other = cell(doc, id, 1, 1);
+    other.format(0, other.length, { bold: true });
+    const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
+    const remote = new Y.Doc();
+    try {
+      Y.applyUpdate(remote, Y.encodeStateAsUpdate(doc));
+      const remoteOriginal = cell(remote, id, 1, 0);
+      remoteOriginal.format(7, 5, { inlineCode: {} });
+      remoteOriginal.insert(9, "!");
+      cell(remote, id, 1, 1).insert(4, " later");
+      const changed = await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
+        old_text: read.text, new_text: read.text.replace("*Alpha*", "***Alpha***"), rev: read.rev });
+      expect(changed.block.text).toContain("***Alpha***");
+      expect(cell(doc, id, 1, 0)).toBe(original);
+      expect(cell(doc, id, 1, 1)).toBe(other);
+      expect(other.toDelta()).toEqual([{ insert: "keep", attributes: { bold: true } }]);
+      const localUpdate = Y.encodeStateAsUpdate(doc);
+      const remoteUpdate = Y.encodeStateAsUpdate(remote);
+      Y.applyUpdate(doc, remoteUpdate); Y.applyUpdate(remote, localUpdate);
+      expect(cellRuns(doc, id, 1, 0)).toEqual(cellRuns(remote, id, 1, 0));
+      expect(cellRuns(doc, id, 1, 0).map(run => run.text).join("")).toBe("prefix Al!pha tail");
+      const alpha = cellRuns(doc, id, 1, 0).filter(run => run.marks.italic);
+      expect(alpha.map(run => run.text).join("")).toBe("Al!pha");
+      for (const run of alpha) expect(run.marks).toMatchObject({ italic: true, inlineCode: true });
+      expect(alpha.filter(run => run.marks.bold).map(run => run.text).join("").replace("!", "")).toBe("Alpha");
+      expect(other.toDelta()).toEqual([{ insert: "keep later", attributes: { bold: true } }]);
+      expect(cell(doc, id, 1, 0)).toBe(original);
+      expect(cell(doc, id, 1, 1)).toBe(other);
+    } finally { remote.destroy(); }
   });
 
   it("keeps first and delayed writers in one empty cell visible to every agent reader", async () => {
@@ -188,14 +353,14 @@ describe("structured tables through MCP", () => {
     const beta = cell(doc, id, 1, 1);
     beta.format(0, beta.length, { bold: true });
     const unchanged = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
-    expect(unchanged.rev).toBe(created.blocks[0].rev);
+    expect(unchanged.rev).not.toBe(created.blocks[0].rev);
     const mismatch = await rig.call("edit_block", {
       uuid: created.uuid, block_id: id, old_text: GFM.replace("Alpha", "Wrong"), new_text: GFM, rev: unchanged.rev,
     });
     expect(mismatch.payload.error).toBe("old_text_mismatch");
     const changed = await rig.ok("edit_block", {
-      uuid: created.uuid, block_id: id, old_text: GFM,
-      new_text: "| Name | Extra | Value |\n| --- | --- | --- |\n| Alpha changed | New | Beta |", rev: unchanged.rev,
+      uuid: created.uuid, block_id: id, old_text: unchanged.text,
+      new_text: "| Name | Extra | Value |\n| --- | --- | --- |\n| Alpha changed | New | **Beta** |", rev: unchanged.rev,
       table_mapping: { rows: [0, 1], columns: [0, null, 1] },
     });
     expect(cell(doc, id, 1, 2)).toBe(beta);
@@ -209,7 +374,7 @@ describe("structured tables through MCP", () => {
   it("preserves shifted status cells and delayed edits through a guarded same-width column replacement", async () => {
     const rig = await localRig();
     const before = writeGfmTable([["Task", "Status", "Notes"], ["Write", "done", "draft"], ["Ship", "todo", "needs QA"]]);
-    const nextRows = [["Task", "Owner", "Status"], ["Write", "ann", "done"], ["Ship", "ben", "todo"]];
+    const nextRows = [["Task", "Owner", "Status"], ["Write", "ann", "done"], ["Ship", "ben", "**todo**"]];
     const after = writeGfmTable(nextRows);
     const created = await rig.ok("create_doc", {
       title: "Column replacement", description: "Shifted cells keep concurrent work.",
@@ -225,9 +390,9 @@ describe("structured tables through MCP", () => {
       const remoteShip = cell(remote, id, 2, 1);
       remoteShip.insert(remoteShip.length, " (blocked)");
       const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
-      expect(read.rev).toBe(created.blocks[0].rev);
+      expect(read.rev).not.toBe(created.blocks[0].rev);
       const changed = await rig.ok("edit_block", {
-        uuid: created.uuid, block_id: id, old_text: before, new_text: after, rev: read.rev,
+        uuid: created.uuid, block_id: id, old_text: read.text, new_text: after, rev: read.rev,
         table_mapping: { rows: [0, 1, 2], columns: [0, null, 1] },
       });
       expect(changed.block.text).toBe(after);
@@ -238,7 +403,7 @@ describe("structured tables through MCP", () => {
       const remoteUpdate = Y.encodeStateAsUpdate(remote);
       Y.applyUpdate(doc, remoteUpdate);
       Y.applyUpdate(remote, localUpdate);
-      nextRows[2]![2] = "todo (blocked)";
+      nextRows[2]![2] = "**todo (blocked)**";
       const merged = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
       expect(merged.text).toBe(writeGfmTable(nextRows));
       expect(parseGfmTable(merged.text)).toMatchObject({ header: nextRows[0], rows: nextRows.slice(1) });
@@ -261,7 +426,7 @@ describe("structured tables through MCP", () => {
         uuid: created.uuid, block_id: id, old_text: merged.text,
         new_text: merged.text.replace("| Ship | ben |", "| Ship | ben2 |"), rev: merged.rev,
       });
-      expect(followup.block.text).toContain("| Ship | ben2 | todo (blocked) |");
+      expect(followup.block.text).toContain("| Ship | ben2 | **todo (blocked)** |");
       expect(cell(doc, id, 2, 2)).toBe(ship);
       expect(ship.toDelta()).toEqual([{ insert: "todo (blocked)", attributes: { bold: {} } }]);
     } finally { remote.destroy(); }
@@ -287,6 +452,7 @@ describe("structured tables through MCP", () => {
   ])("preserves identity, marks and offline text in $name with explicit positions", async ({ before, next, mapping, targetColumn }) => {
     const rig = await localRig();
     const source = writeGfmTable(before);
+    next[2]![targetColumn] = "**done**";
     const requested = writeGfmTable(next);
     const created = await rig.ok("create_doc", {
       title: "Explicit surviving cells", description: "The caller identifies the intended surviving row.",
@@ -300,13 +466,14 @@ describe("structured tables through MCP", () => {
     try {
       Y.applyUpdate(remote, Y.encodeStateAsUpdate(doc));
       const remoteOriginal = cell(remote, id, 1, 1);
+      const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
       remoteOriginal.insert(remoteOriginal.length, " (blocked)");
       const state = Y.encodeStateAsUpdate(doc);
       let updates = 0;
       const onUpdate = (): void => { updates += 1; };
       doc.on("update", onUpdate);
       const refused = await rig.call("edit_block", {
-        uuid: created.uuid, block_id: id, old_text: source, new_text: requested, rev: created.blocks[0].rev,
+        uuid: created.uuid, block_id: id, old_text: read.text, new_text: requested, rev: read.rev,
       });
       expect(refused.payload).toMatchObject({ error: "table_mapping_required", recoveryClass: "manual",
         applied: false, partial: false, synced: false });
@@ -317,7 +484,7 @@ describe("structured tables through MCP", () => {
       doc.off("update", onUpdate);
 
       const changed = await rig.ok("edit_block", {
-        uuid: created.uuid, block_id: id, old_text: source, new_text: requested, rev: created.blocks[0].rev,
+        uuid: created.uuid, block_id: id, old_text: read.text, new_text: requested, rev: read.rev,
         table_mapping: mapping,
       });
       expect(changed.block.text).toBe(requested);
@@ -326,7 +493,7 @@ describe("structured tables through MCP", () => {
       const localUpdate = Y.encodeStateAsUpdate(doc);
       const remoteUpdate = Y.encodeStateAsUpdate(remote);
       Y.applyUpdate(doc, remoteUpdate); Y.applyUpdate(remote, localUpdate);
-      next[2]![targetColumn] = "done (blocked)";
+      next[2]![targetColumn] = "**done (blocked)**";
       const merged = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
       expect(merged.text).toBe(writeGfmTable(next));
       expect(cell(doc, id, 2, targetColumn)).toBe(original);
@@ -395,17 +562,18 @@ describe("structured tables through MCP", () => {
     const doc = rig.instance.replicas.replica(created.uuid).doc;
     const beta = cell(doc, id, 1, 1);
     beta.format(0, beta.length, { italic: {} });
+    const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
     let updates = 0;
     doc.on("update", () => { updates += 1; });
-    const noop = await rig.ok("edit_block", { uuid: created.uuid, block_id: id, old_text: GFM,
-      new_text: GFM.replace("---", ":---"), rev: created.blocks[0].rev });
-    expect(noop.block.rev).toBe(created.blocks[0].rev);
+    const noop = await rig.ok("edit_block", { uuid: created.uuid, block_id: id, old_text: read.text,
+      new_text: read.text.replace("---", ":---"), rev: read.rev });
+    expect(noop.block.rev).toBe(read.rev);
     expect(updates).toBe(0);
-    const batch = GFM.replace("Alpha", "Alpha2").replace("Beta", "Beta2");
-    const refused = await rig.call("edit_block", { uuid: created.uuid, block_id: id, old_text: GFM, new_text: batch });
+    const batch = read.text.replace("Alpha", "Alpha2").replace("Beta", "Beta2");
+    const refused = await rig.call("edit_block", { uuid: created.uuid, block_id: id, old_text: read.text, new_text: batch });
     expect(refused.payload.error).toBe("table_mapping_required");
     expect(updates).toBe(0);
-    const changed = await rig.ok("edit_block", { uuid: created.uuid, block_id: id, old_text: GFM, new_text: batch,
+    const changed = await rig.ok("edit_block", { uuid: created.uuid, block_id: id, old_text: read.text, new_text: batch,
       table_mapping: { rows: [0, 1], columns: [0, 1] } });
     expect(changed.block.text).toBe(batch);
     expect(cell(doc, id, 1, 1)).toBe(beta);
@@ -458,15 +626,16 @@ describe("structured tables through MCP", () => {
     const doc = rig.instance.replicas.replica(created.uuid).doc;
     const oldText = cell(doc, id, 1, 1);
     oldText.format(0, oldText.length, { bold: {} });
+    const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
     let updates = 0;
     doc.on("update", () => { updates += 1; });
     const changed = await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
-      old_text: GFM, new_text: GFM, rev: created.blocks[0].rev,
+      old_text: read.text, new_text: read.text, rev: read.rev,
       table_mapping: { rows: [0, null], columns: [0, 1] } });
-    expect(changed.block.text).toBe(GFM);
+    expect(changed.block.text).toBe(read.text);
     expect(updates).toBeGreaterThan(0);
     expect(cell(doc, id, 1, 1)).not.toBe(oldText);
-    expect(cell(doc, id, 1, 1).toDelta()).toEqual([{ insert: "Beta" }]);
+    expect(cell(doc, id, 1, 1).toDelta()).toEqual([{ insert: "Beta", attributes: { bold: {} } }]);
   });
 
   it("pads ragged tables for reads and lets an agent fill a projected empty cell", async () => {

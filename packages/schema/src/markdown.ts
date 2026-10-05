@@ -215,7 +215,7 @@ function escapeInline(text: string, context: EscapeContext): string {
   let out = "";
   for (let i = 0; i < text.length; i += 1) {
     const char = text[i] as string;
-    if (char === "\\" || char === "`" || char === "*" || char === "[" || (context.table === true && ["|", "<", ">", "&", "!", "]"].includes(char))) {
+    if (char === "\\" || char === "`" || char === "*" || char === "[" || (context.table === true && ["<", ">", "&", "!", "]"].includes(char))) {
       out += `\\${char}`;
     } else if (char === "]" && context.insideLabel) {
       out += "\\]";
@@ -484,7 +484,8 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
 }
 
 /**
- * Render runs as GFM.
+ * Render runs as GFM. Table mode escapes literal HTML punctuation; the outer
+ * `writeGfmTable` layer escapes pipes, including pipes in code and link targets.
  *
  * The emitter is a stack, and everything else follows from that. For each run it
  * closes marks from the top until every mark still open is one this run wants,
@@ -520,7 +521,7 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
  * with nothing writable between them. Both are the format's limits rather than this
  * code's, and `expressibleInGfm` in the test names them structurally.
  */
-function renderInline(source: readonly InlineRun[], table = false): string {
+export function renderInline(source: readonly InlineRun[], table = false): string {
   let out = "";
   const open: OpenMark[] = [];
 
@@ -615,7 +616,7 @@ function renderInline(source: readonly InlineRun[], table = false): string {
 
     out +=
       marks.inlineCode === true
-        ? renderCodeSpan(table ? text.replace(/\|/g, "\\|") : text)
+        ? renderCodeSpan(text)
         : escapeInline(text, {
             insideLabel: open.some((entry) => entry.name === "link"),
             hugged,
@@ -832,7 +833,7 @@ export function exportMarkdown(
     const marker = listItem ? listMarker(block, numbers[index] ?? null) : "";
     push(
       block.type === "table" && table !== undefined && table.length > 0
-        ? writeGfmTable(table.map((row) => row.map((cell) => renderInline(cell, true))), (cell) => cell)
+        ? writeGfmTable(table.map((row) => row.map((cell) => renderInline(cell, true))))
         : renderBlock(
         block,
         inline.length === 0 ? [{ text: block.text, marks: {} }] : inline,
@@ -1254,7 +1255,7 @@ function flanking(
 }
 
 /** Pass 1: `source` as text, code and delimiter tokens, with `marks` in scope. */
-function tokenizeInline(source: string, marks: InlineMarkSet): Token[] {
+function tokenizeInline(source: string, marks: InlineMarkSet, table = false): Token[] {
   const tokens: Token[] = [];
   let plain = "";
   const flush = (): void => {
@@ -1268,7 +1269,7 @@ function tokenizeInline(source: string, marks: InlineMarkSet): Token[] {
 
     if (char === "\\") {
       const next = source[i + 1];
-      if (next !== undefined && "\\`*_~[]".includes(next)) {
+      if (next !== undefined && ("\\`*_~[]".includes(next) || (table && "<>&!".includes(next)))) {
         plain += next;
         i += 2;
         continue;
@@ -1293,7 +1294,7 @@ function tokenizeInline(source: string, marks: InlineMarkSet): Token[] {
       const link = matchLink(source, i);
       if (link !== null) {
         flush();
-        tokens.push(...tokenizeInline(link.label, { ...marks, ...link.marks }));
+        tokens.push(...tokenizeInline(link.label, { ...marks, ...link.marks }, table));
         i = link.next;
         continue;
       }
@@ -1571,8 +1572,8 @@ function marksFor(
  * union of the marks covering it. Unclaimed delimiter characters come through as
  * the text they are.
  */
-function scanInline(source: string, out: InlineRun[]): void {
-  const tokens = tokenizeInline(source, {});
+function scanInline(source: string, out: InlineRun[], table = false): void {
+  const tokens = tokenizeInline(source, {}, table);
   const { spans, unclaimed } = matchNesting(tokens);
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
@@ -1583,6 +1584,13 @@ function scanInline(source: string, out: InlineRun[]): void {
         : token.char.repeat(unclaimed[i] ?? 0);
     pushInlineRun(out, text, marksFor(token, spans, i));
   }
+}
+
+/** The prose inline reader; table mode also undoes its escaped HTML punctuation. */
+export function parseInline(source: string, table = false): InlineRun[] {
+  const runs: InlineRun[] = [];
+  scanInline(source, runs, table);
+  return runs;
 }
 
 /**
