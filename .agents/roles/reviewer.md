@@ -13,7 +13,9 @@ Either an issue a preparer sent to review, or a pull request and the head to
 review. On a pull request the latest handoff sets the scope: one that lists
 finding ids to verify — an implementer revision, or an integrator asking for a
 missing second round — asks for a corrections review of those ids; any other is
-full.
+full. A clean refresh adopted at this exact head starts the fresh full first
+round specified in `review-protocol.md`; later unchanged-head handoffs do not
+restart that adoption's count again.
 
 ## Reviewing an issue contract
 

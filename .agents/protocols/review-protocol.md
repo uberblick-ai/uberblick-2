@@ -82,11 +82,18 @@ explanation accepted, and the corrections introduced no new P1 or P2.
 Otherwise it escalates, naming the mechanism that keeps the change from
 converging; there is no third round.
 
-The count starts again in two cases. A full review the integrator requests
+The count starts again in three cases. A full review the integrator requests
 with `review` is the first round of a new count; one that lists finding ids is
 the missing second round itself. A person's answer to an escalation makes the
 next corrections review a fresh second round; the implementer asks for it when
 the answer asks for verification or the rule above still requires one.
+
+An adopted clean refresh (`integration.md`'s matching durable
+`base-refresh-adopted` record at the current NEW_SHA) starts a fresh full first
+round at that head, even if the prior head exhausted its two rounds. Restart once
+for that adoption, not for every later unchanged-head handoff; ordinary second
+round and escalation limits apply within the new count. Prior findings keep
+their recorded settlements, and new findings follow the normal correction rule.
 
 An issue gets one review pass (`issue-preparation.md`).
 

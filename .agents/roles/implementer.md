@@ -168,7 +168,12 @@ conflicts or other base synchronization through a non-rewriting merge.
   `base-refresh-adopted old=OLD_SHA base=BASE_SHA new=NEW_SHA` in that summary only
   when the pushed head still equals NEW_SHA. Record adoption/validation of an
   integrator-produced refresh rather than claiming authorship of the rewrite;
-  original authorship and independent review requirements remain. A preservation
+  original authorship and independent review requirements remain. Fetch OLD_SHA
+  and BASE_SHA explicitly for preservation; unavailable objects cannot be certified.
+  After checks pass and the remote head still equals NEW_SHA, post that same
+  `base-refresh-adopted old=... base=... new=...` prefix as a durable PR comment
+  from a scratch body file before reporting. Later no-commit revisions preserve
+  it; adoption remains discoverable beyond the feedback window. A preservation
   mismatch requires repair; when repair adds a commit, report that new candidate
   instead. Old-head approvals and checks do not carry over.
 - **A person's answer:** act on it, and finish `review` when the answer asks
