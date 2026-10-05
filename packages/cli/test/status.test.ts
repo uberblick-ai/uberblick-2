@@ -1,9 +1,14 @@
 /** The human overview stays bounded; the report keeps its machine detail. */
 
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
-import { describe, expect, it } from "vitest";
+import { mkdirSync, existsSync, realpathSync } from "node:fs";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import type { StatusReport } from "../src/status.js";
 import { renderStatus } from "../src/status.js";
+import { removeTempDirs, runUb, sandbox } from "./helpers.js";
+
+afterAll(removeTempDirs);
 
 const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
 const HUB = "wss://hub.example.test/ws";
@@ -13,11 +18,13 @@ function report(overrides: Partial<StatusReport> = {}): StatusReport {
     version: "1.2.3",
     workspace: WORKSPACE,
     workspaceUuid: WORKSPACE,
+    binding: { workspaceId: WORKSPACE, hubUrl: HUB },
+    projectConfig: "/project/.uberblick.json",
     hubUrl: HUB,
     databasePath: "/workspace/replica.sqlite",
     credentialPresent: true,
     credentialSource: "credentials file",
-    sources: { workspace: "user config", hubUrl: "environment" },
+    sources: { workspace: "project config", hubUrl: "project config" },
     shadowed: [{ setting: "credential", layer: "credentials file" }],
     hub: { status: "connected", url: HUB, protocolVersion: SYNC_PROTOCOL_VERSION },
     rooms: [{ room: `${WORKSPACE}/a-room`, appliedSeq: 912345, synced: true }],
@@ -68,7 +75,8 @@ describe("the human status overview", () => {
       expect(text).not.toContain(String(appliedSeq));
     }
     expect(text).not.toContain("987654");
-    expect(text).not.toMatch(/credential|shadowed|user config|environment/);
+    expect(text).not.toMatch(/credential|shadowed|user config/);
+    expect(row(text, "selection")).toContain("/project/.uberblick.json");
     for (const path of Object.values(large.storage)) {
       if (path !== "xdg") expect(text).not.toContain(path);
     }
@@ -167,5 +175,38 @@ describe("the human status overview", () => {
     );
     expect(failed).toContain("1 detected failure — run `ub doctor`");
     expect(failed).toContain("hub state not yet known");
+  });
+});
+
+
+describe("project selection in ub status", () => {
+  it("reports no selection without opening a replica or borrowing the machine default", () => {
+    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: HUB } });
+    const text = runUb(["status"], box);
+    expect(text.status).toBe(0);
+    expect(text.stdout).toContain("No workspace selected");
+    expect(text.stdout).not.toContain(WORKSPACE);
+    const json = runUb(["status", "--json"], box);
+    expect(json.status).toBe(0);
+    expect(JSON.parse(json.stdout)).toMatchObject({ workspace: null, binding: null, hubUrl: null });
+    expect(existsSync(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`))).toBe(false);
+  });
+
+  it("finds the same project binding when run from a nested directory", () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const projectPath = realpathSync(join(box.cwd, ".uberblick.json"));
+    const nested = join(box.cwd, "src", "nested");
+    mkdirSync(nested, { recursive: true });
+    const run = runUb(["status", "--json"], { ...box, cwd: nested });
+    expect(run.status).toBe(0);
+    expect(JSON.parse(run.stdout)).toMatchObject({
+      workspace: WORKSPACE,
+      binding: { workspaceId: WORKSPACE, hubUrl: null },
+      projectConfig: projectPath,
+      sources: { workspace: "project config", hubUrl: "project config" },
+    });
+    const text = runUb(["status"], { ...box, cwd: nested });
+    expect(text.stdout).toMatch(/hub\s+local \(this computer\)/);
+    expect(text.stdout).toContain(projectPath);
   });
 });

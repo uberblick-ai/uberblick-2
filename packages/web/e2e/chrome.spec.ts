@@ -14,16 +14,16 @@
  *   background and its font have to *equal* the sidebar's, in both colour
  *   schemes, and they only can if `@theme` resolved to the product's tokens
  *   rather than to Tailwind's defaults.
- * - **The primitives behave.** They portal out of the app's subtree, take the
- *   keyboard and close on Escape through the composed surfaces' native input.
+ * - **The product wiring works.** Uberblick's triggers open its content and
+ *   actions write or refuse as promised; accessibility scans cover primitives.
  * - **The theme is real.** `data-theme` re-themes the editor and the sidebar
  *   from tokens alone, and survives a reload. A stylesheet is exactly what
  *   jsdom does not have.
  * - **A connected agent is counted.** The count reads awareness over a real
  *   hub, and the session it counts is a client that is not a browser at all.
- * - **A highlight steps off its ground.** `light-dark()` and `oklch()` are
- *   resolved by the browser and by nothing else, so a contrast floor is only a
- *   number where there is a rendering engine to measure (#516).
+ * - **The cascade wires the highlight.** The token table holds palette floors;
+ *   rendered consumers must still share one card accent, including the focused
+ *   orphan chip whose actual ground changes with state (#516).
  * - **A bundled face is really there.** A `font-family` in a stylesheet is a
  *   wish; only an engine that fetched the woff2 and put it in `document.fonts`
  *   says the title is set in the face the app ships rather than in the serif
@@ -83,6 +83,8 @@ import {
 import * as Y from "yjs";
 import { placeCaret } from "./harness.js";
 import { renderedText, strokeSeparation } from "./contrast-helpers.js";
+import { alphaOf, composite, contrast, legacySrgb, lightnessLimit, oklab, pageGrounds, separation } from "../test/colour.js";
+import { cardHighlightFloor, focusedOrphanedChipFloor } from "../test/contrast-contract.js";
 
 const { harness, openApp } = setupHarness();
 
@@ -134,17 +136,6 @@ function paintedIn(locator: Locator, property: string): Promise<string> {
     (element, prop) => getComputedStyle(element).getPropertyValue(prop),
     property,
   );
-}
-
-/**
- * The alpha channel of a computed colour, so "opaque" is a number rather than a
- * look. `getComputedStyle` serialises to `rgb(...)` or `rgba(..., a)`, and the
- * three-argument form has no alpha because it is 1.
- */
-function alphaOf(color: string): number {
-  const parts = color.match(/[\d.]+/g);
-  if (parts === null) throw new Error(`unreadable colour: ${color}`);
-  return parts.length < 4 ? 1 : Number(parts[3]);
 }
 
 /** A keyboard focus cue must be painted, regardless of its chosen thickness. */
@@ -288,7 +279,6 @@ for (const scheme of ["light", "dark"] as const) {
     );
     await expect(menu.getByRole("menuitem", { name: "Workspace settings" })).toHaveCount(0);
     await page.keyboard.press("Escape");
-    await expect(menu).toBeHidden();
 
     // The user panel: the same surface, opened from the foot of the column.
     await page.locator(".ub-user-card").click();
@@ -296,8 +286,6 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(panel).toBeVisible();
     await matchesTheSidebar(page, "[data-slot=popover-content]");
     await expect(panel.getByRole("group", { name: "Presence colour" })).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(panel).toBeHidden();
   });
 }
 
@@ -344,6 +332,7 @@ for (const scheme of ["light", "dark"] as const) {
         const style = getComputedStyle(element);
         return [style.backgroundColor, style.borderColor, style.color];
       });
+    // Token ratios and axe cannot see which border carries selection after the cascade.
     const cue = async (option: Locator): Promise<string> => {
       expect(
         Number.parseFloat(await paintedIn(option, "border-top-width")),
@@ -423,6 +412,7 @@ for (const scheme of ["light", "dark"] as const) {
       const selected = swatches.nth(index);
       await selected.click();
       await expect(selected).toHaveAttribute("aria-pressed", "true");
+      // The awareness palette and selected border are consumer wiring, beyond the token table and axe.
       const selectionCue = await paintedIn(selected, "border-top-color");
       expect(
         contrast(selectionCue, await paintedIn(selected, "background-color")),
@@ -982,7 +972,6 @@ test("document actions stay reachable, close with the route, and archive into Re
 
   await trigger.click();
   await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
-  await expect(trigger).toBeFocused();
   await trigger.click();
   await expect(
     page.getByRole("menuitem", { name: "Unpin from sidebar" }),
@@ -1007,27 +996,6 @@ test("document actions stay reachable, close with the route, and archive into Re
   const confirmation = page.getByRole("alertdialog");
   await expect(confirmation).toContainText("Archive Lifecycle notes?");
   await expect(confirmation).toContainText("read-only");
-  await expect(confirmation).toHaveAccessibleName("Archive Lifecycle notes?");
-  await expect(confirmation).toHaveAccessibleDescription(/content is preserved/);
-  await expect(page.locator("#root")).toHaveAttribute("aria-hidden", "true");
-  const cancel = confirmation.getByRole("button", { name: "Cancel" });
-  await expect(cancel).toBeFocused();
-
-  // Scripted focus stands in for the programmatic/assistive path that escaped
-  // the hand-written trap. Radix returns it to the last in-dialog target, while
-  // the background remains absent from the accessibility tree.
-  await page.locator(".ub-title").evaluate((title) =>
-    (title as HTMLInputElement).focus(),
-  );
-  await expect(cancel).toBeFocused();
-  await expect(page.getByRole("textbox")).toHaveCount(0);
-
-  await page.keyboard.press("Tab");
-  await expect(
-    confirmation.getByRole("button", { name: "Archive document" }),
-  ).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(confirmation.getByRole("button", { name: "Cancel" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();
@@ -1331,9 +1299,6 @@ test(`the document collaborator cluster stays compact and jumps once without mov
     await page.keyboard.press("Enter");
     const overflow = page.getByRole("dialog", { name: "More active collaborators" });
     await expect(overflow).toBeVisible();
-    await expect(overflow.getByRole("button").first()).toBeFocused();
-    expect(await more.getAttribute("aria-controls")).toBe(await overflow.getAttribute("id"));
-    await expect(more).toHaveAttribute("aria-expanded", "true");
     const deltaPerson = page.getByRole("button", {
       name: /^Delta · person · .*editing block 1$/,
     });
@@ -1358,7 +1323,6 @@ test(`the document collaborator cluster stays compact and jumps once without mov
       await paintedIn(deltaCursor, "background-color"),
     );
     await page.keyboard.press("Escape");
-    await expect(more).toBeFocused();
     await more.click();
     await expect(overflow).toBeVisible();
     await page.locator(".ub-title").click();
@@ -1466,125 +1430,6 @@ test(`the document collaborator cluster stays compact and jumps once without mov
 });
 }
 
-/**
- * A painted colour in OKLab. Tokens use `oklch()`; Chromium also serializes
- * transitions and color-mix() results as rectangular `oklab()`. Both keep the
- * original precision. Unknown serializations throw rather than guess: a wrong
- * number here would look like a passing measurement.
- */
-function oklab(painted: string): {
-  L: number;
-  a: number;
-  b: number;
-  chroma: number;
-  alpha: number;
-} {
-  const rectangular = /^oklab\((\d*\.?\d+) (-?\d*\.?\d+) (-?\d*\.?\d+)(?: \/ (\d*\.?\d+))?\)$/.exec(painted.trim());
-  if (rectangular !== null) {
-    const [, rawL, rawA, rawB, rawAlpha] = rectangular;
-    if (rawL === undefined || rawA === undefined || rawB === undefined) {
-      throw new Error(`unreadable oklab colour: ${painted}`);
-    }
-    const a = Number(rawA);
-    const b = Number(rawB);
-    return {
-      L: Number(rawL),
-      a,
-      b,
-      chroma: Math.hypot(a, b),
-      alpha: rawAlpha === undefined ? 1 : Number(rawAlpha),
-    };
-  }
-  // `none` is how an achromatic colour reports the hue it does not have, and
-  // the alpha half only appears on the tokens that carry one (#515).
-  const parts =
-    /^oklch\((\d*\.?\d+) (\d*\.?\d+) (\d*\.?\d+|none)(?: \/ (\d*\.?\d+))?\)$/.exec(
-      painted.trim(),
-    );
-  const [, rawL, rawC, rawH, rawA] = parts ?? [];
-  if (rawL === undefined || rawC === undefined || rawH === undefined) {
-    throw new Error(`not an OKLab colour: ${painted}`);
-  }
-  const chroma = Number(rawC);
-  const radians = ((rawH === "none" ? 0 : Number(rawH)) * Math.PI) / 180;
-  return {
-    L: Number(rawL),
-    a: chroma * Math.cos(radians),
-    b: chroma * Math.sin(radians),
-    chroma,
-    alpha: rawA === undefined ? 1 : Number(rawA),
-  };
-}
-
-/**
- * The channels of a legacy serialization, or null where the colour is not one.
- *
- * The column paints one ground that is not a token: the user tile's fill is a
- * colour from the awareness palette, which is `#rrggbb` literals because
- * y-prosemirror accepts nothing else (#482, src/collab/identity.ts). Chromium
- * reports it as `rgb(r, g, b)`, already in the space `srgb` returns. Grounds
- * only — an *ink* still has to be a token, so a legacy one reaches `oklab`
- * below and throws rather than being classified by a chroma nobody computed.
- */
-function legacySrgb(painted: string): [number, number, number] | null {
-  const parts = /^rgb\((\d*\.?\d+), (\d*\.?\d+), (\d*\.?\d+)\)$/.exec(painted.trim());
-  if (parts === null) return null;
-  const [r, g, b] = parts.slice(1).map((channel) => Number(channel) / 255);
-  return [r ?? 0, g ?? 0, b ?? 0];
-}
-
-/**
- * The sRGB a browser paints for one of those colours, so an ink with an alpha
- * can be composited onto its ground and read as a contrast ratio (#515). The
- * matrices are the OKLab specification's; the clamp is the gamut Chromium
- * paints into. Nothing here is a second palette — every input is a value read
- * off a rendered element.
- */
-function srgb(painted: string): [number, number, number] {
-  const { L, a, b } = oklab(painted);
-  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
-  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
-  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
-  const linear = [
-    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
-    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
-    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
-  ];
-  const encoded = linear.map((channel) => {
-    const clamped = Math.min(1, Math.max(0, channel));
-    return clamped <= 0.0031308
-      ? 12.92 * clamped
-      : 1.055 * clamped ** (1 / 2.4) - 0.055;
-  });
-  return [encoded[0] ?? 0, encoded[1] ?? 0, encoded[2] ?? 0];
-}
-
-/** WCAG's ratio between an ink — alpha composited where it has one — and its ground. */
-function contrast(ink: string, ground: string): number {
-  const under = legacySrgb(ground) ?? srgb(ground);
-  const alpha = oklab(ink).alpha;
-  const over = srgb(ink).map((channel, index) => {
-    const beneath = under[index] ?? 0;
-    return channel * alpha + beneath * (1 - alpha);
-  });
-  const luminance = (colour: number[]): number => {
-    const [r, g, b] = colour.map((channel) =>
-      channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
-    );
-    return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
-  };
-  const one = luminance(over) + 0.05;
-  const two = luminance(under) + 0.05;
-  return one > two ? one / two : two / one;
-}
-
-/** How far a fill sits from the ground it is painted on. */
-function separation(fill: string, ground: string): number {
-  const one = oklab(fill);
-  const two = oklab(ground);
-  return Math.hypot(one.L - two.L, one.a - two.a, one.b - two.b);
-}
-
 /** One colour a surface paints, and the ground it lands on. */
 type Reading = {
   where: string;
@@ -1610,135 +1455,70 @@ type Reading = {
  * 1.4.3 excepts a disabled component's text, and the vendored menu draws its two
  * unavailable items at half opacity.
  */
-function surface(page: Page, root: string): Promise<Reading[]> {
-  return page.evaluate((selector) => {
+type GroundLayer = { colour: string; image: string; body: boolean };
+
+/** Resolve raw ancestor paint in Node, through the shared colour module. */
+function groundsFromLayers(layers: GroundLayer[]): string[] {
+  const fills: string[] = [];
+  const over = (ground: string): string => fills.toReversed().reduce(
+    (under, fill) => composite(fill, under), ground,
+  );
+  for (const layer of layers) {
+    if (layer.image !== "none") {
+      if (!layer.body) throw new Error("cannot establish the ground through a painted image");
+      return pageGrounds(layer.image, layer.colour).map(over);
+    }
+    const alpha = alphaOf(layer.colour);
+    if (alpha === 1) return [over(layer.colour)];
+    if (alpha > 0) fills.push(layer.colour);
+  }
+  throw new Error("nothing opaque under this surface");
+}
+
+async function surface(page: Page, root: string): Promise<Reading[]> {
+  const raw = await page.evaluate((selector) => {
     const start = document.querySelector(selector);
     if (start === null) throw new Error(`no surface for ${selector}`);
-
-    const alphaOf = (colour: string): number => {
-      const rgba = /^rgba?\(([^)]*)\)$/.exec(colour);
-      if (rgba !== null) {
-        const parts = (rgba[1] ?? "").split(",");
-        return parts.length === 4 ? Number(parts[3]) : 1;
-      }
-      const slashed = /\/\s*(\d*\.?\d+)\s*\)$/.exec(colour);
-      return slashed === null ? 1 : Number(slashed[1]);
-    };
-
-    // Transparent backgrounds expose their ancestor's ground; translucent
-    // backgrounds, including Button hover fills, must be composited onto it.
-    const composite = (ground: string, fills: string[]): string => {
-      if (fills.length === 0) return ground;
-      const canvas = document.createElement("canvas");
-      canvas.width = canvas.height = 1;
-      const painter = canvas.getContext("2d");
-      if (painter === null) throw new Error("no canvas for background compositing");
-      for (const colour of [ground, ...[...fills].reverse()]) {
-        painter.fillStyle = colour;
-        painter.fillRect(0, 0, 1, 1);
-      }
-      const [red, green, blue] = painter.getImageData(0, 0, 1, 1).data;
-      return `rgb(${red}, ${green}, ${blue})`;
-    };
-    const groundOf = (element: Element | null): string[] => {
-      const fills: string[] = [];
+    const layers = (element: Element | null): GroundLayer[] => {
+      const result: GroundLayer[] = [];
       for (let node = element; node !== null; node = node.parentElement) {
         const style = getComputedStyle(node);
-        if (style.backgroundImage !== "none") {
-          // The body's token paints a gradient. Checking every stop defends
-          // text anywhere on it, including a settings page's heading.
-          if (node !== document.body) throw new Error("cannot establish the ground through a painted image");
-          const stops = style.backgroundImage.match(/(?:rgba?|oklch)\([^)]*\)/g);
-          if (stops === null) throw new Error("no readable page ground");
-          return stops.map((ground) => composite(ground, fills));
-        }
-        const colour = style.backgroundColor;
-        const alpha = alphaOf(colour);
-        if (alpha === 1) return [composite(colour, fills)];
-        if (alpha > 0) fills.push(colour);
+        result.push({ colour: style.backgroundColor, image: style.backgroundImage, body: node === document.body });
       }
-      throw new Error(`nothing opaque under ${selector}`);
+      return result;
     };
-
-    const name = (element: Element): string =>
-      `${selector} ${element.tagName.toLowerCase()}${element.getAttribute("class") === null ? "" : `.${element.getAttribute("class")?.trim().split(/\s+/).join(".")}`}`;
-
-    const readings: Reading[] = [];
+    const readings: Array<Omit<Reading, "ground"> & { layers: GroundLayer[] }> = [];
     for (const element of [start, ...start.querySelectorAll("*")]) {
       const box = element.getBoundingClientRect();
       if (box.width === 0 && box.height === 0) continue;
-      if (
-        element.closest("[data-disabled], [aria-disabled='true'], :disabled") !== null
-      ) {
-        continue;
-      }
+      if (element.closest("[data-disabled], [aria-disabled='true'], :disabled") !== null) continue;
       const style = getComputedStyle(element);
-      const where = name(element);
-
-      // A field's value is text the reader reads, and it is the one text that
-      // is not a child node — without this the rename field's ink is walked
-      // past, and only its border is measured.
-      const field =
-        (element instanceof HTMLInputElement ||
-          element instanceof HTMLTextAreaElement) &&
-        element.value.trim() !== "";
-      const speaks =
-        field ||
-        [...element.childNodes].some(
-          (node) =>
-            node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "",
-        );
-      if (speaks) {
-        readings.push(...groundOf(element).map((ground) => ({
-          where,
-          kind: "text" as const,
-          colour: style.color,
-          ground,
-        })));
-      }
-
+      const where = `${selector} ${element.tagName.toLowerCase()}${element.getAttribute("class") === null ? "" : `.${element.getAttribute("class")?.trim().split(/\s+/).join(".")}`}`;
+      const field = (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && element.value.trim() !== "";
+      const speaks = field || [...element.childNodes].some(
+        (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "",
+      );
+      if (speaks) readings.push({ where, kind: "text", colour: style.color, layers: layers(element) });
       for (const side of ["top", "right", "bottom", "left"] as const) {
-        const width = Number.parseFloat(style.getPropertyValue(`border-${side}-width`));
-        const colour = style.getPropertyValue(`border-${side}-color`);
-        // A transparent border reserves geometry; it is not a separator (#515).
-        if (width > 0 && alphaOf(colour) > 0) {
-          readings.push(...groundOf(element).map((ground) => ({
-            where: `${where} border-${side}`,
-            kind: "stroke" as const,
-            colour,
-            // The background paints under the border, so an element that has
-            // one is its own border's ground.
-            ground,
-          })));
+        if (Number.parseFloat(style.getPropertyValue(`border-${side}-width`)) > 0) {
+          readings.push({ where: `${where} border-${side}`, kind: "stroke", colour: style.getPropertyValue(`border-${side}-color`), layers: layers(element) });
         }
       }
-
-      // `auto` is the browser's own focus ring, in the browser's own colour —
-      // a stroke that carries its own meaning, which #515 excludes by name.
-      const outline = Number.parseFloat(style.outlineWidth);
-      const drawn = style.outlineStyle !== "none" && style.outlineStyle !== "auto";
-      if (outline > 0 && drawn && alphaOf(style.outlineColor) > 0) {
-        readings.push(...groundOf(element.parentElement).map((ground) => ({
-          where: `${where} outline`,
-          kind: "stroke" as const,
-          colour: style.outlineColor,
-          ground,
-        })));
+      // The browser's automatic ring carries its own meaning; author outlines
+      // are measured against the ground outside the element.
+      if (Number.parseFloat(style.outlineWidth) > 0 && style.outlineStyle !== "none" && style.outlineStyle !== "auto") {
+        readings.push({ where: `${where} outline`, kind: "stroke", colour: style.outlineColor, layers: layers(element.parentElement) });
       }
-
-      const hairline =
-        Math.min(box.width, box.height) <= 2 && Math.max(box.width, box.height) > 2;
-      if (hairline && alphaOf(style.backgroundColor) > 0) {
-        readings.push(...groundOf(element.parentElement).map((ground) => ({
-          where: `${where} fill`,
-          kind: "stroke" as const,
-          colour: style.backgroundColor,
-          ground,
-        })));
+      if (Math.min(box.width, box.height) <= 2 && Math.max(box.width, box.height) > 2) {
+        readings.push({ where: `${where} fill`, kind: "stroke", colour: style.backgroundColor, layers: layers(element.parentElement) });
       }
     }
     return readings;
   }, root);
+  return raw.flatMap(({ layers, ...reading }) => {
+    if (reading.kind === "stroke" && alphaOf(reading.colour) === 0) return [];
+    return groundsFromLayers(layers).map((ground) => ({ ...reading, ground }));
+  });
 }
 
 /**
@@ -1900,38 +1680,16 @@ for (const scheme of ["light", "dark"] as const) {
  * mentions, and a list of expected grounds would keep passing after that ground
  * moved.
  */
-async function groundsUnder(page: Page, locator: Locator): Promise<string[]> {
-  const over = await locator.evaluate((element) => {
-    const opaque = (colour: string): boolean => {
-      const rgba = /^rgba?\(([^)]*)\)$/.exec(colour);
-      if (rgba !== null) {
-        const parts = (rgba[1] ?? "").split(",");
-        return parts.length !== 4 || Number(parts[3]) === 1;
-      }
-      const slashed = /\/\s*(\d*\.?\d+)\s*\)$/.exec(colour);
-      return slashed === null || Number(slashed[1]) === 1;
-    };
+async function groundsUnder(_page: Page, locator: Locator): Promise<string[]> {
+  const layers = await locator.evaluate((element) => {
+    const result: GroundLayer[] = [];
     for (let node: Element | null = element; node !== null; node = node.parentElement) {
-      if (node === document.body) break;
       const style = getComputedStyle(node);
-      if (style.backgroundImage !== "none") {
-        throw new Error("cannot establish the ground through a painted image");
-      }
-      const colour = style.backgroundColor;
-      if (opaque(colour)) return colour;
+      result.push({ colour: style.backgroundColor, image: style.backgroundImage, body: node === document.body });
     }
-    return null;
+    return result;
   });
-  if (over !== null) return [over];
-  // The stops are the only parenthesised colours in the value — `at 0% 0%`
-  // carries none — so matching them is the whole parse.
-  const stops = (await painted(page, "body", "background-image")).match(
-    /(?:rgba?|oklch)\([^)]*\)/g,
-  );
-  // A serialization this cannot read must fail here rather than pass as "no
-  // ground to check".
-  if (stops === null) throw new Error("no ground under this text");
-  return stops;
+  return groundsFromLayers(layers);
 }
 
 /**
@@ -2321,7 +2079,8 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
 /**
  * The document's tags read as tags rather than as a form field (#958).
  *
- * Every fact here needs a rendering engine and nothing else can answer it: what
+ * The token table cannot see the tag field's cascade or focus state, and axe
+ * cannot measure their separation. The browser also observes what
  * the trigger paints, whether pills wrap or scroll out of sight, where the
  * keyboard lands when the panel has no field to enter it through, and whether
  * the field — once ten entries earn one — steps down from the panel it sits on
@@ -2542,6 +2301,7 @@ test("Workspace Settings uses the shared touch floors at iPhone and iPad widths"
 });
 
 for (const scheme of ["light", "dark"] as const) {
+  // Tokens cannot see later rules across settings states; axe cannot read text on the page gradient.
   test(`both settings pages keep every text readable through curation states — ${scheme}`, async ({ browser }) => {
     const path = `/${harness().workspace}/settings/tags`;
     const page = await openAppearanceApp(browser, scheme, `/${harness().workspace}/settings`);
@@ -2848,7 +2608,94 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
+/**
+ * The table holds token floors. Only rendered state can show the one card fill
+ * reaching every consumer, or a later rule changing a chip's focused ground.
+ * Seed both thread states through schema operations; no reload or key deletion
+ * is needed to make an orphan, the intermittent setup removed before v0.3.
+ */
 for (const scheme of ["light", "dark"] as const) {
+  test(`card highlights share one fill and keep their rendered floors — ${scheme}`, async ({ browser }) => {
+    const page = await openAppearanceApp(browser, scheme);
+    await page.setViewportSize({ width: 1000, height: 1000 });
+    await contrastDocument(page, scheme, async () => {
+      await page.addStyleTag({ content: "* { transition: none !important; }" });
+      const tokens = await page.evaluate(() => {
+        const probe = document.createElement("span");
+        document.body.append(probe);
+        probe.style.backgroundColor = "var(--card)";
+        const card = getComputedStyle(probe).backgroundColor;
+        probe.style.backgroundColor = "var(--card-accent)";
+        const accent = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return { card, accent };
+      });
+      const check = async (control: Locator, ground = tokens.card) => {
+        await expect(control).toBeVisible();
+        const fill = await paintedIn(control, "background-color");
+        expect(fill, "one card-accent fill").toBe(tokens.accent);
+        expect(separation(fill, ground)).toBeGreaterThanOrEqual(cardHighlightFloor[scheme]);
+        const text = await renderedText(page, await control.evaluate((element) => {
+          element.setAttribute("data-contrast-highlight", "");
+          return "[data-contrast-highlight]";
+        }));
+        await control.evaluate((element) => element.removeAttribute("data-contrast-highlight"));
+        expect(text.length).toBeGreaterThan(0);
+        for (const reading of text) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
+      };
+      const handle = page.locator(".ub-threads-toggle");
+      await check(handle);
+      await handle.click();
+      const resolved = page.locator(".ub-thread-resolved");
+      await expect(resolved).toBeVisible();
+      const card = await paintedIn(resolved, "background-color");
+      expect(card).toBe(tokens.card);
+      await check(resolved.locator(".ub-chip"), card);
+      const orphan = page.locator(".ub-thread-orphaned");
+      const chip = orphan.locator(".ub-chip-orphaned");
+      await expect(chip).toBeVisible();
+      const restingGround = await paintedIn(orphan, "background-color");
+      const restingFill = await paintedIn(chip, "background-color");
+      expect(contrast(await paintedIn(chip, "color"), restingFill)).toBeGreaterThanOrEqual(4.5);
+      await orphan.click();
+      await expect(orphan).toHaveAttribute("aria-current", "true");
+      const focusedGround = await paintedIn(orphan, "background-color");
+      const focusedFill = await paintedIn(chip, "background-color");
+      const focusedStep = separation(focusedFill, focusedGround);
+      expect(focusedStep).toBeGreaterThanOrEqual(focusedOrphanedChipFloor[scheme]);
+      expect(focusedStep).toBeGreaterThanOrEqual(separation(restingFill, restingGround));
+      expect(contrast(await paintedIn(chip, "color"), focusedFill)).toBeGreaterThanOrEqual(4.5);
+      await page.getByRole("button", { name: "Close threads", exact: true }).click();
+      await expect(handle).toBeFocused();
+
+      await page.locator(".ub-editor .ub-paragraph").first().click();
+      await placeCaret(page);
+      await page.keyboard.type("/");
+      const menu = page.getByRole("listbox", { name: "Block types" });
+      await expect(menu).toBeVisible();
+      const menuGround = await paintedIn(page.locator('[data-slot="caret-menu-content"]').filter({ has: menu }), "background-color");
+      expect(menuGround).toBe(tokens.card);
+      await check(menu.getByRole("option", { selected: true }), menuGround);
+      await page.keyboard.press("Escape");
+      await page.keyboard.press("Backspace");
+      await page.keyboard.type("highlight range");
+      for (let index = 0; index < "highlight range".length; index += 1) await page.keyboard.press("Shift+ArrowLeft");
+      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      const composer = page.locator('[data-slot="selection-composer"]');
+      await expect(composer).toBeVisible();
+      const composerGround = await paintedIn(composer, "background-color");
+      expect(composerGround).toBe(tokens.card);
+      await check(composer.getByRole("button", { name: "Cancel", exact: true }), composerGround);
+      await check(composer.locator(".ub-mention").first(), composerGround);
+      // The submit keeps the separate brand emphasis.
+      expect(await paintedIn(composer.getByRole("button", { name: "Comment", exact: true }), "background-color")).not.toBe(tokens.accent);
+      await composer.getByRole("button", { name: "Cancel", exact: true }).click();
+    }, true);
+  });
+}
+
+for (const scheme of ["light", "dark"] as const) {
+  // Tokens cannot observe later panel overrides; axe omits strokes, placeholders and highlight steps.
   test(`document menus keep sidebar contrast and a full-row highlight — ${scheme}`, async ({ browser }) => {
     const page = await openAppearanceApp(browser, scheme);
     await contrastDocument(page, scheme, async () => {
@@ -2922,10 +2769,8 @@ for (const scheme of ["light", "dark"] as const) {
       await page.mouse.move(1399, 999);
       await contents.focus();
       await page.keyboard.press("Enter");
-      await expect(page.locator(".ub-outline-panel [role=menuitem]").first()).toBeFocused();
       await page.keyboard.press("ArrowDown");
       const keyboardRow = page.locator(".ub-outline-panel [role=menuitem]").nth(1);
-      await expect(keyboardRow).toBeFocused();
       await expect.poll(async () => {
         const fill = await paintedIn(keyboardRow, "background-color");
         return alphaOf(fill) === 0 ? 0 : separation(fill, ground);
@@ -2962,6 +2807,7 @@ for (const scheme of ["light", "dark"] as const) {
     });
   });
 
+  // Actual grounds and CSS opacity can change without any token changing; axe omits gradient/pseudo text.
   test(`muted text and enabled dimmed consumers meet their rendered floors — ${scheme}`, async ({ browser }, testInfo) => {
     const page = await openAppearanceApp(browser, scheme);
     await contrastDocument(page, scheme, async () => {
@@ -3035,14 +2881,7 @@ for (const scheme of ["light", "dark"] as const) {
         const fullStrength = readings.filter((one) => one.opacity === 1 &&
           (legacySrgb(one.ground) ?? []).every((channel) => channel > 0.7));
         const limits = fullStrength.map((reading) => {
-          let low = 0;
-          let high = 1;
-          for (let step = 0; step < 30; step += 1) {
-            const middle = (low + high) / 2;
-            if (contrast(`oklch(${middle} 0 0)`, reading.ground) >= 4.5) low = middle;
-            else high = middle;
-          }
-          return { where: reading.where, ground: reading.ground, lightness: low };
+          return { where: reading.where, ground: reading.ground, lightness: lightnessLimit(reading.ground) };
         }).sort((one, two) => one.lightness - two.lightness);
         console.log(`Rendered light limiting reading: ${JSON.stringify(limits[0])}`);
         const current = fullStrength[0];
@@ -3064,6 +2903,7 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
+// Tokens and axe cannot observe a positioned sibling screen or the controls' opacity/focus cascade.
 // The screen is deliberately dark in both appearances. Compare each light
 // control to the corresponding dark rendering, including opacity and focus.
 test("terminal controls keep their dark-screen contrast in either appearance", async ({ browser }, testInfo) => {

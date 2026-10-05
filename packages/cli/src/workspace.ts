@@ -1,38 +1,18 @@
-/**
- * `ub workspace` — which workspace is in force, and how to change it.
- *
- * Three forms and no more: the one in force, the ones this machine has a
- * database for, and the binding verb.
- *
- * Nothing here opens a hub connection or a Y.Doc. `list` reads a directory
- * listing, `use` writes config files — the whole command is local bookkeeping,
- * the way `git remote` is, and it stays fast and offline for the same reason.
- *
- * **`use` writes the user config — this machine's default workspace.** There is
- * one place a workspace preference lives, `config.json`, the same file `ub init`
- * writes. A repository that needs its own workspace does not get a second config
- * file for it: it pins `WORKSPACE_ID` in its project MCP entry
- * (`ub mcp install --project --workspace <id>`), which every agent session in
- * that checkout spawns through and which outranks this.
- *
- * **`use` stores the string as typed.** A `<slug>-<uuid>` spelling is kept whole,
- * because the slug is what makes a config file readable, and only what reaches a
- * room, a token or the database is the bare uuid. A *prefix* is resolved to the
- * uuid it names, because a prefix is a way of typing an id, not an id.
- *
- * **`use` writes one file, and every reader follows it.** The checkout's mise
- * tasks run through `ub env`, which resolves this same `config.json`, so there
- * is no second copy of the binding to keep in step and no way for the two to
- * disagree.
- */
+/** Workspace inspection and explicit project selection; never a machine default. */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { createWorkspaceCommand } from "./workspace-create.js";
+import { promoteWorkspaceCommand } from "./workspace-promote.js";
+import { joinCommand } from "./remote.js";
+
+import { readdirSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/hub/storage";
-import { defaultDatabasePath } from "@uberblick/mcp-server";
+import { defaultDatabasePath, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";
-import { resolveConfig, userConfigPath, writeUserConfig } from "./config.js";
+import { migrateHubAdmissions, resolveConfig, writeHubAdmission } from "./config.js";
+import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
+import { normalizeRemoteUrl } from "@uberblick/hub/remote-url";
 import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
@@ -44,10 +24,12 @@ import { ORIGIN_LABELS } from "./status.js";
 export const WORKSPACE_HELP = `usage: ub workspace [command]
 
 commands:
-  (none)                 the workspace in force, and which layer chose it
-  list [--json]          workspaces this machine has a database for
-  use <id>               make a workspace this machine's default, by writing
-                         the user config
+  (none)                      the workspace in force, and which layer chose it
+  create <name>               create and select a separate local-only workspace
+  promote <hub>               upload, verify and connect this local workspace
+  join <connection-url>       join an existing hub workspace
+  list [--json]               workspaces this machine has a database for
+  use <id> --hub <url|local>  select a workspace and hub in this project
 
 options:
   -h, --help             show this help; after a command, that command's help
@@ -84,6 +66,7 @@ interface InForce {
   configured: string | null;
   uuid: string | null;
   origin: Origin;
+  hubUrl: string | null;
   warnings: string[];
 }
 
@@ -99,6 +82,7 @@ function inForce(options: { env?: NodeJS.ProcessEnv } = {}): InForce {
     // resolveConfig already refused anything that is not a workspace id.
     uuid: configured === null ? null : parseWorkspaceId(configured).uuid,
     origin: resolved.origins.workspace,
+    hubUrl: resolved.binding?.hubUrl ?? null,
     warnings: resolved.warnings,
   };
 }
@@ -167,7 +151,7 @@ function showWorkspace(io: Io): number {
     io.err(
       "ub workspace: no workspace configured. There is no default — a guessed " +
         "workspace would open a corpus nobody chose. Run `ub init` to create " +
-        "one, or `ub workspace use <id>` to adopt one that exists.\n",
+        "one, or `ub workspace use <id> --hub <url|local>` to adopt one that exists.\n",
     );
     return 1;
   }
@@ -180,6 +164,7 @@ function showWorkspace(io: Io): number {
   if (current.uuid !== current.configured) {
     text += field("uuid", current.uuid);
   }
+  text += field("hub", current.hubUrl ?? "local (this computer)");
   io.out(text);
   return 0;
 }
@@ -300,85 +285,48 @@ export function resolveWorkspaceId(
   };
 }
 
-/**
- * A config file as it is on disk, for merging into.
- *
- * A file that exists but cannot be believed is a refusal, not a default: this
- * command replaces one field and republishes the whole file, so treating an
- * unparseable one as an empty object would throw away everything else its
- * author put in it: `config.json` holds an identity and an endpoint this
- * command has no business dropping.
- */
-function readMergeTarget(path: string): Record<string, unknown> {
-  let text: string;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return {};
-    }
-    throw error;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    // The parser's message quotes the file around the syntax error, and this
-    // one is committable — nothing from it is repeated onto a stream.
-    throw new Error(
-      `refusing to rewrite ${path}: it is not valid JSON. Fix it, or move it ` +
-        "aside and run `ub workspace use` again",
-    );
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`refusing to rewrite ${path}: expected a JSON object`);
-  }
-  return parsed as Record<string, unknown>;
-}
+export const WORKSPACE_USE_HELP = `usage: ub workspace use <id> [--hub <url|local>]
 
-export const WORKSPACE_USE_HELP = `usage: ub workspace use <id>
-
-Make a workspace this machine's default, by writing the user config. Every
-reader follows it: \`ub\`, the MCP server it spawns, and the checkout's mise
-tasks, which run through \`ub env\`.
+Select a workspace and hub together in the nearest .uberblick.json, or create
+one in the current directory. Terminal commands and project MCP sessions use it.
 
 operands:
   <id>              a workspace <uuid>, a decorated <slug>-<uuid>, or a unique
-                    prefix of a uuid \`ub workspace list\` shows. A full uuid is
-                    accepted even if this machine has never seen it; the replica
-                    hydrates on next use.
+                    prefix of a local UUID
 
 options:
+  --hub <url|local>  explicit hub URL, or local for this computer
   -h, --help        show this help
 
-Moves no documents and creates no workspace — it changes which one this machine
-resolves to by default. A repository binds itself instead by pinning
-WORKSPACE_ID in its project MCP entry (\`ub mcp install --project --workspace
-<id>\`); that, and WORKSPACE_ID in the environment, still win, and this says so
-when they do.
+The hub is required unless the project file already selects this workspace. An existing local
+database does not identify which hub owns it. This command moves no documents
+and verifies no membership; use \`ub workspace join\` to hydrate a remote workspace.
+Complete UB_WORKSPACE_ID and UB_HUB_URL environment overrides still take priority.
 `;
 
 async function useCommand(argv: string[], io: Io): Promise<number> {
   if (takeHelp(argv, io, WORKSPACE_USE_HELP)) return 0;
 
   let raw: string | undefined;
+  let hub: string | null | undefined;
   try {
-    const { positionals } = parseArgs({
+    const { positionals, values } = parseArgs({
       args: argv,
-      options: {},
+      options: { hub: { type: "string" } },
       allowPositionals: true,
     });
     if (positionals.length !== 1) {
       throw new Error("expected exactly one workspace id");
     }
     raw = positionals[0];
+    hub = values.hub === undefined ? undefined : values.hub === "local" ? null : normalizeRemoteUrl(values.hub);
   } catch (error) {
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
-    io.err("usage: ub workspace use <id>\n");
+    io.err("usage: ub workspace use <id> [--hub <url|local>]\n");
     return 2;
   }
   if (raw === undefined) {
-    io.err("usage: ub workspace use <id>\n");
+    io.err("usage: ub workspace use <id> [--hub <url|local>]\n");
     return 2;
   }
 
@@ -398,11 +346,17 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   }
   const id = resolved.id;
 
-  const path = userConfigPath();
+  // Environment overrides select this process, never a persistence default.
+  const current = resolveProjectBinding({ env: {} }).binding;
+  if (hub === undefined) {
+    if (current === null || parseWorkspaceId(current.workspaceId).uuid !== parseWorkspaceId(id).uuid) {
+      io.err("ub workspace use: specify --hub <url> or --hub local when selecting a different workspace.\n");
+      return 2;
+    }
+    hub = current.hubUrl;
+  }
+  let path: string;
 
-  // `config.json` is read, merged and republished, and `ub init` does the same
-  // to the same file — so the pair runs under the lock `ub init` holds, or one
-  // of them loses a field the other had just written.
   let lock: InitLock;
   try {
     lock = await acquireInitLock();
@@ -412,10 +366,12 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   }
 
   try {
-    // Merged over what is on disk: identity and the endpoint are not this
-    // command's to drop — and neither is a file that did not parse, which is
-    // refused rather than quietly replaced with a one-field file.
-    writeUserConfig({ ...readMergeTarget(path), workspace: id });
+    // Preserve endpoint metadata before the user removes obsolete selection keys.
+    const admission = hub !== null && usesDeviceLogin(hub, { ...process.env, HUB_ADMISSION: undefined })
+      ? writeHubAdmission(hub, true)
+      : migrateHubAdmissions();
+    warn(io, admission.warnings);
+    path = writeProjectBinding({ workspaceId: id, hubUrl: hub });
   } catch (error) {
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
@@ -428,6 +384,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   if (uuid !== id) {
     text += field("uuid", uuid);
   }
+  text += field("hub", hub ?? "local (this computer)");
   text += field("config", path);
   io.out(text);
 
@@ -435,7 +392,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   // nothing anyone will observe, and printing the binding without saying so
   // would be the lie `ub status` then contradicts.
   const after = inForce();
-  if (after.configured !== id) {
+  if (after.configured !== id || resolveProjectBinding().binding?.hubUrl !== hub) {
     io.err(
       `ub: warning: ${ORIGIN_LABELS[after.origin]} sets ${
         after.configured ?? "no workspace"
@@ -456,6 +413,9 @@ export async function workspaceCommand(
   // command is still an unknown command, `--help` after it or not, which is what
   // the top level does too.
   const [sub, ...rest] = argv;
+  if (sub === "create") return createWorkspaceCommand(rest, io);
+  if (sub === "promote") return promoteWorkspaceCommand(rest, io);
+  if (sub === "join") return joinCommand(rest, io);
   if (sub === "list") {
     return listCommand(rest, io);
   }

@@ -330,7 +330,7 @@ export interface HubSyncOptions {
    *
    * For a client whose caller holds the return value and renders a verdict from
    * it — {@link inspectRemote} with `silent`, and only there. A probe's answer
-   * is an answer, not an incident: `ub remote join` reads a hub before it can
+   * is an answer, not an incident: `ub workspace join` reads a hub before it can
    * even ask for the secret, and that reading logging itself put an ERROR about
    * a rejected token, or a WARN about running local-only, in front of the
    * prompt on a command that then succeeded (#447).
@@ -353,7 +353,7 @@ export class HubSync {
   /** False when neither signing-secret nor device-login sync is composed. */
   readonly enabled: boolean;
 
-  private readonly config: McpConfig;
+  private config: McpConfig;
 
   private readonly onConnected: () => void;
 
@@ -418,7 +418,8 @@ export class HubSync {
    */
   private refusedByHub(): boolean {
     return this.authRejected || this.hubProtocolVersion !== null ||
-      (this.deviceReading !== null && !this.checkingDeviceRefusal);
+      (this.deviceReading !== null && !this.checkingDeviceRefusal &&
+        (this.socketStatus === "connected" || this.deviceReading.status !== "auth-failed"));
   }
 
   /** The socket's own first retry delay, reused by {@link rebuild}. */
@@ -555,7 +556,7 @@ export class HubSync {
     }
 
     if (!this.enabled) {
-      if (!this.silent) {
+      if (!this.silent && config.authEnv?.UB_HUB_URL !== "local") {
         log.warn(
           "HUB_AUTH_TOKEN is not set: running local-only, no hub sync (every tool still works)",
         );
@@ -741,7 +742,7 @@ export class HubSync {
       const result = await work.finally(() => this.deviceWork.delete(work));
       if (this.stopped) return null;
       // A token already minting before the refusal says nothing about it.
-      if (rejected !== undefined) this.checkingDeviceRefusal = false;
+      if (rejected !== undefined || this.offeredLogins.size === 0) this.checkingDeviceRefusal = false;
       if (result.status !== "ready") {
         this.deviceReading = this.deviceFailure(result);
         if (result.status === "update-required" && result.hubVersion !== undefined) {
@@ -1017,6 +1018,16 @@ export class HubSync {
           this.stopForProtocolMismatch(hubProtocol);
           return;
         }
+        // A Docker proxy may be reached over loopback while the hub itself
+        // requires device authority. Its strict sentinel can select stronger
+        // admission, but never authorize a secret on a non-loopback endpoint.
+        if (reason === "device-credential-refused" && this.config.deviceLogin === undefined) {
+          this.config = {
+            ...this.config, authSecret: null,
+            deviceLogin: { ...(this.config.authEnv === undefined ? {} : { env: this.config.authEnv }) },
+          };
+          this.authRejected = false;
+        }
         if (this.config.deviceLogin !== undefined) {
           this.rejectedLogin ??= this.offeredLogins.get(room);
           this.checkingDeviceRefusal = true;
@@ -1211,7 +1222,9 @@ export class HubSync {
         reason: AUTH_REJECTED,
       };
     }
-    if (this.deviceReading !== null) return this.deviceReading;
+    if (this.deviceReading !== null && (this.socketStatus === "connected" ||
+        this.deviceReading.status !== "auth-failed" ||
+        (!this.sawFailure && Date.now() - this.connectingSince <= this.config.connectTimeoutMs))) return this.deviceReading;
     if (this.socketStatus === "connected") {
       return { status: "connected", url: this.config.hubUrl };
     }

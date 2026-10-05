@@ -22,7 +22,6 @@ import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { AUTH_REJECTED, SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { userConfigPath } from "../src/config.js";
 import type { Run, Sandbox } from "./helpers.js";
 import {
   DEAD_HUB_URL,
@@ -219,17 +218,16 @@ describe("ub doctor", () => {
     expect(check(checks, "workspace").status).toBe("fail");
     expect(check(checks, "workspace").remedy).toMatch(/ub init/);
     expect(check(checks, "workspace").remedy).toMatch(/ub workspace use/);
-    expect(check(checks, "workspace").remedy).toMatch(/ub remote join/);
-    // ...and says where a workspace is written, so the line answers "where did
-    // it look?" without a second command. Same resolver as the cli's, never a
-    // literal: a path that drifted from `ub`'s own would fail here.
-    expect(check(checks, "workspace").reason).toContain(userConfigPath(box.env));
+    expect(check(checks, "workspace").remedy).toMatch(/ub workspace join/);
+    // The recovery explains the explicit project binding rather than directing
+    // the operator to the obsolete machine-wide default.
+    expect(check(checks, "workspace").reason).toContain(".uberblick.json");
     expect(ok).toBe(false);
     expect(run.status).not.toBe(0);
   });
 
   it("reports the built-in defaults when only a workspace is configured", async () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     const { checks } = await doctor(box);
 
     expect(check(checks, "workspace").status).toBe("pass");
@@ -242,26 +240,22 @@ describe("ub doctor", () => {
     );
   });
 
-  it("passes the workspace check, and still says a pin shadowed the file", async () => {
-    // The failure that asked for this: `ok  workspace … (environment)` while
-    // config.json named a different workspace, and the hub check then read as
-    // a bad credential. The check still passes — a repository pin is meant to
-    // win — and the disagreement arrives on stderr from `resolveConfig`, which
-    // is the one place that compares the layers.
+  it("reports an atomic environment binding ahead of the project file", async () => {
+    // A complete environment pair deliberately overrides the complete file.
     const box = sandbox({
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
     });
-    const { run, checks } = await doctor(box, { WORKSPACE_ID: PINNED });
+    const { run, checks } = await doctor(box, { UB_WORKSPACE_ID: PINNED, UB_HUB_URL: DEAD_HUB_URL });
 
     expect(check(checks, "workspace").status).toBe("pass");
     expect(check(checks, "workspace").reason).toContain("environment");
-    expect(run.stderr).toMatch(/names a different workspace/);
-    expect(run.stderr).toContain(WORKSPACE);
+    expect(check(checks, "workspace").reason).toContain(PINNED);
+    expect(run.stderr).not.toContain("names a different workspace");
   });
 
   it("calls an absent credential a skip that keeps every MCP tool working", async () => {
     const { checks, ok } = await doctor(
-      sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } }),
+      sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } }),
     );
     const credential = check(checks, "credential");
 
@@ -278,7 +272,7 @@ describe("ub doctor", () => {
 
   it("reports a configured credential without printing it", async () => {
     const box = sandbox({
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { signingSecret: SECRET },
     });
     const { run, checks } = await doctor(box);
@@ -292,7 +286,7 @@ describe("ub doctor", () => {
 
   it("fails the credential check when the file lets other users read it", async () => {
     const box = sandbox({
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { signingSecret: SECRET },
       credentialsMode: 0o644,
     });
@@ -309,7 +303,7 @@ describe("ub doctor", () => {
   it("fails the hub check with no hub running, names the URL it dialled and remedies it with `ub open`", async () => {
     const { checks, run } = await doctor(
       sandbox({
-        userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+        projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
         credentials: { signingSecret: SECRET },
       }),
     );
@@ -324,33 +318,65 @@ describe("ub doctor", () => {
     expect(run.status).not.toBe(0);
   });
 
-  it("requires a stored login before contacting a remote deployment", async () => {
+  it("separates a missing login from an unreachable remote deployment", async () => {
     // A hub somebody deployed is not one this machine can start, so naming any
     // start command here would send the reader after a hub that is not theirs.
     const { checks } = await doctor(
       sandbox({
-        userConfig: {
-          workspace: WORKSPACE,
+        projectBinding: {
+          workspaceId: WORKSPACE,
           hubUrl: "wss://hub.example.invalid:443",
         },
         credentials: { signingSecret: SECRET },
       }),
     );
     const hub = check(checks, "hub");
+    const credential = check(checks, "credential");
 
+    expect(credential.status).toBe("fail");
+    expect(credential.remedy).toMatch(/ub auth login/);
     expect(hub.status).toBe("fail");
     expect(hub.reason).toContain("hub.example.invalid");
-    expect(hub.remedy).toMatch(/ub auth login/);
+    expect(hub.reason).toContain("nothing answered");
+    expect(hub.remedy).toContain("check that the deployment is running");
     expect(hub.remedy).not.toMatch(/ub open/);
     expect(hub.remedy).not.toMatch(/mise/);
   });
 
+  it.each([false, true])("names sign-in recovery for a reachable device deployment through loopback (recorded admission: %s)", async recorded => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
+    const hub = await createHub({ port: 0, address: "0.0.0.0", databasePath: join(box.cwd, "device-hub.sqlite"),
+      github: { clientId: "Iv1.0123456789abcdef" }, log: silentLogger });
+    hubs.push(hub);
+    const endpoint = `ws://127.0.0.1:${hub.port}/custom-proxy-path`;
+    pointAt(box, endpoint);
+    if (recorded) writeFileSync(join(box.configHome, "uberblick", "config.json"), JSON.stringify({ hubAdmissions: { [endpoint]: "device" } }));
+    const { checks } = await doctor(box);
+    const upstream = check(checks, "hub");
+    expect(upstream.status).toBe("fail");
+    expect(upstream.remedy).toContain(`ub auth login http://127.0.0.1:${hub.port}`);
+    expect(upstream.remedy).not.toContain("signing secret");
+    expect(upstream.remedy).not.toContain("ub open");
+  });
+
+  it("does not recommend replacing a stopped loopback device deployment with ub open", async () => {
+    const port = await freePort();
+    const endpoint = `ws://127.0.0.1:${port}/custom-proxy-path`;
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint },
+      userConfig: { hubAdmissions: { [endpoint]: "device" } }, credentials: { signingSecret: SECRET } });
+    const { checks } = await doctor(box);
+    const upstream = check(checks, "hub");
+    expect(upstream.status).toBe("fail");
+    expect(upstream.reason).toContain(`nothing answered ${endpoint}`);
+    expect(upstream.remedy).toContain("check that the deployment is running");
+    expect(upstream.remedy).not.toContain("ub open");
+  });
+
   it("passes the hub check against a running hub, and says our hub holds the port", async () => {
-    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
     const hub = await startHub(box);
     pointAt(box, `ws://127.0.0.1:${hub.port}`);
     const { checks } = await doctor(box, {
-      WORKSPACE_ID: WORKSPACE,
       PORT: String(hub.port),
     });
 
@@ -368,17 +394,17 @@ describe("ub doctor", () => {
     // secret sends — it cannot read this client's envelope at all — so the
     // remedy has to name both rather than send the reader after the secret
     // alone. Same sentence every other surface prints.
-    const box = sandbox({ credentials: { signingSecret: "a-secret-this-hub-was-not-deployed-with" } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: "a-secret-this-hub-was-not-deployed-with" } });
     const hub = await startHub(box);
     pointAt(box, `ws://127.0.0.1:${hub.port}`);
-    const { checks, run } = await doctor(box, { WORKSPACE_ID: WORKSPACE });
+    const { checks, run } = await doctor(box);
 
     expect(check(checks, "hub").status).toBe("fail");
     expect(check(checks, "hub").remedy).toContain(AUTH_REJECTED);
     expect(check(checks, "hub").remedy).toMatch(/same secret/);
     expect(check(checks, "hub").remedy).not.toContain("ub status");
     expect(check(checks, "credential").reason).toContain("credentials file");
-    // And the probe stays loud here. `ub remote join` silences its own
+    // And the probe stays loud here. `ub workspace join` silences its own
     // pre-prompt probe (#447); `probeHub` — this check, and `ub open`, which
     // reduces it to a boolean and so never names a refusal itself — must not
     // be silenced with it. This is the cheapest command on that path.
@@ -387,10 +413,10 @@ describe("ub doctor", () => {
 
   it("explains both protocol versions and which side to update", async () => {
     const hubVersion = SYNC_PROTOCOL_VERSION + 1;
-    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
     const hub = await startHub(box, hubVersion);
     pointAt(box, `ws://127.0.0.1:${hub.port}`);
-    const { checks, run } = await doctor(box, { WORKSPACE_ID: WORKSPACE });
+    const { checks, run } = await doctor(box);
     const mismatch = check(checks, "hub");
 
     expect(mismatch.status).toBe("fail");
@@ -415,10 +441,10 @@ describe("ub doctor", () => {
   ])(
     "a clock %s is a %s",
     async (_name, status, offsetSeconds, direction) => {
-      const box = sandbox({ credentials: { signingSecret: SECRET } });
+      const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
       const port = await skewedClock(offsetSeconds);
       pointAt(box, `ws://127.0.0.1:${port}`);
-      const { checks } = await doctor(box, { WORKSPACE_ID: WORKSPACE });
+      const { checks } = await doctor(box);
 
       const clock = check(checks, "clock");
       expect(clock.status).toBe(status);
@@ -430,20 +456,19 @@ describe("ub doctor", () => {
   );
 
   it("skips the clock check when nothing answers an HTTP request", async () => {
-    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
     pointAt(box, DEAD_HUB_URL);
-    const { checks } = await doctor(box, { WORKSPACE_ID: WORKSPACE });
+    const { checks } = await doctor(box);
 
     expect(check(checks, "clock").status).toBe("skipped");
   });
 
   it("names both values when the hub's port and the configured endpoint disagree", async () => {
-    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
     const hub = await startHub(box);
     const dialled = await freePort();
     pointAt(box, `ws://127.0.0.1:${dialled}`);
     const { checks } = await doctor(box, {
-      WORKSPACE_ID: WORKSPACE,
       PORT: String(hub.port),
     });
     const port = check(checks, "port");
@@ -455,15 +480,14 @@ describe("ub doctor", () => {
     // …and how each half is set: one is an environment variable, the other is
     // this machine's configuration and a `ub` command away.
     expect(port.remedy).toMatch(/PORT/);
-    expect(port.remedy).toMatch(/ub remote join/);
+    expect(port.remedy).toMatch(/ub workspace join/);
   });
 
   it("tells a foreign process holding the port from our own hub", async () => {
-    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
     const port = await foreignProcess();
     pointAt(box, `ws://127.0.0.1:${port}`);
     const { checks } = await doctor(box, {
-      WORKSPACE_ID: WORKSPACE,
       PORT: String(port),
     });
     const bind = check(checks, "bind");
@@ -472,15 +496,14 @@ describe("ub doctor", () => {
     expect(bind.reason).toContain(`127.0.0.1:${port}`);
     expect(bind.reason).toMatch(/not an uberblick hub/);
     expect(bind.remedy).toMatch(/PORT/);
-    expect(bind.remedy).toMatch(/ub remote join/);
+    expect(bind.remedy).toMatch(/ub workspace join/);
   });
 
   it("refuses to call a hub that never serves the room reachable, or the port ours", async () => {
-    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
     const port = await silentServer();
     pointAt(box, `ws://127.0.0.1:${port}`);
     const { checks } = await doctor(box, {
-      WORKSPACE_ID: WORKSPACE,
       PORT: String(port),
     });
 
@@ -503,7 +526,7 @@ describe("ub doctor", () => {
   it.skipIf(process.getuid?.() === 0)(
     "fails the database check when its directory cannot be written, and prints the path",
     async () => {
-      const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+      const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
       const readOnly = join(box.cwd, "read-only");
       mkdirSync(readOnly);
       chmodSync(readOnly, 0o500);
@@ -522,7 +545,7 @@ describe("ub doctor", () => {
   );
 
   it("reports which MCP client is wired up, and points at `ub mcp install` when none is", async () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const none = await doctor(box);
 
     expect(check(none.checks, "mcp").status).toBe("fail");
@@ -549,7 +572,7 @@ describe("ub doctor", () => {
     // "No MCP client registers uberblick" would be an answer this check does
     // not have: the file is there and nothing here knows what is in it. It is
     // named by path and quoted nowhere — a config file is where tokens live.
-    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const config = join(box.cwd, ".mcp.json");
     writeFileSync(config, `{ "mcpServers": { "uberblick": "${SECRET}"\n`, "utf8");
     const { run, checks } = await doctor(box);
@@ -562,7 +585,7 @@ describe("ub doctor", () => {
 
   it("writes exactly one JSON object to stdout with --json, and nothing else", async () => {
     const box = sandbox({
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { signingSecret: SECRET },
     });
     const run = await runUbAsync(["doctor", "--json"], box, { PORT: "1" });
@@ -578,7 +601,7 @@ describe("ub doctor", () => {
   });
 
   it("renders the same verdicts for a human, with the remedy under the failure", async () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const run = await runUbAsync(["doctor"], box, { PORT: "1" });
 
     expect(run.stdout).toMatch(/ok {4}workspace/);

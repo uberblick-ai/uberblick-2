@@ -87,12 +87,13 @@ test("a release bundle makes no implicit connection and uses a valid served endp
 });
 
 
-test("a remote hub guide covers every route without credentials or documents @webkit", async ({ context, page }, testInfo) => {
+for (const endpoint of ["ws://localhost:8080/ws", "wss://remote.example/ws"]) {
+  test(`a released page for ${endpoint} guides every route without credentials or documents @webkit`, async ({ context, page }, testInfo) => {
     await context.route("**/uberblick-config.json", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-        hubUrl: "wss://remote.example/ws", workspaces: [WORKSPACE],
-        // Old host config must not restore a remote browser's shared-secret path.
-        hubAuthToken: SECRET,
+        hubUrl: endpoint, workspaces: [WORKSPACE],
+        // A stale HTTPS document must not restore remote shared-secret access.
+        ...(endpoint.startsWith("wss:") ? { hubAuthToken: SECRET } : {}),
       }) });
     });
     await context.addCookies([{ name: "synthetic-session", value: "not-a-credential", url: appUrl }]);
@@ -109,7 +110,7 @@ test("a remote hub guide covers every route without credentials or documents @we
       await expect(page.getByRole("heading", { name: "This hub is unclaimed", exact: true })).toBeVisible();
       const commands = page.getByRole("region", { name: "Hub setup guide" }).locator("li code");
       await expect(commands).toHaveText([
-        `ub auth login '${appUrl}'`, `ub remote join '${appUrl}/<workspace-id>'`, "ub open",
+        `ub auth login '${appUrl}'`, `ub workspace join '${appUrl}/<workspace-id>'`, "ub open",
       ]);
       // Inherited WebKit viewports cover iPhone, iPad and MacBook; long origins
       // and the placeholder must wrap, and remain native selectable text.
@@ -130,7 +131,8 @@ test("a remote hub guide covers every route without credentials or documents @we
     const screenshot = testInfo.outputPath("remote-hub-guide.png");
     await page.screenshot({ path: screenshot, fullPage: true });
     await testInfo.attach("remote-hub-guide", { path: screenshot, contentType: "image/png" });
-});
+  });
+}
 
 test("ub open's local page ignores remote claim state and keeps its editor", async ({ context, page }) => {
   if (hub === undefined) throw new Error("release test hub did not start");

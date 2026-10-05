@@ -43,27 +43,25 @@ describe("ub", () => {
 });
 
 describe("ub status", () => {
-  it("reports the defaults for everything a workspace does not decide", () => {
-    // Absent configuration is a default for the endpoint and the credential:
-    // nothing here requires `ub init` to have set those.
-    const run = runUb(["status"], sandbox({ userConfig: { workspace: WORKSPACE } }));
+  it("reports an explicitly local-only workspace", () => {
+    const run = runUb(["status"], sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } }));
     expect(run.status).toBe(0);
     expect(run.stdout).toMatch(WORKSPACE);
-    expect(run.stdout).toMatch(/ws:\/\/localhost:1234/);
+    expect(run.stdout).toContain("local (this computer)");
   });
 
-  it("fails with no workspace anywhere, and names `ub init`", () => {
+  it("reports that no workspace is selected, and names `ub init`", () => {
     // The one value with no default. A guessed workspace would open a corpus
     // nobody chose, so the answer is the command that creates one.
     const run = runUb(["status"], sandbox());
-    expect(run.status).toBe(1);
-    expect(run.stdout).toBe("");
-    expect(run.stderr).toMatch(/WORKSPACE_ID/);
-    expect(run.stderr).toMatch(/ub init/);
+    expect(run.status).toBe(0);
+    expect(run.stdout).toMatch(/No workspace selected/);
+    expect(run.stdout).toMatch(/ub init/);
+    expect(run.stderr).toBe("");
   });
 
   it("exits 1 with its error instead of an overview when the status read fails", () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     const database = join(box.cwd, "broken.sqlite");
     writeFileSync(database, "this is not a SQLite database");
 
@@ -77,7 +75,7 @@ describe("ub status", () => {
     // The slug is display; the uuid is what rooms, the token claim and the
     // database are keyed by — and what you quote to somebody else.
     const decorated = `uberblick-${WORKSPACE}`;
-    const box = sandbox({ userConfig: { workspace: decorated, hubUrl: DEAD_HUB_URL } });
+    const box = sandbox({ projectBinding: { workspaceId: decorated, hubUrl: DEAD_HUB_URL } });
 
     const human = runUb(["status"], box);
     expect(human.status).toBe(0);
@@ -96,7 +94,7 @@ describe("ub status", () => {
 
   it("emits one parseable object with --json, and nothing else on stdout", () => {
     const box = sandbox({
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
     });
     const run = runUb(["status", "--json"], box);
     expect(run.status).toBe(0);
@@ -106,8 +104,8 @@ describe("ub status", () => {
     expect(report.workspaceUuid).toBe(WORKSPACE);
     expect(report.hubUrl).toBe(DEAD_HUB_URL);
     expect(report.sources).toEqual({
-      workspace: "user config",
-      hubUrl: "user config",
+      workspace: "project config",
+      hubUrl: "project config",
     });
     expect(report.databasePath).toBe(
       join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`),
@@ -143,7 +141,7 @@ describe("ub status", () => {
     const box = sandbox({
       credentials: { signingSecret: secret },
       // A dead hub, so this test never touches a hub the developer is running.
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
     });
 
     const human = runUb(["status"], box);
@@ -171,7 +169,7 @@ describe("ub status", () => {
     const secret = "cli-test-signing-secret-9d2e07";
     const box = sandbox({
       credentials: { signingSecret: secret },
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       // A file every user on the machine can read: the secret must go unused.
       credentialsMode: 0o644,
     });
@@ -195,7 +193,7 @@ describe("ub status", () => {
     const secret = "cli-test-signing-secret-2e6f41";
     const box = sandbox({
       raw: { credentials: `${secret}\n` },
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
     });
 
     const run = runUb(["status", "--json"], box);
@@ -210,8 +208,8 @@ describe("ub status", () => {
     const misplaced = "cli-test-misplaced-secret-a70c93";
     const broken = sandbox({ raw: { userConfig: `${misplaced}\n` } });
     const second = runUb(["status", "--json"], broken, {
-      WORKSPACE_ID: WORKSPACE,
-      HUB_URL: DEAD_HUB_URL,
+      UB_WORKSPACE_ID: WORKSPACE,
+      UB_HUB_URL: DEAD_HUB_URL,
     });
     expect(second.status).toBe(0);
     expect(second.stderr).toMatch(/config\.json: invalid JSON/);
@@ -222,12 +220,12 @@ describe("ub status", () => {
     const secret = "cli-test-signing-secret-71b4de";
     const box = sandbox({
       credentials: { signingSecret: secret },
-      userConfig: { workspace: "../escape" },
+      projectBinding: { workspaceId: "../escape", hubUrl: null },
     });
 
     const run = runUb(["status"], box);
     expect(run.status).not.toBe(0);
-    expect(run.stderr).toMatch(/config\.json/);
+    expect(run.stderr).toMatch(/\.uberblick\.json/);
     expect(run.output).not.toContain(secret);
   });
 });

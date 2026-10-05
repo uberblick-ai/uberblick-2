@@ -46,7 +46,7 @@ import { AUTH_REJECTED, protocolSkew } from "@uberblick/hub/protocol";
 import type { McpConfig } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "./budget.js";
 import type { ResolvedConfig } from "./config.js";
-import { readCredentials, resolveConfig, userConfigPath } from "./config.js";
+import { readCredentials, resolveConfig, requireBinding } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
@@ -102,22 +102,21 @@ function skipped(name: string, reason: string, remedy: string | null = null): Ch
 }
 
 const WORKSPACE_REMEDY =
-  "`ub init` creates a workspace; `ub remote join <hub>/<workspace-id>` binds " +
-  "this machine to one that already exists; `ub workspace use <id>` adopts one " +
+  "`ub init` creates a workspace; `ub workspace join <hub>/<workspace-id>` binds " +
+  "this project to one that already exists; `ub workspace use <id> --hub <url|local>` adopts one " +
   "this machine already has";
 
 /**
  * The hub's bind address and the endpoint the clients dial are two settings, and
  * only one of them is an environment variable: the endpoint lives in this
- * machine's config, written by `ub init` or `ub remote join`.
+ * machine's config, written by `ub init` or `ub workspace join`.
  */
 const PORT_REMEDY =
-  "the hub binds HUB_HOST:PORT — set PORT to the port the configured endpoint dials, or point this machine at the hub you meant with `ub remote join <endpoint>/<workspace-id>`";
+  "the hub binds HUB_HOST:PORT — set PORT to the port the configured endpoint dials, or point this machine at the hub you meant with `ub workspace join <endpoint>/<workspace-id>`";
 
 // --- workspace ---------------------------------------------------------------
 
 function workspaceCheck(
-  env: NodeJS.ProcessEnv,
   resolved: ResolvedConfig | null,
   config: McpConfig | null,
   error: string | null,
@@ -126,11 +125,7 @@ function workspaceCheck(
     // Nothing configured at all is the common case and gets a line of its own;
     // a value that *is* configured and was refused keeps the refusal's own
     // message, which names the layer the value came from.
-    const configured = env.WORKSPACE_ID?.trim();
-    const reason =
-      configured === undefined || configured === ""
-        ? `none configured — a workspace id names the rooms, the token claim and the local database, and there is no default; this machine's belongs in ${userConfigPath(env)}`
-        : (error ?? `${configured} was refused`);
+    const reason = error ?? "No workspace selected; choose a complete project or environment binding";
     return fail("workspace", reason, WORKSPACE_REMEDY);
   }
   const spelling = resolved.env.WORKSPACE_ID ?? config.workspaceId;
@@ -343,17 +338,16 @@ async function hubCheck(
       `no signing secret, so ${config.hubUrl} was not dialled — this machine is local-only`,
     );
   }
-  // Which remedy applies is a property of the endpoint, not of the failure. A
-  // hub on this machine is one `ub open` away; a remote one is somebody's
-  // deployment, which this command can neither start nor pretend to.
-  const local = endpoint !== null && isLocalHost(endpoint.host);
+  // A local-admission hub is one `ub open` away. Device admission identifies
+  // an independent deployment even through loopback, which this command cannot start.
+  const local = config.deviceLogin === undefined && endpoint !== null && isLocalHost(endpoint.host);
   const hub = await dial(config.hubUrl);
   const status = hub.status;
   if (status === "connected") {
     return pass("hub", `${config.hubUrl} answered and served the directory room`);
   }
   if (status === "auth-failed") {
-    if (config.deviceLogin !== undefined) {
+    if (config.deviceLogin !== undefined || hub.authRecovery !== undefined) {
       return fail("hub", `${config.hubUrl} refused remote sync`, hub.reason ?? "Run `ub auth login <hub>` and obtain workspace access.");
     }
     // Narrower here than for a long-running client: this probe minted its
@@ -484,7 +478,7 @@ function portCheck(
     return fail(
       "port",
       `the configured endpoint ${JSON.stringify(config.hubUrl)} is not a websocket URL`,
-      "give this machine a ws:// or wss:// endpoint with `ub remote join <endpoint>/<workspace-id>`",
+      "give this machine a ws:// or wss:// endpoint with `ub workspace join <endpoint>/<workspace-id>`",
     );
   }
   if (!isLocalHost(endpoint.host)) {
@@ -598,7 +592,9 @@ async function bindCheck(
 /** Every scope `ub mcp install` can target, in the order it prefers them. */
 const SCOPES: Scope[] = ["project", "user"];
 
-function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
+function mcpCheck(env: NodeJS.ProcessEnv, cwd: string, resolved: ResolvedConfig | null): Check {
+  const binding = resolved?.binding;
+  const wanted = binding == null ? DEFAULT_ENTRY : { ...DEFAULT_ENTRY, env: { UB_HUB_URL: binding.hubUrl ?? "local", UB_WORKSPACE_ID: binding.workspaceId } };
   const registered: string[] = [];
   const unusable: string[] = [];
   let looked = 0;
@@ -612,7 +608,7 @@ function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
       // commands cannot disagree about what is wired up. Nothing is quoted back
       // out of a config file — not its contents, and not a parser's complaint
       // about them: a file that is there and will not read is named by path.
-      const found = presence(file, DEFAULT_ENTRY);
+      const found = presence(file, wanted);
       if (found === "absent") {
         continue;
       }
@@ -632,7 +628,7 @@ function mcpCheck(env: NodeJS.ProcessEnv, cwd: string): Check {
     unusable.length === 0 ? "" : `; could not read ${unusable.join(", ")}`;
   const first = registered[0];
   if (first !== undefined) {
-    const note = custom ? ", running a command of its own rather than `ub mcp serve`" : "";
+    const note = custom ? ", registration differs from the selected binding or command" : "";
     const more = registered.length > 1 ? ` (and ${registered.length - 1} more)` : "";
     return pass("mcp", `registered in ${first}${more}${note}${unread}`);
   }
@@ -666,7 +662,7 @@ export async function doctorReport(
   let resolved: ResolvedConfig | null = null;
   let error: string | null = null;
   try {
-    resolved = resolveConfig({ env });
+    resolved = resolveConfig({ env, cwd });
     warnings.push(...resolved.warnings);
   } catch (thrown) {
     error = message(thrown);
@@ -675,6 +671,7 @@ export async function doctorReport(
   let config: McpConfig | null = null;
   if (resolved !== null) {
     try {
+      requireBinding(resolved);
       config = resolveMcpConfig(resolved.env);
     } catch (thrown) {
       error = message(thrown);
@@ -692,7 +689,7 @@ export async function doctorReport(
       : hubProber(config);
 
   const checks: Check[] = [
-    workspaceCheck(resolvedEnv, resolved, config, error),
+    workspaceCheck(resolved, config, error),
     credentialCheck(resolved, resolvedEnv, config),
     databaseCheck(config),
     await persistenceCheck(config),
@@ -700,7 +697,7 @@ export async function doctorReport(
     await clockCheck(config),
     portCheck(config, endpoint, resolvedEnv),
     await bindCheck(config, endpoint, resolvedEnv, dial),
-    mcpCheck(resolvedEnv, cwd),
+    mcpCheck(resolvedEnv, cwd, resolved),
   ];
 
   return {

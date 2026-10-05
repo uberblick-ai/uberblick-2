@@ -70,7 +70,7 @@ import {
   syncWorkspace,
 } from "@uberblick/mcp-server";
 import type { SeedDoc } from "@uberblick/mcp-server";
-import { bridgeConfig, resolveMcpConfig } from "./budget.js";
+import { resolveMcpConfig } from "./budget.js";
 
 /** `templates/` in this package — the only place the starter documents live. */
 export const TEMPLATE_DIR = join(
@@ -163,8 +163,8 @@ export interface StarterResult {
  */
 export async function seedStarterDocs(
   env: NodeJS.ProcessEnv,
+  config = resolveMcpConfig(env),
 ): Promise<StarterResult> {
-  const config = resolveMcpConfig(env);
   const starters = readSeedDocs(TEMPLATE_DIR);
   const uuids = new Set(starters.map((doc) => doc.uuid));
 
@@ -175,7 +175,8 @@ export async function seedStarterDocs(
   // make every later `ub init` try, fail on the sticky tombstone, and say so
   // forever. An archived document that is not a starter is the same evidence
   // the live ones are: this workspace is somebody's already.
-  const stubs = (await syncWorkspace(bridgeConfig(config, env, { authSecret: null })))
+  const { deviceLogin: _deviceLogin, ...localConfig } = config;
+  const stubs = (await syncWorkspace({ ...localConfig, authSecret: null }))
     .entries;
   const nothingToDo: StarterResult = { created: [], synced: true };
   if (stubs.some((stub) => !uuids.has(stub.uuid))) return nothingToDo;

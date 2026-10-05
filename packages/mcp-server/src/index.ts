@@ -14,6 +14,7 @@ export {
   DEFAULT_HUB_URL,
   defaultDatabasePath,
   resolveMcpConfig,
+  usesDeviceLogin,
 } from "./config.js";
 export type { McpConfig } from "./config.js";
 export { createMcpEngine } from "./engine.js";

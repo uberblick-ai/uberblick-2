@@ -22,6 +22,20 @@ export interface RemoveMembershipRequest {
   principalId: string;
 }
 
+/** Stable actor refusals; messages remain compatible with internal callers. */
+export class MembershipRefusal extends Error {
+  constructor(readonly code: "admin-required" | "member-required" | "member-not-found" | "last-admin") {
+    const messages = {
+      "admin-required": "MembershipRegistry: workspace admin required",
+      "member-required": "MembershipRegistry: workspace member required",
+      "member-not-found": "MembershipRegistry: member not found",
+      "last-admin": "MembershipRegistry: final workspace admin must remain",
+    };
+    super(messages[code]);
+    this.name = "MembershipRefusal";
+  }
+}
+
 const SCHEMA = `CREATE TABLE IF NOT EXISTS hub_memberships (
   workspace_id TEXT NOT NULL,
   principal_id TEXT NOT NULL CHECK(length(principal_id) > 0),
@@ -132,13 +146,13 @@ export class MembershipRegistry {
   /** Reusable by invitation creation and other workspace access management. */
   requireAdmin(workspaceId: string, actorPrincipalId: string): void {
     if (this.roleFor(workspaceId, actorPrincipalId) !== "admin") {
-      throw new Error("MembershipRegistry: workspace admin required");
+      throw new MembershipRefusal("admin-required");
     }
   }
 
   ownRole(workspaceId: string, actorPrincipalId: string): MembershipRole {
     const role = this.roleFor(workspaceId, actorPrincipalId);
-    if (role === null) throw new Error("MembershipRegistry: workspace member required");
+    if (role === null) throw new MembershipRefusal("member-required");
     return role;
   }
 
@@ -156,7 +170,7 @@ export class MembershipRegistry {
     validateRole(request.role);
     this.requireAdmin(request.workspaceId, request.actorPrincipalId);
     const previousRole = this.roleFor(request.workspaceId, request.principalId);
-    if (previousRole === null) throw new Error("MembershipRegistry: member not found");
+    if (previousRole === null) throw new MembershipRefusal("member-not-found");
     if (request.role !== "admin") this.protectLastAdmin(request.workspaceId, previousRole);
     this.updateRole.run({
       workspaceId: request.workspaceId,
@@ -200,7 +214,7 @@ export class MembershipRegistry {
 
   private protectLastAdmin(workspaceId: string, previousRole: MembershipRole | null): void {
     if (previousRole === "admin" && this.countAdmins.get({ workspaceId })?.count === 1) {
-      throw new Error("MembershipRegistry: final workspace admin must remain");
+      throw new MembershipRefusal("last-admin");
     }
   }
 }
