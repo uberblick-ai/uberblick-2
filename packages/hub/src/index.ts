@@ -49,6 +49,7 @@ export {
 export type { StorageOptions, StoragePaths } from "./storage.js";
 export { silentLogger, stderrLogger } from "./log.js";
 export type { HubLogger, HubLogRecord } from "./log.js";
+export { isGithubAccountId, isGithubUsername } from "./github-identity.js";
 // The credential half of the token module is deliberately absent here: nothing
 // outside the hub issues one, and the entry point is the surface the
 // other packages import.
