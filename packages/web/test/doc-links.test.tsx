@@ -46,7 +46,12 @@ import { createDocLinkContext } from "../src/editor/doc-links.js";
 import type { DocLinkContext } from "../src/editor/doc-links.js";
 import { EditorPane } from "../src/ui/EditorPane.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
-import { mountEditor, snapshotFragment, typeText } from "./helpers.js";
+import {
+  mountEditor,
+  pastePlainText,
+  snapshotFragment,
+  typeText,
+} from "./helpers.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const DOC = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
@@ -65,23 +70,6 @@ function emptyDoc(): Y.Doc {
 
 function caretAtStart(editor: Editor): void {
   editor.commands.setTextSelection(1);
-}
-
-/**
- * A plain-text paste, as prosemirror-view performs one: the text replaces the
- * selection in a transaction marked `uiEvent: "paste"`, which is what Tiptap's
- * paste-rule plugin keys on. `view.pasteText` would be the door itself, but it
- * constructs a `ClipboardEvent`, and jsdom has no such class.
- */
-function pastePlainText(editor: Editor, text: string): void {
-  const { state } = editor.view;
-  const { from, to } = state.selection;
-  editor.view.dispatch(
-    state.tr
-      .insertText(text, from, to)
-      .setMeta("paste", true)
-      .setMeta("uiEvent", "paste"),
-  );
 }
 
 /** What ProseMirror's clipboard parser makes of an HTML fragment. */

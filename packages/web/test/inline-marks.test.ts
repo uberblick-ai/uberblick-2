@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { appendBlock, getBlockInline, initDoc } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
-import { mountEditor, typeText } from "./helpers.js";
+import { mountEditor, pastePlainText, typeText } from "./helpers.js";
 
 const forms = [
   ["**", "bold"],
@@ -30,18 +30,6 @@ function typingDoc() {
   editors.push(editor);
   editor.commands.setTextSelection(1);
   return { ydoc, blockId, editor };
-}
-
-/** ProseMirror's plain-text paste transaction, without jsdom's missing ClipboardEvent. */
-function pastePlainText(editor: Editor, text: string): void {
-  const { state } = editor.view;
-  const { from, to } = state.selection;
-  editor.view.dispatch(
-    state.tr
-      .insertText(text, from, to)
-      .setMeta("paste", true)
-      .setMeta("uiEvent", "paste"),
-  );
 }
 
 for (const [route, insert] of [
@@ -81,6 +69,76 @@ for (const [route, insert] of [
     });
   });
 }
+
+it.each([
+  { before: "Call ", code: "def __init__(self)", after: " first" },
+  { before: "Use ", code: 'if __name__ == "__main__":', after: " here" },
+  { before: "", code: "a _b_ c", after: "" },
+  { before: "", code: "f(*args*)", after: "" },
+])("pastes inline code literally: $code", ({ before, code, after }) => {
+  const { ydoc, blockId, editor } = typingDoc();
+  pastePlainText(editor, `${before}\`${code}\`${after}`);
+
+  expect(getBlockInline(ydoc, blockId)).toEqual([
+    ...(before === "" ? [] : [{ text: before, marks: {} }]),
+    { text: code, marks: { inlineCode: true } },
+    ...(after === "" ? [] : [{ text: after, marks: {} }]),
+  ]);
+});
+
+it("pastes marks outside code without changing any delimiter family inside it", () => {
+  const { ydoc, blockId, editor } = typingDoc();
+  const prose = "**bold** __also bold__ *italic* _also italic_ ~~strike~~";
+  const code = "**bold** __bold__ *italic* _italic_ ~~strike~~";
+  pastePlainText(editor, `${prose} \`${code}\` ${prose}`);
+
+  const markedProse = [
+    { text: "bold", marks: { bold: true } },
+    { text: " ", marks: {} },
+    { text: "also bold", marks: { bold: true } },
+    { text: " ", marks: {} },
+    { text: "italic", marks: { italic: true } },
+    { text: " ", marks: {} },
+    { text: "also italic", marks: { italic: true } },
+    { text: " ", marks: {} },
+    { text: "strike", marks: { strike: true } },
+  ];
+  expect(getBlockInline(ydoc, blockId)).toEqual([
+    ...markedProse,
+    { text: " ", marks: {} },
+    { text: code, marks: { inlineCode: true } },
+    { text: " ", marks: {} },
+    ...markedProse,
+  ]);
+});
+
+it("pastes a complete inline code span within an outer mark", () => {
+  const { ydoc, blockId, editor } = typingDoc();
+  pastePlainText(editor, "**outer `code` outer**");
+
+  expect(getBlockInline(ydoc, blockId)).toEqual([
+    { text: "outer ", marks: { bold: true } },
+    { text: "code", marks: { bold: true, inlineCode: true } },
+    { text: " outer", marks: { bold: true } },
+  ]);
+});
+
+it.each([
+  { boundary: "opening", before: "*outside ", code: "code* literal", after: "" },
+  { boundary: "closing", before: "", code: "literal *code", after: " outside*" },
+])(
+  "keeps formatting delimiters crossing the $boundary code boundary literal",
+  ({ before, code, after }) => {
+    const { ydoc, blockId, editor } = typingDoc();
+    pastePlainText(editor, `${before}\`${code}\`${after}`);
+
+    expect(getBlockInline(ydoc, blockId)).toEqual([
+      ...(before === "" ? [] : [{ text: before, marks: {} }]),
+      { text: code, marks: { inlineCode: true } },
+      ...(after === "" ? [] : [{ text: after, marks: {} }]),
+    ]);
+  },
+);
 
 it.each(forms.filter(([, mark]) => mark !== "inlineCode"))(
   "does not start %s inside existing inline code",
