@@ -170,10 +170,8 @@ version recorded by the hub release before choosing it.
 
 Use this procedure when the operator chooses to upgrade that deployment. A
 source checkout advancing or a candidate passing acceptance does not authorize
-an existing hub upgrade. To keep an existing installation on its current
-protocol while trying a candidate, first
-[pin its corpus client](README.md#keep-the-corpus-client-independent-of-the-checkout)
-and use the [isolated candidate procedure below](#try-a-candidate-on-a-fresh-isolated-hub).
+an existing hub upgrade. To try a candidate first, use the
+[isolated candidate procedure below](#try-a-candidate-on-a-fresh-isolated-hub).
 
 Prepare the old deployment before switching either side:
 
@@ -207,11 +205,8 @@ removal stop live sync but cannot erase downloaded data or local edits.
 Keep each corpus connection on an explicitly installed, compatible client whose
 files live outside the source checkout. The selected package must preserve both
 the existing hub's protocol and the corpus tools the delivery workflow uses;
-finding an older executable on PATH does not prove either. Follow
-[the corpus-client pin procedure](README.md#keep-the-corpus-client-independent-of-the-checkout)
-before new launcher definitions become active, including its actual worker MCP
-check from a private checkout. For an existing `ub open`, use that same explicit
-installed client. Leave the existing hub, bindings, credentials, local stores
+finding an older executable on PATH does not prove either. For an existing
+`ub open`, use that same explicit installed client. Leave the existing hub, bindings, credentials, local stores
 and running workers alone.
 
 Record the installed package identity and the executable that the actual MCP
