@@ -183,5 +183,5 @@ Headless Claude runs deny, without a prompt, any shell command that is not on
 the allow list as written: shell expansion (`$VAR`, `${VAR}`, `$?`, `$(...)`,
 backticks) and loops (`for`, `while`) are denied even when every command inside
 is allowed. Run one plain command per call instead. Files outside the worktree
-and the run's `scratch` directory, such as the corpus launcher under
-`~/.local/bin`, are not readable; use the corpus MCP tools instead.
+and the run's `scratch` directory are not readable; read corpus documents
+through the corpus MCP tools.
