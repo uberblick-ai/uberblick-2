@@ -20,6 +20,7 @@ import {
 } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
+import type { TableMapping } from "@uberblick/schema";
 import { blockText } from "../src/replica.js";
 import { WORKSPACE, removeTempDirs, startServer, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
@@ -196,7 +197,7 @@ describe("structured tables through MCP", () => {
     alpha.format(0, alpha.length, { docLink: { docId: unknown } });
     const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
     const rows = [["Name", "Value"], [`[Alpha](${unknown})`, "Beta"]];
-    let mapping;
+    let mapping: TableMapping | undefined;
     if (change === "neighbour") rows[1]![1] = "Gamma";
     if (change === "label") rows[1]![0] = `[Renamed](${unknown})`;
     if (change === "format") rows[1]![0] = `[**Alpha**](${unknown})`;
@@ -244,7 +245,7 @@ describe("structured tables through MCP", () => {
     alpha.format(0, alpha.length, { docLink: { docId: unknown } });
     const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
     const rows = [["Name", "Value"], [`[Alpha](${unknown})`, "Beta"]];
-    let mapping;
+    let mapping: TableMapping | undefined;
     if (change === "neighbour") rows[1]![1] = `[Copy](${unknown})`;
     if (change === "target") rows[1]![0] = `[Alpha](${randomUUID()})`;
     if (change === "row") {
