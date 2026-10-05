@@ -645,5 +645,11 @@ export function configuredWorkspaces(): readonly string[] {
 /** Direct remote browser sign-in is unavailable until that client flow ships. */
 export function browserSignInRequired(): boolean {
   const config = settled();
-  return config.hubUrl !== "" && !isLoopbackEndpoint(config.hubUrl);
+  // A released Docker proxy can be published on host loopback while its hub
+  // still requires a device login. Unlike development or ub open, its public
+  // runtime document supplies no browser key or local-serving diagnostic.
+  return config.hubUrl !== "" && (
+    !isLoopbackEndpoint(config.hubUrl) ||
+    (RUNTIME_CONFIG_ONLY && config.hubAuthToken === "" && config.localServing === null)
+  );
 }

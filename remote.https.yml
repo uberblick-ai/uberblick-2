@@ -1,0 +1,6 @@
+# Selected by bin/remote-compose.sh for a configured hostname. Replace the
+# loopback publication rather than adding an HTTPS port beside it.
+services:
+  caddy:
+    ports: !override
+      - "${TAILSCALE_IP:-${HTTPS_BIND_IP:-0.0.0.0}}:443:443"
