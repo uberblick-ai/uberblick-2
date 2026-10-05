@@ -7,9 +7,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { credentialsPath, readHubLogins, removeHubLogin, writeHubLogin } from "../src/auth-store.js";
-import { DEVICE_RENEWAL_COOLDOWN_MS, ensureDeviceLogin, readDeviceLogin } from "../src/device-login.js";
-import { acquireInitLock } from "../src/init-lock.js";
 import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
+import { ensureDeviceLogin, readDeviceLogin } from "../src/device-login.js";
+import { acquireInitLock } from "../src/init-lock.js";
 import { startDeviceSyncHub } from "./device-sync-hub.js";
 
 const WORKSPACE = randomUUID();
