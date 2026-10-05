@@ -278,9 +278,9 @@ point — a repository quietly moved to another corpus is exactly what the pin i
 there to prevent.
 
 This repository's `.mcp.json` and `.codex/config.toml` run `ub mcp serve`
-through mise, pinned to the project's hub and workspace, and the Codex agent
-workers in `ub-agents.yaml` receive the same entry as runtime overrides. The
-entries carry no credential.
+through mise, and the Codex agent workers in `ub-agents.yaml` receive the same
+entry as runtime overrides. The checkout's `.uberblick.json` selects the
+workspace, and the entries carry no credential.
 
 For a standalone smoke test of checkout source, `mise run mcp` runs it in the
 foreground.
