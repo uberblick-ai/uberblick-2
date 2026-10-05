@@ -1,6 +1,7 @@
 /** Actor-facing access management; admission remains a separate authority. */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { CredentialRegistry } from "./credentials.js";
+import type { GithubAccountLookup } from "./github-account-lookup.js";
 import type { HubLogger } from "./log.js";
 import { MembershipRefusal, type MembershipRegistry } from "./memberships.js";
 import type { PrincipalRegistry } from "./principals.js";
@@ -20,6 +21,7 @@ export async function handleAccessManagement(
   request: IncomingMessage,
   response: ServerResponse,
   promotions?: WorkspacePromotions,
+  accounts?: GithubAccountLookup,
 ): Promise<boolean> {
   if (request.url !== "/auth/manage") return false;
   const reply = (status: number, body: unknown): void => {
@@ -68,20 +70,57 @@ export async function handleAccessManagement(
   let closesAccess = false;
   try {
     const verified = await credentials.verifyRequest(token, action);
-    // The await above can yield to renewal or revocation even after its last
-    // check. No await separates this fresh record from the synchronous actor
-    // checks and operation below, all on the hub's shared database handle.
-    const current = verified === null ? null : credentials.get(verified.record.id);
-    if (current === null || current.revokedAt !== null || current.replacedAt !== null ||
-      verified === null || clampToken(verified.claims, Math.floor(Date.now() / 1000)) !== null) {
-      reply(401, { status: "sign-in-required" });
-      return true;
-    }
-    if (action.operation !== "promote-workspace" && "workspaceId" in action && !current.workspaces.includes(action.workspaceId)) {
-      reply(403, { status: "forbidden" });
-      return true;
-    }
+    // Verification and GitHub lookup both yield. Each continuation must read
+    // the credential and proof time again, then check current actor authority
+    // synchronously with the write, on the hub's shared database handle.
+    const readCurrent = () => {
+      const current = verified === null ? null : credentials.get(verified.record.id);
+      if (current === null || current.revokedAt !== null || current.replacedAt !== null ||
+        verified === null || clampToken(verified.claims, Math.floor(Date.now() / 1000)) !== null) {
+        reply(401, { status: "sign-in-required" });
+        return null;
+      }
+      if (action.operation !== "promote-workspace" && "workspaceId" in action && !current.workspaces.includes(action.workspaceId)) {
+        reply(403, { status: "forbidden" });
+        return null;
+      }
+      return current;
+    };
+    const current = readCurrent();
+    if (current === null) return true;
     switch (action.operation) {
+      case "resolve-account":
+      case "grant-member": {
+        memberships.requireAdmin(action.workspaceId, current.principalId);
+        if (accounts === undefined) {
+          reply(503, { status: "not-configured" });
+          break;
+        }
+        const account = await accounts.lookup(action);
+        if (account.status !== "ok") {
+          reply(account.status === "account-not-found" ? 404 : 503, account);
+          break;
+        }
+        const refreshed = readCurrent();
+        if (refreshed === null) return true;
+        memberships.requireAdmin(action.workspaceId, refreshed.principalId);
+        if (action.operation === "resolve-account") {
+          reply(200, account);
+          break;
+        }
+        // A lookup never refreshes an existing principal's stored login. Only
+        // its later sign-in does that; a never-seen identity comes from GitHub.
+        const principal = principals.getByGithubAccountId(account.githubAccountId) ??
+          principals.identify(account.githubAccountId, account.githubUsername);
+        const existing = memberships.roleFor(action.workspaceId, principal.id);
+        const member = memberships.grantMember({ workspaceId: action.workspaceId, actorPrincipalId: refreshed.principalId,
+          principalId: principal.id, role: action.role ?? "member" });
+        reply(200, { status: existing === null ? "ok" : "already-member", member: {
+          principalId: principal.id, githubAccountId: principal.githubAccountId,
+          githubUsername: principal.githubUsername, role: member.role,
+        } });
+        break;
+      }
       case "promote-workspace": {
         if (promotions === undefined) {
           reply(503, { status: "not-configured" });

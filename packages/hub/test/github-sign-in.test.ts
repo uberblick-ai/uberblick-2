@@ -98,6 +98,38 @@ function privateRows(path: string) {
 }
 
 describe("hub-driven GitHub identity", () => {
+  it("discovers a direct grant on first sign-in and retains it across login renames and reassignment", async () => {
+    const first = await rig();
+    const admin = first.hub.principals!.identify("9999", "workspace-admin");
+    first.hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: admin.id, role: "admin" });
+    // This identity models the hub's own GitHub lookup for a never-signed-in
+    // account. Discovery must preserve the principal created for the grant.
+    const granted = first.hub.principals!.identify("1234", "first-name");
+    first.hub.memberships!.grantMember({
+      workspaceId: WORKSPACE, actorPrincipalId: admin.id, principalId: granted.id, role: "member",
+    });
+    expect(privateRows(first.databasePath).credentials).toEqual([]);
+
+    const signedIn = await complete(first);
+    expect(signedIn.result.identity).toEqual(granted);
+    expect(signedIn.result.credential.record.workspaces).toEqual([WORKSPACE]);
+    await first.hub.stop();
+
+    const restarted = await rig(first.databasePath);
+    restarted.github.account.login = "renamed-member";
+    const renamed = await complete(restarted);
+    expect(renamed.result.identity).toEqual({ ...granted, githubUsername: "renamed-member" });
+    expect(restarted.hub.principals!.get(granted.id)).toEqual(renamed.result.identity);
+    expect(renamed.result.credential.record.workspaces).toEqual([WORKSPACE]);
+    expect(restarted.hub.memberships!.roleFor(WORKSPACE, granted.id)).toBe("member");
+
+    restarted.github.account = { ...restarted.github.account, id: 5678, login: "first-name" };
+    const reassigned = await complete(restarted);
+    expect(reassigned.result.identity.id).not.toBe(granted.id);
+    expect(reassigned.result.credential.record.workspaces).toEqual([]);
+    expect(restarted.hub.memberships!.roleFor(WORKSPACE, reassigned.result.identity.id)).toBeNull();
+  });
+
   it("binds durable account ID across devices, renames, username reassignment and restart", async () => {
     const first = await rig();
     first.github.account.login = "first_acme";

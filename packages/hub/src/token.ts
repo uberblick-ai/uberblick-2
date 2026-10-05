@@ -46,6 +46,7 @@
  */
 
 import { parseWorkspaceId } from "@uberblick/schema";
+import { isGithubAccountId, isGithubUsername } from "./github-identity.js";
 
 /** What a token is allowed to do. Read-only connections can sync down only. */
 export type TokenScope = "read-write" | "read-only";
@@ -129,6 +130,8 @@ export type RequestAction =
   | { operation: "revoke-device"; deviceId: string }
   | { operation: "own-role"; workspaceId: string }
   | { operation: "list-members"; workspaceId: string }
+  | { operation: "resolve-account"; workspaceId: string; githubUsername: string }
+  | { operation: "grant-member"; workspaceId: string; githubAccountId: string; role?: "admin" | "member" }
   | { operation: "change-role"; workspaceId: string; principalId: string; role: "admin" | "member" }
   | { operation: "remove-member"; workspaceId: string; principalId: string };
 
@@ -586,11 +589,11 @@ async function signClaims(
   return minted;
 }
 
-const REQUEST_TARGET_FIELDS = ["deviceId", "workspaceId", "principalId", "role", "attemptId"] as const;
+const REQUEST_TARGET_FIELDS = ["deviceId", "workspaceId", "principalId", "role", "attemptId", "githubUsername", "githubAccountId"] as const;
 
 /** Parse target semantics, allowing request/proof metadata but no unrelated targets. */
 export function readRequestAction(payload: Record<string, unknown>): RequestAction | null {
-  const { operation, deviceId, workspaceId, principalId, role, attemptId } = payload;
+  const { operation, deviceId, workspaceId, principalId, role, attemptId, githubUsername, githubAccountId } = payload;
   let action: RequestAction;
   switch (operation) {
     case "renew-credential":
@@ -612,6 +615,15 @@ export function readRequestAction(payload: Record<string, unknown>): RequestActi
     case "list-members":
       if (!isWorkspace(workspaceId)) return null;
       action = { operation, workspaceId };
+      break;
+    case "resolve-account":
+      if (!isWorkspace(workspaceId) || !isGithubUsername(githubUsername)) return null;
+      action = { operation, workspaceId, githubUsername };
+      break;
+    case "grant-member":
+      if (!isWorkspace(workspaceId) || !isGithubAccountId(githubAccountId) ||
+        (role !== undefined && role !== "admin" && role !== "member")) return null;
+      action = { operation, workspaceId, githubAccountId, role: role ?? "member" };
       break;
     case "change-role":
       if (!isWorkspace(workspaceId) || !isSubject(principalId) || (role !== "admin" && role !== "member")) {
@@ -644,7 +656,7 @@ function parseRequestProofClaims(
     !UUID.test(kid) ||
     action === null ||
     expectedAction === null ||
-    Object.entries(expectedAction).some(([field, value]) => payload[field] !== value) ||
+    Object.entries(expectedAction).some(([field, value]) => (action as Record<string, unknown>)[field] !== value) ||
     !isEpochSeconds(iat) ||
     !isEpochSeconds(exp) ||
     exp <= iat
