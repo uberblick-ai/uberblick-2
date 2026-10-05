@@ -157,6 +157,9 @@ test("a touch caret exposes a 44px gutter without moving prose, follows edits, a
 
   await first.tap();
   await expect(gutter(page)).toHaveCSS("opacity", "1");
+  // Touch press can reveal the previous caret before selectionchange arrives.
+  // Verify this tap's block target before measuring the next tap's movement.
+  await expect.poll(async () => (await gutter(page).boundingBox())?.y).toBe(proseBefore?.y);
   await minimumTargets(gutter(page), 44, true);
   expect(await first.boundingBox()).toEqual(proseBefore);
   const button = await gutter(page).boundingBox();
