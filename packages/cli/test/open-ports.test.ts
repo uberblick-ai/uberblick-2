@@ -40,6 +40,36 @@ import {
 afterEach(cleanUp);
 
 describe("ub open: hub, ports and serving role", () => {
+  it("opens the default origin and refuses collisions without choosing another port", async () => {
+    const { box, env } = configured();
+    const browser = browserRecorder(box);
+    const app = await open(box, [], { ...env, BROWSER: browser.command });
+
+    expect(app.url).toBe("http://127.0.0.1:13379/");
+    expect((await get(app.url)).status).toBe(200);
+    const configuration = await (await get(`${app.url}uberblick-config.json`)).json();
+    expect(configuration.hubUrl).toBe("ws://127.0.0.1:13379");
+    const recording = (): string =>
+      existsSync(browser.opened) ? readFileSync(browser.opened, "utf8") : "";
+    await waitUntil("the browser to record the default URL", () => recording().endsWith("\n"));
+    expect(recording().trim()).toBe(app.url);
+
+    // The serving role is acquired before binding: even with both the store
+    // and port held, the original store refusal still wins.
+    const sameStore = await openFails(box, [], env);
+    expect(sameStore.status).toBe(1);
+    expect(sameStore.output).toContain("another `ub open` is already serving this store");
+    expect(sameStore.output).not.toContain("port 13379 is");
+
+    const other = configured();
+    const samePort = await openFails(other.box, [], other.env);
+    expect(samePort.status).toBe(1);
+    expect(samePort.output).toContain("port 13379 is already serving an uberblick web app");
+    expect(samePort.output).not.toContain("uberblick is at");
+
+    expect((await app.interrupt()).status).toBe(0);
+  });
+
   it("keeps a stopped loopback deployment external after logout", async () => {
     const { box, env } = configured();
     const port = await freePort();

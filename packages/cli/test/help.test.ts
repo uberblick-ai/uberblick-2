@@ -77,6 +77,20 @@ async function dispatch(argv: string[]): Promise<Run> {
   return { status, stdout, stderr, output: `${stdout}${stderr}` };
 }
 
+it("advertises the default web port in ub open help", async () => {
+  const help = await dispatch(["open", "--help"]);
+  expect(help.status).toBe(0);
+  expect(help.stdout).toMatch(/--port <n>.*\(default 13379\)/);
+  expect(help.stderr).toBe("");
+});
+
+it.each(["0", "65536", "1.5", "invalid"])("refuses invalid explicit web port %s", async (port) => {
+  const refused = await dispatch(["open", "--port", port]);
+  expect(refused.status).toBe(2);
+  expect(refused.stdout).toBe("");
+  expect(refused.stderr).toContain("--port must be an integer in 1..65535");
+});
+
 /** As much of a `parseArgs` option map as this suite reads. */
 type Options = Readonly<
   Record<string, { readonly type: string; readonly short?: string }>

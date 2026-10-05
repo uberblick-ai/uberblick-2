@@ -891,7 +891,7 @@ it("opens a newly created local workspace in the browser without login or promot
   const box = sandbox();
   const created = await runUbAsync(["workspace", "create", "Local browser"], box);
   expect(created.status, created.output).toBe(0);
-  const running = await open(box, [], {
+  const running = await open(box, ["--port", String(await freePort())], {
     UBERBLICK_WEB_DIST: fixtureBundle(box),
     HUB_DB_PATH: join(box.cwd, "local-browser.sqlite"), BROWSER: "none",
   });
