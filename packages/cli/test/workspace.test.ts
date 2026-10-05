@@ -1,8 +1,10 @@
 /** Project selection never borrows a workspace's hub from another binding. */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
 import { writeHubLogin, removeHubLogin } from "@uberblick/hub/auth-store";
+import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { resolveConfig } from "../src/config.js";
 import { removeTempDirs, runUb, runUbAsync, sandbox, type Sandbox } from "./helpers.js";
 
@@ -87,10 +89,98 @@ describe("ub workspace list", () => {
     const run = runUb(["workspace", "list", "--json"], box);
     expect(run.status, run.output).toBe(0);
     expect(JSON.parse(run.stdout)).toEqual([
-      { uuid: WORKSPACE, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`) },
-      { uuid: UNRELATED, active: false, databasePath: join(box.dataHome, "uberblick", `${UNRELATED}.sqlite`) },
+      { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`) },
+      { uuid: UNRELATED, name: null, active: false, databasePath: join(box.dataHome, "uberblick", `${UNRELATED}.sqlite`) },
     ]);
+    expect(existsSync(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`))).toBe(false);
   });
+
+  it("shows local names beside full IDs and preserves JSON parity and selection", () => {
+    const box = sandbox({ userConfig: { displayName: "Synthetic operator" } });
+    bind(box);
+    const named = [[WORKSPACE, "Project notes"], [OTHER, "Research notes"]] as const;
+    for (const [uuid, name] of named) {
+      storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: uuid }), name);
+    }
+    withDatabase(box, UNRELATED);
+    const configPath = join(box.configHome, "uberblick", "config.json");
+    const bindingBefore = readFileSync(join(box.cwd, ".uberblick.json"));
+    const configBefore = readFileSync(configPath);
+    const databaseBefore = named.map(([uuid]) =>
+      readFileSync(join(box.dataHome, "uberblick", `${uuid}.sqlite`)));
+
+    // Any network attempt fails in the real CLI process, including a websocket.
+    const preload = join(box.cwd, "no-network.mjs");
+    writeFileSync(preload, `
+import { Socket } from "node:net";
+Socket.prototype.connect = () => { throw new Error("list must stay local"); };
+globalThis.fetch = () => { throw new Error("list must stay local"); };
+`);
+    const env = { NODE_OPTIONS: `--import=${preload}` };
+    const text = runUb(["workspace", "list"], box, env);
+    expect(text.status, text.output).toBe(0);
+    expect(text.stdout).toBe(
+      `  ${OTHER} | Research notes\n* ${WORKSPACE} | Project notes\n  ${UNRELATED}\n`,
+    );
+    const json = runUb(["workspace", "list", "--json"], box, env);
+    expect(json.status, json.output).toBe(0);
+    expect(JSON.parse(json.stdout)).toEqual([
+      { uuid: OTHER, name: "Research notes", active: false, databasePath: join(box.dataHome, "uberblick", `${OTHER}.sqlite`) },
+      { uuid: WORKSPACE, name: "Project notes", active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`) },
+      { uuid: UNRELATED, name: null, active: false, databasePath: join(box.dataHome, "uberblick", `${UNRELATED}.sqlite`) },
+    ]);
+    expect(readFileSync(join(box.cwd, ".uberblick.json"))).toEqual(bindingBefore);
+    expect(readFileSync(configPath)).toEqual(configBefore);
+    expect(named.map(([uuid]) => readFileSync(join(box.dataHome, "uberblick", `${uuid}.sqlite`))))
+      .toEqual(databaseBefore);
+  });
+
+  it("lists the configured workspace without creating a data directory", () => {
+    const box = sandbox();
+    bind(box);
+    const run = runUb(["workspace", "list"], box);
+    expect(run.status, run.output).toBe(0);
+    expect(run.stdout).toBe(`* ${WORKSPACE}\n`);
+    expect(existsSync(box.dataHome)).toBe(false);
+  });
+
+  it.each(["unnamed", "empty", "old schema", "unreadable"])(
+    "keeps a %s replica in the list and both prefix resolvers",
+    (kind) => {
+      const box = sandbox();
+      bind(box);
+      withDatabase(box, OTHER);
+      const path = join(box.dataHome, "uberblick", `${OTHER}.sqlite`);
+      if (kind === "unreadable") writeFileSync(path, "not a SQLite database");
+      if (kind === "old schema" || kind === "unnamed") {
+        const db = new DatabaseSync(path);
+        try {
+          db.exec("CREATE TABLE updates (seq INTEGER PRIMARY KEY, room TEXT, payload BLOB)");
+          if (kind === "unnamed") {
+            db.exec("CREATE TABLE snapshots (room TEXT PRIMARY KEY, state BLOB, through_seq INTEGER)");
+          }
+        } finally {
+          db.close();
+        }
+      }
+      const before = readFileSync(path);
+      const list = runUb(["workspace", "list", "--json"], box);
+      expect(list.status, list.output).toBe(0);
+      expect(JSON.parse(list.stdout)).toEqual([
+        { uuid: OTHER, name: null, active: false, databasePath: path },
+        { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`) },
+      ]);
+      expect(readFileSync(path)).toEqual(before);
+      const installed = runUb([
+        "mcp", "install", "claude", "--print", "--workspace", OTHER.slice(0, 8), "--hub", "local",
+      ], box);
+      expect(installed.status, installed.output).toBe(0);
+      expect(installed.stdout).toContain(OTHER);
+      const selected = runUb(["workspace", "use", OTHER.slice(0, 8), "--hub", "local"], box);
+      expect(selected.status, selected.output).toBe(0);
+      expect(binding(box).workspaceId).toBe(OTHER);
+    },
+  );
 
   it("refuses an unreadable database directory instead of resolving against a short list", () => {
     const box = sandbox();
