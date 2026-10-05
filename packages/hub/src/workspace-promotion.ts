@@ -2,7 +2,7 @@
 import type { MembershipRegistry } from "./memberships.js";
 import type { HubDatabase } from "./persistence.js";
 
-export type PromotionResult = "created" | "resumed" | "admin-required" | "workspace-conflict";
+export type PromotionResult = "created" | "resumed" | "member-required" | "workspace-conflict";
 
 export class WorkspacePromotions {
   constructor(
@@ -23,11 +23,9 @@ export class WorkspacePromotions {
     try {
       // Current membership, not a credential's issuance snapshot, grants this
       // authority. A login alone cannot create workspaces.
-      if (!this.memberships.workspacesFor(principalId).some(
-        id => this.memberships.roleFor(id, principalId) === "admin",
-      )) {
+      if (this.memberships.workspacesFor(principalId).length === 0) {
         db.exec("ROLLBACK");
-        return "admin-required";
+        return "member-required";
       }
       const receipt = db.prepare("SELECT * FROM hub_workspace_promotions WHERE attempt_id = ?").get(attemptId);
       if (receipt !== undefined) {

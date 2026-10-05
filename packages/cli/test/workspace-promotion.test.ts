@@ -54,6 +54,15 @@ function accessRows(hub: Hub) {
 }
 
 describe("workspace creation and promotion", () => {
+  it("shows accepted hub forms and complete promotion examples", async () => {
+    const result = await runUbAsync(["workspace", "promote", "--help"], sandbox());
+    expect(result.status, result.output).toBe(0);
+    expect(result.stdout).toContain("bare host, an HTTP(S) URL or a WS(S) endpoint");
+    expect(result.stdout).toContain("ub workspace promote https://hub.example.com");
+    expect(result.stdout).toContain("ub workspace promote wss://hub.example.com/ws");
+    expect(result.stdout).toContain("member or administrator of at least one workspace");
+  });
+
   it("creates a new named workspace with starters without touching parent bindings, old data, credentials or MCP pins", async () => {
     const box = await localWorkspace("Original");
     const old = selected(box);
@@ -178,7 +187,7 @@ describe("workspace creation and promotion", () => {
     }
   });
 
-  it("uploads the same history including archived content and joins from a machine with no local workspace", async () => {
+  it.each(["admin", "member"] as const)("uploads the same history for a current %s and joins from a machine with no local workspace", async role => {
     const box = await localWorkspace();
     const local = createMcpServer(offline(box));
     try {
@@ -186,7 +195,7 @@ describe("workspace creation and promotion", () => {
       tombstoneDirectoryEntry(local.replicas.directory().doc, entry.uuid);
     } finally { await local.close(); }
     const expected = await syncWorkspace(offline(box));
-    const { hub, endpoint, login, administered } = await hubFor(box);
+    const { hub, endpoint, login, administered } = await hubFor(box, role);
     const before = accessRows(hub);
     // An earlier no-access check must not suppress renewal after the grant.
     expect((await ensureDeviceLogin(endpoint, selected(box).workspaceId, { env: box.env })).status).toBe("no-access");
@@ -222,14 +231,14 @@ describe("workspace creation and promotion", () => {
     expect(isIdentical(compareCorpus(expected.workspace!, hydrated.workspace!))).toBe(true);
   });
 
-  it.each(["member", null] as const)("refuses an account with role %s without changing the hub or project binding", async role => {
+  it("refuses an account with no memberships without changing the hub or project binding", async () => {
     const box = await localWorkspace();
-    const { hub, endpoint } = await hubFor(box, role);
+    const { hub, endpoint } = await hubFor(box, null);
     const before = accessRows(hub);
     const binding = bindingBytes(box);
     const result = await runUbAsync(["workspace", "promote", endpoint], box);
     expect(result.status, result.output).toBe(1);
-    expect(result.stderr).toContain("already administer");
+    expect(result.stderr).toContain("currently belong to at least one workspace");
     expect(result.stderr).not.toContain("rerun this command");
     expect(accessRows(hub)).toEqual(before);
     expect(bindingBytes(box)).toBe(binding);

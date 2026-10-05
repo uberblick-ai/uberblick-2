@@ -1181,9 +1181,10 @@ ub workspace promote http://localhost:8080
 
 `create` makes and selects a local-only workspace with a fresh UUID, name and
 starter documents/sidebar. `promote` reuses this hub's stored login, or runs
-GitHub approval if there is no working login. Your account must already be an
-administrator of at least one workspace on the hub. The login that claims a
-fresh hub's default workspace qualifies. Signing in otherwise grants nothing.
+GitHub approval if there is no working login. Your account must currently be a
+member or administrator of at least one workspace on the hub. The login that
+claims a fresh hub's default workspace qualifies. Signing in otherwise grants
+nothing.
 
 Promotion grants this account the new workspace's sole initial admin membership,
 then renews its device credential, uploads documents (including archived
@@ -1205,7 +1206,8 @@ default workspace through the normal first-login flow.
 Host-only first-administrator setup remains a separate operation for workspaces
 without membership, existing or new. Its Unix-socket authority and restrictions are
 unchanged. Promotion's authenticated HTTP request can reserve only a new, empty
-UUID for an existing administrator; it cannot adopt an unrelated populated one.
+UUID for an existing workspace member or administrator; it cannot adopt an
+unrelated populated one.
 
 Existing MCP registrations keep their workspace/hub pins after creation or
 promotion. Add a named entry for the new selection when needed. Browser and MCP

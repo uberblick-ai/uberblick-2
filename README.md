@@ -371,8 +371,9 @@ binding, other workspaces, stored logins and existing MCP registrations are
 unchanged. `ub init` remains first-time setup.
 
 To share that workspace, run `ub workspace promote <hub>`. Promotion reuses the
-stored login or runs GitHub approval when needed. Your account must already
-administer a workspace on the hub; signing in alone grants no creation rights.
+stored login or runs GitHub approval when needed. Your account must currently
+be a member or administrator of at least one workspace on the hub; signing in
+alone grants no creation rights.
 The first login on a fresh hub claims its default workspace and qualifies.
 Promotion uploads the same UUID and history, including archived documents,
 name and sidebar, verifies them through a fresh authenticated client, then
@@ -601,12 +602,12 @@ ub open
 ```
 
 Promotion includes login when needed and connection after verification; there
-is no separate join on this machine. The authenticated account must already
-administer a workspace on the hub. It becomes the promoted workspace's first
-and only member, as administrator. The reservation itself leaves the default
-workspace, its claim state and other memberships unchanged. On a fresh hub,
-the sign-in requested by promotion can claim the default workspace through the
-normal first-login flow.
+is no separate join on this machine. The authenticated account must currently
+be a member or administrator of at least one workspace on the hub. It becomes
+the promoted workspace's first and only member, as administrator. The reservation
+itself leaves the default workspace, its claim state and other memberships
+unchanged. On a fresh hub, the sign-in requested by promotion can claim the
+default workspace through the normal first-login flow.
 
 Promotion refuses a workspace already bound to a hub and any destination UUID
 with existing documents or memberships. The only exception is its own recorded

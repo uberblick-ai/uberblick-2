@@ -24,9 +24,16 @@ import { reportWorkspacePins } from "./workspace-create.js";
 export const WORKSPACE_PROMOTE_HELP = `usage: ub workspace promote <hub>
 
 Share the selected local-only workspace on a GitHub-enabled hub. Reuse this
-machine's working login, or ask for GitHub approval. Your account must already
-administer a workspace on that hub. On a fresh hub, its first login claims the
-default workspace and qualifies.
+machine's working login, or ask for GitHub approval. Your account must currently
+be a member or administrator of at least one workspace on that hub. On a fresh
+hub, its first login claims the default workspace and qualifies.
+
+The hub can be a bare host, an HTTP(S) URL or a WS(S) endpoint. Bare hosts and
+HTTP(S) URLs without a path use /ws; WS(S) endpoints keep their supplied path.
+
+examples:
+  ub workspace promote https://hub.example.com
+  ub workspace promote wss://hub.example.com/ws
 
 Upload the same workspace UUID and history, including archived documents, name
 and sidebar. Bind this project only after a fresh client verifies the upload.
@@ -92,6 +99,7 @@ async function reserve(origin: string, workspaceId: string, attemptId: string, l
   if (response.status === 200 && (result.status === "created" || result.status === "resumed") &&
       result.workspaceId === workspaceId && result.attemptId === attemptId) return result.status;
   const reasons: Record<string, string> = {
+    "member-required": "your GitHub account must currently belong to at least one workspace on this hub; ask a workspace administrator for access or choose another hub",
     "admin-required": "your GitHub account must already administer a workspace on this hub; ask a workspace administrator for access or choose another hub",
     "workspace-conflict": "the hub already holds this workspace UUID, or it belongs to a different promotion attempt; resume from the original machine and receipt, or create a different local workspace",
     "protocol-mismatch": "hub and client sync versions differ; update them together",
