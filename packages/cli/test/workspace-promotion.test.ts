@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createHub, silentLogger, type Hub } from "@uberblick/hub";
-import { writeHubLogin, type StoredHubLogin } from "@uberblick/hub/auth-store";
+import { writeHubLogin, removeHubLogin, type StoredHubLogin } from "@uberblick/hub/auth-store";
 import { ensureDeviceLogin } from "@uberblick/hub/device-login";
 import { compareCorpus, createMcpServer, inspectRemote, isIdentical, resolveMcpConfig, syncWorkspace } from "@uberblick/mcp-server";
 import { getWorkspaceName, listDirectory, readSidebar, tombstoneDirectoryEntry } from "@uberblick/schema";
@@ -17,7 +17,7 @@ afterEach(async () => {
   for (const hub of hubs.splice(0)) await hub.stop();
   removeTempDirs();
 });
-const selected = (box: Sandbox) => JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")) as { workspaceId: string; hubUrl: string | null; hubAdmission?: string };
+const selected = (box: Sandbox) => JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")) as { workspaceId: string; hubUrl: string | null };
 const bindingBytes = (box: Sandbox) => readFileSync(join(box.cwd, ".uberblick.json"), "utf8");
 function offline(box: Sandbox) {
   return { ...resolveMcpConfig({ ...box.env, WORKSPACE_ID: selected(box).workspaceId }), authSecret: null };
@@ -92,6 +92,58 @@ describe("workspace creation and promotion", () => {
     } finally { await fresh.close(); }
   });
 
+  it.each([null, "wss://previous.example.test/ws"])("identifies a replaced binding and provides a working switch-back command (hub: %s)", async hubUrl => {
+    const box = await localWorkspace("Original");
+    const previous = { ...selected(box), hubUrl };
+    writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify(previous));
+    const result = await runUbAsync(["workspace", "create", "Second"], box);
+    expect(result.status, result.output).toBe(0);
+    expect(selected(box).workspaceId).not.toBe(previous.workspaceId);
+    expect(result.stdout).toContain(`Previous workspace ${previous.workspaceId} (${hubUrl ?? "local"})`);
+    expect(result.stdout).toContain(`Switch back: ub workspace use ${previous.workspaceId} --hub '${hubUrl ?? "local"}'`);
+    const switched = await runUbAsync(["workspace", "use", previous.workspaceId, "--hub", hubUrl ?? "local"], box);
+    expect(switched.status, switched.output).toBe(0);
+    expect(selected(box)).toEqual(previous);
+  });
+
+  it("keeps loopback promotion admission private and requires login after logout", async () => {
+    const box = await localWorkspace();
+    const { hub, endpoint } = await hubFor(box);
+    const result = await runUbAsync(["workspace", "promote", endpoint], box);
+    expect(result.status, result.output).toBe(0);
+    expect(Object.keys(selected(box)).sort()).toEqual(["hubUrl", "workspaceId"]);
+    await removeHubLogin(`http://127.0.0.1:${hub.port}`, box.env);
+    const status = await runUbAsync(["status", "--json"], box, { HUB_AUTH_TOKEN: "synthetic-local-secret" });
+    expect(JSON.parse(status.stdout).hub.status).toBe("auth-failed");
+    expect(JSON.parse(status.stdout).credentialPresent).toBe(false);
+    expect(status.stdout).toContain("ub auth login");
+  });
+
+  it("does not select the hub when private admission persistence fails after upload", async () => {
+    const box = await localWorkspace();
+    const { hub, endpoint } = await hubFor(box);
+    const before = bindingBytes(box);
+    const result = await new Promise<{ status: number | null; output: string }>((resolve, reject) => {
+      const child = spawn(process.execPath, [UB_BIN, "workspace", "promote", endpoint], { cwd: box.cwd, env: box.env, timeout: 25_000 });
+      let output = "";
+      let injected = false;
+      child.stdout.on("data", data => { output += String(data); });
+      child.stderr.on("data", data => {
+        output += String(data);
+        if (!injected && output.includes("verifying")) {
+          injected = true;
+          mkdirSync(join(box.configHome, "uberblick", "config.json"));
+        }
+      });
+      child.on("error", reject);
+      child.on("close", status => resolve({ status, output }));
+    });
+    expect(result.status, result.output).toBe(1);
+    expect(accessRows(hub).receipts).toHaveLength(1);
+    expect(bindingBytes(box)).toBe(before);
+    expect(result.output).toContain("Project binding unchanged");
+  });
+
   it("refuses a different environment binding before reserving or replacing the project selection", async () => {
     const box = await localWorkspace("Project A");
     const original = bindingBytes(box);
@@ -144,7 +196,9 @@ describe("workspace creation and promotion", () => {
     expect(result.stdout).toContain(`ub workspace join ${endpoint}/${selected(box).workspaceId}`);
     expect(result.output).not.toContain("Waiting for GitHub approval");
     expect(result.output).not.toContain(login.credential.key);
-    expect(selected(box)).toMatchObject({ hubUrl: endpoint, hubAdmission: "device" });
+    expect(selected(box)).toEqual({ workspaceId: selected(box).workspaceId, hubUrl: endpoint });
+    const privateConfig = JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
+    expect(privateConfig.hubAdmissions).toEqual({ [endpoint]: "device" });
     const remote = await inspectRemote(resolveMcpConfig({ ...box.env, WORKSPACE_ID: selected(box).workspaceId, HUB_URL: endpoint, HUB_ADMISSION: "device" }), { documents: true, workspace: true });
     expect(remote.missing).toEqual([]);
     expect(remote.entries.filter(entry => entry.deleted)).toHaveLength(1);
@@ -176,6 +230,7 @@ describe("workspace creation and promotion", () => {
     const result = await runUbAsync(["workspace", "promote", endpoint], box);
     expect(result.status, result.output).toBe(1);
     expect(result.stderr).toContain("already administer");
+    expect(result.stderr).not.toContain("rerun this command");
     expect(accessRows(hub)).toEqual(before);
     expect(bindingBytes(box)).toBe(binding);
     expect(result.output).not.toContain("Waiting for GitHub approval");
@@ -190,12 +245,14 @@ describe("workspace creation and promotion", () => {
     const conflict = await runUbAsync(["workspace", "promote", endpoint], box);
     expect(conflict.status, conflict.output).toBe(1);
     expect(conflict.stderr).toContain("already holds this workspace UUID");
+    expect(conflict.stderr).not.toContain("rerun this command");
     expect(accessRows(hub)).toEqual(before);
     expect(bindingBytes(box)).toBe(binding);
     writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify({ ...selected(box), hubUrl: endpoint }));
     const bound = await runUbAsync(["workspace", "promote", endpoint], box);
     expect(bound.status).toBe(1);
     expect(bound.stderr).toContain("already has a hub");
+    expect(bound.stderr).not.toContain("rerun this command");
     expect(accessRows(hub)).toEqual(before);
   });
 
@@ -275,7 +332,7 @@ it.each([false, true])("runs GitHub approval only when no working login exists (
   expect(rows.receipts).toHaveLength(1);
 });
 
-it("resumes after the hub commits its grant but the reply is lost", async () => {
+it("resumes a lost grant reply using another URL spelling of the same authentication origin", async () => {
   const box = await localWorkspace();
   const { hub, endpoint } = await hubFor(box);
   const before = bindingBytes(box);
@@ -291,10 +348,11 @@ it("resumes after the hub commits its grant but the reply is lost", async () => 
   });
   const lost = await runUbAsync(["workspace", "promote", endpoint], box);
   expect(lost.status, lost.output).toBe(1);
+  expect(lost.output).toContain("resume the same attempt");
   expect(bindingBytes(box)).toBe(before);
   const reserved = accessRows(hub);
   expect(reserved.receipts).toHaveLength(1);
-  const retry = await runUbAsync(["workspace", "promote", endpoint], box);
+  const retry = await runUbAsync(["workspace", "promote", endpoint.replace("ws:", "http:")], box);
   expect(retry.status, retry.output).toBe(0);
   expect(accessRows(hub)).toEqual(reserved);
 });

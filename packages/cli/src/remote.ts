@@ -22,8 +22,9 @@ import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import {
   readCredentials,
   resolveConfig,
+  writeHubAdmission,
 } from "./config.js";
-import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
+import { resolveProjectBinding, validateProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
@@ -51,14 +52,15 @@ export function setRemote(
   const current = resolveProjectBinding({ env: {}, ...(options.cwd === undefined ? {} : { cwd: options.cwd }) });
   const workspaceId = options.workspace ?? current.binding?.workspaceId;
   if (workspaceId === undefined) throw new Error("a workspace is required before binding a remote hub");
-  const path = writeProjectBinding({ workspaceId, hubUrl: url,
-    ...(options.deviceAdmission === true ? { hubAdmission: "device" as const } : {}),
-  }, {
+  const binding = validateProjectBinding({ workspaceId, hubUrl: url }, "project binding");
+  // Failure to remember device admission must never leave the project pointing
+  // at a Docker hub that could later fall back to this computer's local secret.
+  const admission = writeHubAdmission(url, options.deviceAdmission === true, env);
+  const path = writeProjectBinding(binding, {
     env,
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
   });
-  return { written: [path], warnings: [] };
-
+  return { written: [...admission.written, path], warnings: admission.warnings };
 }
 
 function plural(count: number, noun: string): string {

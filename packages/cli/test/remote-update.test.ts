@@ -116,7 +116,7 @@ function fixture(legacy = false): Fixture {
 
   const checkout = join(root, "checkout");
   git(root, "clone", "--quiet", bare, checkout);
-  // What `ub remote init` leaves behind after its own build succeeded.
+  // What checkout initialization leaves behind after its own build succeeded.
   git(checkout, "update-ref", "refs/uberblick/deployed", "HEAD");
   writeFileSync(join(checkout, ".env"), HOST_ENV, "utf8");
 

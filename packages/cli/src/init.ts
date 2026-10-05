@@ -67,7 +67,7 @@ import { userInfo } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
-import { storeWorkspaceName } from "@uberblick/mcp-server";
+import { storeWorkspaceName, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId, validateWorkspaceName } from "@uberblick/schema";
 import { findCheckoutRoot } from "./checkout.js";
 import {
@@ -77,6 +77,7 @@ import {
   readUserConfig,
   resolveConfig,
   writeCredentials,
+  writeHubAdmission,
   writeUserConfig,
 } from "./config.js";
 import { takeHelp } from "./help.js";
@@ -453,8 +454,7 @@ export async function initCommand(
   // --- the hub, when one was given -----------------------------------------
   //
   // The endpoint is part of the selected project binding, and this
-  // command may only *fill it in*. Overwriting it would change the selected workspace
-  // reborn: pointing the clients at another hub moves nothing, and the
+  // command may only *fill it in*. Overwriting it would be an endpoint-only retarget: pointing the clients at another hub moves nothing, and the
   // workspace stays on the old one with nothing dialling it (#376, #385). So a
   // stored endpoint that is not the one asked for is refused outright, and the
   // refusal names the verb that does move a machine.
@@ -756,6 +756,9 @@ export async function initCommand(
       displayName: name,
       color,
     });
+    if (hubInForce !== null && usesDeviceLogin(hubInForce, { ...process.env, HUB_ADMISSION: undefined })) {
+      for (const warning of writeHubAdmission(hubInForce, true).warnings) warnings.add(warning);
+    }
     configPath = writeProjectBinding({ workspaceId: workspace, hubUrl: hubInForce });
 
     // --- the signing secret -------------------------------------------------

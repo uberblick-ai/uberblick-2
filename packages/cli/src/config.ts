@@ -1,7 +1,8 @@
 /** Shared CLI configuration: an atomic project/environment binding plus private credentials.
- * Machine settings retain identity and migration information, never select a workspace.
+ * Machine settings retain identity, endpoint admission, and migration information; never selection.
  */
 
+import { normalizeRemoteUrl } from "@uberblick/hub/remote-url";
 import { usesDeviceLogin } from "@uberblick/mcp-server";
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -16,7 +17,7 @@ import {
   writeTempBeside,
 } from "./safe-write.js";
 
-/** Per-user identity and legacy migration information. Not a workspace selector. */
+/** Per-user identity, endpoint admission, and legacy migration information. */
 export const USER_CONFIG_FILE = "config.json";
 
 /** The key holding the hub's HMAC signing secret in `credentials.json`. */
@@ -161,12 +162,91 @@ export interface UserConfig {
   // file does not carry reads as undefined rather than being absent.
   workspace?: string | undefined;
   hubUrl?: string | undefined;
-  /** Joined hubs retain device admission even after this machine logs out. */
+  /** Legacy admission marker, valid only for its associated hubUrl. */
   hubAdmission?: string | undefined;
   /** Awareness display name. */
   displayName?: string | undefined;
   /** Awareness colour, 6-digit hex — the only form y-prosemirror accepts. */
   color?: string | undefined;
+}
+
+/** Admission metadata describes an endpoint; it never selects one. */
+function hubAdmissions(
+  source: Record<string, unknown> | null,
+  path: string,
+  warnings: string[],
+): Record<string, "device"> {
+  const result: Record<string, "device"> = {};
+  const raw = source?.hubAdmissions;
+  if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) {
+    throw new Error(`Invalid hubAdmissions in ${path}: expected an endpoint-to-admission map`);
+  }
+  for (const [endpoint, admission] of Object.entries(raw ?? {})) {
+    let normalized: string;
+    try { normalized = normalizeRemoteUrl(endpoint); }
+    catch {
+      warnings.push(`ignoring an invalid endpoint in hubAdmissions in ${path}`);
+      continue;
+    }
+    // Unknown future modes must not fall back to a local signing secret.
+    if (admission !== "device") warnings.push(`unsupported hub admission in ${path}; using device credentials`);
+    result[normalized] = "device";
+  }
+  // Older clients stored one endpoint and mode together. Preserve only that
+  // validated association, never apply its mode to the current selection.
+  if (source?.hubAdmission !== undefined && typeof source.hubUrl === "string") {
+    try {
+      const normalized = normalizeRemoteUrl(source.hubUrl);
+      if (source.hubAdmission !== "device") warnings.push(`unsupported hubAdmission in ${path}; using device credentials`);
+      result[normalized] = "device";
+    } catch {
+      warnings.push(`ignoring legacy admission for an invalid hub URL in ${path}`);
+    }
+  }
+  return result;
+}
+
+/** Preserve the old endpoint's mode before its obsolete selector keys are removed. */
+export function migrateHubAdmissions(
+  env: NodeJS.ProcessEnv = process.env,
+): { written: string[]; warnings: string[] } {
+  const current = readUserConfig(env);
+  const path = userConfigPath(env);
+  const warnings = [...current.warnings];
+  const admissions = hubAdmissions(current.raw, path, warnings);
+  if (current.raw?.hubAdmission === undefined || current.config.hubUrl === undefined) return { written: [], warnings };
+  try { normalizeRemoteUrl(current.config.hubUrl); }
+  catch { return { written: [], warnings }; }
+  const updated: Record<string, unknown> = { ...current.raw, hubAdmissions: admissions };
+  delete updated.hubAdmission;
+  writeUserConfig(updated, env);
+  return { written: [path], warnings };
+}
+
+/** Save the verified endpoint's mode before publishing its project binding. */
+export function writeHubAdmission(
+  endpoint: string,
+  device: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): { written: string[]; warnings: string[] } {
+  const normalized = normalizeRemoteUrl(endpoint);
+  const current = readUserConfig(env);
+  const path = userConfigPath(env);
+  const warnings = [...current.warnings];
+  const admissions = hubAdmissions(current.raw, path, warnings);
+  if ((admissions[normalized] === "device") === device) {
+    // An already-correct mode may still be held only in the legacy single-hub
+    // fields. Materialize the map before the owner removes those old keys.
+    return migrateHubAdmissions(env);
+  }
+  if (device) admissions[normalized] = "device";
+  else delete admissions[normalized];
+  const updated: Record<string, unknown> = { ...current.raw, hubAdmissions: admissions };
+  // The map carries all valid older admission metadata now. Leaving the
+  // legacy field would resurrect a mode explicitly cleared for that endpoint.
+  delete updated.hubAdmission;
+  writeUserConfig(updated, env);
+  return { written: [path], warnings };
 }
 
 /**
@@ -344,10 +424,10 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   warnings.push(...credentials.warnings);
   const secretFromFile = credentials.exposed ? null : credentials.signingSecret;
   const secretFromEnv = trimmed(env.HUB_AUTH_TOKEN);
-  // Admission travels with the selected endpoint, never with machine defaults.
+  const admissions = hubAdmissions(userConfig, paths.userConfig, warnings);
   const admissionEnv: NodeJS.ProcessEnv = { ...env };
   delete admissionEnv.HUB_ADMISSION;
-  if (selection.binding?.hubAdmission === "device") admissionEnv.HUB_ADMISSION = "device";
+  if (hubUrl.value !== null && admissions[hubUrl.value] === "device") admissionEnv.HUB_ADMISSION = "device";
   const device = hubUrl.value !== null && usesDeviceLogin(hubUrl.value, admissionEnv);
   // **That** they differ, and nothing else: not either value, not a length, not
   // a prefix. Compared after the exposure refusal above, so a file nobody may

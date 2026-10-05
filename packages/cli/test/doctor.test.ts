@@ -344,12 +344,13 @@ describe("ub doctor", () => {
   });
 
   it.each([false, true])("names sign-in recovery for a reachable device deployment through loopback (recorded admission: %s)", async recorded => {
-    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
     const hub = await createHub({ port: 0, address: "0.0.0.0", databasePath: join(box.cwd, "device-hub.sqlite"),
       github: { clientId: "Iv1.0123456789abcdef" }, log: silentLogger });
     hubs.push(hub);
-    writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify({ workspaceId: WORKSPACE,
-      hubUrl: `ws://127.0.0.1:${hub.port}/custom-proxy-path`, ...(recorded ? { hubAdmission: "device" } : {}) }));
+    const endpoint = `ws://127.0.0.1:${hub.port}/custom-proxy-path`;
+    pointAt(box, endpoint);
+    if (recorded) writeFileSync(join(box.configHome, "uberblick", "config.json"), JSON.stringify({ hubAdmissions: { [endpoint]: "device" } }));
     const { checks } = await doctor(box);
     const upstream = check(checks, "hub");
     expect(upstream.status).toBe("fail");
@@ -361,8 +362,8 @@ describe("ub doctor", () => {
   it("does not recommend replacing a stopped loopback device deployment with ub open", async () => {
     const port = await freePort();
     const endpoint = `ws://127.0.0.1:${port}/custom-proxy-path`;
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint, hubAdmission: "device" },
-      credentials: { signingSecret: SECRET } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint },
+      userConfig: { hubAdmissions: { [endpoint]: "device" } }, credentials: { signingSecret: SECRET } });
     const { checks } = await doctor(box);
     const upstream = check(checks, "hub");
     expect(upstream.status).toBe("fail");

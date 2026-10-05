@@ -1202,8 +1202,8 @@ itself does not change the hub's default workspace, first-claim state or other
 memberships. On a fresh hub, the sign-in requested by promotion can claim the
 default workspace through the normal first-login flow.
 
-Host-only first-administrator setup remains a separate operation for existing
-workspaces without membership. Its Unix-socket authority and restrictions are
+Host-only first-administrator setup remains a separate operation for workspaces
+without membership, existing or new. Its Unix-socket authority and restrictions are
 unchanged. Promotion's authenticated HTTP request can reserve only a new, empty
 UUID for an existing administrator; it cannot adopt an unrelated populated one.
 
@@ -1288,3 +1288,39 @@ Archived documents move with their content and stay archived until restored.
 Merging two independently populated workspaces is not supported: the URL says
 which workspace `join` is about — that one's two replicas reconcile as CRDTs,
 and the others on the machine are left alone.
+
+
+## Existing checkout deployments (compatibility)
+
+The release procedure above is the supported launch and update path. Existing
+source-checkout hosts retain their Docker Compose stack until they migrate to a
+release. This path remains Linux-only and requires Tailscale, Docker Compose
+2.6+, git and an existing configured checkout. Its root `docker-compose.yml`,
+source-build Dockerfile stages and `bin/remote-compose.sh` remain available.
+
+### Updating a checkout host
+
+The host never updates itself. Run this on the host, from its existing checkout,
+while present to verify the result:
+
+```sh
+sh remote-update.sh
+```
+
+The script fetches `origin/main`, resets the host checkout to it, rebuilds and
+recreates the containers through `bin/remote-compose.sh`, then records the
+successfully deployed commit. It reports either “up to date” or the commit it
+moved to. It preserves the untracked `.env`, including `HUB_GITHUB_CLIENT_ID`.
+Tracked host-local edits are deliberately discarded and reported; the host is a
+deployment checkout, not an editing workspace. No timer or webhook runs this.
+
+A checkout-wide `flock` prevents concurrent deployments from interleaving.
+Contention reports “already running; nothing to do”; a host unable to acquire a
+working lock refuses. Separate checkouts can still deploy independently.
+The comparison is against `refs/uberblick/deployed`, which advances only after
+a successful build. A failed build is retried on the next update.
+
+If a change alters wire semantics, update the hub and every client in the same
+sitting and reload open browser tabs. If both halves cannot be completed now,
+postpone the update. Run client login and `ub workspace join` separately when
+connecting a computer; deployment never selects that computer's workspace.

@@ -12,7 +12,7 @@ import { syncWorkspace } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { authCommand } from "./auth.js";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
-import { requireBinding, resolveConfig } from "./config.js";
+import { requireBinding, resolveConfig, writeHubAdmission } from "./config.js";
 import { takeHelp } from "./help.js";
 import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
@@ -59,6 +59,8 @@ function promotionAttempt(path: string): string {
   return attemptId;
 }
 
+class PromotionRefusal extends Error {}
+
 async function reserve(origin: string, workspaceId: string, attemptId: string, login: StoredHubLogin, signal: AbortSignal): Promise<string> {
   const action = { operation: "promote-workspace", workspaceId, attemptId } as const;
   const token = await mintRequestProof(await importCredentialKey(Buffer.from(login.credential.key, "base64url")), {
@@ -90,12 +92,12 @@ async function reserve(origin: string, workspaceId: string, attemptId: string, l
   if (response.status === 200 && (result.status === "created" || result.status === "resumed") &&
       result.workspaceId === workspaceId && result.attemptId === attemptId) return result.status;
   const reasons: Record<string, string> = {
-    "admin-required": "your GitHub account must already administer a workspace on this hub",
-    "workspace-conflict": "the hub already holds this workspace UUID, or it belongs to a different promotion attempt",
+    "admin-required": "your GitHub account must already administer a workspace on this hub; ask a workspace administrator for access or choose another hub",
+    "workspace-conflict": "the hub already holds this workspace UUID, or it belongs to a different promotion attempt; resume from the original machine and receipt, or create a different local workspace",
     "protocol-mismatch": "hub and client sync versions differ; update them together",
     "not-configured": "this hub does not support authenticated workspace promotion; configure GitHub sign-in and update the hub",
   };
-  throw new Error(reasons[String(result.status)] ?? "the hub refused promotion; update the hub and retry");
+  throw new PromotionRefusal(reasons[String(result.status)] ?? "the hub refused promotion; update the hub and retry");
 }
 
 export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<number> {
@@ -109,6 +111,7 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
     io.err(`ub workspace promote: ${error instanceof Error ? error.message : "invalid hub"}\n`);
     return 2;
   }
+  let canResume = false;
   const interrupted = new AbortController();
   const interrupt = () => interrupted.abort();
   process.on("SIGINT", interrupt);
@@ -122,8 +125,7 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
       throw new Error("promotion requires a project binding; select the local workspace with `ub workspace use <id> --hub local` first");
     }
     if (resolved.origins.workspace === "environment" &&
-        (effective.workspaceId !== selected.workspaceId || effective.hubUrl !== selected.hubUrl ||
-         effective.hubAdmission !== selected.hubAdmission)) {
+        (effective.workspaceId !== selected.workspaceId || effective.hubUrl !== selected.hubUrl)) {
       throw new Error("the environment selects a different binding; unset UB_WORKSPACE_ID and UB_HUB_URL or explicitly select that project with `ub workspace use <id> --hub local` first");
     }
     if (selected.hubUrl !== null) throw new Error("the selected workspace already has a hub; only local-only workspaces can be promoted");
@@ -131,7 +133,7 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
     const path = selection.path;
     const before = bindingBytes(path);
     const origin = authenticationOrigin(endpoint);
-    const key = createHash("sha256").update(`${endpoint}\n${workspaceId}`).digest("hex");
+    const key = createHash("sha256").update(`${origin}\n${workspaceId}`).digest("hex");
     const receipt = join(resolveStorage().configDir, `.workspace-promotion-${key}.json`);
     const lock = await acquireInitLock(process.env, { path: `${receipt}.lock`, waitMs: 0, command: "ub workspace promote" });
     try {
@@ -147,6 +149,7 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
       }
       if (current.status !== "ready") throw new Error(current.message);
       interrupted.signal.throwIfAborted();
+      canResume = true;
       let result = await reserve(origin, workspaceId, attemptId, current.login, interrupted.signal);
       if (result === "sign-in-required") {
         // A concurrently renewed key may already be in the store. Try normal
@@ -184,7 +187,7 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
       if (checked.problem !== null) throw new Error(checked.problem.trim());
       interrupted.signal.throwIfAborted();
       const bindingLock = await acquireInitLock();
-      const binding = { workspaceId: selected.workspaceId, hubUrl: endpoint, hubAdmission: "device" as const };
+      const binding = { workspaceId: selected.workspaceId, hubUrl: endpoint };
       try {
         interrupted.signal.throwIfAborted();
         const currentProject = resolveProjectBinding({ env: {} });
@@ -192,6 +195,10 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
             JSON.stringify(currentProject.binding) !== JSON.stringify(selected)) {
           throw new Error("project selection changed during promotion; select the local workspace and retry");
         }
+        // Persist endpoint admission privately before selecting it, so logout
+        // cannot make a loopback Docker route fall back to the local secret.
+        const admission = writeHubAdmission(endpoint, true);
+        for (const warning of admission.warnings) io.err(`ub: warning: ${warning}\n`);
         writeProjectBinding(binding, { path });
       } finally { bindingLock.release(); }
       io.out(`Promoted workspace ${selected.workspaceId} to ${endpoint}.\nProject connected; ${uploaded.entries.length} documents verified, including archived documents.\n` +
@@ -201,7 +208,10 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
     } finally { lock.release(); }
   } catch (error) {
     const message = interrupted.signal.aborted ? "promotion interrupted" : error instanceof Error ? error.message : "promotion failed";
-    io.err(`ub workspace promote: ${message}.\nProject binding unchanged; the local workspace remains usable. Rerun this command to resume.\n`);
+    io.err(`ub workspace promote: ${message}.\nProject binding unchanged; the local workspace remains usable.\n`);
+    if (canResume && !(error instanceof PromotionRefusal)) {
+      io.err("After resolving the error, rerun this command on this machine to resume the same attempt.\n");
+    }
     return 1;
   } finally {
     process.off("SIGINT", interrupt);

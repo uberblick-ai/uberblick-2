@@ -594,7 +594,7 @@ const SCOPES: Scope[] = ["project", "user"];
 
 function mcpCheck(env: NodeJS.ProcessEnv, cwd: string, resolved: ResolvedConfig | null): Check {
   const binding = resolved?.binding;
-  const wanted = binding == null ? DEFAULT_ENTRY : { ...DEFAULT_ENTRY, env: { ...(binding.hubAdmission === "device" ? { HUB_ADMISSION: "device" } : {}), UB_HUB_URL: binding.hubUrl ?? "local", UB_WORKSPACE_ID: binding.workspaceId } };
+  const wanted = binding == null ? DEFAULT_ENTRY : { ...DEFAULT_ENTRY, env: { UB_HUB_URL: binding.hubUrl ?? "local", UB_WORKSPACE_ID: binding.workspaceId } };
   const registered: string[] = [];
   const unusable: string[] = [];
   let looked = 0;

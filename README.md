@@ -525,6 +525,9 @@ variables. Existing MCP entries must be updated to include both variables;
 installation reports conflicting entries without overwriting them.
 Plain `ub init` refuses an unbound project with legacy machine selection rather
 than creating a different workspace. Explicitly select the intended pair first.
+Before removing old settings, run `ub workspace use <workspace-id> --hub <hub-url|local>`
+once. It preserves the old endpoint's device-admission mode in private,
+endpoint-keyed metadata, including when the new project uses a different hub.
 After giving existing projects their bindings, finish migration by removing only
 the obsolete `workspace` and `hubUrl` keys from
 `$XDG_CONFIG_HOME/uberblick/config.json` (normally
@@ -586,8 +589,8 @@ A published Docker hub runs on Linux or Docker Desktop on macOS, including
 Apple Silicon through `linux/amd64` emulation. Follow [REMOTE.md](REMOTE.md) to
 start a release on host loopback and claim its default workspace before wider
 exposure. The operator updates the release deliberately while retaining its
-volumes. Hub deployment uses the release scripts; there is no `ub remote`
-command group.
+volumes. Hub deployment uses the release scripts. Existing source checkouts
+keep the [host-side update runbook](REMOTE.md#existing-checkout-deployments-compatibility).
 
 From the project directory:
 
@@ -633,9 +636,9 @@ sample before binding; promotion verifies all live documents as well.
 Both commands persist a complete binding in `.uberblick.json`. Existing MCP
 registrations retain their pinned workspace and hub; install a new named entry
 for the new selection. A complete environment binding still takes precedence.
-For a GitHub-enabled hub behind a loopback proxy, the project binding also
-records `hubAdmission: "device"`; installed MCP entries carry `HUB_ADMISSION=device`
-so they continue using the stored login.
+For a GitHub-enabled hub behind a loopback proxy, private user configuration
+remembers device admission per endpoint, including after logout. The project
+binding and MCP entries contain only the workspace and hub selection.
 Local-only browser and MCP use need no promotion or GitHub login.
 
 Stored device credentials stay private. `ub open` serves the local replica with

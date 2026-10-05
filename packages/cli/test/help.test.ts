@@ -394,3 +394,10 @@ describe("what is not a request for help", () => {
     }
   });
 });
+
+
+it.each([{ operands: [] }, { operands: ["join"] }, { operands: ["init"] }, { operands: ["update"] }])("refuses the removed command group with operands %j", async ({ operands }) => {
+  const result = await dispatch(["remote", ...operands]);
+  expect(result.status).toBe(2);
+  expect(result.stderr).toContain('unknown command "remote"');
+});

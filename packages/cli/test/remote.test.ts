@@ -1,5 +1,5 @@
 /**
- * `ub workspace join` — endpoint parsing and joining end to end.
+ * Workspace joining — endpoint configuration and verified joining end to end.
  *
  * Every join test runs a real hub on an ephemeral port with its own SQLite
  * database, and a real mirror in a throwaway XDG home. That is the whole point:
@@ -362,13 +362,7 @@ function storedSecret(box: Sandbox): unknown {
   return readConfigFile(box, "credentials.json").signingSecret;
 }
 
-describe("workspace connection URLs", () => {
-  it("refuses the removed remote command group", async () => {
-    const run = await runUbAsync(["remote", "join", "ignored"], sandbox());
-    expect(run.status).toBe(2);
-    expect(run.stderr).toContain('unknown command "remote"');
-  });
-
+describe("workspace join configuration", () => {
   // One normalizer for `ub workspace join` and `ub init` alike (#436): the host
   // `tailscale status` prints and the address a browser hands back both name
   // the deployment's endpoint, and an endpoint somebody typed in full is what
@@ -495,6 +489,35 @@ describe("workspace connection URLs", () => {
     }
   });
 
+  it("preserves other endpoint modes and clears only the selected endpoint's device admission", () => {
+    const first = "ws://localhost:8080/one";
+    const second = "ws://localhost:8081/two";
+    const box = sandbox({
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: first },
+      userConfig: { displayName: "Synthetic operator", hubUrl: first, hubAdmission: "device" },
+    });
+    const readPrivate = () => JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
+    // Even an already-known mode must move out of legacy selector fields before
+    // those obsolete keys can be removed during project migration.
+    setRemote(first, { env: box.env, cwd: box.cwd, deviceAdmission: true });
+    expect(readPrivate().hubAdmissions).toEqual({ [first]: "device" });
+    expect(readPrivate().hubAdmission).toBeUndefined();
+    setRemote(second, { env: box.env, cwd: box.cwd, deviceAdmission: true });
+    expect(readPrivate()).toEqual({ displayName: "Synthetic operator", hubUrl: first, hubAdmissions: { [first]: "device", [second]: "device" } });
+    expect(readConfigFile(box, "config.json")).toEqual({ workspaceId: WORKSPACE, hubUrl: second });
+    setRemote(first, { env: box.env, cwd: box.cwd });
+    expect(readPrivate().hubAdmissions).toEqual({ [second]: "device" });
+    expect(readPrivate().hubAdmission).toBeUndefined();
+  });
+
+  it("leaves the project binding intact when private admission persistence fails", () => {
+    const original = { workspaceId: WORKSPACE, hubUrl: null };
+    const box = sandbox({ projectBinding: original });
+    mkdirSync(join(box.configHome, "uberblick", "config.json"), { recursive: true });
+    expect(() => setRemote("ws://localhost:8080/ws", { env: box.env, cwd: box.cwd, deviceAdmission: true })).toThrow();
+    expect(readConfigFile(box, "config.json")).toEqual(original);
+  });
+
   it("preserves credentials when binding publication fails", () => {
     // Binding publication cannot modify the private credential store.
     const box = sandbox({ credentials: { signingSecret: SECRET } });
@@ -525,6 +548,33 @@ describe("workspace connection URLs", () => {
 });
 
 describe("ub workspace join", () => {
+  it("retains both Docker endpoints after logout and selects either with complete environment pins", async () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const dirs = [join(box.cwd, "first-hub"), join(box.cwd, "second-hub")] as const;
+    for (const dir of dirs) mkdirSync(dir);
+    const first = await startDeviceSyncHub({ directory: dirs[0] });
+    const second = await startDeviceSyncHub({ directory: dirs[1] });
+    try {
+      for (const hub of [first, second]) {
+        hub.grant(WORKSPACE);
+        await writeHubLogin(hub.origin, hub.issue({ workspaces: [WORKSPACE] }), box.env);
+        const joined = await runUbAsync(["workspace", "join", `${hub.url}/ws/${WORKSPACE}`], box);
+        expect(joined.status, joined.output).toBe(0);
+        await removeHubLogin(hub.origin, box.env);
+      }
+      for (const hub of [first, second]) {
+        const shown = await runUbAsync(["status", "--json"], box, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: `${hub.url}/ws` });
+        expect(shown.status, shown.output).toBe(0);
+        expect(shown.stdout).toContain(`${hub.url}/ws`);
+        expect(JSON.parse(shown.stdout).hub.status).toBe("auth-failed");
+        expect(JSON.parse(shown.stdout).credentialPresent).toBe(false);
+        expect(shown.stdout).toContain("ub auth login");
+        expect(shown.stdout).not.toContain("configured (credentials file)");
+      }
+      expect(readConfigFile(box, "config.json")).toEqual({ workspaceId: WORKSPACE, hubUrl: `${second.url}/ws` });
+    } finally { await first.close(); await second.close(); }
+  });
+
   it.each([false, true])("joins a loopback deployment using its origin login and persists device admission (old local secret: %s)", async withSecret => {
     const box = sandbox({ ...(withSecret ? { credentials: { signingSecret: SECRET } } : {}) });
     const remote = await startDeviceSyncHub({ directory: box.cwd });
@@ -541,11 +591,17 @@ describe("ub workspace join", () => {
       await writeHubLogin(remote.origin, remote.issue({ workspaces: [WORKSPACE] }), box.env);
       const joined = await runUbAsync(["workspace", "join", target], box);
       expect(joined.status, joined.output).toBe(0);
-      expect(readConfigFile(box, "config.json")).toMatchObject({ hubUrl: `${remote.url}/custom-proxy-path`, hubAdmission: "device", workspaceId: WORKSPACE });
+      expect(readConfigFile(box, "config.json")).toEqual({ hubUrl: `${remote.url}/custom-proxy-path`, workspaceId: WORKSPACE });
+      const privateConfig = JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
+      expect(privateConfig.hubAdmissions).toEqual({ [`${remote.url}/custom-proxy-path`]: "device" });
+      expect(privateConfig.workspace).toBeUndefined();
+      expect(privateConfig.hubUrl).toBeUndefined();
       if (withSecret) expect(readConfigFile(box, "credentials.json").signingSecret).toBe(SECRET);
       await removeHubLogin(remote.origin, box.env);
-      const loggedOut = await runUbAsync(["status"], box);
-      expect(loggedOut.stdout).toMatch(/sign-in.*required/i);
+      const loggedOut = await runUbAsync(["status", "--json"], box);
+      expect(JSON.parse(loggedOut.stdout).hub.status).toBe("auth-failed");
+      expect(JSON.parse(loggedOut.stdout).credentialPresent).toBe(false);
+      expect(loggedOut.stdout).toContain("ub auth login");
       expect(loggedOut.stdout).not.toContain("configured (credentials file)");
     } finally { await remote.close(); }
   });

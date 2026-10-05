@@ -152,7 +152,6 @@ function trimmed(value: string | undefined): string | null {
 /** A loopback proxy can reach a hub whose own bind requires device credentials. */
 export function usesDeviceLogin(endpoint: string, env: NodeJS.ProcessEnv = process.env): boolean {
   if (!isLoopbackEndpoint(endpoint) || env.HUB_ADMISSION === "device") return true;
-  if (env.UB_HUB_URL === "local" && endpoint === DEFAULT_HUB_URL) return false;
   const origin = authenticationOrigin(endpoint);
   const store = readHubLogins(env);
   return store.logins[origin] !== undefined || store.unreadableHubs.includes(origin);

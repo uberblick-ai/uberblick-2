@@ -44,23 +44,73 @@ function mcpConfig(env: NodeJS.ProcessEnv) {
 }
 
 describe("resolveConfig", () => {
-  it("retains project device admission after logout without inheriting machine admission", () => {
-    const box = sandbox({ projectBinding: { workspaceId: FROM_USER, hubUrl: "ws://localhost:8080/ws", hubAdmission: "device" }, credentials: { signingSecret: SECRET_ON_FILE } });
-    const resolved = resolveConfig({ env: { ...box.env, HUB_AUTH_TOKEN: SECRET_IN_ENV }, cwd: box.cwd });
-    expect(resolved.env.HUB_ADMISSION).toBe("device");
-    expect(resolved.env.HUB_AUTH_TOKEN).toBeUndefined();
-    expect(mcpConfig(resolved.env).deviceLogin).toBeDefined();
-    const local = sandbox({ projectBinding: { workspaceId: FROM_USER, hubUrl: null }, userConfig: { hubAdmission: "device" }, credentials: { signingSecret: SECRET_ON_FILE } });
-    const localResolved = resolveConfig({ env: { ...local.env, HUB_ADMISSION: "device" }, cwd: local.cwd });
-    expect(localResolved.env.HUB_ADMISSION).toBeUndefined();
-    expect(mcpConfig(localResolved.env).deviceLogin).toBeUndefined();
+  it("resolves joined device admission by the explicit endpoint, including complete environment pins", () => {
+    const first = "ws://localhost:8080/custom-path";
+    const second = "ws://localhost:8081/other-path";
+    const box = sandbox({
+      projectBinding: { workspaceId: FROM_USER, hubUrl: first },
+      userConfig: { hubAdmissions: { [first]: "device", [second]: "device" } },
+      credentials: { signingSecret: SECRET_ON_FILE },
+    });
+    for (const extra of [{}, { UB_WORKSPACE_ID: FROM_ENV, UB_HUB_URL: second }]) {
+      const resolved = resolveConfig({ env: { ...box.env, ...extra, HUB_AUTH_TOKEN: SECRET_IN_ENV }, cwd: box.cwd });
+      expect(resolved.binding?.hubUrl).toBe(extra.UB_HUB_URL ?? first);
+      expect(resolved.env.HUB_ADMISSION).toBe("device");
+      expect(resolved.env.HUB_AUTH_TOKEN).toBeUndefined();
+      expect(resolved.origins.credential).toBeNull();
+      expect(resolved.warnings).toEqual([]);
+      expect(mcpConfig(resolved.env).deviceLogin).toBeDefined();
+    }
+  });
+
+  it("does not carry device admission to an unrelated endpoint or the embedded local binding", () => {
+    const first = "ws://localhost:8080/ws";
+    const box = sandbox({
+      projectBinding: { workspaceId: FROM_USER, hubUrl: first },
+      userConfig: { hubAdmissions: { [first]: "device" } },
+      credentials: { signingSecret: SECRET_ON_FILE },
+    });
+    for (const hub of ["ws://localhost:1234", "ws://localhost:8080/other", "local"]) {
+      const resolved = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: FROM_ENV, UB_HUB_URL: hub, HUB_ADMISSION: "device" }, cwd: box.cwd });
+      expect(resolved.env.HUB_ADMISSION).toBeUndefined();
+      expect(resolved.env.HUB_AUTH_TOKEN).toBe(SECRET_ON_FILE);
+      expect(mcpConfig(resolved.env).deviceLogin).toBeUndefined();
+    }
+  });
+
+  it("uses legacy admission only for its validated matching endpoint and never for selection", () => {
+    const legacyHub = "http://localhost:8080/custom-path";
+    const endpoint = "ws://localhost:8080/custom-path";
+    const box = sandbox({
+      userConfig: { workspace: FROM_USER, hubUrl: legacyHub, hubAdmission: "device" },
+      credentials: { signingSecret: SECRET_ON_FILE },
+    });
+    const unbound = resolveConfig({ env: box.env, cwd: box.cwd });
+    expect(unbound.binding).toBeNull();
+    expect(unbound.env.HUB_ADMISSION).toBeUndefined();
+    for (const hub of [endpoint, "ws://localhost:1234"]) {
+      const resolved = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: FROM_ENV, UB_HUB_URL: hub }, cwd: box.cwd });
+      expect(resolved.env.HUB_ADMISSION).toBe(hub === endpoint ? "device" : undefined);
+      expect(resolved.env.HUB_AUTH_TOKEN).toBe(hub === endpoint ? undefined : SECRET_ON_FILE);
+    }
+  });
+
+  it("does not echo or use unsafe legacy admission endpoints", () => {
+    const box = sandbox({
+      projectBinding: { workspaceId: FROM_USER, hubUrl: "ws://localhost:1234" },
+      userConfig: { hubUrl: "http://user:PRIVATE_SENTINEL@localhost:1234/ws", hubAdmission: "device" },
+      credentials: { signingSecret: SECRET_ON_FILE },
+    });
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
+    expect(resolved.env.HUB_ADMISSION).toBeUndefined();
+    expect(resolved.env.HUB_AUTH_TOKEN).toBe(SECRET_ON_FILE);
+    expect(resolved.warnings.join(" ")).not.toContain("PRIVATE_SENTINEL");
   });
 
   it("does not use a legacy workspace or hub, and does not pass either to children", () => {
     const box = sandbox({ userConfig: { workspace: FROM_USER, hubUrl: "wss://old.example.test/ws" } });
     const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
     expect(resolved.binding).toBeNull();
-
     expect(resolved.env.WORKSPACE_ID).toBeUndefined();
     expect(resolved.env.HUB_URL).toBeUndefined();
     expect(resolved.warnings.join("\n")).toMatch(/Legacy machine/);

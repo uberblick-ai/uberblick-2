@@ -694,7 +694,7 @@ describe("ub open", () => {
     const port = await freePort();
     const endpoint = `ws://127.0.0.1:${port}/custom-proxy-path`;
     pointAt(box, endpoint);
-    const configPath = join(box.cwd, ".uberblick.json");
+    const configPath = join(configDir(box), "config.json");
     if (withLogin) {
       const id = crypto.randomUUID();
       await writeHubLogin(`http://127.0.0.1:${port}`, {
@@ -702,7 +702,7 @@ describe("ub open", () => {
         credential: { record: { id, principalId: id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE], issuedAt: 0, revokedAt: null }, key: Buffer.alloc(32).toString("base64url") },
       }, box.env);
     } else {
-      writeFileSync(configPath, JSON.stringify({ ...JSON.parse(readFileSync(configPath, "utf8")), hubAdmission: "device" }));
+      writeFileSync(configPath, JSON.stringify({ hubAdmissions: { [endpoint]: "device" } }));
     }
     const app = await open(box, ["--port", String(await freePort())], env);
     try {
@@ -2399,7 +2399,6 @@ describe("ub open", () => {
     expect(refused.output).toContain(`ws://127.0.0.1:${hubPort}`);
   });
 });
-
 
 it("opens a newly created local workspace in the browser without login or promotion", async () => {
   const box = sandbox();

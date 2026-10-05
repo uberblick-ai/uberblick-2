@@ -53,12 +53,13 @@ export async function createWorkspaceCommand(argv: string[], io: Io): Promise<nu
   const binding: ProjectBinding = { workspaceId: uuid, hubUrl: null };
   // Always create in this directory, never overwrite an ancestor project's binding.
   const path = join(process.cwd(), PROJECT_CONFIG_FILE);
+  let previous: ProjectBinding | null = null;
   try {
     const lock = await acquireInitLock();
     try {
       // Reject an invalid target before creating a replica. An ancestor binding
       // is not this new project's target and is left alone.
-      if (findProjectConfig() === path) resolveProjectBinding({ env: {} });
+      if (findProjectConfig() === path) previous = resolveProjectBinding({ env: {} }).binding;
       const env = { ...process.env, WORKSPACE_ID: uuid, UB_WORKSPACE_ID: uuid, UB_HUB_URL: "local", HUB_URL: undefined,
         HUB_AUTH_TOKEN: undefined, HUB_ADMISSION: undefined,
         UBERBLICK_DB: defaultDatabasePath(uuid, process.env) };
@@ -75,6 +76,10 @@ export async function createWorkspaceCommand(argv: string[], io: Io): Promise<nu
       writeProjectBinding(binding, { path });
     } finally { lock.release(); }
     io.out(`Created ${name} (${uuid}), local-only.\nSelected in ${path}.\nRun \`ub open\` to open it.\n`);
+    if (previous !== null) {
+      io.out(`Previous workspace ${previous.workspaceId} (${previous.hubUrl ?? "local"}) and its documents remain unchanged.\n` +
+        `Switch back: ub workspace use ${previous.workspaceId} --hub '${(previous.hubUrl ?? "local").replaceAll("'", "'\\''")}'\n`);
+    }
     reportWorkspacePins(binding, io);
     return 0;
   } catch (error) {

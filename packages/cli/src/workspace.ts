@@ -1,12 +1,16 @@
-/** Workspace selection, local creation, promotion and joining. */
+/** Workspace inspection and explicit project selection; never a machine default. */
+
+import { createWorkspaceCommand } from "./workspace-create.js";
+import { promoteWorkspaceCommand } from "./workspace-promote.js";
+import { joinCommand } from "./remote.js";
 
 import { readdirSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/hub/storage";
-import { defaultDatabasePath } from "@uberblick/mcp-server";
+import { defaultDatabasePath, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";
-import { resolveConfig } from "./config.js";
+import { migrateHubAdmissions, resolveConfig, writeHubAdmission } from "./config.js";
 import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { normalizeRemoteUrl } from "@uberblick/hub/remote-url";
 import { takeHelp } from "./help.js";
@@ -16,10 +20,6 @@ import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { describeFsError } from "./safe-write.js";
 import { ORIGIN_LABELS } from "./status.js";
-
-import { createWorkspaceCommand } from "./workspace-create.js";
-import { promoteWorkspaceCommand } from "./workspace-promote.js";
-import { joinCommand } from "./remote.js";
 
 export const WORKSPACE_HELP = `usage: ub workspace [command]
 
@@ -366,9 +366,12 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   }
 
   try {
-    path = writeProjectBinding({ workspaceId: id, hubUrl: hub,
-      ...(hub === current?.hubUrl && current.hubAdmission === "device" ? { hubAdmission: "device" } : {}),
-    });
+    // Preserve endpoint metadata before the user removes obsolete selection keys.
+    const admission = hub !== null && usesDeviceLogin(hub, { ...process.env, HUB_ADMISSION: undefined })
+      ? writeHubAdmission(hub, true)
+      : migrateHubAdmissions();
+    warn(io, admission.warnings);
+    path = writeProjectBinding({ workspaceId: id, hubUrl: hub });
   } catch (error) {
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;

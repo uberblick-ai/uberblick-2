@@ -33,9 +33,9 @@ interface McpAgentOptions {
 /**
  * An MCP client's private machine state and every server session using it.
  *
- * Each session explicitly pins the workspace and hub as a complete binding.
- * Keeping setup and cleanup here prevents one spec's protocol client from
- * drifting from another or leaving a server behind after a failed test.
+ * Each process receives an explicit workspace and hub pair, with its own
+ * signing secret and private database. Keeping setup and cleanup here prevents one spec's protocol client from drifting from another
+ * or leaving a server process behind after a failed test.
  */
 export class McpAgent {
   private readonly state: string;
@@ -43,7 +43,6 @@ export class McpAgent {
 
   constructor(private readonly options: McpAgentOptions) {
     this.state = mkdtempSync(join(tmpdir(), options.statePrefix));
-
   }
 
   open(clientInfo: McpClientInfo): McpSession {
@@ -88,11 +87,10 @@ export class McpSession {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
-        UB_WORKSPACE_ID: options.workspace,
-        UB_HUB_URL: options.hubUrl,
         WORKSPACE_ID: undefined,
         HUB_URL: undefined,
-        HUB_ADMISSION: undefined,
+        UB_WORKSPACE_ID: options.workspace,
+        UB_HUB_URL: options.hubUrl,
         HUB_AUTH_TOKEN: options.authSecret,
         UBERBLICK_DB: join(state, "agent.sqlite"),
         XDG_CONFIG_HOME: join(state, "config"),
