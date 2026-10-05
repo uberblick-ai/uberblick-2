@@ -482,7 +482,7 @@ that the host shell does not still export the override when you recreate it.
 
 ### Shared app limits and controls
 
-These GitHub limits include both ordinary login and first-admin setup:
+These GitHub limits cover ordinary login, first-admin setup and member lookup:
 
 - [Device flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#rate-limits-for-the-device-flow)
   permits 50 verification-code submissions per hour per application, shared by
@@ -502,6 +502,13 @@ These GitHub limits include both ordinary login and first-admin setup:
   Apps, OAuth apps and personal access tokens. The documented Enterprise Cloud
   exception can raise it. An operator-owned app does not give each hub or token
   a separate user budget. The hub discards GitHub tokens after reading identity.
+- Resolving a handle and granting a confirmed account each use one public,
+  unauthenticated REST lookup. The hub holds no GitHub token for these calls.
+  The [unauthenticated budget](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#primary-rate-limit-for-unauthenticated-users)
+  is 60 requests per hour per originating IP, shared with other unauthenticated
+  calls from that IP. An operator-owned app does not change this budget.
+  A rate-limited lookup returns `lookup-unavailable` and grants nothing; retry
+  after the GitHub budget recovers.
 - The app owner controls its
   [Device Flow, name and permissions](https://docs.github.com/en/apps/maintaining-github-apps/modifying-a-github-app-registration),
   [visibility](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/making-a-github-app-public-or-private)
@@ -645,7 +652,8 @@ signing-secret admission and need no GitHub, membership or login.
 
 The shared HTTP interface is `POST /auth/manage` with a JSON body
 `{protocolVersion, token, operation, ...targets}`. It requires configured
-GitHub sign-in, but a management request makes no GitHub call. Use
+GitHub sign-in. Only `resolve-account` and `grant-member` contact GitHub;
+the other management operations make no GitHub call. Use
 `mintRequestProof` from `@uberblick/hub/token` with the current device key,
 its credential UUID as `kid`, the operation and all targets below, and
 `lifetimeSeconds` (clients should use 60 seconds). The signed payload carries
@@ -664,17 +672,47 @@ may repeat its effect; there is no replay cache.
 | `revoke-device` | `deviceId` | `{status: "ok"}` |
 | `own-role` | `workspaceId` | `{status: "ok", role}` |
 | `list-members` | `workspaceId` | `{status: "ok", members}` |
+| `resolve-account` | `workspaceId`, `githubUsername` | `{status: "ok", githubAccountId, githubUsername}` |
+| `grant-member` | `workspaceId`, `githubAccountId`, optional `role` (default `member`) | `{status: "ok", member}` or `{status: "already-member", member}` |
 | `change-role` | `workspaceId`, `principalId`, `role` | `{status: "ok"}` |
 | `remove-member` | `workspaceId`, `principalId` | `{status: "ok"}` |
 
 Workspace IDs are bare UUIDs; roles are `admin` or `member`. Workspace
 operations require both current membership and a credential naming that
-workspace. Only its current admins can list or change members; any member
+workspace. Only its current admins can resolve accounts, grant, list or change members; any member
 can read their own role. Member rows contain `principalId`,
-`githubAccountId`, `githubUsername` (the latest GitHub login seen at sign-in),
-and `role`. The final admin cannot be demoted or removed. No operation here
-adds membership. A non-admin member cannot remove themselves; an admin can
+`githubAccountId`, `githubUsername` (the login from the initial grant or latest
+sign-in), and `role`. The final admin cannot be demoted or removed.
+A non-admin member cannot remove themselves; an admin can
 leave while another admin remains.
+
+To add an account, first resolve its handle, then have the admin confirm the
+returned permanent GitHub account ID and current login. Resolution grants
+nothing and changes no access record. Send the confirmed `githubAccountId`
+to `grant-member`, with `role: "admin"` only when explicitly intended. IDs are
+canonical positive decimal strings; handles are 1–39 ASCII letters or digits,
+with single hyphens only between them. The proof binds these targets too;
+omitted role means `member` in both body and proof.
+
+The hub reads `https://api.github.com/users/<encoded-handle>` for resolution
+and `https://api.github.com/user/<account-id>` for the grant. It refuses
+redirects, times out after 10 seconds and caps responses at 64 KiB. It accepts
+only a GitHub user account with an unambiguous ID and login, and never trusts a
+client-supplied login for a grant or resolves against stored logins. After the
+lookup it checks the credential, proof lifetime and admin authority again,
+synchronously with the write. A lost admin role, revocation or credential
+replacement during the lookup prevents a grant.
+
+An account can be granted access before its first sign-in and appears in
+`list-members` immediately. `member` in the grant answer has the same fields
+as a member row. Repeating or racing a grant returns `already-member` once
+the membership exists, including its existing role; it never changes that
+role. Use `change-role` for role changes. Lookup does not refresh existing
+principals' stored logins. Access follows the account ID through a rename;
+sign-in updates its stored login, while another account using the old handle
+gets no access. The new account's first sign-in credential names its
+workspaces; existing devices discover the grant through `/auth/credential/renew`
+without another GitHub approval.
 
 Every person can list and revoke only their own devices, including with a
 credential naming no workspace. Workspace admins have no authority over
@@ -706,6 +744,12 @@ returns 503 `not-configured`, as sign-in does. A storage or internal failure
 returns 500 `failed`; 500 `{status: "closure-failed", applied: true}` means
 the access change committed but a live closure listener failed. It is not a
 refusal or rollback; retry from a credential that still has authority.
+
+For resolution and grant, an unknown or non-user account returns 404
+`account-not-found`. A GitHub error, timeout, redirect, rate limit or malformed
+or ambiguous answer returns 503 `lookup-unavailable`; retry when lookup is
+available. Malformed handles or IDs return 400 `invalid-request` before any
+GitHub call. Every failed lookup grants nothing.
 
 ## Establish a workspace's first administrator
 
