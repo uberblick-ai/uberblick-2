@@ -87,6 +87,9 @@ test("the browser install and suite share private storage that is always removed
 	assert.deepEqual(calls[0].split("\t").slice(2), [
 		"--filter", "@uberblick/web", "exec", "playwright", "install", "chromium", "webkit",
 	]);
+	assert.deepEqual(calls[1].split("\t").slice(2), [
+		"exec", "--if-missing", "warn", "--", "pnpm", "--filter", "@uberblick/web", "run", "e2e",
+	]);
 	assert.equal(installCwd, repoRoot);
 	assert.equal(suiteCwd, repoRoot);
 	assert.equal(suiteTmp, installTmp);

@@ -29,7 +29,7 @@
  * with no file edited by hand. It only ever *fills in* the endpoint — a
  * different one already stored is refused rather than overwritten, because
  * repointing the clients moves nothing and would leave the workspace on the old
- * hub (#376, #385); `ub remote join` is the verb that moves a machine, and the
+ * hub (#376, #385); `ub workspace join` is the verb that moves a machine, and the
  * *same* endpoint is nothing to do at all — that run prints what is bound and
  * exits without writing. What the hub argument adds beyond storing an endpoint
  * is two guarantees: the hub is dialled and authenticated before a single file
@@ -40,9 +40,8 @@
  * renewed to current memberships. A loopback hub uses its local signing secret;
  * none is invented for a hub that already exists.
  *
- * It is convenience, never a precondition. Every other command works without it
- * — absent configuration is a default, not an error (see `config.ts`) — so
- * nothing here is the thing that makes `ub status` or `ub mcp serve` possible.
+ * Explicit bindings can also be supplied by the environment. Without one,
+ * read-only status reports no selection and document commands refuse to guess.
  *
  * **The secret.** `HUB_AUTH_TOKEN` is the HMAC secret hub tokens are signed
  * with, not a token. When a secret is already in force — from fnox, or from the
@@ -68,7 +67,7 @@ import { userInfo } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
-import { storeWorkspaceName } from "@uberblick/mcp-server";
+import { storeWorkspaceName, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId, validateWorkspaceName } from "@uberblick/schema";
 import { findCheckoutRoot } from "./checkout.js";
 import {
@@ -77,8 +76,8 @@ import {
   readCredentials,
   readUserConfig,
   resolveConfig,
-  userConfigPath,
   writeCredentials,
+  writeHubAdmission,
   writeUserConfig,
 } from "./config.js";
 import { takeHelp } from "./help.js";
@@ -88,7 +87,8 @@ import { acquireInitLock, seedLockPath } from "./init-lock.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
-import { normalizeRemoteUrl, remoteProblem, setRemote } from "./remote.js";
+import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
+import { normalizeRemoteUrl, remoteProblem } from "./remote.js";
 import { seedStarterDocs } from "./starter.js";
 
 /**
@@ -177,13 +177,13 @@ export const INIT_OPTIONS = {
 export const INIT_HELP = `usage: ub init [hub-url] [options]
 
 Settle what every other command needs: your awareness identity, the workspace
-this machine works in, and a signing secret for local hubs. Idempotent — it never replaces
+this project uses, and a signing secret for local hubs. Idempotent — it never replaces
 a secret that already exists, and it is safe to run again.
 
 Given a loopback hub, it can create a workspace there and wait for its starter
 documents to be acknowledged. A remote hub requires an existing workspace that
 this machine's stored login may access. It uses the workspace already selected
-here; otherwise pass --workspace <id>. \`ub remote join <url-with-workspace-id>\`
+here; otherwise pass --workspace <id>. \`ub workspace join <url-with-workspace-id>\`
 hydrates and verifies an existing workspace without adding starter documents.
 A newly chosen endpoint is checked before it is stored. Without a hub binding,
 the workspace stays local to this machine. Nothing syncs in the background
@@ -203,9 +203,9 @@ operands:
                      <hub>\` and obtain membership in the selected existing
                      workspace. A loopback hub
                      uses HUB_AUTH_TOKEN or credentials.json. An endpoint
-                     this machine already stores is never replaced: the same one changes nothing, and a different
+                     this project already selects is never replaced: the same one changes nothing, and a different
                      one is refused, because moving a workspace between hubs is
-                     \`ub remote join <url-with-workspace-id>\`, which hydrates and
+                     \`ub workspace join <url-with-workspace-id>\`, which hydrates and
                      verifies first
 
 options:
@@ -215,7 +215,8 @@ options:
   --color <#rrggbb>  awareness cursor colour, 6-digit hex (default: one of the
                      eight the web client uses, picked for you)
   --workspace <id>   the workspace to work in, as <uuid> or <slug>-<uuid>
-                     (default: the selected workspace, or a fresh local uuid)
+                     (default: the project workspace, or a fresh local uuid)
+                     selecting a different workspace requires an explicit hub
                      required for a remote hub if no workspace is selected;
                      that existing workspace must grant this login membership
                      joining by id never writes or infers a workspace name
@@ -229,8 +230,12 @@ no endpoint is stored. Remote hubs use this machine’s stored login, never a
 signing secret. What is generated is written to
 $XDG_CONFIG_HOME/uberblick/credentials.json at mode 0600, and is never printed.
 
-A WORKSPACE_ID in the environment — a project .mcp.json's pin, or your own
-shell — outranks the workspace in config.json, whatever this run settles.
+The complete UB_WORKSPACE_ID and UB_HUB_URL binding in the environment — a project .mcp.json's pin, or your own
+shell — outranks .uberblick.json for commands, but is never implicitly saved by init.
+If it differs from the project file, first select the project with
+\`ub workspace use <id> --hub <url|local>\`, or pass --workspace and a hub URL together.
+The project file contains only the workspace and hub; identity and credentials
+remain in the private user configuration.
 `;
 
 function parseFlags(argv: string[]): Flags {
@@ -253,7 +258,7 @@ function parseFlags(argv: string[]): Flags {
     workspace: values.workspace,
     mcp:
       values.mcp === true ? true : values["no-mcp"] === true ? false : undefined,
-    // The one normalizer, shared with `ub remote join`: a bare host and an
+    // The one normalizer, shared with `ub workspace join`: a bare host and an
     // https:// address are the deployment's endpoint, and this refuses
     // everything that is not an endpoint before the command does anything.
     hub: hub === undefined ? undefined : normalizeRemoteUrl(hub),
@@ -400,6 +405,7 @@ export async function initCommand(
   let flags: Flags;
   try {
     flags = parseFlags(argv);
+    if (flags.workspace !== undefined) parseWorkspaceId(flags.workspace, "--workspace");
   } catch (error) {
     io.err(`ub init: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
@@ -413,15 +419,29 @@ export async function initCommand(
   // chose. Null means no workspace anywhere — the case this command exists to
   // end, and the reason the MCP config below is resolved only once one is
   // settled, since resolving it without a workspace is an error by design.
-  const inForceWorkspace = trimmed(resolved.env.WORKSPACE_ID);
+  const selected = resolveProjectBinding({ env: {} });
+  const inForceWorkspace = selected.binding?.workspaceId ?? null;
   const existing = readUserConfig();
+  const effective = resolved.binding;
+  if (resolved.origins.workspace === "environment" &&
+      (effective?.workspaceId !== selected.binding?.workspaceId || effective?.hubUrl !== selected.binding?.hubUrl) &&
+      !(flags.workspace !== undefined && flags.hub !== undefined)) {
+    io.err("ub init: the environment selects a different binding, or has no matching project binding. Nothing was written. Select the intended project explicitly with `ub workspace use <id> --hub <url|local>`, or pass both --workspace <id> and a hub URL. Environment overrides are not saved implicitly.\n");
+    return 1;
+  }
+  if (selected.binding === null && flags.workspace === undefined &&
+      (existing.raw?.workspace !== undefined || existing.raw?.hubUrl !== undefined)) {
+    io.err("ub init: a legacy machine workspace or hub is configured, but this project has no binding. Nothing was written or seeded. Review the old configuration, then explicitly select it with `ub workspace use <workspace-id> --hub <hub-url|local>`; use `ub workspace join <workspace-url>` to hydrate a remote workspace. No legacy URL or credential has been copied.\n");
+    io.err(`To finish migration after selecting the projects you want to keep, remove only the obsolete workspace and hubUrl keys from ${resolved.paths.userConfig}. Preserve the other fields and credentials.json. Then \`ub init\` can create a fresh workspace in an unbound directory.\n`);
+    return 1;
+  }
   // The same problem is reported by each reader; the set keeps it said once.
   const warnings = new Set([...resolved.warnings, ...existing.warnings]);
   // `--workspace` is somebody naming a workspace that already exists somewhere —
   // a scripted setup, say. Whatever that workspace holds is not this machine's
   // to add to, and it may hold nothing *yet*, so the emptiness `starter.ts`
   // reads would be the wrong answer. (Binding to a remote workspace is
-  // `ub remote join <url>/<workspace-id>`, which needs no `ub init` first and
+  // `ub workspace join <url>/<workspace-id>`, which needs no `ub init` first and
   // seeds nothing either.) The
   // rest of the decision is read from the workspace itself, not from this run.
   const maySeed = flags.workspace === undefined;
@@ -433,19 +453,24 @@ export async function initCommand(
 
   // --- the hub, when one was given -----------------------------------------
   //
-  // The endpoint has one authority — this machine's `config.json` — and this
-  // command may only *fill it in*. Overwriting it would be `ub remote set`
-  // reborn: pointing the clients at another hub moves nothing, and the
+  // The endpoint is part of the selected project binding, and this
+  // command may only *fill it in*. Overwriting it would be an endpoint-only retarget: pointing the clients at another hub moves nothing, and the
   // workspace stays on the old one with nothing dialling it (#376, #385). So a
   // stored endpoint that is not the one asked for is refused outright, and the
   // refusal names the verb that does move a machine.
-  const bound = trimmed(existing.config.hubUrl);
+  const bound = selected.binding?.hubUrl ?? null;
+  if (flags.workspace !== undefined && inForceWorkspace !== null &&
+      parseWorkspaceId(flags.workspace).uuid !== parseWorkspaceId(inForceWorkspace).uuid &&
+      flags.hub === undefined) {
+    io.err("ub init: a different workspace needs an explicit hub. Use `ub workspace use <id> --hub <url|local>`.\n");
+    return 2;
+  }
   if (flags.hub !== undefined && bound !== null && bound !== flags.hub) {
     io.err(
       `ub init: this machine already syncs with ${bound}, and \`ub init\` never ` +
         `replaces an endpoint — pointing it at ${flags.hub} would leave this ` +
         "workspace on the old hub with nothing dialling it. Nothing was " +
-        `written. To move this machine: \`ub remote join ${flags.hub}/` +
+        `written. To move this machine: \`ub workspace join ${flags.hub}/` +
         `${inForceWorkspace ?? "<workspace-id>"}\`, which hydrates and verifies ` +
         "before it persists anything.\n",
     );
@@ -459,7 +484,8 @@ export async function initCommand(
   if (
     flags.hub !== undefined &&
     bound === flags.hub &&
-    inForceWorkspace !== null
+    inForceWorkspace !== null &&
+    (flags.workspace === undefined || parseWorkspaceId(flags.workspace).uuid === parseWorkspaceId(inForceWorkspace).uuid)
   ) {
     for (const warning of warnings) {
       io.err(`ub: warning: ${warning}\n`);
@@ -467,7 +493,7 @@ export async function initCommand(
     let already = "uberblick is already set up here\n\n";
     already += field("workspace", inForceWorkspace);
     already += field("hub", bound);
-    already += field("config", userConfigPath());
+    already += field("config", selected.path ?? "environment");
     already += "\nNothing was changed. `ub status` reports the live state.\n";
     io.out(already);
     return 0;
@@ -593,14 +619,14 @@ export async function initCommand(
     );
     if (problem !== null) {
       // `problem` is a sentence of its own, ending in its own newline — the
-      // same one `ub remote join` prints for the same hub.
+      // same one `ub workspace join` prints for the same hub.
       io.err(`ub init: ${problem}Nothing was written to the workspace or binding.\n`);
       return 1;
     }
   }
 
   // Whether this is a checkout, which decides only whether the report below
-  // names the contributor tasks. Nothing is written into one.
+  // names the contributor tasks. The project binding is written in either case.
   const root = isInstallPayload() ? null : findCheckoutRoot(process.cwd());
 
   // --- everything that writes ---------------------------------------------
@@ -645,29 +671,26 @@ export async function initCommand(
       warnings.add(warning);
     }
 
-    // Merged over what is already there: a `hubUrl` somebody set, or a field a
-    // later version of `ub` writes, is not `ub init`'s to drop. Read again here
-    // rather than reusing the copy taken before the prompts — that one is a
-    // snapshot of a machine somebody may have changed since, and it exists only
-    // to offer defaults. What gets written is merged over what is on disk now.
+    // Preserve the private identity file independently of the project binding.
     const current = readUserConfig();
     for (const warning of current.warnings) {
       warnings.add(warning);
     }
     // The endpoint decision, taken again on what is on disk *now*. The one
     // above was taken before the probe and before this lock, and another run —
-    // an `ub init` or an `ub remote join` — may have bound this machine in
+    // an `ub init` or an `ub workspace join` — may have bound this machine in
     // between; writing over that would be the endpoint-only retarget this
     // command refuses by design, arrived at by a race instead of by an
     // argument. The refusal returns from inside the lock, which the `finally`
     // below releases, and nothing has been written yet at this point.
-    const settledHub = trimmed(current.config.hubUrl);
+    const settledBinding = resolveProjectBinding({ env: {} });
+    const settledHub = settledBinding.binding?.hubUrl ?? null;
     if (binding !== null && settledHub !== null && settledHub !== binding) {
       io.err(
         `ub init: this machine was bound to ${settledHub} while this run was ` +
           "checking " +
-          `${binding} — another \`ub init\` or \`ub remote join\` got there ` +
-          "first. Nothing was written to the workspace or binding. To move it, `ub remote join " +
+          `${binding} — another \`ub init\` or \`ub workspace join\` got there ` +
+          "first. Nothing was written to the workspace or binding. To move it, `ub workspace join " +
           `${binding}/<workspace-id>\`.\n`,
       );
       return 1;
@@ -715,7 +738,7 @@ export async function initCommand(
     // workspace while the run that got there first — the one holding the seed
     // lock — writes the starter documents into another.
     const settled = generatingWorkspace
-      ? trimmed(current.config.workspace)
+      ? settledBinding.binding?.workspaceId ?? null
       : null;
     if (settled !== null) {
       // Adopting is reading a workspace out of a file, so it is held to what
@@ -724,24 +747,19 @@ export async function initCommand(
       // the message the next `ub init` would give for the same file, rather
       // than publishing a value that would make a later run, a seed or a
       // report fail somewhere less obvious.
-      parseWorkspaceId(settled, `"workspace" in ${userConfigPath()}`);
+      parseWorkspaceId(settled, "the selected workspace");
       workspace = settled;
       workspaceName = null;
     }
-    configPath = writeUserConfig({
+    writeUserConfig({
       ...current.raw,
-      workspace,
       displayName: name,
       color,
     });
-    // The endpoint goes through the writer `ub remote join` uses, in the same
-    // file and under the same lock — one place that decides what being bound to
-    // a hub means, rather than a second one that has to be kept in step. Not
-    // when the same endpoint arrived while this run was probing: there is
-    // nothing left to write, and the check above has already refused any other.
-    if (binding !== null && settledHub === null) {
-      setRemote(binding);
+    if (hubInForce !== null && usesDeviceLogin(hubInForce, { ...process.env, HUB_ADMISSION: undefined })) {
+      for (const warning of writeHubAdmission(hubInForce, true).warnings) warnings.add(warning);
     }
+    configPath = writeProjectBinding({ workspaceId: workspace, hubUrl: hubInForce });
 
     // --- the signing secret -------------------------------------------------
     // The raw environment, not `resolved.env`: what matters here is whether
@@ -783,7 +801,7 @@ export async function initCommand(
     // and the re-read keeps the report describing the machine rather than this
     // process's intention.
     const persisted = readCredentials();
-    persistedWorkspace = readUserConfig().config.workspace ?? workspace;
+    persistedWorkspace = workspace;
     if (secret !== null && persisted.signingSecret !== null) {
       secret = persisted.signingSecret;
     }
@@ -876,8 +894,9 @@ export async function initCommand(
       // into the workspace this run had in hand would leave a corpus nothing on
       // this machine points at. A workspace somebody named by id is not this
       // run's to seed either — that is what `--workspace` opting out means.
-      const configured = trimmed(readUserConfig().config.workspace);
-      if (configured !== persistedWorkspace) {
+      const selectedNow = resolveProjectBinding({ env: {} }).binding;
+      const configured = selectedNow?.workspaceId ?? null;
+      if (configured !== persistedWorkspace || (selectedNow?.hubUrl ?? null) !== hubInForce) {
         warnings.add(
           `this machine is configured for ${configured ?? "no workspace"} now, ` +
             `not ${persistedWorkspace} — another \`ub init\` settled that ` +
@@ -936,6 +955,10 @@ export async function initCommand(
       "  ub mcp install        wire up an agent's MCP client (claude, codex, cursor)\n";
   }
   io.out(report);
+  if (resolved.origins.workspace === "environment" &&
+      (effective?.workspaceId !== persistedWorkspace || effective.hubUrl !== hubInForce)) {
+    io.err("ub: warning: the environment binding still takes precedence over the project binding just written.\n");
+  }
 
   // The one promise a hub argument adds, checked rather than assumed. Local
   // state stands — the configuration is settled and the documents are durable

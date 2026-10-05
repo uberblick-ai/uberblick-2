@@ -121,19 +121,29 @@ export type TokenRequest = Omit<TokenClaims, "iat" | "exp"> & {
   iat?: number;
 };
 
-/** An HTTP proof authorizes only the operation it names. */
-export type RequestOperation = "renew-credential";
+/** An HTTP proof binds the operation and every authority-bearing target. */
+export type RequestAction =
+  | { operation: "renew-credential" }
+  | { operation: "promote-workspace"; workspaceId: string; attemptId: string }
+  | { operation: "list-devices" }
+  | { operation: "revoke-device"; deviceId: string }
+  | { operation: "own-role"; workspaceId: string }
+  | { operation: "list-members"; workspaceId: string }
+  | { operation: "change-role"; workspaceId: string; principalId: string; role: "admin" | "member" }
+  | { operation: "remove-member"; workspaceId: string; principalId: string };
 
-export interface RequestProofClaims {
+export type RequestOperation = RequestAction["operation"];
+
+export type RequestProofClaims = RequestAction & {
   typ: "request";
   /** A credential key, never the shared root secret. */
   kid: string;
-  operation: RequestOperation;
   iat: number;
   exp: number;
-}
+};
 
-export type RequestProofRequest = Omit<RequestProofClaims, "typ" | "iat" | "exp"> & {
+export type RequestProofRequest = RequestAction & {
+  kid: string;
   lifetimeSeconds: number;
   iat?: number;
 };
@@ -512,9 +522,9 @@ export async function mintToken(
 }
 
 /**
- * Prove possession of a credential key for one HTTP operation. Workspace and
- * subject authority come from the hub's record, so even a credential issued
- * with no workspaces can authorize this request.
+ * Prove possession of a credential key for one HTTP operation and its targets.
+ * The hub still decides authority from its own current credential and
+ * membership records; signed targets confer no authority themselves.
  */
 export async function mintRequestProof(
   key: CryptoKey,
@@ -523,8 +533,9 @@ export async function mintRequestProof(
   if (typeof claims.kid !== "string" || !UUID.test(claims.kid)) {
     throw new Error("mintRequestProof: kid must be a credential uuid");
   }
-  if (!isRequestOperation(claims.operation)) {
-    throw new Error("mintRequestProof: unknown operation");
+  const action = readRequestAction(claims);
+  if (action === null) {
+    throw new Error("mintRequestProof: unsupported operation or targets");
   }
   if (claims.iat !== undefined && !isEpochSeconds(claims.iat)) {
     throw new Error("mintRequestProof: iat must be a non-negative integer");
@@ -545,7 +556,7 @@ export async function mintRequestProof(
   }
   return signClaims(
     key,
-    { typ: "request", kid: claims.kid, operation: claims.operation, iat, exp },
+    { typ: "request", kid: claims.kid, ...action, iat, exp },
     "mintRequestProof",
   );
 }
@@ -575,28 +586,72 @@ async function signClaims(
   return minted;
 }
 
-function isRequestOperation(value: unknown): value is RequestOperation {
-  return value === "renew-credential";
+const REQUEST_TARGET_FIELDS = ["deviceId", "workspaceId", "principalId", "role", "attemptId"] as const;
+
+/** Parse target semantics, allowing request/proof metadata but no unrelated targets. */
+export function readRequestAction(payload: Record<string, unknown>): RequestAction | null {
+  const { operation, deviceId, workspaceId, principalId, role, attemptId } = payload;
+  let action: RequestAction;
+  switch (operation) {
+    case "renew-credential":
+      // Renewal predates management and has no targets; its existing proof
+      // contract ignores extra payload fields.
+      return { operation };
+    case "promote-workspace":
+      if (!isWorkspace(workspaceId) || typeof attemptId !== "string" || !UUID.test(attemptId)) return null;
+      action = { operation, workspaceId, attemptId };
+      break;
+    case "list-devices":
+      action = { operation };
+      break;
+    case "revoke-device":
+      if (!isSubject(deviceId)) return null;
+      action = { operation, deviceId };
+      break;
+    case "own-role":
+    case "list-members":
+      if (!isWorkspace(workspaceId)) return null;
+      action = { operation, workspaceId };
+      break;
+    case "change-role":
+      if (!isWorkspace(workspaceId) || !isSubject(principalId) || (role !== "admin" && role !== "member")) {
+        return null;
+      }
+      action = { operation, workspaceId, principalId, role };
+      break;
+    case "remove-member":
+      if (!isWorkspace(workspaceId) || !isSubject(principalId)) return null;
+      action = { operation, workspaceId, principalId };
+      break;
+    default:
+      return null;
+  }
+  return REQUEST_TARGET_FIELDS.some((field) => Object.hasOwn(payload, field) && !Object.hasOwn(action, field))
+    ? null
+    : action;
 }
 
 function parseRequestProofClaims(
   payload: Record<string, unknown>,
-  operation: RequestOperation,
+  expected: RequestAction | "renew-credential",
 ): RequestProofClaims | null {
   const { typ, kid, iat, exp } = payload;
+  const action = readRequestAction(payload);
+  const expectedAction = readRequestAction(typeof expected === "string" ? { operation: expected } : expected);
   if (
     typ !== "request" ||
     typeof kid !== "string" ||
     !UUID.test(kid) ||
-    !isRequestOperation(payload.operation) ||
-    payload.operation !== operation ||
+    action === null ||
+    expectedAction === null ||
+    Object.entries(expectedAction).some(([field, value]) => payload[field] !== value) ||
     !isEpochSeconds(iat) ||
     !isEpochSeconds(exp) ||
     exp <= iat
   ) {
     return null;
   }
-  return { typ, kid, operation, iat, exp };
+  return { typ, kid, ...action, iat, exp };
 }
 
 function parseClaims(payload: Record<string, unknown>): TokenClaims | null {
@@ -775,14 +830,15 @@ async function verifySignature(
 }
 
 /**
- * Verify an operation-bound request proof, using the same bounded canonical
- * wire format as room tokens. Time is checked separately with clampToken.
+ * Verify a request proof bound to its operation and exact targets, using the
+ * same bounded canonical wire format as room tokens. Time is checked separately
+ * with clampToken.
  * Rejections reflect no caller-supplied claims or key material.
  */
 export async function inspectRequestProof(
   key: CryptoKey,
   token: string,
-  operation: RequestOperation,
+  expected: RequestAction | "renew-credential",
 ): Promise<RequestProofClaims | TokenRejection> {
   const parsed = parseToken(token);
   if (parsed === null) return UNPARSEABLE;
@@ -791,7 +847,7 @@ export async function inspectRequestProof(
   const identity: TokenIdentity = { typ: null, sub: null };
   if (!signed) return { failure: "bad-signature", identity };
   return (
-    parseRequestProofClaims(parsed.payload, operation) ?? {
+    parseRequestProofClaims(parsed.payload, expected) ?? {
       failure: "unsupported-claims",
       identity,
     }

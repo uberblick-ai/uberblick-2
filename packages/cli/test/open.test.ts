@@ -72,7 +72,7 @@ import {
 const WORKSPACE = "b4d1f0a7-3c62-4e91-8f05-7ad2c9e61b38";
 const SECRET = "open-test-signing-secret-9d31fa";
 
-/** What a `ub remote join` mid-run leaves behind, for the #449 tests. */
+/** What a `ub workspace join` mid-run leaves behind, for the #449 tests. */
 const REBOUND_WORKSPACE = "c7e2b105-9a48-4d6f-b3e1-5f0c8a71d264";
 const REBOUND_SECRET = "open-test-rotated-secret-4b7c21";
 const FIRST_REMOTE = "wss://first.example.ts.net/ws";
@@ -517,7 +517,7 @@ function configured(): {
   bundle: string;
 } {
   const box = sandbox({
-    userConfig: { workspace: WORKSPACE },
+    projectBinding: { workspaceId: WORKSPACE, hubUrl: null },
     credentials: { signingSecret: SECRET },
   });
   const bundle = fixtureBundle(box);
@@ -576,7 +576,7 @@ function configDir(box: Sandbox): string {
 }
 
 /**
- * Rebind this machine, the way `ub remote join` or `ub workspace use` leaves it:
+ * Rebind this project, the way `ub workspace join` or `ub workspace use` leaves it:
  * a different endpoint, workspace and signing secret, across both files.
  */
 function rebind(
@@ -601,11 +601,9 @@ function writeCredentials(box: Sandbox, signingSecret: string): void {
 }
 
 function writeBinding(box: Sandbox, hubUrl: string, workspace: string): void {
-  const dir = configDir(box);
-  mkdirSync(dir, { recursive: true });
   writeFileSync(
-    join(dir, "config.json"),
-    `${JSON.stringify({ workspace, hubUrl }, null, 2)}\n`,
+    join(box.cwd, ".uberblick.json"),
+    `${JSON.stringify({ workspaceId: workspace, hubUrl }, null, 2)}\n`,
     "utf8",
   );
 }
@@ -667,6 +665,52 @@ function bearer(auth: string): Record<string, string> {
 // --- the criteria ------------------------------------------------------------
 
 describe("ub open", () => {
+  it("discovers loopback device admission and later login keeps the same serving binding", async () => {
+    const { box, env } = configured();
+    const hub = await createHub({ port: 0, address: "0.0.0.0", databasePath: join(box.cwd, "loopback-device-hub.sqlite"),
+      github: { clientId: "Iv1.0123456789abcdef" }, log: silentLogger });
+    hubs.push(hub);
+    const origin = `http://127.0.0.1:${hub.port}`;
+    pointAt(box, `ws://127.0.0.1:${hub.port}/custom-proxy-path`);
+    const person = hub.principals!.identify("12345", "open-person");
+    hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: person.id, role: "admin" });
+    const app = await open(box, ["--port", String(await freePort())], env);
+    try {
+      expect(app.stdout()).toContain(`ub auth login ${origin}`);
+      expect(app.stdout()).not.toContain("HUB_AUTH_TOKEN");
+      const authorization = bearer(await authMessage(localBrowserKey(WORKSPACE, box.env)));
+      const status = async () => await (await fetch(`${app.url}api/status`, { headers: authorization })).json() as { caughtUp: boolean; notSharedReason: string | null };
+      await waitUntil("loopback origin sign-in reading", async () => (await status()).notSharedReason === "sign-in-required");
+      const issued = hub.credentials!.issue({ principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
+      const { replacedAt: _replaced, ...record } = issued.record;
+      await writeHubLogin(origin, { identity: person, credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") } }, box.env);
+      await waitUntil("loopback origin login resumes sharing", async () => (await status()).caughtUp);
+      expect(await (await get(`${app.url}uberblick-config.json`)).json()).not.toHaveProperty("rebound");
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
+  it.each([false, true])("keeps a stopped loopback deployment external after logout (stored login: %s)", async withLogin => {
+    const { box, env } = configured();
+    const port = await freePort();
+    const endpoint = `ws://127.0.0.1:${port}/custom-proxy-path`;
+    pointAt(box, endpoint);
+    const configPath = join(configDir(box), "config.json");
+    if (withLogin) {
+      const id = crypto.randomUUID();
+      await writeHubLogin(`http://127.0.0.1:${port}`, {
+        identity: { id, githubAccountId: "12345", githubUsername: "open-person" },
+        credential: { record: { id, principalId: id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE], issuedAt: 0, revokedAt: null }, key: Buffer.alloc(32).toString("base64url") },
+      }, box.env);
+    } else {
+      writeFileSync(configPath, JSON.stringify({ hubAdmissions: { [endpoint]: "device" } }));
+    }
+    const app = await open(box, ["--port", String(await freePort())], env);
+    try {
+      expect(app.stdout()).toContain("hub unreachable; nothing started here");
+      expect((await probePort("127.0.0.1", port)).state).toBe("free");
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
   it("starts a hub, serves the bundle, and opens the browser at the served URL", async () => {
     const { box, env } = configured();
     const hubPort = await freePort();
@@ -952,7 +996,7 @@ describe("ub open", () => {
         rooms: Record<string, { hubAcked: boolean }> };
       expect(await readStatus()).toMatchObject({
         caughtUp: false,
-        notSharedReason: "sign-in-required",
+        notSharedReason: null,
         rooms: { [roomForDoc(WORKSPACE, created.uuid)]: { hubAcked: false } },
       });
       const stored = openStore(instance.store.databasePath);
@@ -1421,7 +1465,7 @@ describe("ub open", () => {
       servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, localBrowserKey(WORKSPACE, box.env)),
     );
 
-    // `ub remote join` completes while this `ub open` keeps running.
+    // `ub workspace join` completes while this `ub open` keeps running.
     rebind(box, {
       hubUrl: SECOND_REMOTE,
       workspace: REBOUND_WORKSPACE,
@@ -1524,11 +1568,12 @@ describe("ub open", () => {
     pointAt(box, FIRST_REMOTE);
     const webPort = await freePort();
     // The pin a repository puts in its project MCP entry. It outranks this
-    // machine's default, and re-resolving must not quietly demote it — nor
+    // project's file, and re-resolving must not quietly demote it — nor
     // promote the file-sourced secret beside it into a pin of its own.
     const app = await open(box, ["--port", String(webPort)], {
       ...env,
-      WORKSPACE_ID: REBOUND_WORKSPACE,
+      UB_WORKSPACE_ID: REBOUND_WORKSPACE,
+      UB_HUB_URL: FIRST_REMOTE,
     });
     const url = `${app.url}uberblick-config.json`;
 
@@ -1536,16 +1581,16 @@ describe("ub open", () => {
       servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env)),
     );
 
-    // The files change underneath, naming a different workspace. The pin still
-    // wins; changes in the endpoint and secret mark this process stale, while
-    // the engine continues with its coherent startup snapshot.
+    // The complete environment pair stays selected even when both file values
+    // change. A legacy signing secret also cannot rebind a remote device login,
+    // so this unrelated file edit does not mark the browser stale.
     rebind(box, {
       hubUrl: SECOND_REMOTE,
       workspace: WORKSPACE,
       signingSecret: REBOUND_SECRET,
     });
     expect(await (await get(url)).text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env), true),
+      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env)),
     );
 
     expect((await app.interrupt()).status).toBe(0);
@@ -2199,51 +2244,26 @@ describe("ub open", () => {
     expect((await app.interrupt()).status).toBe(0);
   });
 
-  it.each([undefined, SECRET])("serves no key when unbound (configured secret: %s)", async (signingSecret) => {
-    const box = sandbox(signingSecret === undefined ? {} : { credentials: { signingSecret } });
-    const hubUrl = signingSecret === undefined ? "ws://localhost:1234" : `ws://127.0.0.1:${await freePort()}`;
-    if (signingSecret !== undefined) pointAt(box, hubUrl);
+  it.each([undefined, SECRET])("refuses to serve without a binding (configured secret: %s)", async (signingSecret) => {
+    const box = sandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: FIRST_REMOTE },
+      ...(signingSecret === undefined ? {} : { credentials: { signingSecret } }),
+    });
     const bundle = fixtureBundle(box);
     const webPort = await freePort();
-
-    const app = await open(box, ["--port", String(webPort)], {
+    const refused = await openFails(box, ["--port", String(webPort)], {
       UBERBLICK_WEB_DIST: bundle,
       BROWSER: "none",
       HUB_DB_PATH: join(box.cwd, "unbound-hub.sqlite"),
     });
 
-    // No `ub init`, so no workspace and no signing secret: the app is served
-    // against the built-in endpoint, the switcher is offered nothing, and the
-    // reason no hub was started is said out loud rather than left to look like
-    // an offline one.
-    expect(await (await get(`${app.url}uberblick-config.json`)).text()).toBe(
-      JSON.stringify({ hubUrl, workspaces: [], hubAuthToken: "" }),
-    );
-    if (signingSecret === undefined) expect(app.stdout()).toContain("no signing secret");
-    expect(app.stdout()).toContain("ub init");
-    expect(app.stdout() + app.stderr()).not.toContain(SECRET);
+    expect(refused.status).not.toBe(0);
+    expect(refused.output).toContain("No workspace selected");
+    expect(refused.output).not.toContain("uberblick is at");
+    expect(refused.output).not.toContain(SECRET);
     expect(existsSync(join(configDir(box), "browser-keys"))).toBe(false);
-
-    const refusedConfig = await getWithHost(
-      `${app.url}uberblick-config.json`,
-      `localhost:${webPort}`,
-    );
-    const refusedApi = await getWithHost(
-      `${app.url}api/status`,
-      `foreign.example:${webPort}`,
-    );
-    for (const response of [refusedConfig, refusedApi]) {
-      expect(response.status).toBe(421);
-      expect(response.headers["cache-control"]).toBe("no-store");
-      expect(response.body).toBe("misdirected request\n");
-    }
-
-    const unboundApi = await get(`${app.url}api/search?q=unchanged`);
-    expect(unboundApi.status).toBe(200);
-    expect(unboundApi.headers.get("cache-control")).toBe("no-cache");
-    expect(await unboundApi.text()).toContain("<title>uberblick</title>");
-
-    expect((await app.interrupt()).status).toBe(0);
+    expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
+    expect(existsSync(join(box.cwd, "unbound-hub.sqlite"))).toBe(false);
   });
 
   it("names a taken port and refuses a second serving replica for the store", async () => {
@@ -2378,4 +2398,18 @@ describe("ub open", () => {
     expect(refused.output).toContain("held by something else");
     expect(refused.output).toContain(`ws://127.0.0.1:${hubPort}`);
   });
+});
+
+it("opens a newly created local workspace in the browser without login or promotion", async () => {
+  const box = sandbox();
+  const created = await runUbAsync(["workspace", "create", "Local browser"], box);
+  expect(created.status, created.output).toBe(0);
+  const running = await open(box, [], {
+    UBERBLICK_WEB_DIST: fixtureBundle(box),
+    HUB_DB_PATH: join(box.cwd, "local-browser.sqlite"), BROWSER: "none",
+  });
+  expect((await get(running.url)).status).toBe(200);
+  expect(running.stdout() + running.stderr()).not.toMatch(/sign.in required|approve in a browser/i);
+  expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).hubUrl).toBeNull();
+  expect((await running.interrupt()).status).toBe(0);
 });

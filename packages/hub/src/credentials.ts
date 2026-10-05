@@ -11,6 +11,8 @@ import type { HubDatabase } from "./persistence.js";
 import type { MembershipRegistry } from "./memberships.js";
 import {
   type ClampFailure,
+  type RequestAction,
+  type RequestProofClaims,
   type TokenClaims,
   type TokenFailure,
   clampToken,
@@ -42,6 +44,12 @@ export interface IssuedCredential {
   keyBytes: Uint8Array;
 }
 
+export interface DeviceRecord {
+  deviceId: string;
+  signedInAt: number;
+  workspaces: string[];
+}
+
 export type CredentialRenewal =
   | { status: "renewed"; credential: { record: CredentialRecord; key: string } }
   | { status: "unchanged" }
@@ -60,6 +68,11 @@ export type CredentialFailure =
 export type CredentialVerification =
   | { record: CredentialRecord; claims: TokenClaims }
   | { failure: CredentialFailure };
+
+export interface CredentialRequestVerification {
+  record: CredentialRecord;
+  claims: RequestProofClaims;
+}
 
 interface CredentialRow {
   id: string;
@@ -109,6 +122,9 @@ export class CredentialRegistry {
   private readonly selectKey: StatementSync;
   private readonly markRevoked: StatementSync;
   private readonly markReplaced: StatementSync;
+  private readonly selectDevices: StatementSync;
+  private readonly selectDeviceCredentials: StatementSync;
+  private readonly markDeviceRevoked: StatementSync;
   private readonly revokeListeners = new Set<(credentialId: string) => void>();
 
   constructor(database: HubDatabase) {
@@ -139,6 +155,27 @@ export class CredentialRegistry {
     this.markReplaced = db.prepare(`
       UPDATE hub_credentials SET replaced_at = $replacedAt
       WHERE id = $id AND revoked_at IS NULL AND replaced_at IS NULL
+    `);
+    // Renewal appends rows; timestamp order can change when the clock moves.
+    // Retained insertion order identifies the device's original sign-in.
+    this.selectDevices = db.prepare(`
+      SELECT current.device_id, current.workspaces,
+        (SELECT history.issued_at FROM hub_credentials AS history
+          WHERE history.principal_id = current.principal_id
+            AND history.device_id = current.device_id
+          ORDER BY history.rowid LIMIT 1) AS signed_in_at
+      FROM hub_credentials AS current
+      WHERE current.principal_id = $principalId
+        AND current.revoked_at IS NULL AND current.replaced_at IS NULL
+      ORDER BY current.device_id
+    `);
+    this.selectDeviceCredentials = db.prepare(`
+      SELECT id FROM hub_credentials
+      WHERE principal_id = $principalId AND device_id = $deviceId ORDER BY id
+    `);
+    this.markDeviceRevoked = db.prepare(`
+      UPDATE hub_credentials SET revoked_at = $revokedAt
+      WHERE principal_id = $principalId AND device_id = $deviceId AND revoked_at IS NULL
     `);
   }
 
@@ -181,6 +218,37 @@ export class CredentialRegistry {
   get(id: string): CredentialRecord | null {
     const row = this.select.get({ id }) as unknown as CredentialRow | undefined;
     return row === undefined ? null : recordFromRow(row);
+  }
+
+  /** Principal-level management; only devices with a current credential exist here. */
+  listDevices(principalId: string): DeviceRecord[] {
+    return this.selectDevices.all({ principalId }).map((row) => ({
+      deviceId: row.device_id as string,
+      signedInAt: row.signed_in_at as number,
+      workspaces: JSON.parse(row.workspaces as string) as string[],
+    }));
+  }
+
+  /**
+   * Verify request-bound possession without granting any room or credential.
+   * A caller must perform its authority check synchronously after awaiting this
+   * result, including a fresh get() and re-clamping the returned proof at the
+   * operation's current time.
+   */
+  async verifyRequest(token: string, request: RequestAction): Promise<CredentialRequestVerification | null> {
+    const lookup = readTokenKeyId(token);
+    if ("failure" in lookup || lookup.kid === null) return null;
+    const row = this.selectKey.get({ id: lookup.kid });
+    if (!(row?.signing_key instanceof Uint8Array)) return null;
+    const proof = await inspectRequestProof(
+      await importCredentialKey(row.signing_key), token, request,
+    );
+    if ("failure" in proof || clampToken(proof, Math.floor(Date.now() / 1000)) !== null) {
+      return null;
+    }
+    const current = this.get(proof.kid);
+    return current !== null && current.revokedAt === null && current.replacedAt === null
+      ? { record: current, claims: proof } : null;
   }
 
   async verify(token: string): Promise<CredentialVerification> {
@@ -292,13 +360,46 @@ export class CredentialRegistry {
     return changed;
   }
 
+  /**
+   * Revoke every row of an owned device in one transaction. A replacement that
+   * committed first is included; an exchange still verifying fails its later
+   * current-row check. No await separates the snapshot from the update.
+   * Historical rows retain sign-in time and support closure retries.
+   * Returns whether the device is owned, including an already-revoked retry.
+   */
+  revokeDevice(principalId: string, deviceId: string): boolean {
+    let ids: string[];
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      ids = this.selectDeviceCredentials.all({ principalId, deviceId })
+        .map((row) => row.id as string);
+      if (ids.length === 0) {
+        this.db.exec("ROLLBACK");
+        return false;
+      }
+      this.markDeviceRevoked.run({ principalId, deviceId, revokedAt: Date.now() });
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    this.closeCredentials(ids);
+    return true;
+  }
+
   private closeCredential(id: string): void {
+    this.closeCredentials([id]);
+  }
+
+  private closeCredentials(ids: readonly string[]): void {
     const failures: unknown[] = [];
-    for (const listener of this.revokeListeners) {
-      try {
-        listener(id);
-      } catch (error) {
-        failures.push(error);
+    for (const id of ids) {
+      for (const listener of this.revokeListeners) {
+        try {
+          listener(id);
+        } catch (error) {
+          failures.push(error);
+        }
       }
     }
     if (failures.length > 0) {

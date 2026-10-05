@@ -2,10 +2,9 @@
 #
 # Bring this host's checkout, and the containers running from it, to origin/main.
 #
-# Runs only when somebody means it: by hand on the host, from
-# `ub remote update <ssh-target>`, or through the internal mode an explicit
-# `ub remote init` re-run uses. Nothing schedules it; there is no timer (owner
-# decision, 2026-08-25).
+# Runs only when somebody means it, by hand on the host. The internal
+# checkout reconfiguration mode remains for existing deployment tooling.
+# Nothing schedules it; there is no timer (owner decision, 2026-08-25).
 #
 # The comparison is against the last *successfully deployed* commit, recorded in
 # refs/uberblick/deployed and moved only after a build exits 0 — never against
@@ -39,7 +38,7 @@ deployed_ref=refs/uberblick/deployed
 # The lock is the checkout directory itself, because one checkout is exactly
 # what two runs must not rewrite and build at once. A path under
 # `$XDG_RUNTIME_DIR` excluded only runs that shared a session, so a sudoed
-# by-hand run and an `ub remote update` each took their own lock and both built
+# by-hand run and an SSH-driven update each took their own lock and both built
 # (#574); a path keyed to the host would tell the mirror-image lie, and two
 # independent checkouts would report "already running" having deployed nothing.
 # The directory outlives the `git reset --hard` below, which rewrites the files
@@ -74,7 +73,7 @@ fi
 
 cd "$checkout"
 
-# An existing `ub remote init` checkout uses this internal mode so its fetch,
+# An existing deployment checkout uses this internal mode so its fetch,
 # replacement `.env`, build and deployed ref share this script's one lock. Read
 # the host settings on stdin into a private staging file before any child runs;
 # no later command inherits payload bytes it could mistake for its own input.
@@ -104,7 +103,7 @@ if [ "$mode" = remote-init-rerun ]; then
   mv "$staged_env" .env || exit 103
   sh bin/remote-compose.sh up --build --detach || exit 104
   git update-ref "$deployed_ref" HEAD || exit 105
-  # Private proof consumed by `ub remote init`; an older updater cannot emit it
+  # Private proof consumed by checkout reconfiguration tooling; an older updater cannot emit it
   # and therefore cannot turn an ignored configuration payload into success.
   printf 'uberblick-init-rerun: applied\n'
   exit 0

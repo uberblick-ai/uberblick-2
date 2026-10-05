@@ -177,9 +177,7 @@ describe("the versioned install payload", () => {
     expect(help.status, help.stderr).toBe(0);
     expect(filesBelow(payload).some((path) => path.endsWith(".map"))).toBe(false);
 
-    const initialized = runPayload(box, ["init", "--yes", "--no-mcp"], {
-      cwd: REPO_ROOT,
-    });
+    const initialized = runPayload(box, ["init", "--yes", "--no-mcp"]);
     expect(initialized.status, initialized.stderr).toBe(0);
     expect(initialized.stdout).toContain("ub open");
     expect(initialized.stdout).not.toMatch(/mise run|pnpm/);
@@ -246,8 +244,9 @@ describe("the versioned install payload", () => {
     const home = dirname(box.cwd);
     for (const file of filesBelow(home)) {
       expect(
-        file.startsWith(box.configHome) || file.startsWith(box.dataHome),
-        `${file} is outside the XDG roots`,
+        file.startsWith(box.configHome) || file.startsWith(box.dataHome) ||
+          file === join(box.cwd, ".uberblick.json"),
+        `${file} is outside the project binding and XDG roots`,
       ).toBe(true);
     }
     expect(treeDigest(payload)).toBe(initialPayload);
@@ -361,7 +360,7 @@ describe("the versioned install payload", () => {
     cpSync(payload, broken, { recursive: true });
     breakWeb(broken);
     const before = treeDigest(broken);
-    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
 
     const opened = runPayload(box, ["open", "--no-browser"], { root: broken });
     expect(opened.status).toBe(1);

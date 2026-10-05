@@ -18,6 +18,7 @@ function fromRow(row: Record<string, unknown>): PrincipalRecord {
 
 export class PrincipalRegistry {
   private readonly upsert: StatementSync;
+  private readonly select: StatementSync;
 
   constructor(database: HubDatabase) {
     const db = database.connection;
@@ -32,6 +33,14 @@ export class PrincipalRegistry {
       ON CONFLICT(github_account_id) DO UPDATE SET github_username = excluded.github_username
       RETURNING id, github_account_id, github_username
     `);
+    this.select = db.prepare(`
+      SELECT id, github_account_id, github_username FROM hub_principals WHERE id = $id
+    `);
+  }
+
+  get(id: string): PrincipalRecord | null {
+    const row = this.select.get({ id });
+    return row === undefined ? null : fromRow(row);
   }
 
   /** Internal only: identity comes from the hub's completed GitHub authorization. */

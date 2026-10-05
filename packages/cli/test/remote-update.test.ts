@@ -25,6 +25,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -115,7 +116,7 @@ function fixture(legacy = false): Fixture {
 
   const checkout = join(root, "checkout");
   git(root, "clone", "--quiet", bare, checkout);
-  // What `ub remote init` leaves behind after its own build succeeded.
+  // What checkout initialization leaves behind after its own build succeeded.
   git(checkout, "update-ref", "refs/uberblick/deployed", "HEAD");
   writeFileSync(join(checkout, ".env"), HOST_ENV, "utf8");
 
@@ -312,7 +313,7 @@ exit 17
 
     expect(ran.status).toBe(17);
     expect(ran.stdout.trimEnd().split("\n")).toEqual([
-      fix.root, "up", "argument with spaces", "--detach",
+      realpathSync(fix.root), "up", "argument with spaces", "--detach",
     ]);
   });
 

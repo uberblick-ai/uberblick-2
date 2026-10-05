@@ -59,6 +59,32 @@ function expireRenewalCooldown(env: NodeJS.ProcessEnv): void {
 }
 
 describe("stored-login sync", () => {
+  it("discovers device admission through a loopback proxy and resumes pending edits after login", async () => {
+    const fixture = await hub();
+    fixture.grant(WORKSPACE);
+    const env = environment();
+    const initial = resolveMcpConfig({ ...env, WORKSPACE_ID: WORKSPACE, HUB_URL: fixture.url, HUB_AUTH_TOKEN: "old-local-secret" });
+    const rig = await client({ ...initial, ...testConfig({ hubUrl: fixture.url, authSecret: "old-local-secret" }), authEnv: env });
+    await waitUntil("loopback device sign-in recovery", () => rig.instance.replicas.sync.state().authRecovery === "sign-in-required");
+    expect(rig.instance.replicas.sync.state().reason).toContain("ub auth login");
+    expect(rig.instance.replicas.sync.state().reason).not.toContain("secret");
+    const written = await rig.ok("create_doc", { title: "Login after local proxy admission", description: "Retains pending local edits." });
+    expect(written.synced).toBe(false);
+    await writeHubLogin(fixture.origin, fixture.issue({ workspaces: [WORKSPACE] }), env);
+    await caughtUp(rig);
+    expect(getMeta(fixture.readRoom(roomForDoc(WORKSPACE, written.uuid))!).title).toBe("Login after local proxy admission");
+  });
+
+  it("reports a stopped loopback deployment as unreachable even without its stored login", async () => {
+    const fixture = await hub();
+    await fixture.pause();
+    const env = environment();
+    const configured = resolveMcpConfig({ ...env, WORKSPACE_ID: WORKSPACE, HUB_URL: fixture.url, HUB_ADMISSION: "device" });
+    const rig = await client({ ...configured, ...testConfig({ hubUrl: fixture.url }), deviceLogin: { env }, connectTimeoutMs: 250 });
+    await waitUntil("stopped deployment reading", () => rig.instance.replicas.sync.state().status === "hub-down");
+    expect(rig.instance.replicas.sync.state().reason).toContain(fixture.url);
+  });
+
   it("selects stored login for remote endpoints and never falls back to a supplied signing secret", async () => {
     const fixture = await hub();
     const env = environment();
@@ -285,13 +311,14 @@ describe("stored-login sync", () => {
     expect(first.authentications.every(auth => auth.claims?.kid === one.credential.record.id)).toBe(true);
   });
 
-  it("reports a missing stored login locally even when the hub cannot be reached", async () => {
+  it("reports an unreachable hub before login recovery and every local tool still works", async () => {
     const fixture = await hub();
     const cfg = config(fixture, environment());
     await fixture.pause();
     const rig = await client(cfg);
-    expect(rig.instance.replicas.sync.state()).toMatchObject({ status: "auth-failed", authRecovery: "sign-in-required", recoveryClass: "manual" });
-    expect(rig.instance.replicas.sync.state().reason).toContain(`ub auth login ${fixture.origin}`);
+    await waitUntil("unreachable hub reading", () => rig.instance.replicas.sync.state().status === "hub-down");
+    expect(rig.instance.replicas.sync.state()).toMatchObject({ status: "hub-down", recoveryClass: "retry" });
+    expect(rig.instance.replicas.sync.state().reason).toContain(fixture.url);
     const written = await rig.ok("create_doc", { title: "No login or hub", description: "Still local." });
     expect(written).toMatchObject({ applied: true, synced: false });
   });
