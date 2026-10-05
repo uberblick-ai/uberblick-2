@@ -4,6 +4,10 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
+    // CI output, as in packages/schema/vitest.config.ts.
+    reporters: process.env.CI ? ["dot"] : ["default"],
+    silent: "passed-only",
+    execArgv: ["--no-experimental-webstorage"],
     // Builds the `ub` the spawning suites run, once for the whole run. See
     // test/global-setup.ts for why a bundler, and why the output lives where
     // it does.

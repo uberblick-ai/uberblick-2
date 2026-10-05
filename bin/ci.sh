@@ -81,6 +81,6 @@ git -C "$root" worktree add --quiet --detach "$worktree" "$sha"
 (cd "$worktree" && mise trust >/dev/null &&
 	env GH_CONFIG_DIR="$worktree.gh" GH_TOKEN= GITHUB_TOKEN= GH_ENTERPRISE_TOKEN= \
 		GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null SSH_AUTH_SOCK= \
-		sh -c 'mise run install && mise run e2e') || fail "browser e2e" e2e
+		sh -c 'mise run install && mise run e2e -- --reporter=dot') || fail "browser e2e" e2e
 gh signoff --commit "$sha" e2e
 printf 'ci: browser e2e passed at %s\n' "$short"

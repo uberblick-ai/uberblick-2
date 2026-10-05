@@ -114,6 +114,10 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["test/setup-dom.ts"],
     include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
+    // CI output, as in packages/schema/vitest.config.ts.
+    reporters: process.env.CI ? ["dot"] : ["default"],
+    silent: "passed-only",
+    execArgv: ["--no-experimental-webstorage"],
     // The reconnect suite runs real hubs on real sockets, and its `afterEach`
     // stops two of them. Vitest's default 5s hook budget is what a shutdown
     // under load overruns, and it overruns it anonymously — the hook has no

@@ -639,6 +639,8 @@ it("ships the templates inside the package", () => {
     execFileSync("npm", ["pack", "--dry-run", "--json"], {
       cwd: PACKAGE_ROOT,
       encoding: "utf8",
+      // npm warns about every pnpm setting it finds in the environment.
+      stdio: ["ignore", "pipe", "ignore"],
     }),
   );
   const paths = packed[0].files.map((file: { path: string }) => file.path);
