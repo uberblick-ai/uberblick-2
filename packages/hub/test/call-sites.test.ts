@@ -107,6 +107,7 @@ describe("token minting sites", () => {
 
   it("enumerates operation-bound request proof minting sites separately", () => {
     expect(mentioning("mintRequestProof(")).toEqual([
+      "packages/cli/src/workspace-promote.ts",
       // Client renewal proof: operation-bound, 60 seconds, stored credential kid.
       "packages/hub/src/device-login.ts",
       // Request and target bound management proofs, issued credential kid, 60 seconds.

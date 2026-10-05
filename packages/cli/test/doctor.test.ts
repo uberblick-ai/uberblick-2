@@ -218,7 +218,7 @@ describe("ub doctor", () => {
     expect(check(checks, "workspace").status).toBe("fail");
     expect(check(checks, "workspace").remedy).toMatch(/ub init/);
     expect(check(checks, "workspace").remedy).toMatch(/ub workspace use/);
-    expect(check(checks, "workspace").remedy).toMatch(/ub remote join/);
+    expect(check(checks, "workspace").remedy).toMatch(/ub workspace join/);
     // The recovery explains the explicit project binding rather than directing
     // the operator to the obsolete machine-wide default.
     expect(check(checks, "workspace").reason).toContain(".uberblick.json");
@@ -404,7 +404,7 @@ describe("ub doctor", () => {
     expect(check(checks, "hub").remedy).toMatch(/same secret/);
     expect(check(checks, "hub").remedy).not.toContain("ub status");
     expect(check(checks, "credential").reason).toContain("credentials file");
-    // And the probe stays loud here. `ub remote join` silences its own
+    // And the probe stays loud here. `ub workspace join` silences its own
     // pre-prompt probe (#447); `probeHub` — this check, and `ub open`, which
     // reduces it to a boolean and so never names a refusal itself — must not
     // be silenced with it. This is the cheapest command on that path.
@@ -480,7 +480,7 @@ describe("ub doctor", () => {
     // …and how each half is set: one is an environment variable, the other is
     // this machine's configuration and a `ub` command away.
     expect(port.remedy).toMatch(/PORT/);
-    expect(port.remedy).toMatch(/ub remote join/);
+    expect(port.remedy).toMatch(/ub workspace join/);
   });
 
   it("tells a foreign process holding the port from our own hub", async () => {
@@ -496,7 +496,7 @@ describe("ub doctor", () => {
     expect(bind.reason).toContain(`127.0.0.1:${port}`);
     expect(bind.reason).toMatch(/not an uberblick hub/);
     expect(bind.remedy).toMatch(/PORT/);
-    expect(bind.remedy).toMatch(/ub remote join/);
+    expect(bind.remedy).toMatch(/ub workspace join/);
   });
 
   it("refuses to call a hub that never serves the room reachable, or the port ours", async () => {

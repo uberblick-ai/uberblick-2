@@ -402,7 +402,7 @@ describe("ub init <hub-url>", () => {
 
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain("ws://127.0.0.1:2");
-    expect(run.stderr).toContain(`ub remote join ${CLOSED}/${WORKSPACE}`);
+    expect(run.stderr).toContain(`ub workspace join ${CLOSED}/${WORKSPACE}`);
     // Refused on what is on disk, before anything is dialled.
     expect(run.stderr).not.toContain("did not answer");
     expect(readFileSync(configPath(box), "utf8")).toBe(before);
@@ -484,7 +484,7 @@ describe("ub init <hub-url>", () => {
     expect(config(box).hubUrl).toBe(CLOSED);
   });
 
-  it("agrees with `ub remote join` about the endpoint that is stored", async () => {
+  it("agrees with `ub workspace join` about the endpoint that is stored", async () => {
     // The two verbs write the same file, so a spelling one accepts and the
     // other rewrites would make `ub init` refuse the hub this machine is
     // already joined to. Same string in, same string stored, and the second
@@ -493,7 +493,7 @@ describe("ub init <hub-url>", () => {
     const box = sandbox();
 
     const joined = await runUbAsync(
-      ["remote", "join", `${url(hub)}/${WORKSPACE}`],
+      ["workspace", "join", `${url(hub)}/${WORKSPACE}`],
       box,
       { HUB_AUTH_TOKEN: SECRET },
     );

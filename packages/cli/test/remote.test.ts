@@ -1,5 +1,5 @@
 /**
- * `ub remote` — what it says about the endpoint, and `join` end to end.
+ * Workspace joining — endpoint configuration and verified joining end to end.
  *
  * Every join test runs a real hub on an ephemeral port with its own SQLite
  * database, and a real mirror in a throwaway XDG home. That is the whole point:
@@ -76,7 +76,7 @@ const OTHER_SECRET = "a-different-secret-the-remote-was-deployed-with";
 const WORKSPACE = "b7c3d914-5a20-4e6f-8d13-9f04a2c68e75";
 
 /**
- * One `remote join` can spend 20 s reading the directory, 50 s moving the
+ * One `workspace join` can spend 20 s reading the directory, 50 s moving the
  * mirror (connect plus three sync waits), and another 35 s verifying it: 105 s
  * in capped, named waits. Ten seconds above that ceiling keeps a child-process
  * timeout from replacing the condition the command itself can name.
@@ -362,53 +362,8 @@ function storedSecret(box: Sandbox): unknown {
   return readConfigFile(box, "credentials.json").signingSecret;
 }
 
-describe("ub remote", () => {
-  it("explains explicit selection when no binding exists", async () => {
-    const run = await runUbAsync(["remote"], sandbox());
-    expect(run.status).toBe(1);
-    expect(run.stderr).toContain("No workspace selected");
-    expect(run.stderr).toContain(".uberblick.json");
-    expect(run.stderr).not.toContain("Set WORKSPACE_ID");
-  });
-
-  it("says so when no remote is configured, and exits 0", async () => {
-    // A workspace but no remote: `ub remote` reads which workspace it is
-    // reporting on, and there is no default workspace to fall back to.
-    const run = await runUbAsync(
-      ["remote"],
-      sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, userConfig: { workspace: WORKSPACE } }),
-    );
-    expect(run.status).toBe(0);
-    expect(run.stdout).toContain("no remote configured");
-  });
-
-  it("names the endpoint and the sharing boundary once one is configured", async () => {
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "wss://hub.example.ts.net" },
-      userConfig: { workspace: WORKSPACE, hubUrl: "wss://hub.example.ts.net" },
-    });
-
-    const run = await runUbAsync(["remote"], box);
-    expect(run.status).toBe(0);
-    expect(run.stdout).toContain("wss://hub.example.ts.net");
-    // The boundary as it now works: the host serves the secret to the app
-    // (#426), rather than the bundle carrying it. Same consequence, and it is
-    // the consequence this line exists to keep on screen.
-    expect(run.stdout).toContain("stored login");
-    expect(run.stdout).toContain("current workspace membership");
-    // And where it came from: the user config is the only place it can be.
-    expect(run.stdout).toContain("project config");
-  });
-
-  it("refuses a command it does not have", async () => {
-    const run = await runUbAsync(
-      ["remote", "invite", "someone@example.com"],
-      sandbox(),
-    );
-    expect(run.status).toBe(2);
-    expect(run.stderr).toContain('unknown command "invite"');
-  });
-
-  // One normalizer for `ub remote join` and `ub init` alike (#436): the host
+describe("workspace join configuration", () => {
+  // One normalizer for `ub workspace join` and `ub init` alike (#436): the host
   // `tailscale status` prints and the address a browser hands back both name
   // the deployment's endpoint, and an endpoint somebody typed in full is what
   // they meant — including a plain hub, which has no path at all.
@@ -502,7 +457,7 @@ describe("ub remote", () => {
   ])("refuses %s", async (endpoint, because) => {
     const box = sandbox();
     const run = await runUbAsync(
-      ["remote", "join", `${endpoint}/${WORKSPACE}`],
+      ["workspace", "join", `${endpoint}/${WORKSPACE}`],
       box,
     );
     expect(run.status).toBe(2);
@@ -526,7 +481,7 @@ describe("ub remote", () => {
   it("rejects obsolete partial environment selection rather than silently ignoring it", async () => {
     const original = { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL };
     const box = sandbox({ projectBinding: original });
-    for (const command of [["remote"], ["status", "--json"]]) {
+    for (const command of [["workspace"], ["status", "--json"]]) {
       const run = await runUbAsync(command, box, { HUB_URL: "ws://127.0.0.1:9999" });
       expect(run.status).toBe(1);
       expect(run.stderr).toContain("Legacy WORKSPACE_ID / HUB_URL");
@@ -592,7 +547,7 @@ describe("ub remote", () => {
   });
 });
 
-describe("ub remote join", () => {
+describe("ub workspace join", () => {
   it("retains both Docker endpoints after logout and selects either with complete environment pins", async () => {
     const box = sandbox({ credentials: { signingSecret: SECRET } });
     const dirs = [join(box.cwd, "first-hub"), join(box.cwd, "second-hub")] as const;
@@ -603,15 +558,17 @@ describe("ub remote join", () => {
       for (const hub of [first, second]) {
         hub.grant(WORKSPACE);
         await writeHubLogin(hub.origin, hub.issue({ workspaces: [WORKSPACE] }), box.env);
-        const joined = await runUbAsync(["remote", "join", `${hub.url}/ws/${WORKSPACE}`], box);
+        const joined = await runUbAsync(["workspace", "join", `${hub.url}/ws/${WORKSPACE}`], box);
         expect(joined.status, joined.output).toBe(0);
         await removeHubLogin(hub.origin, box.env);
       }
       for (const hub of [first, second]) {
-        const shown = await runUbAsync(["remote"], box, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: `${hub.url}/ws` });
+        const shown = await runUbAsync(["status", "--json"], box, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: `${hub.url}/ws` });
         expect(shown.status, shown.output).toBe(0);
         expect(shown.stdout).toContain(`${hub.url}/ws`);
-        expect(shown.stdout).toContain("sign-in required");
+        expect(JSON.parse(shown.stdout).hub.status).toBe("auth-failed");
+        expect(JSON.parse(shown.stdout).credentialPresent).toBe(false);
+        expect(shown.stdout).toContain("ub auth login");
         expect(shown.stdout).not.toContain("configured (credentials file)");
       }
       expect(readConfigFile(box, "config.json")).toEqual({ workspaceId: WORKSPACE, hubUrl: `${second.url}/ws` });
@@ -624,7 +581,7 @@ describe("ub remote join", () => {
     try {
       remote.grant(WORKSPACE);
       const target = `${remote.url}/custom-proxy-path/${WORKSPACE}`;
-      const beforeLogin = await runUbAsync(["remote", "join", target], box);
+      const beforeLogin = await runUbAsync(["workspace", "join", target], box);
       expect(beforeLogin.status).toBe(1);
       expect(beforeLogin.stderr).toContain(`ub auth login ${remote.origin}`);
       expect(beforeLogin.stderr).not.toContain("secret is wrong");
@@ -632,7 +589,7 @@ describe("ub remote join", () => {
       expect(beforeLogin.stderr).not.toContain("make them equal");
       expect(existsSync(join(box.configHome, "uberblick", "config.json"))).toBe(false);
       await writeHubLogin(remote.origin, remote.issue({ workspaces: [WORKSPACE] }), box.env);
-      const joined = await runUbAsync(["remote", "join", target], box);
+      const joined = await runUbAsync(["workspace", "join", target], box);
       expect(joined.status, joined.output).toBe(0);
       expect(readConfigFile(box, "config.json")).toEqual({ hubUrl: `${remote.url}/custom-proxy-path`, workspaceId: WORKSPACE });
       const privateConfig = JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
@@ -641,8 +598,10 @@ describe("ub remote join", () => {
       expect(privateConfig.hubUrl).toBeUndefined();
       if (withSecret) expect(readConfigFile(box, "credentials.json").signingSecret).toBe(SECRET);
       await removeHubLogin(remote.origin, box.env);
-      const loggedOut = await runUbAsync(["remote"], box);
-      expect(loggedOut.stdout).toContain("sign-in required");
+      const loggedOut = await runUbAsync(["status", "--json"], box);
+      expect(JSON.parse(loggedOut.stdout).hub.status).toBe("auth-failed");
+      expect(JSON.parse(loggedOut.stdout).credentialPresent).toBe(false);
+      expect(loggedOut.stdout).toContain("ub auth login");
       expect(loggedOut.stdout).not.toContain("configured (credentials file)");
     } finally { await remote.close(); }
   });
@@ -675,7 +634,7 @@ describe("ub remote join", () => {
       return created.uuid as string;
     });
     const storeBefore = readFileSync(join(box.configHome, "uberblick", "credentials.json"));
-    const joined = await runUbAsync(["remote", "join", joinUrl(hub)], box,
+    const joined = await runUbAsync(["workspace", "join", joinUrl(hub)], box,
       source === "environment" ? { HUB_AUTH_TOKEN: SECRET } : {});
     expect(joined.status, joined.stderr).toBe(0);
     expect(persistedHubUrl(box)).toBe(url(hub));
@@ -698,7 +657,7 @@ describe("ub remote join", () => {
 
     const run = await runUbAsync(
       [
-        "remote",
+        "workspace",
         "join",
         localJoinUrl(remote, box, OTHER_SECRET),
       ],
@@ -760,7 +719,7 @@ describe("ub remote join", () => {
     const remote = await startHub(OTHER_SECRET);
     const moved = await runUbAsync(
       [
-        "remote",
+        "workspace",
         "join",
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
@@ -776,7 +735,7 @@ describe("ub remote join", () => {
     const fresh = sandbox();
     const joined = await runUbAsync(
       [
-        "remote",
+        "workspace",
         "join",
         localJoinUrl(remote, fresh, OTHER_SECRET),
       ],
@@ -826,7 +785,7 @@ describe("ub remote join", () => {
 
     const moved = await runUbAsync(
       [
-        "remote",
+        "workspace",
         "join",
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
@@ -838,7 +797,7 @@ describe("ub remote join", () => {
     const fresh = sandbox();
     const joined = await runUbAsync(
       [
-        "remote",
+        "workspace",
         "join",
         localJoinUrl(remote, fresh, OTHER_SECRET),
       ],
@@ -878,7 +837,7 @@ describe("ub remote join", () => {
 
     const run = await runUbAsync(
       [
-        "remote",
+        "workspace",
         "join",
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
@@ -934,7 +893,7 @@ describe("ub remote join", () => {
 
     const run = await runUbAsync(
       [
-        "remote",
+        "workspace",
         "join",
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
@@ -966,14 +925,14 @@ describe("ub remote join", () => {
 
     const run = await runUbAsync(
       [
-        "remote",
+        "workspace",
         "join",
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
     );
     expect(run.status).toBe(1);
-    expect(run.stderr).toContain(`ub remote join ${url(source)}/${WORKSPACE}`);
+    expect(run.stderr).toContain(`ub workspace join ${url(source)}/${WORKSPACE}`);
     expect(run.stderr).toContain("another replica that still holds the content");
     expect(run.stderr).not.toContain("Rerun to finish");
     expect(run.stdout).not.toContain("moved and verified");
@@ -987,7 +946,7 @@ describe("ub remote join", () => {
 
     const run = await runUbAsync(
       [
-        "remote",
+        "workspace",
         "join",
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
@@ -1022,7 +981,7 @@ describe("ub remote join", () => {
       await seedLocalCorpus(local, 5_000);
 
       const args = [
-        "remote",
+        "workspace",
         "join",
         localJoinUrl(remote, local, OTHER_SECRET),
       ];
@@ -1083,7 +1042,7 @@ describe("ub remote join", () => {
 
     const run = await runUbAsync(
       [
-        "remote",
+        "workspace",
         "join",
         localJoinUrl(remote, box, OTHER_SECRET),
       ],
@@ -1153,12 +1112,12 @@ describe("ub remote join", () => {
     ["ws://127.0.0.1:9999/ws/b7c3d914-5a20-4e6f", "is not a workspace id"],
   ])("refuses %s and writes nothing", async (target, because) => {
     const box = sandbox();
-    const run = await runUbAsync(["remote", "join", target], box);
+    const run = await runUbAsync(["workspace", "join", target], box);
     expect(run.status).toBe(2);
     expect(run.stderr).toContain(because);
     // The expected form, in the refusal itself.
     expect(run.stderr).toContain("wss://hub.example.ts.net/ws/<workspace-id>");
-    expect(run.stderr).toContain("usage: ub remote join <url-with-workspace-id>");
+    expect(run.stderr).toContain("usage: ub workspace join <url-with-workspace-id>");
     expect(existsSync(join(box.configHome, "uberblick", "config.json"))).toBe(false);
     expect(existsSync(join(box.configHome, "uberblick", "credentials.json"))).toBe(
       false,
@@ -1172,7 +1131,7 @@ describe("ub remote join", () => {
     chmodSync(path, 0o644);
 
     const run = await runUbAsync(
-      ["remote", "join", `${DEAD_HUB_URL}/${WORKSPACE}`, "--secret-file", path],
+      ["workspace", "join", `${DEAD_HUB_URL}/${WORKSPACE}`, "--secret-file", path],
       box,
     );
     expect(run.status).toBe(2);
@@ -1187,7 +1146,7 @@ describe("ub remote join", () => {
     });
 
     const run = await runUbAsync(
-      ["remote", "join", `${DEAD_HUB_URL}/${WORKSPACE}`],
+      ["workspace", "join", `${DEAD_HUB_URL}/${WORKSPACE}`],
       box,
     );
     expect(run.status).toBe(1);
@@ -1221,7 +1180,7 @@ describe("ub remote join", () => {
       if (address === null || typeof address === "string") throw new Error("missing proxy port");
       const box = sandbox({ credentials: { signingSecret: SECRET } });
       const target = `ws://127.0.0.1:${address.port}`;
-      const run = await runUbAsync(["remote", "join", `${target}/${WORKSPACE}`], box);
+      const run = await runUbAsync(["workspace", "join", `${target}/${WORKSPACE}`], box);
       expect(run.stderr.match(/retrying once/g)).toHaveLength(1);
       expect(run.output).not.toContain(SECRET);
       expect(run.output).not.toMatch(TOKEN_SHAPE);
@@ -1253,7 +1212,7 @@ describe("ub remote join", () => {
       credentials: { signingSecret: SECRET },
     });
 
-    const run = await runUbAsync(["remote", "join", joinUrl(remote)], box);
+    const run = await runUbAsync(["workspace", "join", joinUrl(remote)], box);
 
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("different sync protocol");
@@ -1279,7 +1238,7 @@ describe("ub remote join", () => {
       credentials: { signingSecret: SECRET },
     });
 
-    const run = await runUbAsync(["remote", "join", joinUrl(remote)], box);
+    const run = await runUbAsync(["workspace", "join", joinUrl(remote)], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("rejected the credential");
     expect(run.stderr).not.toContain("retrying once");
@@ -1299,7 +1258,7 @@ describe("ub remote join", () => {
     const remote = await startHub(OTHER_SECRET);
     const box = sandbox();
 
-    const run = await runUbAsync(["remote", "join", joinUrl(remote)], box);
+    const run = await runUbAsync(["workspace", "join", joinUrl(remote)], box);
 
     expect(run.stderr).not.toContain("running local-only");
     expect(run.status).toBe(1);

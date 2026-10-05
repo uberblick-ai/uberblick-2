@@ -437,3 +437,67 @@ describe("authenticated hub access management", () => {
     await expect(connect(hub, testRoom(), managementProof).denied).resolves.toBe("invalid-token");
   });
 });
+
+describe("workspace promotion authority", () => {
+  it("creates only for a current administrator, and resumes only the same principal and attempt", async () => {
+    const { hub } = await rig();
+    const admin = person(hub, "1201", "promoter", [[WORKSPACE, "admin"]]);
+    const member = person(hub, "1202", "member", [[WORKSPACE, "member"]]);
+    const stranger = person(hub, "1203", "signed-in");
+    const other = person(hub, "1204", "other-admin", [[OTHER_WORKSPACE, "admin"]]);
+    const action = { operation: "promote-workspace", workspaceId: randomUUID(), attemptId: randomUUID() } as const;
+    for (const actor of [member, stranger]) {
+      expect(await manage(hub, actor.issued, action)).toMatchObject({ code: 403, result: { status: "admin-required" } });
+      expect(hub.memberships!.hasMembership(action.workspaceId)).toBe(false);
+    }
+    // The credential does not include the new UUID; current hub authority does.
+    expect(await manage(hub, admin.issued, action)).toMatchObject({ code: 200, result: { status: "created" } });
+    expect(hub.memberships!.listMembers(action.workspaceId, admin.principal.id)).toEqual([
+      { workspaceId: action.workspaceId, principalId: admin.principal.id, role: "admin" },
+    ]);
+    expect(await manage(hub, admin.issued, action)).toMatchObject({ code: 200, result: { status: "resumed" } });
+    for (const [actor, request] of [
+      [other, action], [admin, { ...action, attemptId: randomUUID() }],
+      [admin, { ...action, workspaceId: randomUUID() }],
+    ] as const) {
+      expect(await manage(hub, actor.issued, request)).toMatchObject({ code: 409, result: { status: "workspace-conflict" } });
+    }
+    expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(2);
+    expect(hub.memberships!.workspacesFor(stranger.principal.id)).toEqual([]);
+  });
+
+  it("binds the proof to both targets and refuses revoked devices or withdrawn admin authority", async () => {
+    const { hub } = await rig();
+    const admin = person(hub, "1201", "promoter", [[WORKSPACE, "admin"]]);
+    const second = person(hub, "1202", "other-admin", [[WORKSPACE, "admin"]]);
+    const action = { operation: "promote-workspace", workspaceId: randomUUID(), attemptId: randomUUID() } as const;
+    const signed = await proof(admin.issued, action);
+    for (const changed of [{ ...action, workspaceId: randomUUID() }, { ...action, attemptId: randomUUID() }]) {
+      expect(await post(hub, envelope(signed, changed))).toMatchObject({ code: 401 });
+      expect(hub.memberships!.hasMembership(changed.workspaceId)).toBe(false);
+    }
+    const original = hub.credentials!.verifyRequest.bind(hub.credentials!);
+    vi.spyOn(hub.credentials!, "verifyRequest").mockImplementationOnce(async (...args) => {
+      const result = await original(...args);
+      hub.memberships!.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: second.principal.id,
+        principalId: admin.principal.id, role: "member" });
+      return result;
+    });
+    expect(await post(hub, envelope(signed, action))).toMatchObject({ code: 403, result: { status: "admin-required" } });
+    hub.credentials!.revokeDevice(second.principal.id, second.issued.record.deviceId);
+    expect(await manage(hub, second.issued, action)).toMatchObject({ code: 401 });
+    expect(hub.memberships!.hasMembership(action.workspaceId)).toBe(false);
+  });
+
+  it("serializes competing attempts and rejects a UUID with an existing membership", async () => {
+    const { hub } = await rig();
+    const admin = person(hub, "1201", "promoter", [[WORKSPACE, "admin"]]);
+    const workspaceId = randomUUID();
+    const requests = [randomUUID(), randomUUID()].map(attemptId =>
+      manage(hub, admin.issued, { operation: "promote-workspace", workspaceId, attemptId }));
+    const results = await Promise.all(requests);
+    expect(results.map(result => result.code).sort()).toEqual([200, 409]);
+    expect(await manage(hub, admin.issued, { operation: "promote-workspace", workspaceId: WORKSPACE, attemptId: randomUUID() }))
+      .toMatchObject({ code: 409, result: { status: "workspace-conflict" } });
+  });
+});

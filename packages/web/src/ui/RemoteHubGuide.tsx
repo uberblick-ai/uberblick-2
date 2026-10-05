@@ -126,7 +126,7 @@ export function RemoteHubGuide(): ReactElement {
               <li>
                 {claimable ? "Join the default workspace. Replace <workspace-id> with the workspace UUID reported by the claiming login:" :
                   "If this computer is not already bound to the workspace, join it. Replace <workspace-id> with its UUID from the claiming login’s report or a workspace administrator:"}
-                <code className={commandClass}>{`ub remote join '${origin}/<workspace-id>'`}</code>
+                <code className={commandClass}>{`ub workspace join '${origin}/<workspace-id>'`}</code>
               </li>
               <li>
                 Open the browser served by that computer to read and edit its local copy:

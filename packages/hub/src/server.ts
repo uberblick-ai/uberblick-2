@@ -61,6 +61,7 @@ import type { HubLogger } from "./log.js";
 import { CredentialRegistry } from "./credentials.js";
 import { CredentialAdmission, type CredentialContext } from "./credential-admission.js";
 import { handleCredentialRenewal } from "./credential-renewal.js";
+import { WorkspacePromotions } from "./workspace-promotion.js";
 import { handleAccessManagement } from "./access-management.js";
 import { startAdminSetup } from "./admin-setup.js";
 import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
@@ -656,6 +657,7 @@ export async function createHub(config: HubConfig, options: {
   let memberships: MembershipRegistry | undefined;
   let claims: HubClaimState | undefined;
   let admission: CredentialAdmission | undefined;
+  let promotions: WorkspacePromotions | undefined;
   try {
     // Standalone entry points opt in. ub open's embedded hub never initializes
     // or claims, even when it offers an explicitly configured GitHub sign-in.
@@ -665,6 +667,8 @@ export async function createHub(config: HubConfig, options: {
       memberships = new MembershipRegistry(database);
       if (config.github !== undefined) {
         credentials = new CredentialRegistry(database);
+        promotions = new WorkspacePromotions(database, memberships, workspaceId =>
+          [...server.hocuspocus.documents.keys()].some(name => name.startsWith(`${workspaceId}/`)));
         signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims);
       }
     }
@@ -722,7 +726,7 @@ export async function createHub(config: HubConfig, options: {
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response)) {
         return Promise.reject();
       }
-      if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response)) {
+      if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions)) {
         return Promise.reject();
       }
       if (await handleGithubSignIn(signIn, request, response)) return Promise.reject();

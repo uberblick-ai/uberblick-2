@@ -115,7 +115,7 @@ process.once("message", async () => {
     if (job.command === "write") await writeHubLogin(job.origin, job.login);
     else if (job.command === "remove") await removeHubLogin(job.origin);
     else {
-      // The persistence phase used by ub remote join, under its real lock.
+      // The persistence phase used by ub workspace join, under its real lock.
       const lock = await acquireInitLock();
       try { setRemote("wss://new.example.test/ws", { workspace: "5c1f9a72-4d38-4e02-9b6a-7e3f10c85b94" }); }
       finally { lock.release(); }

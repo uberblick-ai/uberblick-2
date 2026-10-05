@@ -24,7 +24,7 @@ export interface ResolvedBinding {
 }
 
 export const NO_BINDING = "No workspace selected. Add a .uberblick.json binding, run `ub init` for a local workspace, " +
-  "`ub remote join <workspace-url>` to join a hub, or set both UB_WORKSPACE_ID and UB_HUB_URL (local for local-only).";
+  "`ub workspace join <workspace-url>` to join a hub, or set both UB_WORKSPACE_ID and UB_HUB_URL (local for local-only).";
 
 /** Find the nearest entry, including a broken symlink: invalid files must fail. */
 export function findProjectConfig(cwd = process.cwd()): string | null {

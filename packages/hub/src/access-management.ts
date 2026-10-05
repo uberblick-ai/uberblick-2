@@ -7,6 +7,8 @@ import type { PrincipalRegistry } from "./principals.js";
 import { protocolMismatchReason } from "./protocol.js";
 import { clampToken, readRequestAction, type RequestAction } from "./token.js";
 
+import type { WorkspacePromotions } from "./workspace-promotion.js";
+
 type ManagementAction = Exclude<RequestAction, { operation: "renew-credential" }>;
 
 export async function handleAccessManagement(
@@ -17,6 +19,7 @@ export async function handleAccessManagement(
   log: HubLogger,
   request: IncomingMessage,
   response: ServerResponse,
+  promotions?: WorkspacePromotions,
 ): Promise<boolean> {
   if (request.url !== "/auth/manage") return false;
   const reply = (status: number, body: unknown): void => {
@@ -74,11 +77,21 @@ export async function handleAccessManagement(
       reply(401, { status: "sign-in-required" });
       return true;
     }
-    if ("workspaceId" in action && !current.workspaces.includes(action.workspaceId)) {
+    if (action.operation !== "promote-workspace" && "workspaceId" in action && !current.workspaces.includes(action.workspaceId)) {
       reply(403, { status: "forbidden" });
       return true;
     }
     switch (action.operation) {
+      case "promote-workspace": {
+        if (promotions === undefined) {
+          reply(503, { status: "not-configured" });
+          break;
+        }
+        const status = promotions.reserve(action.workspaceId, action.attemptId, current.principalId);
+        reply(status === "admin-required" ? 403 : status === "workspace-conflict" ? 409 : 200,
+          { status, workspaceId: action.workspaceId, attemptId: action.attemptId });
+        break;
+      }
       case "list-devices":
         reply(200, { status: "ok", devices: credentials.listDevices(current.principalId)
           .map(device => ({ ...device, current: device.deviceId === current.deviceId })) });

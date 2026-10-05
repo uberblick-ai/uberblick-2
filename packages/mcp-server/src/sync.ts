@@ -330,7 +330,7 @@ export interface HubSyncOptions {
    *
    * For a client whose caller holds the return value and renders a verdict from
    * it — {@link inspectRemote} with `silent`, and only there. A probe's answer
-   * is an answer, not an incident: `ub remote join` reads a hub before it can
+   * is an answer, not an incident: `ub workspace join` reads a hub before it can
    * even ask for the secret, and that reading logging itself put an ERROR about
    * a rejected token, or a WARN about running local-only, in front of the
    * prompt on a command that then succeeded (#447).
@@ -556,7 +556,7 @@ export class HubSync {
     }
 
     if (!this.enabled) {
-      if (!this.silent) {
+      if (!this.silent && config.authEnv?.UB_HUB_URL !== "local") {
         log.warn(
           "HUB_AUTH_TOKEN is not set: running local-only, no hub sync (every tool still works)",
         );

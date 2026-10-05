@@ -41,7 +41,7 @@ describe("remote device commands", () => {
   it("joins and resumes status with a stored login, retaining the loopback secret", async () => {
     const { hub, endpoint, login, box } = await rig(true);
     const before = readFileSync(file(box, "credentials.json"));
-    const joined = await runUbAsync(["remote", "join", `${endpoint}/${WORKSPACE}`], box);
+    const joined = await runUbAsync(["workspace", "join", `${endpoint}/${WORKSPACE}`], box);
     expect(joined.status, joined.stderr).toBe(0);
     expect(readFileSync(file(box, "credentials.json"))).toEqual(before);
     const status = await runUbAsync(["status", "--json"], box);
@@ -71,7 +71,7 @@ describe("remote device commands", () => {
     if (kind === "missing") box.env.XDG_CONFIG_HOME = sandbox({ credentials: { signingSecret: SECRET } }).configHome;
     const configFile = join(box.cwd, ".uberblick.json");
     const before = readFileSync(configFile);
-    for (const args of [["remote", "join", `${endpoint}/${WORKSPACE}`], ["init", endpoint, "--workspace", WORKSPACE, "--yes"]]) {
+    for (const args of [["workspace", "join", `${endpoint}/${WORKSPACE}`], ["init", endpoint, "--workspace", WORKSPACE, "--yes"]]) {
       const refused = await runUbAsync(args, box);
       expect(refused.status, refused.output).toBe(1);
       expect(refused.output).toContain(kind === "no-access" ? "administrator for access" : "ub auth login");

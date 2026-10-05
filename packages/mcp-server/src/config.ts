@@ -159,7 +159,7 @@ export function usesDeviceLogin(endpoint: string, env: NodeJS.ProcessEnv = proce
 
 /** Direct server entry is internal; public `ub mcp serve` resolves the binding. */
 function missingWorkspace(): string {
-  return "WORKSPACE_ID is not set for the internal MCP server. Use `ub mcp serve` with a .uberblick.json binding or both UB_WORKSPACE_ID and UB_HUB_URL. Run `ub init` for local setup or `ub remote join <hub>/<workspace>` for an existing workspace.";
+  return "WORKSPACE_ID is not set for the internal MCP server. Use `ub mcp serve` with a .uberblick.json binding or both UB_WORKSPACE_ID and UB_HUB_URL. Run `ub init` for local setup or `ub workspace join <hub>/<workspace>` for an existing workspace.";
 }
 
 export function resolveMcpConfig(

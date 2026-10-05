@@ -49,12 +49,6 @@
  * call, so capping them is a CLI concern, and the MCP server's own defaults stay
  * exactly where they are.
  *
- * **What this module does not see.** `remote-init.ts` budgets a hub's first
- * answer at `REACH_BUDGET_MS = 90_000` and gives each of its two HTTP probes
- * 10 s; none of the three passes through here. No suite waits any of them out,
- * so none needs to — but this module is an account of the deadlines that were
- * costing the suite time, not of every deadline the CLI owns.
- *
  * The two `McpConfig` builders are re-exported here rather than wrapped at each
  * of their call sites, so within `packages/cli` `./budget.js` is where
  * `resolveMcpConfig` and `bridgeConfig` come from. That is a convention the

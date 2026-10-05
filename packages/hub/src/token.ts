@@ -124,6 +124,7 @@ export type TokenRequest = Omit<TokenClaims, "iat" | "exp"> & {
 /** An HTTP proof binds the operation and every authority-bearing target. */
 export type RequestAction =
   | { operation: "renew-credential" }
+  | { operation: "promote-workspace"; workspaceId: string; attemptId: string }
   | { operation: "list-devices" }
   | { operation: "revoke-device"; deviceId: string }
   | { operation: "own-role"; workspaceId: string }
@@ -585,17 +586,21 @@ async function signClaims(
   return minted;
 }
 
-const REQUEST_TARGET_FIELDS = ["deviceId", "workspaceId", "principalId", "role"] as const;
+const REQUEST_TARGET_FIELDS = ["deviceId", "workspaceId", "principalId", "role", "attemptId"] as const;
 
 /** Parse target semantics, allowing request/proof metadata but no unrelated targets. */
 export function readRequestAction(payload: Record<string, unknown>): RequestAction | null {
-  const { operation, deviceId, workspaceId, principalId, role } = payload;
+  const { operation, deviceId, workspaceId, principalId, role, attemptId } = payload;
   let action: RequestAction;
   switch (operation) {
     case "renew-credential":
       // Renewal predates management and has no targets; its existing proof
       // contract ignores extra payload fields.
       return { operation };
+    case "promote-workspace":
+      if (!isWorkspace(workspaceId) || typeof attemptId !== "string" || !UUID.test(attemptId)) return null;
+      action = { operation, workspaceId, attemptId };
+      break;
     case "list-devices":
       action = { operation };
       break;

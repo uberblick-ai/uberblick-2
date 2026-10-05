@@ -157,7 +157,7 @@ export function protocolSkew(hubVersion: number, ourVersion: number): string {
 
 /**
  * What every surface says when the hub refuses a token — MCP's `hub.reason`,
- * the web status line, `ub status`, `ub remote` and `ub doctor`.
+ * the web status line, `ub status`, `ub workspace join` and `ub doctor`.
  *
  * Composed locally and shared so the surfaces cannot drift, and never the hub's
  * own words: the thing being rejected is a token we just sent, so an endpoint
