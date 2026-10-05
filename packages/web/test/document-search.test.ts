@@ -1,3 +1,4 @@
+// @vitest-environment node
 /** The browser trusts only a validated local status answer. */
 
 import { describe, expect, it, vi } from "vitest";

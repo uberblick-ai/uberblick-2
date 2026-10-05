@@ -101,16 +101,16 @@ describe("workspace creation and promotion", () => {
     } finally { await fresh.close(); }
   });
 
-  it.each([null, "wss://previous.example.test/ws"])("identifies a replaced binding and provides a working switch-back command (hub: %s)", async hubUrl => {
+  it("identifies a replaced binding and provides a working switch-back command", async () => {
     const box = await localWorkspace("Original");
-    const previous = { ...selected(box), hubUrl };
+    const previous = { ...selected(box), hubUrl: null };
     writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify(previous));
     const result = await runUbAsync(["workspace", "create", "Second"], box);
     expect(result.status, result.output).toBe(0);
     expect(selected(box).workspaceId).not.toBe(previous.workspaceId);
-    expect(result.stdout).toContain(`Previous workspace ${previous.workspaceId} (${hubUrl ?? "local"})`);
-    expect(result.stdout).toContain(`Switch back: ub workspace use ${previous.workspaceId} --hub '${hubUrl ?? "local"}'`);
-    const switched = await runUbAsync(["workspace", "use", previous.workspaceId, "--hub", hubUrl ?? "local"], box);
+    expect(result.stdout).toContain(`Previous workspace ${previous.workspaceId} (local)`);
+    expect(result.stdout).toContain(`Switch back: ub workspace use ${previous.workspaceId} --hub 'local'`);
+    const switched = await runUbAsync(["workspace", "use", previous.workspaceId, "--hub", "local"], box);
     expect(switched.status, switched.output).toBe(0);
     expect(selected(box)).toEqual(previous);
   });
@@ -303,7 +303,7 @@ describe("workspace creation and promotion", () => {
   });
 });
 
-it.each([false, true])("runs GitHub approval only when no working login exists (revoked: %s)", async revoked => {
+it("runs GitHub approval when the stored login no longer works", async () => {
   const box = await localWorkspace();
   let approvals = 0;
   const github: typeof fetch = async input => {
@@ -322,13 +322,11 @@ it.each([false, true])("runs GitHub approval only when no working login exists (
   }, { deviceCredentials: true, initializeDefaultWorkspace: true });
   hubs.push(hub);
   const endpoint = `ws://127.0.0.1:${hub.port}`;
-  if (revoked) {
-    const identity = hub.principals!.identify("1234", "test-first-owner");
-    const issued = hub.credentials!.issue({ principalId: identity.id, deviceId: randomUUID(), workspaces: [] });
-    await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity,
-      credential: { record: issued.record, key: Buffer.from(issued.keyBytes).toString("base64url") } }, box.env);
-    hub.credentials!.revokeDevice(identity.id, issued.record.deviceId);
-  }
+  const identity = hub.principals!.identify("1234", "test-first-owner");
+  const issued = hub.credentials!.issue({ principalId: identity.id, deviceId: randomUUID(), workspaces: [] });
+  await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity,
+    credential: { record: issued.record, key: Buffer.from(issued.keyBytes).toString("base64url") } }, box.env);
+  hub.credentials!.revokeDevice(identity.id, issued.record.deviceId);
   const result = await runUbAsync(["workspace", "promote", endpoint], box);
   expect(result.status, result.output).toBe(0);
   expect(result.output).toContain("Approve in a browser:");

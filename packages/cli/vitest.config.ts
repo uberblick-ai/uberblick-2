@@ -24,5 +24,9 @@ export default defineConfig({
     // is the difference between a diagnosis and a re-run.
     testTimeout: 150_000,
     hookTimeout: 150_000,
+    // Most of a test here is spent waiting on sockets, child processes and
+    // timers, not computing: at the default of one fewer worker than cores the
+    // suite left over half the machine idle. Oversubscribe instead.
+    maxWorkers: "150%",
   },
 });

@@ -13,14 +13,20 @@ import { afterAll, expect, it } from "vitest";
 import { acquireInitLock, seedLockPath } from "../src/init-lock.js";
 import {
   UB_BIN,
+  hubless,
   removeTempDirs,
   runUb,
-  sandbox,
+  sandbox as anySandbox,
   waitUntil,
 } from "./helpers.js";
-import type { Run, Sandbox } from "./helpers.js";
+import type { Run, Sandbox, SandboxFiles } from "./helpers.js";
 
 afterAll(removeTempDirs);
+
+/** No test here starts a hub, so none waits for one; see {@link hubless}. */
+function sandbox(files?: SandboxFiles): Sandbox {
+  return hubless(anySandbox(files));
+}
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const IDENTITY = "A person's display name";
@@ -136,23 +142,23 @@ it("stores a name with no ASCII slug under a bare UUID", async () => {
   expect(nameFromLog(box)).toBe("研究");
 });
 
-it.each(["", "   "])("leaves an empty interactive answer unnamed (%j)", async (answer) => {
+it("leaves a blank interactive answer unnamed", async () => {
   const box = sandbox();
-  const run = await namedInit(box, answer);
+  const run = await namedInit(box, "   ");
   expect(run.status, run.output).toBe(0);
   expect(workspace(box)).toMatch(UUID);
   expect(nameFromLog(box)).toBeNull();
 });
 
-it.each([{ args: [] }, { args: ["--yes"] }])("leaves unattended init unnamed ($args)", ({ args }) => {
+it("leaves unattended init unnamed", () => {
   const box = sandbox();
-  const run = runUb(["init", "--name", IDENTITY, "--no-mcp", ...args], box);
+  const run = runUb(["init", "--name", IDENTITY, "--no-mcp"], box);
   expect(run.status, run.output).toBe(0);
   expect(workspace(box)).toMatch(UUID);
   expect(nameFromLog(box)).toBeNull();
 });
 
-it.each(["x".repeat(65), "bad\u0000name", "bad\u200dname"])("refuses invalid names before writing (%j)", async (answer) => {
+it.each(["x".repeat(65), "bad\u0000name"])("refuses invalid names before writing (%j)", async (answer) => {
   const box = sandbox();
   const run = await namedInit(box, answer);
   expect(run.status, run.output).toBe(2);

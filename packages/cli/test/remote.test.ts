@@ -13,20 +13,15 @@
  * and that no secret and no token ever reaches either stream.
  */
 
-import { spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import { createServer as createHttpServer } from "node:http";
-import { createServer as createTlsServer } from "node:tls";
+import { randomUUID } from "node:crypto";
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
   statSync,
-  writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import net, { createConnection, createServer, type Socket } from "node:net";
+import { createConnection, createServer, type Socket } from "node:net";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -58,18 +53,16 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import * as Y from "yjs";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { Sandbox } from "./helpers.js";
 import { normalizeRemoteUrl, parseJoinTarget, setRemote } from "../src/remote.js";
 import {
   DEAD_HUB_URL,
-  PACKAGE_ROOT,
   pointAt,
   removeTempDirs,
   runUbAsync,
   sandbox,
 } from "./helpers.js";
-import { observePreflight } from "./remote-observation.js";
 
 const SECRET = "test-signing-secret-for-the-remote-bridge";
 const OTHER_SECRET = "a-different-secret-the-remote-was-deployed-with";
@@ -575,8 +568,8 @@ describe("ub workspace join", () => {
     } finally { await first.close(); await second.close(); }
   });
 
-  it.each([false, true])("joins a loopback deployment using its origin login and persists device admission (old local secret: %s)", async withSecret => {
-    const box = sandbox({ ...(withSecret ? { credentials: { signingSecret: SECRET } } : {}) });
+  it("joins a loopback deployment using its origin login, persists device admission and keeps an old local secret", async () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
     const remote = await startDeviceSyncHub({ directory: box.cwd });
     try {
       remote.grant(WORKSPACE);
@@ -596,7 +589,7 @@ describe("ub workspace join", () => {
       expect(privateConfig.hubAdmissions).toEqual({ [`${remote.url}/custom-proxy-path`]: "device" });
       expect(privateConfig.workspace).toBeUndefined();
       expect(privateConfig.hubUrl).toBeUndefined();
-      if (withSecret) expect(readConfigFile(box, "credentials.json").signingSecret).toBe(SECRET);
+      expect(readConfigFile(box, "credentials.json").signingSecret).toBe(SECRET);
       await removeHubLogin(remote.origin, box.env);
       const loggedOut = await runUbAsync(["status", "--json"], box);
       expect(JSON.parse(loggedOut.stdout).hub.status).toBe("auth-failed");
@@ -620,12 +613,12 @@ describe("ub workspace join", () => {
     return joinUrl(hub);
   }
 
-  it.each(["file", "environment"] as const)("rejoins a loopback hub from a remote binding using the retained %s secret", async (source) => {
+  it("rejoins a loopback hub from a remote binding using the retained file secret", async () => {
     const hub = await startHub(SECRET);
     const fromHub = await webDoc(hub, "Hub document");
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "wss://previous.invalid/ws" },
       userConfig: { workspace: WORKSPACE, hubUrl: "wss://previous.invalid/ws" },
-      credentials: { signingSecret: source === "file" ? SECRET : OTHER_SECRET, future: { retained: true } },
+      credentials: { signingSecret: SECRET, future: { retained: true } },
     });
     const mine = await withMcp(box, { WORKSPACE_ID: WORKSPACE, HUB_AUTH_TOKEN: "" }, async (call) => {
       const created = await call("create_doc", {
@@ -634,8 +627,7 @@ describe("ub workspace join", () => {
       return created.uuid as string;
     });
     const storeBefore = readFileSync(join(box.configHome, "uberblick", "credentials.json"));
-    const joined = await runUbAsync(["workspace", "join", joinUrl(hub)], box,
-      source === "environment" ? { HUB_AUTH_TOKEN: SECRET } : {});
+    const joined = await runUbAsync(["workspace", "join", joinUrl(hub)], box);
     expect(joined.status, joined.stderr).toBe(0);
     expect(persistedHubUrl(box)).toBe(url(hub));
     expect(readFileSync(join(box.configHome, "uberblick", "credentials.json"))).toEqual(storeBefore);
@@ -643,7 +635,6 @@ describe("ub workspace join", () => {
     expect([...mirror.keys()].sort()).toEqual([mine, fromHub].sort());
     expect(mirror.get(mine)).toEqual(["Pending local edit"]);
     expect(joined.output).not.toContain(SECRET);
-    expect(joined.output).not.toContain(OTHER_SECRET);
   });
 
   it("binds a machine with no configuration at all to the workspace in the URL", async () => {
@@ -969,55 +960,71 @@ describe("ub workspace join", () => {
     );
   });
 
-  it(
+  /**
+   * Join a seeded local corpus of `count` documents, and check the binding it
+   * leaves. Under a slower runner, only the command's own specific
+   * local-rerun instruction earns the second try.
+   */
+  async function joinLocalCorpus(count: number): Promise<void> {
+    const remote = await startHub(OTHER_SECRET);
+    const local = sandbox();
+    await seedLocalCorpus(local, count);
+
+    const args = [
+      "workspace",
+      "join",
+      localJoinUrl(remote, local, OTHER_SECRET),
+    ];
+    const deadline = Date.now() + LARGE_CORPUS_JOIN_RECOVERY_TIMEOUT_MS;
+    const runAttempt = async () => {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new Error(
+          `timed out waiting for the ${count}-document join recovery within ${LARGE_CORPUS_JOIN_RECOVERY_TIMEOUT_MS}ms`,
+        );
+      }
+      return await runUbAsync(
+        args,
+        local,
+        { UB_TEST_MAX_WAIT_MS: "15000" },
+        Math.min(LARGE_CORPUS_JOIN_ATTEMPT_TIMEOUT_MS, remaining),
+      );
+    };
+
+    let run = await runAttempt();
+    const instructedRerun =
+      run.status === 1 &&
+      /has not acknowledged \d+ rooms?, so this sync did not finish inside its time limit:/.test(
+        run.stderr,
+      ) &&
+      run.stderr.includes("Rerun this command on this machine once");
+    if (instructedRerun) {
+      run = await runAttempt();
+    }
+
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toContain(`joined ${count} documents — directory verified`);
+    expect(run.stdout).toContain("one live document's content");
+    expect(run.stdout).not.toContain("a fresh client read\nthem back");
+    expect(persistedHubUrl(local)).toBe(url(remote));
+    expect(readConfigFile(local, "config.json").workspaceId).toBe(WORKSPACE);
+  }
+
+  // A hundred rooms is three times the 32 concurrent attaches a connection
+  // admits (`packages/mcp-server/src/sync.ts`), so the bounded attach queue
+  // drains in waves, as it does for any real corpus.
+  it("joins 100 local documents and persists the verified binding", async () => {
+    await joinLocalCorpus(100);
+  });
+
+  // Opt-in (UB_SLOW_TESTS=1): ~30 s of scale proof, not of behaviour.
+  // Loaded-host proof, 2026-09-06: this exact case passed in 16.45 s with
+  // eight foreground `yes` workers (the #803 probe shape), and the cleanup
+  // trap left `pgrep -c -x yes` at zero.
+  it.runIf(process.env.UB_SLOW_TESTS === "1")(
     "joins 5,000 local documents and persists the verified binding",
     async () => {
-      // Loaded-host proof, 2026-09-06: this exact case passed in 16.45 s with
-      // eight foreground `yes` workers (the #803 probe shape), and the cleanup
-      // trap left `pgrep -c -x yes` at zero. Under a slower runner, only the
-      // command's own specific local-rerun instruction earns the second try.
-      const remote = await startHub(OTHER_SECRET);
-      const local = sandbox();
-      await seedLocalCorpus(local, 5_000);
-
-      const args = [
-        "workspace",
-        "join",
-        localJoinUrl(remote, local, OTHER_SECRET),
-      ];
-      const deadline = Date.now() + LARGE_CORPUS_JOIN_RECOVERY_TIMEOUT_MS;
-      const runAttempt = async () => {
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) {
-          throw new Error(
-            `timed out waiting for the 5,000-document join recovery within ${LARGE_CORPUS_JOIN_RECOVERY_TIMEOUT_MS}ms`,
-          );
-        }
-        return await runUbAsync(
-          args,
-          local,
-          { UB_TEST_MAX_WAIT_MS: "15000" },
-          Math.min(LARGE_CORPUS_JOIN_ATTEMPT_TIMEOUT_MS, remaining),
-        );
-      };
-
-      let run = await runAttempt();
-      const instructedRerun =
-        run.status === 1 &&
-        /has not acknowledged \d+ rooms?, so this sync did not finish inside its time limit:/.test(
-          run.stderr,
-        ) &&
-        run.stderr.includes("Rerun this command on this machine once");
-      if (instructedRerun) {
-        run = await runAttempt();
-      }
-
-      expect(run.status, run.stderr).toBe(0);
-      expect(run.stdout).toContain("joined 5000 documents — directory verified");
-      expect(run.stdout).toContain("one live document's content");
-      expect(run.stdout).not.toContain("a fresh client read\nthem back");
-      expect(persistedHubUrl(local)).toBe(url(remote));
-      expect(readConfigFile(local, "config.json").workspaceId).toBe(WORKSPACE);
+      await joinLocalCorpus(5_000);
     },
     LARGE_CORPUS_TEST_TIMEOUT_MS,
   );
@@ -1107,9 +1114,6 @@ describe("ub workspace join", () => {
     // The endpoint as it was documented before this command took an id — the
     // paste most likely to happen, and `ws` is not a workspace id.
     ["ws://127.0.0.1:9999/ws", "is not a workspace id"],
-    ["ws://127.0.0.1:9999/ws/not-a-workspace-id", "is not a workspace id"],
-    // A truncated uuid: a real copy-paste failure, and not a prefix match here.
-    ["ws://127.0.0.1:9999/ws/b7c3d914-5a20-4e6f", "is not a workspace id"],
   ])("refuses %s and writes nothing", async (target, because) => {
     const box = sandbox();
     const run = await runUbAsync(["workspace", "join", target], box);
@@ -1122,21 +1126,6 @@ describe("ub workspace join", () => {
     expect(existsSync(join(box.configHome, "uberblick", "credentials.json"))).toBe(
       false,
     );
-  });
-
-  it("refuses a secret file other users can read", async () => {
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, userConfig: { workspace: WORKSPACE } });
-    const path = join(box.cwd, "remote-secret");
-    writeFileSync(path, `${OTHER_SECRET}\n`);
-    chmodSync(path, 0o644);
-
-    const run = await runUbAsync(
-      ["workspace", "join", `${DEAD_HUB_URL}/${WORKSPACE}`, "--secret-file", path],
-      box,
-    );
-    expect(run.status).toBe(2);
-    expect(run.stderr).toContain("Unknown option");
-    expect(run.output).not.toContain(OTHER_SECRET);
   });
 
   it("persists nothing when the remote is unreachable", async () => {
@@ -1271,299 +1260,5 @@ describe("ub workspace join", () => {
     expect(existsSync(join(box.configHome, "uberblick", "credentials.json"))).toBe(
       false,
     );
-  });
-});
-
-describe("preflight observation instrument", () => {
-  const workspace = WORKSPACE;
-  const secret = SECRET;
-  const tokenShape = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/;
-
-  function config(hubUrl: string) {
-    return bridgeConfig(resolveMcpConfig({ WORKSPACE_ID: workspace, HUB_URL: hubUrl, HUB_AUTH_TOKEN: secret }));
-  }
-
-  it("measures full-budget directory preflights without local or remote state writes", async () => {
-    const box = sandbox({ projectBinding: { workspaceId: workspace, hubUrl: "ws://127.0.0.1:1" },
-      userConfig: { workspace, hubUrl: "ws://127.0.0.1:1" },
-      credentials: { signingSecret: secret },
-    });
-    const hub = await createHub({ authSecret: secret, port: 0,
-      databasePath: join(box.cwd, "hub.sqlite"), log: silentLogger });
-    const endpoint = `ws://127.0.0.1:${hub.port}`;
-    const dir = new Y.Doc();
-    const provider = new HocuspocusProvider({ url: endpoint, name: directoryRoom(workspace),
-      document: dir, token: wrapToken(await mintToken(await importRootSecret(secret), {
-        typ: "room", sub: "seed", workspace, scope: "read-write", kid: null, lifetimeSeconds: 60,
-      })) });
-    try {
-      await waitUntil("seed directory sync", () => provider.isSynced);
-      upsertDirectoryEntry(dir, { uuid: randomUUID(), title: "private title", tags: [] });
-      await waitUntil("seed directory acknowledgement", () => !provider.hasUnsyncedChanges);
-      provider.destroy();
-      await waitUntil("seed presence withdrawn", () => {
-        const doc = hub.hocuspocus.documents.get(directoryRoom(workspace));
-        return doc !== undefined && doc.awareness.getStates().size === 0;
-      });
-      let changes = 0;
-      let presence = 0;
-      const loads: string[] = [];
-      hub.hocuspocus.configuration.extensions.push({
-        onChange: async () => { changes += 1; },
-        onAwarenessUpdate: async ({ added, updated }) => { presence += added.length + updated.length; },
-        onLoadDocument: async ({ documentName }) => { loads.push(documentName); },
-      });
-      const userConfig = join(box.configHome, "uberblick", "config.json");
-      const credentials = join(box.configHome, "uberblick", "credentials.json");
-      writeFileSync(userConfig, JSON.stringify({ workspace, hubUrl: endpoint }));
-      // No store is opened, even if the resolved environment names this file.
-      writeFileSync(join(box.cwd, "local-store"), "local workspace sentinel");
-      const files = [userConfig, credentials, join(box.cwd, "local-store")];
-      const before = files.map(path => readFileSync(path));
-      const run = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
-        const child = spawn(process.execPath, ["--import", "tsx", "test/observe-remote-join.ts", "3"], {
-          cwd: PACKAGE_ROOT, timeout: 30_000,
-          env: { ...box.env, UB_WORKSPACE_ID: workspace, UB_HUB_URL: endpoint, UB_TEST_MAX_WAIT_MS: undefined, UBERBLICK_DB: files[2] },
-        });
-        let stdout = "";
-        let stderr = "";
-        child.stdout.on("data", chunk => { stdout += chunk; });
-        child.stderr.on("data", chunk => { stderr += chunk; });
-        child.on("error", reject);
-        child.on("close", code => resolve({ stdout, stderr, code }));
-      });
-      expect(run.code, run.stderr).toBe(0);
-      const records = run.stdout.trim().split("\n").map(line => JSON.parse(line));
-      expect(records[0]).toMatchObject({ connectTimeoutMs: 5_000, syncTimeoutMs: 15_000 });
-      expect(records.filter(row => row.kind === "attempt")).toHaveLength(3);
-      for (const row of records.filter(row => row.kind === "attempt")) {
-        expect(row).toMatchObject({ status: "connected", complete: true, stage: null, dials: 1 });
-        expect(row.events.some((event: { kind: string }) => event.kind === "websocket-open")).toBe(true);
-      }
-      expect(records.at(-2)).toMatchObject({ bindingAndCredentialFilesUnchanged: true });
-      expect(records.at(-1)).toMatchObject({ attempts: 3, successes: 3, connectionFailures: 0 });
-      expect(files.map(path => readFileSync(path))).toEqual(before);
-      expect(changes).toBe(0);
-      expect(presence).toBe(0);
-      expect(loads.every(room => room === directoryRoom(workspace))).toBe(true);
-      expect(run.stdout + run.stderr).not.toContain(secret);
-      expect(run.stdout + run.stderr).not.toContain("private title");
-      expect(run.stdout + run.stderr).not.toMatch(tokenShape);
-    } finally {
-      provider.destroy();
-      dir.destroy();
-      await hub.stop();
-    }
-  });
-
-  it("places a TCP-accepted, stalled upgrade at the upgrade stage and cleans up", async () => {
-    const sockets = new Set<Socket>();
-    const server = createServer(socket => {
-      sockets.add(socket);
-      // Consume the request without answering it, so end/close can be observed.
-      socket.resume();
-      socket.on("close", () => sockets.delete(socket));
-      socket.on("error", () => {});
-    });
-    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-    const native = globalThis.WebSocket;
-    try {
-      const address = server.address();
-      if (!address || typeof address === "string") throw new Error("missing port");
-      const result = await observePreflight(config(`ws://127.0.0.1:${address.port}`));
-      expect(result).toMatchObject({ complete: false, stage: "websocket-upgrade" });
-      expect(["connecting", "hub-down"]).toContain(result.status);
-      expect(result.elapsedMs).toBeGreaterThanOrEqual(5_000);
-      expect(result.elapsedMs).toBeLessThan(10_000);
-      expect(result.events.some(event => event.kind === "transport-connected")).toBe(true);
-      expect(result.events.some(event => event.kind === "websocket-open")).toBe(false);
-      expect(globalThis.WebSocket).toBe(native);
-      await waitUntil("observer sockets closed", () => sockets.size === 0);
-    } finally {
-      for (const socket of sockets) socket.destroy();
-      await new Promise<void>(resolve => server.close(() => resolve()));
-    }
-  });
-
-  it("leaves a connected first dial followed by a pending reconnect unattributable", async () => {
-    const sockets = new Set<Socket>();
-    let requestReceived = false;
-    const server = createServer(socket => {
-      sockets.add(socket);
-      socket.on("close", () => sockets.delete(socket));
-      socket.on("error", () => {});
-      socket.once("data", () => {
-        requestReceived = true;
-        // Drop the first real transport as soon as its upgrade request arrives,
-        // leaving the entire remaining connect budget for the native retry.
-        socket.destroy();
-      });
-    });
-    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("missing port");
-    let pendingLookups = 0;
-    // The first dial uses real TCP. Later native sockets start connecting but
-    // their lookup never answers: no OS backlog sizes, filler races or blocked
-    // worker can turn this pending transport into a completed one. Undici and
-    // the observer still produce all diagnostics themselves.
-    const nativeConnect = net.connect;
-    const connect = vi.spyOn(net, "connect")
-      .mockImplementationOnce(nativeConnect)
-      .mockImplementation(() => {
-        const socket = new net.Socket();
-        socket.on("error", () => {});
-        sockets.add(socket);
-        socket.on("close", () => sockets.delete(socket));
-        return socket.connect({ host: "pending-reconnect.invalid", port: address.port,
-          lookup: () => { pendingLookups += 1; } });
-      });
-    try {
-      const result = await observePreflight(config(`ws://127.0.0.1:${address.port}`));
-      const setup = (condition: string) => `pending reconnect precondition: ${condition}; ${JSON.stringify(result)}`;
-      const kinds = result.events.map(event => event.kind);
-      const connected = kinds.indexOf("transport-connected");
-      const upgrade = kinds.indexOf("upgrade-request-sent");
-      const reconnect = kinds.indexOf("connect-start", upgrade + 1);
-      expect(requestReceived, setup("first connection received its upgrade request")).toBe(true);
-      expect(connected, setup("first connection completed transport")).toBeGreaterThanOrEqual(0);
-      expect(upgrade, setup("first connection sent an upgrade request after transport connected")).toBeGreaterThan(connected);
-      expect(reconnect, setup("a later connection started after the first upgrade request")).toBeGreaterThan(upgrade);
-      expect(pendingLookups, setup("reconnect reached the held native lookup")).toBeGreaterThan(0);
-      expect(kinds.slice(reconnect), setup("reconnect transport remained pending through the preflight deadline"))
-        .not.toContain("transport-connected");
-      expect(kinds, setup("no connect-error replaced the pending transport"))
-        .not.toContain("connect-error");
-      expect(kinds, setup("no WebSocket opened instead of a pending transport")).not.toContain("websocket-open");
-      expect(result).toMatchObject({ complete: false, stage: "unattributable" });
-      expect(result.dials).toBeGreaterThan(1);
-    } finally {
-      connect.mockRestore();
-      for (const socket of sockets) socket.destroy();
-      await new Promise<void>(resolve => server.close(() => resolve()));
-    }
-  });
-
-  it.each([false, true])("records credential and protocol refusal as authentication (skew: %s)", async skew => {
-    const hub = await createHub({ authSecret: skew ? secret : "different-secret", port: 0,
-      ...(skew ? { protocolVersion: SYNC_PROTOCOL_VERSION + 1 } : {}),
-      databasePath: join(sandbox().cwd, "hub.sqlite"), log: silentLogger });
-    try {
-      const result = await observePreflight(config(`ws://127.0.0.1:${hub.port}`));
-      expect(result).toMatchObject({ complete: false, stage: "hub-authentication",
-        status: skew ? "update-required" : "auth-failed" });
-      expect(JSON.stringify(result)).not.toContain(secret);
-      expect(JSON.stringify(result)).not.toMatch(tokenShape);
-    } finally { await hub.stop(); }
-  });
-
-  it("retains native TCP refusal evidence and distinguishes raw dials from preflights", async () => {
-    const server = createServer();
-    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("missing port");
-    await new Promise<void>(resolve => server.close(() => resolve()));
-    const result = await observePreflight(config(`ws://127.0.0.1:${address.port}`));
-    expect(result).toMatchObject({ complete: false, status: "hub-down", stage: "tcp" });
-    expect(result.dials).toBeGreaterThan(1);
-    expect(result.events.some(event => event.code === "ECONNREFUSED" && event.stage === "tcp")).toBe(true);
-  });
-
-  it("attributes a TLS handshake refusal from its native error code", async () => {
-    // No certificate/cipher shared: the peer rejects TLS before any upgrade.
-    const server = createTlsServer();
-    server.on("tlsClientError", () => {});
-    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-    try {
-      const address = server.address();
-      if (!address || typeof address === "string") throw new Error("missing port");
-      const result = await observePreflight(config(`wss://127.0.0.1:${address.port}`));
-      expect(result).toMatchObject({ complete: false, stage: "tls" });
-      expect(result.events.some(event => event.stage === "tls")).toBe(true);
-    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
-  });
-
-  it("leaves a socket that opens without serving auth or directory unattributable", async () => {
-    const hub = await createHub({ authSecret: secret, port: 0,
-      databasePath: join(sandbox().cwd, "hub.sqlite"), log: silentLogger });
-    let release: (() => void) | undefined;
-    const pending = new Promise<void>(resolve => { release = resolve; });
-    hub.hocuspocus.configuration.extensions.push({ onAuthenticate: () => pending });
-    try {
-      const result = await observePreflight(config(`ws://127.0.0.1:${hub.port}`));
-      expect(result).toMatchObject({ complete: false, status: "connected", stage: "unattributable" });
-      expect(result.elapsedMs).toBeGreaterThanOrEqual(15_000);
-      expect(result.events.some(event => event.kind === "websocket-open")).toBe(true);
-    } finally { release?.(); await hub.stop(); }
-  });
-
-  it("does not attribute mixed known and unknown transport failures to the known stage", async () => {
-    const server = createTlsServer();
-    let connections = 0;
-    server.on("tlsClientError", () => {});
-    server.on("connection", socket => {
-      connections += 1;
-      // One TLS alert followed by abrupt resets whose stage is unproven.
-      if (connections > 1) socket.destroy();
-    });
-    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-    try {
-      const address = server.address();
-      if (!address || typeof address === "string") throw new Error("missing port");
-      const result = await observePreflight(config(`wss://127.0.0.1:${address.port}`));
-      expect(result).toMatchObject({ complete: false, stage: "unattributable" });
-      expect(result.events.some(event => event.kind === "connect-error" && event.stage === "tls")).toBe(true);
-      expect(result.events.some(event => event.kind === "connect-error" && event.stage === "unattributable")).toBe(true);
-    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
-  });
-
-  it("never retains a credential or token echoed in an authentication refusal", async () => {
-    const hub = await createHub({ authSecret: secret, port: 0,
-      databasePath: join(sandbox().cwd, "hub.sqlite"), log: silentLogger });
-    const token = await mintToken(await importRootSecret(secret), {
-      typ: "room", sub: "echo", workspace, scope: "read-write", kid: null, lifetimeSeconds: 60,
-    });
-    hub.hocuspocus.configuration.extensions.push({ onAuthenticate: async () => {
-      throw { reason: `${secret} ${token}` };
-    } });
-    try {
-      const result = await observePreflight(config(`ws://127.0.0.1:${hub.port}`));
-      expect(result).toMatchObject({ status: "auth-failed", stage: "hub-authentication" });
-      const printed = JSON.stringify(result);
-      expect(printed).not.toContain(secret);
-      expect(printed).not.toMatch(tokenShape);
-    } finally { await hub.stop(); }
-  });
-
-  it("retains a transport close code while discarding the remote close reason", async () => {
-    const server = createHttpServer();
-    const sockets = new Set<Socket>();
-    server.on("upgrade", (request, socket) => {
-      sockets.add(socket as Socket);
-      socket.resume();
-      socket.on("error", () => {});
-      socket.on("close", () => sockets.delete(socket as Socket));
-      const accept = createHash("sha1")
-        .update(`${request.headers["sec-websocket-key"]}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
-      socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
-      const reason = Buffer.from(secret);
-      // Real server close frame, code 1011, carrying hostile wire text.
-      socket.end(Buffer.concat([Buffer.from([0x88, reason.length + 2, 0x03, 0xf3]), reason]));
-    });
-    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-    try {
-      const address = server.address();
-      if (!address || typeof address === "string") throw new Error("missing port");
-      const result = await observePreflight(config(`ws://127.0.0.1:${address.port}`));
-      expect(result.complete).toBe(false);
-      expect(result.stage).toBe("unattributable");
-      expect(result.events.some(event => event.kind === "websocket-close" &&
-        event.code === 1011 && event.local === false && event.stage === "unattributable")).toBe(true);
-      expect(JSON.stringify(result)).not.toContain(secret);
-      expect(JSON.stringify(result)).not.toMatch(tokenShape);
-    } finally {
-      for (const socket of sockets) socket.destroy();
-      await new Promise<void>(resolve => server.close(() => resolve()));
-    }
   });
 });

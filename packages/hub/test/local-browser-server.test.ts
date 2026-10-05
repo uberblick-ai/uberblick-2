@@ -32,7 +32,6 @@ import {
   WORKSPACE,
   createClient,
   removeTempDatabases,
-  sleep,
   startHub,
   token as hubToken,
   waitUntil,
@@ -327,8 +326,22 @@ describe("the ub open browser server", () => {
     // An upstream close clears remote states from the replica. A served tab is
     // one of those states, but must not be played back into its own room as a
     // removal: the other local tab keeps seeing it without a cursor flicker.
+    // The relay is synchronous, so a removal played back into the room would
+    // reach both tabs ahead of an agent move relayed right after it: the move
+    // arriving is the barrier, where a tab's own heartbeat would re-add it.
     removeAwarenessStates(replica, [firstId, secondId], "upstream-close");
-    await sleep(750);
+    agent.setLocalStateField("cursor", { blockId: "block-1", anchor: 3, head: 3 });
+    applyAwarenessUpdate(
+      replica,
+      encodeAwarenessUpdate(agent, [agent.clientID]),
+      "hub-relay",
+    );
+    await waitUntil("the agent's move to reach both tabs", () =>
+      [first, second].every(
+        (client) =>
+          client.provider.awareness?.getStates().get(agent.clientID)?.cursor?.anchor === 3,
+      ),
+    );
     expect(second.provider.awareness?.getStates().has(firstId)).toBe(true);
     expect(first.provider.awareness?.getStates().has(secondId)).toBe(true);
     first.provider.setAwarenessField("heartbeat", 1);

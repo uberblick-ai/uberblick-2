@@ -428,7 +428,7 @@ describe("credential admission on a composed server", () => {
     }
   });
 
-  it.each(["revocation", "membership removal", "replacement"] as const)("reads authority after verification's final await so %s during verification wins", async (accessEnd) => {
+  it.each(["revocation", "membership removal"] as const)("reads authority after verification's final await so %s during verification wins", async (accessEnd) => {
     const rig = await startServer();
     const held = gate();
     const verified = gate();
@@ -462,7 +462,8 @@ describe("credential admission on a composed server", () => {
     }
   });
 
-  it.each(["revocation", "replacement"] as const)("%s closes every room under one credential while another device on the same socket keeps writing", async (accessEnd) => {
+  it("replacement closes every room under one credential while another device on the same socket keeps writing", async () => {
+    const accessEnd = "replacement";
     const rig = await startServer();
     const laptop = issue(rig.registry, "laptop", [WORKSPACE, OTHER_WORKSPACE]);
     const phone = issue(rig.registry, "phone");
@@ -493,13 +494,17 @@ describe("credential admission on a composed server", () => {
     expect(rig.logs.at(-1)).toMatchObject({ cause: accessEndCause(accessEnd) });
   });
 
-  describe.each(["revocation", "membership removal", "replacement"] as const)("%s fences", (accessEnd) => {
+  // Every access end converges on the same latch (`closeWhere`) and the same
+  // per-frame check, so the frame variants run under revocation; membership
+  // removal arrives through its own subscription and keeps one variant.
+  describe("ended access fences", () => {
     it.each([
-      ["a live update", messageYjsUpdate, false],
-      ["a reconnect diff", messageYjsSyncStep2, false],
-      ["a detached connection's live update", messageYjsUpdate, true],
-      ["a detached connection's reconnect diff", messageYjsSyncStep2, true],
-    ] as const)("fences %s already past the admission check and the burst queued behind it", async (_label, type, detachBeforeAccessEnd) => {
+      ["revocation", "a live update", messageYjsUpdate, false],
+      ["revocation", "a reconnect diff", messageYjsSyncStep2, false],
+      ["revocation", "a detached connection's live update", messageYjsUpdate, true],
+      ["revocation", "a detached connection's reconnect diff", messageYjsSyncStep2, true],
+      ["membership removal", "a live update", messageYjsUpdate, false],
+    ] as const)("%s fences %s already past the admission check and the burst queued behind it", async (accessEnd, _label, type, detachBeforeAccessEnd) => {
       const held = gate();
       const entered = gate();
       const completed = gate();
@@ -582,6 +587,7 @@ describe("credential admission on a composed server", () => {
     });
 
     it.each(["authentication", "document loading"] as const)("refuses queued writes when access ends during %s", async (phase) => {
+      const accessEnd = "revocation";
       const held = gate();
       const entered = gate();
       const room = testRoom();

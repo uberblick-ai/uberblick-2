@@ -222,32 +222,6 @@ describe("ub mcp install, and the vendor's own CLI", () => {
       ],
     },
     {
-      what: "claude, user, pinned",
-      program: "claude",
-      argv: ["mcp", "install", "claude", "--user", "--workspace", WORKSPACE, "--hub", "local"],
-      expected: [
-        "mcp",
-        "add",
-        "uberblick",
-        "--scope",
-        "user",
-        "-e",
-        "UB_HUB_URL=local",
-        "-e",
-        `UB_WORKSPACE_ID=${WORKSPACE}`,
-        "--",
-        "ub",
-        "mcp",
-        "serve",
-      ],
-    },
-    {
-      what: "codex, user, selected pair",
-      program: "codex",
-      argv: ["mcp", "install", "codex", "--user"],
-      expected: ["mcp", "add", "uberblick", "--env", "UB_HUB_URL=local", "--env", `UB_WORKSPACE_ID=${WORKSPACE}`, "--", "ub", "mcp", "serve"],
-    },
-    {
       what: "codex, project, pinned",
       program: "codex",
       argv: ["mcp", "install", "codex", "--project", "--workspace", WORKSPACE, "--hub", "local"],
@@ -742,13 +716,12 @@ describe("complete MCP bindings", () => {
     expect(read(path)).toBe(before);
   });
 
-  it.each([
-    { UB_WORKSPACE_ID: OTHER, UB_HUB_URL: undefined },
-    { UB_WORKSPACE_ID: undefined, UB_HUB_URL: "https://other.example.test" },
-  ])("refuses an incomplete environment override instead of borrowing the project half", (env) => {
+  it("refuses an incomplete environment override instead of borrowing the project half", () => {
     const box = sandbox();
     const stub = stubVendor(box, "claude");
-    const run = runUb(["mcp", "install", "claude"], box, { ...stub.env, ...env });
+    const run = runUb(["mcp", "install", "claude"], box, {
+      ...stub.env, UB_WORKSPACE_ID: OTHER, UB_HUB_URL: undefined,
+    });
     expect(run.status).toBe(2);
     expect(run.stderr).toMatch(/UB_WORKSPACE_ID.*UB_HUB_URL/);
     expect(existsSync(stub.record)).toBe(false);

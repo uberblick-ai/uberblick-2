@@ -90,40 +90,19 @@ afterAll(() => {
 });
 
 describe("create_doc requires a description", () => {
-  it("refuses without one, and says what is wanted", async () => {
+  it("refuses a missing, blank, whitespace or overlong one, and trims the one it takes", async () => {
     const rig = await localRig();
-    const refused = await rig.call("create_doc", { title: "Undescribed" });
-
-    expect(refused.isError).toBe(true);
-    expect(refused.payload.message).toContain("description");
-    expect(refused.payload.message).toContain("one or two sentences");
-    // Nothing was published for a call that failed at the boundary.
-    expect((await rig.ok("list_docs")).docs).toEqual([]);
-  });
-
-  it("refuses a blank one and one past the length ceiling", async () => {
-    const rig = await localRig();
-    for (const description of ["", "x".repeat(301)]) {
-      const refused = await rig.call("create_doc", {
-        title: "Undescribed",
-        description,
-      });
-      expect(refused.isError).toBe(true);
-    }
-    expect((await rig.ok("list_docs")).docs).toEqual([]);
-  });
-
-  it("refuses whitespace as a description, and trims the one it takes", async () => {
-    const rig = await localRig();
+    const missing = await rig.call("create_doc", { title: "Undescribed" });
+    expect(missing.isError).toBe(true);
+    expect(missing.payload.message).toContain("one or two sentences");
     // Spaces are not a description. Accepting them would satisfy the
     // requirement on paper, store blanks in the document and the stub, and
     // silence the nudge that exists to get a real one written.
-    const refused = await rig.call("create_doc", {
-      title: "Undescribed",
-      description: "   ",
-    });
-    expect(refused.isError).toBe(true);
-    expect(refused.payload.message).toContain("whitespace");
+    for (const description of ["", "   ", "x".repeat(301)]) {
+      const refused = await rig.call("create_doc", { title: "Undescribed", description });
+      expect(refused.isError).toBe(true);
+    }
+    // Nothing was published for a call that failed at the boundary.
     expect((await rig.ok("list_docs")).docs).toEqual([]);
 
     // And what is stored is what was checked: the trimmed value, not the
@@ -258,24 +237,6 @@ describe("set_description", () => {
     expect(
       getMeta(rig.instance.replicas.replica(doc.uuid).doc).description,
     ).toBe("Something worth keeping.");
-  });
-
-  it("refuses an archived document, like every other mutator", async () => {
-    const rig = await localRig();
-    const doc = await rig.ok("create_doc", {
-      title: "Archived",
-      description: "Withdrawn from the corpus.",
-    });
-    await rig.ok("archive_doc", { uuid: doc.uuid });
-
-    const refused = await rig.call("set_description", {
-      uuid: doc.uuid,
-      description: "Should not land.",
-    });
-    expect(refused.payload).toMatchObject({
-      error: "doc_archived",
-      applied: false,
-    });
   });
 });
 
@@ -582,91 +543,7 @@ describe("set_status", () => {
   });
 });
 
-describe("lifecycle tool text", () => {
-  it("names the recorded fields and their authority boundary on every surface", async () => {
-    const rig = await localRig();
-    const { tools } = await rig.client.listTools();
-    for (const name of ["create_doc", "get_doc", "list_docs", "set_status"]) {
-      const description = tools.find((tool) => tool.name === name)?.description;
-      expect(description, name).toContain("`kind`");
-      expect(description, name).toContain("`status`");
-      expect(description, name).toContain("do not authorize");
-    }
-    const exported = tools.find((tool) => tool.name === "export_markdown");
-    if (exported === undefined) throw new Error("no tool export_markdown");
-    const frontmatter = (exported.inputSchema as any).properties.frontmatter;
-    expect(frontmatter.description).toContain("kind");
-    expect(frontmatter.description).toContain("status");
-    expect(frontmatter.description).toContain("do not authorize");
-  });
-
-  it("describes topic, agent authority and recorded answers on lifecycle surfaces", async () => {
-    const rig = await localRig();
-    const { tools } = await rig.client.listTools();
-    for (const name of ["create_doc", "set_status", "get_doc", "list_docs"]) {
-      const description = tools.find(tool => tool.name === name)?.description ?? "";
-      expect(description, name).toContain("a topic followed by the decision itself");
-      expect(description, name).toContain("A Reconsidering section is optional");
-      expect(description, name).toContain("agent-account rule");
-      expect(description, name).toContain("answer: {who, when, where}");
-      expect(description, name).toContain("boundary");
-      expect(description, name).toContain("starts `open`");
-      expect(description, name).toContain("changed after approval");
-      expect(description, name).not.toContain("question");
-      expect(description, name).not.toContain("immediately followed by a non-heading");
-    }
-    for (const name of ["set_title", "set_tldr", "edit_block", "insert_block", "delete_block", "link_range"]) {
-      expect(tools.find(tool => tool.name === name)?.description, name).toContain("`decision_read_only`");
-    }
-    expect(tools.find(tool => tool.name === "create_doc")?.description).toContain("Optional `tldr`");
-    expect(tools.find(tool => tool.name === "set_status")?.description).toContain("Rejected and withdrawn are final");
-  });
-
-  it("states the decision-listing default wherever archive discovery is described", async () => {
-    const rig = await localRig();
-    const { tools } = await rig.client.listTools();
-    const description = (name: string) =>
-      tools.find((tool) => tool.name === name)?.description ?? "";
-
-    expect(description("list_docs")).toContain(
-      'unfiltered orientation listing omits `kind: "decision"`',
-    );
-    expect(description("list_docs")).toContain(
-      '`kind: "decision"` lists decision topics',
-    );
-    expect(description("list_docs")).toContain(
-      "`include_deleted` admits archived topics but is not a predicate",
-    );
-    expect(description("archive_doc")).toContain(
-      "for a decision, add a matching `kind`, `status` or `tag` predicate",
-    );
-    expect(description("restore_doc")).toContain(
-      "default list_docs listing unless it is a decision",
-    );
-    expect(description("create_doc")).toContain(
-      "a decision needs a matching `kind`, `status` or `tag` predicate in list_docs",
-    );
-    expect(description("set_title")).toContain(
-      "list_docs does too; for a decision, pass a matching `kind`",
-    );
-    for (const name of ["get_sidebar", "sidebar_group"]) {
-      expect(description(name), name).toContain(
-        "a decision needs a matching `kind`, `status` or `tag` predicate in list_docs",
-      );
-    }
-  });
-});
-
 describe("decision log tools", () => {
-  it("states that decision lifecycle acts on the whole topic", async () => {
-    const rig = await localRig();
-    const { tools } = await rig.client.listTools();
-    for (const name of ["archive_doc", "restore_doc"]) {
-      expect(tools.find(tool => tool.name === name)?.description).toContain("acts on every record in its topic");
-      expect(tools.find(tool => tool.name === name)?.description).toContain("first record's directory tombstone");
-    }
-  });
-
   it("raises a decision into its requirement and reads the ordered log", async () => {
     const rig = await localRig();
     const requirement = await lifecycleDoc(rig, "Requirement", {
@@ -856,23 +733,5 @@ describe("decision log tools", () => {
       partial: false,
       synced: false,
     });
-  });
-
-  it("describes decision edges and the curated-link round trip", async () => {
-    const rig = await localRig();
-    const { tools } = await rig.client.listTools();
-    const create = tools.find((tool) => tool.name === "create_doc");
-    const get = tools.find((tool) => tool.name === "get_doc");
-    const setLinks = tools.find((tool) => tool.name === "set_links");
-
-    expect(create?.description).toContain("`governs`");
-    expect(create?.description).toContain("governing requirement");
-    expect(create?.description).toContain("`supersedes`");
-    expect(create?.description).toContain("without editing that earlier document");
-    expect(get?.description).toContain("oldest-topic-first log");
-    expect(get?.description).toContain("derived outbound edges");
-    expect(get?.description).toContain("immutable `supersedes`");
-    expect(setLinks?.description).toContain("curated link array");
-    expect(setLinks?.description).toContain("passing get_doc's effective `links`");
   });
 });

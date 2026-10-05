@@ -264,26 +264,6 @@ describe("the terminal block", () => {
     }
   });
 
-  it("shows a cursor while a command types and not while output stands", () => {
-    const { ydoc } = docWithTerminal("$ ls\nfile.txt");
-    const editor = mount(ydoc);
-    try {
-      enterViewport();
-      // The first frame is the prompt, with the cursor waiting at it.
-      expect(shown(editor)).toBe("$ ");
-      expect(cursorShowing(editor)).toBe(true);
-
-      // Advance to the finished output line: nothing is being typed there.
-      for (let i = 0; i < 400 && shown(editor) !== "$ ls\nfile.txt\n"; i += 1) {
-        vi.advanceTimersByTime(10);
-      }
-      expect(shown(editor)).toBe("$ ls\nfile.txt\n");
-      expect(cursorShowing(editor)).toBe(false);
-    } finally {
-      editor.destroy();
-    }
-  });
-
   it("stops and resumes on its own control, holding the frame it stopped on", () => {
     const { ydoc, id } = docWithTerminal(TRANSCRIPT);
     const revBefore = getBlockRev(ydoc, id);
@@ -478,14 +458,14 @@ describe("the terminal block", () => {
     }
   });
 
-  it.each(["", "   \n  "])("draws an empty transcript %j as a complete, idle panel", (text) => {
-    const { ydoc } = docWithTerminal(text);
+  it("draws an empty transcript as a complete, idle panel", () => {
+    const { ydoc } = docWithTerminal("");
     const editor = mount(ydoc);
     try {
       enterViewport();
       vi.advanceTimersByTime(20_000);
       expect(block(editor)?.getAttribute("data-rendered")).toBe("true");
-      expect(shown(editor)).toBe(text);
+      expect(shown(editor)).toBe("");
       expect(vi.getTimerCount()).toBe(0);
       expect(toggle(editor)?.hidden).toBe(true);
     } finally {

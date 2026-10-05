@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The document rev is bounded work.
  *

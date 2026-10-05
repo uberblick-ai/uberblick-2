@@ -191,6 +191,20 @@ export function sandbox(files: SandboxFiles = {}): Sandbox {
   return { cwd, configHome, dataHome, env };
 }
 
+/**
+ * The ceiling for a suite that starts no hub at all, applied to `box`.
+ *
+ * With nothing listening, every bounded wait for a hub is a wait for an answer
+ * that cannot come — and `ub init`'s starter seed makes several of them
+ * against `ws://localhost:1234`, each one the full ceiling above. A ceiling
+ * near zero reaches the same honest "no hub" answer at once. Only for suites
+ * where no test starts a hub: a real one on loopback needs the 400 ms.
+ */
+export function hubless<T extends Sandbox>(box: T): T {
+  box.env.UB_TEST_MAX_WAIT_MS = "25";
+  return box;
+}
+
 /** Update the endpoint of an explicitly selected project workspace. */
 export function pointAt(box: Sandbox, hubUrl: string): void {
   const path = join(box.cwd, ".uberblick.json");

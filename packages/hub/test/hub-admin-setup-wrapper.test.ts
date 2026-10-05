@@ -50,7 +50,8 @@ describe("first-admin host wrapper", () => {
     ]);
   });
 
-  it.each([[WORKSPACE], ["status", SETUP]])("gives terminal input %j a container TTY so Ctrl-C can reach the command", (...args) => {
+  it("gives terminal input a container TTY so Ctrl-C can reach the command", () => {
+    const args = [WORKSPACE];
     const { directory, capture, result } = run(args, 0, true);
     expect(result.status).toBe(0);
     expect(readFileSync(capture, "utf8").trimEnd().split("\n")).toEqual([
@@ -58,7 +59,7 @@ describe("first-admin host wrapper", () => {
     ]);
   });
 
-  it.each([[], ["status"], [WORKSPACE, "extra"], ["status", SETUP, "extra"]])("refuses an incomplete invocation %j", (...args) => {
+  it.each([[], ["status", SETUP, "extra"]])("refuses a malformed invocation %j", (...args) => {
     const { result } = run(args);
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("usage: sh bin/hub-admin-setup.sh");

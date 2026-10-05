@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * `updatedAt` on the directory stub, written by a web client (#257).
  *

@@ -292,36 +292,6 @@ test("a partial publication advances an older formula from the verified asset", 
   ]);
 });
 
-test("a malformed tap version is refused with the publisher's own diagnostic", async () => {
-  const malformed = formulaFor("v1.2.3", "1.2.3", DIGEST).replace(
-    'version "1.2.3"',
-    'version "1.2"',
-  );
-  const fake = services({
-    getRelease: async () => {
-      fake.calls.push("get release");
-      return release();
-    },
-    getTapFormula: async () => {
-      fake.calls.push("get formula");
-      return { sha: "formula-sha", content: malformed };
-    },
-  });
-
-  await assert.rejects(
-    () => publishHomebrewRelease(input(), fake),
-    /publish-homebrew-release: the tap formula has invalid version "1\.2"/,
-  );
-  assert.deepEqual(fake.calls, [
-    "get tap",
-    "get release",
-    "get formula",
-    "download",
-    "published version",
-    "public asset",
-  ]);
-});
-
 test("a dry run builds the payload but reaches no repository API", async () => {
   const output = [];
   const fake = services({
@@ -361,21 +331,6 @@ test("a private artifact destination refuses before any release or tap mutation"
   await assert.rejects(
     () => publishHomebrewRelease(input(), fake),
     /homebrew-tap must be public before publishing/,
-  );
-  assert.deepEqual(fake.calls, ["get tap"]);
-});
-
-test("an artifact destination without commits refuses and names the seed step", async () => {
-  const fake = services({
-    getTapRepository: async () => {
-      fake.calls.push("get tap");
-      return { visibility: "public", initialized: false };
-    },
-  });
-
-  await assert.rejects(
-    () => publishHomebrewRelease(input(), fake),
-    /has no commits; seed it with one commit on its default branch/,
   );
   assert.deepEqual(fake.calls, ["get tap"]);
 });

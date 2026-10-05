@@ -148,13 +148,18 @@ export async function startAdminSetup(options: {
     // Neither an idle host client nor an abandoned code can stay alive forever.
     socket.setTimeout(16 * 60_000, () => finish({ status: "abandoned", setupId }));
 
+    const schedule = (intervalSeconds: number): void => {
+      const wait = github?.setupPollMs ?? intervalSeconds * 1000;
+      timer = setTimeout(() => { void poll().catch(() => finish({ status: "failed", setupId })); },
+        Math.max(1, Math.min(wait, expiresAt - Date.now())));
+    };
+
     const poll = async (): Promise<void> => {
       if (ended || approval === undefined || flow === undefined) return;
       const result = await flow.collect(approval.requestId, approval.collectionSecret);
       if (ended) return;
       if (result.status === "pending") {
-        timer = setTimeout(() => { void poll().catch(() => finish({ status: "failed", setupId })); },
-          Math.max(1, Math.min(result.interval * 1000, expiresAt - Date.now())));
+        schedule(result.interval);
       } else if (result.status === "complete") {
         finish("grant" in result ? result.grant : { status: "workspace-has-membership", setupId });
       } else finish({ status: result.status, setupId });
@@ -204,8 +209,7 @@ export async function startAdminSetup(options: {
       // reach even the host command; it receives only the public approval code.
       send({ status: "pending", setupId, workspaceId, verificationUri: result.verificationUri,
         userCode: result.userCode, expiresIn: result.expiresIn });
-      timer = setTimeout(() => { void poll().catch(() => finish({ status: "failed", setupId })); },
-        Math.max(1, Math.min(result.interval * 1000, expiresAt - Date.now())));
+      schedule(result.interval);
     };
 
     socket.setEncoding("utf8");

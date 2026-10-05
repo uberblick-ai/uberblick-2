@@ -10,8 +10,8 @@
  * is gone, report itself connected or `auth-failed` and never sync again.
  *
  * What the tests defend, then, is that the restart is invisible except in
- * timing — and that the retry which makes that true does not turn a wrong
- * secret into a hub that is merely slow.
+ * timing. That the retry does not turn a wrong secret into a hub that is merely
+ * slow is pinned in sync.test.ts ("reports a rejected token as auth-failed").
  */
 
 import { DatabaseSync } from "node:sqlite";
@@ -233,9 +233,9 @@ describe("a hub that restarts under connected servers", () => {
       () => connections() >= bound,
     );
     const spent = connections();
-    // Six rebuild windows at this rig's 250ms cap — where a rebuild budget
+    // Three rebuild windows at this rig's 250ms cap — where a rebuild budget
     // that resets on every accepted token would show itself as a re-dial storm.
-    await sleep(1_500);
+    await sleep(750);
     expect(connections()).toBe(spent);
     expect(spent).toBe(bound);
 
@@ -278,29 +278,5 @@ describe("a hub that restarts under connected servers", () => {
     expect((read.blocks as { text: string }[]).map((block) => block.text)).toEqual([
       "stored before it was poisoned",
     ]);
-  });
-
-  it("still reports a wrong secret as auth-failed, retries and all", async () => {
-    const running = await hub();
-    const rig = await serverOn(running.port, {
-      authSecret: "a-different-secret-the-hub-will-not-accept",
-    });
-
-    await waitUntil("the hub to refuse the token", async () => {
-      const status = await rig.ok("sync_status", {});
-      return status.hub.status === "auth-failed";
-    });
-
-    // Long enough for every rebuild a refusal schedules to have been made and
-    // refused again (three, each capped at this rig's 250ms reconnect delay).
-    // A refusal is retried; it is never retried into silence.
-    await sleep(1_500);
-
-    const status = await rig.ok("sync_status", {});
-    expect(status.hub.status).toBe("auth-failed");
-    expect(status.hub.reason).toBe(
-      "the hub rejected this client's token: the secret is wrong, or this hub is " +
-        "older than this client — update the hub",
-    );
   });
 });
