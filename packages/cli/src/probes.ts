@@ -9,7 +9,7 @@
  * **The hub probe is a real client, not a socket test.** It mints a token from
  * the stored device login for a remote endpoint or local signing secret,
  * sends it in Hocuspocus' auth message and reads
- * the workspace's directory room — the same path the MCP server and `ub remote`
+ * the workspace's directory room — the same path the MCP server and `ub workspace join`
  * take. So a probe that says `connected` means a client would connect, not
  * merely that something accepted a TCP connection; and `auth-failed` stays
  * distinct from `hub-down`, because authentication and reachability need

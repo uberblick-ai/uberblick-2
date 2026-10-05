@@ -26,21 +26,29 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, parse } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { findCheckoutRoot } from "../src/checkout.js";
+import { resolveConfig } from "../src/config.js";
 import {
   REPO_ROOT,
+  hubless,
   removeTempDirs,
   runUb,
   runUbAsync,
-  sandbox,
+  sandbox as anySandbox,
   type Sandbox,
+  type SandboxFiles,
   sleep,
   waitUntil,
 } from "./helpers.js";
 
 afterAll(removeTempDirs);
+
+/** No test here starts a hub, so none waits for one; see {@link hubless}. */
+function sandbox(files?: SandboxFiles): Sandbox {
+  return hubless(anySandbox(files));
+}
 
 const CREDENTIALS = ["uberblick", "credentials.json"] as const;
 
@@ -55,6 +63,10 @@ function storedSecret(box: Sandbox): string {
   const secret = (parsed as { signingSecret?: unknown }).signingSecret;
   expect(typeof secret).toBe("string");
   return secret as string;
+}
+
+function projectBinding(box: Sandbox): Record<string, unknown> {
+  return JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8"));
 }
 
 function userConfig(box: Sandbox): Record<string, unknown> {
@@ -93,10 +105,115 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const JOINED = "7c2b91d4-3e05-4a68-9f31-b0d5e6a71c82";
 
 describe("ub init", () => {
-  it("generates an owner-only secret and prints none of it", () => {
+  it("does not persist a differing environment binding or create a workspace beneath an environment-only binding", () => {
+    for (const present of [false, true]) {
+      const fileBinding = { workspaceId: JOINED, hubUrl: null };
+      const box = sandbox(present ? { projectBinding: fileBinding } : {});
+      const run = runUb(["init", "--yes"], box, {
+        UB_WORKSPACE_ID: "b7c3d914-5a20-4e6f-8d13-9f04a2c68e75", UB_HUB_URL: "local",
+      });
+      expect(run.status, run.output).toBe(1);
+      expect(run.stderr).toContain("Environment overrides are not saved implicitly");
+      if (present) expect(projectBinding(box)).toEqual(fileBinding);
+      else expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
+      expect(existsSync(credentialsPath(box))).toBe(false);
+      expect(existsSync(join(box.dataHome, "uberblick", `${JOINED}.sqlite`))).toBe(false);
+    }
+  });
+
+  it("accepts an environment pair that already matches the project without changing its destination", () => {
+    const original = { workspaceId: JOINED, hubUrl: null };
+    const box = sandbox({ projectBinding: original });
+    const run = runUb(["init", "--yes", "--workspace", JOINED], box, {
+      UB_WORKSPACE_ID: JOINED, UB_HUB_URL: "local",
+    });
+    expect(run.status, run.output).toBe(0);
+    expect(projectBinding(box)).toEqual(original);
+  });
+
+  it("refuses legacy implicit migration without creating a corpus or echoing an unsafe URL", () => {
+    for (const hubUrl of ["wss://legacy.example.test/ws", "https://user:PRIVATE_LEGACY_SECRET@legacy.example.test/?token=PRIVATE_TOKEN"]) {
+      const legacy = { workspace: JOINED, hubUrl, displayName: "Synthetic operator" };
+      const box = sandbox({ userConfig: legacy });
+      const run = runUb(["init", "--yes"], box);
+      expect(run.status, run.output).toBe(1);
+      expect(run.stderr).toContain("legacy machine workspace or hub");
+      expect(run.stderr).toContain("ub workspace use <workspace-id> --hub <hub-url|local>");
+      expect(run.output).not.toContain(hubUrl);
+      expect(run.output).not.toContain("PRIVATE_");
+      expect(userConfig(box)).toEqual(legacy);
+      expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
+      expect(existsSync(credentialsPath(box))).toBe(false);
+      expect(existsSync(join(box.dataHome, "uberblick"))).toBe(false);
+    }
+  });
+
+  it("reports invalid --workspace as a usage error before binding comparison", () => {
+    const original = { workspaceId: JOINED, hubUrl: null };
+    const box = sandbox({ projectBinding: original });
+    const run = runUb(["init", "--yes", "--workspace", "not-an-id"], box);
+    expect(run.status, run.output).toBe(2);
+    expect(run.stderr).toContain("ub init:");
+    expect(run.stderr).toContain("--workspace");
+    expect(projectBinding(box)).toEqual(original);
+    expect(existsSync(credentialsPath(box))).toBe(false);
+  });
+
+  it("creates a fresh workspace in another project after completing the documented legacy migration", () => {
+    const oldHub = "ws://localhost:8080/proxy";
+    const box = sandbox({ userConfig: { workspace: JOINED, hubUrl: oldHub, hubAdmission: "device", displayName: "Synthetic operator" } });
+    const first = { ...box, cwd: join(box.cwd, "first") };
+    const second = { ...box, cwd: join(box.cwd, "second") };
+    mkdirSync(first.cwd);
+    mkdirSync(second.cwd);
+    const migrated = runUb(["workspace", "use", JOINED, "--hub", "local"], first);
+    expect(migrated.status, migrated.output).toBe(0);
+    const before = projectBinding(first);
+    const refused = runUb(["init", "--yes"], second);
+    expect(refused.status, refused.output).toBe(1);
+    expect(refused.stderr).toContain("remove only the obsolete workspace and hubUrl keys");
+    const path = join(box.configHome, "uberblick", "config.json");
+    expect(refused.stderr).toContain(path);
+    expect(existsSync(join(second.cwd, ".uberblick.json"))).toBe(false);
+    // Follow the documented opt-in cleanup, preserving identity and project A.
+    const legacy = userConfig(box);
+    delete legacy.workspace;
+    delete legacy.hubUrl;
+    writeFileSync(path, JSON.stringify(legacy));
+    const created = runUb(["init", "--yes"], second);
+    expect(created.status, created.output).toBe(0);
+    const fresh = projectBinding(second);
+    expect(fresh.workspaceId).toMatch(UUID);
+    expect(fresh.workspaceId).not.toBe(JOINED);
+    expect(fresh.hubUrl).toBeNull();
+    expect(projectBinding(first)).toEqual(before);
+    expect(userConfig(box).displayName).toBe("Synthetic operator");
+    expect(userConfig(box).hubAdmissions).toEqual({ [oldHub]: "device" });
+    expect(userConfig(box).hubAdmission).toBeUndefined();
+    const selected = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: JOINED, UB_HUB_URL: oldHub }, cwd: first.cwd });
+    expect(selected.env.HUB_ADMISSION).toBe("device");
+    expect(selected.env.HUB_AUTH_TOKEN).toBeUndefined();
+    expect(existsSync(join(box.dataHome, "uberblick", `${fresh.workspaceId}.sqlite`))).toBe(true);
+  });
+
+  it("generates an owner-only secret once, prints none of it, and keeps its workspace", () => {
+    // Under the widest umask a system will accept: `mode:` on a write is
+    // subject to the umask, so the file has to be chmodded afterwards.
     const box = sandbox({ checkout: true });
-    const run = runUb(["init", "--yes"], box);
-    expect(run.status).toBe(0);
+    const previous = process.umask(0o000);
+    let run: ReturnType<typeof runUb>;
+    let again: ReturnType<typeof runUb>;
+    try {
+      run = runUb(["init", "--yes"], box);
+      expect(run.status).toBe(0);
+      expect(statSync(credentialsPath(box)).mode & 0o777).toBe(0o600);
+
+      // A second run is not a second workspace or a second secret: what is in
+      // force is what a re-run confirms.
+      again = runUb(["init", "--yes"], box);
+    } finally {
+      process.umask(previous);
+    }
 
     // At least 32 random bytes, over the alphabet `bin/remote-compose.sh` accepts
     // (`A-Za-z0-9._-`) so the same secret survives a shell and Docker Compose.
@@ -104,12 +221,12 @@ describe("ub init", () => {
     expect(secret).toMatch(/^[A-Za-z0-9._-]+$/);
     expect(Buffer.from(secret, "base64url").length).toBeGreaterThanOrEqual(32);
 
-    expect(statSync(credentialsPath(box)).mode & 0o777).toBe(0o600);
     // One workspace, generated here because nothing else in the system will
-    // invent one.
-    expect(userConfig(box).workspace).toMatch(UUID);
-    // It is in the report too, so the id is not something to go looking for.
-    expect(run.stdout).toContain(userConfig(box).workspace as string);
+    // invent one. It is in the report too, so the id is not something to go
+    // looking for.
+    const workspace = projectBinding(box).workspaceId as string;
+    expect(workspace).toMatch(UUID);
+    expect(run.stdout).toContain(workspace);
 
     // Identity is recorded, and the colour is one y-prosemirror will accept.
     expect(typeof userConfig(box).displayName).toBe("string");
@@ -118,30 +235,19 @@ describe("ub init", () => {
     // The one thing this command must never do.
     expect(run.output).not.toContain(secret);
     expect(run.stdout).toMatch(/credential\s+generated for local development/);
-  });
+    // Inside the sandbox's own checkout, the contributor task is the next step.
+    const cwd = realpathSync(box.cwd);
+    expect(
+      findCheckoutRoot(cwd),
+      "the fixture must detect its own checkout, not an enclosing checkout",
+    ).toBe(cwd);
+    expect(run.stdout).toContain("mise run dev");
 
-  it("keeps the workspace it generated, rather than minting a second one", () => {
-    // A workspace id is an identity, and a second run is not a second
-    // workspace: the one in force is what a re-run confirms.
-    const box = sandbox({ checkout: true });
-    expect(runUb(["init", "--yes"], box).status).toBe(0);
-    const first = userConfig(box).workspace as string;
-    expect(first).toMatch(UUID);
-
-    expect(runUb(["init", "--yes"], box).status).toBe(0);
-    expect(userConfig(box).workspace).toBe(first);
-  });
-
-  it("is a no-op for the secret on a second run", () => {
-    const box = sandbox({ checkout: true });
-    expect(runUb(["init", "--yes"], box).status).toBe(0);
-    const first = storedSecret(box);
-
-    const again = runUb(["init", "--yes"], box);
     expect(again.status).toBe(0);
-    expect(storedSecret(box)).toBe(first);
+    expect(projectBinding(box).workspaceId).toBe(workspace);
+    expect(storedSecret(box)).toBe(secret);
     expect(again.stdout).toMatch(/credential\s+already on this machine/);
-    expect(again.output).not.toContain(first);
+    expect(again.output).not.toContain(secret);
   });
 
   it("generates nothing when the environment already supplies a secret", () => {
@@ -157,20 +263,26 @@ describe("ub init", () => {
     expect(run.output).not.toContain(supplied);
   });
 
-  it("repairs the mode of an exposed credentials file, keeping its value", () => {
+  it("repairs the modes of exposed credentials and config files, keeping their values", () => {
     // Every other command refuses a secret other users can read. Regenerating
     // would cut this machine off from clients holding the old one, so the fix is
     // the mode.
     const secret = "exposed-but-shared-signing-secret-77b1";
     const box = sandbox({
       checkout: true,
+      projectBinding: { workspaceId: JOINED, hubUrl: null },
+      userConfig: { workspace: JOINED },
       credentials: { signingSecret: secret },
       credentialsMode: 0o644,
     });
+    chmodSync(join(box.configHome, "uberblick", "config.json"), 0o644);
 
     const run = runUb(["init", "--yes"], box);
     expect(run.status).toBe(0);
     expect(statSync(credentialsPath(box)).mode & 0o777).toBe(0o600);
+    expect(
+      statSync(join(box.configHome, "uberblick", "config.json")).mode & 0o077,
+    ).toBe(0);
     expect(storedSecret(box)).toBe(secret);
     expect(run.output).not.toContain(secret);
   });
@@ -180,9 +292,16 @@ describe("ub init", () => {
     // No `--yes`, stdin a pipe: this must complete rather than block on input.
     // With nobody to ask for a display slug, the id is the bare uuid.
     expect(runUb(["init"], box).status).toBe(0);
-    expect(userConfig(box).workspace).toMatch(UUID);
+    expect(projectBinding(box).workspaceId).toMatch(UUID);
 
     const decorated = `team-b-${JOINED}`;
+    const before = projectBinding(box);
+    const ambiguous = runUb(["init", "--yes", "--workspace", decorated], box);
+    expect(ambiguous.status).toBe(2);
+    expect(ambiguous.stderr).toContain("explicit hub");
+    expect(projectBinding(box)).toEqual(before);
+    const selected = runUb(["workspace", "use", decorated, "--hub", "local"], box);
+    expect(selected.status, selected.output).toBe(0);
     const flagged = runUb(
       ["init", "--name", "Ada", "--color", "#0675c9", "--workspace", decorated],
       box,
@@ -191,7 +310,6 @@ describe("ub init", () => {
     expect(userConfig(box)).toMatchObject({
       displayName: "Ada",
       color: "#0675c9",
-      workspace: decorated,
     });
   });
 
@@ -230,7 +348,7 @@ describe("ub init", () => {
       const box = sandbox({ checkout: true });
       const run = runUb(["init", "--yes", "--workspace", workspace], box);
       expect(run.status, run.stderr).toBe(0);
-      expect(userConfig(box).workspace).toBe(workspace);
+      expect(projectBinding(box).workspaceId).toBe(workspace);
     }
   });
 
@@ -272,7 +390,7 @@ describe("ub init", () => {
       }
 
       const authority = storedSecret(box);
-      expect(userConfig(box).workspace).toBe(workspace);
+      expect(projectBinding(box).workspaceId).toBe(workspace);
       // Exactly one secret survives: neither process printed its own, and the
       // one on disk is the one both of them now describe.
       for (const run of runs) {
@@ -335,14 +453,14 @@ describe("ub init", () => {
     );
     await waitUntil("`ub init` to say it is waiting for the lock", () => waiting);
     writeFileSync(
-      join(box.configHome, "uberblick", "config.json"),
-      `${JSON.stringify({ workspace: JOINED }, null, 2)}\n`,
+      join(box.cwd, ".uberblick.json"),
+      `${JSON.stringify({ workspaceId: JOINED, hubUrl: null }, null, 2)}\n`,
     );
     rmSync(lock);
 
     const run = await running;
     expect(run.status, run.output).toBe(0);
-    expect(userConfig(box).workspace).toBe(JOINED);
+    expect(projectBinding(box).workspaceId).toBe(JOINED);
     // And the report describes the machine rather than the intention.
     expect(run.stdout).toContain(JOINED);
   });
@@ -354,7 +472,7 @@ describe("ub init", () => {
     // the next run — or a seed, or a report — is where it would finally go
     // wrong.
     const box = sandbox({ checkout: true });
-    const config = join(box.configHome, "uberblick", "config.json");
+    const config = join(box.cwd, ".uberblick.json");
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
@@ -370,7 +488,7 @@ describe("ub init", () => {
       },
     );
     await waitUntil("`ub init` to say it is waiting for the lock", () => waiting);
-    writeFileSync(config, `${JSON.stringify({ workspace: "a/b" }, null, 2)}\n`);
+    writeFileSync(config, `${JSON.stringify({ workspaceId: "a/b", hubUrl: null }, null, 2)}\n`);
     rmSync(lock);
 
     const run = await running;
@@ -378,7 +496,7 @@ describe("ub init", () => {
     // Named by file, the way every other reader of it reports the same value.
     expect(run.stderr).toContain(config);
     // And nothing was written on top of it.
-    expect(userConfig(box).workspace).toBe("a/b");
+    expect(projectBinding(box).workspaceId).toBe("a/b");
   });
 
   it("never removes a lock it did not create, however old that lock is", () => {
@@ -387,52 +505,36 @@ describe("ub init", () => {
     // a lock is stale unlink it twice, and the second unlink deletes a lock
     // somebody had just legitimately taken. A crashed holder is instead a
     // visible situation with a one-line fix, so the message has to carry it.
-    // A fresh lock and a long-dead one get the same answer, and the second case
-    // puts the lock somewhere whose name a shell would mangle: that recovery
-    // line is going to be pasted into one.
-    for (const [ageMs, home] of [
-      [0, null],
-      [120_000, "it's here/config dir"],
-    ] as const) {
-      const box = sandbox({ checkout: true });
-      const configHome =
-        home === null ? box.configHome : join(box.configHome, home);
-      const lock = join(configHome, "uberblick", ".init.lock");
-      mkdirSync(dirname(lock), { recursive: true });
-      writeFileSync(lock, "999999\n");
-      const when = new Date(Date.now() - ageMs);
-      utimesSync(lock, when, when);
+    // A long-dead lock gets the same answer as a fresh one, and this one sits
+    // somewhere whose name a shell would mangle: that recovery line is going to
+    // be pasted into one.
+    const box = sandbox({ checkout: true });
+    const configHome = join(box.configHome, "it's here/config dir");
+    const lock = join(configHome, "uberblick", ".init.lock");
+    mkdirSync(dirname(lock), { recursive: true });
+    writeFileSync(lock, "999999\n");
+    const when = new Date(Date.now() - 120_000);
+    utimesSync(lock, when, when);
 
-      const run = runUb(["init", "--yes"], box, {
-        XDG_CONFIG_HOME: configHome,
-      });
-      expect(run.status).toBe(1);
-      // The path, how old it is, and the command that fixes it.
-      expect(run.stderr).toMatch(/another `ub init` is holding .*\.init\.lock/);
-      expect(run.stderr).toMatch(/\d+s old/);
-      // Quoted for a shell: single quotes around the path, with any single
-      // quote in it spliced as '\'' — so the line survives spaces, quotes and
-      // anything else XDG_CONFIG_HOME can carry.
-      expect(run.stderr).toContain(
-        `rm -- '${lock.split("'").join(`'\\''`)}'`,
-      );
-      // Somebody else's lock is left exactly where it was, and nothing was
-      // half-written around it.
-      expect(existsSync(lock)).toBe(true);
-      expect(existsSync(join(configHome, "uberblick", "credentials.json"))).toBe(
-        false,
-      );
-    }
-  });
-
-  it("repairs the mode of a config.json that was left readable", () => {
-    const box = sandbox({ checkout: true, userConfig: { workspace: JOINED } });
-    chmodSync(join(box.configHome, "uberblick", "config.json"), 0o644);
-
-    expect(runUb(["init", "--yes"], box).status).toBe(0);
-    expect(
-      statSync(join(box.configHome, "uberblick", "config.json")).mode & 0o077,
-    ).toBe(0);
+    const run = runUb(["init", "--yes"], box, {
+      XDG_CONFIG_HOME: configHome,
+    });
+    expect(run.status).toBe(1);
+    // The path, how old it is, and the command that fixes it.
+    expect(run.stderr).toMatch(/another `ub init` is holding .*\.init\.lock/);
+    expect(run.stderr).toMatch(/\d+s old/);
+    // Quoted for a shell: single quotes around the path, with any single
+    // quote in it spliced as '\'' — so the line survives spaces, quotes and
+    // anything else XDG_CONFIG_HOME can carry.
+    expect(run.stderr).toContain(
+      `rm -- '${lock.split("'").join(`'\\''`)}'`,
+    );
+    // Somebody else's lock is left exactly where it was, and nothing was
+    // half-written around it.
+    expect(existsSync(lock)).toBe(true);
+    expect(existsSync(join(configHome, "uberblick", "credentials.json"))).toBe(
+      false,
+    );
   });
 
   it("offers the MCP wiring, and honours --no-mcp instead of blocking", () => {
@@ -460,25 +562,12 @@ describe("ub init", () => {
     expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
   });
 
-  it("names the contributor task inside the sandbox's own checkout", () => {
-    const box = sandbox({ checkout: true });
-    const cwd = realpathSync(box.cwd);
-    expect(
-      findCheckoutRoot(cwd),
-      "the fixture must detect its own checkout, not an enclosing checkout",
-    ).toBe(cwd);
-
-    const run = runUb(["init", "--yes"], box);
-    expect(run.status).toBe(0);
-    expect(run.stdout).toContain("mise run dev");
-  });
-
   it("initialises outside a checkout, and names no contributor task there", () => {
     // An installed `ub` with no checkout still initialises. The mise tasks only
     // exist inside one, so they are not offered as a next step.
     // Scratch may itself be beneath a checkout. init only reads its cwd, so
     // use the filesystem root while keeping all config and data in scratch.
-    const box = { ...sandbox(), cwd: parse(REPO_ROOT).root };
+    const box = sandbox();
     expect(
       findCheckoutRoot(realpathSync(box.cwd)),
       "the outside-checkout fixture must have no checkout ancestor",
@@ -489,7 +578,7 @@ describe("ub init", () => {
     expect(run.stdout).not.toMatch(/mise run dev/);
   });
 
-  it.skipIf(!hasGit)("leaves a checkout with nothing for git to report", () => {
+  it.skipIf(!hasGit)("creates only the non-secret project binding inside a checkout", () => {
     // The real `.gitignore`: `ub init` writes nothing into a checkout, and this
     // is what would catch it if that ever changed.
     const box = sandbox({ checkout: true });
@@ -519,19 +608,6 @@ describe("ub init", () => {
       cwd: box.cwd,
       encoding: "utf8",
     });
-    expect(status.stdout).toBe("");
-  });
-
-  it("keeps the credential owner-only under a umask that would widen it", () => {
-    // `mode:` on a write is subject to the umask, so the file is chmodded
-    // afterwards. Prove it with the widest umask a system will accept.
-    const box = sandbox({ checkout: true });
-    const previous = process.umask(0o000);
-    try {
-      expect(runUb(["init", "--yes"], box).status).toBe(0);
-    } finally {
-      process.umask(previous);
-    }
-    expect(statSync(credentialsPath(box)).mode & 0o077).toBe(0);
+    expect(status.stdout).toBe("?? .uberblick.json\n");
   });
 });

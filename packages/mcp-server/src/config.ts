@@ -6,7 +6,8 @@
  *
  * `HUB_URL` is plaintext config (an endpoint is not a secret) and the only
  * hardcoded address in this package is {@link DEFAULT_HUB_URL}. `HUB_AUTH_TOKEN`
- * is used only for loopback hubs; remote hubs use this machine's stored login.
+ * is used only for local loopback admission; deployed hubs use this machine's
+ * stored login even when a proxy is published on the host's loopback address.
  *
  * `WORKSPACE_ID` is required and has no default: it names the rooms, the token
  * claim and the local database, and a wrong guess would quietly open somebody
@@ -22,7 +23,8 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { resolveStorage } from "@uberblick/hub/storage";
-import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
+import { authenticationOrigin, isLoopbackEndpoint } from "@uberblick/hub/remote-url";
+import { readHubLogins } from "@uberblick/hub/auth-store";
 import { parseWorkspaceId } from "@uberblick/schema";
 
 /**
@@ -65,6 +67,8 @@ export interface McpConfig {
    * Programmatic loopback callers may select the same stricter admission.
    */
   deviceLogin?: { env?: NodeJS.ProcessEnv };
+  /** Credential-store location for a loopback hub that requires device admission. */
+  authEnv?: NodeJS.ProcessEnv;
   /** SQLite file holding the update log, snapshots and the derived index. */
   databasePath: string;
   /** This process's agent session id. Becomes the token's `sub`. */
@@ -77,6 +81,10 @@ export interface McpConfig {
   syncTimeoutMs: number;
   /** Upper bound on websocket reconnect backoff (ms). */
   reconnectMaxDelayMs: number;
+  /** Upper bound on device-login recovery polling (ms); thirty seconds when unset. */
+  deviceRetryMaxDelayMs?: number;
+  /** How long a device renewal outcome is shared across rooms and processes (ms); thirty seconds when unset. */
+  deviceRenewalCooldownMs?: number;
   /** How long an agent's published cursor lives before it is withdrawn (ms). */
   cursorTtlMs: number;
   /** Log entries per room that trigger a snapshot-and-prune. */
@@ -145,34 +153,17 @@ function trimmed(value: string | undefined): string | null {
   return text === undefined || text === "" ? null : text;
 }
 
-/**
- * The file `ub` keeps this machine's workspace in. Named here rather than
- * imported because the dependency runs cli → mcp-server: `packages/cli` owns
- * the file and its own `USER_CONFIG_FILE`, and `packages/cli/test/config.test.ts`
- * asserts that the path this message prints is the one the cli resolves.
- */
-const USER_CONFIG_FILE = "config.json";
+/** A loopback proxy can reach a hub whose own bind requires device credentials. */
+export function usesDeviceLogin(endpoint: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!isLoopbackEndpoint(endpoint) || env.HUB_ADMISSION === "device") return true;
+  const origin = authenticationOrigin(endpoint);
+  const store = readHubLogins(env);
+  return store.logins[origin] !== undefined || store.unreadableHubs.includes(origin);
+}
 
-/**
- * Every room, the token claim and the database file are keyed by this — so a
- * machine with none configured gets the whole answer in one line: where `ub`
- * takes it from, and both commands that write there. `ub remote join` is the
- * one a machine binding to an existing hub runs, and the one a flag-day
- * re-bind needs.
- *
- * The path is a directory and a filename and never a secret: the signing
- * secret lives in `credentials.json`, which configuration never opens. The
- * separately composed device sync path reads that store directly.
- */
-function missingWorkspace(env: NodeJS.ProcessEnv): string {
-  const path = join(resolveStorage({ env }).configDir, USER_CONFIG_FILE);
-  return (
-    "WORKSPACE_ID is not set. It names the rooms this server opens, the " +
-    "workspace claim in its hub token, and its local database — there is no " +
-    `default. \`ub\` takes it from ${path}. Run \`ub init\` to create a ` +
-    "workspace, or `ub remote join <hub>/<workspace>` to bind this machine to " +
-    "one that already exists (`ub status` prints the one in force)."
-  );
+/** Direct server entry is internal; public `ub mcp serve` resolves the binding. */
+function missingWorkspace(): string {
+  return "WORKSPACE_ID is not set for the internal MCP server. Use `ub mcp serve` with a .uberblick.json binding or both UB_WORKSPACE_ID and UB_HUB_URL. Run `ub init` for local setup or `ub workspace join <hub>/<workspace>` for an existing workspace.";
 }
 
 export function resolveMcpConfig(
@@ -180,20 +171,21 @@ export function resolveMcpConfig(
 ): McpConfig {
   const configured = trimmed(env.WORKSPACE_ID);
   if (configured === null) {
-    throw new Error(missingWorkspace(env));
+    throw new Error(missingWorkspace());
   }
   // A decorated value is accepted and parsed down: the slug is display, the
   // uuid is the identity, and only the identity goes any further.
   const workspaceId = parseWorkspaceId(configured).uuid;
   const sessionId = `agent-${randomUUID()}`;
   const hubUrl = trimmed(env.HUB_URL) ?? DEFAULT_HUB_URL;
-  const remote = !isLoopbackEndpoint(hubUrl);
+  const remote = usesDeviceLogin(hubUrl, env);
 
   return {
     workspaceId,
     hubUrl,
     authSecret: remote ? null : trimmed(env.HUB_AUTH_TOKEN),
     ...(remote ? { deviceLogin: { env } } : {}),
+    authEnv: env,
     databasePath:
       trimmed(env.UBERBLICK_DB) ??
       defaultDatabasePath(workspaceId, env),

@@ -50,7 +50,7 @@ async function main() {
 	}
 	const release = join(destination, "release");
 	mkdirSync(release);
-	for (const file of ["remote.env.example", "remote-settings.sh", "REMOTE.md", "RELEASING.md"]) {
+	for (const file of ["remote.env.example", "remote-settings.sh", "remote.https.yml", "remote.tailscale.yml", "REMOTE.md", "RELEASING.md"]) {
 		cpSync(join(root, file), join(release, file));
 	}
 	mkdirSync(join(release, "bin"));
@@ -65,7 +65,7 @@ async function main() {
 	}, null, 2)}\n`);
 	const environment = { ...process.env, UBERBLICK_RELEASE_WEB: "1" };
 	for (const key of ["HUB_URL", "HUB_AUTH_TOKEN", "WORKSPACE_ID", "WORKSPACES",
-		"WEB_HUB_URL", "WEB_WORKSPACES", "TAILSCALE_HOST", "TAILSCALE_IP"]) delete environment[key];
+		"WEB_HUB_URL", "WEB_WORKSPACES", "WEB_HOST", "HTTPS_BIND_IP", "LOOPBACK_PORT", "TAILSCALE_HOST", "TAILSCALE_IP"]) delete environment[key];
 	const result = spawnSync("pnpm", ["--filter", "@uberblick/web", "exec", "vite", "build",
 		"--outDir", join(destination, "web"), "--emptyOutDir"], {
 		cwd: root, env: environment, stdio: "inherit",

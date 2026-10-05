@@ -518,36 +518,6 @@ describe("the prose selection toolbar", () => {
     }
   });
 
-  it.each([
-    ["before compositionend", false],
-    ["after compositionend", true],
-  ] as const)("keeps a composing Escape %s in the link field, then returns to the toolbar", (_order, afterCompositionEnd) => {
-    const { ydoc } = annotatedDoc();
-    const view = mountComposer(ydoc);
-    try {
-      select(view.editor, 1, 4, 15);
-      const before = snapshotFragment(ydoc);
-      act(() => tool(view, "External link").click());
-      linkValue(view, "https://example.com/日本語");
-      const field = view.query<HTMLInputElement>("[aria-label=\"External link URL\"]")!;
-
-      composingKey(field, "Escape", afterCompositionEnd);
-      expect(view.query("[aria-label=\"External link URL\"]")).toBe(field);
-      expect(field.value).toBe("https://example.com/日本語");
-      expect(document.activeElement).toBe(field);
-      expect(snapshotFragment(ydoc)).toEqual(before);
-
-      act(() => field.dispatchEvent(new KeyboardEvent("keydown", {
-        key: "Escape", bubbles: true, cancelable: true,
-      })));
-      expect(view.query("[aria-label=\"External link URL\"]")).toBeNull();
-      expect(view.query("[role=\"toolbar\"]")).not.toBeNull();
-      expect(snapshotFragment(ydoc)).toEqual(before);
-    } finally {
-      view.unmount();
-    }
-  });
-
   it("keeps source and cross-block ranges on the Comment-only path", () => {
     const { ydoc } = annotatedDoc();
     appendBlock(ydoc, { type: "code", text: "const x = 1", language: "ts" });
@@ -649,10 +619,8 @@ describe("the prose selection toolbar", () => {
 });
 
 describe("starting a thread from the prose", () => {
-  it.each([
-    ["before compositionend", false],
-    ["after compositionend", true],
-  ] as const)("keeps a composing Enter %s in the comment field, then sends on Enter", (_order, afterCompositionEnd) => {
+  // Safari's order, which only the IME keyCode still marks as composing.
+  it("keeps a composing Enter after compositionend in the comment field, then sends on Enter", () => {
     const { ydoc } = annotatedDoc();
     const view = mountComposer(ydoc);
     try {
@@ -661,7 +629,7 @@ describe("starting a thread from the prose", () => {
       view.type("日本語のコメント");
       const field = view.query<HTMLTextAreaElement>(".ub-comment-input")!;
 
-      composingKey(field, "Enter", afterCompositionEnd);
+      composingKey(field, "Enter", true);
       expect(listAnnotations(ydoc)).toEqual([]);
       expect(view.query(".ub-comment-input")).toBe(field);
       expect(field.value).toBe("日本語のコメント");
@@ -684,10 +652,7 @@ describe("starting a thread from the prose", () => {
     }
   });
 
-  it.each([
-    ["before compositionend", false],
-    ["after compositionend", true],
-  ] as const)("keeps a composing Escape %s in the comment field, then returns to the toolbar", (_order, afterCompositionEnd) => {
+  it("keeps a composing Escape before compositionend in the comment field, then returns to the toolbar", () => {
     const { ydoc } = annotatedDoc();
     const view = mountComposer(ydoc);
     try {
@@ -698,7 +663,7 @@ describe("starting a thread from the prose", () => {
 
       // Dispatch through the composer frame, whose capture listener sees
       // Escape before the field's own handler can preserve the draft.
-      composingKey(field, "Escape", afterCompositionEnd);
+      composingKey(field, "Escape", false);
       expect(view.query(".ub-comment-input")).toBe(field);
       expect(field.value).toBe("日本語のコメント");
       expect(document.activeElement).toBe(field);

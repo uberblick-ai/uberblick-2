@@ -1,7 +1,7 @@
-/** HTTP proof authority stays separate from rooms and bound to its operation. */
+/** HTTP proof authority stays separate from rooms and bound to its exact request. */
 import { describe, expect, it } from "vitest";
 import type {
-  RequestOperation,
+  RequestAction,
   RequestProofRequest,
 } from "../src/token.js";
 import {
@@ -20,8 +20,22 @@ import {
 
 const KID = "6c1f0f4a-2b3d-4c5e-8f90-1a2b3c4d5e6f";
 const WORKSPACE = "3f6a1c20-9d84-4b1e-8a77-2c5e9b0d4411";
+const OTHER_WORKSPACE = "4f6a1c20-9d84-4b1e-8a77-2c5e9b0d4411";
 const NOW = 1_800_000_000;
 const key = await importCredentialKey(new Uint8Array(32).fill(7));
+const ACTIONS: RequestAction[] = [
+  { operation: "renew-credential" },
+  { operation: "promote-workspace", workspaceId: WORKSPACE, attemptId: KID },
+  { operation: "list-devices" },
+  { operation: "revoke-device", deviceId: "device" },
+  { operation: "own-role", workspaceId: WORKSPACE },
+  { operation: "list-members", workspaceId: WORKSPACE },
+  { operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "octocat" },
+  { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "42", role: "member" },
+  { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "42", role: "admin" },
+  { operation: "change-role", workspaceId: WORKSPACE, principalId: "principal", role: "member" },
+  { operation: "remove-member", workspaceId: WORKSPACE, principalId: "principal" },
+];
 
 function request(overrides: Record<string, unknown> = {}): RequestProofRequest {
   return {
@@ -66,26 +80,138 @@ describe("credential request proofs", () => {
   });
 
   it("cannot authenticate a room, and a room token cannot authorize a request", async () => {
-    const proof = await mintRequestProof(key, request());
-    expect(await inspectToken(key, proof)).toHaveProperty("failure", "unsupported-claims");
-    expect(await verifyToken(key, proof)).toBeNull();
     const room = await mintToken(key, {
       typ: "room", kid: KID, sub: "principal", workspace: WORKSPACE,
       scope: "read-write", iat: NOW, lifetimeSeconds: 60,
     });
-    expect(await inspectRequestProof(key, room, "renew-credential"))
-      .toHaveProperty("failure", "unsupported-claims");
+    for (const action of ACTIONS) {
+      const proof = await mintRequestProof(key, request(action));
+      expect(await inspectToken(key, proof)).toHaveProperty("failure", "unsupported-claims");
+      expect(await verifyToken(key, proof)).toBeNull();
+      expect(await inspectRequestProof(key, room, action))
+        .toHaveProperty("failure", "unsupported-claims");
+    }
   });
 
-  it("authorizes only its named operation, even when signed by the credential holder", async () => {
+  it("refuses unknown operations even when signed by the credential holder", async () => {
     const foreignProof = await forge({
-      typ: "request", kid: KID, operation: "list-devices", iat: NOW, exp: NOW + 60,
+      typ: "request", kid: KID, operation: "unknown-operation", iat: NOW, exp: NOW + 60,
     });
     expect(await inspectRequestProof(key, foreignProof, "renew-credential"))
       .toHaveProperty("failure", "unsupported-claims");
     const proof = await mintRequestProof(key, request());
-    expect(await inspectRequestProof(key, proof, "list-devices" as RequestOperation))
+    expect(await inspectRequestProof(key, proof, { operation: "unknown-operation" } as unknown as RequestAction))
       .toHaveProperty("failure", "unsupported-claims");
+  });
+
+  it("binds every operation and authority-bearing target, including management versus renewal", async () => {
+    for (const action of ACTIONS) {
+      const proof = await mintRequestProof(key, request(action));
+      expect(await inspectRequestProof(key, proof, action)).toEqual({
+        typ: "request", kid: KID, ...action, iat: NOW, exp: NOW + 60,
+      });
+      for (const replacement of ACTIONS.filter((candidate) => candidate.operation !== action.operation)) {
+        expect(await inspectRequestProof(key, proof, replacement))
+          .toHaveProperty("failure", "unsupported-claims");
+      }
+      for (const [field, value] of Object.entries(action)) {
+        if (field === "operation") continue;
+        const replacement = field === "workspaceId" ? OTHER_WORKSPACE
+          : field === "attemptId" ? WORKSPACE
+          : field === "githubAccountId" ? "43"
+          : field === "role" ? value === "admin" ? "member" : "admin" : `${value}-other`;
+        expect(await inspectRequestProof(key, proof, { ...action, [field]: replacement } as RequestAction))
+          .toHaveProperty("failure", "unsupported-claims");
+      }
+    }
+  });
+
+  it("rejects missing or malformed targets and signed authority fields irrelevant to the operation", async () => {
+    const fields = {
+      deviceId: "device", workspaceId: WORKSPACE, principalId: "principal", role: "member",
+      attemptId: KID, githubUsername: "octocat", githubAccountId: "42",
+    };
+    for (const action of ACTIONS.filter((candidate) => candidate.operation !== "renew-credential")) {
+      for (const [field, value] of Object.entries(fields)) {
+        const changes = Object.hasOwn(action, field)
+          ? [
+            ...(action.operation === "grant-member" && field === "role" ? [] : [{ [field]: undefined }]),
+            { [field]: "" }, { [field]: 7 },
+          ]
+          : [{ [field]: value }];
+        for (const changed of changes) {
+          expect(await inspectRequestProof(key, await forge({
+            typ: "request", kid: KID, ...action, ...changed, iat: NOW, exp: NOW + 60,
+          }), action)).toHaveProperty("failure", "unsupported-claims");
+          await expect(mintRequestProof(key, request({ ...action, ...changed })))
+            .rejects.toThrow(/mintRequestProof/);
+        }
+      }
+    }
+    for (const workspaceId of [WORKSPACE.toUpperCase(), `workspace-${WORKSPACE}`]) {
+      await expect(mintRequestProof(key, request({ operation: "own-role", workspaceId })))
+        .rejects.toThrow(/mintRequestProof/);
+    }
+    await expect(mintRequestProof(key, request({
+      operation: "change-role", workspaceId: WORKSPACE, principalId: "principal", role: "owner",
+    }))).rejects.toThrow(/mintRequestProof/);
+    await expect(mintRequestProof(key, request({
+      operation: "revoke-device", deviceId: "x".repeat(MAX_TOKEN_LENGTH),
+    }))).rejects.toThrow(/mintRequestProof/);
+  });
+
+  it("binds a default member grant to the same role as an explicit member grant", async () => {
+    const grant: RequestAction = { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "42" };
+    const memberGrant: RequestAction = { ...grant, role: "member" };
+    const adminGrant: RequestAction = { ...grant, role: "admin" };
+    const expected = { typ: "request", kid: KID, ...memberGrant, iat: NOW, exp: NOW + 60 };
+    for (const action of [grant, memberGrant]) {
+      const proof = await mintRequestProof(key, request(action));
+      expect(await inspectRequestProof(key, proof, grant)).toEqual(expected);
+      expect(await inspectRequestProof(key, proof, memberGrant)).toEqual(expected);
+      expect(await inspectRequestProof(key, proof, adminGrant))
+        .toHaveProperty("failure", "unsupported-claims");
+    }
+    const omittedRole = await forge({ typ: "request", kid: KID, ...grant, iat: NOW, exp: NOW + 60 });
+    expect(await inspectRequestProof(key, omittedRole, memberGrant)).toEqual(expected);
+    const adminProof = await mintRequestProof(key, request(adminGrant));
+    expect(await inspectRequestProof(key, adminProof, grant))
+      .toHaveProperty("failure", "unsupported-claims");
+  });
+
+  it("validates GitHub handles and permanent account IDs on both sides of the proof", async () => {
+    for (const githubUsername of ["a", "Octocat-1", "a".repeat(39)]) {
+      const action: RequestAction = { operation: "resolve-account", workspaceId: WORKSPACE, githubUsername };
+      expect(await inspectRequestProof(key, await mintRequestProof(key, request(action)), action))
+        .toMatchObject(action);
+    }
+    for (const githubAccountId of ["1", String(Number.MAX_SAFE_INTEGER)]) {
+      const action: RequestAction = { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId, role: "member" };
+      expect(await inspectRequestProof(key, await mintRequestProof(key, request(action)), action))
+        .toMatchObject(action);
+    }
+    const malformed = [
+      ...["", "-name", "name-", "two--hyphens", "with_under", "é", "a".repeat(40), "../users", "name?q=x", "name%2fother"]
+        .map((githubUsername) => ({ operation: "resolve-account", workspaceId: WORKSPACE, githubUsername })),
+      ...["0", "-1", "+1", "01", "1.0", "1e2", " 42", "9007199254740992", 42]
+        .map((githubAccountId) => ({ operation: "grant-member", workspaceId: WORKSPACE, githubAccountId, role: "member" })),
+    ];
+    for (const action of malformed) {
+      await expect(mintRequestProof(key, request(action))).rejects.toThrow(/mintRequestProof/);
+      expect(await inspectRequestProof(key, await forge({
+        typ: "request", kid: KID, ...action, iat: NOW, exp: NOW + 60,
+      }), action as RequestAction)).toHaveProperty("failure", "unsupported-claims");
+    }
+  });
+
+  it("preserves renewal's existing handling of extra payload fields", async () => {
+    const metadata = { workspaceId: WORKSPACE, role: "admin", githubUsername: "octocat", githubAccountId: "42" };
+    const expected = { typ: "request", kid: KID, operation: "renew-credential", iat: NOW, exp: NOW + 60 };
+    expect(await inspectRequestProof(key, await forge({ ...expected, ...metadata }), "renew-credential"))
+      .toEqual(expected);
+    const proof = await mintRequestProof(key, request(metadata));
+    expect(await inspectRequestProof(key, proof, "renew-credential")).toEqual(expected);
+    expect(JSON.parse(Buffer.from(proof.split(".")[0]!, "base64url").toString())).toEqual(expected);
   });
 
   it("rejects another device's signature and the shared root signature without reflecting claims or key material", async () => {
@@ -124,14 +250,14 @@ describe("credential request proofs", () => {
     const claims = { typ: "request", kid: KID, operation: "renew-credential", iat: NOW, exp: NOW + 60 };
     for (const changed of [
       { kid: null }, { kid: "not-a-uuid" }, { kid: KID.toUpperCase() },
-      { operation: "list-devices" }, { iat: -1 }, { iat: 1.5 },
+      { operation: "unknown-operation" }, { iat: -1 }, { iat: 1.5 },
       { exp: NOW }, { exp: Number.MAX_SAFE_INTEGER + 1 },
     ]) {
       expect(await inspectRequestProof(key, await forge({ ...claims, ...changed }), "renew-credential"))
         .toHaveProperty("failure", "unsupported-claims");
     }
     for (const changed of [
-      { kid: null }, { kid: "not-a-uuid" }, { operation: "list-devices" },
+      { kid: null }, { kid: "not-a-uuid" }, { operation: "unknown-operation" },
       { iat: -1 }, { iat: 1.5 }, { iat: Number.MAX_SAFE_INTEGER },
       { lifetimeSeconds: 0 }, { lifetimeSeconds: 1.5 },
       { lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS + 1 },

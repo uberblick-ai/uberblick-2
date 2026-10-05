@@ -149,11 +149,17 @@ test("a touch caret exposes a 44px gutter without moving prose, follows edits, a
   const second = editor(page).locator(":scope > p").nth(1);
   const pane = page.locator(".ub-document-pane");
   await page.mouse.move(0, 0);
+  // The first sync reading reveals the timestamp and can wrap the narrow
+  // status row. Settle that chrome before measuring gutter-induced movement.
+  await expect(page.locator(".ub-status .ub-last-updated")).toBeVisible();
   const proseBefore = await first.boundingBox();
   const scrollBefore = await pane.evaluate((element) => element.scrollWidth);
 
   await first.tap();
   await expect(gutter(page)).toHaveCSS("opacity", "1");
+  // Touch press can reveal the previous caret before selectionchange arrives.
+  // Verify this tap's block target before measuring the next tap's movement.
+  await expect.poll(async () => (await gutter(page).boundingBox())?.y).toBe(proseBefore?.y);
   await minimumTargets(gutter(page), 44, true);
   expect(await first.boundingBox()).toEqual(proseBefore);
   const button = await gutter(page).boundingBox();

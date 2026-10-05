@@ -44,26 +44,13 @@ export interface Entry {
   command: string;
   args: string[];
   /**
-   * Environment pinned into the entry, absent for the unpinned one.
-   *
-   * The only value that ever goes here is `WORKSPACE_ID`, and only when
-   * `--workspace` said so: which workspace a project's entry serves is the one
-   * thing a client config can say that `ub` cannot work out for itself. No
-   * endpoint, no credential, ever.
+   * A complete, non-secret binding: UB_WORKSPACE_ID and UB_HUB_URL.
+   * The hub may be "local". Credentials are resolved privately at spawn time.
    */
   env?: Record<string, string>;
 }
 
-/**
- * The line every client is pointed at.
- *
- * No arguments and no environment: which workspace, which hub and which
- * credential apply is resolved by `ub` itself, from the layers `config.ts`
- * documents. A client config that pinned the hub or the credential would be a
- * second, stale copy of configuration that already has an owner. `WORKSPACE_ID`
- * is the exception `--workspace` writes — see `install.ts`. This one never
- * carries configuration.
- */
+/** The stable spawn line; `install` adds its complete selected binding. */
 export const DEFAULT_ENTRY: Entry = {
   name: SERVER_NAME,
   command: "ub",
@@ -328,7 +315,7 @@ function tomlBlock(entry: Entry): string {
   const pinned = Object.entries(entry.env ?? {});
   // The table name and any pinned variable are bare keys by construction — the
   // names are `uberblick` and `uberblick-<label>`, and the only variable is
-  // `WORKSPACE_ID` — so neither needs quoting here.
+  // `UB_HUB_URL` and `UB_WORKSPACE_ID` — so none needs quoting here.
   return (
     `[mcp_servers.${entry.name}]\n` +
     `command = ${tomlString(entry.command)}\n` +

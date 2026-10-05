@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The appearance stamp that runs before first paint (#74).
  *

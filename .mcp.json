@@ -2,10 +2,13 @@
   "mcpServers": {
     "uberblick": {
       "type": "stdio",
-      "command": "sh",
+      "command": "mise",
       "args": [
-        "-c",
-        "exec \"$HOME/.local/bin/uberblick-corpus-mcp\""
+        "exec",
+        "--",
+        "ub",
+        "mcp",
+        "serve"
       ]
     }
   }

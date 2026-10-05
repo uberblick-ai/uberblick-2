@@ -10,12 +10,12 @@
  */
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { closeSync, constants, openSync } from "node:fs";
+import { closeSync, constants, existsSync, openSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
-import { DEAD_HUB_URL, UB_BIN, removeTempDirs, sandbox } from "./helpers.js";
+import { DEAD_HUB_URL, UB_BIN, removeTempDirs, runUb, runUbAsync, sandbox } from "./helpers.js";
 import type { Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -142,8 +142,22 @@ function clientStdin(path: string): { childEnd: number; writer: number } {
 const WORKSPACE = "1e9b7a30-52c4-4d6f-8a13-c7b204e5f981";
 
 describe("ub mcp serve", () => {
+  it("opens a newly created local workspace without a hub or login", async () => {
+    const box = sandbox();
+    const created = await runUbAsync(["workspace", "create", "Local MCP"], box);
+    expect(created.status, created.output).toBe(0);
+    const session = await connect(box);
+    try {
+      const result = await session.client.callTool({ name: "list_docs", arguments: {} });
+      expect(result.isError).not.toBe(true);
+      const content = result.content as { text: string }[];
+      expect(content[0]!.text).toContain("Welcome");
+      expect(session.stderr()).not.toMatch(/sign.in required|HUB_AUTH_TOKEN missing/i);
+    } finally { await session.close(); }
+  });
+
   it("serves the shipped tool set to a client that spawns it", async () => {
-    const session = await connect(sandbox({ userConfig: { workspace: WORKSPACE } }));
+    const session = await connect(sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } }));
     try {
       const names = (await session.client.listTools()).tools.map(
         (tool) => tool.name,
@@ -170,16 +184,12 @@ describe("ub mcp serve", () => {
     }
   });
 
-  // What the wrapper owes a client: the endpoint is the user config's, and it
+  // What the wrapper owes a client: the endpoint is the project binding's, and it
   // survives the exec into the server the client actually talks to.
-  // `checkout: true` is documentation of the spawn shape, a `cwd` inside a
-  // repository; nothing on this path reads it, which is the point. Worth
-  // pinning because of #376, where an ambient `HUB_URL` from the checkout's own
-  // mise config replaced this answer for every process spawned there.
-  it("dials the user config's endpoint when a client spawns it inside a checkout", async () => {
+  it("dials the project binding's endpoint when a client spawns it inside a checkout", async () => {
     const box = sandbox({
       checkout: true,
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { signingSecret: "cli-serve-checkout-secret" },
     });
 
@@ -197,22 +207,19 @@ describe("ub mcp serve", () => {
   });
 
   it("passes the resolved configuration through, warnings and all", async () => {
-    // A user config that names the workspace and an endpoint, a credential so
-    // the hub is enabled rather than disabled, and a secret misplaced in that
-    // same config — which is refused with a warning, so resolution has something
+    // A project binding, a credential so the hub is enabled rather than
+    // disabled, and a secret misplaced in the user config. The secret is
+    // refused with a warning, so resolution has something
     // to write to stderr while stdout is carrying the protocol.
     const box = sandbox({
+      projectBinding: { workspaceId: `serve-${WORKSPACE}`, hubUrl: DEAD_HUB_URL },
       userConfig: {
-        workspace: `serve-${WORKSPACE}`,
-        hubUrl: DEAD_HUB_URL,
         signingSecret: "cli-serve-misplaced-secret",
       },
       credentials: { signingSecret: "cli-serve-signing-secret" },
     });
 
-    // And the ambient `HUB_URL` does not survive it: the user config's endpoint
-    // is what the server must report, whatever the process was started with.
-    const session = await connect(box, { HUB_URL: "ws://ambient.invalid:1" });
+    const session = await connect(box);
     try {
       const result = await session.client.callTool({
         name: "sync_status",
@@ -235,6 +242,51 @@ describe("ub mcp serve", () => {
     }
   });
 
+  it.each([
+    { WORKSPACE_ID: "8f21c604-3b7d-4a15-9c62-0d5e8b3f7a29" },
+    { HUB_URL: "wss://legacy.example.test/ws" },
+  ])("refuses a legacy MCP selector before opening the project workspace", (legacy) => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    // The real subprocess receives a valid project binding plus an old MCP
+    // entry's pin. Ignoring that pin would boot the wrong corpus and seed data.
+    const run = runUb(["mcp", "serve"], box, legacy);
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("Legacy WORKSPACE_ID / HUB_URL");
+    expect(run.stderr).toContain("No workspace was opened");
+    expect(existsSync(box.dataHome)).toBe(false);
+    expect(existsSync(box.configHome)).toBe(false);
+    expect(readdirSync(box.cwd)).toEqual([".uberblick.json"]);
+  });
+
+  it("serves only the complete new MCP binding even when legacy and project selections disagree", async () => {
+    const selected = "8f21c604-3b7d-4a15-9c62-0d5e8b3f7a29";
+    const legacy = "5cb9a7a5-3cc0-4cdb-bd20-fd348fbf1311";
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const session = await connect(box, {
+      WORKSPACE_ID: legacy,
+      HUB_URL: "wss://legacy.example.test/ws",
+      UB_WORKSPACE_ID: selected,
+      UB_HUB_URL: "local",
+    });
+    try {
+      await session.client.callTool({ name: "create_doc", arguments: {
+        title: "Explicit binding only", description: "Synthetic binding regression.",
+      } });
+      const result = await session.client.callTool({ name: "list_docs", arguments: {} });
+      const content = result.content as { text: string }[];
+      const listing = JSON.parse(content[0]!.text);
+      expect(listing.workspace).toBe(selected);
+      expect(listing.docs.map((doc: { title: string }) => doc.title)).toEqual(["Explicit binding only"]);
+      const data = join(box.dataHome, "uberblick");
+      expect(existsSync(join(data, `${selected}.sqlite`))).toBe(true);
+      expect(existsSync(join(data, `${WORKSPACE}.sqlite`))).toBe(false);
+      expect(existsSync(join(data, `${legacy}.sqlite`))).toBe(false);
+    } finally {
+      await session.close();
+    }
+  });
+
   // The two signals the server installs no handler for, so the child dies OF
   // them rather than exiting cleanly — which is what makes them the pair that
   // proves the wrapper's lifecycle. SIGHUP is what a vanished terminal sends;
@@ -242,7 +294,7 @@ describe("ub mcp serve", () => {
   it.each(["SIGHUP", "SIGQUIT"] as const)(
     "forwards %s to the server, takes it down, and dies of it too",
     async (signal) => {
-      const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+      const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
       const { childEnd, writer } = clientStdin(join(box.cwd, "client-stdin"));
       // Its own process group, so teardown can take a survivor down by group
       // even after the wrapper — the group's leader — is gone. `child.kill`

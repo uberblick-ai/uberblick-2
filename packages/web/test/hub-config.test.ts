@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Where the client configuration comes from, and what happens when the answer
  * is unusable.
@@ -324,6 +325,23 @@ describe("the served configuration", () => {
 });
 
 describe("the local-serving diagnostic", () => {
+  it("keeps development and ub open on their local admission path without a key", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const document of [
+      { hubUrl: "ws://localhost:1234", workspaces: [FIRST] },
+      { hubUrl: "ws://127.0.0.1:4321", workspaces: [FIRST], remoteHubUrl: "wss://remote.example/ws" },
+      { hubUrl: "ws://127.0.0.1:4321", workspaces: [], remoteHubUrl: "wss://remote.example/ws" },
+    ]) {
+      // Each case represents a new page, with its own resolved configuration.
+      vi.resetModules();
+      const config = await import("../src/config.js");
+      await config.resolveClientConfig(serving({ body: JSON.stringify(document) }).fetch);
+      expect(config.hubAuthToken()).toBe("");
+      expect(config.browserSignInRequired()).toBe(false);
+    }
+  });
+
   it("keeps the frozen workspace/upstream pair and accepts only a literal rebound", async () => {
     const servingDocument = (rebound: unknown, remote = true): string =>
       JSON.stringify({

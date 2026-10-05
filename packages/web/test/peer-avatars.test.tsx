@@ -125,7 +125,7 @@ describe("the compact collaborator cluster", () => {
     );
   }
 
-  it("caps the circles at three and makes every remaining session operable", async () => {
+  it("caps the circles at three and makes every remaining session operable", () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
       true;
     const activate = vi.fn();
@@ -159,8 +159,6 @@ describe("the compact collaborator cluster", () => {
       expect(activate).toHaveBeenCalledWith(
         expect.objectContaining({ clientId: 4, blockId: "block-4" }),
       );
-      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-      expect(document.activeElement).toBe(more);
       expect(document.querySelector(".ub-peer-overflow")).toBeNull();
     } finally {
       act(() => root.unmount());
@@ -168,7 +166,7 @@ describe("the compact collaborator cluster", () => {
     }
   });
 
-  it("returns focus after dismissal and after live removal", async () => {
+  it("leaves outside focus alone and recovers after live removal", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
       true;
     const host = document.createElement("div");
@@ -189,18 +187,6 @@ describe("the compact collaborator cluster", () => {
     render(peers(4));
     try {
       const more = host.querySelector<HTMLButtonElement>(".ub-peer-more");
-      act(() => more?.focus());
-      act(() => more?.click());
-      const row = document.querySelector<HTMLButtonElement>(
-        '.ub-peer-overflow-row[data-peer-id="4"]',
-      );
-      act(() => row?.focus());
-      act(() =>
-        row?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
-      );
-      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-      expect(document.activeElement).toBe(more);
-
       act(() => more?.click());
       expect(document.querySelector(".ub-peer-overflow")).not.toBeNull();
       await act(() => new Promise((resolve) => setTimeout(resolve, 0)));

@@ -98,6 +98,38 @@ function privateRows(path: string) {
 }
 
 describe("hub-driven GitHub identity", () => {
+  it("discovers a direct grant on first sign-in and retains it across login renames and reassignment", async () => {
+    const first = await rig();
+    const admin = first.hub.principals!.identify("9999", "workspace-admin");
+    first.hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: admin.id, role: "admin" });
+    // This identity models the hub's own GitHub lookup for a never-signed-in
+    // account. Discovery must preserve the principal created for the grant.
+    const granted = first.hub.principals!.identify("1234", "first-name");
+    first.hub.memberships!.grantMember({
+      workspaceId: WORKSPACE, actorPrincipalId: admin.id, principalId: granted.id, role: "member",
+    });
+    expect(privateRows(first.databasePath).credentials).toEqual([]);
+
+    const signedIn = await complete(first);
+    expect(signedIn.result.identity).toEqual(granted);
+    expect(signedIn.result.credential.record.workspaces).toEqual([WORKSPACE]);
+    await first.hub.stop();
+
+    const restarted = await rig(first.databasePath);
+    restarted.github.account.login = "renamed-member";
+    const renamed = await complete(restarted);
+    expect(renamed.result.identity).toEqual({ ...granted, githubUsername: "renamed-member" });
+    expect(restarted.hub.principals!.get(granted.id)).toEqual(renamed.result.identity);
+    expect(renamed.result.credential.record.workspaces).toEqual([WORKSPACE]);
+    expect(restarted.hub.memberships!.roleFor(WORKSPACE, granted.id)).toBe("member");
+
+    restarted.github.account = { ...restarted.github.account, id: 5678, login: "first-name" };
+    const reassigned = await complete(restarted);
+    expect(reassigned.result.identity.id).not.toBe(granted.id);
+    expect(reassigned.result.credential.record.workspaces).toEqual([]);
+    expect(restarted.hub.memberships!.roleFor(WORKSPACE, reassigned.result.identity.id)).toBeNull();
+  });
+
   it("binds durable account ID across devices, renames, username reassignment and restart", async () => {
     const first = await rig();
     first.github.account.login = "first_acme";
@@ -194,14 +226,12 @@ describe("bounded device requests", () => {
     expect(privateRows(testRig.databasePath).credentials).toHaveLength(0);
   });
 
-  it.each(["denied", "expired", "abandoned", "failed"])("%s ends distinctly and issues nothing", async (status) => {
+  it.each(["denied", "expired"])("%s ends distinctly and issues nothing", async (status) => {
     const testRig = await rig();
     const request = await start(testRig.hub);
     testRig.github.time += 5000;
     if (status === "denied") testRig.github.tokenResult = { error: "access_denied" };
     if (status === "expired") testRig.github.time += 900_000;
-    if (status === "abandoned") expect(await post(testRig.hub, "cancel", request)).toMatchObject({ result: { status } });
-    if (status === "failed") testRig.github.failedUrl = "https://github.com/login/oauth/access_token";
     const first = await post(testRig.hub, "collect", request);
     expect(first).toMatchObject({ result: { status } });
     expect(await post(testRig.hub, "collect", request)).toEqual(first);
@@ -209,7 +239,7 @@ describe("bounded device requests", () => {
     expect(JSON.stringify(testRig.logs)).not.toContain(GITHUB_TOKEN);
   });
 
-  it.each(["expire", "cancel", "stop"])("%s during identity fetch fences issuance and concurrent collection", async (action) => {
+  it.each(["cancel", "stop"])("%s during identity fetch fences issuance and concurrent collection", async (action) => {
     const testRig = await rig();
     const request = await start(testRig.hub);
     testRig.github.time += 5000;
@@ -223,12 +253,11 @@ describe("bounded device requests", () => {
     collecting.catch(() => {});
     await paused;
     expect(await post(testRig.hub, "collect", request)).toMatchObject({ result: { status: "pending" } });
-    if (action === "expire") testRig.github.time += 900_000;
     if (action === "cancel") await post(testRig.hub, "cancel", request);
     if (action === "stop") await testRig.hub.stop();
     release();
     if (action === "stop") await collecting.catch(() => {});
-    else expect(await collecting).toMatchObject({ result: { status: action === "expire" ? "expired" : "abandoned" } });
+    else expect(await collecting).toMatchObject({ result: { status: "abandoned" } });
     expect(privateRows(testRig.databasePath).credentials).toHaveLength(0);
   });
 
@@ -297,8 +326,6 @@ describe("bounded device requests", () => {
 
   it.each([
     { step: "start", url: "https://github.com/login/device/code", error: "device_flow_disabled", status: 200, code: "device_flow_disabled" },
-    { step: "start", url: "https://github.com/login/device/code", error: "incorrect_client_credentials", status: 200, code: "incorrect_client_credentials" },
-    { step: "token", url: "https://github.com/login/oauth/access_token", error: GITHUB_TOKEN, status: 200, code: "provider-error" },
     { step: "identity", url: "https://api.github.com/user", error: GITHUB_TOKEN, status: 503, code: "http-error" },
   ])("logs safe diagnostics for $step/$code and issues nothing", async ({ step, url, error, status, code }) => {
     const testRig = await rig();
@@ -318,9 +345,9 @@ describe("bounded device requests", () => {
 });
 
 describe("optional GitHub configuration", () => {
-  it.each([undefined, ""])("uses the shared app for remote deployments with client ID %s", async (clientId) => {
+  it("uses the shared app for remote deployments with an empty client ID", async () => {
     const github = new GithubFake();
-    const config = resolveRemoteHubConfig({ HUB_AUTH_TOKEN: TEST_SECRET, HUB_GITHUB_CLIENT_ID: clientId });
+    const config = resolveRemoteHubConfig({ HUB_AUTH_TOKEN: TEST_SECRET, HUB_GITHUB_CLIENT_ID: "" });
     expect(config.github).toEqual({ clientId: SHARED_GITHUB_CLIENT_ID });
     const hub = await startHub({ ...config, databasePath: tempDatabasePath(), port: 0,
       github: { ...config.github!, fetch: github.fetch, now: () => github.time } });

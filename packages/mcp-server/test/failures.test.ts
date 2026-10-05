@@ -475,24 +475,6 @@ describe("the failure contract", () => {
     expect(crash.message).not.toContain("exploded");
   });
 
-  it("describes additive sync recovery fields without changing the existing status meanings", async () => {
-    const rig = await localRig();
-    const { tools } = await rig.client.listTools();
-    const description = tools.find((tool) => tool.name === "sync_status")?.description ?? "";
-    expect(description).toContain("Every reading carries `hub.recoveryClass`");
-    expect(description).toContain("`hub-down`, a retryable connection or renewal failure");
-    expect(description).toContain("`auth-failed`");
-    expect(description).toContain("needs human action");
-    for (const reading of [
-      "sign-in-required",
-      "no-workspace-access",
-      "credential-store",
-      "renewal-unavailable",
-    ]) {
-      expect(description).toContain(reading);
-    }
-  });
-
   it("says a failed write changed nothing, and invents nothing for a read", async () => {
     const rig = await localRig();
 

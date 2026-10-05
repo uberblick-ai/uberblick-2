@@ -9,7 +9,9 @@ import {
   removeHubLogin,
   writeHubLogin,
 } from "./auth-store.js";
-import { readUserConfig } from "./config.js";
+import { budget } from "./budget.js";
+import { resolveProjectBinding } from "./project-binding.js";
+import { openBrowser } from "./browser.js";
 import type { Io } from "./io.js";
 import { authenticationOrigin } from "@uberblick/hub/remote-url";
 export { authenticationOrigin } from "@uberblick/hub/remote-url";
@@ -27,10 +29,13 @@ options:
 
 export const AUTH_LOGIN_HELP = `usage: ub auth login [hub]
 
-Sign in to the given hub, or the hub bound in this machine's config.json.
+Sign in to the given hub, or the hub selected by this project's binding.
 The hub can be a bare host, an http(s) address or a ws(s) endpoint.
 Approve the displayed GitHub URL and code in a browser on any machine;
 this command completes automatically and never asks for keyboard input.
+In a local terminal, the approval page opens automatically after the guidance.
+Over SSH or when stdout is not a terminal, only the URL and code are displayed.
+BROWSER names the opener command; BROWSER=none skips automatic opening.
 GitHub's approval page shows the app's name, not the hub. Approve only a
 login you started for the displayed hub; the app does not vouch for it.
 Store the issued device credential privately on this machine for remote sync. A replacement does not revoke the previous device.
@@ -46,7 +51,7 @@ options:
 export const AUTH_STATUS_HELP = `usage: ub auth status [hub]
 
 Show the locally recorded GitHub identity and credential workspace limits
-for the given hub, or the hub bound in this machine's config.json.
+for the given hub, or the hub selected by this project's binding.
 The hub can be a bare host, an http(s) address or a ws(s) endpoint.
 No network is used; this cannot establish whether the hub accepts the device.
 Other stored hubs are named too. The machine's binding stays unchanged.
@@ -57,7 +62,7 @@ options:
 
 export const AUTH_LOGOUT_HELP = `usage: ub auth logout [hub]
 
-Remove this machine's login for the given hub, or the hub bound in config.json.
+Remove this machine's login for the given hub, or the hub selected by the project binding.
 The hub can be a bare host, an http(s) address or a ws(s) endpoint.
 No network is used. The device keeps hub access until revoked through device
 management; logout never revokes it. The machine's binding stays unchanged.
@@ -72,14 +77,22 @@ interface Selection {
   workspace: string | undefined;
 }
 
+const GITHUB_APPROVAL_URL = "https://github.com/login/device";
+
 function selectHub(hub: string | undefined, io: Io): Selection | number {
-  const { config, warnings } = readUserConfig();
-  const reportWarnings = () => {
-    for (const warning of warnings) io.err(`ub auth: ${warning}\n`);
-  };
-  const selected = hub ?? config.hubUrl;
+  // An explicit authentication target works before any project is bound.
+  // Resolve a binding only for the implicit target, or to describe membership.
+  let binding: ReturnType<typeof resolveProjectBinding>["binding"] = null;
+  try {
+    binding = resolveProjectBinding().binding;
+  } catch (error) {
+    if (hub === undefined) {
+      io.err(`ub auth: ${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+  const selected = hub ?? binding?.hubUrl ?? undefined;
   if (selected === undefined) {
-    reportWarnings();
     io.err("ub auth: no hub given and none bound. Local-only work needs no login. Give a hub to `ub auth login <hub>`.\n");
     return 1;
   }
@@ -88,18 +101,16 @@ function selectHub(hub: string | undefined, io: Io): Selection | number {
     origin = authenticationOrigin(selected);
   } catch {
     // Never echo an operand: it may be a pasted secret or a credential URL.
-    reportWarnings();
     io.err("ub auth: invalid hub; use a bare host, http(s) address or ws(s) endpoint without credentials, query or fragment.\n");
     return 2;
   }
   io.out(`Hub: ${origin}\n`);
-  reportWarnings();
   let bound = false;
-  if (config.hubUrl !== undefined) {
-    try { bound = authenticationOrigin(config.hubUrl) === origin; } catch { /* Invalid binding is never rewritten. */ }
+  if (binding?.hubUrl != null) {
+    try { bound = authenticationOrigin(binding.hubUrl) === origin; } catch { /* Invalid binding is never rewritten. */ }
   }
-  if (!bound) io.out("This machine's hub and workspace binding is unchanged.\n");
-  return { origin, bound, workspace: config.workspace };
+  if (!bound) io.out("This project's hub and workspace binding is unchanged.\n");
+  return { origin, bound, workspace: binding?.workspaceId };
 }
 
 function describeLogin(login: StoredHubLogin, io: Io): void {
@@ -115,7 +126,7 @@ function describeMissingWorkspace(selection: Selection, login: StoredHubLogin, i
   if (!selection.bound || selection.workspace === undefined) return false;
   let workspace: string;
   try { workspace = parseWorkspaceId(selection.workspace).uuid; } catch {
-    io.err("ub auth: the bound workspace is invalid; fix workspace in config.json.\n");
+    io.err("ub auth: the bound workspace is invalid; fix workspaceId in the project binding.\n");
     return true;
   }
   if (login.credential.record.workspaces.includes(workspace)) return false;
@@ -205,7 +216,7 @@ async function isUnclaimed(origin: string, signal: AbortSignal): Promise<boolean
   try {
     const response = await fetch(`${origin}/auth/claim-state`, {
       method: "GET", redirect: "error",
-      signal: AbortSignal.any([signal, AbortSignal.timeout(CLAIM_STATE_MS)]),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(budget(CLAIM_STATE_MS))]),
     });
     if (response.status !== 200) {
       await response.body?.cancel();
@@ -296,7 +307,7 @@ async function login(selection: Selection, io: Io): Promise<number> {
     });
     if (started.status !== "pending") terminal(started);
     if (attempt === undefined ||
-        started.verificationUri !== "https://github.com/login/device" ||
+        started.verificationUri !== GITHUB_APPROVAL_URL ||
         typeof started.userCode !== "string" || !/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(started.userCode) ||
         !seconds(started.expiresIn, true) || started.expiresIn > MAX_LIFETIME_SECONDS ||
         !seconds(started.interval) || started.interval > MAX_LIFETIME_SECONDS) {
@@ -307,14 +318,23 @@ async function login(selection: Selection, io: Io): Promise<number> {
     if (unclaimed) io.out("This hub is unclaimed. The first GitHub account to complete approval becomes administrator of its default workspace.\n");
     io.out(`GitHub sign-in for ${selection.origin}\nApprove in a browser: ${started.verificationUri}\nCode: ${started.userCode}\n`);
     io.out(`GitHub's approval page shows the app's name, not the hub.\nApprove only if you started this login for ${selection.origin}; the app does not vouch for this hub.\nWaiting for GitHub approval…\n`);
+    if (process.stdout.isTTY &&
+        process.env.SSH_CONNECTION === undefined &&
+        process.env.SSH_CLIENT === undefined &&
+        process.env.SSH_TTY === undefined) {
+      // Browser failures must never enter sign-in's cancellation path.
+      try { openBrowser(GITHUB_APPROVAL_URL, process.env, io); } catch {
+        io.err("ub auth: warning: could not open a browser; approve using the displayed URL and code.\n");
+      }
+    }
     let interval = started.interval;
     for (;;) {
       const remaining = deadline - performance.now();
       if (remaining <= 0) throw new SignInFailure("GitHub sign-in expired; run login again");
       await delay(Math.min(interval * 1000, remaining), undefined, { signal: interrupted.signal });
-      const budget = deadline - performance.now();
-      if (budget <= 0) throw new SignInFailure("GitHub sign-in expired; run login again");
-      const result = await post(selection.origin, "collect", attempt, interrupted.signal, Math.min(REQUEST_MS, budget));
+      const left = deadline - performance.now();
+      if (left <= 0) throw new SignInFailure("GitHub sign-in expired; run login again");
+      const result = await post(selection.origin, "collect", attempt, interrupted.signal, Math.min(REQUEST_MS, left));
       if (result.status === "pending" && seconds(result.interval)) { interval = result.interval; continue; }
       if (result.status !== "complete") terminal(result);
       collected = true;

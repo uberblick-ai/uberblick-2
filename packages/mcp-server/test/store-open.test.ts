@@ -109,20 +109,14 @@ async function expectConcurrentOpens(
   }
 }
 
+// One pool of openers, alternating between a store that does not exist yet and
+// one that does, so both startup paths race without paying for a second pool.
 it(
-  "opens a new store from eight processes at once without a busy failure",
+  "opens new and existing stores from eight processes at once without a busy failure",
   async () => {
-    await expectConcurrentOpens(() => tempDatabasePath());
-  },
-  120_000,
-);
-
-it(
-  "opens an existing store from eight processes at once without a busy failure",
-  async () => {
-    const databasePath = tempDatabasePath();
-    new MirrorStore(databasePath, WORKSPACE).close();
-    await expectConcurrentOpens(() => databasePath);
+    const existing = tempDatabasePath();
+    new MirrorStore(existing, WORKSPACE).close();
+    await expectConcurrentOpens((round) => (round % 2 === 0 ? tempDatabasePath() : existing));
   },
   120_000,
 );

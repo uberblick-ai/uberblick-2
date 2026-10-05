@@ -61,8 +61,11 @@ import type { HubLogger } from "./log.js";
 import { CredentialRegistry } from "./credentials.js";
 import { CredentialAdmission, type CredentialContext } from "./credential-admission.js";
 import { handleCredentialRenewal } from "./credential-renewal.js";
+import { WorkspacePromotions } from "./workspace-promotion.js";
+import { handleAccessManagement } from "./access-management.js";
 import { startAdminSetup } from "./admin-setup.js";
 import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
+import { GithubAccountLookup } from "./github-account-lookup.js";
 import { HubClaimState, handleHubClaimState } from "./hub-claim.js";
 import { MembershipRegistry } from "./memberships.js";
 import { PrincipalRegistry } from "./principals.js";
@@ -650,11 +653,13 @@ export async function createHub(config: HubConfig, options: {
   }
 
   let signIn: GithubSignIn | undefined;
+  let accounts: GithubAccountLookup | undefined;
   let credentials: CredentialRegistry | undefined;
   let principals: PrincipalRegistry | undefined;
   let memberships: MembershipRegistry | undefined;
   let claims: HubClaimState | undefined;
   let admission: CredentialAdmission | undefined;
+  let promotions: WorkspacePromotions | undefined;
   try {
     // Standalone entry points opt in. ub open's embedded hub never initializes
     // or claims, even when it offers an explicitly configured GitHub sign-in.
@@ -664,7 +669,10 @@ export async function createHub(config: HubConfig, options: {
       memberships = new MembershipRegistry(database);
       if (config.github !== undefined) {
         credentials = new CredentialRegistry(database);
+        promotions = new WorkspacePromotions(database, memberships, workspaceId =>
+          [...server.hocuspocus.documents.keys()].some(name => name.startsWith(`${workspaceId}/`)));
         signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims);
+        accounts = new GithubAccountLookup(config.github.fetch);
       }
     }
     if (deviceCredentials && credentials !== undefined && memberships !== undefined) {
@@ -719,6 +727,9 @@ export async function createHub(config: HubConfig, options: {
     async onRequest({ request, response }) {
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return Promise.reject();
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response)) {
+        return Promise.reject();
+      }
+      if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts)) {
         return Promise.reject();
       }
       if (await handleGithubSignIn(signIn, request, response)) return Promise.reject();
@@ -781,6 +792,7 @@ export async function createHub(config: HubConfig, options: {
     // Half a hub is worse than none: release the socket and the handle so the
     // caller sees a rejection and nothing else.
     signIn?.stop();
+    accounts?.stop();
     await adminSetup?.stop();
     await server.destroy().catch((cleanup: unknown) => {
       log({ event: "hub.start.cleanupFailed", error: String(cleanup) });
@@ -818,6 +830,7 @@ export async function createHub(config: HubConfig, options: {
     // Fence asynchronous identity reads before any database teardown. An
     // outstanding HTTP request can complete only with a safe failure now.
     signIn?.stop();
+    accounts?.stop();
     await adminSetup?.stop();
     // Collected before the rooms are closed, because closing one removes the
     // connection that names its socket. See openSockets.

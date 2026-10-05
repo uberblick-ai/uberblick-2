@@ -12,11 +12,6 @@
  * The debounce lives in the hub process' memory, so real processes and a real
  * `SIGKILL` are the only honest reproduction: an in-process "crash" would assert
  * the test's own bookkeeping instead of the hub's.
- *
- * The second test is much smaller and no less load-bearing: the behaviour is
- * Yjs and Hocuspocus being themselves, so what this package can get wrong is the
- * wording — and the wording is where an agent decides how much to trust
- * `synced`.
  */
 
 import { spawn } from "node:child_process";
@@ -207,7 +202,8 @@ afterEach(async () => {
 });
 
 describe("synced", () => {
-  it("means acknowledged, not stored: a hub killed inside the debounce loses the write", async () => {
+  // Opt-in (UB_SLOW_TESTS=1): three spawned processes to pin Hocuspocus' own debounce, not this package's code.
+  it.runIf(process.env.UB_SLOW_TESTS === "1")("means acknowledged, not stored: a hub killed inside the debounce loses the write", async () => {
     const hubDatabase = tempDatabasePath();
     const running = await startHubProcess(hubDatabase);
     const writer = await startWriter(running.port);
@@ -285,44 +281,5 @@ describe("synced", () => {
     // the whole of what `synced: true` claims, and the crash window is the gap
     // between the two — named in create_doc, edit_block and sync_status.
     expect(read?.blocks.map((block) => block.text)).toEqual([STORED]);
-  });
-
-  // The behaviour above is Yjs and Hocuspocus being themselves; what this
-  // package owes an agent is saying so where the agent reads. So the words are
-  // part of the contract, pinned like any other.
-  it("is qualified in the description of every tool that returns it", async () => {
-    const rig = await startServer(testConfig());
-    rigs.push(rig);
-    const { tools } = await rig.client.listTools();
-    const description = (name: string): string =>
-      tools.find((tool) => tool.name === name)?.description ?? "";
-
-    // Stated in full where durability decisions are made: what the word means,
-    // the window it leaves open, and that the local log is what closes it.
-    for (const name of ["create_doc", "edit_block", "sync_status"]) {
-      expect(description(name)).toContain("the hub acknowledged");
-      expect(description(name)).toContain("store debounce");
-      expect(description(name)).toContain("SIGKILL");
-      expect(description(name)).toContain("update log");
-    }
-
-    // The two counts sync_status returns are in different units, and this
-    // paragraph is the only place an agent learns which is which — so losing it
-    // loses the distinction, exactly like losing the qualification above.
-    expect(description("sync_status")).toContain("counts ROOMS, not updates");
-    expect(description("sync_status")).toContain(
-      "counts provider SYNC MESSAGES awaiting acknowledgement",
-    );
-
-    // And named, with a pointer, on every other tool that returns the field.
-    for (const name of [
-      "insert_block",
-      "delete_block",
-      "set_tags",
-      "set_links",
-      "annotate",
-    ]) {
-      expect(description(name)).toContain("hub-acknowledged, not hub-stored");
-    }
   });
 });

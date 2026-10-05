@@ -33,9 +33,14 @@ agents:
       - acceptEdits
       - --permission-prompts
       - none
+      # The run's private scratch directory, writable without a prompt.
+      - --add-dir
+      - "{scratch}"
       - --allowedTools
       - "Bash(git *)"
       - "Bash(gh *)"
+      # Reports go through the launcher's own installation, not whatever `ub-agents` PATH finds.
+      - "Bash({report_command} report *)"
       - "Bash(ub-agents *)"
       - "Bash(mise *)"
       - "mcp__uberblick__*"
@@ -59,11 +64,6 @@ agents:
       - "Bash(find *)"
       - "Bash(jq *)"
       - "Bash(node *)"
-      - --strict-mcp-config
-      - --mcp-config
-      # Inline configuration also applies when a private run checks out an old
-      # PR whose .mcp.json still names the source-following bare ub command.
-      - '{"mcpServers":{"uberblick":{"type":"stdio","command":"sh","args":["-c","exec \"$HOME/.local/bin/uberblick-corpus-mcp\""]}}}'
 
   issue-reviewer:
     runtime: "codex:gpt-6.1-sol:xhigh"
@@ -79,9 +79,9 @@ agents:
       - --sandbox
       - danger-full-access
       - -c
-      - 'mcp_servers.uberblick.command="sh"'
+      - 'mcp_servers.uberblick.command="mise"'
       - -c
-      - 'mcp_servers.uberblick.args=["-c", ''exec "$HOME/.local/bin/uberblick-corpus-mcp"'']'
+      - 'mcp_servers.uberblick.args=["exec", "--", "ub", "mcp", "serve"]'
       - -c
       - 'mcp_servers.uberblick.default_tools_approval_mode="approve"'
 

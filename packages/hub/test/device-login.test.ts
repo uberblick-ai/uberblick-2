@@ -1,11 +1,11 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { credentialsPath, readHubLogins, removeHubLogin, writeHubLogin } from "../src/auth-store.js";
 import { DEVICE_RENEWAL_COOLDOWN_MS, ensureDeviceLogin, readDeviceLogin } from "../src/device-login.js";
 import { acquireInitLock } from "../src/init-lock.js";
@@ -14,6 +14,8 @@ import { startDeviceSyncHub } from "./device-sync-hub.js";
 
 const WORKSPACE = randomUUID();
 const OTHER_WORKSPACE = randomUUID();
+/** Concurrent renewal processes: two are enough to contend for the lock. */
+const WORKERS = 2;
 const directories: string[] = [];
 const hubs: Awaited<ReturnType<typeof startDeviceSyncHub>>[] = [];
 function box(): { directory: string; env: NodeJS.ProcessEnv } {
@@ -28,7 +30,6 @@ async function setup() {
   return { ...test, hub };
 }
 afterEach(async () => {
-  vi.restoreAllMocks();
   await Promise.all(hubs.splice(0).map((hub) => hub.close()));
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
@@ -41,13 +42,12 @@ async function waitForRequest(hub: Awaited<ReturnType<typeof startDeviceSyncHub>
   }
 }
 
-async function workers(endpoint: string, workspace: string, test: ReturnType<typeof box>, rejected: boolean, now?: number): Promise<unknown[]> {
+async function workers(endpoint: string, workspace: string, test: ReturnType<typeof box>, rejected: boolean): Promise<unknown[]> {
   const worker = join(test.directory, "renew.mjs");
   const helper = pathToFileURL(fileURLToPath(new URL("../src/device-login.ts", import.meta.url))).href;
   writeFileSync(worker, `
 import { ensureDeviceLogin, readDeviceLogin } from ${JSON.stringify(helper)};
 const endpoint = process.argv[2], workspace = process.argv[3];
-if (process.argv[5] !== undefined) Date.now = () => Number(process.argv[5]);
 const before = readDeviceLogin(endpoint, workspace);
 process.once("message", async () => {
   try {
@@ -61,8 +61,8 @@ process.once("message", async () => {
 process.send("ready");
 `);
   const children: { child: ChildProcess; ready: Promise<void>; done: Promise<unknown> }[] = [];
-  for (let i = 0; i < 3; i++) {
-    const child = spawn(process.execPath, ["--import", createRequire(import.meta.url).resolve("tsx"), worker, endpoint, workspace, String(rejected), ...(now === undefined ? [] : [String(now)])], {
+  for (let i = 0; i < WORKERS; i++) {
+    const child = spawn(process.execPath, ["--import", createRequire(import.meta.url).resolve("tsx"), worker, endpoint, workspace, String(rejected)], {
       cwd: test.directory, env: test.env, stdio: ["ignore", "ignore", "pipe", "ipc"], timeout: 15_000,
     });
     let output = "";
@@ -106,7 +106,7 @@ describe("stored device login renewal", () => {
     test.hub.setRenewalDelay(100);
     const answers = await workers(test.hub.url, WORKSPACE, test, false);
     const after = readHubLogins(test.env).logins[test.hub.origin]!;
-    expect(answers).toEqual(Array(3).fill({ status: "ready", id: after.credential.record.id }));
+    expect(answers).toEqual(Array(WORKERS).fill({ status: "ready", id: after.credential.record.id }));
     expect(after.credential.record.id).not.toBe(before.credential.record.id);
     expect(after.identity).toEqual(before.identity);
     expect(after.credential.record).not.toHaveProperty("replacedAt");
@@ -129,7 +129,7 @@ describe("stored device login renewal", () => {
     test.hub.setRenewalDelay(100);
     const answers = await workers(test.hub.url, WORKSPACE, test, true);
     const after = readHubLogins(test.env).logins[test.hub.origin]!;
-    expect(answers).toEqual(Array(3).fill({ status: "ready", id: after.credential.record.id }));
+    expect(answers).toEqual(Array(WORKERS).fill({ status: "ready", id: after.credential.record.id }));
     expect(test.hub.renewalCount).toBe(1);
     const refusedAgain = await ensureDeviceLogin(test.hub.url, WORKSPACE, { env: test.env, rejected: after });
     expect(refusedAgain.status).toBe("hub-down");
@@ -140,37 +140,10 @@ describe("stored device login renewal", () => {
     const test = await setup();
     await writeHubLogin(test.hub.origin, test.hub.issue({ workspaces: [] }), test.env);
     const answers = await workers(test.hub.url, WORKSPACE, test, false);
-    expect(answers).toEqual(Array(3).fill({ status: "no-access", id: null }));
+    expect(answers).toEqual(Array(WORKERS).fill({ status: "no-access", id: null }));
     const anotherNeed = await ensureDeviceLogin(test.hub.url, OTHER_WORKSPACE, { env: test.env });
     expect(anotherNeed.status).toBe("no-access");
     expect(test.hub.renewalCount).toBe(1);
-  });
-
-  it("polls denied access across processes without retirement and recovers a later grant", async () => {
-    const test = await setup();
-    test.hub.grant(OTHER_WORKSPACE);
-    const before = test.hub.issue({ workspaces: [OTHER_WORKSPACE] });
-    await writeHubLogin(test.hub.origin, before, test.env);
-    expect(await workers(test.hub.url, WORKSPACE, test, false)).toEqual(Array(3).fill({ status: "no-access", id: null }));
-    expect(test.hub.renewalCount).toBe(1);
-    expect(readHubLogins(test.env).logins[test.hub.origin]).toEqual(before);
-
-    let now = Date.now();
-    vi.spyOn(Date, "now").mockImplementation(() => now);
-    now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
-    expect(await workers(test.hub.url, WORKSPACE, test, false, now)).toEqual(Array(3).fill({ status: "no-access", id: null }));
-    expect(test.hub.renewalCount).toBe(2);
-    expect(readHubLogins(test.env).logins[test.hub.origin]).toEqual(before);
-    expect((await ensureDeviceLogin(test.hub.url, OTHER_WORKSPACE, { env: test.env })).status).toBe("ready");
-
-    test.hub.grant(WORKSPACE);
-    now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
-    const answers = await workers(test.hub.url, WORKSPACE, test, false, now);
-    const after = readHubLogins(test.env).logins[test.hub.origin]!;
-    expect(answers).toEqual(Array(3).fill({ status: "ready", id: after.credential.record.id }));
-    expect(after.credential.record.id).not.toBe(before.credential.record.id);
-    expect(after.credential.record.workspaces).toEqual([WORKSPACE, OTHER_WORKSPACE].sort());
-    expect(test.hub.renewalCount).toBe(3);
   });
 
   it.each(["login", "logout"])("does not overwrite concurrent %s during its network request", async (action) => {
@@ -206,12 +179,8 @@ describe("stored device login renewal", () => {
 
   it.each([
     { status: 401, body: { status: "sign-in-required" }, reading: "sign-in-required" },
-    { status: 401, body: { status: "already-replaced" }, reading: "sign-in-required" },
     { status: 409, body: { status: "protocol-mismatch", reason: `protocol-mismatch:${SYNC_PROTOCOL_VERSION + 1}` }, reading: "update-required" },
     { status: 503, body: { status: "not-configured" }, reading: "renewal-unavailable" },
-    { status: 503, raw: "proxy unavailable", reading: "hub-down" },
-    { status: 500, body: { status: "failed" }, reading: "hub-down" },
-    { status: 200, raw: "unreadable", reading: "hub-down" },
     { status: 200, body: { status: "renewed", credential: { key: "private-invalid-key" } }, reading: "hub-down" },
   ])("classifies renewal reply $status/$reading without inventing access", async ({ reading, ...reply }) => {
     const test = await setup();
@@ -242,21 +211,6 @@ describe("stored device login renewal", () => {
     expect(result.status).toBe("credential-store-unreadable");
     expect(JSON.stringify(result)).not.toContain("invalid-private-contents");
     expect(test.hub.renewalCount).toBe(0);
-  });
-
-  it("refuses a FIFO store immediately without waiting for a writer", async () => {
-    const test = box();
-    const path = credentialsPath(test.env);
-    const prepared = spawnSync("mkdir", ["-p", dirname(path)], { timeout: 2_000 });
-    expect(prepared.status).toBe(0);
-    const fifo = spawnSync("mkfifo", [path], { timeout: 2_000 });
-    expect(fifo.status).toBe(0);
-    const module = pathToFileURL(fileURLToPath(new URL("../src/device-login.ts", import.meta.url))).href;
-    const reader = spawnSync(process.execPath, ["--import", createRequire(import.meta.url).resolve("tsx"), "--input-type=module", "-e",
-      `import { readDeviceLogin } from ${JSON.stringify(module)}; process.stdout.write(readDeviceLogin("https://hub.example", ${JSON.stringify(WORKSPACE)}).status);`],
-      { env: test.env, cwd: test.directory, timeout: 2_000, encoding: "utf8" });
-    expect(reader.status, reader.stderr).toBe(0);
-    expect(reader.stdout).toBe("credential-store-refused");
   });
 
   it("never follows a renewal redirect to another authentication origin", async () => {

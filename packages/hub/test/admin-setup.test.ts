@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { createConnection, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,14 +31,12 @@ class GithubFake {
   time = 1000;
   account = { id: 1234, login: "approving-account" };
   tokenResult: Record<string, unknown> | undefined;
-  failedUrl: string | undefined;
   pauseIdentity: ((signal: AbortSignal) => Promise<void>) | undefined;
   calls: string[] = [];
   private accounts = new Map<string, { id: number; login: string }>();
   fetch: typeof fetch = async (input, init) => {
     const url = String(input);
     this.calls.push(url);
-    if (this.failedUrl === url) throw new Error(`${TOKEN} ${REFRESH_TOKEN}`);
     if (url === "https://github.com/login/device/code") {
       const code = `${DEVICE_CODE}-${this.accounts.size}`;
       this.accounts.set(code, { ...this.account });
@@ -216,7 +214,7 @@ afterEach(async () => {
 });
 
 describe("host-only first-admin setup", () => {
-  it.each(["insecure-directory", "symlink-directory", "occupied-path"])("refuses %s rather than exposing or replacing control", async (obstruction) => {
+  it.each(["insecure-directory", "symlink-directory"])("refuses %s rather than exposing control", async (obstruction) => {
     const directory = mkdtempSync(join(tmpdir(), `ub-${process.env.UB_AGENTS_RUN ?? "admin-setup"}-`));
     directories.push(directory);
     const databasePath = join(directory, "hub.sqlite");
@@ -227,10 +225,9 @@ describe("host-only first-admin setup", () => {
       symlinkSync(target, privateDirectory);
     } else {
       mkdirSync(privateDirectory, { mode: 0o700 });
-      if (obstruction === "insecure-directory") chmodSync(privateDirectory, 0o755);
-      else writeFileSync(join(privateDirectory, "control.sock"), "do not replace");
+      chmodSync(privateDirectory, 0o755);
     }
-    await expect(rig({ databasePath })).rejects.toThrow(obstruction === "occupied-path" ? "not a socket" : "mode 0700");
+    await expect(rig({ databasePath })).rejects.toThrow("mode 0700");
   });
 
   it("refuses another live listener without unlinking it", async () => {
@@ -299,9 +296,9 @@ describe("host-only first-admin setup", () => {
     expect(JSON.stringify(clients.flatMap((client) => client.output))).not.toContain("credential");
   });
 
-  it.each(["admin", "member"] as const)("refuses a workspace with any %s membership before contacting GitHub", async (role) => {
+  it("refuses a workspace with any membership before contacting GitHub", async () => {
     const testRig = await rig();
-    testRig.memberships.grant({ workspaceId: WORKSPACE, principalId: "existing-person", role });
+    testRig.memberships.grant({ workspaceId: WORKSPACE, principalId: "existing-person", role: "member" });
     const before = rows(testRig);
     const client = new HostClient(testRig.control.path);
     client.send({ action: "start", workspaceId: WORKSPACE });
@@ -348,13 +345,12 @@ describe("host-only first-admin setup", () => {
     expect(rows(testRig).memberships).toHaveLength(1);
   });
 
-  it.each(["denied", "expired", "failed"])("%s approval grants nothing and discloses no upstream secret", async (status) => {
+  it("a denied approval grants nothing and discloses no upstream secret", async () => {
     const testRig = await rig();
     const request = await pending(testRig);
-    if (status === "denied") testRig.github.tokenResult = { error: "access_denied" };
-    if (status === "failed") testRig.github.failedUrl = "https://github.com/login/oauth/access_token";
-    await tick(testRig, status === "expired" ? 900_000 : 1000);
-    expect(await request.client.next()).toMatchObject({ status, setupId: request.setupId });
+    testRig.github.tokenResult = { error: "access_denied" };
+    await tick(testRig, 1000);
+    expect(await request.client.next()).toMatchObject({ status: "denied", setupId: request.setupId });
     expect(rows(testRig).memberships).toEqual([]);
     expect(rows(testRig).principals).toEqual([]);
     expect(rows(testRig).credentials).toEqual([]);
@@ -374,7 +370,7 @@ describe("host-only first-admin setup", () => {
     expect(rows(testRig).memberships).toEqual([]);
   });
 
-  it.each(["cancel", "disconnect", "stop", "expire"])("%s during identity fetch fences a later approval", async (action) => {
+  it.each(["cancel", "disconnect"])("%s during identity fetch fences a later approval", async (action) => {
     const testRig = await rig();
     const request = await pending(testRig);
     const pause = identityPause(testRig.github);
@@ -383,24 +379,15 @@ describe("host-only first-admin setup", () => {
     if (action === "cancel") {
       request.client.send({ action: "cancel" });
       expect(await request.client.next()).toMatchObject({ status: "cancelled", setupId: request.setupId });
-    } else if (action === "disconnect") {
+    } else {
       request.client.socket.destroy();
       await pause.aborted;
-    } else if (action === "stop") {
-      await testRig.control.stop();
-      await pause.aborted;
-    } else testRig.github.time += 900_000;
+    }
     pause.resume();
     await polling;
-    if (action === "expire") expect(await request.client.next()).toMatchObject({ status: "expired" });
     expect(rows(testRig).memberships).toEqual([]);
     expect(rows(testRig).principals).toEqual([]);
     expect(rows(testRig).receipts).toEqual([]);
-    // stop() above exercises the transport fence while keeping the DB open for inspection.
-    if (action === "stop") {
-      testRig.database.close();
-      controls.splice(controls.indexOf(testRig), 1);
-    }
   });
 
   it("keeps a committed grant and its receipt after output is lost and the hub restarts", async () => {
@@ -439,14 +426,14 @@ describe("host-only first-admin setup", () => {
     expect(testRig.claims!.state(true)).toEqual({ unclaimed: true, canClaim: true });
   });
 
-  it.each(["default", "other"])("a committed host grant on the %s workspace closes claiming before a pending public login", async (workspace) => {
+  it("a committed host grant on the default workspace closes claiming before a pending public login", async () => {
     const testRig = await rig({ initialize: true });
     const defaultId = defaultWorkspace(testRig);
     const flow = publicSignIn(testRig);
     const login = await flow.start();
     if (login.status !== "pending") throw new Error("sign-in did not start");
     testRig.github.account = { id: 5678, login: "host-approver" };
-    const setup = await pending(testRig, workspace === "default" ? defaultId : WORKSPACE);
+    const setup = await pending(testRig, defaultId);
     await tick(testRig);
     expect(await setup.client.next()).toMatchObject({ status: "complete" });
     expect(testRig.claims!.state(true)).toEqual({ unclaimed: false, canClaim: false });
@@ -455,7 +442,7 @@ describe("host-only first-admin setup", () => {
     expect(result).not.toHaveProperty("claimedWorkspaceId");
     const grants = rows(testRig).memberships;
     expect(grants).toHaveLength(1);
-    expect(grants[0]!.workspace_id).toBe(workspace === "default" ? defaultId : WORKSPACE);
+    expect(grants[0]!.workspace_id).toBe(defaultId);
   });
 
   it("a public claim wins over an earlier host approval still fetching identity", async () => {

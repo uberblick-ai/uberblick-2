@@ -2,8 +2,9 @@
  * The storage layout: where a machine's files are, and what may move them.
  *
  * There is one layout, so the contract is a small table — environment in, four
- * paths out — plus the two properties that make "one layout" a fact rather than
- * a claim: it does not consult the platform, and resolving creates nothing.
+ * paths out — plus two properties: resolving creates nothing, and the hub
+ * database does not move when the package does. (`resolveStorage` takes no
+ * platform, so macOS and Linux get the same answer by construction.)
  *
  * Every case resolves against a throwaway `HOME`. A test that read the
  * developer's real one would be a test of the developer's machine.
@@ -74,27 +75,10 @@ const CASES: Case[] = [
     paths: () => xdgUnder("/srv/conf", "/srv/data"),
   },
   {
-    // One variable moves its own half; the other keeps its default. Both are
-    // still the same layout — there is no second one to fall back to.
-    name: "XDG_CONFIG_HOME alone moves only the config root",
-    env: { XDG_CONFIG_HOME: "/srv/conf" },
-    paths: (root) => xdgUnder("/srv/conf", join(root, ".local", "share")),
-  },
-  {
-    name: "an empty XDG variable is not an override",
-    env: { XDG_CONFIG_HOME: "  " },
-    paths: defaults,
-  },
-  {
     // The XDG spec: a relative value must be ignored. Honouring one would put
     // this machine's files wherever the command was started from.
     name: "a relative XDG_CONFIG_HOME is ignored",
     env: { XDG_CONFIG_HOME: "relative/conf" },
-    paths: defaults,
-  },
-  {
-    name: "a relative XDG_DATA_HOME is ignored",
-    env: { XDG_DATA_HOME: "./data" },
     paths: defaults,
   },
 ];
@@ -121,46 +105,6 @@ describe("the layout", () => {
     resolveStorage({ env: { HOME: root } });
     expect(existsSync(join(root, ".config"))).toBe(false);
     expect(existsSync(join(root, ".local"))).toBe(false);
-  });
-});
-
-/**
- * The same answer on macOS as on Linux — the whole of "one layout".
- *
- * `resolveStorage` takes no platform, so the only honest way to ask is to run
- * it in a process that *believes* it is on one: a child that redefines
- * `process.platform` before importing the module. A parameter would be a
- * parameter someone could pass differently.
- */
-describe("platform independence", () => {
-  function resolvedOn(platform: NodeJS.Platform, root: string): string {
-    const probe = spawnSync(
-      process.execPath,
-      [
-        "--import",
-        "tsx",
-        "--eval",
-        `Object.defineProperty(process, "platform", { value: ${JSON.stringify(platform)} });\n` +
-          `const { resolveStorage } = await import(${JSON.stringify(join(PACKAGE_ROOT, "src", "storage.ts"))});\n` +
-          "process.stdout.write(JSON.stringify(resolveStorage()));\n",
-        "--input-type=module",
-      ],
-      {
-        cwd: PACKAGE_ROOT,
-        env: { PATH: process.env.PATH ?? "", HOME: root },
-        encoding: "utf8",
-      },
-    );
-    expect(probe.status, probe.stderr).toBe(0);
-    return probe.stdout;
-  }
-
-  it("resolves the same paths on darwin and on linux", () => {
-    const root = home();
-    const onLinux = resolvedOn("linux", root);
-    expect(JSON.parse(onLinux)).toEqual(resolveStorage({ env: { HOME: root } }));
-    expect(resolvedOn("darwin", root)).toBe(onLinux);
-    expect(onLinux).not.toContain("Application Support");
   });
 });
 

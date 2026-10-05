@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The executable link between a repository scenario and the Playwright test
  * that defends it (#668).
@@ -119,21 +120,25 @@ function registeredTests(): RegisteredTest[] {
   return found;
 }
 
-describe("scenario ↔ test links", () => {
+describe("scenario ↔ test links", { timeout: 60_000 }, () => {
   const scenarios = readdirSync(scenarioDir)
     .filter((file) => file.endsWith(".md"))
     .map(readScenario);
-  const registered = registeredTests();
-  const annotated = registered.filter((test) => test.scenarioIds.length > 0);
+  // Enumerated on first use rather than at collection: listing spawns
+  // Playwright over every spec, and collection is not where that cost belongs.
+  let registered: RegisteredTest[] | undefined;
+  const registeredOnce = (): RegisteredTest[] => (registered ??= registeredTests());
+  const annotated = (): RegisteredTest[] =>
+    registeredOnce().filter((test) => test.scenarioIds.length > 0);
 
   it("has at least one link to check", () => {
     expect(scenarios.length).toBeGreaterThan(0);
-    expect(annotated.length).toBeGreaterThan(0);
+    expect(annotated().length).toBeGreaterThan(0);
   });
 
   it("resolves every scenario to exactly one registered test that names it back", () => {
     for (const scenario of scenarios) {
-      const matches = registered.filter(
+      const matches = registeredOnce().filter(
         (test) => test.spec === scenario.spec && test.title === scenario.title,
       );
       expect(matches, `${scenario.id} must name exactly one registered test`).toHaveLength(1);
@@ -142,7 +147,7 @@ describe("scenario ↔ test links", () => {
   });
 
   it("resolves every annotated test to exactly one scenario file that names it back", () => {
-    for (const test of annotated) {
+    for (const test of annotated()) {
       expect(test.scenarioIds, `${test.spec} › ${test.title}`).toHaveLength(1);
       const matches = scenarios.filter((scenario) => scenario.id === test.scenarioIds[0]);
       expect(matches, `${test.spec} › ${test.title} must name one scenario`).toHaveLength(1);

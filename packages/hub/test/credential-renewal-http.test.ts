@@ -3,10 +3,11 @@ import { CredentialRegistry, type CredentialRenewal, type IssuedCredential } fro
 import type { HubLogRecord } from "../src/log.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
+import { PrincipalRegistry } from "../src/principals.js";
 import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
 import type { Hub } from "../src/server.js";
 import { importCredentialKey, mintRequestProof } from "../src/token.js";
-import { removeTempDatabases, startHub, tempDatabasePath, WORKSPACE } from "./helpers.js";
+import { OTHER_WORKSPACE, removeTempDatabases, startHub, tempDatabasePath, WORKSPACE } from "./helpers.js";
 
 const hubs: Hub[] = [];
 afterEach(async () => {
@@ -49,6 +50,50 @@ async function post(hub: Hub, body: unknown, options: { raw?: string; headers?: 
 const envelope = (token: string, protocolVersion = SYNC_PROTOCOL_VERSION) => ({ protocolVersion, token });
 
 describe("public credential renewal", () => {
+  it("discovers a direct grant on each existing device's next renewal without GitHub approval", async () => {
+    const databasePath = tempDatabasePath();
+    const database = new HubDatabase(databasePath, (error) => { throw error; });
+    database.open();
+    let issued: IssuedCredential[];
+    let adminId: string;
+    let memberId: string;
+    try {
+      const principals = new PrincipalRegistry(database);
+      adminId = principals.identify("9999", "workspace-admin").id;
+      memberId = principals.identify("1234", "new-member").id;
+      const memberships = new MembershipRegistry(database);
+      memberships.grant({ workspaceId: WORKSPACE, principalId: adminId, role: "admin" });
+      memberships.grant({ workspaceId: OTHER_WORKSPACE, principalId: memberId, role: "member" });
+      const credentials = new CredentialRegistry(database);
+      issued = [
+        credentials.issue({ principalId: memberId, deviceId: "empty-device", workspaces: [] }),
+        credentials.issue({ principalId: memberId, deviceId: "existing-device", workspaces: [OTHER_WORKSPACE] }),
+      ];
+    } finally {
+      database.close();
+    }
+    const github = vi.fn<typeof fetch>(async () => { throw new Error("GitHub is unreachable"); });
+    const hub = await startHub({ databasePath, github: { clientId: "Iv1.0123456789abcdef", fetch: github } });
+    hubs.push(hub);
+    hub.memberships!.grantMember({ workspaceId: WORKSPACE, actorPrincipalId: adminId, principalId: memberId, role: "member" });
+
+    for (const original of issued) {
+      const proof = await mintRequestProof(await importCredentialKey(original.keyBytes), {
+        kid: original.record.id, operation: "renew-credential", lifetimeSeconds: 60,
+      });
+      const renewed = await post(hub, { ...envelope(proof), ifWorkspacesChanged: true });
+      expect(renewed.code).toBe(200);
+      if (!("credential" in renewed.result)) throw new Error("direct grant did not renew");
+      expect(renewed.result.credential.record).toMatchObject({
+        principalId: memberId, deviceId: original.record.deviceId, workspaces: [WORKSPACE, OTHER_WORKSPACE].sort(),
+      });
+      expect(renewed.result.credential.record.id).not.toBe(original.record.id);
+      expect(hub.credentials!.get(original.record.id)?.replacedAt).toBeTypeOf("number");
+    }
+    expect(github).not.toHaveBeenCalled();
+    expect(hub.memberships!.roleFor(WORKSPACE, memberId)).toBe("member");
+  });
+
   it("returns no key when conditional renewal finds unchanged memberships", async () => {
     const { hub, proof, issued } = await rig();
     const renewed = await post(hub, { ...envelope(proof), ifWorkspacesChanged: true });

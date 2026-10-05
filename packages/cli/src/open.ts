@@ -13,7 +13,7 @@
  * Four decisions are load-bearing:
  *
  * 1. **It starts a hub only when it has to.** A hub answering at the configured
- *    endpoint — a remote one after `ub remote join`, or one somebody started
+ *    endpoint — a remote one after `ub workspace join`, or one somebody started
  *    with `mise run hub` — is used as it is, and Ctrl-C leaves it running. Only
  *    a *local* endpoint with nothing answering gets a hub of our own, started
  *    in this process with {@link createHub} so that stopping it is the same
@@ -97,7 +97,7 @@ import {
   readAuthEnvelope,
 } from "@uberblick/hub/protocol";
 import { clampToken } from "@uberblick/hub/token";
-import { isLoopbackEndpoint, isLoopbackHost } from "@uberblick/hub/remote-url";
+import { isLoopbackHost } from "@uberblick/hub/remote-url";
 import {
   DIRECTORY_SUFFIX,
   SIDEBAR_SUFFIX,
@@ -108,13 +108,15 @@ import {
   ServingReplicaHeldError,
   collectServingSyncStatus,
   createMcpEngine,
+  usesDeviceLogin,
   type ServingSyncStatus,
   type UberblickMcpEngine,
 } from "@uberblick/mcp-server";
 import { buildLockPath } from "./build-lock.js";
 import { budget, resolveMcpConfig } from "./budget.js";
+import { openBrowser } from "./browser.js";
 import { localBrowserKey } from "./browser-key.js";
-import { resolveConfig } from "./config.js";
+import { resolveConfig, requireBinding } from "./config.js";
 import { takeHelp } from "./help.js";
 import { isInstallPayload } from "./installation.js";
 import type { InitLock } from "./init-lock.js";
@@ -125,7 +127,7 @@ import {
   endpointOf,
   hubBind,
   isLocalHost,
-  probeHub,
+  probeHubState,
   probePort,
 } from "./probes.js";
 
@@ -710,14 +712,19 @@ interface Binding {
   hubUrl: string;
   workspace: string | null;
   hubAuthToken: string;
+  hubAdmission: string | null;
+  deviceAdmission: boolean;
 }
 
 function bindingOf(resolved: ReturnType<typeof resolveConfig>): Binding {
   const hubUrl = trimmed(resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
+  const deviceAdmission = usesDeviceLogin(hubUrl, resolved.env);
   return {
     hubUrl,
     workspace: trimmed(resolved.env.WORKSPACE_ID),
-    hubAuthToken: isLoopbackEndpoint(hubUrl) ? trimmed(resolved.env.HUB_AUTH_TOKEN) ?? "" : "",
+    hubAuthToken: deviceAdmission ? "" : trimmed(resolved.env.HUB_AUTH_TOKEN) ?? "",
+    hubAdmission: trimmed(resolved.env.HUB_ADMISSION),
+    deviceAdmission,
   };
 }
 
@@ -725,7 +732,10 @@ function sameBinding(left: Binding, right: Binding): boolean {
   return (
     left.hubUrl === right.hubUrl &&
     left.workspace === right.workspace &&
-    left.hubAuthToken === right.hubAuthToken
+    left.hubAdmission === right.hubAdmission &&
+    // A login changes live device authority, not the served binding. Local
+    // secret rotations still require restart while using local admission.
+    (left.deviceAdmission || right.deviceAdmission || left.hubAuthToken === right.hubAuthToken)
   );
 }
 
@@ -737,7 +747,7 @@ function sameBinding(left: Binding, right: Binding): boolean {
  * with what it resolved written over the process's own, so a `WORKSPACE_ID` or
  * `HUB_AUTH_TOKEN` that came from a file arrives back looking exactly like an
  * environment pin. Feeding that back in would freeze the first resolution's
- * file values into apparent permanent overrides, and no later `ub remote join`
+ * file values into apparent permanent overrides, and no later `ub workspace join`
  * would ever be seen again — the refresh would resolve, and resolve the same
  * answer forever. Passing the original environment keeps the precedence honest:
  * a genuine pin still wins every time, and a file value stays a file value.
@@ -756,7 +766,7 @@ function resolvedConfigDocument(resolved: ReturnType<typeof resolveConfig>): str
  * The per-request source of the unbound configuration document. It refreshes
  * the hub endpoint and publishes no workspace or browser key.
  *
- * `ub init`, `ub remote join` and `ub workspace use` publish `credentials.json`
+ * `ub init`, `ub workspace join` and `ub workspace use` publish `credentials.json`
  * and `config.json` as separate atomic writes, holding `.init.lock` across both.
  * Each file is therefore whole whenever it is read. This source uses the same
  * lock so its resolution sees a completed configuration publication.
@@ -1203,7 +1213,7 @@ function whyNotStartable(hubUrl: string, parsed: URL): string | null {
     return (
       `${preamble}\`ub open\` binds loopback only, and ${host} is not a loopback ` +
       "address. This command starts only loopback hubs; reaching a hub from " +
-      "another machine is the remote deployment's job (`ub remote init`, and " +
+      "another machine is the remote deployment's job (" +
       "REMOTE.md)"
     );
   }
@@ -1213,7 +1223,7 @@ function whyNotStartable(hubUrl: string, parsed: URL): string | null {
 /**
  * Make a hub available at the resolved endpoint, or explain why there is none.
  *
- * Reachability is a real client — {@link probeHub} mints a token and reads the
+ * Reachability is a real client — {@link probeHubState} mints a token and reads the
  * workspace's directory room — so "already answering" means a client would
  * actually connect, not that something accepted a TCP connection. Without a
  * workspace or a signing secret there is no such client to be, and the port is
@@ -1239,6 +1249,14 @@ async function ensureHub(
     return { started: null, note: `${hubUrl} (remote — nothing started here)` };
   }
 
+  if (usesDeviceLogin(hubUrl, resolved)) {
+    const workspace = trimmed(resolved.WORKSPACE_ID);
+    const probe = workspace === null ? null : await probeHubState(resolveMcpConfig(resolved), hubUrl);
+    const state = probe?.status === "hub-down" || probe?.status === "connecting"
+      ? "hub unreachable" : probe?.reason ?? "device-authenticated hub";
+    return { started: null, note: `${hubUrl} (${state}; nothing started here)` };
+  }
+
   const secret = trimmed(resolved.HUB_AUTH_TOKEN);
   const workspace = trimmed(resolved.WORKSPACE_ID);
 
@@ -1255,8 +1273,14 @@ async function ensureHub(
   }
 
   if (workspace !== null) {
-    if ((await probeHub(resolveMcpConfig(resolved), hubUrl)) === "connected") {
+    const probe = await probeHubState(resolveMcpConfig(resolved), hubUrl);
+    if (probe.status === "connected") {
       return { started: null, note: `${hubUrl} (already running — left alone)` };
+    }
+    if (probe.status === "auth-failed" || probe.status === "update-required") {
+      // Refused authority proves the endpoint is occupied, not permission to
+      // replace its hub. Device refusal keeps its sign-in recovery wording.
+      return { started: null, note: `${hubUrl} (${probe.reason ?? "credential refused"}; nothing started here)` };
     }
   } else {
     // No workspace, so no client to be, so no way to ask whether the thing on
@@ -1316,51 +1340,6 @@ async function ensureHub(
     throw error;
   }
   return { started: hub, note: `${hubUrl} (started here — Ctrl-C stops it)` };
-}
-
-// --- the browser -------------------------------------------------------------
-
-/** The command that opens a URL on this platform, or null when asked not to. */
-function browserCommand(
-  url: string,
-  env: NodeJS.ProcessEnv,
-): { command: string; args: string[] } | null {
-  const configured = trimmed(env.BROWSER);
-  if (configured === "none") {
-    return null;
-  }
-  if (configured !== null) {
-    return { command: configured, args: [url] };
-  }
-  if (process.platform === "darwin") {
-    return { command: "open", args: [url] };
-  }
-  if (process.platform === "win32") {
-    return { command: "cmd", args: ["/c", "start", "", url] };
-  }
-  return { command: "xdg-open", args: [url] };
-}
-
-/**
- * Hand the URL to a browser, and carry on regardless.
- *
- * A machine with no `xdg-open` is a headless one, and the URL is already on
- * stdout — failing the command over it would be refusing to serve because
- * nobody could be shown the door.
- */
-function openBrowser(url: string, env: NodeJS.ProcessEnv, io: Io): void {
-  const opener = browserCommand(url, env);
-  if (opener === null) {
-    return;
-  }
-  const child = spawn(opener.command, opener.args, {
-    stdio: "ignore",
-    detached: true,
-  });
-  child.on("error", (error) => {
-    io.err(`ub: warning: could not open a browser (${message(error)})\n`);
-  });
-  child.unref();
 }
 
 // --- the command -------------------------------------------------------------
@@ -1542,6 +1521,7 @@ export async function openCommand(
   const startupEnv: NodeJS.ProcessEnv = { ...process.env };
   const initial = await initialConfig(startupEnv);
   const resolved = initial.resolved;
+  requireBinding(resolved);
   for (const warning of resolved.warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }

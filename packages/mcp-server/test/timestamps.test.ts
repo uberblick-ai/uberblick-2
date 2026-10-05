@@ -133,26 +133,21 @@ describe("directory timestamps", () => {
     expect(stub(rig, doc.uuid).createdAt).toBe(T0);
   });
 
-  it("bumps updatedAt immediately on a tag change", async () => {
+  it("bumps updatedAt immediately on a tag or title change", async () => {
     const rig = await localRig();
-    const doc = await rig.ok("create_doc", { title: "Retagged", description: "A test document." });
+    const doc = await rig.ok("create_doc", { title: "Before", description: "A test document." });
 
     vi.setSystemTime(T0 + 1_000);
     await rig.ok("set_tags", { uuid: doc.uuid, tags: ["mcp"] });
     expect(stub(rig, doc.uuid).updatedAt).toBe(T0 + 1_000);
-  });
-
-  it("bumps updatedAt immediately on a title change", async () => {
-    const rig = await localRig();
-    const doc = await rig.ok("create_doc", { title: "Before", description: "A test document." });
 
     // The web editor's path: the title lives in the document, and the stub
     // follows it.
-    vi.setSystemTime(T0 + 1_000);
+    vi.setSystemTime(T0 + 2_000);
     setTitle(rig.instance.replicas.replica(doc.uuid).doc, "After");
     expect(stub(rig, doc.uuid)).toMatchObject({
       title: "After",
-      updatedAt: T0 + 1_000,
+      updatedAt: T0 + 2_000,
       createdAt: T0,
     });
   });

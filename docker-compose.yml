@@ -26,6 +26,7 @@ services:
       - hub
     environment:
       TAILSCALE_HOST: "${TAILSCALE_HOST:?set TAILSCALE_HOST in .env}"
+      TAILSCALE_IP: "${TAILSCALE_IP:?set TAILSCALE_IP in .env}"
       # Native operator names are validated by the image entrypoint before
       # becoming Caddy's HUB_URL and WORKSPACES. One bundle serves every host.
       WEB_HUB_URL: "${WEB_HUB_URL:-}"

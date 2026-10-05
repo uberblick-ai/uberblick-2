@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The hub token, as the client mints it.
  *

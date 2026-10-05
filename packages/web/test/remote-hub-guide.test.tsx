@@ -81,7 +81,7 @@ describe("the remote hub setup reading", () => {
     expect(text).toMatch(/one[- ]time|once/i);
     expect(text).toMatch(/workspace UUID.*report|reported.*workspace UUID/i);
     expect(commands(host)).toContain(`ub auth login '${window.location.origin}'`);
-    expect(commands(host)).toContain(`ub remote join '${window.location.origin}/<workspace-id>'`);
+    expect(commands(host)).toContain(`ub workspace join '${window.location.origin}/<workspace-id>'`);
     expect(commands(host)).toContain("ub open");
     expect(text).toMatch(/browser is not signed in/i);
   });
@@ -98,7 +98,7 @@ describe("the remote hub setup reading", () => {
     expect(text).toMatch(/workspace administrator/i);
     expect(text).toMatch(/already bound/i);
     expect(commands(host)).toContain(`ub auth login '${window.location.origin}'`);
-    expect(commands(host)).toContain(`ub remote join '${window.location.origin}/<workspace-id>'`);
+    expect(commands(host)).toContain(`ub workspace join '${window.location.origin}/<workspace-id>'`);
     expect(commands(host)).toContain("ub open");
     expect(text).not.toMatch(/hub is set up|sign-in is configured|sign-in is not configured/i);
 
