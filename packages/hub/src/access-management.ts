@@ -88,7 +88,7 @@ export async function handleAccessManagement(
           break;
         }
         const status = promotions.reserve(action.workspaceId, action.attemptId, current.principalId);
-        reply(status === "admin-required" ? 403 : status === "workspace-conflict" ? 409 : 200,
+        reply(status === "member-required" ? 403 : status === "workspace-conflict" ? 409 : 200,
           { status, workspaceId: action.workspaceId, attemptId: action.attemptId });
         break;
       }
