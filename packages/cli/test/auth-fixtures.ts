@@ -68,6 +68,7 @@ export class GithubFake {
   failAt: string | undefined;
   tokenHook: (() => void | Promise<void>) | undefined;
   identityHook: (() => void | Promise<void>) | undefined;
+  lookupHook: ((url: string) => Response | Promise<Response>) | undefined;
   fetch: typeof fetch = async (input) => {
     const url = String(input);
     this.calls.push(url);
@@ -82,6 +83,9 @@ export class GithubFake {
     if (url === "https://github.com/login/oauth/access_token") {
       await this.tokenHook?.();
       return Response.json(this.tokenResult);
+    }
+    if (url.startsWith("https://api.github.com/users/") || url.startsWith("https://api.github.com/user/")) {
+      return this.lookupHook?.(url) ?? Response.json({ id: 1234, login: USERNAME, type: "User" });
     }
     await this.identityHook?.();
     return Response.json({ id: 1234, login: USERNAME });
@@ -110,7 +114,7 @@ export async function serve(handler: (request: IncomingMessage, response: Server
   return { server, origin: `http://127.0.0.1:${address.port}` };
 }
 
-export async function rig(workspaces: string[] = [], configured = true, initializeDefaultWorkspace = false) {
+export async function rig(workspaces: string[] = [], configured = true, initializeDefaultWorkspace = false, deviceCredentials = false) {
   const box = sandbox();
   const github = new GithubFake();
   const logs: unknown[] = [];
@@ -119,7 +123,7 @@ export async function rig(workspaces: string[] = [], configured = true, initiali
     const hub = await createHub({
       authSecret: SIGNING_SECRET, port: 0, databasePath, log: (line) => logs.push(line),
       ...(configured ? { github: { clientId: "Iv23AbCdEF0123456789", fetch: github.fetch } } : {}),
-    }, { initializeDefaultWorkspace });
+    }, { initializeDefaultWorkspace, ...(deviceCredentials ? { deviceCredentials: true } : {}) });
     hubs.push(hub);
     return hub;
   };

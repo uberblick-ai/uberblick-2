@@ -655,6 +655,20 @@ signing-secret admission and need no GitHub, membership or login.
 
 ### Manage members and devices
 
+The terminal route to member management is `ub workspace member`:
+`add <github-handle> [--role admin|member]`, `list [--json]`,
+`role <member> <admin|member>` and `remove <member>`. These use the project's
+binding, including `UB_WORKSPACE_ID`/`UB_HUB_URL`, and this machine's stored
+device login. Missing workspace scope or a rejected credential triggers one
+renewal without GitHub approval; the commands never start a sign-in or change
+the binding. Add resolves the handle and requires an explicit yes at a terminal
+prompt naming the hub origin, workspace UUID, resolved login, permanent
+account ID and role. The confirmed account ID is granted. Existing members
+keep their roles. Role and remove match the current list by case-insensitive
+login or account ID and refuse ambiguous matches. Removal ends that account's
+workspace access on every device, revokes no devices and leaves other
+workspaces alone. Device management remains available through the API below.
+
 The shared HTTP interface is `POST /auth/manage` with a JSON body
 `{protocolVersion, token, operation, ...targets}`. It requires configured
 GitHub sign-in. Only `resolve-account` and `grant-member` contact GitHub;
