@@ -81,13 +81,37 @@ A correctable gap in a specification is not such a stop: correct it.
 
 Finish `needs-human`. The summary is the question, ready to answer:
 
-- what is blocked, and the one decision needed;
+- what is blocked, and each independent decision needed;
 - the answers to pick from, and your recommendation;
 - an @-mention of who can answer: the person who opened the issue (for a pull
   request, its issue) when they have write access, otherwise
   `@uberblick-ai/maintainers`;
 - the closing line `Answer here, then replace needs-human with <label>.`,
   naming `needs-preparation` on an issue or `needs-changes` on a pull request.
+
+Make the question scannable before the evidence. Give each independent decision
+its own short heading or numbered item. Aim for one or two plain-language
+sentences per decision: the choice and alternatives, what each means for the
+person, and the recommendation. Keep material risks and tradeoffs visible;
+brevity never justifies omitting or truncating them. Keep the @-mention and
+invitation to answer here visible too.
+
+Give the person one unambiguous next action and one place to answer. Keep the
+prescribed closing line visible outside collapsed details; it names the one
+next label required by this project's route.
+Launcher-generated steps for the stopped role apply only when that same role
+should resume; do not present them as an alternative when a correction or
+handoff requires another role.
+
+Put supporting technical evidence, commits, CI results and resume mechanics in
+a collapsed `<details>` block with a descriptive `<summary>`, or link to their
+existing record. If the launcher flattens Markdown (including ub-agents
+0.1.11), or the explanation is long, post a structured decision comment and
+link it from the concise report summary. Link the summary's invitation to answer
+to that comment, and keep the prescribed closing line visible in both records.
+The summary still names every independent choice, recommendation and material
+risk. This changes presentation only: the answer, authority, outcome and label
+rules below and above still apply.
 
 Any person with write access may answer. A comment from a person's account is
 the answer; one from `uberblick-agent` or a bot never is. The next run works
