@@ -16,6 +16,9 @@ import { dirname, join } from "node:path";
 import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { writeHubLogin, removeHubLogin } from "@uberblick/hub/auth-store";
+import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
+import { resolveConfig } from "../src/config.js";
 import {
   bridgeConfig,
   inspectRemote,
@@ -100,6 +103,21 @@ async function onHub(
 }
 
 describe("ub init <hub-url>", () => {
+  it("retains verified Docker device admission after logout", async () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const remote = await startDeviceSyncHub({ directory: box.cwd });
+    try {
+      remote.grant(WORKSPACE);
+      await writeHubLogin(remote.origin, remote.issue({ workspaces: [WORKSPACE] }), box.env);
+      const run = await runUbAsync(["init", remote.url, "--workspace", WORKSPACE, "--yes"], box);
+      expect(run.status, run.output).toBe(0);
+      await removeHubLogin(remote.origin, box.env);
+      const selected = resolveConfig({ env: box.env, cwd: box.cwd });
+      expect(selected.env.HUB_ADMISSION).toBe("device");
+      expect(selected.env.HUB_AUTH_TOKEN).toBeUndefined();
+    } finally { await remote.close(); }
+  });
+
   it("persists an explicit complete choice without borrowing a differing environment binding", async () => {
     const hub = await startHub();
     const box = sandbox();

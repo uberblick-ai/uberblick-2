@@ -3,10 +3,10 @@
 import { readdirSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/hub/storage";
-import { defaultDatabasePath } from "@uberblick/mcp-server";
+import { defaultDatabasePath, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";
-import { migrateHubAdmissions, resolveConfig } from "./config.js";
+import { migrateHubAdmissions, resolveConfig, writeHubAdmission } from "./config.js";
 import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { normalizeRemoteUrl } from "@uberblick/hub/remote-url";
 import { takeHelp } from "./help.js";
@@ -360,7 +360,10 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
 
   try {
     // Preserve endpoint metadata before the user removes obsolete selection keys.
-    warn(io, migrateHubAdmissions().warnings);
+    const admission = hub !== null && usesDeviceLogin(hub, { ...process.env, HUB_ADMISSION: undefined })
+      ? writeHubAdmission(hub, true)
+      : migrateHubAdmissions();
+    warn(io, admission.warnings);
     path = writeProjectBinding({ workspaceId: id, hubUrl: hub });
   } catch (error) {
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);

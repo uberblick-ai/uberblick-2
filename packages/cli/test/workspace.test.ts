@@ -2,6 +2,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { writeHubLogin, removeHubLogin } from "@uberblick/hub/auth-store";
+import { resolveConfig } from "../src/config.js";
 import { removeTempDirs, runUb, runUbAsync, sandbox, type Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -52,6 +54,29 @@ describe("ub workspace", () => {
     expect(shown.stdout).toContain("environment");
     expect(shown.stdout).toContain("local (this computer)");
   });
+});
+
+it("workspace use remembers device admission after logout and never clears another hub's mode", async () => {
+  const endpoint = "ws://localhost:8080/ws";
+  const otherEndpoint = "ws://localhost:8081/ws";
+  const box = sandbox({ credentials: { signingSecret: "synthetic-local-secret" } });
+  await writeHubLogin("http://localhost:8080", {
+    identity: { id: WORKSPACE, githubAccountId: "12345", githubUsername: "synthetic-person" },
+    credential: { record: { id: WORKSPACE, principalId: WORKSPACE, deviceId: OTHER,
+      workspaces: [WORKSPACE], issuedAt: 0, revokedAt: null }, key: Buffer.alloc(32).toString("base64url") },
+  }, box.env);
+  const selected = runUb(["workspace", "use", WORKSPACE, "--hub", endpoint], box);
+  expect(selected.status, selected.output).toBe(0);
+  await removeHubLogin("http://localhost:8080", box.env);
+  const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
+  expect(resolved.env.HUB_ADMISSION).toBe("device");
+  expect(resolved.env.HUB_AUTH_TOKEN).toBeUndefined();
+  const next = runUb(["workspace", "use", OTHER, "--hub", otherEndpoint], box);
+  expect(next.status, next.output).toBe(0);
+  expect(resolveConfig({ env: box.env, cwd: box.cwd }).env.HUB_ADMISSION).toBeUndefined();
+  const previous = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: endpoint }, cwd: box.cwd });
+  expect(previous.env.HUB_ADMISSION).toBe("device");
+  expect(previous.env.HUB_AUTH_TOKEN).toBeUndefined();
 });
 
 describe("ub workspace list", () => {

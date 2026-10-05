@@ -67,7 +67,7 @@ import { userInfo } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
-import { storeWorkspaceName } from "@uberblick/mcp-server";
+import { storeWorkspaceName, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId, validateWorkspaceName } from "@uberblick/schema";
 import { findCheckoutRoot } from "./checkout.js";
 import {
@@ -77,6 +77,7 @@ import {
   readUserConfig,
   resolveConfig,
   writeCredentials,
+  writeHubAdmission,
   writeUserConfig,
 } from "./config.js";
 import { takeHelp } from "./help.js";
@@ -756,6 +757,9 @@ export async function initCommand(
       displayName: name,
       color,
     });
+    if (hubInForce !== null && usesDeviceLogin(hubInForce, { ...process.env, HUB_ADMISSION: undefined })) {
+      for (const warning of writeHubAdmission(hubInForce, true).warnings) warnings.add(warning);
+    }
     configPath = writeProjectBinding({ workspaceId: workspace, hubUrl: hubInForce });
 
     // --- the signing secret -------------------------------------------------
