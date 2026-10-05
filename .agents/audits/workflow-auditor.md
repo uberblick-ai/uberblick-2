@@ -15,8 +15,9 @@ it unchanged.
 
 The audit may:
 
-- create issues in `uberblick-ai/uberblick-2`, without a trigger label, so they
-  wait until a maintainer queues them;
+- create issues in `uberblick-ai/uberblick-2`, or `uberblick-ai/ub-agents` for
+  project-neutral mechanisms only, without a trigger label, so they wait until
+  a maintainer queues them;
 - comment on an open issue that already covers a finding, with the new
   evidence;
 - post one summary reply in [Workflow audit
@@ -39,23 +40,47 @@ gh api graphql -F number=<board number> [-f after=<endCursor>] -f query='
     discussion(number:$number){comments(first:100,after:$after){
       pageInfo{hasNextPage endCursor}
       nodes{id url createdAt authorAssociation author{login}
-        body replies(first:100){totalCount nodes{id authorAssociation body}}}}}}}' \
-  --jq '.data.repository.discussion.comments
-    | {pageInfo, nodes: [.nodes[]
-        | select(.authorAssociation | IN("OWNER","MEMBER","COLLABORATOR"))
-        | .replies.nodes |= map(select(.authorAssociation | IN("OWNER","MEMBER","COLLABORATOR")))]}'
+        body replies(first:100){totalCount pageInfo{hasNextPage endCursor}
+          nodes{id url createdAt authorAssociation author{login} body}}}}}}}' \
+  --jq 'def trusted: .authorAssociation | IN("OWNER","MEMBER","COLLABORATOR");
+    .data.repository.discussion.comments
+    | {pageInfo,
+       nodes: [.nodes[] | select(trusted) | del(.replies)],
+       replies: [.nodes[] as $parent | $parent.replies.nodes[]
+         | select(trusted) | . + {parentId: $parent.id}],
+       replyPages: [.nodes[]
+         | {parentId: .id, totalCount: .replies.totalCount, pageInfo: .replies.pageInfo}],
+       notRead: [.nodes[] | (select(trusted | not) | .url),
+         (.replies.nodes[] | select(trusted | not) | .url)]}'
 ```
 
 Omit `after` on the first page, then repeat with `after` set to the returned
 `endCursor`, as a literal value, until `hasNextPage` is false; a board that
-silently stops at 100 comments hides the newest runs. Leave other authors' comments and replies unread and undeleted;
-list their comment URLs in the summary for a maintainer. Deleting a comment
-deletes its replies, so keep any comment whose reply `totalCount` is larger than
-the trusted replies you read.
+silently stops at 100 comments hides the newest runs. Page each `replyPages`
+entry with `hasNextPage` too, retaining its `parentId`:
 
-Before grouping, read your previous summary on #540 (trusted authors only)
-for its "Kept for next audit" list, so kept comments are judged with the reason
-they were kept.
+```sh
+gh api graphql -f id=<parent node id> -f after=<reply endCursor> -f query='
+  query($id:ID!,$after:String){node(id:$id){... on DiscussionComment{
+    replies(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor}
+      nodes{id url createdAt authorAssociation author{login} body}}}}}' \
+  --jq '.data.node.replies
+    | {totalCount, pageInfo,
+       nodes: [.nodes[]
+         | select(.authorAssociation | IN("OWNER","MEMBER","COLLABORATOR"))],
+       notRead: [.nodes[]
+         | select(.authorAssociation | IN("OWNER","MEMBER","COLLABORATOR") | not) | .url]}'
+```
+
+Read trusted replies even under an untrusted parent. Leave other authors'
+comments and replies unread and undeleted; the queries return only their URLs
+in `notRead`, for the summary's maintainer list.
+
+Before grouping, read the latest workflow-audit summary on #540 (trusted
+authors only), including "Seen once" and "Kept for next audit". Match new
+claims against that evidence and judge kept comments with the reason they were
+kept. Count distinct runs, never repeated reads or replies about the same
+occurrence.
 
 A retrospective is a claim, not evidence. Before filing, open the run's linked
 issue or PR and confirm the cost and cause from the durable record. Read only
@@ -69,8 +94,10 @@ group:
 
 - **File an issue** when the problem appears in at least two independent runs,
   or once when it could cause wrong product behavior, unauthorized work, lost
-  data or secrets, or work nobody can see. Search open issues first; when one
-  already covers it, add the new evidence there instead. One issue per mechanism,
+  data or secrets, or work nobody can see. Search open and closed issues first;
+  when an open issue already covers it, add the new evidence there instead.
+  Do not refile a mechanism closed as not planned unless new evidence changes
+  the reason for that disposition. One issue per mechanism,
   shaped by `.github/ISSUE_SPEC.md`: the cost observed, the runs as links, and
   the smallest change that would have prevented it. Prefer deleting or
   shortening procedural prose, or moving a mechanical step into the ub-agents
@@ -80,9 +107,14 @@ group:
 - **Keep** a comment when it is a single plausible occurrence of something
   serious that the next audit could confirm. Keep few; a kept comment is a
   question for the next run, not a backlog.
-- **Dismiss** everything else: nitpicks, preferences, one-off friction the agent
-  recovered from, things already fixed on `main`, and claims the record does
-  not support.
+- **Seen once** records a supported single occurrence with a real cost below
+  the filing bar: one line naming the mechanism and linking its durable run record,
+  since its board comment will be deleted. Carry unmatched entries into the next
+  summary until filed, covered by an existing issue, or dismissed with evidence
+  that they no longer apply. A match from another run meets the two-run bar even
+  across audits.
+- **Dismiss** everything else: nitpicks, preferences, friction with no real
+  cost, things already fixed on `main`, and claims the record does not support.
 
 ## Summary
 
@@ -105,6 +137,9 @@ Updated
 Kept for next audit
 - <comment link> — <what would confirm it> | None.
 
+Seen once
+- <mechanism> — <durable run link> | None.
+
 Dismissed
 - <count> comments: <short reasons, grouped>
 
@@ -117,8 +152,12 @@ fails, stop without deleting.
 
 ## Clean up
 
-After the summary is posted, delete every trusted comment you analyzed except
-the kept ones and those with replies you did not read:
+After the summary is posted, delete analyzed trusted replies first, except kept
+ones. Then delete analyzed trusted top-level comments except kept ones and
+parents with any remaining reply (kept, unread or untrusted). Deleting a parent
+with replies wipes its body and leaves the replies; it does not clean the thread.
+Use the same mutation for replies and parents, and leave a parent if a reply
+deletion fails:
 
 ```sh
 gh api graphql -f id=<comment node id> \

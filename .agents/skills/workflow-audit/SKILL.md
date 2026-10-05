@@ -2,9 +2,10 @@
 name: workflow-audit
 description: >-
   Run Uberblick's workflow audit when a maintainer asks, roughly weekly: read
-  the four role retrospective boards, file issues for what recurs or matters,
-  post a summary to Discussion #540 and delete the analyzed comments. Do not
-  use for a delivery role, issue or PR review, implementation, or a merge gate.
+  the four role retrospective boards, file issues for what recurs across audits
+  or matters, post a summary to Discussion #540 and delete the analyzed
+  comments. Do not use for a delivery role, issue or PR review, implementation,
+  or a merge gate.
 ---
 
 # Workflow audit
