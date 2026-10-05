@@ -33,9 +33,14 @@ agents:
       - acceptEdits
       - --permission-prompts
       - none
+      # The run's private scratch directory, writable without a prompt.
+      - --add-dir
+      - "{scratch}"
       - --allowedTools
       - "Bash(git *)"
       - "Bash(gh *)"
+      # Reports go through the launcher's own installation, not whatever `ub-agents` PATH finds.
+      - "Bash({report_command} report *)"
       - "Bash(ub-agents *)"
       - "Bash(mise *)"
       - "mcp__uberblick__*"
