@@ -338,17 +338,16 @@ async function hubCheck(
       `no signing secret, so ${config.hubUrl} was not dialled — this machine is local-only`,
     );
   }
-  // Which remedy applies is a property of the endpoint, not of the failure. A
-  // hub on this machine is one `ub open` away; a remote one is somebody's
-  // deployment, which this command can neither start nor pretend to.
-  const local = endpoint !== null && isLocalHost(endpoint.host);
+  // A local-admission hub is one `ub open` away. Device admission identifies
+  // an independent deployment even through loopback, which this command cannot start.
+  const local = config.deviceLogin === undefined && endpoint !== null && isLocalHost(endpoint.host);
   const hub = await dial(config.hubUrl);
   const status = hub.status;
   if (status === "connected") {
     return pass("hub", `${config.hubUrl} answered and served the directory room`);
   }
   if (status === "auth-failed") {
-    if (config.deviceLogin !== undefined) {
+    if (config.deviceLogin !== undefined || hub.authRecovery !== undefined) {
       return fail("hub", `${config.hubUrl} refused remote sync`, hub.reason ?? "Run `ub auth login <hub>` and obtain workspace access.");
     }
     // Narrower here than for a long-running client: this probe minted its

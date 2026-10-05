@@ -25,7 +25,11 @@ depends on that decision until a person answers, and continue independent
 work. This successor write is permitted; an unresolved challenge finishes
 `needs-human` under the shared escalation rules. No implementation, branches,
 PRs, implementation scheduling or priority changes. Preserve approved behavior and guarantees;
-escalate unresolved product choices rather than inventing them. Never silently
+escalate unresolved product choices rather than inventing them. An inference
+that decides who may do what, or widens network exposure or external
+resources, is an owner question unless an owner statement clearly covers it:
+on the issue or its parent, or in a corpus document or decision. Escalate it
+rather than listing it as a preparer inference. Never silently
 waive a serious finding. Shared role rules own workflow labels, permissions, escalation and retrospectives.
 
 ## Outcomes and handoff

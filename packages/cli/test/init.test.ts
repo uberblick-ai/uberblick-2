@@ -29,6 +29,7 @@ import {
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { findCheckoutRoot } from "../src/checkout.js";
+import { resolveConfig } from "../src/config.js";
 import {
   REPO_ROOT,
   removeTempDirs,
@@ -152,7 +153,8 @@ describe("ub init", () => {
   });
 
   it("creates a fresh workspace in another project after completing the documented legacy migration", () => {
-    const box = sandbox({ userConfig: { workspace: JOINED, hubUrl: "wss://legacy.example.test/ws", displayName: "Synthetic operator" } });
+    const oldHub = "ws://localhost:8080/proxy";
+    const box = sandbox({ userConfig: { workspace: JOINED, hubUrl: oldHub, hubAdmission: "device", displayName: "Synthetic operator" } });
     const first = { ...box, cwd: join(box.cwd, "first") };
     const second = { ...box, cwd: join(box.cwd, "second") };
     mkdirSync(first.cwd);
@@ -179,6 +181,11 @@ describe("ub init", () => {
     expect(fresh.hubUrl).toBeNull();
     expect(projectBinding(first)).toEqual(before);
     expect(userConfig(box).displayName).toBe("Synthetic operator");
+    expect(userConfig(box).hubAdmissions).toEqual({ [oldHub]: "device" });
+    expect(userConfig(box).hubAdmission).toBeUndefined();
+    const selected = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: JOINED, UB_HUB_URL: oldHub }, cwd: first.cwd });
+    expect(selected.env.HUB_ADMISSION).toBe("device");
+    expect(selected.env.HUB_AUTH_TOKEN).toBeUndefined();
     expect(existsSync(join(box.dataHome, "uberblick", `${fresh.workspaceId}.sqlite`))).toBe(true);
   });
 

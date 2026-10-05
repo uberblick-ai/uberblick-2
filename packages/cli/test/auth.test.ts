@@ -450,7 +450,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     assertPublicOnly(login, remote);
   });
 
-  it("keeps loopback sync disabled without a local secret and does not export its login key", async () => {
+  it("selects the stored login for loopback sync without a local secret and exports no key", async () => {
     const login = fixture();
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
@@ -459,7 +459,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
     const config = resolveMcpConfig(resolved.env);
     expect(config.authSecret).toBeNull();
-    expect(config.deviceLogin).toBeUndefined();
+    expect(config.deviceLogin !== undefined, "the selected origin uses device admission").toBe(true);
     expect(Object.values(resolved.env).every((value) => !value?.includes(login.credential.key)),
       "the child environment contains no stored device key").toBe(true);
     expect(JSON.stringify(config).includes(login.credential.key),
@@ -468,8 +468,8 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const status = await runUbAsync(["status", "--json"], box);
     expect(status.status, status.stderr).toBe(0);
     const report = JSON.parse(status.stdout);
-    expect(report.credentialPresent).toBe(false);
-    expect(report.hub.status).toBe("disabled");
+    expect(report.credentialPresent).toBe(true);
+    expect(report.hub.status).toBe("hub-down");
     const snippet = await runUbAsync(["mcp", "install", "zed", "--print"], box);
     expect(snippet.status, snippet.stderr).toBe(0);
     for (const output of [status.output, snippet.output, readFileSync(configPath(box), "utf8")]) {
@@ -516,7 +516,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
       const values = Object.values(process.env);
       process.stdout.write(JSON.stringify({
         deviceCredentialsAbsent: Object.values(stored.hubLogins).every(login => values.every(value => !value.includes(login.credential.key))),
-        signingSecretPresent: process.env.HUB_AUTH_TOKEN === stored.signingSecret,
+        signingSecretAbsent: process.env.HUB_AUTH_TOKEN === undefined,
         workspace: process.env.WORKSPACE_ID,
         hub: process.env.HUB_URL
       }));
@@ -532,7 +532,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     }
     expect(bridge.status).toBe(0);
     expect(JSON.parse(bridge.stdout)).toEqual({
-      deviceCredentialsAbsent: true, signingSecretPresent: true,
+      deviceCredentialsAbsent: true, signingSecretAbsent: true,
       workspace: WORKSPACE, hub: `${remote.origin.replace("http:", "ws:")}/ws`,
     });
     await remote.hub.stop();

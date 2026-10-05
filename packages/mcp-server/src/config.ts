@@ -6,7 +6,8 @@
  *
  * `HUB_URL` is plaintext config (an endpoint is not a secret) and the only
  * hardcoded address in this package is {@link DEFAULT_HUB_URL}. `HUB_AUTH_TOKEN`
- * is used only for loopback hubs; remote hubs use this machine's stored login.
+ * is used only for local loopback admission; deployed hubs use this machine's
+ * stored login even when a proxy is published on the host's loopback address.
  *
  * `WORKSPACE_ID` is required and has no default: it names the rooms, the token
  * claim and the local database, and a wrong guess would quietly open somebody
@@ -22,7 +23,8 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { resolveStorage } from "@uberblick/hub/storage";
-import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
+import { authenticationOrigin, isLoopbackEndpoint } from "@uberblick/hub/remote-url";
+import { readHubLogins } from "@uberblick/hub/auth-store";
 import { parseWorkspaceId } from "@uberblick/schema";
 
 /**
@@ -65,6 +67,8 @@ export interface McpConfig {
    * Programmatic loopback callers may select the same stricter admission.
    */
   deviceLogin?: { env?: NodeJS.ProcessEnv };
+  /** Credential-store location for a loopback hub that requires device admission. */
+  authEnv?: NodeJS.ProcessEnv;
   /** SQLite file holding the update log, snapshots and the derived index. */
   databasePath: string;
   /** This process's agent session id. Becomes the token's `sub`. */
@@ -145,6 +149,14 @@ function trimmed(value: string | undefined): string | null {
   return text === undefined || text === "" ? null : text;
 }
 
+/** A loopback proxy can reach a hub whose own bind requires device credentials. */
+export function usesDeviceLogin(endpoint: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!isLoopbackEndpoint(endpoint) || env.HUB_ADMISSION === "device") return true;
+  const origin = authenticationOrigin(endpoint);
+  const store = readHubLogins(env);
+  return store.logins[origin] !== undefined || store.unreadableHubs.includes(origin);
+}
+
 /** Direct server entry is internal; public `ub mcp serve` resolves the binding. */
 function missingWorkspace(): string {
   return "WORKSPACE_ID is not set for the internal MCP server. Use `ub mcp serve` with a .uberblick.json binding or both UB_WORKSPACE_ID and UB_HUB_URL. Run `ub init` for local setup or `ub remote join <hub>/<workspace>` for an existing workspace.";
@@ -162,13 +174,14 @@ export function resolveMcpConfig(
   const workspaceId = parseWorkspaceId(configured).uuid;
   const sessionId = `agent-${randomUUID()}`;
   const hubUrl = trimmed(env.HUB_URL) ?? DEFAULT_HUB_URL;
-  const remote = !isLoopbackEndpoint(hubUrl);
+  const remote = usesDeviceLogin(hubUrl, env);
 
   return {
     workspaceId,
     hubUrl,
     authSecret: remote ? null : trimmed(env.HUB_AUTH_TOKEN),
     ...(remote ? { deviceLogin: { env } } : {}),
+    authEnv: env,
     databasePath:
       trimmed(env.UBERBLICK_DB) ??
       defaultDatabasePath(workspaceId, env),

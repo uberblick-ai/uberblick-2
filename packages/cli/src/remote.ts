@@ -43,6 +43,7 @@ import {
   isIdentical,
   liveDocs,
   syncWorkspace,
+  usesDeviceLogin,
 } from "@uberblick/mcp-server";
 import type {
   Corpus,
@@ -51,7 +52,7 @@ import type {
   McpConfig,
 } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
-import { isLoopbackEndpoint, parseJoinTarget } from "@uberblick/hub/remote-url";
+import { parseJoinTarget } from "@uberblick/hub/remote-url";
 import { readDeviceLogin } from "@uberblick/hub/device-login";
 export { normalizeRemoteUrl, parseJoinTarget } from "@uberblick/hub/remote-url";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
@@ -59,8 +60,9 @@ import {
   readCredentials,
   requireBinding,
   resolveConfig,
+  writeHubAdmission,
 } from "./config.js";
-import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
+import { resolveProjectBinding, validateProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
@@ -99,17 +101,21 @@ export interface RemotePersistence {
 /** Persist the verified complete project destination in one atomic write. */
 export function setRemote(
   url: string,
-  options: { workspace?: string | undefined; env?: NodeJS.ProcessEnv; cwd?: string } = {},
+  options: { workspace?: string | undefined; env?: NodeJS.ProcessEnv; cwd?: string; deviceAdmission?: boolean } = {},
 ): RemotePersistence {
   const env = options.env ?? process.env;
   const current = resolveProjectBinding({ env: {}, ...(options.cwd === undefined ? {} : { cwd: options.cwd }) });
   const workspaceId = options.workspace ?? current.binding?.workspaceId;
   if (workspaceId === undefined) throw new Error("a workspace is required before binding a remote hub");
-  const path = writeProjectBinding({ workspaceId, hubUrl: url }, {
+  const binding = validateProjectBinding({ workspaceId, hubUrl: url }, "project binding");
+  // Failure to remember device admission must never leave the project pointing
+  // at a Docker hub that could later fall back to this computer's local secret.
+  const admission = writeHubAdmission(url, options.deviceAdmission === true, env);
+  const path = writeProjectBinding(binding, {
     env,
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
   });
-  return { written: [path], warnings: [] };
+  return { written: [...admission.written, path], warnings: admission.warnings };
 }
 
 function plural(count: number, noun: string): string {
@@ -248,15 +254,15 @@ operands:
                         \`ub remote init\` prints it, and \`ub status\` on the
                         machine that has the workspace names the id. ws:// or
                         wss:// is stored as given; a bare host and an https://
-                        or http:// address are read as the deployed
-                        wss://<host>/ws; a URL without an id is refused before
+                        address is read as the deployed wss://<host>/ws;
+                        http:// is read as ws://<host>/ws. A URL without an id is refused before
                         anything is written
 
 options:
   -h, --help            show this help
 
 Sign in with \`ub auth login <hub>\` before joining a remote workspace.
-A signing secret is used only for a loopback hub.`;
+A loopback-only development hub keeps its local signing-secret admission.`;
 
 interface JoinFlags {
   /** The endpoint, with the workspace id taken off it. */
@@ -451,10 +457,11 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     WORKSPACE_ID: flags.workspace,
     HUB_URL: flags.endpoint,
   };
+  if (flags.endpoint !== resolved.env.HUB_URL) delete bridgeEnv.HUB_ADMISSION;
   // Resolution withheld the local secret while bound to a remote endpoint.
   // Choosing a loopback target recovers that existing authority without
   // copying it into the configuration or credential store.
-  if (isLoopbackEndpoint(flags.endpoint)) {
+  if (!usesDeviceLogin(flags.endpoint, bridgeEnv)) {
     const stored = readCredentials();
     const secret = process.env.HUB_AUTH_TOKEN?.trim() ||
       (stored.exposed ? null : stored.signingSecret);
@@ -462,6 +469,9 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
   } else {
     delete bridgeEnv.HUB_AUTH_TOKEN;
   }
+  // An unknown loopback deployment with no local authority is still a device
+  // client; no signing secret is needed to join a released hub.
+  if (bridgeEnv.HUB_AUTH_TOKEN === undefined) bridgeEnv.HUB_ADMISSION = "device";
   let base: McpConfig;
   try {
     base = resolveMcpConfig(bridgeEnv);
@@ -549,6 +559,7 @@ async function joinCommand(argv: string[], io: Io): Promise<number> {
     previous = resolveProjectBinding({ env: {} }).binding;
     persistence = setRemote(bridge.target, {
       workspace: flags.workspace,
+      deviceAdmission: bridge.base.deviceLogin !== undefined || usesDeviceLogin(bridge.target, bridge.env),
     });
   } catch (error) {
     io.err(`ub remote join: ${error instanceof Error ? error.message : String(error)}\n`);

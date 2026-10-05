@@ -1,0 +1,11 @@
+# Linux only: Caddy obtains *.ts.net certificates from this host's daemon.
+# No socket is mounted for loopback or public DNS deployments.
+services:
+  caddy:
+    user: "0:0"
+    volumes:
+      - type: bind
+        source: /var/run/tailscale/tailscaled.sock
+        target: /var/run/tailscale/tailscaled.sock
+        bind:
+          create_host_path: false

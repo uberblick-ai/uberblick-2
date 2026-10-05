@@ -97,7 +97,7 @@ import {
   readAuthEnvelope,
 } from "@uberblick/hub/protocol";
 import { clampToken } from "@uberblick/hub/token";
-import { isLoopbackEndpoint, isLoopbackHost } from "@uberblick/hub/remote-url";
+import { isLoopbackHost } from "@uberblick/hub/remote-url";
 import {
   DIRECTORY_SUFFIX,
   SIDEBAR_SUFFIX,
@@ -108,6 +108,7 @@ import {
   ServingReplicaHeldError,
   collectServingSyncStatus,
   createMcpEngine,
+  usesDeviceLogin,
   type ServingSyncStatus,
   type UberblickMcpEngine,
 } from "@uberblick/mcp-server";
@@ -125,7 +126,7 @@ import {
   endpointOf,
   hubBind,
   isLocalHost,
-  probeHub,
+  probeHubState,
   probePort,
 } from "./probes.js";
 
@@ -710,14 +711,19 @@ interface Binding {
   hubUrl: string;
   workspace: string | null;
   hubAuthToken: string;
+  hubAdmission: string | null;
+  deviceAdmission: boolean;
 }
 
 function bindingOf(resolved: ReturnType<typeof resolveConfig>): Binding {
   const hubUrl = trimmed(resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
+  const deviceAdmission = usesDeviceLogin(hubUrl, resolved.env);
   return {
     hubUrl,
     workspace: trimmed(resolved.env.WORKSPACE_ID),
-    hubAuthToken: isLoopbackEndpoint(hubUrl) ? trimmed(resolved.env.HUB_AUTH_TOKEN) ?? "" : "",
+    hubAuthToken: deviceAdmission ? "" : trimmed(resolved.env.HUB_AUTH_TOKEN) ?? "",
+    hubAdmission: trimmed(resolved.env.HUB_ADMISSION),
+    deviceAdmission,
   };
 }
 
@@ -725,7 +731,10 @@ function sameBinding(left: Binding, right: Binding): boolean {
   return (
     left.hubUrl === right.hubUrl &&
     left.workspace === right.workspace &&
-    left.hubAuthToken === right.hubAuthToken
+    left.hubAdmission === right.hubAdmission &&
+    // A login changes live device authority, not the served binding. Local
+    // secret rotations still require restart while using local admission.
+    (left.deviceAdmission || right.deviceAdmission || left.hubAuthToken === right.hubAuthToken)
   );
 }
 
@@ -1213,7 +1222,7 @@ function whyNotStartable(hubUrl: string, parsed: URL): string | null {
 /**
  * Make a hub available at the resolved endpoint, or explain why there is none.
  *
- * Reachability is a real client — {@link probeHub} mints a token and reads the
+ * Reachability is a real client — {@link probeHubState} mints a token and reads the
  * workspace's directory room — so "already answering" means a client would
  * actually connect, not that something accepted a TCP connection. Without a
  * workspace or a signing secret there is no such client to be, and the port is
@@ -1239,6 +1248,14 @@ async function ensureHub(
     return { started: null, note: `${hubUrl} (remote — nothing started here)` };
   }
 
+  if (usesDeviceLogin(hubUrl, resolved)) {
+    const workspace = trimmed(resolved.WORKSPACE_ID);
+    const probe = workspace === null ? null : await probeHubState(resolveMcpConfig(resolved), hubUrl);
+    const state = probe?.status === "hub-down" || probe?.status === "connecting"
+      ? "hub unreachable" : probe?.reason ?? "device-authenticated hub";
+    return { started: null, note: `${hubUrl} (${state}; nothing started here)` };
+  }
+
   const secret = trimmed(resolved.HUB_AUTH_TOKEN);
   const workspace = trimmed(resolved.WORKSPACE_ID);
 
@@ -1255,8 +1272,14 @@ async function ensureHub(
   }
 
   if (workspace !== null) {
-    if ((await probeHub(resolveMcpConfig(resolved), hubUrl)) === "connected") {
+    const probe = await probeHubState(resolveMcpConfig(resolved), hubUrl);
+    if (probe.status === "connected") {
       return { started: null, note: `${hubUrl} (already running — left alone)` };
+    }
+    if (probe.status === "auth-failed" || probe.status === "update-required") {
+      // Refused authority proves the endpoint is occupied, not permission to
+      // replace its hub. Device refusal keeps its sign-in recovery wording.
+      return { started: null, note: `${hubUrl} (${probe.reason ?? "credential refused"}; nothing started here)` };
     }
   } else {
     // No workspace, so no client to be, so no way to ask whether the thing on

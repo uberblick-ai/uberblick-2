@@ -128,13 +128,16 @@ The repository holds no copy of it. Unless a secret is already supplied,
 `ub init` writes 32 random bytes to `credentials.json` (mode 0600) in this
 machine's config root — see [Where your files live](#where-your-files-live).
 It is generated only while this machine has **no hub endpoint stored**: a
-machine bound to a loopback hub needs that hub's secret. Remote bindings instead
-use the login established by `ub auth login`.
+machine bound to a loopback-only hub needs that hub's secret. Deployed Docker
+hubs use the login established by `ub auth login`, including through a proxy
+published on host loopback.
 
 A mise task reaches it the same way an MCP client's server does: every task that
 needs configuration wraps its command in `fnox exec -- ub env -- …`, and
 `ub env -- <command…>` execs the command under the configuration `ub`
-resolved and passes the signing secret only for loopback endpoints. Device
+resolved and passes the signing secret only for local admission. A stored
+login or a verified device-authenticated binding selects device credentials
+even for a loopback endpoint. Device
 credentials stay in the credential store, never child environments. So the
 precedence a task sees is `ub`'s own, highest first: an explicitly supplied
 secret in the environment, then `credentials.json`. There is
@@ -169,9 +172,11 @@ mise run fue          # the documented install path, executed on a clean machine
 mise run review <commit>  # immutable Docker review of one commit
 ```
 
-To run the hub and built web client on a remote Tailscale host, follow
-[REMOTE.md](REMOTE.md). The remote deployment uses Docker Compose and Caddy for
-TLS, WebSocket proxying, and SPA fallback.
+To run the released Docker hub on Linux or Docker Desktop on macOS, follow
+[REMOTE.md](REMOTE.md). It defaults to HTTP on host loopback without Tailscale.
+Other computers connect over HTTPS for a public DNS name or, as the recommended
+optional network layer, Tailscale. Caddy serves the app and proxies sync and
+sign-in; the hub requires device credentials on every deployment route.
 
 `mise run e2e` is the only task that drives a browser. It starts its own hub on
 an ephemeral port with a throwaway signing secret and a temp database, and its
@@ -357,7 +362,7 @@ across: the room key carries the workspace (`<workspaceId>/<docUuid>`, the
 directory at `<workspaceId>/_directory`), the token claim is scoped to it, and
 the local database is `<uuid>.sqlite`. There is nothing to create and nothing to
 migrate — a workspace is a uuid, and its rooms exist the moment something opens
-one. A loopback hub trusts its local signing secret. A remote hub admits only
+one. A loopback-only hub trusts its local signing secret. A deployed hub admits only
 a device credential naming the workspace with current membership, and closes
 sessions when that credential is revoked or membership is removed.
 
@@ -507,6 +512,9 @@ variables. Existing MCP entries must be updated to include both variables;
 installation reports conflicting entries without overwriting them.
 Plain `ub init` refuses an unbound project with legacy machine selection rather
 than creating a different workspace. Explicitly select the intended pair first.
+Before removing old settings, run `ub workspace use <workspace-id> --hub <hub-url|local>`
+once. It preserves the old endpoint's device-admission mode in private,
+endpoint-keyed metadata, including when the new project uses a different hub.
 After giving existing projects their bindings, finish migration by removing only
 the obsolete `workspace` and `hubUrl` keys from
 `$XDG_CONFIG_HOME/uberblick/config.json` (normally
@@ -565,30 +573,34 @@ opens a packaged install's database.
 
 ### Going remote: local first, then a hub, then a second computer
 
-The normal journey is local first and remote later, and `ub remote` is the part
-that keeps a corpus from being left behind when the endpoint changes. Documents
-a browser created live only in the local hub until an MCP session pulls them
-down, so an endpoint changed without them strands them.
+Start with local work, then join a shared hub when you need it. A published
+Docker hub runs on Linux or Docker Desktop on macOS, including Apple Silicon
+through `linux/amd64` emulation. The host needs no checkout or Homebrew client
+to run the containers. Follow [REMOTE.md](REMOTE.md) to extract an exact release,
+start it on host loopback and claim its fresh default workspace before wider
+exposure. **The host never updates itself**; its operator deliberately updates
+the release while keeping the same data volumes.
 
-**On the remote host** — a Linux box in your tailnet — one command from your own
-machine stands the hub and the web client up:
-`ub remote init <ssh-target>`, which [REMOTE.md](REMOTE.md) describes in full. It
-clones `main` onto the host and builds from it; **the host never updates
-itself** — `ub remote update <ssh-target>` deploys `origin/main` onto it when you
-mean to, and a change to wire semantics must update the clients in the same
-sitting. It ends by printing this machine's endpoint and the join URL, and
-persists the endpoint here.
+Existing Linux checkout deployments keep `ub remote init` and `ub remote update`
+with their Tailscale requirements until they switch to a release; see
+[the compatibility runbook](REMOTE.md#existing-checkout-deployments-compatibility).
 
 **On every computer**, including this one, one command binds a machine to the
 workspace, whatever is on it already:
 
-```
-ub auth login <host>.ts.net
-ub remote join wss://<host>.ts.net/ws/<workspace id>
+```sh
+ub auth login http://localhost:8080
+ub remote join ws://localhost:8080/ws/<workspace id>
 ```
 
-That URL is what `ub remote init` prints: the endpoint with the workspace id as
-its **last path segment**. `ub init [hub-url]` seeds starter documents; remote
+These commands use the default Docker route from the same computer; the claim
+reports its workspace UUID. The port is configurable. For other computers,
+configure HTTPS first, then use `ub auth login https://<host>` and
+`ub remote join wss://<host>/ws/<workspace id>` on each; Tailscale is optional.
+[REMOTE.md](REMOTE.md#choose-how-clients-reach-the-hub) gives the route settings
+and exact endpoints. Sign-in stores this computer's device credential and does
+not change its binding. Join selects the existing workspace by the URL's
+**last path segment**. `ub init [hub-url]` seeds starter documents; remote
 initialization requires membership for the selected UUID. `ub remote join`
 uses a workspace that already exists and seeds nothing. There is no operator suite beside them: nothing that
 repoints the clients without moving anything. The id has to travel,
@@ -819,10 +831,11 @@ of aborting. See
 `HUB_AUTH_TOKEN` is the HMAC secret loopback hub tokens are signed with, and
 `ub init` generates one when the machine has none. A loopback-only hub requires
 it. Remote hubs require GitHub sign-in configuration and admit only device
-credentials with membership. The MCP server
+credentials with membership, including the Docker proxy's host-loopback
+route. The MCP server
 keeps its local replica usable when its remote login is absent or refused,
-reports the needed action, and resumes sharing after login with access. A local
-loopback binding without a secret reports `hub.status: "disabled"`. `WORKSPACE_ID` it does
+reports the needed action, and resumes sharing after login with access. A
+local-admission binding without a secret reports `hub.status: "disabled"`. `WORKSPACE_ID` it does
 require — with none set it exits non-zero, naming `ub init` — and it reads
 `UBERBLICK_DB` (default `<uuid>.sqlite` in the data root — see [Where your files
 live](#where-your-files-live) — keyed by the bare uuid so both spellings of a
