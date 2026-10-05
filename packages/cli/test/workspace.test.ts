@@ -141,7 +141,10 @@ describe("ub workspace use", () => {
     const run = runUb(["workspace", "use", OTHER, "--hub", "https://other.example.test"], box);
     expect(run.status, run.output).toBe(0);
     expect(binding(box)).toEqual({ workspaceId: OTHER, hubUrl: "wss://other.example.test/ws" });
-    expect(JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"))).toEqual(userConfig);
+    expect(JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"))).toEqual({
+      ...userConfig,
+      hubAdmissions: { "wss://other.example.test/ws": "device" },
+    });
   });
 
   it("retains the selected destination when only changing its decorated spelling", () => {
