@@ -56,11 +56,8 @@ permissions or policy.
 - **Corpus context:** Uberblick project agent workflow
   (`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`) for the delivery model; Editorial
   contract (`5e0e25d8-c71f-44c3-9bf3-93662712c1fc`) before any corpus edit.
-- **MCP route:** use the registered `uberblick` server. Repository MCP entries
-  use the host-installed corpus launcher described in README, "Keep the corpus
-  client independent of the checkout". For a stdio fallback, run
-  `"$HOME/.local/bin/uberblick-corpus-mcp"` from private scratch. A missing or
-  incompatible pin stops corpus-dependent work; never substitute checkout `ub`.
+- **MCP route:** use the registered `uberblick` server (`ub mcp serve` through
+  mise, from `.mcp.json`).
 - **Commands:** `.agents/development.md`.
 - **Retrospectives and audit reports** go to one discussion per agent, posted
   with the node id below and never a guessed one, because a wrong id posts to a

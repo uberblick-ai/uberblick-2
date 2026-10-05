@@ -182,3 +182,10 @@ pull request you continue, and never rebase or force-push a pull request's
 head. A detached checkout is pushed with `git push origin
 HEAD:refs/heads/<branch>`. Leave other runs' worktrees and
 processes alone.
+
+Headless Claude runs deny, without a prompt, any shell command that is not on
+the allow list as written: shell expansion (`$VAR`, `${VAR}`, `$?`, `$(...)`,
+backticks) and loops (`for`, `while`) are denied even when every command inside
+is allowed. Run one plain command per call instead. Files outside the worktree
+and the run's `scratch` directory are not readable; read corpus documents
+through the corpus MCP tools.

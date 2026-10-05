@@ -620,10 +620,7 @@ describe("ub mcp install cursor", () => {
 
 describe("MCP install and the checkout's deployment override", () => {
   it("keeps the generic installed entry independent of the corpus deployment pin", () => {
-    // Generic users still receive the public ub mcp serve route. This project's
-    // deployment deliberately pins an installed version while its source and
-    // corpus hub upgrade independently; the launcher contract is tested in
-    // scripts/corpus-mcp.test.mjs.
+    // Generic users receive the public ub mcp serve route.
     const entry = JSON.parse(snippet("json", DEFAULT_ENTRY)).mcpServers.uberblick;
     expect([entry.command, ...entry.args]).toEqual(["ub", "mcp", "serve"]);
   });
