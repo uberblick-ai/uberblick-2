@@ -29,8 +29,8 @@ inspect the code and Pointers it depends on.
 - If an open pull request is expected to edit the same substantive files
   semantically ([scheduling rules](../protocols/workflow.md#scheduling-semantics)), mark this issue
   blocked by the issue that PR closes (`gh issue edit <N> --add-blocked-by
-  <M>`) and finish `defer`, naming it. When that PR closes no issue, finish
-  `defer` alone. An overlap the issue's Pointers classify as a mechanical
+  <M>`) and finish `defer`, naming it. When that PR closes no issue, record
+  the overlap in Pointers and build; whichever lands second merges the base. An overlap the issue's Pointers classify as a mechanical
   reconciliation is not a block only when the open PR's current diff confirms
   the scheduling rule's bounded additive aggregation exception. A rewrite of
   the same substantive file does not qualify. Follow qualifying Pointers and build.

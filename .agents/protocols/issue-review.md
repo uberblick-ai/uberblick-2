@@ -27,16 +27,18 @@ reopening them. Changed outcomes or guarantees and unresolved owner choices use
 Classify each finding:
 
 - `correctable` — repository evidence or settled intent is sufficient for a
-  meaning-preserving issue edit; the preparer applies it;
+  meaning-preserving issue edit. Apply a correctable P3 to the body yourself
+  and note it in the verdict; the preparer applies a correctable P1 or P2;
 - `owner-boundary` — product or agent authority, safety, or the fundamental
   work shape needs a person's decision; escalate it yourself.
 
-Do not edit the issue or turn implementation preferences into requirements.
+Make no other issue edit, and do not turn implementation preferences into
+requirements.
 
 ## Outcomes and handoff
 
-- `approve` — no material findings.
-- `changes` — correctable findings.
+- `approve` — no material findings, or only correctable P3s you applied.
+- `changes` — a correctable P1 or P2.
 - `needs-human` — an owner-boundary finding; escalate it yourself under
   [human-decisions.md](human-decisions.md).
 - `defer` — a document the judgment needs could not be read; name it and the

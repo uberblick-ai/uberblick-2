@@ -52,7 +52,8 @@ Parallelism is judged at file level; overlapping `Touches` sets alone do not
 serialize work, including `schema`. For expected semantic edits to the same
 substantive files, the later implementer blocks its issue on the issue the open
 PR closes and finishes `defer`. If the PR closes none, record the overlap in
-Pointers and defer without inventing a dependency. Bounded overlap in purely
+Pointers and build without inventing a dependency; whichever lands second
+merges the base. Bounded overlap in purely
 additive aggregation surfaces (barrel exports, independent error collections)
 is reconciled mechanically: after the earlier merge, synchronize with a
 non-rewriting merge only if mergeability requires it, then rerun every exact-head

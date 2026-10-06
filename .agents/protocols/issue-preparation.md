@@ -48,7 +48,7 @@ For discovered open PRs, apply [scheduling semantics](workflow.md#scheduling-sem
 substantive file rewrites require a blocked-by relationship to the issue the PR
 closes; only bounded additive aggregation qualifies as mechanical overlap.
 If it closes no issue, record the overlap in Pointers and finish normally;
-the implementer defers at build time under that rule. Invent no dependency, scan
+the implementer builds alongside it under that rule. Invent no dependency, scan
 no further and leave the other issue unedited.
 
 Keep investigation proportional. On resumption or relevant main changes, refresh
