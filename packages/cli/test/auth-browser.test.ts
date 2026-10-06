@@ -69,19 +69,17 @@ async function hub(start: unknown = started, unclaimed = true, pending = false, 
 }
 
 function guidance(origin: string, unclaimed = true): string {
-  return `Hub: ${origin}\nThis project's hub and workspace binding is unchanged.\n` +
-    (unclaimed ? "This hub is unclaimed. The first GitHub account to complete approval becomes administrator of its default workspace.\n" : "") +
-    `GitHub sign-in for ${origin}\nApprove in a browser: ${URL}\nCode: ABCD-EFGH\n` +
-    "GitHub's approval page shows the app's name, not the hub.\n" +
-    `Approve only if you started this login for ${origin}; the app does not vouch for this hub.\nWaiting for GitHub approval…\n`;
+  return `hub        ${origin}\n` +
+    "approve only a code you just started yourself\n" +
+    (unclaimed ? "this hub is unclaimed: the first account to approve becomes its admin\n" : "") +
+    `open       ${URL}\ncode       ABCD-EFGH\nwaiting for approval…\n`;
 }
 
 function stdout(origin: string, unclaimed = true): string {
   return guidance(origin, unclaimed) +
-    `This login claimed the hub. Default workspace: ${WORKSPACE}\nStored login for ${origin}.\n` +
-    'GitHub username recorded at sign-in: "browser-test-user"\n' +
-    `Credential covers workspaces: ${WORKSPACE}\n` +
-    "Remote sync uses this stored login. Run `ub open` to edit in this computer’s browser.\n";
+    `signed in  browser-test-user on ${origin}\n` +
+    `claimed    default workspace (${WORKSPACE}), you are admin\n` +
+    `available workspaces:\n  ${WORKSPACE}\n`;
 }
 
 function recorder(box: Sandbox, mode = "success") {
@@ -210,7 +208,7 @@ describe("login browser handoff", () => {
     expect(result.status).toBe(1);
     expect(cli.calls()).toEqual([]);
     expect(existsSync(browser.record)).toBe(false);
-    expect(result.stdout).not.toContain("Approve in a browser:");
+    expect(result.stdout).not.toContain("open       ");
     expect(remote.routes).not.toContain("/auth/github/collect");
   });
 

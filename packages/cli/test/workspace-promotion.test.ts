@@ -203,7 +203,7 @@ describe("workspace creation and promotion", () => {
       { UB_WORKSPACE_ID: selected(box).workspaceId, UB_HUB_URL: "local" });
     expect(result.status, result.output).toBe(0);
     expect(result.stdout).toContain(`ub workspace join ${endpoint}/${selected(box).workspaceId}`);
-    expect(result.output).not.toContain("Waiting for GitHub approval");
+    expect(result.output).not.toContain("waiting for approval…");
     expect(result.output).not.toContain(login.credential.key);
     expect(selected(box)).toEqual({ workspaceId: selected(box).workspaceId, hubUrl: endpoint });
     const privateConfig = JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
@@ -242,7 +242,7 @@ describe("workspace creation and promotion", () => {
     expect(result.stderr).not.toContain("rerun this command");
     expect(accessRows(hub)).toEqual(before);
     expect(bindingBytes(box)).toBe(binding);
-    expect(result.output).not.toContain("Waiting for GitHub approval");
+    expect(result.output).not.toContain("waiting for approval…");
   });
 
   it("refuses an existing destination and a workspace already bound to a hub", async () => {
@@ -329,7 +329,7 @@ it("runs GitHub approval when the stored login no longer works", async () => {
   hub.credentials!.revokeDevice(identity.id, issued.record.deviceId);
   const result = await runUbAsync(["workspace", "promote", endpoint], box);
   expect(result.status, result.output).toBe(0);
-  expect(result.output).toContain("Approve in a browser:");
+  expect(result.stdout).toContain("open       https://github.com/login/device\n");
   expect(result.output).not.toContain("fixture-private");
   expect(approvals).toBe(1);
   const rows = accessRows(hub);

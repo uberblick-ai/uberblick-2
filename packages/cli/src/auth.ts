@@ -19,36 +19,34 @@ import { authenticationOrigin } from "@uberblick/hub/remote-url";
 import { manageRequest, ManagementResponseError } from "./access-management.js";
 export { authenticationOrigin } from "@uberblick/hub/remote-url";
 
-export const AUTH_HELP = `usage: ub auth <command>
+export const AUTH_HELP = `usage: ub auth [command]
 
 commands:
-  login [hub]            sign in to a remote hub with GitHub
-  status [hub]           show this machine's stored login
-  logout [hub]           revoke this computer; --all-devices revokes all of yours
-
-options:
-  -h, --help             show this help; after a command, that command's help
+  login [hub]      # Sign in to a hub with GitHub
+  status [hub]     # Show who this computer is signed in as, and what it can reach
+  logout [hub]     # Sign this computer out of a hub; --all-devices signs out all of yours
 `;
 
 export const AUTH_LOGIN_HELP = `usage: ub auth login [hub]
 
 Sign in to the given hub, or the hub selected by this project's binding.
 The hub can be a bare host, an http(s) address or a ws(s) endpoint.
-Approve the displayed GitHub URL and code in a browser on any machine;
+Open the displayed GitHub URL and approve the code in any browser;
 this command completes automatically and never asks for keyboard input.
 In a local terminal, the approval page opens automatically after the guidance.
 Over SSH or when stdout is not a terminal, only the URL and code are displayed.
 BROWSER names the opener command; BROWSER=none skips automatic opening.
-GitHub's approval page shows the app's name, not the hub. Approve only a
-login you started for the displayed hub; the app does not vouch for it.
+GitHub's approval page shows the app's name, not the hub.
+Approve only a code you just started yourself for the displayed hub.
 Store the issued device credential privately on this machine for remote sync.
 Signing in again stores the new login, then revokes the replaced device.
 If that revocation is not confirmed, login still succeeds and warns that the
 previous device is not revoked.
-Local-only work needs no login. The machine's binding stays unchanged.
+Local-only work needs no login. Login never changes the project binding.
 On a fresh, unclaimed hub, the first GitHub account to complete approval
 claims its default workspace as administrator. Claiming is one-time; this
-command reports whether this login claimed it and the workspace UUID.
+command reports the claim after storing the login, then lists the available
+workspace UUIDs along with who signed in and the hub.
 
 options:
   -h, --help             show this help
@@ -56,11 +54,11 @@ options:
 
 export const AUTH_STATUS_HELP = `usage: ub auth status [hub]
 
-Show the locally recorded GitHub identity and credential workspace limits
+Show who this computer is signed in as and the available workspace UUIDs
 for the given hub, or the hub selected by this project's binding.
 The hub can be a bare host, an http(s) address or a ws(s) endpoint.
-No network is used; this cannot establish whether the hub accepts the device.
-Other stored hubs are named too. The machine's binding stays unchanged.
+Read only this computer's stored login, without using the network.
+Run \`ub status\` to see whether the hub accepts that login now.
 
 options:
   -h, --help             show this help
@@ -124,19 +122,22 @@ function selectHub(hub: string | undefined, io: Io, describe = true): Selection 
     try { bound = authenticationOrigin(binding.hubUrl) === origin; } catch { /* Invalid binding is never rewritten. */ }
   }
   if (describe) {
-    io.out(`Hub: ${origin}\n`);
-    if (!bound) io.out("This project's hub and workspace binding is unchanged.\n");
+    authField(io, "hub", origin);
   }
   return { origin, bound, workspace: binding?.workspaceId };
 }
 
-function describeLogin(login: StoredHubLogin, io: Io): void {
-  // A hub-supplied username is display data, so control characters stay quoted.
-  io.out(`GitHub username recorded at sign-in: ${JSON.stringify(login.identity.githubUsername)}\n`);
+function displayUsername(user: string): string {
+  // JSON quoting escapes C0 controls; DEL and C1 also need terminal-safe escapes.
+  return isGithubUsername(user) ? user : JSON.stringify(user).replace(/[\u007f-\u009f]/g,
+    char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
+function describeWorkspaces(login: StoredHubLogin, io: Io): void {
   const workspaces = login.credential.record.workspaces;
   io.out(workspaces.length === 0
-    ? "Credential covers no workspaces. Sign-in grants no membership.\n"
-    : `Credential covers workspaces: ${workspaces.join(", ")}\n`);
+    ? "available workspaces: none\n"
+    : `available workspaces:\n${workspaces.map(workspace => `  ${workspace}\n`).join("")}`);
 }
 
 function describeMissingWorkspace(selection: Selection, login: StoredHubLogin, io: Io): boolean {
@@ -153,9 +154,6 @@ function describeMissingWorkspace(selection: Selection, login: StoredHubLogin, i
 
 function status(selection: Selection, io: Io): number {
   const stored = readHubLogins();
-  const others = Object.keys(stored.logins).filter(origin => origin !== selection.origin).sort();
-  if (others.length > 0) io.out(`Other hubs with a stored login: ${others.join(", ")}\n`);
-  io.out("Local state only; the hub's acceptance of this credential has not been checked.\n");
   const login = stored.logins[selection.origin];
   if (login === undefined) {
     const reason = stored.state === "refused" ? "stored login refused"
@@ -163,7 +161,8 @@ function status(selection: Selection, io: Io): number {
     io.err(`ub auth: ${reason} for ${selection.origin}. ${stored.diagnostic ?? ""} Run \`ub auth login ${selection.origin}\`.\n`);
     return 1;
   }
-  describeLogin(login, io);
+  authField(io, "signed in", displayUsername(login.identity.githubUsername));
+  describeWorkspaces(login, io);
   if (login.credential.record.revokedAt !== null) {
     io.err(`ub auth: this stored credential is recorded as revoked. Run \`ub auth login ${selection.origin}\`.\n`);
     return 1;
@@ -200,7 +199,7 @@ async function deviceRequest(origin: string, action: DeviceAction, login: Stored
   throw new DeviceFailure(refusal?.[0] === reply.status ? refusal[1] : "the hub returned an invalid device-management response");
 }
 
-function logoutField(io: Io, label: string, value: string): void {
+function authField(io: Io, label: string, value: string): void {
   io.out(`${label.padEnd(11)}${value}\n`);
 }
 
@@ -245,18 +244,18 @@ async function logout(selection: Selection, io: Io, allDevices: boolean): Promis
         confirmed++;
       }
     } catch (error) {
-      logoutField(io, "confirmed", `${confirmed} revocations on ${origin}`);
-      logoutField(io, "kept", `login for ${origin} on this computer`);
+      authField(io, "confirmed", `${confirmed} revocations on ${origin}`);
+      authField(io, "kept", `login for ${origin} on this computer`);
       io.err(`ub auth: ${error instanceof DeviceFailure ? error.message : "device revocation failed"}. This computer's revocation is uncertain; the kept login may no longer work.\n`);
       io.err(`Run \`ub auth logout --all-devices ${origin}\` again with a login the hub still accepts. If the hub refuses this computer's login, sign in again with \`ub auth login ${origin}\` or use another computer still signed in.\n`);
       return 1;
     }
     const user = login.identity.githubUsername;
-    logoutField(io, "revoked", `${confirmed} devices of ${isGithubUsername(user) ? user : JSON.stringify(user)} on ${origin}, including this computer`);
+    authField(io, "revoked", `${confirmed} devices of ${isGithubUsername(user) ? user : JSON.stringify(user)} on ${origin}, including this computer`);
   } else if (login !== undefined) {
     try {
       await deviceRequest(origin, { operation: "revoke-device", deviceId: login.credential.record.deviceId }, login, io);
-      logoutField(io, "revoked", `this computer on ${origin}`);
+      authField(io, "revoked", `this computer on ${origin}`);
     } catch (error) {
       failure = error instanceof DeviceFailure ? error.message : "revocation not confirmed";
     }
@@ -269,7 +268,7 @@ async function logout(selection: Selection, io: Io, allDevices: boolean): Promis
   }
   try {
     const removed = await removeHubLogin(origin);
-    if (removed) logoutField(io, "removed", `login for ${origin} on this computer`);
+    if (removed) authField(io, "removed", `login for ${origin} on this computer`);
     else io.out("No login stored for this hub.\n");
   } catch (error) {
     io.err(`ub auth: ${error instanceof Error ? error.message : "could not remove the stored login"}\n`);
@@ -405,6 +404,7 @@ async function login(selection: Selection, io: Io): Promise<number> {
   let deadline: number | undefined;
   let collected = false;
   let stored = false;
+  let claimedWorkspaceId: string | undefined;
   try {
     const unclaimed = await isUnclaimed(selection.origin, interrupted.signal);
     if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
@@ -428,9 +428,11 @@ async function login(selection: Selection, io: Io): Promise<number> {
     }
     deadline = performance.now() + started.expiresIn * 1000;
     if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
-    if (unclaimed) io.out("This hub is unclaimed. The first GitHub account to complete approval becomes administrator of its default workspace.\n");
-    io.out(`GitHub sign-in for ${selection.origin}\nApprove in a browser: ${started.verificationUri}\nCode: ${started.userCode}\n`);
-    io.out(`GitHub's approval page shows the app's name, not the hub.\nApprove only if you started this login for ${selection.origin}; the app does not vouch for this hub.\nWaiting for GitHub approval…\n`);
+    io.out("approve only a code you just started yourself\n");
+    if (unclaimed) io.out("this hub is unclaimed: the first account to approve becomes its admin\n");
+    authField(io, "open", started.verificationUri);
+    authField(io, "code", started.userCode);
+    io.out("waiting for approval…\n");
     if (process.stdout.isTTY &&
         process.env.SSH_CONNECTION === undefined &&
         process.env.SSH_CLIENT === undefined &&
@@ -460,13 +462,14 @@ async function login(selection: Selection, io: Io): Promise<number> {
             !credential.credential.record.workspaces.includes(result.claimedWorkspaceId)) {
           throw new SignInFailure("the hub returned an invalid sign-in claim result; run login again");
         }
-        io.out(`This login claimed the hub. Default workspace: ${result.claimedWorkspaceId}\n`);
+        claimedWorkspaceId = result.claimedWorkspaceId;
       }
       if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
       let replaced: StoredHubLogin | null;
       try { replaced = await writeHubLogin(selection.origin, credential, process.env, interrupted.signal); } catch (error) {
         if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
-        io.err(`ub auth: could not store login for ${selection.origin}: ${error instanceof Error ? error.message : "credential store write failed"}. The issued device remains on the hub; revoke it through device management if needed.\n`);
+        const claim = claimedWorkspaceId === undefined ? "" : ` The hub claimed default workspace (${claimedWorkspaceId}) for this account.`;
+        io.err(`ub auth: could not store login for ${selection.origin}: ${error instanceof Error ? error.message : "credential store write failed"}.${claim} The issued device remains on the hub; revoke it through device management if needed.\n`);
         return 1;
       }
       stored = true;
@@ -484,9 +487,9 @@ async function login(selection: Selection, io: Io): Promise<number> {
           io.err(`ub auth: warning: the previous device is not revoked on ${selection.origin}: ${error instanceof DeviceFailure ? error.message : "revocation not confirmed"}. The new login is stored.\n`);
         }
       }
-      io.out(`Stored login for ${selection.origin}.\n`);
-      describeLogin(credential, io);
-      io.out("Remote sync uses this stored login. Run `ub open` to edit in this computer’s browser.\n");
+      authField(io, "signed in", `${displayUsername(credential.identity.githubUsername)} on ${selection.origin}`);
+      if (claimedWorkspaceId !== undefined) authField(io, "claimed", `default workspace (${claimedWorkspaceId}), you are admin`);
+      describeWorkspaces(credential, io);
       return 0;
     }
   } catch (error) {
@@ -494,6 +497,7 @@ async function login(selection: Selection, io: Io): Promise<number> {
       : deadline !== undefined && performance.now() >= deadline ? "GitHub sign-in expired; run login again"
       : error instanceof SignInFailure ? error.message : "the hub is unreachable or the sign-in request timed out";
     io.err(`ub auth: ${selection.origin}: ${message}.\n`);
+    if (claimedWorkspaceId !== undefined && !stored) io.err(`ub auth: the hub claimed default workspace (${claimedWorkspaceId}) for this account.\n`);
     if (collected) io.err("ub auth: the issued device remains on the hub; revoke it through device management if needed.\n");
     return 1;
   } finally {

@@ -38,7 +38,7 @@ commands:
   status [--json]        workspace, hub, connection, pending work and failures
   doctor [--json]        check the local stack against its known failure modes
   workspace [command]    create, promote, join, list or select a workspace
-  auth <command>         sign in to a remote hub and manage this machine's login
+  auth [command]         sign in to a remote hub and manage this machine's login
   mcp <command>          register uberblick with an MCP client
   env -- <command...>    run a command with uberblick's configuration in its
                          environment
