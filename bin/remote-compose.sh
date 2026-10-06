@@ -6,7 +6,7 @@ set -eu
 # only revision. Refuse before Docker can discover a parent's Compose file or
 # use COMPOSE_FILE to mutate an unrelated stack.
 if [ ! -f release.json ]; then
-  printf 'Hub checkout deployments are no longer supported. Switch this host to a published release using REMOTE.md before updating.\n' >&2
+  printf 'Run this command from the extracted release directory containing release.json. Hub checkout deployments are no longer supported; switch this host to a published release using REMOTE.md before updating.\n' >&2
   exit 1
 fi
 
@@ -63,15 +63,10 @@ case "$compose_major.$compose_minor" in
     ;;
 esac
 
-if [ "$compose_major" -lt 2 ] || { [ "$compose_major" -eq 2 ] && [ "$compose_minor" -lt 6 ]; }; then
-  printf 'Docker Compose 2.6.0 or newer is required; found %s\n' "$compose_version" >&2
-  exit 1
-fi
-
 case "$compose_patch" in
   '' | *[!0-9]*) printf 'Cannot parse Docker Compose version.\n' >&2; exit 1 ;;
 esac
-if [ "$compose_major" -eq 2 ] && { [ "$compose_minor" -lt 24 ] || { [ "$compose_minor" -eq 24 ] && [ "$compose_patch" -lt 4 ]; }; }; then
+if [ "$compose_major" -lt 2 ] || { [ "$compose_major" -eq 2 ] && { [ "$compose_minor" -lt 24 ] || { [ "$compose_minor" -eq 24 ] && [ "$compose_patch" -lt 4 ]; }; }; }; then
   printf 'Docker Compose 2.24.4 or newer is required for released hubs.\n' >&2
   exit 1
 fi

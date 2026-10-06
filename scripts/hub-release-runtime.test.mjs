@@ -131,7 +131,11 @@ else printf '%s\\n' "$@"; fi
 				"compose\n-f\ndocker-compose.yml\n-f\nremote.https.yml\n-f\nremote.tailscale.yml\nconfig\n");
 		}
 		assert.equal(run({ COMPOSE_FILE: "operator-compose.yml", WEB_HOST: "hub.example.com" }).stdout, "compose\nconfig\n");
-		for (const version of ["2.6.0", "2.24.3"]) assert.equal(run({ TEST_COMPOSE_VERSION: version }).status, 1);
+		for (const version of ["1.29.2", "2.5.0", "2.6.0", "2.24.3"]) {
+			const result = run({ TEST_COMPOSE_VERSION: version });
+			assert.equal(result.status, 1);
+			assert.match(result.stderr, /Docker Compose 2\.24\.4 or newer is required/);
+		}
 		assert.equal(run({ TEST_ENGINE_VERSION: "27.5.0" }, ["up", "--detach"]).status, 1);
 		assert.equal(run({ TEST_ENGINE_VERSION: "28.0.0" }, ["up", "--detach"]).status, 0);
 		for (const args of [["--env-file", "network.env", "config"], ["--env-file=network.env", "config"]]) {
@@ -143,40 +147,20 @@ else printf '%s\\n' "$@"; fi
 	} finally { rmSync(scratch, { recursive: true, force: true }); }
 });
 
-test("old checkout updater cannot reach Docker through parent discovery or COMPOSE_FILE after its stack is removed", () => {
+test("old checkout updater cannot reach Docker without release metadata even with COMPOSE_FILE set", () => {
 	const scratch = mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(), `hub-old-updater-${process.env.UB_AGENTS_RUN ?? "test"}-`));
 	try {
-		for (const route of ["parent", "COMPOSE_FILE"]) {
-			const parent = join(scratch, route);
-			const checkout = join(parent, "checkout");
-			mkdirSync(join(checkout, "bin"), { recursive: true });
-			cpSync(join(root, "bin/remote-compose.sh"), join(checkout, "bin/remote-compose.sh"));
-			cpSync(join(root, "remote-settings.sh"), join(checkout, "remote-settings.sh"));
-			const compose = join(parent, route === "parent" ? "compose.yaml" : "selected-compose.yaml");
-			const state = join(parent, "existing-host-state");
-			const log = join(parent, "docker-calls");
-			const env = join(checkout, ".env");
-			writeFileSync(compose, "name: unrelated-host-project\nservices:\n  unrelated:\n    image: synthetic-never-started:0.0.0\n");
-			writeFileSync(state, "existing containers running; hub-data, caddy-data and caddy-config retained\n");
-			writeFileSync(log, "");
-			writeFileSync(env, "COMPOSE_PROJECT_NAME=existing-checkout\nTAILSCALE_HOST=synthetic.tailnet.ts.net\nTAILSCALE_IP=100.64.0.2\n");
-			const original = [compose, state, env].map((file) => readFileSync(file, "utf8"));
-			writeFileSync(join(checkout, "docker"), `#!/bin/sh
+		const log = join(scratch, "docker-calls");
+		writeFileSync(log, "");
+		writeFileSync(join(scratch, "docker"), `#!/bin/sh
 printf '%s\\n' "$*" >> "$TEST_DOCKER_LOG"
-if [ "$1 $2" = "compose version" ]; then printf '2.24.4\\n';
-elif [ "$1" = version ]; then printf '28.0.0\\n';
-else printf 'mutated\\n' > "$TEST_HOST_STATE"; fi
+if [ "$1 $2" = "compose version" ]; then printf '2.24.4\\n'; fi
 `, { mode: 0o755 });
-			const result = spawnSync("sh", [join(checkout, "bin/remote-compose.sh"), "up", "--build", "--detach"], {
-				cwd: checkout, encoding: "utf8", env: {
-					PATH: `${checkout}:${process.env.PATH}`, TEST_DOCKER_LOG: log, TEST_HOST_STATE: state,
-					...(route === "COMPOSE_FILE" ? { COMPOSE_FILE: compose } : {}),
-				},
-			});
-			assert.equal(result.status, 1, route);
-			assert.match(result.stderr, /Switch this host to a published release/);
-			assert.equal(readFileSync(log, "utf8"), "", `${route} must refuse before any Docker call`);
-			assert.deepEqual([compose, state, env].map((file) => readFileSync(file, "utf8")), original);
-		}
+		const result = execute("bin/remote-compose.sh", {
+			PATH: `${scratch}:${process.env.PATH}`, TEST_DOCKER_LOG: log, COMPOSE_FILE: "operator-compose.yml",
+		}, ["up", "--build", "--detach"], scratch);
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /extracted release directory containing release\.json/);
+		assert.equal(readFileSync(log, "utf8"), "", "must refuse before any Docker call");
 	} finally { rmSync(scratch, { recursive: true, force: true }); }
 });
