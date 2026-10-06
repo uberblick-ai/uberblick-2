@@ -37,7 +37,7 @@
 import { readDeviceLogin } from "@uberblick/hub/device-login";
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
-import { basename, dirname, relative, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import {
   CLOCK_SKEW_SECONDS,
@@ -620,15 +620,22 @@ const CLIENT_NAMES: Record<TargetName, string> = {
 
 /** Claude Code shares local scope with the main checkout of a linked worktree. */
 function claudeProjectKey(projectRoot: string): string {
-  const git = spawnSync(
+  const git = (args: string[]) => spawnSync(
     "git",
-    ["-C", projectRoot, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"],
+    ["-C", projectRoot, ...args],
     { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 1_000 },
   );
-  if (git.status !== 0) return projectRoot;
-  const [common, root] = git.stdout.trim().split("\n");
-  if (common !== undefined && basename(common) === ".git") return dirname(common);
-  return root ?? projectRoot;
+  const metadata = git(["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "--show-toplevel"]);
+  if (metadata.status !== 0) return projectRoot;
+  const [directory, common, root] = metadata.stdout.split("\n");
+  if (directory === common) return root ?? projectRoot;
+  // Main worktree first, with NUL-delimited paths rather than quoted text.
+  // Comparing metadata distinguishes linked worktrees from separate Git dirs.
+  const worktrees = git(["worktree", "list", "--porcelain", "-z"]);
+  const first = worktrees.stdout?.split("\0")[0];
+  return worktrees.status === 0 && first?.startsWith("worktree ")
+    ? first.slice("worktree ".length)
+    : projectRoot;
 }
 
 function mcpCheck(env: NodeJS.ProcessEnv, cwd: string, resolved: ResolvedConfig | null): Check {

@@ -791,9 +791,16 @@ describe("ub doctor", () => {
     expect(check(checks, "mcp").reason).toBe(`Claude Code (${path})`);
   });
 
-  it("uses the common repository root for Claude Code's local entry in a linked worktree", async () => {
+  it.each([null, "git-storage", "metadata/.git"])("uses Claude Code's shared local key in a linked worktree (Git metadata: %s)", async metadata => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
-    repository(box);
+    let localKey = box.cwd;
+    if (metadata === null) repository(box);
+    else {
+      const gitDirectory = join(homeOf(box), metadata);
+      mkdirSync(dirname(gitDirectory), { recursive: true });
+      execFileSync("git", ["init", "--quiet", "--separate-git-dir", gitDirectory, box.cwd], { env: box.env });
+      localKey = metadata.endsWith(".git") ? dirname(gitDirectory) : gitDirectory;
+    }
     const tree = execFileSync("git", ["hash-object", "-t", "tree", "--stdin", "-w"], { cwd: box.cwd, env: box.env, input: "", encoding: "utf8" }).trim();
     const commit = execFileSync("git", ["commit-tree", tree, "-m", "fixture"], {
       cwd: box.cwd,
@@ -806,10 +813,27 @@ describe("ub doctor", () => {
     wireMcp(project);
     const path = join(homeOf(box), ".claude.json");
     writeJson(path, { projects: {
-      [box.cwd]: { mcpServers: { uberblick: pin(PINNED) } },
+      [localKey]: { mcpServers: { uberblick: pin(PINNED) } },
       [project.cwd]: { mcpServers: { uberblick: UNPINNED } },
     } });
     const { checks } = await doctor(project);
+
+    expect(check(checks, "mcp").status).toBe("warn");
+    expect(check(checks, "mcp").reason).toContain(`Claude Code (${path})`);
+  });
+
+  it("uses the working repository root when Git metadata is stored separately in a .git directory", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const metadataRoot = join(homeOf(box), "metadata");
+    mkdirSync(metadataRoot);
+    execFileSync("git", ["init", "--quiet", "--separate-git-dir", join(metadataRoot, ".git"), box.cwd], { env: box.env });
+    wireMcp(box);
+    const path = join(homeOf(box), ".claude.json");
+    writeJson(path, { projects: {
+      [box.cwd]: { mcpServers: { uberblick: pin(PINNED) } },
+      [metadataRoot]: { mcpServers: { uberblick: UNPINNED } },
+    } });
+    const { checks } = await doctor(box);
 
     expect(check(checks, "mcp").status).toBe("warn");
     expect(check(checks, "mcp").reason).toContain(`Claude Code (${path})`);
