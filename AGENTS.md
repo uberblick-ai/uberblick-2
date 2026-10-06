@@ -53,8 +53,8 @@ permissions or policy.
   `@uberblick-ai/maintainers`, mentioned on a question when no other person is
   better placed to answer it. **Agents'
   account:** `uberblick-agent`; a comment from it is never a person's answer.
-- **Corpus context:** `ub` command behavior lives in the `cli`-tagged pages,
-  starting at CLI: intro and principles. They describe the intended state, so
+- **Corpus context:** discover `ub` command intent through the current tag
+  catalog and purpose-based search. These pages describe the intended state, so
   check the code for what ships. The corpus holds no agent workflow or
   editorial contract; the local protocols govern delivery.
 - **MCP route:** use the registered `uberblick` server (`ub mcp serve` through
@@ -73,6 +73,9 @@ permissions or policy.
   | workflow-audit | #540 | `D_kwDOT-Zo0s4Ao4BT` |
   | technical-audit | #541 | `D_kwDOT-Zo0s4Ao4BU` |
 
+  Supervised delivery runs use [the launcher route](.agents/protocols/retrospectives.md).
+  The command below is for authorized posts outside supervised runs.
+
   ```sh
   gh api graphql -f discussionId=<node id> -F body=@<body-file> \
     -f query='mutation($discussionId:ID!,$body:String!){addDiscussionComment(input:{discussionId:$discussionId,body:$body}){comment{url}}}' \
@@ -86,7 +89,7 @@ permissions or policy.
 Delivery runs four roles: issue-preparer, implementer, reviewer and integrator.
 A run is given one issue or pull request and ends with one named outcome from
 its role file. The loop that starts runs and turns outcomes into the label
-changes in `.agents/roles/README.md` and handoff records is
+changes in `.agents/protocols/workflow.md` and handoff records is
 [ub-agents](https://github.com/uberblick-ai/ub-agents), a separate tool configured
 by `ub-agents.yaml`; roles never move workflow labels, claim work or start the
 agent review themselves.
@@ -97,11 +100,20 @@ Use `gh` CLI for GitHub reads and writes; use the project's corpus MCP server
 for the product corpus. GitHub MCP is not required.
 
 MCP access is expected for every session. Discover documents through `list_docs`
-and search, then read the relevant documents and linked decisions. Do not load
-the whole corpus. If required context cannot be read, stop dependent decisions
-or edits and report the concrete failure; diagnosis and independent mechanical
-work can continue. Classify work as mechanical only after establishing that
-its relevant guarantees are understood; a small diff is not evidence of that.
+and purpose-based `search`; use `list_tags` for current tag names/IDs before
+filtering either call by `tag`. Use `list_docs` with `kind: decision` for decisions
+(the unfiltered listing omits them). Read discovered UUIDs with `get_doc`, including
+relevant governing links. Reusable instructions must not pin corpus UUIDs or assume
+legacy titles exist; issues and decision references should cite the real UUIDs
+discovered at runtime. Use installed MCP tool schemas for call shapes and refusals,
+not a presumed interface page. Do not load
+the whole corpus. Current corpus context is required before a product-sensitive
+choice or a judgment against product intent. If required context cannot be read, stop
+dependent decisions or edits and report what was needed and the concrete failure;
+diagnosis, independent mechanical inspection, validation and GitHub bookkeeping
+can continue on their own inputs. Classify work as mechanical only after
+establishing that its relevant guarantees are understood; a small diff is not
+evidence of that.
 If a required local contract cannot be read, stop the dependent action.
 
 The preparer scans the corpus catalog and supplies relevant document links and
