@@ -51,6 +51,69 @@ import * as Y from "yjs";
 import { BLOCK_TYPES, getBlocksFragment } from "@uberblick/schema";
 import type { BlockType } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
+import { TextSelection } from "@tiptap/pm/state";
+import { CellSelection } from "@tiptap/pm/tables";
+import type { ResolvedPos } from "@tiptap/pm/model";
+
+/** A formatting range in one cell; it is deliberately not an annotation target. */
+export interface CellTextTarget {
+  kind: "cell";
+  blockId: string;
+  /** Cell position relative to its table, distinguishing equal offsets in cells. */
+  cellPos: number;
+  start: number;
+  end: number;
+  text: string;
+  contentStart: number;
+  blockType: "table";
+  blockIndex: number;
+  clamped: false;
+}
+
+function cellDepth($pos: ResolvedPos): number | null {
+  for (let depth = $pos.depth; depth > 1; depth -= 1) {
+    if (["cell", "header_cell"].includes($pos.node(depth).type.spec.tableRole ?? "")) return depth;
+  }
+  return null;
+}
+
+/** Both text endpoints, or the actual CellSelection coverage, must name one cell. */
+export function cellTextTargetOf(editor: Editor): CellTextTarget | null {
+  const { selection, doc } = editor.state;
+  let from = selection.from;
+  let to = selection.to;
+  if (selection instanceof CellSelection) {
+    // CellSelection's ordinary endpoints describe only its head cell, even
+    // when dragging or Shift+Arrow selected several cells.
+    if (selection.$anchorCell.pos !== selection.$headCell.pos) return null;
+    const cell = selection.$anchorCell.nodeAfter;
+    if (cell === null || cell.childCount !== 1 || !cell.firstChild?.isTextblock) return null;
+    from = selection.$anchorCell.pos + 2;
+    to = from + cell.firstChild.content.size;
+  } else if (!(selection instanceof TextSelection)) return null;
+  if (to <= from) return null;
+  const $from = doc.resolve(from);
+  const $to = doc.resolve(to);
+  const depth = cellDepth($from);
+  const endDepth = cellDepth($to);
+  if (depth === null || endDepth === null || $from.before(depth) !== $to.before(endDepth)) return null;
+  const cell = $from.node(depth);
+  // The shipped cell vocabulary is exactly one flat paragraph. Refuse any
+  // different structure rather than projecting an ambiguous range.
+  if (cell.childCount !== 1 || !cell.firstChild?.isTextblock || $from.parent !== $to.parent) return null;
+  const table = $from.node(1);
+  if (table.type.name !== "table" || typeof table.attrs.id !== "string" || table.attrs.id === "") return null;
+  const contentStart = $from.before(depth) + 2;
+  const start = from - contentStart;
+  const end = to - contentStart;
+  if (start < 0 || end > cell.firstChild.content.size) return null;
+  return {
+    kind: "cell", blockId: table.attrs.id,
+    cellPos: $from.before(depth) - $from.before(1),
+    start, end, text: doc.textBetween(from, to), contentStart,
+    blockType: "table", blockIndex: $from.index(0), clamped: false,
+  };
+}
 
 /** A range the annotation API can anchor a thread to. */
 export interface CommentTarget {
