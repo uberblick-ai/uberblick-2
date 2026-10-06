@@ -1,8 +1,9 @@
-import { appendFileSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, inject, it } from "vitest";
 import { resolveProjectBinding, writeProjectBinding } from "../src/project-binding.js";
-import { createBoundFixtureParent } from "./binding-fixtures.js";
 import { PACKAGE_ROOT, removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -20,10 +21,37 @@ describe("CLI process helpers", () => {
     expect(readFileSync(parentPath)).toEqual(parentBytes);
   });
 
-  it("fails suite teardown even when a parent edit preserves its JSON meaning", () => {
-    const parent = createBoundFixtureParent();
-    appendFileSync(join(parent.root, ".uberblick.json"), "\n");
-    expect(parent.teardown).toThrow(/changed its parent/);
+  it.each([false, true])("fails the run only when suite teardown finds changed parent bytes (edit: %s)", (edit) => {
+    const box = sandbox();
+    const configPath = join(box.cwd, "vitest.config.mjs");
+    // Run the suite's real guard without rebuilding the shared CLI bundle while
+    // other workers may be spawning it.
+    writeFileSync(configPath, `export default ${JSON.stringify({
+      root: PACKAGE_ROOT,
+      test: {
+        include: ["test/fixtures/binding-parent.fixture.ts"],
+        globalSetup: [join(PACKAGE_ROOT, "test/binding-fixtures.ts")],
+        reporters: ["dot"],
+        maxWorkers: 1,
+        execArgv: ["--no-experimental-webstorage"],
+      },
+    })};`);
+    const vitestRoot = dirname(createRequire(import.meta.url).resolve("vitest/package.json"));
+    const run = spawnSync(process.execPath, [
+      join(vitestRoot, "vitest.mjs"), "run", "--config", configPath,
+      "-t", edit ? "changes parent bytes" : "leaves parent unchanged",
+    ], {
+      cwd: PACKAGE_ROOT,
+      env: box.env,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect(run.error).toBeUndefined();
+    expect(run.signal).toBeNull();
+    expect(run.stdout).toContain("1 passed");
+    expect(run.status, run.stdout + run.stderr).toBe(edit ? 1 : 0);
+    if (edit) expect(run.stderr).toContain("CLI suite changed its parent .uberblick.json");
+    else expect(run.stderr).not.toContain("CLI suite changed its parent .uberblick.json");
   });
 
   it("never blocks the event loop in a suite that serves in-process", () => {
