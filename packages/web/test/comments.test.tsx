@@ -859,6 +859,17 @@ describe("the table-cell selection toolbar", () => {
       expect(view.editor.state.selection.empty).toBe(false);
       expect(view.editor.state.doc.textBetween(view.editor.state.selection.from, view.editor.state.selection.to)).toBe("Neighbour");
       expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      // Touching a scrollport is pending input, not a new selection. Neither
+      // an unchanged transaction nor a document edit may revive Tab's range.
+      act(() => view.editor.view.dom.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+      act(() => view.editor.view.dispatch(view.editor.state.tr));
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      const neighbour = cells(view.editor)[1]!;
+      act(() => view.editor.view.dispatch(view.editor.state.tr.addMark(
+        neighbour.start, neighbour.start + 1,
+        view.editor.state.schema.marks.italic!.create(),
+      )));
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
       key(view.editor, "Tab", true);
       expect(view.editor.state.doc.textBetween(view.editor.state.selection.from, view.editor.state.selection.to)).toBe("Alpha beta");
       expect(view.query('[data-slot="selection-composer"]')).toBeNull();

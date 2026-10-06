@@ -22,8 +22,25 @@ async function openTable(page: Page, wide = false): Promise<Locator> {
   }
   await createDoc(page, docTitle("Cell formatting"));
   await placeCaret(page);
-  await page.keyboard.insertText("Above the table");
+  await page.keyboard.type("Above the table");
   await page.keyboard.press("Enter");
+  // WebKit can paint the new paragraph before its native caret catches up.
+  // Start the table fixture in that empty paragraph explicitly.
+  const empty = page.locator(".ub-editor .ProseMirror > p").last();
+  await expect(empty).toHaveText("");
+  await empty.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(true);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await expect.poll(() => empty.evaluate((element) => {
+    const anchor = document.getSelection()?.anchorNode;
+    return anchor !== null && anchor !== undefined && element.contains(anchor);
+  })).toBe(true);
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
   if (wide) {
     await page.keyboard.type("| First column | Second column | Alpha words suffix | Fourth column | Fifth column | Sixth column | Seventh column | Eighth column |");
     await page.keyboard.press("Enter");
@@ -196,6 +213,7 @@ test("Tab selection is navigation, triple click selects one cell, and cross-cell
     await expect(toolbar(page)).toBeVisible();
     await page.keyboard.press("ArrowLeft");
     await expect(popup(page)).toHaveCount(0);
+    await selectCell(first, 0, 0);
     await page.keyboard.press("Shift+End");
     await expect.poll(() => page.evaluate(() => document.getSelection()?.toString())).toBe("Alpha words suffix");
     await expect(toolbar(page)).toBeVisible();

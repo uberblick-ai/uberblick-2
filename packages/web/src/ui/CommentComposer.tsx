@@ -232,6 +232,7 @@ export function CommentComposer({
   const [error, setError] = useState<string | null>(null);
   const [touch, setTouch] = useState(false);
   const selectionInput = useRef(false);
+  const navigationInput = useRef(false);
   const cellNavigation = useRef(false);
   const range = useRef<string | null>(null);
   const dismissed = useRef<string | null>(null);
@@ -245,7 +246,15 @@ export function CommentComposer({
     // component's passive cleanup during a route or fallback transition.
     const editorDom = editor.view.dom;
     const ownerDocument = editorDom.ownerDocument;
+    let previousSelection = editor.state.selection;
     const read = (event?: { transaction: Transaction }): void => {
+      const selectionChanged = !editor.state.selection.eq(previousSelection);
+      previousSelection = editor.state.selection;
+      // A pointer down may just pan a table. Adopt its selection intent only
+      // when the range actually changes, never on a peer edit or scroll.
+      if (event?.transaction.selectionSet && selectionChanged && !event.transaction.docChanged) {
+        cellNavigation.current = navigationInput.current;
+      }
       if (composing.current) return;
       const cell = cellTextTargetOf(editor);
       const target = cell !== null
@@ -326,12 +335,13 @@ export function CommentComposer({
     };
     const pointer = (event: PointerEvent): void => {
       selectionInput.current = event.pointerType === "touch";
-      cellNavigation.current = false;
+      navigationInput.current = false;
     };
     const keyboard = (event: KeyboardEvent): void => {
       if (event.key === "Tab") {
         // TableKit selects the next cell's whole text. That is navigation,
         // not a request for formatting. Capture before its synchronous handler.
+        navigationInput.current = true;
         cellNavigation.current = true;
         if (cellTextTargetOf(editor) !== null) {
           setDraft(null);
@@ -341,7 +351,7 @@ export function CommentComposer({
       if (/^(Arrow|Home|End|Page)/.test(event.key) ||
           (event.key.toLowerCase() === "a" && (event.metaKey || event.ctrlKey))) {
         selectionInput.current = false;
-        cellNavigation.current = false;
+        navigationInput.current = false;
       }
     };
     read();
