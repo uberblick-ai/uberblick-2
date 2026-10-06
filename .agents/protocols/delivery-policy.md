@@ -26,22 +26,13 @@ the issue, PR or code comment. When in doubt, mention the choice in the PR
 without a new record; a reviewer or person can promote it later.
 
 An agent creates a topic's first record `decided` as its stance, except that a
-topic crossing the live **Uberblick project agent workflow**
-(`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`)'s **Human boundaries** table starts
-`open` with the agent's recommendation. Use **Decision logs**
-(`b7fdc6d7-ce5c-4733-a083-3fc30196f0b3`) for stance, answers, rejection and
-topic resolution, and **MCP interface contract**
-(`6e73bb70-e5da-4ee6-98ff-93ec9804856d`) for the installed calls and refusals.
-`create_doc` and `set_status` record a person's answer with
+topic crossing a human boundary (`.agents/roles/README.md`, Escalate) starts
+`open` with the agent's recommendation. The MCP tools' own descriptions give
+the calls and refusals. `create_doc` and `set_status` record a person's answer with
 `answer: {who, when, where}`; a first record decided without one is
 `agentStance`. Do not invent an answer or reject a stance without a person's
 recorded answer. A decided record's title, decision line and blocks refuse
 writes with `decision_read_only`; a change needs a successor a person approves.
-
-Implementation and review corrections follow
-[`implementer.md`](../roles/implementer.md#decision-records); missing-record
-findings follow [`review-protocol.md`](review-protocol.md#findings). These
-routes do not change the review or merge tiers below.
 
 ## Workflow
 
@@ -55,16 +46,10 @@ routes do not change the review or merge tiers below.
 3. **Gates, all before merge**, each at the exact head that merges. Effort
    follows semantic risk: paths and line counts are inspection signals, not
    extra rounds. Link exact-head evidence instead of repeating it.
-   - **CI.** Every tier requires a `signoff` commit status of `success` at the
-     merging head, from the integrator's own local CI run (`mise run ci <sha>`,
-     `integration.md`).
-     A missing or failing status blocks agent merge. If the run cannot
-     complete for reasons outside the change, escalate to a maintainer, who
-     may merge by hand.
-   - **Immutable review.** Local CI runs the isolated review
-     (`mise run review <sha>`) at the head, so every change has one. A change
-     where the base moved under the PR also passes the merged-tree gate
-     (`integration.md`). At stateful boundaries —
+   - **CI and immutable review.** Every tier requires a `signoff` status of
+     `success` at the merging head from the integrator's own local CI run,
+     which includes the isolated review; a moved base adds the merged-tree
+     gate (`integration.md`). At stateful boundaries —
      persistence, startup and shutdown, networking, concurrency — passing
      happy-path tests is not enough: run focused failure-path probes and post
      reproducible findings. Worktree tests help while building but are never
@@ -100,19 +85,12 @@ the role that owes it. It hunts for counterexamples, missing failure paths, inco
 assumptions, overengineering and overtesting; gate work never substitutes for
 it.
 
-Copilot is optional ([owner decision](https://github.com/uberblick-ai/uberblick-2/issues/1217)).
-Reinstating its gate requires an explicit owner decision and a corresponding
-policy update. Do not request it automatically; request it only when a person
-asks. A missing, pending, stale-head or unavailable Copilot review never by
-itself defers, escalates or blocks integration, even if an older handoff calls
-it required. An explicit owner instruction to hold a merge still applies;
-requesting an optional review does not itself impose that hold.
-
-Record a refusal once using its existing review record, or a PR comment if
-none exists; do not retry it without a person's request. Every Copilot remark
-posted before merge, including late ones, falls under the no-unanswered-remarks
-gate. Independent agent review, required correction rounds, CI and all other
-validation and merge gates remain unchanged.
+Copilot is optional ([owner decision](https://github.com/uberblick-ai/uberblick-2/issues/1217)):
+request it only when a person asks. A missing, pending, stale-head or
+unavailable Copilot review never by itself defers, escalates or blocks
+integration, even if an older handoff calls it required; an explicit owner
+instruction to hold a merge still applies. Every Copilot remark posted before
+merge falls under the no-unanswered-remarks gate.
 
 ## Merge policy — the rules are the authority, not a session
 
@@ -145,18 +123,6 @@ validation and merge gates remain unchanged.
   behavior is tier 2. Paths identify what to inspect; they never trigger tier 3
   by themselves.
 
-The new-runtime-dependency trigger does not apply to a dependency added only
-to `packages/web` for web UI when the PR records how it meets the live library
-selection criteria in **Web UI system**
-(`fd874b38-eea8-4754-a2e7-cffa5f4372b1`). It still applies when those criteria
-are absent, unavailable or unmet, or the PR lacks the evidence; when the
-library touches sync, persistence, auth or CRDT semantics; and to any runtime
-dependency outside `packages/web`. This exception requires the reviewed
-library-selection Corpus update in [PR #1094](https://github.com/uberblick-ai/uberblick-2/pull/1094)
-to be applied to the live corpus after merge; a draft in a PR is not sufficient.
-It removes only this trigger: every other tier-3 trigger and the Reviews owed
-table still apply.
-
 The answer may come early. A person's answer on the issue or the PR that fixes
 the PR's intended shape — while shaping, to a question, or unprompted — covers
 that shape, its conforming fix-ups and non-rewriting synchronization with the
@@ -166,10 +132,14 @@ or scope: escalate again, naming the difference.
 
 Tier routes authority; it does not choose the design. Never replace a simpler
 established primitive or dependency with bespoke correctness machinery merely
-to avoid tier 3. For web UI, challenge custom mechanics against the framework,
-existing dependencies and libraries qualifying under Web UI system. Custom
-mechanics still require its evidenced, owner-confirmed exception. Make a shape
-that needs a person's answer visible early and get the answer once.
+to avoid tier 3. Make a shape that needs a person's answer visible early and
+get the answer once.
+
+**Web UI: off the shelf first.** Every role challenges a custom web UI
+mechanism that the framework, an existing dependency (shadcn over Radix,
+Tailwind) or a well-maintained library would cover. A PR that adds a UI
+library records why it fits: maintenance, size, licence, accessibility and
+touch support. Custom mechanics need a person's confirmation.
 
 The tier-3 trigger list is the owner-controlled autonomy boundary. Verify gates
 at the candidate SHA rather than relying on a session's assertion.

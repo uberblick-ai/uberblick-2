@@ -23,9 +23,9 @@ At minimum identify:
   workspace identity, MCP tools and failures, CLI behavior, sync protocol, and
   persisted storage.
 
-Compare that derived map with Architecture
-(`d2d28f20-7c9a-4547-b65b-0fdf75a41dff`) block by block where it makes a
-material claim. A matching paragraph is not proof; name the implementation and
+Compare that derived map with whatever corpus document describes the
+architecture (find it with `list_docs` and search), block by block where it
+makes a material claim; if none exists, report that gap. A matching paragraph is not proof; name the implementation and
 test that make it true. A code path with no corresponding architectural truth
 is assessed in the other direction.
 

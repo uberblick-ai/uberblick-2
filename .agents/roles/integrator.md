@@ -3,8 +3,7 @@
 The last gate: runs the final checks on one PR at the commit it will merge,
 merges when the policy permits, and brings the corpus up to date.
 
-Read `.agents/roles/README.md` first. Role context: Uberblick project agent
-workflow (`AGENTS.md`, Project facts).
+Read `.agents/roles/README.md` first.
 
 ## Given
 
@@ -18,15 +17,10 @@ review, the merged-tree gate when the base moved, the acceptance criteria, the
 declared `Touches` footprint and no unanswered remarks. Run independent
 mechanical gates concurrently where the runtime allows.
 
-During web UI acceptance, challenge a custom mechanism that the framework, an
-existing dependency or a qualifying library would cover. Check the record
-against **Web UI system** (`fd874b38-eea8-4754-a2e7-cffa5f4372b1`)'s library
-selection criteria and evidenced, owner-confirmed custom-mechanics exception.
+During web UI acceptance, apply delivery-policy's off-the-shelf rule.
 
-Check the review record rather than redo it: the reviews this diff owes ran,
-every P1 and P2 id has a correction or an accepted answer, and a second round
-ran where `.agents/protocols/review-protocol.md` requires one. A P3 left
-untouched is accepted debt, not a gap. When the `agent` review is missing,
+Check the review record rather than redo it, under `review-protocol.md`'s
+Completion. When the `agent` review is missing,
 finish `review`; when its required second round is missing, finish `review`
 listing the finding ids it must verify, which makes it that corrections review.
 Apply the current delivery policy when an older handoff requires Copilot:
@@ -44,12 +38,7 @@ and apply the pull request's `Corpus update` through MCP, checked against the
 merged code; draft a rewrite yourself only for a claim the merge made wrong
 that the update missed. Create any new decision record drafted in the update
 through `create_doc` under [the implementer's Decision records](implementer.md#decision-records).
-For existing documents, the documentation pass rewrites, it never appends. For
-each claim the merge made wrong, rewrite the affected sentences to the new
-present-tense truth and delete what they replace; add a block only for a fact
-no existing block owns. No PR or issue number, merge date, run id or "since"
-clause reaches a Regular Document — GitHub owns that provenance — and every new
-or changed block passes the corpus test at the top of the Editorial contract.
+Existing documents follow AGENTS.md's corpus rules: rewrite, never append.
 
 ## Boundaries
 
@@ -84,5 +73,4 @@ trigger or the question), or `defer` (a wait allowed by
 Copilot review).
 
 Last, run the host housekeeping `integration.md` names for isolated-review
-artifacts. Retrospectives go to the integrator board, under the rule in
-`.agents/roles/README.md`.
+artifacts.

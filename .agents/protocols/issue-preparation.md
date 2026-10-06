@@ -29,8 +29,8 @@ catalog scan; explain why. Resumed work refreshes only affected sources.
 
 Include relevant decisions in that reading guide, including open records the
 implementation would build on: cite the topic and record UUIDs with the reading
-reason. Read the topic's answer in force and pending records under **Decision
-logs** (`b7fdc6d7-ce5c-4733-a083-3fc30196f0b3`); an open recommendation never
+reason. Read the topic's answer in force and its pending records (`find_decisions`);
+an open recommendation never
 supplies the approved outcome required by ISSUE_SPEC. A challenge to a decided
 record follows the successor and affected-work stop in the preparer's role.
 
@@ -54,6 +54,12 @@ Do not turn implementation preferences into requirements or enumerate every
 edge case. An investigation names its decision, uncertain assumption and
 confirming or refuting observation; a bounded negative result can complete it.
 The eventual feature is not its deliverable.
+
+Authoring formats and user-visible limits of durable content are owner
+decisions; rendering mechanics are engineering choices within existing
+constraints. An inaccessible reference limits evidence; it never supplies a
+missing product decision. Before escalating the replacement of an established
+primitive, name that primitive and the contract it would supply.
 
 Grounded dispositions include:
 
@@ -83,10 +89,7 @@ existing classification and review evidence.
 
 ## Challenge and resume
 
-On every route, challenge custom web UI mechanics against the framework,
-existing dependencies and qualifying libraries. Read **Web UI system**
-(`fd874b38-eea8-4754-a2e7-cffa5f4372b1`) for selection and the evidenced,
-owner-confirmed exception; cite it rather than copying its policy.
+On every route, apply delivery-policy's web UI off-the-shelf rule.
 
 A challenged issue receives one independently dispatched review on another
 runtime under `.agents/roles/reviewer.md`. The reviewer reconstructs the contract

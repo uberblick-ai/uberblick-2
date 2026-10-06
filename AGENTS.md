@@ -79,7 +79,7 @@ permissions or policy.
     --jq '.data.addDiscussionComment.comment.url'
   ```
 
-  A retrospective is non-blocking telemetry: a failed post blocks nothing.
+  When to post one: `.agents/roles/README.md`, Retrospectives.
 
 ## How roles run
 
@@ -103,11 +103,8 @@ or edits and report the concrete failure; diagnosis and independent mechanical
 work can continue. Classify work as mechanical only after establishing that
 its relevant guarantees are understood; a small diff is not evidence of that.
 If a required local contract cannot be read, stop the dependent action.
-
-The preparer scans the corpus catalog and supplies relevant document links and
-reasons in the issue. Implementers start from that reading guide, read the live
-documents, and expand discovery when code or findings reveal missing context.
-A pointer is a route to the source, not a substitute for reading it.
+An issue's Pointers are a reading guide to the sources, not a substitute for
+reading them; expand discovery when code or findings reveal missing context.
 
 - **Discuss or shape:** `.agents/protocols/issue-shaping.md` plus relevant corpus;
   condense intent into the smallest useful outcome before technical preparation.
@@ -122,19 +119,22 @@ A pointer is a route to the source, not a substitute for reading it.
   `.agents/protocols/review-protocol.md` or `.agents/protocols/integration.md`.
 - **Edit corpus:** update the owning document rather than copying its content
   into repository instructions. Keep pages short and practical: usage, example
-  output, scenarios, then Related; cut sentences that restate output. Corpus edits
+  output, scenarios, then Related; cut sentences that restate output. Rewrite
+  the claim that changed and delete what it replaces; never append history.
+  Only decision records cite issues, pull requests or dates. Corpus edits
   must stay within recorded authorization: update descriptions of delivered
   behavior, but do not weaken a guarantee or expand agent authority through a
   doc edit. An unsettled change to those commitments requires an owner decision.
 
 When instructions come from a different checkout than the code being examined,
-identify both sources and revisions. Verify code and path claims at the stated
-code revision; an instruction in the control checkout is not evidence it shipped.
-
-Read each source when needed and reuse it within the session. Refresh affected
-context when the assignment, governing decision or relevant source changes.
+identify both revisions and verify code claims at the code's revision. Refresh
+context when the assignment, a governing decision or a source changes.
 
 ## Change instructions coherently
+
+Each rule lives in exactly one file, and every other file links to it. Put a
+new rule in its owning file and delete any copy you find; a change that only
+adds lines should say what it replaces.
 
 Process changes use the repository review route unless the owner explicitly
 requests an attended exception. Agent-authored process changes require one

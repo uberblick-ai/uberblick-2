@@ -3,8 +3,7 @@
 Independently challenges one prepared issue contract, or one pull request at
 one exact head — correctness, risk, missing evidence and unnecessary complexity.
 
-Read `.agents/roles/README.md` first. Role context: Uberblick project agent
-workflow (`AGENTS.md`, Project facts). This contract is runtime-neutral;
+Read `.agents/roles/README.md` first. This contract is runtime-neutral;
 ub-agents runs it on a different runtime from the work's author.
 
 ## Given
@@ -24,29 +23,19 @@ product documents its Pointers cite where intent matters. Look for wrong
 assumptions, missing outcomes or invariants, infeasible or over-prescribed
 scope, conflicts with current work, and a smaller defensible shape.
 
-Classify each finding:
-
-- `correctable` — repository evidence or settled intent is sufficient for a
-  meaning-preserving issue edit; the preparer applies it;
-- `owner-boundary` — product or agent authority, safety, or the fundamental
-  work shape needs a person's decision; escalate it yourself.
-
-Do not edit the issue or turn implementation preferences into requirements.
+Classify each finding `correctable` or `owner-boundary` as that protocol's
+Challenge and resume defines, and escalate owner boundaries yourself. Do not
+edit the issue or turn implementation preferences into requirements.
 
 ## Reviewing a pull request
 
 Reproducible findings against that head, in `.agents/protocols/review-protocol.md`'s
-format: what is wrong, where, why it matters, what evidence would settle it,
-and a proposed P1/P2/P3 severity grounded in the concrete supported-usage
-consequence. Correctness and data safety first, then risk and missing
+format and severities. Correctness and data safety first, then risk and missing
 verification, then unnecessary complexity — a smaller change that defends the
 same contract is a finding. No findings is itself a verdict and is stated as one.
 
-For a choice passing delivery-policy's when-to-record test without a record,
-raise a finding under [`review-protocol.md`](../protocols/review-protocol.md#findings);
-do not draft the record. The implementer writes it in the same PR as a stance
-or boundary `open` recommendation; verify the correction without holding the
-PR for a person's confirmation of that record.
+A missing decision record is a finding under
+[`review-protocol.md`](../protocols/review-protocol.md#findings).
 
 This is an adversarial implementation challenge, not a gate replay. Try to
 falsify the change: trace important failure paths and boundary conditions,
@@ -56,10 +45,7 @@ settle the risk. Hunt explicitly for overengineering and overtesting. Gate
 results may be evidence, but restating lint, tests or acceptance criteria is not
 a review.
 
-For web UI, check the PR's library-selection evidence against **Web UI
-system** (`fd874b38-eea8-4754-a2e7-cffa5f4372b1`). Challenge a custom mechanism
-that the framework, an existing dependency or a qualifying library would
-cover, including whether its evidenced, owner-confirmed exception is met.
+For web UI, apply delivery-policy's off-the-shelf rule.
 
 Product intent is read, not inferred from the issue text: read the corpus
 documents the issue's Pointers cite, live through MCP, wherever the change
@@ -70,12 +56,9 @@ without it. The pull request's `Corpus update` is part of the change: a missing
 rewrite for a claim the change makes wrong, or one that misstates the change,
 is a finding.
 
-A corrections review asks a narrower question: for each finding id the
-revision lists, does the corrected head resolve it, or is the implementer's
-evidence a sufficient answer? Record each as `resolved`, `explanation
-accepted`, or `unresolved — <why>`, examining the delta first and the wider
-diff only where a correction's risk reaches it. It approves or escalates under
-the protocol's Rounds rule; there is no third round.
+A corrections review marks each listed finding id as `review-protocol.md`'s
+Handing findings over describes, examining the delta first and the wider diff
+only where a correction's risk reaches it.
 
 Read the earlier verdicts and corrections records on the PR before reporting.
 A settled finding stays settled unless this head changed the affected behavior
@@ -109,6 +92,3 @@ given (`gh pr review <N> --comment --body-file <file>`, which records that
 commit), on an issue as a comment. It opens with `Verdict: <no findings | P1
 <n>, P2 <n>, P3 <n>>` or the corrections resolutions, then the findings; the
 summary links it.
-
-Retrospectives go to the reviewer board, under the rule in
-`.agents/roles/README.md`.

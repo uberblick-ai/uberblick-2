@@ -86,8 +86,7 @@ never from the issue's `Touches`. `--name-only` is just the pathname inventory:
 it identifies hunks to classify but never fires tier 3 by itself. The triggers
 live in the change — for example breaking persisted-data compatibility rather
 than an additive optional schema field; authority or merge rules rather than
-routine process clarification; a new runtime dependency subject to the web UI
-exception in [delivery-policy.md](delivery-policy.md) rather than a dev
+routine process clarification; a new runtime dependency rather than a dev
 dependency; auth/token semantics; a decided-architecture or invariants edit; or
 overruling a major reviewer finding. A tier-3 trigger without a person's answer
 that covers it is an escalation naming the trigger. With one, verify the diff
@@ -100,20 +99,13 @@ Every merge report ends with two machine-readable lines —
 — and only these two: timestamps, round counts and run counts stay derivable
 from the PR thread.
 
-**Gate freshness, at merge time.** Make the merge itself conditional on the
-recorded gate SHA — `gh pr merge <n> --match-head-commit <gate-sha> …` — so a
-commit landing after the last check fails the merge instead of riding stale
-evidence; comparing `gh pr view <n> --json headRefOid` beforehand is for the
-report, not the guarantee. Freshness covers the base too, but GitHub provides
-no merge argument that binds it: immediately before merging, fetch the base ref
-and compare it with the base SHA named by the latest gate evidence. If it moved
-after the exact-head gates, or after a prior merged-tree gate, run the
-merged-tree gate against the new base and recheck again; every observed move
-repeats that gate, without a file-overlap shortcut. Only then invoke the merge.
-`--match-head-commit` still protects only the PR head, so this immediate
-fetch-and-recheck is an honest best-effort base guard, not a claim that another
-merge cannot land before GitHub executes the command. Either an observed base
-move or a head mismatch returns to the applicable gates.
+**Gate freshness, at merge time.** Merge with `gh pr merge <n>
+--match-head-commit <gate-sha> …`, so a commit landing after the last check
+fails the merge. GitHub cannot bind the base the same way: immediately before
+merging, fetch the base ref and compare it with the base SHA of the latest gate
+evidence. Every observed move repeats the merged-tree gate against the new base,
+with no file-overlap shortcut, before the merge is invoked. This is a
+best-effort base guard; a base move or head mismatch returns to the gates.
 
 ## After the merge
 
@@ -123,15 +115,9 @@ MCP, checked against the merged code. If MCP fails, record the concrete failure
 and outstanding update on the PR for recovery. A fresh integrator does not own
 or restart another session's development processes.
 
-**Housekeeping, last** (owner direction, 2026-09-01). On every durable outcome —
-merge or escalation — once the probes on the retained review image are done,
-run `sh bin/housekeeping.sh` with every review SHA this run built — each
-exact head it gated and each merged-tree commit from an observed base advance —
-from the same freshly fetched base-ref checkout used for the container review,
-and record a concise summary on the PR. Besides the named review images, the
-command removes review images older than 24 hours and dangling images. It prunes
-build cache older than a week, for a free-space floor (`HOUSEKEEPING_MIN_FREE`,
-default `5GB`), and to cap cache use (`HOUSEKEEPING_MAX_USED_SPACE`, default
-`1GB`). Each prune reports what it reclaimed. Containers, other tagged images,
-volumes and worktrees are left alone, including a stopped production hub. It
-supports `--dry-run` to show what it would do.
+**Housekeeping, last.** On every durable outcome, merge or escalation, once the
+probes on the retained review image are done, run `sh bin/housekeeping.sh`
+with every review SHA this run built (each gated head and each merged-tree
+commit) from the same base-ref checkout used for the review, and record a
+concise summary on the PR. What it removes and keeps is in the script's header;
+`--dry-run` shows it.

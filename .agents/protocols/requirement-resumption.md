@@ -7,16 +7,14 @@ authorization; this file preserves the document and retry-safety mechanics.
 ## Publish a draft requirement
 
 Use the installed MCP server's discovered tool schemas, so this path works from
-a machine with only `ub`, its MCP server, and the shaping skill. Read the
-Editorial contract (`5e0e25d8-c71f-44c3-9bf3-93662712c1fc`) and the active tag
-catalog through MCP, then create one document
+a machine with only `ub`, its MCP server, and the shaping skill. Read the active
+tag catalog through MCP, then create one document
 with `kind: requirement`, `status: draft`, a concise description, applicable
-catalog tags under that live contract, and blocks carrying the confirmed
+catalog tags, and blocks carrying the confirmed
 problem, intended outcome, success evidence, constraints, trade-offs, and scope
 boundary.
 Preserve the human's language and do not invent missing product meaning. State
-every unresolved human choice in the explicit lifecycle language the live
-editorial document requires of a Product Document.
+every unresolved human choice as explicitly open.
 
 Re-read the new document and verify that `list_docs` filtered to
 `kind: requirement`, `status: draft` returns its uuid. Then return its title and
@@ -44,8 +42,7 @@ a decision leaves an unresolved objection unresolved and still owed a
 disposition. A decision reference this replica cannot read is a visible
 boundary to surface to the human, never an item to skip.
 
-**Decision logs** (`b7fdc6d7-ce5c-4733-a083-3fc30196f0b3`) owns topic
-resolution. With A decided and open successors B and C, gather B and C and
+Topic resolution: with A decided and open successors B and C, gather B and C and
 both records' unresolved annotations even though A represents the topic.
 A stays in force until a person approves a successor; a pending recommendation
 does not replace it. After approving B, a person who declines C rejects it
@@ -73,15 +70,13 @@ that explicit disposition:
   with `decided` and `answer: {who, when, where}` recording the person's actual
   confirmed choice and its source. A successor takes effect only through that
   approval, never an agent stance. No `Reconsidering` section is required;
-  **MCP interface contract** (`6e73bb70-e5da-4ee6-98ff-93ec9804856d`) owns the
-  exact call and refusals;
 - reject an open proposal, an agent stance, or a side of a decided conflict
   through `set_status` with `status: rejected`, the person's non-empty `reason`
   and `answer: {who, when, where}`. To resolve a conflict, reject only the
   records the person declines, re-reading the topic after each write until the
   chosen answer is in force. If new competing records surface, obtain their
-  disposition before further writes. The MCP interface contract owns the exact
-  call and refusals; never infer rejection from approval of another record; or
+  disposition before further writes. Never infer rejection from approval of
+  another record; or
 - make no write when the human leaves the item unresolved.
 
 Only a resolved annotation drops out of the next resumption. A topic drops out
@@ -120,12 +115,7 @@ Each planned-outcome intake starts with this line:
 Implements: <requirement uuid> [<outcome block ids, when used>]
 ```
 
-Follow it with the confirmed intake sections in `issue-shaping.md`. Label it as
-`issue-shaping.md` describes for this session's account: do not write `Touches`, relationships, Priority, or
-`ready`. The issue-preparer later completes the machine-readable header and
-grounds the contract. Record the human's planned decision as a comment on the
-intake; it is their approval only when it comes from their own account
-(`.github/ISSUE_SPEC.md`), so when this session posts as `uberblick-agent`, ask
-them to confirm it there. Create it with `gh issue create --repo
-uberblick-ai/uberblick-2`, so no checkout is required, and tell the human to set
-Request Source `Human` in the issue sidebar.
+Then create it exactly as `issue-shaping.md`'s Create a small intake says.
+Record the human's planned decision as a comment on the intake; it counts as
+their approval only from their own account (`.github/ISSUE_SPEC.md`), so when
+this session posts as `uberblick-agent`, ask them to confirm it there.

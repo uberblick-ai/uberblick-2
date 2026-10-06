@@ -11,9 +11,7 @@ findings, implementer returns and human answers.
 
 Read `.agents/roles/README.md`, then follow
 `.agents/protocols/issue-preparation.md` for grounding, routing, corrections and
-final recheck. `.github/ISSUE_SPEC.md` owns the issue contract. Read the live
-Uberblick project agent workflow and Editorial contract through MCP
-(`AGENTS.md`, Project facts), plus the relevant corpus found during grounding.
+final recheck. `.github/ISSUE_SPEC.md` owns the issue contract.
 
 ## Boundaries
 
@@ -30,7 +28,7 @@ that decides who may do what, or widens network exposure or external
 resources, is an owner question unless an owner statement clearly covers it:
 on the issue or its parent, or in a corpus document or decision. Escalate it
 rather than listing it as a preparer inference. Never silently
-waive a serious finding. Shared role rules own workflow labels, permissions, escalation and retrospectives.
+waive a serious finding.
 
 ## Outcomes and handoff
 

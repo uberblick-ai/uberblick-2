@@ -26,15 +26,11 @@ limitation.
 A finding keeps its id across heads. Reopen a settled one only when changed
 code or new evidence invalidates how it was settled.
 
-When a PR settles a choice that passes
+A choice that passes
 [`delivery-policy.md`'s when-to-record test](delivery-policy.md#decision-records)
-but has no record, raise a finding; the reviewer does not draft it. The
-implementer supplies the complete record in the same PR under
-[`implementer.md`'s Decision records](../roles/implementer.md#decision-records),
-as a drafted initial stance or a linked boundary `open` recommendation. Verify
-the draft or open record like any other correction, while it is still editable;
-do not hold the PR for a person's confirmation of that record. Review and merge gates
-remain owed.
+without a record is a finding; the implementer writes the record
+([`implementer.md`](../roles/implementer.md#decision-records)) and the
+corrections review verifies it like any other correction.
 
 ## Handing findings over
 
@@ -47,11 +43,9 @@ ledger is kept:
 3. The corrections review marks every listed id `resolved`, `explanation
    accepted` or `unresolved — <why>`.
 
-When an optional Copilot review has posted findings, one revision answers
-whatever both reviews have posted. Copilot's remarks carry no finding ids:
-they are corrected or answered in their own threads, and any still open at
-integration are the integrator's to answer. Its absence or pending status is
-not a reason to wait; the delivery policy governs optional review requests.
+Copilot remarks, when a person requested that review, carry no finding ids:
+the same revision corrects or answers them in their own threads, and any still
+open at integration are the integrator's to answer.
 
 ## Settling a finding
 

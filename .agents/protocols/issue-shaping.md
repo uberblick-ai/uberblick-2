@@ -30,10 +30,8 @@ when new evidence or changed direction conflicts with it, naming the conflict.
 
 Raise a durable choice that passes
 [`delivery-policy.md`'s when-to-record test](delivery-policy.md#decision-records)
-as a decision record rather than leaving the decision in issue text. Read
-**Decision logs** (`b7fdc6d7-ce5c-4733-a083-3fc30196f0b3`) and **MCP interface
-contract** (`6e73bb70-e5da-4ee6-98ff-93ec9804856d`) for its shape and calls.
-The authorization rule below also governs this write: confirm its meaning and
+as a decision record rather than leaving the decision in issue text; the MCP
+tools describe its shape and calls. The authorization rule below also governs this write: confirm its meaning and
 destination before creating it. With the person present, record their actual
 choice through `create_doc` or `set_status` as `decided` with
 `answer: {who, when, where}`,

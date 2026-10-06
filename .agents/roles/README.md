@@ -3,8 +3,7 @@
 Shared rules for the four delivery roles. Each role file says what its run is
 given, what it does and which outcomes it may end with. The issue schema lives
 in `.github/ISSUE_SPEC.md`, executable gates in
-`.agents/protocols/delivery-policy.md`. Product intent and workflow reasoning
-live in the MCP corpus. These are distinct authorities, not duplicate policies.
+`.agents/protocols/delivery-policy.md`, product intent in the MCP corpus.
 
 ## One run, one item, one outcome
 
@@ -58,14 +57,10 @@ unless the answer calls for another.
 
 ## Preserve the shaped scope
 
-Interactive shaping follows `.agents/protocols/issue-shaping.md`: help broad ideas converge on the
-smallest useful outcome; questions clarify unresolved intent, not routine
-engineering. Delivery roles preserve that confirmed scope and its essential
-guarantees. Do not add optional capabilities because they are convenient to
-build, or drop agreed behavior in the name of an MVP. An unattended run uses
-evidence for factual gaps and makes engineering choices within scope; it raises
-unresolved owner choices through the existing escalation outcome, without
-waiting for a live dialogue. Other role-specific stops remain unchanged.
+Delivery roles preserve the scope confirmed in shaping and its essential
+guarantees: add no optional capability because it is convenient, and drop no
+agreed behavior in the name of an MVP. Fill factual gaps from evidence, make
+engineering choices within scope, and escalate unresolved owner choices.
 
 ## Escalate what is not yours to decide
 
@@ -76,8 +71,9 @@ All other boundary crossings follow the escalation rule here.
 Decide what the issue, settled decisions, adopted principles and repository
 policy already cover. Ask a person when the next step would change product
 direction, an adopted principle or guarantee, external resources or agent
-authority; when the merge policy says tier 3; or when review stops converging.
-A correctable gap in a specification is not such a stop: correct it.
+authority (the **human boundaries**); when the merge policy says tier 3; or
+when review stops converging. A correctable gap in a specification is not such
+a stop: correct it.
 
 Finish `needs-human`. The summary is the question, ready to answer:
 
@@ -89,29 +85,14 @@ Finish `needs-human`. The summary is the question, ready to answer:
 - the closing line `Answer here, then replace needs-human with <label>.`,
   naming `needs-preparation` on an issue or `needs-changes` on a pull request.
 
-Make the question scannable before the evidence. Give each independent decision
-its own short heading or numbered item. Aim for one or two plain-language
-sentences per decision: the choice and alternatives, what each means for the
-person, and the recommendation. Keep material risks and tradeoffs visible;
-brevity never justifies omitting or truncating them. Keep the @-mention and
-invitation to answer here visible too.
-
-Give the person one unambiguous next action and one place to answer. Keep the
-prescribed closing line visible outside collapsed details; it names the one
-next label required by this project's route.
-Launcher-generated steps for the stopped role apply only when that same role
-should resume; do not present them as an alternative when a correction or
-handoff requires another role.
-
-Put supporting technical evidence, commits, CI results and resume mechanics in
-a collapsed `<details>` block with a descriptive `<summary>`, or link to their
-existing record. If the launcher flattens Markdown (including ub-agents
-0.1.11), or the explanation is long, post a structured decision comment and
-link it from the concise report summary. Link the summary's invitation to answer
-to that comment, and keep the prescribed closing line visible in both records.
-The summary still names every independent choice, recommendation and material
-risk. This changes presentation only: the answer, authority, outcome and label
-rules below and above still apply.
+Put the question before the evidence: each independent decision as its own
+numbered item, in one or two plain sentences naming the choice, what each
+answer means for the person, and the recommendation. Keep material risks, the
+@-mention and the closing line visible; put commits, CI results and resume
+mechanics in a collapsed `<details>` block or a linked record. When the
+launcher flattens Markdown or the explanation is long, post a structured
+decision comment, link it from the summary and repeat the closing line there.
+Launcher-generated resume steps apply only when the same role should resume.
 
 Any person with write access may answer. A comment from a person's account is
 the answer; one from `uberblick-agent` or a bot never is. The next run works
@@ -175,28 +156,13 @@ retrospective is telemetry, never a gate.
 
 ## Every process a run starts is that run's to end
 
-A run owns each process it spawns on the host — a browser, a load or timing
-probe, a server, a watcher — until that process exits. Start one in the
-foreground of a script under a cleanup trap so that an interrupted run still
-tears it down, and give it its own deadline (a `timeout`, or the tool's own
-equivalent) so it dies on its own clock rather than waiting on a parent that may
-never return. Never disown a process to make it someone else's problem.
-A trap only runs between commands, so a loop that blocks in a foreground
-`sleep` will not honour `SIGTERM` until that sleep ends: background the wait
-and `wait` on it, or signal the process group, or the trap is decoration.
-
-A run ends when its session ends, so a task your agent tool starts in the
-background never reports back. Wait in the foreground with a bounded command, such as `gh pr checks <N>
---watch` under the tool's timeout. A tool that returns while the command still
-runs leaves it yours: keep polling until it exits, or stop it. When what you
-wait for is still pending after that, finish `defer` and name it.
-
-## Product context, proportional to the action
-
-Current corpus context is required before a product-sensitive choice or a
-judgment against product intent. If it is unavailable and proceeding could change
-product meaning, stop and report what was needed and observed. Mechanical
-inspection, validation and GitHub bookkeeping continue on their own inputs.
+A run owns each process it spawns on the host (a browser, a probe, a server, a
+watcher) until it exits. Start it under a cleanup trap and its own `timeout`,
+and never disown it. A trap runs only between commands, so background a long
+`sleep` and `wait` on it, or signal the process group. A background task never
+reports back after the session ends: wait in the foreground with a bounded
+command, keep polling anything still running, and finish `defer`, naming it,
+when what you wait for is still pending.
 
 ## Worktrees
 
