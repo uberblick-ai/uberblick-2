@@ -29,13 +29,9 @@ consequence. Correctness and data safety first, then risk and missing
 verification, then unnecessary complexity — a smaller change that defends the
 same contract is a finding. No findings is itself a verdict and is stated as one.
 
-Challenge bespoke parsers, file-format handling and other custom mechanisms
-under [library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices),
-preserving dependency approval requirements. For web UI, discover the live corpus guidance for library selection and custom
-mechanisms under [AGENTS.md](../../AGENTS.md#read-for-the-action), then check the PR's
-evidence against it. Challenge a custom mechanism
-that the framework, an existing dependency or a qualifying library would
-cover, including whether its evidenced, owner-confirmed exception is met.
+Check the PR's mechanism and evidence under
+[library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices),
+including live web UI criteria and owner-confirmed exceptions where required.
 
 Product intent is read, not inferred from the issue text: read the corpus
 documents the issue's Pointers cite, live through MCP, wherever the change

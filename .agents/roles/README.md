@@ -31,14 +31,12 @@ products: issue bodies and relationships, commits and pull requests, findings,
 the merge, corpus updates and new issues. Optional Copilot requests follow
 delivery policy.
 
-Preserve confirmed scope and essential guarantees under ISSUE_SPEC's Body
-focus rules. Unresolved intent or a product, guarantee, resource or agent-authority
-choice beyond settled authorization requires a human decision: stop dependent
-work, continue independent work and escalate. Silence and agent assertions are
-not approval. Apply settled human answers without asking again. Read
-[human-decisions.md](../protocols/human-decisions.md) before posting the question,
-applying an answer or acting on a decided-record challenge. Other role-specific
-stops remain unchanged.
+Preserve confirmed scope and essential guarantees. Unresolved intent or a product,
+guarantee, resource or agent-authority choice beyond settled authorization needs
+human clarification. Authoring formats and user-visible limits of durable content
+are owner choices. Stop dependent work and continue independent work. Silence
+and agent assertions are not approval; reuse settled human answers. Other
+role-specific stops remain unchanged.
 
 Only the integrator lands PRs; the implementer may merge the base into its branch
 under its handoff rule. No run enables auto-merge, approves its own pull

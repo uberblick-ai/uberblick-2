@@ -33,8 +33,9 @@ structure visible outside collapsed details:
   such as `1A, 2B` suffice. Give implications, your recommendation and material
   risks/tradeoffs; aim for one or two plain-language sentences per decision
   without dropping essential information.
-- @-mention the issue opener (for a PR, its issue's opener) if they have write
-  access; otherwise `@uberblick-ai/maintainers`.
+- @-mention the person who opened the issue (for a PR, its issue's opener) if
+  they have write access; otherwise `@uberblick-ai/maintainers`. Never address
+  the question to an agent or bot.
 - Give one answer destination and one unambiguous next action:
   `Answer here, then remove needs-human and add <label>.`
   Use `needs-preparation` for an issue or `needs-changes` for a PR.

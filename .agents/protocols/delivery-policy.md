@@ -167,15 +167,12 @@ or scope: escalate again, naming the difference.
 
 ### Library and custom-mechanism choices
 
-Tier routes authority; it does not choose the design. Never replace a simpler
-established primitive or dependency with bespoke correctness machinery merely
-to avoid tier 3. Challenge custom mechanisms, including parsers and file-format
-handling, against existing primitives and suitable libraries. Compare the
-supported input contract, correctness burden and maintenance cost; a hand-built
-subset is not automatically simpler because it adds no dependency. Recommend
-the smallest defensible approach with evidence. If it needs a protected runtime
-dependency, ask the owner early, preferably during preparation. This grants no
-new dependency exception and invents no missing corpus selection criteria.
+Choose the simplest defensible mechanism, comparing existing primitives and
+libraries with custom code, including parsers and file-format handling. Consider
+the supported inputs, correctness burden and maintenance. If that choice needs
+a protected runtime dependency, seek the owner's answer early; bespoke code
+must not be an approval workaround. Evidence supports a recommendation, not a
+new dependency exception.
 
 For web UI, challenge custom mechanics against the framework,
 existing dependencies and libraries qualifying under those live selection criteria.

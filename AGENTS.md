@@ -73,10 +73,8 @@ permissions or policy.
   | workflow-audit | #540 | `D_kwDOT-Zo0s4Ao4BT` |
   | technical-audit | #541 | `D_kwDOT-Zo0s4Ao4BU` |
 
-  Supervised delivery runs use the launcher-provided `report_command` followed
-  by `retrospective --body-file <private-body-file>`; the launcher pins the board
-  configured in `ub-agents.yaml`. The direct command below is for authorized
-  posts outside supervised runs, never a fallback for a failed launcher command.
+  Supervised delivery runs use [the launcher route](.agents/protocols/retrospectives.md).
+  The command below is for authorized posts outside supervised runs.
 
   ```sh
   gh api graphql -f discussionId=<node id> -F body=@<body-file> \

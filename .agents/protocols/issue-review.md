@@ -15,9 +15,7 @@ invariants, infeasible or over-prescribed scope, conflicts with current work
 and unnecessary complexity. When warranted, offer materially better or smaller
 alternatives with evidence and meaningful tradeoffs; do not force alternatives.
 
-Challenge custom mechanisms, including parsers and file formats, under
-[library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices).
-An approval requirement is not a reason to prefer bespoke correctness machinery;
+Apply [library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices);
 an unresolved protected dependency choice is an owner boundary.
 
 Honor settled authorization. New evidence may justify recommending a change

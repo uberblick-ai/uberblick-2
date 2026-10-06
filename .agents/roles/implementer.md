@@ -49,16 +49,10 @@ For choices left open, verify the proposed mechanism against the governing
 guarantees and concrete failure cases before adopting it; readiness is not proof
 that a suggested design works. Explicit constraints remain binding.
 
-Challenge bespoke parsers, file-format handling and other custom mechanisms
-against existing primitives and libraries under
-[library and custom-mechanism choices](../protocols/delivery-policy.md#library-and-custom-mechanism-choices).
-A protected dependency needs an owner's answer; custom code is not an approval
-workaround. Before building web UI, challenge a custom mechanism that the framework, an
-existing dependency or a qualifying library would cover. Discover and read the
-live corpus guidance for web UI library selection and custom mechanisms under
-[AGENTS.md](../../AGENTS.md#read-for-the-action). Apply its criteria
-and record new-library evidence in the PR; custom mechanics still require its
-evidenced, owner-confirmed exception.
+Apply [library and custom-mechanism choices](../protocols/delivery-policy.md#library-and-custom-mechanism-choices)
+before building custom mechanisms, including web UI and parsers. Record required
+library or exception evidence in the PR; unresolved owner choices use the return
+or escalation rule below.
 
 The least code that defends the issue's contract, inside its declared `Touches`
 footprint, with contract and invariant tests rather than tests of trivia. Run
@@ -165,20 +159,14 @@ initial issue implementations. Run final validation on any new head.
 
 ## Handoff merge readiness
 
-Before finishing `review` or `integrate`, fetch `origin/main` and run
-`git merge-tree --write-tree origin/main HEAD`. Exit 0 means the merge is clean;
-exit 1 means conflicts; another error is a failed check, not evidence of
-mergeability. On conflicts, merge `origin/main` into this branch, resolve them
-and commit the result; never rebase or force-push. Do not leave reconciliation
-for the integrator, which makes no fix-up commits. If the check cannot run or
-resolution needs an unresolved owner choice, use the existing defer or human
-decision route rather than reporting a clean handoff.
-
-After synchronization, rerun affected checks and the required final validation,
-verify merge readiness again, and push before handing off. A new commit has a
-new candidate SHA: earlier exact-head review and gate evidence does not transfer.
-Route the new head through the reviews owed and the review protocol's Rounds
-rule; a merge commit does not waive review or authorize a third round.
+Before handing off an issue implementation or PR revision as `review` or
+`integrate`, fetch `origin/main` and run `git merge-tree --write-tree origin/main HEAD`.
+Exit 0 is clean, 1 means conflicts, and other errors mean the check failed.
+Resolve conflicts by merging the base into the assigned branch, never rebasing
+or force-pushing; the integrator makes no fix-up commits. Rerun affected and
+required final checks, verify merge readiness, then push and hand off the new
+SHA under the existing exact-head review and rounds rules. Use existing defer
+or human-decision routes for a failed check or unresolved owner choice.
 
 ## Boundaries
 

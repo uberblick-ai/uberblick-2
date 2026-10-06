@@ -13,28 +13,20 @@
    Catalog-only treatment requires intent established by authoritative sources or
    an explicit human decision, no governing product document, and a mechanical
    correction preserving that intent; explain why.
-2. **Define success.** Establish the smallest useful scope, measurable success
-   where meaningful, otherwise observable success. Within delegated scope, choose
-   the narrowest option that solves the stated problem; put optional alternatives
-   out of scope. Widen only for evidenced necessity, such as an inseparable shared
-   guarantee, not convenience or imagined intent. Preserve essential guarantees.
-   Exclude unspecified optional work without asking. An explicit requested outcome
-   remains unless an owner authorizes deferral or removal; another open issue alone
-   does not authorize dropping it. Reuse settled allocation to avoid duplicate work,
-   citing that authorization and preserving real prerequisites.
-3. **Resolve.** Never invent or assume product intent. Resolve factual gaps from
-   evidence; missing or ambiguous intent, conflicts or scope changes beyond settled
-   authorization require [human clarification](human-decisions.md) and `needs-human`.
-   Stop dependent work; independent work may continue. Reporting missing context
-   does not waive required-source rules. Reuse settled authorization regardless of
-   issue origin; agent assertions, open recommendations, stances, labels and silence
-   supply no human approval for protected choices. Do not override corpus intent or
-   reopen settled choices without new conflict or evidence; ask only about that difference.
-   Before code grounding, if the intake and live corpus already expose an unresolved
-   owner choice affecting What, decomposition or acceptance criteria, ask then and
-   stop dependent drafting instead of writing the full dependent contract first.
-   Gather evidence needed to formulate the question and continue independent work;
-   later evidence may still reveal a question. An invitation to object is not approval.
+2. **Define success.** Set the smallest useful scope and measurable or observable
+   success. Within delegated choices, choose the narrowest solution; widen only
+   for evidenced necessity, such as an inseparable guarantee. Exclude optional
+   extras. Preserve explicit requested outcomes unless settled owner authorization
+   permits deferral or removal; another issue alone is not that authorization.
+   Cite agreed allocation and retain real prerequisites when avoiding duplicate work.
+3. **Resolve.** Resolve factual gaps from evidence; never invent intent or treat
+   silence, agent assertions or an invitation to object as approval. Reuse settled
+   authorization regardless of issue origin. If intake and live corpus already
+   expose an owner choice affecting scope, split or criteria, ask under
+   [human-decisions.md](human-decisions.md) before drafting the dependent contract.
+   Stop dependent work, continue independent work and gather evidence needed for
+   the question; code grounding may reveal further questions later. Missing
+   required context is not waived. Ask only about unresolved choices or new conflicts.
 4. **Record.** Put the outcome and pointers in the issue under
    [ISSUE_SPEC](../../.github/ISSUE_SPEC.md#body-sections). Cite sources with short
    reading reasons, including relevant decision topic/record UUIDs and open records
@@ -52,13 +44,12 @@ recorded `origin/main` SHA. `not-started` is only for a clarification
 
 Record discovered semantic prerequisites — functionality supplied by another
 issue — using [native relationships](../../.github/ISSUE_SPEC.md#relationships).
-Also apply [scheduling semantics](workflow.md#scheduling-semantics) to discovered
-open PRs: a rewrite of the same substantive file is not mechanical overlap.
-Record a native blocked-by relationship to the issue that PR closes. Only the
-bounded additive aggregation surfaces named there qualify for mechanical
-reconciliation. If the PR closes no issue, record the overlap in Pointers and
-defer without inventing a dependency. Do not scan open PRs or dependencies
-exhaustively or edit the other issue.
+For discovered open PRs, apply [scheduling semantics](workflow.md#scheduling-semantics):
+substantive file rewrites require a blocked-by relationship to the issue the PR
+closes; only bounded additive aggregation qualifies as mechanical overlap.
+If it closes no issue, record the overlap in Pointers and use the shared
+`defer` retry report, not a new outcome or invented dependency. No exhaustive
+scan or edits to the other issue.
 
 Keep investigation proportional. On resumption or relevant main changes, refresh
 only affected evidence, corpus sources and governing instructions; expand discovery
@@ -72,12 +63,8 @@ or exhaustive edge cases. An investigation names its decision, uncertain assumpt
 and confirming or refuting observation. A bounded negative result may complete it;
 the eventual feature is not its deliverable.
 
-On every route, challenge bespoke mechanisms against existing primitives and
-libraries, including parsers and file formats, under
-[library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices).
-If the simpler defensible implementation needs a protected runtime dependency,
-seek the owner's answer during preparation; do not prescribe custom machinery
-to evade that approval. Evidence supports the recommendation, not authorization.
+On every route, apply [library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices).
+Raise a needed protected dependency choice during preparation.
 
 Set the existing `Effort` field to your best tentative XS/S/M/L/XL estimate using
 [the field operation](run-operations.md#effort-field). Reassess on feedback and
