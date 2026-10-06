@@ -1,5 +1,5 @@
 # Uberblick's delivery workflow. Roles and outcomes live in .agents/roles/; the
-# label changes below mirror the outcome table in .agents/roles/README.md.
+# label changes below mirror the outcome table in .agents/protocols/workflow.md.
 repository: uberblick-ai/uberblick-2
 
 queue:

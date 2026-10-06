@@ -26,12 +26,12 @@ the issue, PR or code comment. When in doubt, mention the choice in the PR
 without a new record; a reviewer or person can promote it later.
 
 An agent creates a topic's first record `decided` as its stance, except that a
-topic crossing the live **Uberblick project agent workflow**
-(`c0bb016d-3d4c-4316-9b4e-da8a7b322e55`)'s **Human boundaries** table starts
-`open` with the agent's recommendation. Use **Decision logs**
-(`b7fdc6d7-ce5c-4733-a083-3fc30196f0b3`) for stance, answers, rejection and
-topic resolution, and **MCP interface contract**
-(`6e73bb70-e5da-4ee6-98ff-93ec9804856d`) for the installed calls and refusals.
+topic reserved to a human under [human-decisions.md](human-decisions.md) or the
+merge policy below starts `open` with the agent's recommendation. Local protocols
+own this authority. Discover relevant live decision records and lifecycle guidance
+by purpose under [AGENTS.md](../../AGENTS.md#read-for-the-action); use installed MCP
+schemas for stance, answer, rejection and topic-resolution calls and refusals.
+Missing required guidance does not grant authority; stop the dependent decision.
 `create_doc` and `set_status` record a person's answer with
 `answer: {who, when, where}`; a first record decided without one is
 `agentStance`. Do not invent an answer or reject a stance without a person's
@@ -120,7 +120,8 @@ validation and merge gates remain unchanged.
   persisted state, public command or interface surface, dependencies, or
   decided architecture: focused tests, documentation corrections and
   mechanical maintenance that defend or describe an existing contract. Merge
-  when the gates and acceptance criteria are green; no merge report is owed.
+  when the gates and acceptance criteria are green; no merge report is owed
+  except for [batch PRs](#batch-merge-reports).
 - **Tier 2 — merge with evidence.** Production-behavior changes that are
   neither tier 1 nor tier 3, including feature packages and backward-compatible
   additive schema work: all gates green plus a merge-report comment on the PR —
@@ -129,7 +130,7 @@ validation and merge gates remain unchanged.
   merging while updating the product docs; audit findings become issues, not
   reverts, unless critical.
 - **Tier 3 — a person decides before merge.** Without a person's answer that
-  covers the diff, the integrator escalates (`.agents/roles/README.md`),
+  covers the diff, the integrator escalates (`.agents/protocols/human-decisions.md`),
   naming the trigger; with one, it merges as tier 2 and every other gate still
   applies. Triggers: a breaking or destructive schema change, data migration,
   or break in persisted-data compatibility; a change to CRDT or concurrency
@@ -147,8 +148,8 @@ validation and merge gates remain unchanged.
 
 The new-runtime-dependency trigger does not apply to a dependency added only
 to `packages/web` for web UI when the PR records how it meets the live library
-selection criteria in **Web UI system**
-(`fd874b38-eea8-4754-a2e7-cffa5f4372b1`). It still applies when those criteria
+selection criteria discovered by purpose in the live corpus under
+[AGENTS.md](../../AGENTS.md#read-for-the-action). It still applies when those criteria
 are absent, unavailable or unmet, or the PR lacks the evidence; when the
 library touches sync, persistence, auth or CRDT semantics; and to any runtime
 dependency outside `packages/web`. This exception requires the reviewed
@@ -167,9 +168,17 @@ or scope: escalate again, naming the difference.
 Tier routes authority; it does not choose the design. Never replace a simpler
 established primitive or dependency with bespoke correctness machinery merely
 to avoid tier 3. For web UI, challenge custom mechanics against the framework,
-existing dependencies and libraries qualifying under Web UI system. Custom
-mechanics still require its evidenced, owner-confirmed exception. Make a shape
+existing dependencies and libraries qualifying under those live selection criteria.
+Custom mechanics still require the evidenced, owner-confirmed exception specified
+by the governing guidance; if that guidance is missing, stop the dependent choice
+rather than assume an exception. Make a shape
 that needs a person's answer visible early and get the answer once.
 
 The tier-3 trigger list is the owner-controlled autonomy boundary. Verify gates
 at the candidate SHA rather than relying on a session's assertion.
+
+### Batch merge reports
+
+A batch PR allowed by [ISSUE_SPEC's sizing](../../.github/ISSUE_SPEC.md#sizing)
+must carry the tier-2 merge-report comment described above, checking each issue's
+acceptance criteria separately, even when the PR would otherwise be tier 1.
