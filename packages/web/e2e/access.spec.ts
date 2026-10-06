@@ -17,6 +17,14 @@ test("confirm a GitHub account, manage membership, and revoke only your devices"
   await expect(devices.getByText("This computer", { exact: true })).toBeVisible();
   await expect(devices.getByText(access.foreignDeviceId, { exact: true })).toHaveCount(0);
 
+  for (const handle of ["@octocat", "https://github.com/octocat", "octo cat"]) {
+    await page.getByLabel("GitHub account", { exact: true }).fill(handle);
+    await page.getByRole("button", { name: "Look up account", exact: true }).click();
+    await expect(page.getByRole("alert")).toHaveText("Enter a GitHub handle, without @, a link or spaces.");
+    await expect(members.getByText("browser-person", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Confirm and add account", exact: true })).toHaveCount(0);
+  }
+
   await page.getByLabel("GitHub account", { exact: true }).fill("missing-user");
   await page.getByRole("button", { name: "Look up account", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("No such GitHub account");

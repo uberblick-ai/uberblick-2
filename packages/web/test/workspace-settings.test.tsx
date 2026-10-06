@@ -553,7 +553,7 @@ function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?
   ];
   let signedIn = true;
   let ownRoleStatus = options.ownRoleStatus;
-  let override: ((action: AccessAction) => AccessAnswer | null) | null = null;
+  let override: ((action: AccessAction) => AccessAnswer | Response | null) | null = null;
   const calls: { action: AccessAction; init: RequestInit }[] = [];
   const fetchImpl = vi.fn(async (path: RequestInfo | URL, init?: RequestInit) => {
     expect(path).toBe("/api/access");
@@ -561,6 +561,7 @@ function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?
     calls.push({ action, init: init ?? {} });
     let body: AccessAnswer;
     const overridden = override?.(action);
+    if (overridden instanceof Response) return overridden;
     if (overridden !== undefined && overridden !== null) body = overridden;
     else if (options.status !== undefined) body = { status: options.status, hub: options.status === "local-only" ? null : ACCESS_HUB };
     else if (!signedIn) body = { status: "sign-in-required", hub: ACCESS_HUB };
@@ -671,6 +672,21 @@ it.each([ ["account-not-found", "No such GitHub account"], ["lookup-unavailable"
     hub.setOverride((action) => action.operation === "resolve-account" ? { status, hub: ACCESS_HUB } : null);
     await lookUp(host);
     expect(host.textContent).toContain(message);
+    expect(hub.calls.some(({ action }) => action.operation === "grant-member")).toBe(false);
+    expect(host.querySelector('select[aria-label="Role for new account"]')).toBeNull();
+  },
+);
+
+it.each(["@octocat", "https://github.com/octocat", "octo cat"])(
+  "explains the bridge's invalid-request answer for handle %s without reporting a hub outage", async (handle) => {
+    const hub = accessHub(); const host = await mountAccess();
+    hub.setOverride((action) => action.operation === "resolve-account"
+      ? new Response(JSON.stringify({ status: "invalid-request" }), { status: 400 }) : null);
+    await lookUp(host, handle);
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("Enter a GitHub handle, without @, a link or spaces.");
+    expect(host.textContent).not.toContain("The hub cannot be reached");
+    expect(host.querySelector('table[aria-label="Members"]')?.textContent).toContain(ADMIN.githubUsername);
+    expect(hub.calls.filter(({ action }) => action.operation === "list-members")).toHaveLength(1);
     expect(hub.calls.some(({ action }) => action.operation === "grant-member")).toBe(false);
     expect(host.querySelector('select[aria-label="Role for new account"]')).toBeNull();
   },

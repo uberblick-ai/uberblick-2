@@ -46,9 +46,10 @@ function member(value: unknown): AccessMember {
 /** Keep only the response fields this page needs, never arbitrary diagnostics. */
 function answer(value: unknown, action: AccessAction): AccessAnswer {
   const body = object(value);
+  // Local refusals can occur before the bridge selects a hub.
   if (body === null || typeof body.status !== "string" ||
-    (body.hub !== null && typeof body.hub !== "string")) throw new Error("Invalid access answer");
-  const parsed: AccessAnswer = { status: body.status, hub: body.hub };
+    (body.hub !== undefined && body.hub !== null && typeof body.hub !== "string")) throw new Error("Invalid access answer");
+  const parsed: AccessAnswer = { status: body.status, hub: body.hub ?? null };
   if (body.status === "closure-failed" && body.applied === true) parsed.applied = true;
   if (body.status !== "ok" && body.status !== "already-member") return parsed;
   switch (action.operation) {

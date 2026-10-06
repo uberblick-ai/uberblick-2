@@ -34,10 +34,6 @@ export async function manageRequest(
     signal,
   });
   signal.throwIfAborted();
-  if (response.redirected) {
-    await response.body?.cancel();
-    throw new ManagementResponseError();
-  }
   const reader = response.body?.getReader();
   if (reader === undefined) throw new ManagementResponseError(true);
   const chunks: Uint8Array[] = [];
@@ -145,15 +141,6 @@ export function sanitizeManagementReply(
     case "change-role":
     case "remove-member":
       if (status === 200 && state === "ok") return result({ status: state });
-      break;
-    case "promote-workspace":
-      if (status === 200 && (state === "created" || state === "resumed") &&
-          body.workspaceId === action.workspaceId && body.attemptId === action.attemptId) {
-        return result({ status: state, workspaceId: action.workspaceId, attemptId: action.attemptId });
-      }
-      if ((status === 403 && state === "member-required") || (status === 409 && state === "workspace-conflict")) {
-        return result({ status: state });
-      }
       break;
   }
   if ((action.operation === "resolve-account" || action.operation === "grant-member") &&

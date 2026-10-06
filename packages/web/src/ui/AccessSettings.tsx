@@ -166,8 +166,10 @@ export function AccessSettings({ workspace, serving, subject }: {
       setResolved({ githubAccountId: result.githubAccountId, githubUsername: result.githubUsername });
       setGrantRole("member");
     } else {
-      setFeedback({ applied: false, text: failure(result.status, result.hub) });
-      if (result.status !== "account-not-found" && result.status !== "lookup-unavailable") await refresh(signal);
+      setFeedback({ applied: false, text: result.status === "invalid-request"
+        ? "Enter a GitHub handle, without @, a link or spaces."
+        : failure(result.status, result.hub) });
+      if (result.status !== "invalid-request" && result.status !== "account-not-found" && result.status !== "lookup-unavailable") await refresh(signal);
     }
     if (!signal.aborted) setBusy(false);
   };
