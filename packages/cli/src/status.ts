@@ -21,6 +21,7 @@ import { hubDatabasePath } from "@uberblick/hub/config";
 import { readDeviceLogin } from "@uberblick/hub/device-login";
 import { collectSyncStatus, createMcpServer } from "@uberblick/mcp-server";
 import type { McpConfig, SyncStatus } from "@uberblick/mcp-server";
+import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
 import type { CredentialOrigin, Origin, ShadowedLayer } from "./config.js";
 import { resolveConfig } from "./config.js";
@@ -72,6 +73,8 @@ export interface StatusReport {
    * `hub.url` is null when no signing secret makes it local-only.
    */
   hubUrl: string;
+  /** The account stored on this computer, independent of live hub acceptance. */
+  account: { login: string; provider: "github" } | null;
   databasePath: string;
   /** Whether the endpoint’s local secret or stored device login is present. */
   credentialPresent: boolean;
@@ -124,25 +127,35 @@ export interface UnboundStatusReport {
   workspace: null;
   binding: null;
   hubUrl: null;
+  account: null;
   projectConfig: null;
   message: string;
 }
 
-/** Collect the report without printing it. Exported for tests. */
+/**
+ * Collect the report without printing it. Exported for tests.
+ * accountOrigin is render metadata for device admission, excluded from JSON.
+ */
 export async function statusReport(
   options: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
-): Promise<{ report: StatusReport | UnboundStatusReport; warnings: string[] }> {
+): Promise<{ report: StatusReport | UnboundStatusReport; warnings: string[]; accountOrigin?: string }> {
   const resolved = resolveConfig(options);
   if (resolved.binding === null) {
     return { warnings: resolved.warnings, report: {
       version: cliVersion(), workspace: null, binding: null, hubUrl: null,
-      projectConfig: null, message: NO_BINDING,
+      account: null, projectConfig: null, message: NO_BINDING,
     } };
   }
   const config = resolveMcpConfig(resolved.env);
   const sync = await readSyncStatus(config);
+  // Reuse the existing local presence read; the account never requests a login
+  // or renewal. A refused connection still has an account if it is stored here.
+  const deviceLogin = config.deviceLogin === undefined
+    ? undefined : readDeviceLogin(config.hubUrl, config.workspaceId, resolved.env);
+  const accountOrigin = resolved.binding.hubUrl === null ? undefined : deviceLogin?.origin;
   return {
     warnings: resolved.warnings,
+    ...(accountOrigin === undefined ? {} : { accountOrigin }),
     report: {
       binding: resolved.binding,
       projectConfig: resolved.paths.projectConfig,
@@ -150,8 +163,10 @@ export async function statusReport(
       workspace: resolved.env.WORKSPACE_ID ?? config.workspaceId,
       workspaceUuid: config.workspaceId,
       hubUrl: config.hubUrl,
+      account: accountOrigin !== undefined && deviceLogin?.status === "ready"
+        ? { login: deviceLogin.login.identity.githubUsername, provider: "github" } : null,
       databasePath: config.databasePath,
-      credentialPresent: config.deviceLogin === undefined ? config.authSecret !== null : readDeviceLogin(config.hubUrl, config.workspaceId, resolved.env).status === "ready",
+      credentialPresent: deviceLogin === undefined ? config.authSecret !== null : deviceLogin.status === "ready",
       credentialSource: resolved.origins.credential,
       sources: {
         workspace: resolved.origins.workspace,
@@ -188,7 +203,7 @@ function field(name: string, value: string): string {
   return `${name.padEnd(12)}${value}\n`;
 }
 
-export function renderStatus(report: StatusReport | UnboundStatusReport): string {
+export function renderStatus(report: StatusReport | UnboundStatusReport, accountOrigin?: string): string {
   if (report.workspace === null) return `${report.message}\n`;
   const hub = report.hub;
   const hubFailure =
@@ -207,6 +222,11 @@ export function renderStatus(report: StatusReport | UnboundStatusReport): string
     text += field("uuid", report.workspaceUuid);
   }
   text += field("hub", report.binding.hubUrl ?? "local (this computer)");
+  if (report.account !== null) {
+    text += field("account", `@${displayUsername(report.account.login)} (GitHub)`);
+  } else if (accountOrigin !== undefined) {
+    text += field("account", `not signed in, run ub auth login ${accountOrigin}`);
+  }
   text += field("selection", report.projectConfig ?? ORIGIN_LABELS[report.sources.workspace]);
   text += field("connection", hub.status);
   if (hub.reason !== undefined) text += field("recovery", hub.reason);
@@ -235,9 +255,10 @@ export const STATUS_OPTIONS = {
 
 export const STATUS_HELP = `usage: ub status [--json]
 
-Overview of the selected project workspace, hub, selection source, connection state,
-pending rooms and sync messages, attached rooms, records stored in the local log and
-detected failures. Connection does not mean the hub acknowledged every change.
+Overview of the selected project workspace, hub, stored account, selection source,
+connection state, pending rooms and sync messages, attached rooms, records stored
+in the local log and detected failures. Connection does not mean the hub
+acknowledged every change.
 Recovery names the next action; \`ub doctor\` gives further diagnostics.
 Workspace and hub bindings stay unchanged; renewal may update the stored login.
 
@@ -245,8 +266,8 @@ options:
   --json            full report as JSON, including rooms, configuration and paths
   -h, --help        show this help
 
-The JSON report includes configuration sources and credential presence; the
-signing secret is never printed. Warnings remain on stderr.
+The JSON report includes the stored account, configuration sources and credential
+presence; the signing secret is never printed. Warnings remain on stderr.
 `;
 
 export async function statusCommand(
@@ -268,10 +289,10 @@ export async function statusCommand(
     return 2;
   }
 
-  const { report, warnings } = await statusReport();
+  const { report, warnings, accountOrigin } = await statusReport();
   for (const warning of warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }
-  io.out(json ? `${JSON.stringify(report, null, 2)}\n` : renderStatus(report));
+  io.out(json ? `${JSON.stringify(report, null, 2)}\n` : renderStatus(report, accountOrigin));
   return 0;
 }
