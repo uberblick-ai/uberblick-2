@@ -184,9 +184,9 @@ describe("@hocuspocus/* is pinned to an exact version", () => {
  * `@hocuspocus/server` ships the same `ClientConnection` twice — an ESM bundle
  * and a CJS bundle — and the patch has to edit both by hand, because the
  * package ships no build. Everything in this repository loads the ESM one
- * (every workspace package is `"type": "module"`, and the hub image runs `tsx`
- * on TypeScript sources), so the CJS copy is shipped, never exercised, and a
- * defect in it is invisible to the suites, to CI and to the Docker review.
+ * (every workspace package is `"type": "module"`, and the release hub runs the
+ * esbuild bundle `/app/hub.mjs`), so the CJS copy is shipped, never exercised,
+ * and a defect in it is invisible to the suites, to CI and to the Docker review.
  *
  * These probes close that gap for the one rule the patch adds: a document is
  * opened by its Auth message, and any other first frame for a document is

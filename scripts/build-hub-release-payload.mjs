@@ -24,15 +24,9 @@ async function bundle(entry, output) {
 
 async function main() {
 	const [output, version, sourceCommit, protocolVersion, hubImage, webImage] = process.argv.slice(2);
-	if (!output) throw new Error("usage: build-hub-release-payload <output> [version commit protocol hub-image web-image]");
-	const destination = resolve(output);
-	mkdirSync(destination, { recursive: true });
-	await Promise.all([
-		bundle("packages/hub/src/main.ts", join(destination, "hub.mjs")),
-		bundle("packages/hub/src/admin-setup-command.ts", join(destination, "hub-admin-setup.mjs")),
-	]);
-	// The checkout hub uses the same setup entrypoint without building a release.
-	if (version === undefined) return;
+	if (!output || process.argv.slice(2).length !== 6) {
+		throw new Error("usage: build-hub-release-payload <output> <version> <commit> <protocol> <hub-image> <web-image>");
+	}
 	if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version) ||
 		!/^[a-f0-9]{40}$/.test(sourceCommit ?? "")) {
 		throw new Error("release version and full source commit are required");
@@ -48,6 +42,12 @@ async function main() {
 			throw new Error("release image references must name this version under ghcr.io/uberblick-ai");
 		}
 	}
+	const destination = resolve(output);
+	mkdirSync(destination, { recursive: true });
+	await Promise.all([
+		bundle("packages/hub/src/main.ts", join(destination, "hub.mjs")),
+		bundle("packages/hub/src/admin-setup-command.ts", join(destination, "hub-admin-setup.mjs")),
+	]);
 	const release = join(destination, "release");
 	mkdirSync(release);
 	for (const file of ["remote.env.example", "remote-settings.sh", "remote.https.yml", "remote.tailscale.yml", "REMOTE.md", "RELEASING.md"]) {

@@ -2,6 +2,14 @@
 
 set -eu
 
+# An old checkout updater can reach this wrapper after resetting to a release-
+# only revision. Refuse before Docker can discover a parent's Compose file or
+# use COMPOSE_FILE to mutate an unrelated stack.
+if [ ! -f release.json ]; then
+  printf 'Run this command from the extracted release directory containing release.json. Hub checkout deployments are no longer supported; switch this host to a published release using REMOTE.md before updating.\n' >&2
+  exit 1
+fi
+
 # Every value the served configuration document carries is checked here, and
 # checked *before* the first `docker` call: a refusal is then about the value
 # and never about the daemon, and a host without Docker still gets the honest
@@ -31,16 +39,14 @@ validate_remote_settings
 
 # Route selection uses the operator's .env. Passing a different env file only
 # to Compose would give the containers settings for a route we did not select.
-if [ -f release.json ]; then
-  for argument in "$@"; do
-    case "$argument" in
-      --env-file | --env-file=*)
-        printf 'Released hub wrapper does not support --env-file; put settings in .env, or use plain Compose with the route files in REMOTE.md.\n' >&2
-        exit 1
-        ;;
-    esac
-  done
-fi
+for argument in "$@"; do
+  case "$argument" in
+    --env-file | --env-file=*)
+      printf 'Released hub wrapper does not support --env-file; put settings in .env, or use plain Compose with the route files in REMOTE.md.\n' >&2
+      exit 1
+      ;;
+  esac
+done
 
 compose_version=$(docker compose version --short)
 compose_version=${compose_version#v}
@@ -57,48 +63,39 @@ case "$compose_major.$compose_minor" in
     ;;
 esac
 
-if [ "$compose_major" -lt 2 ] || { [ "$compose_major" -eq 2 ] && [ "$compose_minor" -lt 6 ]; }; then
-  printf 'Docker Compose 2.6.0 or newer is required; found %s\n' "$compose_version" >&2
+case "$compose_patch" in
+  '' | *[!0-9]*) printf 'Cannot parse Docker Compose version.\n' >&2; exit 1 ;;
+esac
+if [ "$compose_major" -lt 2 ] || { [ "$compose_major" -eq 2 ] && { [ "$compose_minor" -lt 24 ] || { [ "$compose_minor" -eq 24 ] && [ "$compose_patch" -lt 4 ]; }; }; }; then
+  printf 'Docker Compose 2.24.4 or newer is required for released hubs.\n' >&2
   exit 1
 fi
-
-# The extracted release carries metadata; checkout compatibility keeps its
-# original Compose file and Tailscale-only route. Select ordinary override files
-# rather than generating deployment configuration or changing the project name.
-if [ -f release.json ]; then
-  case "$compose_patch" in
-    '' | *[!0-9]*) printf 'Cannot parse Docker Compose version.\n' >&2; exit 1 ;;
-  esac
-  if [ "$compose_major" -eq 2 ] && { [ "$compose_minor" -lt 24 ] || { [ "$compose_minor" -eq 24 ] && [ "$compose_patch" -lt 4 ]; }; }; then
-    printf 'Docker Compose 2.24.4 or newer is required for released hubs.\n' >&2
-    exit 1
-  fi
-  host=${WEB_HOST:-${TAILSCALE_HOST:-}}
-  if [ -z "$host" ]; then
-    # Docker before 28 can expose loopback-published ports on the local network.
-    # Only startup needs the daemon; config and offline inspection still work.
-    for argument in "$@"; do
-      if [ "$argument" = up ] || [ "$argument" = start ] || [ "$argument" = create ]; then
-        engine_version=$(docker version --format '{{.Server.Version}}')
-        engine_major=${engine_version%%.*}
-        case "$engine_major" in
-          '' | *[!0-9]*) printf 'Cannot parse Docker Engine version.\n' >&2; exit 1 ;;
-        esac
-        if [ "$engine_major" -lt 28 ]; then
-          printf 'Docker Engine 28.0.0 or newer is required for host-only HTTP publication.\n' >&2
-          exit 1
-        fi
-        break
+host=${WEB_HOST:-${TAILSCALE_HOST:-}}
+if [ -z "$host" ]; then
+  # Docker before 28 can expose loopback-published ports on the local network.
+  # Only startup needs the daemon; config and offline inspection still work.
+  for argument in "$@"; do
+    if [ "$argument" = up ] || [ "$argument" = start ] || [ "$argument" = create ]; then
+      engine_version=$(docker version --format '{{.Server.Version}}')
+      engine_major=${engine_version%%.*}
+      case "$engine_major" in
+        '' | *[!0-9]*) printf 'Cannot parse Docker Engine version.\n' >&2; exit 1 ;;
+      esac
+      if [ "$engine_major" -lt 28 ]; then
+        printf 'Docker Engine 28.0.0 or newer is required for host-only HTTP publication.\n' >&2
+        exit 1
       fi
-    done
-  fi
-  if [ -z "${COMPOSE_FILE-}" ]; then
-    case "$host" in
-      *.[tT][sS].[nN][eE][tT]) set -- -f docker-compose.yml -f remote.https.yml -f remote.tailscale.yml "$@" ;;
-      '') set -- -f docker-compose.yml "$@" ;;
-      *) set -- -f docker-compose.yml -f remote.https.yml "$@" ;;
-    esac
-  fi
+      break
+    fi
+  done
+fi
+# Select ordinary release override files without changing the project name.
+if [ -z "${COMPOSE_FILE-}" ]; then
+  case "$host" in
+    *.[tT][sS].[nN][eE][tT]) set -- -f docker-compose.yml -f remote.https.yml -f remote.tailscale.yml "$@" ;;
+    '') set -- -f docker-compose.yml "$@" ;;
+    *) set -- -f docker-compose.yml -f remote.https.yml "$@" ;;
+  esac
 fi
 
 exec docker compose "$@"

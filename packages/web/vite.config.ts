@@ -55,9 +55,9 @@ const BUILD_STAMP = "uberblick-build.json";
  * Stamp the built bundle with the sync protocol version it speaks.
  *
  * A plugin rather than a `package.json` postbuild step because that would run
- * for one entrance only: `ub open`, the Dockerfile and `mise run build-web` all
- * shell out to `pnpm --filter @uberblick/web build`, but
- * `test/bundle-secret.test.ts` calls Vite's `build()` directly.
+ * for one entrance only: `ub open` and `mise run build-web` shell out to
+ * `pnpm --filter @uberblick/web build`, while the release payload invokes Vite
+ * directly and `test/bundle-secret.test.ts` calls its `build()` API.
  * `generateBundle` is common to all four, so no build produces an unstamped
  * bundle — including the one the suite scans.
  *
