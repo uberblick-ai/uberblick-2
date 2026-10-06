@@ -61,6 +61,7 @@ import type { HubLogger } from "./log.js";
 import { CredentialRegistry } from "./credentials.js";
 import { CredentialAdmission, type CredentialContext } from "./credential-admission.js";
 import { handleCredentialRenewal } from "./credential-renewal.js";
+import { WorkspaceNameReader } from "./workspace-names.js";
 import { WorkspacePromotions } from "./workspace-promotion.js";
 import { handleAccessManagement } from "./access-management.js";
 import { startAdminSetup } from "./admin-setup.js";
@@ -660,6 +661,7 @@ export async function createHub(config: HubConfig, options: {
   let claims: HubClaimState | undefined;
   let admission: CredentialAdmission | undefined;
   let promotions: WorkspacePromotions | undefined;
+  const workspaceNames = new WorkspaceNameReader(database, room => server.hocuspocus.documents.get(room));
   try {
     // Standalone entry points opt in. ub open's embedded hub never initializes
     // or claims, even when it offers an explicitly configured GitHub sign-in.
@@ -671,7 +673,7 @@ export async function createHub(config: HubConfig, options: {
         credentials = new CredentialRegistry(database);
         promotions = new WorkspacePromotions(database, memberships, workspaceId =>
           [...server.hocuspocus.documents.keys()].some(name => name.startsWith(`${workspaceId}/`)));
-        signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims);
+        signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims, workspaceNames);
         accounts = new GithubAccountLookup(config.github.fetch);
       }
     }
@@ -726,7 +728,7 @@ export async function createHub(config: HubConfig, options: {
 
     async onRequest({ request, response }) {
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return Promise.reject();
-      if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response)) {
+      if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) {
         return Promise.reject();
       }
       if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts)) {

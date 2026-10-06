@@ -7,6 +7,7 @@ import {
   type StoredHubLogin,
   isHubLogin,
   preflightHubLoginStore,
+  projectLoginFields,
   readHubLogins,
   removeHubLogin,
   writeHubLogin,
@@ -46,7 +47,7 @@ Local-only work needs no login. Login never changes the project binding.
 On a fresh, unclaimed hub, the first GitHub account to complete approval
 claims its default workspace as administrator. Claiming is one-time; this
 command reports the claim after storing the login, then lists the available
-workspace UUIDs along with who signed in and the hub.
+workspace UUIDs and any supplied names along with who signed in and the hub.
 
 options:
   -h, --help             show this help
@@ -54,7 +55,7 @@ options:
 
 export const AUTH_STATUS_HELP = `usage: ub auth status [hub]
 
-Show who this computer is signed in as and the available workspace UUIDs
+Show who this computer is signed in as and the available workspace UUIDs and names
 for the given hub, or the hub selected by this project's binding.
 The hub can be a bare host, an http(s) address or a ws(s) endpoint.
 Read only this computer's stored login, without using the network.
@@ -135,9 +136,11 @@ function displayUsername(user: string): string {
 
 function describeWorkspaces(login: StoredHubLogin, io: Io): void {
   const workspaces = login.credential.record.workspaces;
+  const names = login.credential.workspaceNames;
   io.out(workspaces.length === 0
     ? "available workspaces: none\n"
-    : `available workspaces:\n${workspaces.map(workspace => `  ${workspace}\n`).join("")}`);
+    : `available workspaces:\n${workspaces.map(workspace =>
+      `  ${workspace}${names?.[workspace] === undefined ? "" : ` | ${names[workspace]}`}\n`).join("")}`);
 }
 
 function describeMissingWorkspace(selection: Selection, login: StoredHubLogin, io: Io): boolean {
@@ -453,10 +456,11 @@ async function login(selection: Selection, io: Io): Promise<number> {
       if (result.status === "pending" && seconds(result.interval)) { interval = result.interval; continue; }
       if (result.status !== "complete") terminal(result);
       collected = true;
-      const credential = { identity: result.identity, credential: result.credential };
-      if (!isHubLogin(credential) || credential.identity.githubUsername.includes(attempt.collectionSecret)) {
+      const supplied = { identity: result.identity, credential: result.credential };
+      if (!isHubLogin(supplied) || supplied.identity.githubUsername.includes(attempt.collectionSecret)) {
         throw new SignInFailure("the hub returned an invalid sign-in credential; run login again");
       }
+      const credential = projectLoginFields(supplied, attempt.collectionSecret);
       if (Object.hasOwn(result, "claimedWorkspaceId")) {
         if (typeof result.claimedWorkspaceId !== "string" || !UUID.test(result.claimedWorkspaceId) ||
             !credential.credential.record.workspaces.includes(result.claimedWorkspaceId)) {

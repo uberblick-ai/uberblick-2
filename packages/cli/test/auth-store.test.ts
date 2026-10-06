@@ -344,6 +344,47 @@ describe("hub login store", () => {
     expect(JSON.parse(readFileSync(credentialsPath(box.env), "utf8"))).toEqual({ hubLogins: { [HUB]: value } });
   });
 
+  it("stores names only for issued workspaces and reads them without rewriting the login", async () => {
+    const box = sandbox();
+    const value = login();
+    const name = 'Synthetic 🧭 "workspace" \\';
+    value.credential.workspaceNames = {
+      [WORKSPACE]: name,
+      "eeeeeeee-5555-4555-8555-555555555555": "Not issued",
+    };
+    await writeHubLogin(HUB, value, box.env);
+    const path = credentialsPath(box.env);
+    const before = readFileSync(path, "utf8");
+    const stored = readHubLogins(box.env).logins[HUB]!;
+    expect(stored.credential.workspaceNames).toEqual({ [WORKSPACE]: name });
+    expect(stored.credential.record.workspaces).toEqual([WORKSPACE]);
+    expect(JSON.parse(before).hubLogins[HUB]).toEqual(stored);
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  it.each([
+    { label: "null", workspaceNames: null }, { label: "array", workspaceNames: [] },
+    { label: "string", workspaceNames: "not a map" },
+    { label: "non-string", workspaceNames: { [WORKSPACE]: 4 } },
+    { label: "empty", workspaceNames: { [WORKSPACE]: "" } },
+    { label: "padded", workspaceNames: { [WORKSPACE]: " C1-free but padded " } },
+    { label: "C1", workspaceNames: { [WORKSPACE]: "synthetic\u009bname" } },
+    { label: "bidi", workspaceNames: { [WORKSPACE]: "synthetic\u202ename" } },
+    { label: "credential key", workspaceNames: { [WORKSPACE]: `synthetic ${login().credential.key}` } },
+  ])("ignores $label names without losing an older credential", async ({ workspaceNames }) => {
+    const original = login();
+    const supplied = { ...original, credential: { ...original.credential, workspaceNames } };
+    expect(isHubLogin(supplied)).toBe(true);
+    const box = sandbox({ credentials: { hubLogins: { [HUB]: supplied } } });
+    const path = credentialsPath(box.env);
+    const before = readFileSync(path, "utf8");
+    expect(readHubLogins(box.env).logins[HUB]).toEqual(original);
+    expect(readFileSync(path, "utf8")).toBe(before);
+    if (!isHubLogin(supplied)) throw new Error("display names must not invalidate a credential");
+    await writeHubLogin(HUB, supplied, box.env);
+    expect(JSON.parse(readFileSync(path, "utf8")).hubLogins[HUB]).toEqual(original);
+  });
+
   it.each([0o644, 0o640, 0o606])("refuses mode %o for reads and mutations without repairing it", async (mode) => {
     const box = sandbox({ credentials: { signingSecret: SECRET_ON_FILE, hubLogins: { [HUB]: login() } }, credentialsMode: mode });
     const path = credentialsPath(box.env);

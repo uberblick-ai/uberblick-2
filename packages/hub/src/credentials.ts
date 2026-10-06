@@ -51,7 +51,7 @@ export interface DeviceRecord {
 }
 
 export type CredentialRenewal =
-  | { status: "renewed"; credential: { record: CredentialRecord; key: string } }
+  | { status: "renewed"; credential: { record: CredentialRecord; key: string; workspaceNames?: Record<string, string> } }
   | { status: "unchanged" }
   | { status: "already-replaced" }
   | { status: "sign-in-required" };
