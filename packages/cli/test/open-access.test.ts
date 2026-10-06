@@ -56,6 +56,8 @@ async function rig(role: "admin" | "member" | null = "admin", snapshot?: string[
 describe("ub open: live Access bridge", () => {
   it("distinguishes an explicitly local workspace, a shared-secret hub and an unreachable hub", async () => {
     const { box, env } = configured();
+    // Local-only Access needs no upstream credential or implicit default-port hub.
+    rmSync(join(configDir(box), "credentials.json"));
     const app = await open(box, ["--port", String(await freePort())], env);
     try {
       const local = await fetch(`${app.url}api/access`, { method: "POST", headers: {
