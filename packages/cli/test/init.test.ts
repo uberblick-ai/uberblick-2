@@ -26,10 +26,25 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { createConnection } from "node:net";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { readSeedDocs, resolveMcpConfig } from "@uberblick/mcp-server";
+import {
+  directoryRoom,
+  getBlocks,
+  getMeta,
+  isSidebarSeeded,
+  listDirectory,
+  readSidebar,
+  roomForDoc,
+  sidebarRoom,
+} from "@uberblick/schema";
+import * as Y from "yjs";
 import { afterAll, describe, expect, it } from "vitest";
 import { findCheckoutRoot } from "../src/checkout.js";
 import { resolveConfig } from "../src/config.js";
+import { STARTER_GROUP_ID, STARTER_GROUP_NAME, TEMPLATE_DIR } from "../src/starter.js";
 import {
   REPO_ROOT,
   hubless,
@@ -111,6 +126,82 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const JOINED = "7c2b91d4-3e05-4a68-9f31-b0d5e6a71c82";
 
 describe("ub init", () => {
+  it("creates its local workspace, secret and starter documents without waiting out refused hub deadlines", async (context) => {
+    // Init with a local binding currently dials the built-in endpoint. Check
+    // it is refused before writing: this proof must never seed a running hub.
+    const endpoint = new URL(resolveMcpConfig({ WORKSPACE_ID: randomUUID() }).hubUrl);
+    const refused = await new Promise<boolean>((resolve) => {
+      const socket = createConnection({ host: endpoint.hostname, port: Number(endpoint.port) });
+      const finish = (result: boolean) => {
+        socket.destroy();
+        resolve(result);
+      };
+      socket.once("connect", () => finish(false));
+      socket.once("error", (error: NodeJS.ErrnoException) => finish(error.code === "ECONNREFUSED"));
+      socket.setTimeout(500, () => finish(false));
+    });
+    if (!refused) context.skip("the built-in local hub endpoint did not refuse the connection");
+
+    // A fresh explicit local binding keeps this fixture independent of a
+    // launcher's enclosing project while still creating the replica and seed.
+    const box = sandbox();
+    const selected = projectBinding(box);
+    delete box.env.UB_TEST_MAX_WAIT_MS;
+    const started = performance.now();
+    const run = runUb(["init", "--yes"], box);
+    const elapsed = performance.now() - started;
+    expect(run.status, run.output).toBe(0);
+    // A loaded test runner gets headroom over the subsecond first-run target;
+    // the regression waits several full 1.5 s connect budgets.
+    expect(elapsed, `offline init took ${elapsed.toFixed(0)} ms`).toBeLessThan(2_000);
+    const binding = projectBinding(box);
+    expect(binding).toEqual(selected);
+    expect(binding.workspaceId).toMatch(UUID);
+    expect(binding.hubUrl).toBeNull();
+    const secret = storedSecret(box);
+    expect(Buffer.from(secret, "base64url").length).toBeGreaterThanOrEqual(32);
+    expect(statSync(credentialsPath(box)).mode & 0o777).toBe(0o600);
+    expect(run.output).not.toContain(secret);
+
+    // Replay durable state directly, so a later replica cannot repair a seed
+    // that returned early with missing documents or sidebar pins.
+    const workspace = binding.workspaceId as string;
+    const db = new DatabaseSync(join(box.dataHome, "uberblick", `${workspace}.sqlite`), { readOnly: true });
+    const docs: Y.Doc[] = [];
+    const replay = (room: string): Y.Doc => {
+      const doc = new Y.Doc();
+      docs.push(doc);
+      for (const row of db.prepare("SELECT state FROM snapshots WHERE room = ?").all(room)) {
+        Y.applyUpdate(doc, new Uint8Array(row.state as Uint8Array));
+      }
+      for (const row of db.prepare("SELECT payload FROM updates WHERE room = ? ORDER BY seq").all(room)) {
+        Y.applyUpdate(doc, new Uint8Array(row.payload as Uint8Array));
+      }
+      return doc;
+    };
+    try {
+      const starters = readSeedDocs(TEMPLATE_DIR);
+      expect(listDirectory(replay(directoryRoom(workspace))).map((doc) => doc.uuid).sort())
+        .toEqual(starters.map((doc) => doc.uuid).sort());
+      for (const starter of starters) {
+        const doc = replay(roomForDoc(workspace, starter.uuid));
+        expect(getMeta(doc)).toMatchObject({ uuid: starter.uuid, title: starter.title, description: starter.description, tags: [] });
+        expect(getBlocks(doc).map(({ type, text }) => ({ type, text })))
+          .toEqual(starter.blocks.map(({ type, text }) => ({ type, text })));
+      }
+      const sidebar = replay(sidebarRoom(workspace));
+      expect(readSidebar(sidebar)).toEqual([{
+        id: STARTER_GROUP_ID,
+        name: STARTER_GROUP_NAME,
+        docs: ["welcome-to-uberblick.md", "how-to-use-it.md"].map((file) => starters.find((doc) => doc.file === file)?.uuid),
+      }]);
+      expect(isSidebarSeeded(sidebar)).toBe(true);
+    } finally {
+      db.close();
+      for (const doc of docs) doc.destroy();
+    }
+  });
+
   it("does not persist a differing environment binding or create a workspace beneath an environment-only binding", () => {
     for (const present of [false, true]) {
       const fileBinding = { workspaceId: JOINED, hubUrl: null };

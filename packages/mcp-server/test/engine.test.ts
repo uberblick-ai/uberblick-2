@@ -5,7 +5,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Hub } from "@uberblick/hub";
 import {
   appendBlock,
@@ -47,6 +47,7 @@ const peers: PeerClient[] = [];
 const rigs: Rig[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const peer of peers.splice(0)) peer.destroy();
   for (const rig of rigs.splice(0)) await rig.close();
   for (const engine of engines.splice(0)) await engine.close();
@@ -98,9 +99,8 @@ describe("transport-free MCP engine", () => {
       refreshIntervalMs: 30_000,
     });
     engines.push(engine);
-    // If the steady-state pass accidentally calls settle, the unreachable hub
-    // makes the mistake visible without a tight wall-clock assertion.
-    config.connectTimeoutMs = 30_000;
+    // Boot may settle; steady-state refreshes must never wait on the hub.
+    const settle = vi.spyOn(engine.replicas, "settle");
 
     const uuid = randomUUID();
     const room = roomForDoc(WORKSPACE, uuid);
@@ -113,6 +113,7 @@ describe("transport-free MCP engine", () => {
       .find((entry) => entry.room === room);
     if (replica === undefined) throw new Error("the caller's room was not attached");
     expect(getBlocks(replica.doc).map((block) => block.text)).toEqual(["caller append"]);
+    expect(settle).not.toHaveBeenCalled();
   });
 
   it("polls a foreign commit without putting the hub wait in front of it", async () => {
@@ -124,7 +125,7 @@ describe("transport-free MCP engine", () => {
     });
     const engine = await createMcpEngine(config, { refreshIntervalMs: 10 });
     engines.push(engine);
-    config.connectTimeoutMs = 30_000;
+    const settle = vi.spyOn(engine.replicas, "settle");
 
     const outside = new MirrorStore(databasePath, WORKSPACE);
     stores.push(outside);
@@ -144,6 +145,7 @@ describe("transport-free MCP engine", () => {
       },
       2_000,
     );
+    expect(settle).not.toHaveBeenCalled();
   });
 
   it("pushes pending state after hub recovery and releases its marker without a tool call", async () => {
