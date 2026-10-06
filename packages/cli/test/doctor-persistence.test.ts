@@ -19,9 +19,11 @@ import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
 import { directoryRoom, upsertDirectoryEntry } from "@uberblick/schema";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Check, DoctorReport } from "../src/doctor.js";
+import { doctorReport } from "../src/doctor.js";
 import type { StatusReport } from "../src/status.js";
+import * as statusReading from "../src/status.js";
 import type { Sandbox } from "./helpers.js";
 import { pointAt, removeTempDirs, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
 
@@ -154,7 +156,7 @@ describe("ub doctor live persistence reading", () => {
     expect(check.status).toBe("fail");
     expect(check.reason).toContain(databasePath);
     expect(check.reason).toMatch(/not a database/);
-    expect(check.remedy).toMatch(/valid database/);
+    expect(check.fix).toMatch(/valid database/);
     expect(status).toBe(1);
     expect(readFileSync(databasePath, "utf8")).toBe(contents);
     expect(existsSync(box.dataHome)).toBe(false);
@@ -170,7 +172,7 @@ describe("ub doctor live persistence reading", () => {
       expect(check.status).toBe("fail");
       expect(check.reason).toContain(databasePath);
       expect(check.reason).toMatch(/could not take the live reading/);
-      expect(check.remedy).toMatch(/restore access/);
+      expect(check.fix).toMatch(/restore access/);
       expect(existsSync(box.dataHome)).toBe(false);
     } finally {
       chmodSync(databasePath, 0o600);
@@ -184,8 +186,35 @@ describe("ub doctor live persistence reading", () => {
     const { check, report } = await persistence(box, { UBERBLICK_DB: databasePath });
 
     expect(check.status).toBe("pass");
-    expect(check.remedy).toBeNull();
+    expect(check.fix).toBeNull();
     expect(report.checks.find((one) => one.name === "hub")?.status).toBe("skipped");
+  });
+
+  it("keeps the retry hint in the persistence skip when the live reading is still connecting", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const databasePath = join(box.cwd, "connecting.sqlite");
+    await emptyStore(box, databasePath);
+    const env = { ...box.env, UBERBLICK_DB: databasePath, PORT: "1", HUB_HOST: "127.0.0.1" };
+    const reading = await statusReading.readSyncStatus(resolveMcpConfig({
+      ...env,
+      WORKSPACE_ID: WORKSPACE,
+    }));
+    // The probe's budget can expire before the connection's own timeout;
+    // force that reading here rather than depending on competing timers.
+    const probe = vi.spyOn(statusReading, "readSyncStatus").mockResolvedValue({
+      ...reading,
+      hub: { ...reading.hub, status: "connecting" },
+    });
+    try {
+      const { report } = await doctorReport({ env, cwd: box.cwd });
+      const check = report.checks.find(one => one.name === "persistence");
+      expect(check?.status).toBe("skipped");
+      expect(check?.reason).toMatch(/still connecting/);
+      expect(check?.reason).toMatch(/ub doctor.*hub has answered/);
+      expect(check?.fix).toBeNull();
+    } finally {
+      probe.mockRestore();
+    }
   });
 
   it("explains the refused append found by status, and never repairs it", async () => {
@@ -222,10 +251,10 @@ describe("ub doctor live persistence reading", () => {
     expect(check.status).toBe("fail");
     expect(check.reason).toContain(snapshot.persistence?.room);
     expect(check.reason).toContain(REFUSED);
-    expect(check.remedy).toMatch(/restart.*MCP server/i);
-    expect(check.remedy).toMatch(/re-read/);
-    expect(check.remedy).toMatch(/never.*durable/);
-    expect(check.remedy).not.toContain("ub status");
+    expect(check.fix).toMatch(/restart.*MCP server/i);
+    expect(check.fix).toMatch(/re-read/);
+    expect(check.fix).toMatch(/never.*durable/);
+    expect(check.fix).not.toContain("ub status");
     expect(exit).toBe(1);
 
     // All three diagnostics leave the refused append refused. Only this

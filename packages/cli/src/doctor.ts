@@ -66,7 +66,7 @@ import { ORIGIN_LABELS, readSyncStatus } from "./status.js";
 import { cliVersion } from "./version.js";
 
 /** Stable strings: `--json` prints them and a script will branch on them. */
-export type CheckStatus = "pass" | "fail" | "skipped";
+export type CheckStatus = "pass" | "warn" | "fail" | "skipped";
 
 export interface Check {
   /** Stable name of the check. */
@@ -74,8 +74,8 @@ export interface Check {
   status: CheckStatus;
   /** One line, and never a secret. */
   reason: string;
-  /** The command that repairs it, or null when there is nothing to repair. */
-  remedy: string | null;
+  /** How to repair a warning or failure; null for a pass or skip. */
+  fix: string | null;
 }
 
 export interface DoctorReport {
@@ -90,15 +90,19 @@ function message(error: unknown): string {
 }
 
 function pass(name: string, reason: string): Check {
-  return { name, status: "pass", reason, remedy: null };
+  return { name, status: "pass", reason, fix: null };
 }
 
-function fail(name: string, reason: string, remedy: string): Check {
-  return { name, status: "fail", reason, remedy };
+function warn(name: string, reason: string, fix: string): Check {
+  return { name, status: "warn", reason, fix };
 }
 
-function skipped(name: string, reason: string, remedy: string | null = null): Check {
-  return { name, status: "skipped", reason, remedy };
+function fail(name: string, reason: string, fix: string): Check {
+  return { name, status: "fail", reason, fix };
+}
+
+function skipped(name: string, reason: string): Check {
+  return { name, status: "skipped", reason, fix: null };
 }
 
 const WORKSPACE_REMEDY =
@@ -178,8 +182,7 @@ function credentialCheck(
   }
   return skipped(
     "credential",
-    "no signing secret in force — hub sync is disabled, and every MCP tool still works",
-    "`ub init` writes a local development signing secret",
+    "no signing secret in force — hub sync is disabled, and every MCP tool still works; `ub init` writes a local development signing secret",
   );
 }
 
@@ -284,8 +287,7 @@ async function persistenceCheck(config: McpConfig | null): Promise<Check> {
     if (reading.hub.status === "connecting") {
       return skipped(
         "persistence",
-        "the live reading ended while the hub was still connecting; its state is not yet known",
-        "run `ub doctor` again once the hub has answered",
+        "the live reading ended while the hub was still connecting; its state is not yet known; run `ub doctor` again once the hub has answered",
       );
     }
     return pass(
@@ -324,24 +326,39 @@ function hubProber(config: McpConfig): Dial {
 /** What both hub checks are handed: an endpoint in, what a client found out. */
 type Dial = (url: string) => Promise<HubProbe>;
 
+interface HubCheckResult {
+  check: Check;
+  status: HubProbe["status"] | "skipped";
+}
+
 async function hubCheck(
   config: McpConfig | null,
   endpoint: Endpoint | null,
   dial: Dial,
-): Promise<Check> {
+): Promise<HubCheckResult> {
   if (config === null) {
-    return skipped("hub", "no workspace configured, so no hub token could be minted");
+    return {
+      check: skipped("hub", "no workspace configured, so no hub token could be minted"),
+      status: "skipped",
+    };
   }
   if (config.deviceLogin === undefined && config.authSecret === null) {
-    return skipped(
-      "hub",
-      `no signing secret, so ${config.hubUrl} was not dialled — this machine is local-only`,
-    );
+    return {
+      check: skipped(
+        "hub",
+        `no signing secret, so ${config.hubUrl} was not dialled — this machine is local-only`,
+      ),
+      status: "skipped",
+    };
   }
+  const hub = await dial(config.hubUrl);
+  return { check: hubVerdict(config, endpoint, hub), status: hub.status };
+}
+
+function hubVerdict(config: McpConfig, endpoint: Endpoint | null, hub: HubProbe): Check {
   // A local-admission hub is one `ub open` away. Device admission identifies
   // an independent deployment even through loopback, which this command cannot start.
   const local = config.deviceLogin === undefined && endpoint !== null && isLocalHost(endpoint.host);
-  const hub = await dial(config.hubUrl);
   const status = hub.status;
   if (status === "connected") {
     return pass("hub", `${config.hubUrl} answered and served the directory room`);
@@ -356,7 +373,7 @@ async function hubCheck(
     // does not share, a clock far enough out that the hub's clamp refuses an
     // otherwise correct token, and a hub older than this client, which reads
     // our envelope as unparseable and answers exactly as a wrong secret does.
-    // The clock check below reads the second; the third is why the remedy
+    // The clock check below reads the second; the third is why the fix
     // carries AUTH_REJECTED, since no probe can tell it from the first.
     return fail(
       "hub",
@@ -365,7 +382,7 @@ async function hubCheck(
     );
   }
   if (status === "update-required") {
-    // A version refusal always carries the hub's integer. Compose the remedy
+    // A version refusal always carries the hub's integer. Compose the fix
     // locally rather than rendering an authentication server's arbitrary text.
     const versions =
       hub.hubProtocolVersion === undefined
@@ -388,7 +405,7 @@ async function hubCheck(
     // Up, and not serving: the socket opened and the directory room never
     // arrived. Reporting this as reachable is how a client that will never sync
     // gets called healthy.
-    return fail(
+    return warn(
       "hub",
       `${config.hubUrl} answered but the directory room did not finish syncing`,
       local
@@ -396,12 +413,12 @@ async function hubCheck(
         : "check the deployment's log — it accepted the connection without serving the room; restarting the hub there is the usual fix",
     );
   }
-  return fail(
+  return warn(
     "hub",
-    `nothing answered ${config.hubUrl}`,
+    `${config.hubUrl} does not answer`,
     local
       ? "start a hub with `ub open --no-browser` — if one is running, the port check says whether the configured endpoint disagrees with the port it bound"
-      : "check that the deployment is running and that this machine can reach it — nothing is listening at that address from here",
+      : "check your network or ask whoever runs the hub; your work stays here and syncs once the hub is back",
   );
 }
 
@@ -422,15 +439,19 @@ async function hubCheck(
  * Neither bound is this command's invention; both are the clamp's, read from
  * the same constants the hub applies.
  *
- * It needs no credential: the reading comes from the `Date` header of an
- * unauthenticated GET, so it answers even on a machine that has never been
- * provisioned. A hub that does not answer is a skip, not a failure — the hub
- * check above is what reports an unreachable hub, and saying so twice would
- * only bury it.
+ * The reading comes from the `Date` header of an unauthenticated GET, but only
+ * after the hub check reached the hub. A skipped or unreachable hub skips this
+ * check without another dial; the hub check already reports what it needs.
  */
-async function clockCheck(config: McpConfig | null): Promise<Check> {
-  if (config === null) {
-    return skipped("clock", "no workspace configured, so no hub was dialled");
+async function clockCheck(config: McpConfig | null, hub: HubCheckResult): Promise<Check> {
+  if (
+    config === null ||
+    hub.status === "skipped" ||
+    hub.status === "hub-down" ||
+    hub.status === "connecting" ||
+    hub.status === "disabled"
+  ) {
+    return skipped("clock", "needs the hub");
   }
   const skew = await probeHubClock(config.hubUrl);
   if (skew === null) {
@@ -576,8 +597,7 @@ async function bindCheck(
     // it "not an uberblick hub" would be the false answer.
     return skipped(
       "bind",
-      `${address} is held by something that speaks the protocol but did not serve this workspace to this machine`,
-      `if it is your hub, give it and this machine the same signing secret — and read the hub check above, which says whether it refused the secret or this machine's sync protocol version; if it is not, ${PORT_REMEDY}`,
+      `${address} is held by something that speaks the protocol but did not serve this workspace to this machine; if it is your hub, give it and this machine the same signing secret — and read the hub check above, which says whether it refused the secret or this machine's sync protocol version; if it is not, ${PORT_REMEDY}`,
     );
   }
   return fail(
@@ -693,12 +713,15 @@ export async function doctorReport(
     credentialCheck(resolved, resolvedEnv, config),
     databaseCheck(config),
     await persistenceCheck(config),
-    await hubCheck(config, endpoint, dial),
-    await clockCheck(config),
+  ];
+  const hub = await hubCheck(config, endpoint, dial);
+  checks.push(
+    hub.check,
+    await clockCheck(config, hub),
     portCheck(config, endpoint, resolvedEnv),
     await bindCheck(config, endpoint, resolvedEnv, dial),
     mcpCheck(resolvedEnv, cwd, resolved),
-  ];
+  );
 
   return {
     warnings,
@@ -712,6 +735,7 @@ export async function doctorReport(
 
 const MARKERS: Record<CheckStatus, string> = {
   pass: "ok",
+  warn: "warn",
   fail: "FAIL",
   skipped: "skip",
 };
@@ -720,17 +744,17 @@ export function renderDoctor(report: DoctorReport): string {
   let text = `uberblick ${report.version}\n\n`;
   for (const check of report.checks) {
     text += `${MARKERS[check.status].padEnd(6)}${check.name.padEnd(12)}${check.reason}\n`;
-    if (check.remedy !== null) {
-      // Indented under the line it repairs: the remedy is the answer, and it has
+    if (check.status === "warn" || check.status === "fail") {
+      // Indented under the line it repairs: the fix is the answer, and it has
       // to be findable without reading the whole report.
-      text += `${" ".repeat(6)}→ ${check.remedy}\n`;
+      text += `${" ".repeat(6)}→ ${check.fix}\n`;
     }
   }
-  const counts = { pass: 0, fail: 0, skipped: 0 };
+  const counts = { pass: 0, warn: 0, fail: 0, skipped: 0 };
   for (const check of report.checks) {
     counts[check.status] += 1;
   }
-  text += `\n${counts.fail} failed, ${counts.pass} passed, ${counts.skipped} skipped\n`;
+  text += `\n${counts.fail} failed, ${counts.warn} warning${counts.warn === 1 ? "" : "s"}, ${counts.pass} passed, ${counts.skipped} skipped\n`;
   return text;
 }
 
