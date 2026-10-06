@@ -39,8 +39,9 @@ Do not edit the issue or turn implementation preferences into requirements.
 - `changes` — correctable findings.
 - `needs-human` — an owner-boundary finding; escalate it yourself under
   [human-decisions.md](human-decisions.md).
-- `defer` — a document the judgment needs could not be read; name it and the
-  failure.
+- A document that cannot be read follows
+  [AGENTS.md's two corpus failures](../../AGENTS.md#read-for-the-action); it is
+  never a `defer`.
 
 Post the verdict once as an issue comment. It opens with
 `Verdict: <no findings | P1 <n>, P2 <n>, P3 <n>>`, then the findings;

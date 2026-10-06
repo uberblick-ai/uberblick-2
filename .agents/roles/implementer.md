@@ -121,10 +121,8 @@ new issue.
 
 Read the corpus documents the issue cites live through MCP wherever the change
 may affect their meaning, and follow the decisions they link; widen discovery
-when the code or findings expose missing context. If MCP cannot
-serve one, stop before editing and finish `defer`, naming the tool and the
-failure. Only a strictly mechanical change continues, saying why no product
-context applies.
+when the code or findings expose missing context. A document that cannot be
+read follows [AGENTS.md's two corpus failures](../../AGENTS.md#read-for-the-action).
 
 ## Outcomes
 

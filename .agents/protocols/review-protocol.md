@@ -36,9 +36,8 @@ including live web UI criteria and owner-confirmed exceptions where required.
 Product intent is read, not inferred from the issue text: read the corpus
 documents the issue's Pointers cite, live through MCP, wherever the change
 touches their product meaning, and follow their links where they govern the
-outcome. If MCP cannot serve a document the judgment needs, finish
-`defer`, naming the document and the failure, rather than judging intent
-without it. The pull request's `Corpus update` is part of the change: a missing
+outcome. When a document cannot be read, follow
+[AGENTS.md's two corpus failures](../../AGENTS.md#read-for-the-action). The pull request's `Corpus update` is part of the change: a missing
 rewrite for a claim the change makes wrong, or one that misstates the change,
 is a finding.
 
@@ -66,8 +65,7 @@ you review, stop with `defer`: a review of another head satisfies nothing.
 - `changes` — a full review finds a P1 or P2.
 - `needs-human` — a corrections review leaves a P1 or P2 unresolved or finds
   a new one; follow [human-decisions.md](human-decisions.md).
-- `defer` — the head moved during review, or a document the judgment needs
-  could not be read.
+- `defer` — the head moved during review.
 
 Post the verdict once as a review on the assigned head:
 `gh pr review <N> --comment --body-file <file>`, which records that commit.

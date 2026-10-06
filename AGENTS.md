@@ -111,7 +111,18 @@ the whole corpus. Current corpus context is required before a product-sensitive
 choice or a judgment against product intent. If required context cannot be read, stop
 dependent decisions or edits and report what was needed and the concrete failure;
 diagnosis, independent mechanical inspection, validation and GitHub bookkeeping
-can continue on their own inputs. Classify work as mechanical only after
+can continue on their own inputs.
+
+Tell two failures apart, because retrying fixes neither:
+
+- **The server fails** (no connection, the wrong workspace, every read refused):
+  report `--status blocked` with an `--action` naming what a maintainer must
+  fix. Never `defer`; each retry repeats the run against the same outage.
+- **A cited document is gone** (`doc_not_found` while other reads work): the
+  pointer is stale, not the corpus. Search by title and purpose and use what
+  the live corpus holds. When nothing covers it, continue on the issue's
+  settled intent, name the missing document in the handoff and post a
+  retrospective; a choice only a person can make still goes to them. Classify work as mechanical only after
 establishing that its relevant guarantees are understood; a small diff is not
 evidence of that.
 If a required local contract cannot be read, stop the dependent action.

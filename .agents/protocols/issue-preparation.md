@@ -28,7 +28,9 @@
    drafting the dependent contract.
    Stop dependent work, continue independent work and gather evidence needed for
    the question; code grounding may reveal further questions later. Missing
-   required context is not waived. Ask only about unresolved choices or new conflicts.
+   required context is not waived; an unreadable document follows
+   [AGENTS.md's two corpus failures](../../AGENTS.md#read-for-the-action). Ask only about unresolved choices or new
+   conflicts.
 4. **Record.** Put the outcome and pointers in the issue under
    [ISSUE_SPEC](../../.github/ISSUE_SPEC.md#body-sections). Cite sources with short
    reading reasons, including relevant decision topic/record UUIDs and open records
