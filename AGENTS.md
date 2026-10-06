@@ -70,7 +70,6 @@ permissions or policy.
   | implementer | #1015 | `D_kwDOT-Zo0s4ApsUL` |
   | reviewer (issue-reviewer, pr-reviewer) | #1016 | `D_kwDOT-Zo0s4ApsUM` |
   | integrator | #1017 | `D_kwDOT-Zo0s4ApsUN` |
-  | workflow-audit | #540 | `D_kwDOT-Zo0s4Ao4BT` |
   | technical-audit | #541 | `D_kwDOT-Zo0s4Ao4BU` |
 
   Supervised delivery runs use [the launcher route](.agents/protocols/retrospectives.md).
