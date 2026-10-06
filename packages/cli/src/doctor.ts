@@ -465,8 +465,19 @@ async function localHubListenerCheck(
     );
   }
 
-  const address = `${bind.host}:${bind.port}`;
-  const probe = await probePort(bind.host, bind.port);
+  // `ub open` binds the endpoint's host, which can differ from HUB_HOST.
+  // A real answer settles identity before any bind probe can hide it.
+  const address = `${new URL(config.hubUrl).hostname}:${endpoint.port}`;
+  if (config.authSecret !== null) {
+    const hub = await dial(config.hubUrl);
+    if (hub.status === "connected") {
+      return pass(name, `${address} is held by an uberblick hub — it is already running`);
+    }
+    if (hub.status === "auth-failed" || hub.status === "unsettled" || hub.status === "update-required") {
+      return hubVerdict(config, hub, name);
+    }
+  }
+  const probe = await probePort(endpoint.host, endpoint.port);
   if (probe.state === "free") {
     if (config.authSecret === null) {
       return skipped(name, `${address} is not running; no signing secret in force — hub sync is disabled, and every MCP tool still works; \`ub init\` writes a local development signing secret`);
@@ -483,13 +494,6 @@ async function localHubListenerCheck(
       name,
       `${address} is in use; without a signing secret this cannot tell an uberblick hub from another process`,
     );
-  }
-  const hub = await dial(config.hubUrl);
-  if (hub.status === "connected") {
-    return pass(name, `${address} is held by an uberblick hub — it is already running`);
-  }
-  if (hub.status === "auth-failed" || hub.status === "unsettled" || hub.status === "update-required") {
-    return hubVerdict(config, hub, name);
   }
   return fail(name, `${address} is in use by a process that is not an uberblick hub`, PORT_REMEDY);
 }

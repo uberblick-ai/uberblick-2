@@ -50,18 +50,18 @@ afterEach(async () => {
   removeTempDirs();
 });
 
-async function startHub(box: Sandbox, protocolVersion = SYNC_PROTOCOL_VERSION): Promise<Hub> {
-  const hub = await createHub({ authSecret: SECRET, protocolVersion, port: 0,
+async function startHub(box: Sandbox, protocolVersion = SYNC_PROTOCOL_VERSION, address = "127.0.0.1"): Promise<Hub> {
+  const hub = await createHub({ authSecret: SECRET, protocolVersion, address, port: 0,
     databasePath: join(box.cwd, "hub.sqlite"), log: silentLogger,
     debounce: 20, maxDebounce: 200, shutdownTimeoutMs: 5_000 });
   hubs.push(hub);
   return hub;
 }
 
-async function foreignProcess(): Promise<number> {
+async function foreignProcess(host = "127.0.0.1"): Promise<number> {
   const sockets: Socket[] = [];
   const server = createServer((socket) => sockets.push(socket));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, host, resolve));
   servers.push({ server, sockets });
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("no foreign process port");
@@ -284,6 +284,18 @@ describe("ub doctor", () => {
     expect(local.fix).not.toContain("ub status");
   });
 
+  it.each([["matching", SECRET, "pass"], ["refused", "another-local-signing-secret", "fail"]] as const)("reports an IPv6 local hub with a %s secret and HUB_HOST unset", async (_kind, signingSecret, status) => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret } });
+    const hub = await startHub(box, SYNC_PROTOCOL_VERSION, "::1");
+    pointAt(box, `ws://[::1]:${hub.port}`);
+    const { checks } = await doctor(box, { PORT: String(hub.port), HUB_HOST: undefined });
+    expect(check(checks, "hub").status).toBe("skipped");
+    const local = listener(checks, "hub listener");
+    expect(local.status).toBe(status);
+    expect(local.reason).toContain(`[::1]:${hub.port}`);
+    expect(local.reason).toMatch(status === "pass" ? /held by an uberblick hub/ : /refused the signing secret/);
+  });
+
   it("explains both sync protocol versions under local hub", async () => {
     const hubVersion = SYNC_PROTOCOL_VERSION + 1;
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
@@ -326,6 +338,18 @@ describe("ub doctor", () => {
     expect(check(checks, "local hub").status).toBe("skipped");
     expect(check(checks, "local hub").reason).toMatch(/signing secret/);
     expect(dial).not.toHaveBeenCalled();
+  });
+
+  it.each([["with", SECRET, "fail"], ["without", undefined, "skipped"]] as const)("reports a foreign IPv6 listener %s a secret with HUB_HOST unset", async (_kind, signingSecret, status) => {
+    const port = await foreignProcess("::1");
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: `ws://[::1]:${port}` }, credentials: signingSecret === undefined ? undefined : { signingSecret } });
+    const dial = vi.spyOn(probes, "probeHubState");
+    const { checks } = await doctor(box, { PORT: String(port), HUB_HOST: undefined });
+    const local = listener(checks, "hub listener");
+    expect(local.status).toBe(status);
+    expect(local.reason).toContain(`[::1]:${port}`);
+    expect(local.reason).toMatch(status === "fail" ? /not an uberblick hub/ : /without a signing secret/);
+    if (signingSecret === undefined) expect(dial).not.toHaveBeenCalled();
   });
 
   it.each(["not-a-number", "65536", "1.5"])("fails an invalid local PORT %s", async value => {
