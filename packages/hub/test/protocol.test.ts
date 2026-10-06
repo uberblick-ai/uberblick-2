@@ -155,9 +155,10 @@ describe("the version exchange", () => {
       await updated.synced;
       expect(Y.encodeStateVector(updated.doc)).toEqual(tableState);
       expect(findBlockElement(updated.doc, id)!.firstChild).toBeInstanceOf(Y.XmlElement);
-      expect(getBlock(updated.doc, id)!.text).toBe(before);
-      const after = before.replace("done", "done (blocked)");
-      editBlock(updated.doc, id, before, after);
+      const formatted = getBlock(updated.doc, id)!.text;
+      expect(formatted).toBe(before.replace("done", "**done**"));
+      const after = formatted.replace("**done**", "**done (blocked)**");
+      editBlock(updated.doc, id, formatted, after);
       await waitUntil("the matching table edit to arrive", () => getBlock(current.doc, id)!.text === after);
       await waitUntil("the matching table edit to be acknowledged", () => !updated.provider.hasUnsyncedChanges);
       expect(tableCellText(tableRows(findBlockElement(current.doc, id)!)[1]![1]!)).toBe(status);

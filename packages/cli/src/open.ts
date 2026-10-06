@@ -142,12 +142,10 @@ export const CONFIG_PATH = "/uberblick-config.json";
 /**
  * The port the web app is served on, unless `--port` says otherwise.
  *
- * Vite's `preview` port rather than its `dev` port (5173): serving an already
- * built bundle is exactly what preview does, and a distinct number means
- * `mise run dev` and `ub open` can both be running without either wondering
- * which one the browser is looking at.
+ * Keep a stable origin for browser settings, on a port distinct from Vite's
+ * defaults. An occupied port is an error, never a reason to choose another.
  */
-export const DEFAULT_WEB_PORT = 4173;
+export const DEFAULT_WEB_PORT = 13379;
 
 /** Loopback, per the issue: reaching this from another machine is #75's job. */
 const WEB_HOST = "127.0.0.1";

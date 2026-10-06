@@ -14,6 +14,7 @@ import { migrateHubAdmissions, resolveConfig, writeHubAdmission } from "./config
 import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { normalizeRemoteUrl } from "@uberblick/hub/remote-url";
 import { takeHelp } from "./help.js";
+import { workspaceMemberCommand } from "./workspace-member.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
@@ -28,6 +29,7 @@ commands:
   create <name>               create and select a separate local-only workspace
   promote <hub>               upload, verify and connect this local workspace
   join <connection-url>       join an existing hub workspace
+  member <command>            grant workspace access and manage members
   list [--json]               workspaces this machine has a database for
   use <id> --hub <url|local>  select a workspace and hub in this project
 
@@ -423,6 +425,7 @@ export async function workspaceCommand(
   if (sub === "create") return createWorkspaceCommand(rest, io);
   if (sub === "promote") return promoteWorkspaceCommand(rest, io);
   if (sub === "join") return joinCommand(rest, io);
+  if (sub === "member") return workspaceMemberCommand(rest, io);
   if (sub === "list") {
     return listCommand(rest, io);
   }

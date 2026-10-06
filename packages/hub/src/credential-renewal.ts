@@ -4,6 +4,7 @@ import type { CredentialRegistry } from "./credentials.js";
 import type { HubLogger } from "./log.js";
 import type { MembershipRegistry } from "./memberships.js";
 import { type AuthEnvelope, protocolMismatchReason, readAuthEnvelope } from "./protocol.js";
+import { addWorkspaceNames, type WorkspaceNameReader } from "./workspace-names.js";
 
 export async function handleCredentialRenewal(
   credentials: CredentialRegistry | undefined,
@@ -12,6 +13,7 @@ export async function handleCredentialRenewal(
   log: HubLogger,
   request: IncomingMessage,
   response: ServerResponse,
+  workspaceNames?: WorkspaceNameReader,
 ): Promise<boolean> {
   if (request.url !== "/auth/credential/renew") return false;
   const reply = (status: number, body: unknown): void => {
@@ -57,7 +59,8 @@ export async function handleCredentialRenewal(
   }
   try {
     const result = await credentials.renew(envelope.token, memberships, { ifWorkspacesChanged });
-    reply(result.status === "renewed" || result.status === "unchanged" ? 200 : 401, result);
+    reply(result.status === "renewed" || result.status === "unchanged" ? 200 : 401,
+      result.status === "renewed" && workspaceNames !== undefined ? addWorkspaceNames(result, workspaceNames) : result);
   } catch {
     // Storage or connection closure failed, rather than an invalid request.
     // Neither the input, key, crypto exception nor database error is logged.

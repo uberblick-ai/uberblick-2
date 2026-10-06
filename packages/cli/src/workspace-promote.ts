@@ -4,12 +4,11 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/hub/device-login";
 import type { StoredHubLogin } from "@uberblick/hub/auth-store";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { authenticationOrigin, normalizeRemoteUrl } from "@uberblick/hub/remote-url";
 import { resolveStorage } from "@uberblick/hub/storage";
-import { importCredentialKey, mintRequestProof } from "@uberblick/hub/token";
 import { syncWorkspace } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
+import { ManagementResponseError, manageRequest } from "./access-management.js";
 import { authCommand } from "./auth.js";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import { requireBinding, resolveConfig, writeHubAdmission } from "./config.js";
@@ -70,33 +69,18 @@ class PromotionRefusal extends Error {}
 
 async function reserve(origin: string, workspaceId: string, attemptId: string, login: StoredHubLogin, signal: AbortSignal): Promise<string> {
   const action = { operation: "promote-workspace", workspaceId, attemptId } as const;
-  const token = await mintRequestProof(await importCredentialKey(Buffer.from(login.credential.key, "base64url")), {
-    ...action, kid: login.credential.record.id, lifetimeSeconds: 60,
-  });
-  const response = await fetch(`${origin}/auth/manage`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...action, token, protocolVersion: SYNC_PROTOCOL_VERSION }),
-    redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
-  });
-  const reader = response.body?.getReader();
-  if (reader === undefined) throw new Error("hub returned an invalid promotion response; update the hub and retry");
-  const chunks: Uint8Array[] = [];
-  let length = 0;
+  let reply: Awaited<ReturnType<typeof manageRequest>>;
   try {
-    for (;;) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      length += chunk.value.length;
-      if (length > 4096) throw new Error("hub returned an invalid promotion response");
-      chunks.push(chunk.value);
+    reply = await manageRequest(origin, action, login, { signal, maxResponseBytes: 4096 });
+  } catch (error) {
+    if (error instanceof ManagementResponseError) {
+      throw new Error(`hub returned an invalid promotion response${error.updateRequired ? "; update the hub and retry" : ""}`);
     }
-  } finally { await reader.cancel(); }
-  let result: Record<string, unknown>;
-  try { result = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
-  catch { throw new Error("hub returned an invalid promotion response; update the hub and retry"); }
-  if (result === null || typeof result !== "object") throw new Error("hub returned an invalid promotion response");
-  if (response.status === 401 && result.status === "sign-in-required") return "sign-in-required";
-  if (response.status === 200 && (result.status === "created" || result.status === "resumed") &&
+    throw error;
+  }
+  const { status, body: result } = reply;
+  if (status === 401 && result.status === "sign-in-required") return "sign-in-required";
+  if (status === 200 && (result.status === "created" || result.status === "resumed") &&
       result.workspaceId === workspaceId && result.attemptId === attemptId) return result.status;
   const reasons: Record<string, string> = {
     "member-required": "your GitHub account must currently belong to at least one workspace on this hub; ask a workspace administrator for access or choose another hub",

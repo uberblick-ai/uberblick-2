@@ -4,8 +4,8 @@
  * `docFingerprint` gates every refusal and the whole of verification, so the
  * property worth defending is narrow and total: a replica that received
  * everything fingerprints the same, and a replica missing *anything the schema
- * can hold* does not. `Block.rev` covers type, text and attributes and would
- * pass a replica that received every character and none of the formatting or
+ * can hold* does not. A prose `Block.rev` covers type, text and attributes and
+ * would pass a replica that received every character and none of the formatting or
  * comment threads — which is the state a half-finished sync leaves behind, and
  * what a user would not notice until they opened the document.
  *
@@ -98,10 +98,12 @@ describe("docFingerprint", () => {
     expect(docFingerprint(copy)).toBe(docFingerprint(doc));
     const rev = getBlocks(doc).find(block => block.id === id)!.rev;
     text.format(0, 4, { bold: true, [COMMENT_MARK]: { threadId: "synthetic-cell-anchor" } });
-    expect(getBlocks(doc).find(block => block.id === id)!.rev).toBe(rev);
+    const formattedRev = getBlocks(doc).find(block => block.id === id)!.rev;
+    expect(formattedRev).not.toBe(rev);
     expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
     Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc));
     text.format(0, 4, { [COMMENT_MARK]: null });
+    expect(getBlocks(doc).find(block => block.id === id)!.rev).toBe(formattedRev);
     expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
     Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc));
     expect(docFingerprint(copy)).toBe(docFingerprint(doc));

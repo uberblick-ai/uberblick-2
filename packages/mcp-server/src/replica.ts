@@ -151,8 +151,8 @@ export function docLinkRanges(
   block: Block,
   inline: readonly InlineRun[],
 ): DocLinkRange[] {
-  // Source blocks hold source text and carry no inline links, so a docLink on
-  // one is foreign content: nothing renders it, and nothing here counts it.
+  // Block-level ranges belong to prose. Table links are indexed from each
+  // cell's runs instead, since GFM offsets do not address stored characters.
   if (!isProseBlockType(block.type)) return [];
   const ranges: DocLinkRange[] = [];
   let index = 0;
@@ -758,8 +758,12 @@ export class Replicas {
         description: meta.description ?? "",
         links: [
           ...meta.links,
-          ...blocks.flatMap(({ block, inline }) =>
-            docLinkRanges(block, inline).map((range) => range.docId),
+          ...blocks.flatMap(({ block, inline, table }) =>
+            table === undefined
+              ? docLinkRanges(block, inline).map((range) => range.docId)
+              : table.flat().flatMap((cell) => cell.flatMap((run) =>
+                run.marks.docLink === undefined ? [] : [run.marks.docLink],
+              )),
           ),
         ],
         githubRefs:
