@@ -107,8 +107,10 @@ legacy titles exist; issues and decision references should cite the real UUIDs
 discovered at runtime. Use installed MCP tool schemas for call shapes and refusals,
 not a presumed interface page. Do not load
 the whole corpus. Current corpus context is required before a product-sensitive
-choice or a judgment against product intent. If required context cannot be read, stop
-dependent decisions or edits and report what was needed and the concrete failure;
+choice or a judgment against product intent. A cited UUID the corpus no longer has
+is a stale pointer, not missing context: find its live successor by search, ground on
+it and the code, and note the replacement. If no live document covering the choice can
+be read, stop dependent decisions or edits and report the concrete failure;
 diagnosis, independent mechanical inspection, validation and GitHub bookkeeping
 can continue on their own inputs. Classify work as mechanical only after
 establishing that its relevant guarantees are understood; a small diff is not
