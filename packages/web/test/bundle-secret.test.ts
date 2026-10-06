@@ -10,12 +10,11 @@
  * every other test still green.
  *
  * So this file performs the build. One build of the real app, with a sentinel
- * secret in the environment exactly where `mise run build-web` and the
- * Dockerfile put the real one, and the output is searched for it — Docker and
- * `ub open` both invoke the same `pnpm --filter @uberblick/web build`, so there
- * is one bundle to defend, not two. Its negative control re-injects the define
- * through the same `build()` API and asserts the search finds *that*: a scan
- * that cannot fail proves nothing.
+ * secret in the environment where `mise run build-web` and `ub open` build,
+ * and the output is searched for it. The release payload also uses Vite's
+ * build pipeline, so the guard covers its assets too. The negative control
+ * re-injects the define through the same `build()` API and asserts the search
+ * finds *that*: a scan that cannot fail proves nothing.
  *
  * Not a generic entropy detector. It looks for one known string and one known
  * identifier, which is what makes its verdict trustworthy rather than

@@ -520,8 +520,8 @@ A published Docker hub runs on Linux or Docker Desktop on macOS, including
 Apple Silicon through `linux/amd64` emulation. Follow [REMOTE.md](REMOTE.md) to
 start a release on host loopback and claim its default workspace before wider
 exposure. The operator updates the release deliberately while retaining its
-volumes. Hub deployment uses the release scripts. Existing source checkouts
-keep the [host-side update runbook](REMOTE.md#existing-checkout-deployments-compatibility).
+volumes. Existing checkout hosts can
+[switch to a release](REMOTE.md#switch-an-existing-checkout-host-to-a-release).
 
 From the project directory:
 

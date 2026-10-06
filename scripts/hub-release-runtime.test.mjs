@@ -14,9 +14,9 @@ const settings = {
 	WEB_WORKSPACES: "synthetic-00000000-0000-4000-8000-000000000001",
 };
 
-function execute(script, overrides = {}, args = []) {
+function execute(script, overrides = {}, args = [], cwd = root) {
 	return spawnSync("sh", [join(root, script), ...args], {
-		cwd: root, env: { ...process.env, ...settings, ...overrides }, encoding: "utf8",
+		cwd, env: { ...process.env, ...settings, ...overrides }, encoding: "utf8",
 	});
 }
 
@@ -82,29 +82,31 @@ test("release defaults to loopback HTTP and HTTPS replaces that publication with
 	assert.match(https, /\$\{TAILSCALE_IP:-\$\{HTTPS_BIND_IP:-0\.0\.0\.0\}\}:443:443/);
 	assert.doesNotMatch(https, /tailscaled\.sock|:80/);
 	assert.match(readFileSync(join(root, "remote.tailscale.yml"), "utf8"), /create_host_path: false/);
-	// The shared entrypoint also validates the unchanged checkout route.
-	assert.match(readFileSync(join(root, "docker-compose.yml"), "utf8"), /TAILSCALE_IP: "\$\{TAILSCALE_IP:\?set TAILSCALE_IP in \.env\}"/);
 	for (const volume of ["hub-data", "caddy-data", "caddy-config"]) assert.match(compose, new RegExp(`^  ${volume}:$`, "m"));
 });
 
 test("network values refuse unsafe routes before Docker or either service starts", () => {
-	for (const [key, value] of [
-		["WEB_HOST", "localhost"], ["WEB_HOST", "127.0.0.1"], ["WEB_HOST", "hub.local"], ["WEB_HOST", "home.arpa"], ["WEB_HOST", "hub.home.arpa"],
-		["WEB_HOST", "hub..example.com"], ["WEB_HOST", "-hub.example.com"], ["WEB_HOST", "hub.example.com."],
-		["TAILSCALE_HOST", "hub.internal"], ["TAILSCALE_IP", "0.0.0.0"],
-		["HTTPS_BIND_IP", "256.1.2.3"], ["HTTPS_BIND_IP", "127.1"],
-		["LOOPBACK_PORT", "0"], ["LOOPBACK_PORT", "65536"], ["LOOPBACK_PORT", "08080"],
-		["WEB_HUB_URL", "ws://hub.example.com/ws"],
-	]) {
-		const overrides = { [key]: value };
-		if (key === "WEB_HOST") overrides.TAILSCALE_HOST = "";
-		for (const script of ["bin/remote-compose.sh", "hub-release-entrypoint.sh", "web-release-entrypoint.sh"]) {
-			const result = execute(script, overrides, ["sh", "-c", "printf SERVICE_STARTED"]);
-			assert.equal(result.status, 1, `${script} must refuse ${key}=${value}`);
-			assert.ok(result.stderr.includes(key), result.stderr);
-			assert.doesNotMatch(result.stdout, /SERVICE_STARTED/);
+	const scratch = mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(), `hub-network-${process.env.UB_AGENTS_RUN ?? "test"}-`));
+	try {
+		writeFileSync(join(scratch, "release.json"), "{}\n");
+		for (const [key, value] of [
+			["WEB_HOST", "localhost"], ["WEB_HOST", "127.0.0.1"], ["WEB_HOST", "hub.local"], ["WEB_HOST", "home.arpa"], ["WEB_HOST", "hub.home.arpa"],
+			["WEB_HOST", "hub..example.com"], ["WEB_HOST", "-hub.example.com"], ["WEB_HOST", "hub.example.com."],
+			["TAILSCALE_HOST", "hub.internal"], ["TAILSCALE_IP", "0.0.0.0"],
+			["HTTPS_BIND_IP", "256.1.2.3"], ["HTTPS_BIND_IP", "127.1"],
+			["LOOPBACK_PORT", "0"], ["LOOPBACK_PORT", "65536"], ["LOOPBACK_PORT", "08080"],
+			["WEB_HUB_URL", "ws://hub.example.com/ws"],
+		]) {
+			const overrides = { [key]: value };
+			if (key === "WEB_HOST") overrides.TAILSCALE_HOST = "";
+			for (const script of ["bin/remote-compose.sh", "hub-release-entrypoint.sh", "web-release-entrypoint.sh"]) {
+				const result = execute(script, overrides, ["sh", "-c", "printf SERVICE_STARTED"], scratch);
+				assert.equal(result.status, 1, `${script} must refuse ${key}=${value}`);
+				assert.ok(result.stderr.includes(key), result.stderr);
+				assert.doesNotMatch(result.stdout, /SERVICE_STARTED/);
+			}
 		}
-	}
+	} finally { rmSync(scratch, { recursive: true, force: true }); }
 });
 
 test("release wrapper chooses routes for new and unchanged legacy env, and enforces host-only Engine floor", () => {
@@ -128,6 +130,7 @@ else printf '%s\\n' "$@"; fi
 			assert.equal(run({ [name]: settings.TAILSCALE_HOST, TAILSCALE_IP: settings.TAILSCALE_IP }).stdout,
 				"compose\n-f\ndocker-compose.yml\n-f\nremote.https.yml\n-f\nremote.tailscale.yml\nconfig\n");
 		}
+		assert.equal(run({ COMPOSE_FILE: "operator-compose.yml", WEB_HOST: "hub.example.com" }).stdout, "compose\nconfig\n");
 		for (const version of ["2.6.0", "2.24.3"]) assert.equal(run({ TEST_COMPOSE_VERSION: version }).status, 1);
 		assert.equal(run({ TEST_ENGINE_VERSION: "27.5.0" }, ["up", "--detach"]).status, 1);
 		assert.equal(run({ TEST_ENGINE_VERSION: "28.0.0" }, ["up", "--detach"]).status, 0);
@@ -137,9 +140,43 @@ else printf '%s\\n' "$@"; fi
 			assert.match(result.stderr, /--env-file.*\.env/);
 			assert.equal(result.stdout, "");
 		}
-		// The checkout compatibility route retains Compose 2.6 and its own file.
-		rmSync(join(scratch, "release.json"));
-		assert.equal(run({ TEST_COMPOSE_VERSION: "2.6.0" }).stdout, "compose\nconfig\n");
-		assert.equal(run({}, ["--env-file", "network.env", "config"]).stdout, "compose\n--env-file\nnetwork.env\nconfig\n");
+	} finally { rmSync(scratch, { recursive: true, force: true }); }
+});
+
+test("old checkout updater cannot reach Docker through parent discovery or COMPOSE_FILE after its stack is removed", () => {
+	const scratch = mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(), `hub-old-updater-${process.env.UB_AGENTS_RUN ?? "test"}-`));
+	try {
+		for (const route of ["parent", "COMPOSE_FILE"]) {
+			const parent = join(scratch, route);
+			const checkout = join(parent, "checkout");
+			mkdirSync(join(checkout, "bin"), { recursive: true });
+			cpSync(join(root, "bin/remote-compose.sh"), join(checkout, "bin/remote-compose.sh"));
+			cpSync(join(root, "remote-settings.sh"), join(checkout, "remote-settings.sh"));
+			const compose = join(parent, route === "parent" ? "compose.yaml" : "selected-compose.yaml");
+			const state = join(parent, "existing-host-state");
+			const log = join(parent, "docker-calls");
+			const env = join(checkout, ".env");
+			writeFileSync(compose, "name: unrelated-host-project\nservices:\n  unrelated:\n    image: synthetic-never-started:0.0.0\n");
+			writeFileSync(state, "existing containers running; hub-data, caddy-data and caddy-config retained\n");
+			writeFileSync(log, "");
+			writeFileSync(env, "COMPOSE_PROJECT_NAME=existing-checkout\nTAILSCALE_HOST=synthetic.tailnet.ts.net\nTAILSCALE_IP=100.64.0.2\n");
+			const original = [compose, state, env].map((file) => readFileSync(file, "utf8"));
+			writeFileSync(join(checkout, "docker"), `#!/bin/sh
+printf '%s\\n' "$*" >> "$TEST_DOCKER_LOG"
+if [ "$1 $2" = "compose version" ]; then printf '2.24.4\\n';
+elif [ "$1" = version ]; then printf '28.0.0\\n';
+else printf 'mutated\\n' > "$TEST_HOST_STATE"; fi
+`, { mode: 0o755 });
+			const result = spawnSync("sh", [join(checkout, "bin/remote-compose.sh"), "up", "--build", "--detach"], {
+				cwd: checkout, encoding: "utf8", env: {
+					PATH: `${checkout}:${process.env.PATH}`, TEST_DOCKER_LOG: log, TEST_HOST_STATE: state,
+					...(route === "COMPOSE_FILE" ? { COMPOSE_FILE: compose } : {}),
+				},
+			});
+			assert.equal(result.status, 1, route);
+			assert.match(result.stderr, /Switch this host to a published release/);
+			assert.equal(readFileSync(log, "utf8"), "", `${route} must refuse before any Docker call`);
+			assert.deepEqual([compose, state, env].map((file) => readFileSync(file, "utf8")), original);
+		}
 	} finally { rmSync(scratch, { recursive: true, force: true }); }
 });
