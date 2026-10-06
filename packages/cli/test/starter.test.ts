@@ -50,6 +50,7 @@ import {
   runUb,
   runUbAsync,
   sandbox as anySandbox,
+  unboundSandbox as anyUnboundSandbox,
 } from "./helpers.js";
 import type { Run, Sandbox, SandboxFiles } from "./helpers.js";
 
@@ -58,6 +59,11 @@ afterAll(removeTempDirs);
 /** No test here starts a hub, so none waits for one; see {@link hubless}. */
 function sandbox(files?: SandboxFiles): Sandbox {
   return hubless(anySandbox(files));
+}
+
+/** Starter creation also covers the first binding written by init. */
+function unboundSandbox(files?: SandboxFiles): Sandbox {
+  return hubless(anyUnboundSandbox(files));
 }
 
 /** The shipped templates, in the order the sidebar pins them. */
@@ -190,7 +196,7 @@ async function withTools<T>(
 }
 
 beforeAll(() => {
-  box = sandbox();
+  box = unboundSandbox();
   init();
 });
 
@@ -548,7 +554,7 @@ it("does not duplicate a document when two ub init runs race", async () => {
   // else can write between the two, which is what the init lock is for here:
   // without it both runs read an empty workspace and both write Welcome into
   // the same room, where Yjs merges two copies of every block.
-  const race = sandbox();
+  const race = unboundSandbox();
   const runs = await Promise.all([
     runUbAsync(["init", "--yes", "--no-mcp"], race),
     runUbAsync(["init", "--yes", "--no-mcp"], race),

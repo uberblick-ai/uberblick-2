@@ -18,6 +18,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  rmSync,
   statSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -62,6 +63,7 @@ import {
   removeTempDirs,
   runUbAsync,
   sandbox,
+  unboundSandbox,
 } from "./helpers.js";
 
 const SECRET = "test-signing-secret-for-the-remote-bridge";
@@ -514,6 +516,7 @@ describe("workspace join configuration", () => {
   it("preserves credentials when binding publication fails", () => {
     // Binding publication cannot modify the private credential store.
     const box = sandbox({ credentials: { signingSecret: SECRET } });
+    rmSync(join(box.cwd, ".uberblick.json"));
     mkdirSync(join(box.cwd, ".uberblick.json"), { recursive: true });
 
     expect(() =>
@@ -644,7 +647,8 @@ describe("ub workspace join", () => {
 
     // Nothing here: no `ub init`, no workspace, no endpoint, no credential —
     // the second machine as the owner decided it should work.
-    const box = sandbox({ credentials: { signingSecret: OTHER_SECRET } });
+    const box = unboundSandbox({ credentials: { signingSecret: OTHER_SECRET } });
+    expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
 
     const run = await runUbAsync(
       [
@@ -1039,7 +1043,7 @@ describe("ub workspace join", () => {
     // local hub that is not running. In that order because the two halves are
     // ordered in life too: a machine bound to a hub is one `ub init` expects to
     // hold that hub's credential and to reach it (#436).
-    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const box = unboundSandbox({ credentials: { signingSecret: SECRET } });
     expect((await runUbAsync(["init", "--yes"], box)).status).toBe(0);
     pointAt(box, DEAD_HUB_URL);
     const mine = readConfigFile(box, "config.json").workspaceId as string;
@@ -1115,13 +1119,14 @@ describe("ub workspace join", () => {
     // paste most likely to happen, and `ws` is not a workspace id.
     ["ws://127.0.0.1:9999/ws", "is not a workspace id"],
   ])("refuses %s and writes nothing", async (target, because) => {
-    const box = sandbox();
+    const box = unboundSandbox();
     const run = await runUbAsync(["workspace", "join", target], box);
     expect(run.status).toBe(2);
     expect(run.stderr).toContain(because);
     // The expected form, in the refusal itself.
     expect(run.stderr).toContain("wss://hub.example.ts.net/ws/<workspace-id>");
     expect(run.stderr).toContain("usage: ub workspace join <url-with-workspace-id>");
+    expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
     expect(existsSync(join(box.configHome, "uberblick", "config.json"))).toBe(false);
     expect(existsSync(join(box.configHome, "uberblick", "credentials.json"))).toBe(
       false,
@@ -1245,7 +1250,7 @@ describe("ub workspace join", () => {
 
   it("asks an unconfigured client to sign in without a local-secret diagnostic", async () => {
     const remote = await startHub(OTHER_SECRET);
-    const box = sandbox();
+    const box = unboundSandbox();
 
     const run = await runUbAsync(["workspace", "join", joinUrl(remote)], box);
 
@@ -1256,6 +1261,7 @@ describe("ub workspace join", () => {
     expect(run.stderr).not.toContain("--secret-file");
     expect(run.stderr).not.toContain("remote signing secret (");
     expect(run.stderr).toContain("Nothing was written");
+    expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
     expect(existsSync(join(box.configHome, "uberblick", "config.json"))).toBe(false);
     expect(existsSync(join(box.configHome, "uberblick", "credentials.json"))).toBe(
       false,

@@ -27,7 +27,7 @@ import {
 import type { Corpus } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Sandbox } from "./helpers.js";
-import { removeTempDirs, runUbAsync, sandbox, waitUntil } from "./helpers.js";
+import { removeTempDirs, runUbAsync, sandbox, unboundSandbox, waitUntil } from "./helpers.js";
 
 const SECRET = "test-signing-secret-for-ub-init";
 const OTHER_SECRET = "the-secret-that-hub-was-actually-deployed-with";
@@ -133,7 +133,7 @@ describe("ub init <hub-url>", () => {
 
   it("creates the workspace on that hub, corpus and all, before it returns", async () => {
     const hub = await startHub();
-    const box = sandbox();
+    const box = unboundSandbox();
 
     const run = await runUbAsync(["init", url(hub), "--yes"], box, {
       HUB_AUTH_TOKEN: SECRET,
@@ -190,7 +190,7 @@ describe("ub init <hub-url>", () => {
     // interleave is a fact rather than a hope.
     const hub = await startHub();
     const first = "ws://127.0.0.1:2";
-    const box = sandbox();
+    const box = unboundSandbox();
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
@@ -229,7 +229,7 @@ describe("ub init <hub-url>", () => {
     // written for a hub that has its own, arrived at by a race. The winner's
     // credential is not visible to this process, which is the case that has to
     // refuse rather than invent one.
-    const box = sandbox();
+    const box = unboundSandbox();
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
@@ -274,7 +274,7 @@ describe("ub init <hub-url>", () => {
     // has changed by the time the write phase runs, the run would seed with a
     // secret no hub has answered for — so it refuses instead.
     const hub = await startHub();
-    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const box = unboundSandbox({ credentials: { signingSecret: SECRET } });
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
@@ -308,7 +308,7 @@ describe("ub init <hub-url>", () => {
     // The environment and the file must not disagree about the credential a
     // bound machine sends: whichever this run preferred, the other is what some
     // other reader on this machine would use.
-    const box = sandbox({ credentials: { signingSecret: OTHER_SECRET } });
+    const box = unboundSandbox({ credentials: { signingSecret: OTHER_SECRET } });
 
     const run = await runUbAsync(["init", CLOSED, "--yes"], box, {
       HUB_AUTH_TOKEN: SECRET,
@@ -334,7 +334,7 @@ describe("ub init <hub-url>", () => {
     // The file `ub init` would repair and keep. Read as absent, its value would
     // slip past the conflict check and then win the seed — the run would
     // authenticate with the environment's secret and write with this one.
-    const box = sandbox({
+    const box = unboundSandbox({
       credentials: { signingSecret: OTHER_SECRET },
       credentialsMode: 0o644,
     });
@@ -358,7 +358,7 @@ describe("ub init <hub-url>", () => {
     // exact moment rather than a race.
     const hub = await startHub();
     const endpoint = url(hub);
-    const box = sandbox();
+    const box = unboundSandbox();
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
@@ -410,7 +410,7 @@ describe("ub init <hub-url>", () => {
   });
 
   it("refuses an endpoint that does not answer, before anything exists", async () => {
-    const box = sandbox();
+    const box = unboundSandbox();
 
     const run = await runUbAsync(["init", CLOSED, "--yes"], box, {
       HUB_AUTH_TOKEN: SECRET,
@@ -425,7 +425,7 @@ describe("ub init <hub-url>", () => {
 
   it("refuses a hub that rejects the secret this machine holds", async () => {
     const hub = await startHub({ authSecret: OTHER_SECRET });
-    const box = sandbox();
+    const box = unboundSandbox();
 
     const run = await runUbAsync(["init", url(hub), "--yes"], box, {
       HUB_AUTH_TOKEN: SECRET,
@@ -439,7 +439,7 @@ describe("ub init <hub-url>", () => {
 
   it("refuses a hub speaking another sync protocol, in that hub's terms", async () => {
     const hub = await startHub({ protocolVersion: SYNC_PROTOCOL_VERSION + 1 });
-    const box = sandbox();
+    const box = unboundSandbox();
 
     const run = await runUbAsync(["init", url(hub), "--yes"], box, {
       HUB_AUTH_TOKEN: SECRET,
@@ -454,7 +454,7 @@ describe("ub init <hub-url>", () => {
   });
 
   it("refuses before dialling when no secret is here to authenticate with", async () => {
-    const box = sandbox();
+    const box = unboundSandbox();
 
     const run = await runUbAsync(["init", CLOSED, "--yes"], box);
 
@@ -490,7 +490,7 @@ describe("ub init <hub-url>", () => {
     // already joined to. Same string in, same string stored, and the second
     // command has nothing left to do.
     const hub = await startHub();
-    const box = sandbox();
+    const box = unboundSandbox();
 
     const joined = await runUbAsync(
       ["workspace", "join", `${url(hub)}/${WORKSPACE}`],
@@ -512,7 +512,7 @@ describe("ub init <hub-url>", () => {
   });
 
   it("refuses something that is not an endpoint at all, echoing none of it", async () => {
-    const box = sandbox();
+    const box = unboundSandbox();
 
     const run = await runUbAsync(["init", "not a hub", "--yes"], box, {
       HUB_AUTH_TOKEN: SECRET,

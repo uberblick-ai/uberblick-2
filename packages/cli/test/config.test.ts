@@ -24,6 +24,7 @@ import {
   SECRET_ON_FILE,
   removeTempDirs,
   sandbox,
+  unboundSandbox,
   tracesOf,
 } from "./helpers.js";
 
@@ -35,8 +36,8 @@ const FROM_ENV = "cccccccc-3333-4333-8333-333333333333";
 
 /**
  * The MCP config for a resolved environment, with a workspace supplied when the
- * layers under test do not carry one — most cases here are about the signing
- * secret or the hub URL, and a sandbox has no workspace unless it was given one.
+ * layers under test do not carry one — the explicitly unbound cases keep
+ * their absent selection while testing legacy admission or machine defaults.
  * An environment that does carry a workspace still wins.
  */
 function mcpConfig(env: NodeJS.ProcessEnv) {
@@ -81,7 +82,7 @@ describe("resolveConfig", () => {
   it("uses legacy admission only for its validated matching endpoint and never for selection", () => {
     const legacyHub = "http://localhost:8080/custom-path";
     const endpoint = "ws://localhost:8080/custom-path";
-    const box = sandbox({
+    const box = unboundSandbox({
       userConfig: { workspace: FROM_USER, hubUrl: legacyHub, hubAdmission: "device" },
       credentials: { signingSecret: SECRET_ON_FILE },
     });
@@ -108,7 +109,7 @@ describe("resolveConfig", () => {
   });
 
   it("does not use a legacy workspace or hub, and does not pass either to children", () => {
-    const box = sandbox({ userConfig: { workspace: FROM_USER, hubUrl: "wss://old.example.test/ws" } });
+    const box = unboundSandbox({ userConfig: { workspace: FROM_USER, hubUrl: "wss://old.example.test/ws" } });
     const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
     expect(resolved.binding).toBeNull();
     expect(resolved.env.WORKSPACE_ID).toBeUndefined();

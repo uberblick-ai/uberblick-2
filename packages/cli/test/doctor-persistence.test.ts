@@ -23,7 +23,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Check, DoctorReport } from "../src/doctor.js";
 import type { StatusReport } from "../src/status.js";
 import type { Sandbox } from "./helpers.js";
-import { pointAt, removeTempDirs, runUbAsync, sandbox } from "./helpers.js";
+import { pointAt, removeTempDirs, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
 
 const WORKSPACE = "c4ee1905-90e4-42df-8a4c-ed6ce9cbe531";
 const DOCUMENT = "13b04df6-1c7b-45f1-9ec9-5f22034f71d3";
@@ -105,7 +105,7 @@ async function seededHub(box: Sandbox): Promise<Hub> {
 
 describe("ub doctor live persistence reading", () => {
   it("reports no workspace without creating config, data or a database", async () => {
-    const box = sandbox();
+    const box = unboundSandbox();
     const { check } = await persistence(box);
 
     expect(check.status).not.toBe("pass");

@@ -29,6 +29,7 @@ import {
   removeTempDirs,
   runUbAsync,
   sandbox,
+  unboundSandbox,
 } from "./helpers.js";
 
 const WORKSPACE = "9f2c47a1-5b83-4e60-91d7-2a6c8b40e3f5";
@@ -191,7 +192,7 @@ function check(checks: Map<string, Check>, name: string): Check {
 
 describe("ub doctor", () => {
   it("reports every check with no configuration at all, and never throws", async () => {
-    const box = sandbox();
+    const box = unboundSandbox();
     const { run, checks, ok } = await doctor(box);
 
     // A stack with nothing configured still gets an answer for every check.

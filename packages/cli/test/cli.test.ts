@@ -10,7 +10,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox } from "./helpers.js";
+import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox, unboundSandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -53,7 +53,7 @@ describe("ub status", () => {
   it("reports that no workspace is selected, and names `ub init`", () => {
     // The one value with no default. A guessed workspace would open a corpus
     // nobody chose, so the answer is the command that creates one.
-    const run = runUb(["status"], sandbox());
+    const run = runUb(["status"], unboundSandbox());
     expect(run.status).toBe(0);
     expect(run.stdout).toMatch(/No workspace selected/);
     expect(run.stdout).toMatch(/ub init/);

@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { writeHubLogin, removeHubLogin } from "@uberblick/hub/auth-store";
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { resolveConfig } from "../src/config.js";
-import { removeTempDirs, runUb, runUbAsync, sandbox, type Sandbox } from "./helpers.js";
+import { removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
@@ -40,7 +40,7 @@ describe("ub workspace", () => {
   });
 
   it("ignores a legacy machine default without an explicit project binding", () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: HUB } });
+    const box = unboundSandbox({ userConfig: { workspace: WORKSPACE, hubUrl: HUB } });
     const shown = runUb(["workspace"], box);
     expect(shown.status).toBe(1);
     expect(shown.stderr).toContain("no workspace configured");
@@ -246,14 +246,14 @@ describe("ub workspace use", () => {
   });
 
   it("writes explicit local-only selection without inferring a hub", () => {
-    const box = sandbox();
+    const box = unboundSandbox();
     const run = runUb(["workspace", "use", UNRELATED, "--hub", "local"], box);
     expect(run.status, run.output).toBe(0);
     expect(binding(box)).toEqual({ workspaceId: UNRELATED, hubUrl: null });
   });
 
   it("resolves unique prefixes and refuses ambiguous, missing, and invalid IDs without changing selection", () => {
-    const box = sandbox();
+    const box = unboundSandbox();
     for (const id of [WORKSPACE, OTHER, UNRELATED]) withDatabase(box, id);
     expect(runUb(["workspace", "use", "b7c", "--hub", "local"], box).status).toBe(0);
     for (const [id, message] of [["4d8e", "matches 2"], ["ffff", "no workspace"], ["my-notes", "not a workspace id"]]) {

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { StatusReport } from "../src/status.js";
 import { renderStatus } from "../src/status.js";
-import { removeTempDirs, runUb, sandbox } from "./helpers.js";
+import { removeTempDirs, runUb, sandbox, unboundSandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -181,7 +181,7 @@ describe("the human status overview", () => {
 
 describe("project selection in ub status", () => {
   it("reports no selection without opening a replica or borrowing the machine default", () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: HUB } });
+    const box = unboundSandbox({ userConfig: { workspace: WORKSPACE, hubUrl: HUB } });
     const text = runUb(["status"], box);
     expect(text.status).toBe(0);
     expect(text.stdout).toContain("No workspace selected");
