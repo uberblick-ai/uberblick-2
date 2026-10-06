@@ -3,7 +3,8 @@
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { mkdirSync, existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import type { StatusReport } from "../src/status.js";
 import { renderStatus } from "../src/status.js";
 import { fixture } from "./auth-fixtures.js";
@@ -32,6 +33,7 @@ function report(overrides: Partial<StatusReport> = {}): StatusReport {
     rooms: [{ room: `${WORKSPACE}/a-room`, appliedSeq: 912345, synced: true }],
     unsyncedChanges: 0,
     pendingRooms: [],
+    lastSync: null,
     inFlightUpdates: 0,
     logEntries: 5284,
     persistence: null,
@@ -51,6 +53,45 @@ function row(text: string, name: string): string {
 }
 
 describe("the human status overview", () => {
+  it("shows an unknown last sync directly after pending", () => {
+    const text = renderStatus(report());
+    expect(row(text, "last sync")).toBe("last sync   never");
+    const lines = text.split("\n");
+    expect(lines.indexOf(row(text, "last sync"))).toBe(lines.indexOf(row(text, "pending")) + 1);
+  });
+
+  it.each([
+    [-1_000, "just now"],
+    [0, "just now"],
+    [4_999, "just now"],
+    [5_000, "5 seconds ago"],
+    [12_999, "12 seconds ago"],
+    [59_999, "59 seconds ago"],
+    [60_000, "1 minute ago"],
+    [119_999, "1 minute ago"],
+    [120_000, "2 minutes ago"],
+    [3_599_999, "59 minutes ago"],
+    [3_600_000, "1 hour ago"],
+    [10_800_000, "3 hours ago"],
+    [86_399_999, "23 hours ago"],
+    [86_400_000, "1 day ago"],
+    [172_800_000, "2 days ago"],
+  ])("renders a last sync %d ms ago as %s", (age, expected) => {
+    const lastSync = "2026-10-05T19:58:12Z";
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse(lastSync) + age);
+    try {
+      const text = renderStatus(report({ lastSync }));
+      expect(row(text, "last sync")).toBe(`last sync   ${expected}`);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each([null, "2026-10-05T19:58:12Z"])("omits a local workspace's last sync %s", (lastSync) => {
+    const text = renderStatus(report({ binding: { workspaceId: WORKSPACE, hubUrl: null }, lastSync }));
+    expect(row(text, "last sync")).toBe("");
+  });
+
   it("places the stored GitHub account directly after the hub, even when the hub refuses it", () => {
     const text = renderStatus(report({
       hub: { status: "auth-failed", url: HUB, protocolVersion: SYNC_PROTOCOL_VERSION },
@@ -208,6 +249,53 @@ describe("the human status overview", () => {
   });
 });
 
+describe("the last hub sync in ub status", () => {
+  it("keeps a stored acknowledgement time visible while the hub is unavailable", () => {
+    const box = sandbox({
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      credentials: { signingSecret: "last-sync-status-test-secret" },
+    });
+    const initial = runUb(["status", "--json"], box);
+    expect(initial.status, initial.stderr).toBe(0);
+    const initialReport = JSON.parse(initial.stdout);
+    expect(initialReport.lastSync).toBeNull();
+    expect(row(runUb(["status"], box).stdout, "last sync")).toBe("last sync   never");
+
+    const timestamp = Math.floor((Date.now() - 3 * 3_600_000 - 30_000) / 1_000) * 1_000;
+    const database = new DatabaseSync(initialReport.databasePath);
+    try {
+      database.prepare("INSERT INTO meta (key, value) VALUES ('last_sync_at', ?)").run(String(timestamp));
+    } finally {
+      database.close();
+    }
+    const json = runUb(["status", "--json"], box);
+    expect(json.status, json.stderr).toBe(0);
+    expect(JSON.parse(json.stdout).lastSync).toBe(new Date(timestamp).toISOString().replace(".000Z", "Z"));
+    const text = runUb(["status"], box);
+    expect(text.status, text.stderr).toBe(0);
+    expect(row(text.stdout, "last sync")).toBe("last sync   3 hours ago");
+  });
+
+  it("hides a local workspace's stored time from text and JSON", () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const initial = runUb(["status", "--json"], box);
+    expect(initial.status, initial.stderr).toBe(0);
+    const database = new DatabaseSync(JSON.parse(initial.stdout).databasePath);
+    try {
+      database.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_sync_at', ?)")
+        .run(String(Date.parse("2026-10-05T19:58:12Z")));
+    } finally {
+      database.close();
+    }
+    const json = runUb(["status", "--json"], box);
+    expect(json.status, json.stderr).toBe(0);
+    expect(JSON.parse(json.stdout).lastSync).toBeNull();
+    const text = runUb(["status"], box);
+    expect(text.status, text.stderr).toBe(0);
+    expect(row(text.stdout, "last sync")).toBe("");
+  });
+});
+
 
 describe("project selection in ub status", () => {
   it("reports no selection without opening a replica or borrowing the machine default", () => {
@@ -218,7 +306,7 @@ describe("project selection in ub status", () => {
     expect(text.stdout).not.toContain(WORKSPACE);
     const json = runUb(["status", "--json"], box);
     expect(json.status).toBe(0);
-    expect(JSON.parse(json.stdout)).toMatchObject({ workspace: null, binding: null, hubUrl: null });
+    expect(JSON.parse(json.stdout)).toMatchObject({ workspace: null, binding: null, hubUrl: null, lastSync: null });
     expect(JSON.parse(json.stdout).account).toBeNull();
     expect(existsSync(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`))).toBe(false);
   });

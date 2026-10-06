@@ -5,6 +5,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Hub } from "@uberblick/hub";
 import {
@@ -21,6 +22,7 @@ import {
   createMcpEngine,
   type UberblickMcpEngine,
 } from "../src/engine.js";
+import { log } from "../src/log.js";
 import { collectServingSyncStatus } from "../src/status.js";
 import { MirrorStore } from "../src/store.js";
 import {
@@ -89,6 +91,53 @@ function tickAfter(engine: UberblickMcpEngine, action: () => void): Promise<void
 }
 
 describe("transport-free MCP engine", () => {
+  it("keeps an idle caught-up timestamp fresh without refreshing unchanged replicas", async () => {
+    let wall = Date.UTC(2031, 0, 1);
+    let elapsed = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => wall);
+    vi.spyOn(performance, "now").mockImplementation(() => elapsed);
+    const engine = await createMcpEngine(testConfig());
+    engines.push(engine);
+    const hub = engine.replicas.sync.state();
+    vi.spyOn(engine.replicas.sync, "state").mockReturnValue({
+      ...hub,
+      status: "connected",
+    });
+    vi.spyOn(engine.replicas.sync, "isRoomQuiet").mockReturnValue(true);
+    vi.spyOn(engine.replicas.sync, "isDraining").mockReturnValue(false);
+    await engine.replicas.settle();
+    expect(engine.store.readLastSync()).toBe(wall);
+    const refresh = vi.spyOn(engine.replicas, "refresh");
+
+    // No room changes or tool calls occur during either interval. The idle
+    // engine still checks, reaching a new observation at the five-second
+    // throttle boundary rather than leaving the old time unboundedly stale.
+    for (const offset of [5_000, 10_000]) {
+      wall = Date.UTC(2031, 0, 1) + offset;
+      elapsed = offset;
+      await sleep(100);
+      expect(engine.store.readLastSync()).toBe(wall);
+      expect(refresh).not.toHaveBeenCalled();
+      expect(engine.health).toEqual({ status: "healthy" });
+      expect(engine.refreshStatus).toEqual({ status: "running" });
+    }
+
+    const warning = vi.spyOn(log, "warn").mockImplementation(() => {});
+    vi.spyOn(engine.store, "recordLastSync").mockImplementation(() => {
+      throw new Error("simulated metadata write failure");
+    });
+    elapsed = 15_000;
+    wall += 5_000;
+    await sleep(100);
+    expect(engine.store.readLastSync()).toBe(wall - 5_000);
+    expect(engine.health).toEqual({ status: "healthy" });
+    expect(engine.refreshStatus).toEqual({ status: "running" });
+    expect(warning).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ message: "simulated metadata write failure" }),
+    );
+  });
+
   it("wakes on a caller append and delivers the tick after its hub-free refresh", async () => {
     const config = testConfig({
       authSecret: TEST_SECRET,

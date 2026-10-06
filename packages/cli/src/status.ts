@@ -97,6 +97,8 @@ export interface StatusReport {
    * what someone about to close their laptop actually needs.
    */
   pendingRooms: SyncStatus["pendingRooms"];
+  /** Last time this replica was caught up with its hub; null for local workspaces. */
+  lastSync: SyncStatus["lastSync"];
   /** Provider sync MESSAGES awaiting acknowledgement. Not a count of updates. */
   inFlightUpdates: number;
   logEntries: number;
@@ -112,7 +114,7 @@ export const ORIGIN_LABELS: Record<Origin, string> = {
   default: "built-in default",
 };
 
-/** The live diagnostic reading, shared with `ub doctor`. Always releases it. */
+/** The live replica reading used by `ub status`. Always releases it. */
 export async function readSyncStatus(config: McpConfig): Promise<SyncStatus> {
   const instance = createMcpServer(config);
   try {
@@ -128,6 +130,7 @@ export interface UnboundStatusReport {
   binding: null;
   hubUrl: null;
   account: null;
+  lastSync: null;
   projectConfig: null;
   message: string;
 }
@@ -143,7 +146,7 @@ export async function statusReport(
   if (resolved.binding === null) {
     return { warnings: resolved.warnings, report: {
       version: cliVersion(), workspace: null, binding: null, hubUrl: null,
-      account: null, projectConfig: null, message: NO_BINDING,
+      account: null, lastSync: null, projectConfig: null, message: NO_BINDING,
     } };
   }
   const config = resolveMcpConfig(resolved.env);
@@ -179,6 +182,7 @@ export async function statusReport(
       rooms: sync.rooms,
       unsyncedChanges: sync.unsyncedChanges,
       pendingRooms: sync.pendingRooms,
+      lastSync: resolved.binding.hubUrl === null ? null : sync.lastSync,
       inFlightUpdates: sync.inFlightUpdates,
       logEntries: sync.logEntries,
       persistence: sync.persistence,
@@ -201,6 +205,20 @@ function plural(count: number, noun: string): string {
 
 function field(name: string, value: string): string {
   return `${name.padEnd(12)}${value}\n`;
+}
+
+function lastSyncAge(lastSync: string | null): string {
+  if (lastSync === null) return "never";
+  const seconds = Math.floor((Date.now() - Date.parse(lastSync)) / 1_000);
+  if (seconds < 5) return "just now";
+  for (const [unit, duration] of [
+    ["day", 86_400],
+    ["hour", 3_600],
+    ["minute", 60],
+  ] as const) {
+    if (seconds >= duration) return `${plural(Math.floor(seconds / duration), unit)} ago`;
+  }
+  return `${plural(seconds, "second")} ago`;
 }
 
 export function renderStatus(report: StatusReport | UnboundStatusReport, accountOrigin?: string): string {
@@ -237,6 +255,7 @@ export function renderStatus(report: StatusReport | UnboundStatusReport, account
     `${plural(report.unsyncedChanges, "room")} with unacknowledged local changes, ` +
       `${plural(report.inFlightUpdates, "sync message")} unacknowledged`,
   );
+  if (report.binding.hubUrl !== null) text += field("last sync", lastSyncAge(report.lastSync));
   text += field("rooms", `${plural(report.rooms.length, "room")} attached`);
   text += field("local log", `${plural(report.logEntries, "update record")} stored`);
   const failures =
@@ -256,9 +275,9 @@ export const STATUS_OPTIONS = {
 export const STATUS_HELP = `usage: ub status [--json]
 
 Overview of the selected project workspace, hub, stored account, selection source,
-connection state, pending rooms and sync messages, attached rooms, records stored
-in the local log and detected failures. Connection does not mean the hub
-acknowledged every change.
+connection state, pending rooms and sync messages, last hub acknowledgement,
+attached rooms, records stored in the local log and detected failures.
+Connection does not mean the hub acknowledged every change.
 Recovery names the next action; \`ub doctor\` gives further diagnostics.
 Workspace and hub bindings stay unchanged; renewal may update the stored login.
 
