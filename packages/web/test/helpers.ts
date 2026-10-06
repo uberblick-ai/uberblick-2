@@ -101,6 +101,23 @@ export function typeText(editor: Editor, text: string): void {
   for (const char of text) press(editor, char);
 }
 
+/**
+ * A plain-text paste, as prosemirror-view performs one: the text replaces the
+ * selection in a transaction marked `uiEvent: "paste"`, which is what Tiptap's
+ * paste-rule plugin keys on. `view.pasteText` would be the door itself, but it
+ * constructs a `ClipboardEvent`, and jsdom has no such class.
+ */
+export function pastePlainText(editor: Editor, text: string): void {
+  const { state } = editor.view;
+  const { from, to } = state.selection;
+  editor.view.dispatch(
+    state.tr
+      .insertText(text, from, to)
+      .setMeta("paste", true)
+      .setMeta("uiEvent", "paste"),
+  );
+}
+
 /** A counter-based id source, so assertions can name exact ids. */
 export function sequentialIds(prefix = "fresh"): () => string {
   let n = 0;

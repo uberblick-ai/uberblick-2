@@ -149,7 +149,7 @@ export const CONFIG_PATH = "/uberblick-config.json";
 export const DEFAULT_WEB_PORT = 13379;
 
 /** Loopback, per the issue: reaching this from another machine is #75's job. */
-const WEB_HOST = "127.0.0.1";
+export const WEB_HOST = "127.0.0.1";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -1228,7 +1228,7 @@ interface HubDecision {
  * bundle would be told to dial 0), and a non-loopback host per
  * {@link isLoopbackHost}.
  */
-function whyNotStartable(hubUrl: string, parsed: URL): string | null {
+export function whyNotStartable(hubUrl: string, parsed: URL): string | null {
   const preamble = `nothing answers ${hubUrl}, and no hub can be started for it: `;
   if (parsed.protocol !== "ws:") {
     return (
@@ -1363,7 +1363,7 @@ async function ensureHub(
   } catch (error) {
     // Nothing that answers this machine's credential is there — the probe just
     // said so — and the port is taken anyway. Which of the several things it
-    // could be is `ub doctor`'s bind check, so the message points there rather
+    // could be is `ub doctor`'s local hub check, so the message points there rather
     // than guessing.
     if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
       throw new Error(

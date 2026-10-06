@@ -8,7 +8,7 @@ how it fails, and which evidence supports that account.
 
 ## Build the current architecture map
 
-Derive the map from code and the live corpus rather than copying Architecture.
+Derive the map from code and live architectural claims rather than copying a page.
 At minimum identify:
 
 - packages and allowed dependency direction;
@@ -23,8 +23,8 @@ At minimum identify:
   workspace identity, MCP tools and failures, CLI behavior, sync protocol, and
   persisted storage.
 
-Compare that derived map with Architecture
-(`d2d28f20-7c9a-4547-b65b-0fdf75a41dff`) block by block where it makes a
+Compare that derived map with architectural documents discovered by purpose under
+[AGENTS.md](../../../../AGENTS.md#read-for-the-action), block by block where each makes a
 material claim. A matching paragraph is not proof; name the implementation and
 test that make it true. A code path with no corresponding architectural truth
 is assessed in the other direction.

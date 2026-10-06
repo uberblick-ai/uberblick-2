@@ -50,7 +50,7 @@ function home(): string {
 
 /** An environment that resolves against nothing but that home. */
 function homeEnv(root: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  return { HOME: root, ...extra };
+  return { HOME: root, UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local", ...extra };
 }
 
 function configRoot(root: string): string {
@@ -226,13 +226,11 @@ describe("`ub doctor`", () => {
 
     expect(report.checks.map((one) => one.name)).toEqual([
       "workspace",
-      "credential",
+      "login",
       "database",
-      "persistence",
       "hub",
       "clock",
-      "port",
-      "bind",
+      "local hub",
       "mcp",
     ]);
   });

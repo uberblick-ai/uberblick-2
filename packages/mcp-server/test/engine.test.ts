@@ -5,7 +5,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { performance } from "node:perf_hooks";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Hub } from "@uberblick/hub";
 import {
   appendBlock,
@@ -21,6 +22,7 @@ import {
   createMcpEngine,
   type UberblickMcpEngine,
 } from "../src/engine.js";
+import { log } from "../src/log.js";
 import { collectServingSyncStatus } from "../src/status.js";
 import { MirrorStore } from "../src/store.js";
 import {
@@ -47,6 +49,7 @@ const peers: PeerClient[] = [];
 const rigs: Rig[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const peer of peers.splice(0)) peer.destroy();
   for (const rig of rigs.splice(0)) await rig.close();
   for (const engine of engines.splice(0)) await engine.close();
@@ -88,6 +91,53 @@ function tickAfter(engine: UberblickMcpEngine, action: () => void): Promise<void
 }
 
 describe("transport-free MCP engine", () => {
+  it("keeps an idle caught-up timestamp fresh without refreshing unchanged replicas", async () => {
+    let wall = Date.UTC(2031, 0, 1);
+    let elapsed = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => wall);
+    vi.spyOn(performance, "now").mockImplementation(() => elapsed);
+    const engine = await createMcpEngine(testConfig());
+    engines.push(engine);
+    const hub = engine.replicas.sync.state();
+    vi.spyOn(engine.replicas.sync, "state").mockReturnValue({
+      ...hub,
+      status: "connected",
+    });
+    vi.spyOn(engine.replicas.sync, "isRoomQuiet").mockReturnValue(true);
+    vi.spyOn(engine.replicas.sync, "isDraining").mockReturnValue(false);
+    await engine.replicas.settle();
+    expect(engine.store.readLastSync()).toBe(wall);
+    const refresh = vi.spyOn(engine.replicas, "refresh");
+
+    // No room changes or tool calls occur during either interval. The idle
+    // engine still checks, reaching a new observation at the five-second
+    // throttle boundary rather than leaving the old time unboundedly stale.
+    for (const offset of [5_000, 10_000]) {
+      wall = Date.UTC(2031, 0, 1) + offset;
+      elapsed = offset;
+      await sleep(100);
+      expect(engine.store.readLastSync()).toBe(wall);
+      expect(refresh).not.toHaveBeenCalled();
+      expect(engine.health).toEqual({ status: "healthy" });
+      expect(engine.refreshStatus).toEqual({ status: "running" });
+    }
+
+    const warning = vi.spyOn(log, "warn").mockImplementation(() => {});
+    vi.spyOn(engine.store, "recordLastSync").mockImplementation(() => {
+      throw new Error("simulated metadata write failure");
+    });
+    elapsed = 15_000;
+    wall += 5_000;
+    await sleep(100);
+    expect(engine.store.readLastSync()).toBe(wall - 5_000);
+    expect(engine.health).toEqual({ status: "healthy" });
+    expect(engine.refreshStatus).toEqual({ status: "running" });
+    expect(warning).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ message: "simulated metadata write failure" }),
+    );
+  });
+
   it("wakes on a caller append and delivers the tick after its hub-free refresh", async () => {
     const config = testConfig({
       authSecret: TEST_SECRET,
@@ -98,9 +148,8 @@ describe("transport-free MCP engine", () => {
       refreshIntervalMs: 30_000,
     });
     engines.push(engine);
-    // If the steady-state pass accidentally calls settle, the unreachable hub
-    // makes the mistake visible without a tight wall-clock assertion.
-    config.connectTimeoutMs = 30_000;
+    // Boot may settle; steady-state refreshes must never wait on the hub.
+    const settle = vi.spyOn(engine.replicas, "settle");
 
     const uuid = randomUUID();
     const room = roomForDoc(WORKSPACE, uuid);
@@ -113,6 +162,7 @@ describe("transport-free MCP engine", () => {
       .find((entry) => entry.room === room);
     if (replica === undefined) throw new Error("the caller's room was not attached");
     expect(getBlocks(replica.doc).map((block) => block.text)).toEqual(["caller append"]);
+    expect(settle).not.toHaveBeenCalled();
   });
 
   it("polls a foreign commit without putting the hub wait in front of it", async () => {
@@ -124,7 +174,7 @@ describe("transport-free MCP engine", () => {
     });
     const engine = await createMcpEngine(config, { refreshIntervalMs: 10 });
     engines.push(engine);
-    config.connectTimeoutMs = 30_000;
+    const settle = vi.spyOn(engine.replicas, "settle");
 
     const outside = new MirrorStore(databasePath, WORKSPACE);
     stores.push(outside);
@@ -144,6 +194,7 @@ describe("transport-free MCP engine", () => {
       },
       2_000,
     );
+    expect(settle).not.toHaveBeenCalled();
   });
 
   it("pushes pending state after hub recovery and releases its marker without a tool call", async () => {

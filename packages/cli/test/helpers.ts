@@ -13,6 +13,7 @@
  */
 
 import { type SpawnSyncReturns, spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   mkdirSync,
@@ -24,6 +25,14 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inject } from "vitest";
+import { findProjectConfig } from "../src/project-binding.js";
+
+declare module "vitest" {
+  export interface ProvidedContext {
+    boundFixtureRoot: string;
+  }
+}
 
 /** The package root, so a test can spawn `bin/ub.mjs` the way a user would. */
 export const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -123,7 +132,29 @@ function writeText(path: string, text: string): void {
 }
 
 export function sandbox(files: SandboxFiles = {}): Sandbox {
-  const root = mkdtempSync(join(tmpdir(), "uberblick-cli-"));
+  return createSandbox(inject("boundFixtureRoot"), {
+    ...files,
+    projectBinding: files.projectBinding !== undefined
+      ? files.projectBinding
+      : { workspaceId: randomUUID(), hubUrl: null },
+  });
+}
+
+/**
+ * Only for assertions that require no project file or no selected workspace.
+ * These folders are siblings of the suite's bound parent, never below it.
+ * Refuse an unsafe TMPDIR before any command can adopt or rewrite an operator's
+ * file. Moving launcher scratch outside the checkout belongs to ub-agents.
+ */
+export function unboundSandbox(files: SandboxFiles = {}): Sandbox {
+  if (findProjectConfig(tmpdir()) !== null) {
+    throw new Error("Unbound CLI fixtures require TMPDIR with no ancestor .uberblick.json; no command was run.");
+  }
+  return createSandbox(tmpdir(), files);
+}
+
+function createSandbox(parent: string, files: SandboxFiles): Sandbox {
+  const root = mkdtempSync(join(parent, "uberblick-cli-"));
   tempDirs.push(root);
 
   const cwd = join(root, "checkout");

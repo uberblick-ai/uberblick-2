@@ -85,10 +85,11 @@ describe("local browser key", () => {
     expect(readdirSync(directory)).toEqual([]);
 
     const linked = sandbox();
+    const before = readdirSync(linked.cwd);
     mkdirSync(join(linked.configHome, "uberblick"), { recursive: true });
     symlinkSync(linked.cwd, join(linked.configHome, "uberblick", "browser-keys"));
     expect(() => localBrowserKey(WORKSPACE, linked.env)).toThrow("owner-only directory");
-    expect(readdirSync(linked.cwd)).toEqual([]);
+    expect(readdirSync(linked.cwd)).toEqual(before);
   });
 
   it("rejects invalid workspace paths before creating state", () => {

@@ -45,7 +45,7 @@
 # went.
 #
 # Every compose call goes through `bin/remote-compose.sh`, which resolves and checks
-# this deployment's settings in both a checkout and an extracted hub release.
+# this extracted hub release's settings.
 
 set -eu
 

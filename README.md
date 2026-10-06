@@ -364,8 +364,8 @@ ub init            # identity, workspace, signing secret
 ub init <hub-url> --workspace <uuid>  # seed a workspace the stored login permits
 ub update          # update this copy — Homebrew, or a checkout on main
 ub open            # serve the web app and a hub, and open the browser
-ub status          # workspace, hub, connection, pending work, local log, failures
-ub status --json   # full report, including rooms, configuration and storage paths
+ub status          # workspace, hub, stored account, connection, pending work, last sync, local log, failures
+ub status --json   # full report, including account, rooms, configuration and storage paths
 ub workspace       # the workspace in force, and which layer chose it
 ub workspace list  # workspaces this machine has a database for
 ub workspace use <id> --hub <url|local>  # select a complete project binding
@@ -520,8 +520,8 @@ A published Docker hub runs on Linux or Docker Desktop on macOS, including
 Apple Silicon through `linux/amd64` emulation. Follow [REMOTE.md](REMOTE.md) to
 start a release on host loopback and claim its default workspace before wider
 exposure. The operator updates the release deliberately while retaining its
-volumes. Hub deployment uses the release scripts. Existing source checkouts
-keep the [host-side update runbook](REMOTE.md#existing-checkout-deployments-compatibility).
+volumes. Existing checkout hosts can
+[switch to a release](REMOTE.md#switch-an-existing-checkout-host-to-a-release).
 
 From the project directory:
 

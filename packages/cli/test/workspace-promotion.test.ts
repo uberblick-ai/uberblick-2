@@ -9,7 +9,7 @@ import { ensureDeviceLogin } from "@uberblick/hub/device-login";
 import { compareCorpus, createMcpServer, inspectRemote, isIdentical, resolveMcpConfig, syncWorkspace } from "@uberblick/mcp-server";
 import { getWorkspaceName, listDirectory, readSidebar, tombstoneDirectoryEntry } from "@uberblick/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { UB_BIN, removeTempDirs, runUbAsync, sandbox, type Sandbox } from "./helpers.js";
+import { UB_BIN, removeTempDirs, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
 
 const hubs: Hub[] = [];
 afterEach(async () => {
@@ -23,7 +23,7 @@ function offline(box: Sandbox) {
   return { ...resolveMcpConfig({ ...box.env, WORKSPACE_ID: selected(box).workspaceId }), authSecret: null };
 }
 async function localWorkspace(name = "Project notes") {
-  const box = sandbox();
+  const box = unboundSandbox();
   const result = await runUbAsync(["workspace", "create", name], box);
   expect(result.status, result.output).toBe(0);
   return box;
@@ -219,7 +219,7 @@ describe("workspace creation and promotion", () => {
     expect(after.memberships.filter(row => row.workspace_id === selected(box).workspaceId)).toEqual([
       expect.objectContaining({ principal_id: login.identity.id, role: "admin" }),
     ]);
-    const other = sandbox();
+    const other = unboundSandbox();
     const freshCredential = hub.credentials!.issue({ principalId: login.identity.id, deviceId: randomUUID(), workspaces: [selected(box).workspaceId] });
     await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity: login.identity,
       credential: { record: freshCredential.record, key: Buffer.from(freshCredential.keyBytes).toString("base64url") } }, other.env);
@@ -293,7 +293,7 @@ describe("workspace creation and promotion", () => {
   });
 
   it("validates names and URLs without side effects or echoing pasted credentials", async () => {
-    const box = sandbox();
+    const box = unboundSandbox();
     for (const name of ["", "bad\nname", "x".repeat(65)]) expect((await runUbAsync(["workspace", "create", name], box)).status).toBe(2);
     const result = await runUbAsync(["workspace", "promote", "https://user:private-paste@hub.test"], box);
     expect(result.status).toBe(2);

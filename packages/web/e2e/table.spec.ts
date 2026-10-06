@@ -65,11 +65,15 @@ test("TableKit cells stay drawn and wide tables contain horizontal scrolling", {
     await expect.poll(() => wrapper.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
   }
 
-  await wide.locator("th").last().evaluate((element) => {
+  await wide.locator("th").last().scrollIntoViewIfNeeded();
+  await wide.locator("th").last().evaluate((element, pointerType) => {
+    element.dispatchEvent(new PointerEvent("pointerdown", { pointerType, bubbles: true, pointerId: 1 }));
     const range = document.createRange(); range.selectNodeContents(element);
     const selection = document.getSelection(); selection?.removeAllRanges(); selection?.addRange(range);
-  });
-  await expect(page.locator('[data-slot="selection-composer"]')).toHaveCount(0);
+  }, info.project.use.hasTouch === true ? "touch" : "mouse");
+  const formatting = page.getByRole("toolbar", { name: "Text formatting", exact: true });
+  await expect(formatting).toBeVisible();
+  await expect(formatting.getByRole("button", { name: "Comment", exact: true })).toHaveCount(0);
   if (process.env.UB_AGENTS_SCRATCH !== undefined) {
     for (const colorScheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme });

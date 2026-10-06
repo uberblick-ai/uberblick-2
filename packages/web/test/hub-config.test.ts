@@ -31,7 +31,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -577,7 +577,7 @@ describe("the deployments that serve it", () => {
     // Both the wrapper and the image use the same guard. Plain Compose passes
     // native operator names; the container validates before aliasing them into
     // the Caddyfile, so it cannot bypass the wrapper's alphabets.
-    const compose = readFileSync(resolve(repoRoot, "docker-compose.yml"), "utf8");
+    const compose = readFileSync(resolve(repoRoot, "compose.release.yml"), "utf8");
     // biome-ignore lint/suspicious/noTemplateCurlyInString: literal Compose expression
     expect(compose).toContain('WEB_HUB_URL: "${WEB_HUB_URL:-}"');
     // biome-ignore lint/suspicious/noTemplateCurlyInString: literal Compose expression
@@ -627,13 +627,15 @@ describe("the deployments that serve it", () => {
     //
     // PATH is an empty directory, which is the proof of that order: nothing
     // external is reachable, `docker` included, and the refusal still arrives.
-    // The cwd is empty too, so no developer's own `.env` is sourced over these.
+    // The cwd has only release metadata, so no developer's own `.env` is
+    // sourced over these, and the wrapper accepts it as a release directory.
     const injecting = {
       WEB_HUB_URL: 'wss://ok.example.ts.net/ws","hubUrl":"wss://elsewhere',
       TAILSCALE_HOST: 'ok.example.ts.net","hubUrl":"wss://elsewhere',
     };
     const empty = mkdtempSync(join(tmpdir(), `uberblick-${process.env.UB_AGENTS_RUN ?? "test"}-wrapper-`));
     try {
+      writeFileSync(join(empty, "release.json"), "{}\n");
       for (const [name, value] of Object.entries(injecting)) {
         const run = spawnSync(
           "/bin/sh",

@@ -89,6 +89,7 @@ interface Selection {
   origin: string;
   bound: boolean;
   workspace: string | undefined;
+  bindingOrigin: ReturnType<typeof resolveProjectBinding>["origin"];
 }
 
 const GITHUB_APPROVAL_URL = "https://github.com/login/device";
@@ -96,15 +97,16 @@ const GITHUB_APPROVAL_URL = "https://github.com/login/device";
 function selectHub(hub: string | undefined, io: Io, describe = true): Selection | number {
   // An explicit authentication target works before any project is bound.
   // Resolve a binding only for the implicit target, or to describe membership.
-  let binding: ReturnType<typeof resolveProjectBinding>["binding"] = null;
+  let resolved: ReturnType<typeof resolveProjectBinding> | undefined;
   try {
-    binding = resolveProjectBinding().binding;
+    resolved = resolveProjectBinding();
   } catch (error) {
     if (hub === undefined) {
       io.err(`ub auth: ${error instanceof Error ? error.message : String(error)}\n`);
       return 1;
     }
   }
+  const binding = resolved?.binding;
   const selected = hub ?? binding?.hubUrl ?? undefined;
   if (selected === undefined) {
     io.err("ub auth: no hub given and none bound. Local-only work needs no login. Give a hub to `ub auth login <hub>`.\n");
@@ -125,10 +127,10 @@ function selectHub(hub: string | undefined, io: Io, describe = true): Selection 
   if (describe) {
     authField(io, "hub", origin);
   }
-  return { origin, bound, workspace: binding?.workspaceId };
+  return { origin, bound, workspace: binding?.workspaceId, bindingOrigin: resolved?.origin ?? null };
 }
 
-function displayUsername(user: string): string {
+export function displayUsername(user: string): string {
   // JSON quoting escapes C0 controls; DEL and C1 also need terminal-safe escapes.
   return isGithubUsername(user) ? user : JSON.stringify(user).replace(/[\u007f-\u009f]/g,
     char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
@@ -151,7 +153,11 @@ function describeMissingWorkspace(selection: Selection, login: StoredHubLogin, i
     return true;
   }
   if (login.credential.record.workspaces.includes(workspace)) return false;
-  io.out(`The bound workspace ${workspace} is absent from the recorded credential. Remote sync renews this login to discover current memberships; ask a workspace administrator for access if it remains unavailable.\n`);
+  const source = selection.bindingOrigin === "environment" ? "UB_WORKSPACE_ID" : ".uberblick.json";
+  const user = displayUsername(login.identity.githubUsername);
+  io.out(`\nYou might have expected access to ${workspace} as per your ${source}.\n` +
+    `But ${user} has no access to this workspace, or it simply doesn't exist on this hub.\n` +
+    `Ask a workspace admin to grant you access: \`ub workspace member add ${user}\`\n`);
   return false;
 }
 
