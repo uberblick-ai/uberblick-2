@@ -20,3 +20,5 @@ board. Do not substitute another installation or direct GraphQL. A failed post
 blocks nothing.
 Follow [run-operations.md](run-operations.md#posting-records-and-scratch)
 when writing and posting the body.
+
+A maintainer reads them in the `delivery-review` skill's daily report.
