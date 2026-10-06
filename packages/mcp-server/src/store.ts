@@ -388,6 +388,65 @@ export function readWorkspaceName(databasePath: string, workspaceId: string): st
   }
 }
 
+/**
+ * Check an existing replica without opening the write-capable store. Replaying
+ * into bare Y.Docs validates its authoritative state without replica repairs,
+ * and absent tables or workspace claims remain valid pre-migration states.
+ */
+export function inspectExistingStore(databasePath: string, workspaceId: string): void {
+  const db = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    transactional(db, () => {
+      const checks = db.prepare("PRAGMA quick_check").all();
+      if (checks.some((check) => Object.values(check).some((value) => value !== "ok"))) {
+        throw new Error("The database failed SQLite's integrity check.");
+      }
+      const tables = new Set(
+        (db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all() as { name: string }[])
+          .map((table) => table.name),
+      );
+      if (tables.has("meta")) {
+        const row = db.prepare("SELECT value FROM meta WHERE key = 'workspace'").get();
+        const recorded = row?.value;
+        if (recorded !== undefined && recorded !== workspaceId) {
+          throw new Error(
+            `${databasePath} is the replica of workspace ${recorded ?? "unknown"}, ` +
+              `but this server is configured for workspace ${workspaceId}. One ` +
+              "database holds one workspace: unset UBERBLICK_DB to use the " +
+              "per-workspace default file, or point it at a different path.",
+          );
+        }
+      }
+      const roomQueries = [];
+      const snapshot = tables.has("snapshots")
+        ? db.prepare("SELECT state, through_seq FROM snapshots WHERE room = ?")
+        : null;
+      const updates = tables.has("updates")
+        ? db.prepare("SELECT payload FROM updates WHERE room = ? AND seq > ? ORDER BY seq")
+        : null;
+      if (snapshot !== null) roomQueries.push("SELECT room FROM snapshots");
+      if (updates !== null) roomQueries.push("SELECT room FROM updates");
+      if (roomQueries.length === 0) return;
+
+      const rooms = db.prepare(roomQueries.join(" UNION ")).all() as { room: string }[];
+      for (const { room } of rooms) {
+        const doc = new Y.Doc();
+        try {
+          const stored = snapshot?.get(room);
+          if (stored !== undefined) Y.applyUpdate(doc, stored.state as Uint8Array);
+          for (const update of updates?.all(room, stored?.through_seq ?? 0) ?? []) {
+            Y.applyUpdate(doc, update.payload as Uint8Array);
+          }
+        } finally {
+          doc.destroy();
+        }
+      }
+    })();
+  } finally {
+    db.close();
+  }
+}
+
 export class MirrorStore {
   readonly databasePath: string;
 

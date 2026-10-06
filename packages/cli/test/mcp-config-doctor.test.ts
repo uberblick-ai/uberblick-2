@@ -85,6 +85,10 @@ describe("doctor's MCP config reads", () => {
         '"""\n',
     },
     {
+      setting: "a multiline basic string with an escaped quote",
+      text: '[other]\ninstructions = """a\\"""\n"""\n',
+    },
+    {
       setting: "a multiline literal string",
       text: "[other]\ninstructions = '''\n" +
         'Text with [brackets], {braces} and a # character.\n' +
