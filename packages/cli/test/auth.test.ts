@@ -147,6 +147,37 @@ describe("ub auth local selection and command surface", () => {
     expect(status.stderr).toBe("");
   });
 
+  it("shows safe stored names in credential order and leaves stored bytes unchanged", async () => {
+    const old = fixture([WORKSPACE, OTHER_WORKSPACE]);
+    const login = { ...old, credential: { ...old.credential, workspaceNames: {
+      [WORKSPACE]: 'Synthetic 🧭 "workspace" \\',
+      [OTHER_WORKSPACE]: "unsafe\u009bname",
+      "aaaaaaaa-1111-4111-8111-111111111111": "Not in credential",
+    } } };
+    const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: login } } });
+    const before = readFileSync(credentialPath(box), "utf8");
+    const status = await runUbAsync(["auth", "status", OTHER_HUB], box);
+    expect(status.status, status.stderr).toBe(0);
+    expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  previous-user\navailable workspaces:\n  ${WORKSPACE} | Synthetic 🧭 "workspace" \\\n  ${OTHER_WORKSPACE}\n`);
+    expect(status.stderr).toBe("");
+    expect(readFileSync(credentialPath(box), "utf8")).toBe(before);
+  });
+
+  it("keeps malformed names and names without issued workspaces out of status rows", async () => {
+    for (const [workspaces, workspaceNames] of [
+      [[WORKSPACE], "not a map"], [[], { [WORKSPACE]: "Not issued" }],
+    ] as const) {
+      const old = fixture([...workspaces]);
+      const login = { ...old, credential: { ...old.credential, workspaceNames } };
+      const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: login } } });
+      const status = await runUbAsync(["auth", "status", OTHER_HUB], box);
+      expect(status.status, status.stderr).toBe(0);
+      expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  previous-user\n${workspaces.length === 0
+        ? "available workspaces: none\n" : `available workspaces:\n  ${WORKSPACE}\n`}`);
+      expect(status.stderr).toBe("");
+    }
+  });
+
   it("quotes invalid stored usernames and escapes C0, DEL and every C1 control in status", async () => {
     const old = fixture([]);
     old.identity.githubUsername = `synthetic"\\user\n\u001b\u007f${String.fromCharCode(...Array.from({ length: 32 }, (_, index) => index + 0x80))}`;
@@ -205,7 +236,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(stored.credential.record.workspaces).toHaveLength(1);
     expect(workspace).toMatch(/^[0-9a-f-]{36}$/);
     expect(workspace).not.toBe(WORKSPACE);
-    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes its admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${workspace}), you are admin\navailable workspaces:\n  ${workspace}\n`);
+    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes its admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${workspace}), you are admin\navailable workspaces:\n  ${workspace} | Default workspace\n`);
     expect(login.stderr).toBe("");
     expect(readFileSync(configPath(box))).toEqual(binding);
     expect(remote.requests[0]).toMatchObject({ path: "/auth/claim-state", method: "GET", body: {} });
@@ -377,6 +408,37 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(readFileSync(configPath(box))).toEqual(before);
     expect(remote.requests).toHaveLength(requestCount + 1);
     expect(remote.requests.at(-1)).toMatchObject({ path: "/auth/manage", body: { operation: "revoke-device" } });
+  });
+
+  it("stores and prints only safe collected names, excluding flow and credential secrets", async () => {
+    const workspaces = Array.from({ length: 6 }, (_, index) =>
+      `aaaaaaaa-1111-4111-8111-${String(index + 1).padStart(12, "0")}`);
+    const remote = await rig(workspaces);
+    const name = 'Synthetic 🧭 "workspace" \\';
+    remote.controls.transform = (path, status, result, body) => {
+      if (path !== "/auth/github/collect" || result.status !== "complete") return { status, result };
+      const credential = result.credential as { key: string };
+      const values = [name, "unsafe\u009bname", "unsafe\u202ename", " padded ",
+        `key ${credential.key}`, `secret ${String(body.collectionSecret)}`];
+      return { status, result: { ...result, credential: { ...credential,
+        workspaceNames: { ...Object.fromEntries(workspaces.map((workspace, index) => [workspace, values[index]])),
+          [OTHER_WORKSPACE]: "Not issued" },
+      } } };
+    };
+    const box = sandbox();
+    const login = await runUbAsync(["auth", "login", remote.origin], box);
+    expect(login.status, login.stderr).toBe(0);
+    const stored = savedLogin(box, remote.origin);
+    expect((stored.credential as typeof stored.credential & { workspaceNames?: unknown }).workspaceNames)
+      .toEqual({ [workspaces[0]!]: name });
+    expect(stored.credential.record.workspaces).toEqual(workspaces);
+    expect(login.stdout).toContain(`available workspaces:\n  ${workspaces[0]} | ${name}\n${workspaces.slice(1).map(workspace => `  ${workspace}\n`).join("")}`);
+    assertPublicOnly(login, remote, stored.credential.key);
+    const requestCount = remote.requests.length;
+    const status = await runUbAsync(["auth", "status", remote.origin], box);
+    expect(status.status, status.stderr).toBe(0);
+    expect(status.stdout).toContain(`  ${workspaces[0]} | ${name}\n`);
+    expect(remote.requests).toHaveLength(requestCount);
   });
 
   it("signs in with zero workspaces and leaves a different hub binding unchanged", async () => {

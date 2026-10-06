@@ -189,6 +189,20 @@ describe("fresh deployed hub initialization", () => {
 });
 
 describe("first-completed GitHub sign-in claim", () => {
+  it("delivers a claimed credential when the workspace settings cannot be decoded", async () => {
+    const testRig = rig();
+    const workspaceId = defaultWorkspace(testRig);
+    testRig.database.connection.prepare("UPDATE documents SET data = ? WHERE name = ?")
+      .run(new Uint8Array([255]), `${workspaceId}/_settings`);
+    const { flow, github } = signIn(testRig);
+    const collected = await complete(flow, github);
+    expect(collected.credential.record.workspaces).toEqual([workspaceId]);
+    expect(collected.credential.workspaceNames).toBeUndefined();
+    expect(collected.credential.key).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(testRig.credentials.get(collected.credential.record.id)).toEqual(collected.credential.record);
+    expect(testRig.claims!.state(true)).toEqual({ unclaimed: false, canClaim: false });
+  });
+
   it("claims with the issued credential and never changes membership on later sign-ins", async () => {
     const testRig = rig();
     const workspaceId = defaultWorkspace(testRig);
@@ -196,6 +210,7 @@ describe("first-completed GitHub sign-in claim", () => {
     const claim = await complete(flow, github);
     expect(claim.claimedWorkspaceId).toBe(workspaceId);
     expect(claim.credential.record.workspaces).toEqual([workspaceId]);
+    expect(claim.credential.workspaceNames).toEqual({ [workspaceId]: "Default workspace" });
     expect(rows(testRig).hub_memberships).toEqual([{ workspace_id: workspaceId, principal_id: claim.identity.id, role: "admin" }]);
     const membership = rows(testRig).hub_memberships;
     const again = await complete(flow, github);

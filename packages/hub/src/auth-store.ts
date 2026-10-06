@@ -5,6 +5,7 @@
  */
 import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
+import { validateWorkspaceName } from "@uberblick/schema";
 import { credentialsPath } from "./storage.js";
 export { CREDENTIALS_FILE, credentialsPath } from "./storage.js";
 import { acquireInitLock } from "./init-lock.js";
@@ -26,6 +27,8 @@ export interface StoredHubLogin {
       revokedAt: number | null;
     };
     key: string;
+    /** Optional display data, replaced with each issued credential. */
+    workspaceNames?: Record<string, string>;
   };
 }
 
@@ -51,6 +54,27 @@ function uuid(value: unknown): value is string {
 
 function timestamp(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** Bad display data never invalidates a credential or adds workspace authority. */
+export function sanitizeWorkspaceNames(
+  value: unknown,
+  workspaces: readonly string[],
+  credentialKey: string,
+  collectionSecret?: string,
+): Record<string, string> | undefined {
+  if (!object(value)) return undefined;
+  const names: Record<string, string> = {};
+  for (const workspace of workspaces) {
+    if (!Object.hasOwn(value, workspace)) continue;
+    const name = value[workspace];
+    if (typeof name !== "string" || name.includes(credentialKey) ||
+        (collectionSecret !== undefined && name.includes(collectionSecret))) continue;
+    try {
+      if (validateWorkspaceName(name) === name) names[workspace] = name;
+    } catch { /* Unsafe names remain unnamed. */ }
+  }
+  return Object.keys(names).length === 0 ? undefined : names;
 }
 
 /** Validate exactly the identity and issued credential that collection supplies. */
@@ -128,7 +152,14 @@ function readStore(env: NodeJS.ProcessEnv): Store {
     // Invalid origin keys may be future fields or misplaced secrets. Preserve
     // them on write, but never use them as names in output.
     if (!authOrigin(origin)) continue;
-    if (isHubLogin(login)) logins[origin] = login;
+    if (isHubLogin(login)) {
+      const names = sanitizeWorkspaceNames(login.credential.workspaceNames,
+        login.credential.record.workspaces, login.credential.key);
+      const { workspaceNames: _workspaceNames, ...credential } = login.credential;
+      logins[origin] = { ...login, credential: {
+        ...credential, ...(names === undefined ? {} : { workspaceNames: names }),
+      } };
+    }
     else unreadableHubs.push(origin);
   }
   return { path, state: "usable", logins, unreadableHubs, raw };
@@ -174,9 +205,11 @@ function publish(store: Store, hubLogins: Record<string, unknown>, command: stri
 }
 
 /** Only the collection fields owned by this contract may enter the store. */
-export function projectLoginFields(login: StoredHubLogin): StoredHubLogin {
+export function projectLoginFields(login: StoredHubLogin, collectionSecret?: string): StoredHubLogin {
   const { identity, credential } = login;
   const { record } = credential;
+  const workspaceNames = sanitizeWorkspaceNames(credential.workspaceNames, record.workspaces,
+    credential.key, collectionSecret);
   return {
     identity: {
       id: identity.id,
@@ -193,6 +226,7 @@ export function projectLoginFields(login: StoredHubLogin): StoredHubLogin {
         revokedAt: record.revokedAt,
       },
       key: credential.key,
+      ...(workspaceNames === undefined ? {} : { workspaceNames }),
     },
   };
 }
