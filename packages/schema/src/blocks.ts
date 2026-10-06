@@ -14,16 +14,16 @@
  * `inlineCode`, `link`, `docLink` — see `marks.ts`) and the `comment` mark anchoring
  * annotation threads. Source blocks carry no inline marks, only `comment`.
  * Tables are the exception: TableKit rows and cells contain single paragraphs,
- * with a narrower inline mark set. Their block text is a canonical GFM projection.
+ * with the same inline mark set. Their block text is canonical inline-marked GFM.
  *
  * `list-item` and `quote` are prose blocks like any other, and flat like every
  * other: a list is a *run* of adjacent list-item elements carrying `list` and
  * `indent` attributes, exactly markdown's own model. Block order stays flat;
  * only a table's cell content nests.
  *
- * Every read in this module is mark-blind: `text` and `rev` are plain text, so
- * formatting a range never invalidates a prepared edit. `getBlockInline` is the
- * one read that sees marks.
+ * Prose reads are mark-blind: `text` and `rev` are plain text, so formatting
+ * prose never invalidates a prepared edit. Table text and rev include cell
+ * formatting through their inline-marked GFM projection.
  */
 
 import * as Y from "yjs";
@@ -48,7 +48,7 @@ import {
 } from "./marks.js";
 import { blockRev } from "./rev.js";
 import { canonicalDocumentUuid } from "./rooms.js";
-import { buildTableElement, editTable, parseGfmTable, parseTableInput, tableCellTexts, tableRows, tableText } from "./table.js";
+import { buildTableElement, editTable, parseGfmTable, parseTableInput, parseTableCell, tableCellTexts, tableRows, tableText } from "./table.js";
 import type { TableMapping } from "./table.js";
 import {
   MAX_LIST_INDENT,
@@ -333,13 +333,22 @@ function inlineOf(input: BlockInput): readonly InlineRun[] | null {
   return isProseBlockType(input.type) ? input.inline : null;
 }
 
-function buildElement(id: string, input: BlockInput): Y.XmlElement {
+function buildElement(id: string, input: BlockInput, inlineTables = true): Y.XmlElement {
   // Before anything is inserted: a Yjs transaction does not roll back, so a
   // refusal from inside one would leave a stray empty block behind.
   const runs = inlineOf(input);
   if (runs !== null) assertInlineWritable(runs);
 
-  if (input.type === "table") return buildTableElement(id, parseTableInput(input.text ?? ""));
+  if (input.type === "table") {
+    const table = parseTableInput(input.text ?? "");
+    // Agent inputs carry inline markdown. The web's retype door and legacy
+    // normalization still create literal cells through the plain builders.
+    if (!inlineTables) return buildTableElement(id, table);
+    for (const cell of [table.header, ...table.rows].flat()) assertInlineWritable(parseTableCell(cell));
+    return buildTableElement(id, {
+      ...table, header: table.header.map(() => ""), rows: table.rows.map((row) => row.map(() => "")),
+    });
+  }
 
   const element = new Y.XmlElement(input.type);
   element.setAttribute("id", id);
@@ -367,6 +376,18 @@ function buildElement(id: string, input: BlockInput): Y.XmlElement {
  * reader ever sees the unformatted intermediate state.
  */
 function writeInline(element: Y.XmlElement, input: BlockInput): void {
+  if (input.type === "table") {
+    const table = parseTableInput(input.text ?? "");
+    const cells = tableRows(element);
+    for (const [row, values] of [table.header, ...table.rows].entries()) {
+      for (const [column, value] of values.entries()) {
+        const cell = cells[row]?.[column];
+        const text = cell === undefined ? null : tableCellTexts(cell)[0];
+        if (text !== null && text !== undefined) applyInlineRuns(text, parseTableCell(value));
+      }
+    }
+    return;
+  }
   const runs = inlineOf(input);
   if (runs === null) return;
   const text = textOf(element);
@@ -608,7 +629,7 @@ export function setBlockType(
         ...(attrs.language === undefined ? {} : { language: attrs.language }),
         ...(attrs.list === undefined ? {} : { list: attrs.list }),
         ...(attrs.indent === undefined ? {} : { indent: attrs.indent }),
-      });
+      }, false);
       fragment.insert(index + 1, [replacement]);
       fragment.delete(index, 1);
       return;
@@ -681,14 +702,17 @@ export interface EditBlockOptions {
  * a concurrent edit elsewhere in the same block — or at the block's very end —
  * survives the merge, and marks over untouched text stay anchored.
  *
- * **Marks are invisible to this call, by design.** `oldText`, `newText` and
- * `rev` are all plain text: an edit never mentions inline marks and never
+ * **Prose marks are invisible to this call.** Prose `oldText`, `newText` and
+ * `rev` are plain text: a prose edit never mentions inline marks and never
  * changes one, and formatting a range does not make a prepared edit stale.
  * Spliced text inherits formatting the way Yjs inserts always do — from the
  * character to its left — so text inserted strictly inside a bold run is bold,
  * and text inserted at a run's start boundary is not. Deleting a whole run
  * removes its mark with it. A caller that wants to *change* formatting writes
  * the marks, not the text.
+ *
+ * Tables instead compare inline-marked GFM, then splice changed cell text and
+ * only the mark keys changed by that source. Unchanged stored marks survive.
  *
  * The staleness check is local-replica-only. See {@link StaleBlockError}.
  *

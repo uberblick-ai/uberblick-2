@@ -24,7 +24,13 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { HELP, MCP_HELP, runCli } from "../src/cli.js";
-import { AUTH_HELP, AUTH_LOGIN_HELP, AUTH_LOGOUT_HELP, AUTH_STATUS_HELP } from "../src/auth.js";
+import {
+  AUTH_HELP,
+  AUTH_LOGIN_HELP,
+  AUTH_LOGOUT_HELP,
+  AUTH_LOGOUT_OPTIONS,
+  AUTH_STATUS_HELP,
+} from "../src/auth.js";
 import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
 import { ENV_HELP } from "../src/env.js";
 import { INIT_HELP, INIT_OPTIONS } from "../src/init.js";
@@ -144,7 +150,7 @@ const PATHS: Path[] = [
   { argv: ["auth"], help: AUTH_HELP, options: {}, children: ["login", "status", "logout"] },
   { argv: ["auth", "login"], help: AUTH_LOGIN_HELP, options: {} },
   { argv: ["auth", "status"], help: AUTH_STATUS_HELP, options: {} },
-  { argv: ["auth", "logout"], help: AUTH_LOGOUT_HELP, options: {} },
+  { argv: ["auth", "logout"], help: AUTH_LOGOUT_HELP, options: AUTH_LOGOUT_OPTIONS },
   { argv: ["mcp"], help: MCP_HELP, options: {}, children: ["install"] },
   { argv: ["mcp", "install"], help: INSTALL_HELP, options: INSTALL_OPTIONS },
   { argv: ["env"], help: ENV_HELP, options: {} },
@@ -168,9 +174,11 @@ const DISPATCHERS = [
 const HIDDEN = ["serve", "help", "--help", "-h", "--version", "-v"];
 
 /** Command names and description columns from one contextual catalog. */
-function commandRows(help: string): Array<{ command: string; descriptionColumn: number }> {
-  const catalog = help.match(/\ncommands:\n((?: {2}.+\n)+)\noptions:\n/);
-  expect(catalog, "command help contains only its catalog before its own options").not.toBeNull();
+function commandRows(help: string, catalogOnly = false): Array<{ command: string; descriptionColumn: number }> {
+  const catalog = help.match(catalogOnly
+    ? /\ncommands:\n((?: {2}.+\n)+)$/
+    : /\ncommands:\n((?: {2}.+\n)+)\noptions:\n/);
+  expect(catalog, "command help contains its complete catalog").not.toBeNull();
 
   return (catalog?.[1] ?? "")
     .split("\n")
@@ -232,6 +240,7 @@ describe("ub init --help", () => {
 describe("every human-facing command path", () => {
   for (const path of PATHS) {
     const name = ["ub", ...path.argv].join(" ");
+    const isAuthGroup = path.argv.length === 1 && path.argv[0] === "auth";
 
     it(`answers --help and -h on \`${name}\``, async () => {
       for (const flag of ["--help", "-h"]) {
@@ -258,9 +267,11 @@ describe("every human-facing command path", () => {
           );
         }
       }
-      expect(path.help, `${name} help documents -h, --help`).toContain("-h, --help");
+      if (!isAuthGroup) {
+        expect(path.help, `${name} help documents -h, --help`).toContain("-h, --help");
+      }
       if (path.children !== undefined) {
-        const rows = commandRows(path.help);
+        const rows = commandRows(path.help, isAuthGroup);
         expect(
           rows.map(({ command }) => command).filter((command) => command !== "(none)"),
           `${name} help lists each immediate command once`,
@@ -319,14 +330,73 @@ describe("every human-facing command path", () => {
     );
   });
 
-  it("explains one-time fresh-hub claiming in login help without changing the machine binding", async () => {
+  it("prints auth's complete command catalog with no options block", async () => {
+    const expected = `usage: ub auth [command]
+
+commands:
+  login [hub]      # Sign in to a hub with GitHub
+  status [hub]     # Show who this computer is signed in as, and what it can reach
+  logout [hub]     # Sign this computer out of a hub; --all-devices signs out all of yours
+`;
+    for (const args of [[], ["--help"], ["-h"]]) {
+      const run = await dispatch(["auth", ...args]);
+      expect(run.status).toBe(0);
+      expect(run.stdout).toBe(expected);
+      expect(run.stderr).toBe("");
+    }
+    expect(HELP).toMatch(/^ {2}auth \[command\] {2,}/m);
+    const unknown = await dispatch(["auth", "bogus"]);
+    expect(unknown.status).toBe(2);
+    expect(unknown.stdout).toBe("");
+    expect(unknown.stderr).toContain(expected);
+  });
+
+  it("explains fresh-hub claiming in login help without changing the project binding", async () => {
     const run = await dispatch(["auth", "login", "--help"]);
     expect(run.status).toBe(0);
     const help = run.stdout.replace(/\s+/g, " ");
-    expect(help).toContain("the first GitHub account to complete approval claims its default workspace as administrator");
-    expect(help).toContain("Claiming is one-time");
-    expect(help).toContain("this command reports whether this login claimed it and the workspace UUID");
-    expect(help).toContain("The machine's binding stays unchanged.");
+    expect(help).toMatch(/first GitHub account.*approval.*claims.*default workspace.*administrator/);
+    expect(help).toMatch(/(?:never changes|stays unchanged).*binding|binding.*(?:never changes|stays unchanged)/);
+  });
+
+  it("describes login approval and status's local view", async () => {
+    const login = await dispatch(["auth", "login", "--help"]);
+    const loginHelp = login.stdout.replace(/\s+/g, " ");
+    expect(loginHelp).toMatch(/bare host.*http\(s\).*ws\(s\)/);
+    expect(loginHelp).toMatch(/hub selected by this project's binding/);
+    expect(loginHelp).toMatch(/browser on any machine|any browser/);
+    expect(loginHelp).toMatch(/opens automatically/);
+    expect(loginHelp).toContain("BROWSER");
+    expect(loginHelp).toContain("SSH");
+    expect(loginHelp).toMatch(/Approve only a code you just started/i);
+
+    const status = await dispatch(["auth", "status", "--help"]);
+    const statusHelp = status.stdout.replace(/\s+/g, " ");
+    expect(statusHelp).toMatch(/only.*stored.*this computer|only this computer's stored login/i);
+    expect(statusHelp).toMatch(/ub status.*whether the hub accepts.*login/);
+    for (const help of [loginHelp, statusHelp]) {
+      expect(help).not.toMatch(/Other stored hubs|Other hubs|binding stays unchanged|Stored login for|GitHub username recorded at sign-in|ub open/);
+    }
+  });
+
+  it("describes device revocation in auth, logout and replacement-login help", async () => {
+    const group = await dispatch(["auth", "--help"]);
+    expect(group.stdout).toContain("--all-devices");
+    expect(group.stdout).toMatch(/logout.*Sign this computer out/);
+
+    const logout = await dispatch(["auth", "logout", "--help"]);
+    const help = logout.stdout.replace(/\s+/g, " ");
+    expect(help).toContain("--all-devices");
+    expect(help).toMatch(/revok.*this computer/i);
+    expect(help).toMatch(/this computer last/i);
+    expect(help).toMatch(/keeps? (?:the |any )?(?:local )?login/i);
+    expect(help).toContain("ub auth logout --all-devices");
+    expect(help).not.toMatch(/logout never revokes|No network is used/i);
+
+    const login = await dispatch(["auth", "login", "--help"]);
+    expect(login.stdout.replace(/\s+/g, " ")).toMatch(/revok.*(?:replaced|previous) device/i);
+    expect(login.stdout.replace(/\s+/g, " ")).toMatch(/revocation is not confirmed.*login still succeeds.*previous device is not revoked/i);
+    expect(login.stdout).not.toContain("does not revoke the previous device");
   });
 
   it("keeps the hidden `mcp serve` out of the group help it is dispatched by", async () => {
@@ -359,6 +429,7 @@ describe("help before the work", () => {
     ["open", "--port", "0", "-h"],
     ["workspace", "join", "ws://example.invalid:1234", "-h"],
     ["auth", "login", "--help"],
+    ["auth", "logout", "--all-devices", "--help"],
     ["mcp", "install", "claude", "--help"],
   ];
   for (const argv of inert) {

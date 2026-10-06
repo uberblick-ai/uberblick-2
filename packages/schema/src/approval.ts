@@ -1,7 +1,9 @@
 /** Approval content is narrower than replica agreement: discussion stays open. */
 
 import type * as Y from "yjs";
-import { getBlocks } from "./blocks.js";
+import { getBlocksWithInline } from "./blocks.js";
+import { inlinePlainText } from "./marks.js";
+import { writeGfmTable } from "./table.js";
 import { getMeta } from "./doc.js";
 import { blockRev } from "./rev.js";
 
@@ -16,7 +18,13 @@ export function decisionApprovalFingerprint(doc: Y.Doc): string {
   const meta = getMeta(doc);
   return blockRev({
     type: "paragraph",
-    text: JSON.stringify([meta.title, meta.tldr, getBlocks(doc).map((block) => block.text)]),
+    // Approval excludes formatting and retains the historical plain table
+    // projection, even though the agent-facing text now includes inline marks.
+    text: JSON.stringify([meta.title, meta.tldr, getBlocksWithInline(doc).map(({ block, table }) =>
+      table !== undefined && table.length > 0
+        ? writeGfmTable(table.map((row) => row.map(inlinePlainText)))
+        : block.text,
+    )]),
   });
 }
 

@@ -37,6 +37,8 @@ import {
   getMeta,
   initDoc,
   tombstoneDirectoryEntry,
+  tableCellText,
+  tableRows,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
@@ -149,6 +151,27 @@ describe("making a reference", () => {
     } finally {
       editor.destroy();
     }
+  });
+
+  it("uses the same typed document link and workspace-derived anchor in a table cell", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: DOC, title: "Cell references" });
+    appendBlock(ydoc, { type: "table", text: "|  | other |\n| --- | --- |" });
+    const { directory, context } = directoryWith([{ uuid: TARGET, title: "The hub" }]);
+    const { editor, element } = mountEditor(ydoc, { docLinks: context });
+    try {
+      editor.commands.setTextSelection(4);
+      typeText(editor, `see [the hub](${TARGET.toUpperCase()}) today`);
+      const cell = tableRows(getBlocksFragment(ydoc).get(0) as Y.XmlElement)[0]![0]!;
+      expect(tableCellText(cell)!.toDelta()).toEqual([
+        { insert: "see " },
+        { insert: "the hub", attributes: { docLink: { docId: TARGET } } },
+        { insert: " today" },
+      ]);
+      const anchor = element.querySelector("th a.ub-doclink");
+      expect(anchor?.getAttribute("href")).toBe(`/${WORKSPACE}/${TARGET}`);
+      expect(anchor?.getAttribute("data-doc-link-state")).toBe("resolved");
+    } finally { editor.destroy(); ydoc.destroy(); directory.destroy(); }
   });
 
   /** The external rule is untouched: a URL target is still an external link. */

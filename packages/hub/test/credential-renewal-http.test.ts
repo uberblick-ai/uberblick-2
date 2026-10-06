@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { settingsRoom, setWorkspaceName } from "@uberblick/schema";
+import * as Y from "yjs";
 import { CredentialRegistry, type CredentialRenewal, type IssuedCredential } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
 import { MembershipRegistry } from "../src/memberships.js";
@@ -7,6 +9,7 @@ import { PrincipalRegistry } from "../src/principals.js";
 import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
 import type { Hub } from "../src/server.js";
 import { importCredentialKey, mintRequestProof } from "../src/token.js";
+import { WorkspaceNameReader } from "../src/workspace-names.js";
 import { OTHER_WORKSPACE, removeTempDatabases, startHub, tempDatabasePath, WORKSPACE } from "./helpers.js";
 
 const hubs: Hub[] = [];
@@ -25,6 +28,11 @@ async function rig() {
     const credentials = new CredentialRegistry(database);
     issued = credentials.issue({ principalId: "person", deviceId: "laptop", workspaces: [] });
     new MembershipRegistry(database).grant({ workspaceId: WORKSPACE, principalId: "person", role: "admin" });
+    const settings = new Y.Doc();
+    setWorkspaceName(settings, "Original workspace");
+    database.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)")
+      .run(settingsRoom(WORKSPACE), Y.encodeStateAsUpdate(settings));
+    settings.destroy();
   } finally {
     database.close();
   }
@@ -121,6 +129,7 @@ describe("public credential renewal", () => {
     expect(renewed.result).toEqual({ status: "renewed", credential: {
       record: { ...issued.record, id: expect.any(String), issuedAt: expect.any(Number), workspaces: [WORKSPACE] },
       key: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      workspaceNames: { [WORKSPACE]: "Original workspace" },
     } });
     expect(renewed.result.credential.record.id).not.toBe(issued.record.id);
     const replay = await post(hub, envelope(proof));
@@ -133,6 +142,47 @@ describe("public credential renewal", () => {
     expect(JSON.stringify(logs)).not.toContain(Buffer.from(issued.keyBytes).toString("base64url"));
     expect(JSON.stringify(logs)).not.toContain(proof);
     expect(JSON.stringify(replay.result)).not.toContain(key);
+  });
+
+  it("returns the live renamed workspace and a newly granted workspace on the next renewal", async () => {
+    const { hub, proof } = await rig();
+    const direct = await hub.hocuspocus.openDirectConnection(settingsRoom(WORKSPACE));
+    try {
+      await direct.transact(document => { setWorkspaceName(document, "Renamed workspace"); });
+      hub.memberships!.grant({ workspaceId: OTHER_WORKSPACE, principalId: "person", role: "member" });
+      const extra = await hub.hocuspocus.openDirectConnection(settingsRoom(OTHER_WORKSPACE));
+      try {
+        await extra.transact(document => { setWorkspaceName(document, "New workspace"); });
+        const renewed = await post(hub, envelope(proof));
+        expect(renewed.code).toBe(200);
+        if (!("credential" in renewed.result)) throw new Error("renewal failed");
+        expect(renewed.result.credential.record.workspaces).toEqual([WORKSPACE, OTHER_WORKSPACE].sort());
+        expect(renewed.result.credential.workspaceNames).toEqual({
+          [WORKSPACE]: "Renamed workspace", [OTHER_WORKSPACE]: "New workspace",
+        });
+      } finally {
+        await extra.disconnect();
+      }
+    } finally {
+      await direct.disconnect();
+    }
+  });
+
+  it("delivers the replacement key even when a name read fails after retirement", async () => {
+    const { hub, proof, issued } = await rig();
+    vi.spyOn(WorkspaceNameReader.prototype, "read").mockImplementation(() => { throw new Error("settings unavailable"); });
+    const renewed = await post(hub, envelope(proof));
+    expect(renewed.code).toBe(200);
+    if (!("credential" in renewed.result)) throw new Error("renewal lost its key");
+    expect(renewed.result.credential.workspaceNames).toBeUndefined();
+    expect(renewed.result.credential.record.workspaces).toEqual([WORKSPACE]);
+    expect(hub.credentials!.get(issued.record.id)?.replacedAt).toBeTypeOf("number");
+    const replacementProof = await mintRequestProof(
+      await importCredentialKey(Buffer.from(renewed.result.credential.key, "base64url")),
+      { kid: renewed.result.credential.record.id, operation: "renew-credential", lifetimeSeconds: 60 },
+    );
+    expect((await post(hub, { ...envelope(replacementProof), ifWorkspacesChanged: true })).result)
+      .toEqual({ status: "unchanged" });
   });
 
   it("distinguishes malformed requests and protocol skew from proof refusals without changing credentials", async () => {

@@ -3,6 +3,7 @@ import * as Y from "yjs";
 import {
   addComment,
   appendBlock,
+  blockRev,
   createAnnotation,
   decisionApprovalChanged,
   decisionApprovalFingerprint,
@@ -12,6 +13,8 @@ import {
   directoryStubDiffers,
   editBlock,
   getBlocks,
+  getBlockText,
+  findBlockElement,
   getDirectoryEntry,
   getMeta,
   getMetaMap,
@@ -22,6 +25,7 @@ import {
   setChangelogSuggestion,
   setDescription,
   setInlineLink,
+  setBlockType,
   setKind,
   setLinks,
   setStatus,
@@ -30,6 +34,9 @@ import {
   setTldr,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
+  tableCellText,
+  tableRows,
+  writeGfmTable,
 } from "../src/index.js";
 import { syncDocs } from "./helpers.js";
 
@@ -105,6 +112,31 @@ describe("decision approval content", () => {
     meta.set("rejectionReason", "Foreign bookkeeping");
     expect(decisionApprovalFingerprint(doc)).toBe(fingerprint);
     expect(decisionApprovalChanged(doc)).toBe(false);
+  });
+
+  it("retains historical plain table approval when cell marks and document links change", () => {
+    const doc = decision([]);
+    const source = writeGfmTable([["Header"], ["**Alpha** <tag> & \\|"], ["Beta"]]);
+    const id = appendBlock(doc, { type: "paragraph", text: source });
+    setBlockType(doc, id, "table");
+    const historical = blockRev({
+      type: "paragraph", text: JSON.stringify(["The topic", "The decision.", [source]]),
+    });
+    getMetaMap(doc).set("approvalFingerprint", historical);
+    expect(getBlockText(doc, id)).not.toBe(source);
+    expect(decisionApprovalFingerprint(doc)).toBe(historical);
+    expect(decisionApprovalChanged(doc)).toBe(false);
+    const table = findBlockElement(doc, id)!;
+    const text = tableCellText(tableRows(table)[1]![0]!)!;
+    text.format(2, 5, { bold: {}, docLink: { docId: TARGET } });
+    expect(decisionApprovalFingerprint(doc)).toBe(historical);
+    expect(decisionApprovalChanged(doc)).toBe(false);
+    text.format(2, 5, { bold: null, docLink: { docId: UUID } });
+    expect(decisionApprovalChanged(doc)).toBe(false);
+    const before = getBlockText(doc, id);
+    editBlock(doc, id, before, before.replace("Beta", "Gamma"));
+    expect(decisionApprovalChanged(doc)).toBe(true);
+    doc.destroy();
   });
 
   it("preserves block order and boundaries, without including block identity", () => {

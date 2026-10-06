@@ -554,15 +554,41 @@ login opens GitHub's approval page once after displaying the hub, URL, code and
 approval guidance. Over SSH or with non-terminal stdout it only displays them.
 `BROWSER` names the opener command; `BROWSER=none` suppresses opening. An opener
 failure does not interrupt login, and login exits without waiting for the browser.
-`ub auth status [hub]`
-reads the locally recorded identity and workspace limits, without checking hub
-acceptance. `ub auth logout [hub]` removes only that local login; the device
-keeps hub access until revoked through device management. Credentials live in
-the owner-only `credentials.json` store, separate from `config.json`; these
-commands never change the machine's hub or workspace binding. A new login
-replaces the stored device only after completion and does not revoke the old
-one. Concurrent logins and logout preserve other hubs' logins, the signing
-secret and unrelated credential fields. Sign-in does not create a browser session.
+`ub auth login` and `ub auth status [hub]` list the credential's workspaces as
+`<uuid> | <name>` when a valid stored name is available, or `<uuid>` alone.
+Status reads only the locally recorded identity, workspace limits and names,
+without checking hub acceptance. `ub auth logout [hub]` revokes this computer's
+device at the hub before removing its local login. If the hub does not confirm
+revocation, logout still removes the login, exits 1 and names the recovery:
+run `ub auth logout --all-devices <hub>` from another computer that is still
+signed in. With no stored login, plain logout contacts nothing.
+
+`ub auth logout --all-devices [hub]` revokes every device of the signed-in GitHub
+account on that hub, this computer last, then removes the local login. Sign in
+again on the computers you still use. If device listing fails, it revokes
+nothing and keeps the login. A failure after revocation starts reports the
+confirmed count, keeps the login and exits 1. An unconfirmed revocation of this
+computer is uncertain: the kept login may no longer work. Retry
+`ub auth logout --all-devices <hub>` with a login the hub still accepts; if this
+computer's login is refused, first run `ub auth login <hub>` or use another
+computer still signed in.
+
+Credentials live in the owner-only `credentials.json` store, separate from
+`config.json`. A new login is stored after approval, then revokes the replaced
+device using its previous credential. If that revocation is not confirmed,
+login still succeeds and reports that the previous device is not revoked.
+Names are optional display data inside `credential.workspaceNames`, a map from
+workspace UUID to name. Every stored sign-in or renewal replaces this map with
+the new reply's names; an omitted name is removed. Older stored logins and hubs
+without names remain usable and show UUID-only rows. Status never rewrites the
+store or renews the credential. Names must pass workspace-name validation
+unchanged (1–64 characters, no control or format characters) and contain neither
+the credential key nor the sign-in collection secret; invalid names are ignored
+without invalidating the login.
+These commands never change workspace memberships, the project's hub or
+workspace binding, or local workspace copies. Concurrent logins and logout
+preserve other hubs' logins, the signing secret and unrelated credential
+fields. Sign-in does not create a browser session.
 The hub permits 100 active attempts, independently of finished attempts. Terminal
 statuses expire no later than fifteen minutes after the attempt's expiry; at
 most 100 are retained when new attempts start, evicting oldest requests first. Evicted or restarted
@@ -630,10 +656,21 @@ never URLs or an `Authorization` header; bodies are limited to 4096 bytes and
 all answers are `no-store`.
 
 Renewal needs no GitHub approval or GitHub connection. It retires the presented
-credential and returns `renewed` with `credential: {record, key}` once, for the
+credential and returns `renewed` with `credential: {record, key, workspaceNames?}` once, for the
 same principal and device and exactly its current memberships, including none.
 It grants no membership. Retirement closes and fences any rooms admitted under
 the old credential on a remote hub.
+Both a `complete` sign-in collection and a `renewed` reply can include names
+from the issued workspaces' hub `_settings` rooms. Loaded rooms supply their
+current state; otherwise the hub reads persisted state without loading or
+changing a room. Missing, invalid or unreadable settings leave a workspace
+unnamed and never fail credential delivery. The hub omits names as necessary
+to keep the complete serialized UTF-8 JSON reply within 65,536 bytes whenever
+the reply without names fits; it preserves the full credential and workspace
+list. Names refresh only when an existing renewal trigger or sign-in stores a
+new credential. A rename or new grant can therefore remain absent from status
+until then, and promotion initially shows the UUID alone. Conditional renewal
+with unchanged memberships still returns only `{status: "unchanged"}`.
 Replaying a verified proof under that retired credential returns
 `already-replaced`; unknown, revoked or unverifiable credentials return
 `sign-in-required`, revealing no identity or workspace. If the replacement
