@@ -9,8 +9,9 @@
  *
  * **Nothing here writes a config file.** `ub mcp install` either runs the
  * vendor's own CLI or prints a snippet for somebody to paste, so the only
- * question this module asks of an existing file is {@link presence}: is our
- * entry there, and is it the one we would register. `JSON.parse` and a scan for
+ * install asks {@link presence}: is our entry there, and is it the one we would
+ * register. Doctor reads only the binding variables through {@link doctorEntry}.
+ * `JSON.parse` and a scan for
  * every TOML spelling of the key we own are enough for that — a file nothing
  * splices needs no byte-preserving splicer.
  *
@@ -135,8 +136,8 @@ export type Presence =
 /**
  * Whether `file` already registers `entry`, and whether it is ours.
  *
- * The whole read side of `ub mcp install`, and of `ub doctor`'s MCP check. A
- * file that is not there is `absent`; a file that is there and will not open or
+ * The whole read side of `ub mcp install`. A file that is not there is
+ * `absent`; a file that is there and will not open or
  * will not parse is `unusable`, which is a different answer for a different
  * reason: the caller may not treat a file it cannot read as an empty one.
  */
@@ -163,6 +164,208 @@ export function presence(file: TargetFile, entry: Entry): Presence {
   }
   if (registered === undefined) return "absent";
   return jsonMatches(registered, entry) ? "ours" : "foreign";
+}
+
+/** Doctor judges a workspace pin, never an entry's command or other values. */
+export type DoctorEntry =
+  | { status: "absent" | "unusable" }
+  | { status: "entry"; env: NodeJS.ProcessEnv };
+
+const PIN_KEYS = new Set(["UB_WORKSPACE_ID", "UB_HUB_URL", "WORKSPACE_ID", "HUB_URL"]);
+
+/** No parser message or non-binding environment value leaves this read. */
+function doctorRead(file: TargetFile): string | DoctorEntry {
+  try {
+    return readFileSync(file.path, "utf8");
+  } catch (error) {
+    return {
+      status: (error as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "unusable",
+    };
+  }
+}
+
+function doctorJson(text: string): Record<string, unknown> | null {
+  try {
+    const doc: unknown = JSON.parse(text);
+    return isObject(doc) ? doc : null;
+  } catch {
+    return null;
+  }
+}
+
+function doctorJsonEntry(doc: unknown): DoctorEntry {
+  if (!isObject(doc)) return { status: "unusable" };
+  if (doc.mcpServers === undefined) return { status: "absent" };
+  if (!isObject(doc.mcpServers)) return { status: "unusable" };
+  if (!Object.hasOwn(doc.mcpServers, SERVER_NAME)) return { status: "absent" };
+  const held = doc.mcpServers[SERVER_NAME];
+  if (!isObject(held)) return { status: "unusable" };
+  if (held.env === undefined) return { status: "entry", env: {} };
+  if (!isObject(held.env)) return { status: "unusable" };
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(held.env)) {
+    if (!PIN_KEYS.has(key)) continue;
+    if (typeof value !== "string") return { status: "unusable" };
+    env[key] = value;
+  }
+  return { status: "entry", env };
+}
+
+/** The project/user entry doctor can inspect without judging its command. */
+export function doctorEntry(file: TargetFile): DoctorEntry {
+  const text = doctorRead(file);
+  if (typeof text !== "string") return text;
+  return file.format === "json" ? doctorJsonEntry(doctorJson(text)) : doctorTomlEntry(text);
+}
+
+/** Claude's local and user scopes share one file, so read its bytes once. */
+export function claudeDoctorEntries(
+  file: TargetFile,
+  projectKey: string,
+): { local: DoctorEntry; user: DoctorEntry } {
+  const text = doctorRead(file);
+  if (typeof text !== "string") return { local: text, user: text };
+  const doc = doctorJson(text);
+  if (doc === null) return { local: { status: "unusable" }, user: { status: "unusable" } };
+  let local: DoctorEntry = { status: "absent" };
+  if (doc.projects !== undefined) {
+    local = !isObject(doc.projects)
+      ? { status: "unusable" }
+      : Object.hasOwn(doc.projects, projectKey)
+        ? doctorJsonEntry(doc.projects[projectKey])
+        : { status: "absent" };
+  }
+  return { local, user: doctorJsonEntry(doc) };
+}
+
+/** A one-line TOML string, including comments, but never an expression. */
+function doctorTomlString(text: string): string | null {
+  if ([...text].some((char) => {
+    const code = char.charCodeAt(0);
+    return (code < 0x20 && code !== 9) || code === 0x7f;
+  })) return null;
+  const literal = /^'([^']*)'\s*(?:#.*)?$/.exec(text);
+  if (literal !== null) return literal[1] as string;
+  const basic = /^"(?:[^"\\]|\\[btnfr"\\]|\\u[\da-fA-F]{4})*"\s*(?:#.*)?$/.exec(text);
+  if (basic === null) return null;
+  try {
+    // The closing quote is followed only by whitespace and an optional comment.
+    const string = /^"(?:[^"\\]|\\.)*"/.exec(text)?.[0];
+    return JSON.parse(string as string) as string;
+  } catch {
+    return null;
+  }
+}
+
+/** Decode keys so an escaped binding-variable name cannot hide a pin. */
+function doctorTomlKey(text: string): string[] | null {
+  const key: string[] = [];
+  let rest = text.trim();
+  while (rest !== "") {
+    const part = /^(?:[\w-]+|"(?:[^"\\]|\\.)*"|'[^']*')/.exec(rest)?.[0];
+    if (part === undefined) return null;
+    const value = part.startsWith('"') || part.startsWith("'") ? doctorTomlString(part) : part;
+    if (value === null) return null;
+    key.push(value);
+    rest = rest.slice(part.length).trimStart();
+    if (rest === "") return key;
+    if (!rest.startsWith(".")) return null;
+    rest = rest.slice(1).trimStart();
+    if (rest === "") return null;
+  }
+  return null;
+}
+
+/** Refuse incomplete one-line values before they can hide apparent tables. */
+function doctorTomlValue(text: string): boolean {
+  const brackets: string[] = [];
+  let quote = "";
+  let quoteStart = 0;
+  let content = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index] as string;
+    if (quote !== "") {
+      if (quote === '"' && char === "\\") index += 1;
+      else if (char === quote) {
+        if (doctorTomlString(text.slice(quoteStart, index + 1)) === null) return false;
+        quote = "";
+      }
+      continue;
+    }
+    if (char === "#") break;
+    if (!/\s/.test(char)) content = true;
+    if (char === '"' || char === "'") {
+      if (text.startsWith(char.repeat(3), index)) return false;
+      quote = char;
+      quoteStart = index;
+    } else if (char === "[" || char === "{") brackets.push(char);
+    else if (char === "]" || char === "}") {
+      if (brackets.pop() !== (char === "]" ? "[" : "{")) return false;
+    }
+  }
+  return content && quote === "" && brackets.length === 0;
+}
+
+/**
+ * Read Codex's normal server table and string-valued env sub-table. Other TOML
+ * definitions of the server are deliberately unreadable rather than unpinned.
+ * In particular an inline/dotted environment must not hide a workspace pin.
+ */
+function doctorTomlEntry(text: string): DoctorEntry {
+  let table: string[] = [];
+  let found = false;
+  let foundEnv = false;
+  const env: NodeJS.ProcessEnv = {};
+  const envKeys = new Set<string>();
+  const serverKeys = new Set<string>();
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    if (line.startsWith("[")) {
+      const header = /^(\[\[?)(.+?)(\]\]?)\s*(?:#.*)?$/.exec(line);
+      if (header === null) return { status: "unusable" };
+      const key = doctorTomlKey(header[2] as string);
+      if (key === null) return { status: "unusable" };
+      table = key;
+      if (key[0] !== "mcp_servers" || key[1] !== SERVER_NAME) continue;
+      if (header[1] !== "[" || header[3] !== "]") return { status: "unusable" };
+      if (key.length === 2 && !found) found = true;
+      else if (key.length === 3 && key[2] === "env" && !foundEnv) foundEnv = true;
+      else return { status: "unusable" };
+      continue;
+    }
+    const equals = line.indexOf("=");
+    const key = equals === -1 ? null : doctorTomlKey(line.slice(0, equals));
+    const ownsTable = table[0] === "mcp_servers" && table[1] === SERVER_NAME;
+    const value = line.slice(equals + 1).trim();
+    if (key === null || !doctorTomlValue(value)) return { status: "unusable" };
+    const absolute = [...table, ...key];
+    if (absolute[0] !== "mcp_servers" || absolute[1] !== SERVER_NAME) continue;
+    if (!ownsTable) return { status: "unusable" };
+    if (table.length === 2) {
+      const name = key.join(".");
+      if (serverKeys.has(name)) return { status: "unusable" };
+      serverKeys.add(name);
+      if (key[0] === "env") {
+        if (key.length !== 1 || foundEnv || !/^\{\s*\}\s*(?:#.*)?$/.test(value)) {
+          return { status: "unusable" };
+        }
+        foundEnv = true;
+      }
+      continue;
+    }
+    if (key.length !== 1 || envKeys.has(key[0] as string)) return { status: "unusable" };
+    const name = key[0] as string;
+    envKeys.add(name);
+    if (PIN_KEYS.has(name)) {
+      const scalar = doctorTomlString(value);
+      if (scalar === null) return { status: "unusable" };
+      env[name] = scalar;
+    }
+  }
+  return found
+    ? { status: "entry", env }
+    : { status: foundEnv || mentionsServer(text, SERVER_NAME) ? "unusable" : "absent" };
 }
 
 /**

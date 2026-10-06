@@ -12,12 +12,13 @@
  */
 
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import type { Server as HttpServer } from "node:http";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { AUTH_REJECTED, SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
@@ -166,6 +167,7 @@ async function doctor(
   const run = await runUbAsync(["doctor", "--json"], box, {
     PORT: "1",
     HUB_HOST: "127.0.0.1",
+    CODEX_HOME: join(homeOf(box), ".codex"),
     ...extraEnv,
   });
   const report = JSON.parse(run.stdout) as { ok: boolean; checks: Check[] };
@@ -190,18 +192,59 @@ async function doctor(
   };
 }
 
-function wireMcp(box: Sandbox): string {
+function homeOf(box: Sandbox): string {
+  const home = box.env.HOME;
+  if (home === undefined) throw new Error("the sandbox has no private HOME");
+  return home;
+}
+
+const UNPINNED = { command: "ub", args: ["mcp", "serve"] };
+
+function writeJson(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function wireMcp(box: Sandbox, entry: unknown = UNPINNED): string {
   const config = join(box.cwd, ".mcp.json");
-  writeFileSync(
-    config,
-    `${JSON.stringify(
-      { mcpServers: { uberblick: { type: "stdio", command: "ub", args: ["mcp", "serve"] } } },
-      null,
-      2,
-    )}\n`,
-    "utf8",
-  );
+  writeJson(config, { mcpServers: { uberblick: entry } });
   return config;
+}
+
+const CLIENTS = [
+  { name: "Claude Code", path: ".mcp.json", userPath: ".claude.json" },
+  { name: "Codex", path: ".codex/config.toml", userPath: ".codex/config.toml" },
+  { name: "Cursor", path: ".cursor/mcp.json", userPath: ".cursor/mcp.json" },
+] as const;
+
+type Client = (typeof CLIENTS)[number];
+type McpEntry = { command: string; args: string[]; env?: Record<string, unknown> };
+
+function clientFile(box: Sandbox, client: Client, scope: "project" | "user"): string {
+  return join(scope === "project" ? box.cwd : homeOf(box), scope === "project" ? client.path : client.userPath);
+}
+
+function wireClient(box: Sandbox, client: Client, scope: "project" | "user", entry: McpEntry = UNPINNED): string {
+  const path = clientFile(box, client, scope);
+  if (client.name !== "Codex") {
+    writeJson(path, { mcpServers: { uberblick: entry } });
+  } else {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "[mcp_servers.uberblick]\n" +
+      `command = ${JSON.stringify(entry.command)}\nargs = ${JSON.stringify(entry.args)}\n` +
+      (entry.env === undefined ? "" : "\n[mcp_servers.uberblick.env]\n" +
+        Object.entries(entry.env).map(([key, value]) => `${key} = ${JSON.stringify(value)}\n`).join("")), "utf8");
+  }
+  return path;
+}
+
+function pin(workspaceId = WORKSPACE, hubUrl = DEAD_HUB_URL): McpEntry {
+  return { ...UNPINNED, env: { UB_WORKSPACE_ID: workspaceId, UB_HUB_URL: hubUrl } };
+}
+
+/** Give Claude local fixtures their own root, regardless of where TMPDIR lives. */
+function repository(box: Sandbox): void {
+  execFileSync("git", ["init", "--quiet", box.cwd], { env: box.env });
 }
 
 function check(checks: Map<string, Check>, name: string): Check {
@@ -294,7 +337,8 @@ describe("ub doctor", () => {
     expect(check(checks, "hub").status).toBe("skipped");
     expect(check(checks, "clock").status).toBe("skipped");
     expect(check(checks, "clock").reason).toBe("needs the hub");
-    expect(ok).toBe(false); // the MCP wiring check, which no sandbox has
+    expect(check(checks, "mcp").status).toBe("warn");
+    expect(ok).toBe(true);
   });
 
   it("reports a configured credential without printing it", async () => {
@@ -342,7 +386,7 @@ describe("ub doctor", () => {
     // never a task that exists in a checkout and nowhere else.
     expect(hub.fix).toMatch(/ub open --no-browser/);
     expect(hub.fix).not.toMatch(/mise/);
-    expect(run.status).not.toBe(0);
+    expect(run.status).toBe(0);
   });
 
   it("separates a missing login from an unreachable remote deployment", async () => {
@@ -614,15 +658,222 @@ describe("ub doctor", () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const none = await doctor(box);
 
-    expect(check(none.checks, "mcp").status).toBe("fail");
-    expect(check(none.checks, "mcp").fix).toMatch(/ub mcp install/);
+    expect(check(none.checks, "mcp")).toEqual({
+      name: "mcp",
+      status: "warn",
+      reason: "MCP client is not set up for this project",
+      fix: "ub mcp install claude   (or codex)",
+    });
+    expect(none.run.status).toBe(0);
 
-    // Claude Code's project-scoped config, written the way `ub mcp install` does.
-    const config = wireMcp(box);
+    wireMcp(box);
     const wired = await doctor(box);
 
     expect(check(wired.checks, "mcp").status).toBe("pass");
-    expect(check(wired.checks, "mcp").reason).toContain(config);
+    expect(check(wired.checks, "mcp").reason).toBe("Claude Code (.mcp.json)");
+    const human = await runUbAsync(["doctor"], box, { PORT: "1" });
+    expect(human.stdout).toContain("ok    mcp         Claude Code (.mcp.json)\n");
+  });
+
+  it.each(CLIENTS)("reads $name's project config beside the binding and ignores a subdirectory's shadow", async client => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    wireClient(box, client, "project", { command: "mise", args: ["exec", "--", "ub", "mcp", "serve"] });
+    const nested = { ...box, cwd: join(box.cwd, "src") };
+    mkdirSync(nested.cwd);
+    wireClient(nested, client, "project", pin(PINNED));
+    const { checks } = await doctor(nested);
+
+    expect(check(checks, "mcp").status).toBe("pass");
+    expect(check(checks, "mcp").reason).toBe(`${client.name} (${client.path})`);
+  });
+
+  it("uses the working directory for an environment binding and names every set-up client", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const nested = { ...box, cwd: join(box.cwd, "src") };
+    mkdirSync(nested.cwd);
+    for (const client of CLIENTS) {
+      wireClient(box, client, "project", pin(PINNED));
+      wireClient(nested, client, "project", { command: "custom-wrapper", args: ["anything"] });
+    }
+    const { checks } = await doctor(nested, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: DEAD_HUB_URL });
+
+    expect(check(checks, "mcp").status).toBe("pass");
+    for (const client of CLIENTS) {
+      expect(check(checks, "mcp").reason).toContain(`${client.name} (${client.path})`);
+    }
+    expect(check(checks, "mcp").reason).not.toMatch(/\(project\)|\(user\)|custom-wrapper/);
+  });
+
+  it.each(CLIENTS)("accepts an unpinned custom command in $name's user config", async client => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const path = wireClient(box, client, "user", { command: SECRET, args: ["custom"], env: { API_TOKEN: SECRET } });
+    const { checks, run } = await doctor(box);
+
+    expect(check(checks, "mcp").status).toBe("pass");
+    expect(check(checks, "mcp").reason).toBe(`${client.name} (${path})`);
+    expect(run.output).not.toContain(SECRET);
+  });
+
+  it.each(CLIENTS)("accepts $name's current pin with the workspace slug and normalized hub", async client => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "wss://hub.example.invalid/ws" } });
+    wireClient(box, client, "project", pin(`a-workspace-${WORKSPACE}`, "https://hub.example.invalid"));
+    const { checks } = await doctor(box);
+
+    expect(check(checks, "mcp").status).toBe("pass");
+    expect(check(checks, "mcp").reason).toBe(`${client.name} (${client.path})`);
+  });
+
+  it("accepts the install pin for a local workspace whose project binding has a slug", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: `a-workspace-${WORKSPACE}`, hubUrl: null } });
+    wireMcp(box, pin(WORKSPACE, "local"));
+    const { checks } = await doctor(box);
+
+    expect(check(checks, "mcp").status).toBe("pass");
+  });
+
+  it.each([
+    { what: "another workspace", env: { UB_WORKSPACE_ID: PINNED, UB_HUB_URL: DEAD_HUB_URL } },
+    { what: "a local pin left after promote", env: { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" } },
+    { what: "the same workspace on another hub", env: { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "wss://other.example.invalid/ws" } },
+    { what: "an incomplete workspace pair", env: { UB_WORKSPACE_ID: SECRET } },
+    { what: "an incomplete hub pair", env: { UB_HUB_URL: SECRET } },
+    { what: "a refused legacy workspace variable", env: { WORKSPACE_ID: SECRET } },
+    { what: "a refused legacy hub variable", env: { HUB_URL: SECRET } },
+    { what: "a value the binding resolver refuses", env: { UB_WORKSPACE_ID: SECRET, UB_HUB_URL: DEAD_HUB_URL } },
+    { what: "a non-string pin", env: { UB_WORKSPACE_ID: [SECRET], UB_HUB_URL: DEAD_HUB_URL } },
+  ])("warns about $what instead of passing or leaking entry values", async ({ env }) => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    wireMcp(box, { ...UNPINNED, env });
+    // Another configured client cannot turn an unsafe pin into a pass.
+    wireClient(box, CLIENTS[1], "project");
+    const { checks, run } = await doctor(box);
+
+    expect(check(checks, "mcp").status).toBe("warn");
+    expect(check(checks, "mcp").reason).toContain("Claude Code (.mcp.json)");
+    expect(run.status).toBe(0);
+    expect(run.output).not.toContain(SECRET);
+    expect(check(checks, "mcp").reason).not.toContain(PINNED);
+    expect(check(checks, "mcp").reason).not.toContain("other.example.invalid");
+  });
+
+  it("reads Claude Code's local entry at the repository root even when the binding is in a package", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    repository(box);
+    const project = { ...box, cwd: join(box.cwd, "package") };
+    mkdirSync(project.cwd);
+    writeJson(join(project.cwd, ".uberblick.json"), { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL });
+    wireMcp(project);
+    const path = join(homeOf(box), ".claude.json");
+    writeJson(path, {
+      mcpServers: { uberblick: UNPINNED },
+      projects: {
+        [box.cwd]: { mcpServers: { uberblick: pin(PINNED) } },
+        [project.cwd]: { mcpServers: { uberblick: UNPINNED } },
+      },
+    });
+    const { checks } = await doctor(project);
+
+    expect(check(checks, "mcp").status).toBe("warn");
+    expect(check(checks, "mcp").reason).toContain(`Claude Code (${path})`);
+  });
+
+  it("reads Claude Code's local entry under the project root outside a repository", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const path = join(homeOf(box), ".claude.json");
+    writeJson(path, { projects: {
+      [box.cwd]: { mcpServers: { uberblick: UNPINNED } },
+    } });
+    // Scratch may itself be in a checkout. Bound Git's discovery to this
+    // sandbox so the fixture still represents a project outside a repository.
+    const { checks } = await doctor(box, { GIT_CEILING_DIRECTORIES: homeOf(box) });
+
+    expect(check(checks, "mcp").status).toBe("pass");
+    expect(check(checks, "mcp").reason).toBe(`Claude Code (${path})`);
+  });
+
+  it("uses the common repository root for Claude Code's local entry in a linked worktree", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    repository(box);
+    const tree = execFileSync("git", ["hash-object", "-t", "tree", "--stdin", "-w"], { cwd: box.cwd, env: box.env, input: "", encoding: "utf8" }).trim();
+    const commit = execFileSync("git", ["commit-tree", tree, "-m", "fixture"], {
+      cwd: box.cwd,
+      env: { ...box.env, GIT_AUTHOR_NAME: "Fixture", GIT_AUTHOR_EMAIL: "fixture@example.invalid", GIT_COMMITTER_NAME: "Fixture", GIT_COMMITTER_EMAIL: "fixture@example.invalid" },
+      encoding: "utf8",
+    }).trim();
+    const project = { ...box, cwd: join(homeOf(box), "linked-worktree") };
+    execFileSync("git", ["worktree", "add", "--quiet", "--detach", project.cwd, commit], { cwd: box.cwd, env: box.env });
+    writeJson(join(project.cwd, ".uberblick.json"), { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL });
+    wireMcp(project);
+    const path = join(homeOf(box), ".claude.json");
+    writeJson(path, { projects: {
+      [box.cwd]: { mcpServers: { uberblick: pin(PINNED) } },
+      [project.cwd]: { mcpServers: { uberblick: UNPINNED } },
+    } });
+    const { checks } = await doctor(project);
+
+    expect(check(checks, "mcp").status).toBe("warn");
+    expect(check(checks, "mcp").reason).toContain(`Claude Code (${path})`);
+  });
+
+  it("lets Claude Code's project entry hide a user pin, then its local entry hide the project pin", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    repository(box);
+    wireClient(box, CLIENTS[0], "user", pin(PINNED));
+    wireMcp(box);
+    const project = await doctor(box);
+
+    expect(check(project.checks, "mcp").status).toBe("pass");
+    expect(check(project.checks, "mcp").reason).toBe("Claude Code (.mcp.json)");
+
+    wireMcp(box, pin(PINNED));
+    const path = join(homeOf(box), ".claude.json");
+    writeJson(path, { mcpServers: { uberblick: pin(PINNED) }, projects: {
+      [box.cwd]: { mcpServers: { uberblick: UNPINNED } },
+    } });
+    const local = await doctor(box);
+
+    expect(check(local.checks, "mcp").status).toBe("pass");
+    expect(check(local.checks, "mcp").reason).toBe(`Claude Code (${path})`);
+  });
+
+  it.each(CLIENTS.filter(client => client.name !== "Claude Code").flatMap(client => [
+    { client, badScope: "project" as const },
+    { client, badScope: "user" as const },
+  ]))("counts $client.name's $badScope pin even with a set-up entry in the other scope", async ({ client, badScope }) => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const badPath = wireClient(box, client, badScope, pin(PINNED));
+    wireClient(box, client, badScope === "project" ? "user" : "project");
+    const { checks, run } = await doctor(box);
+
+    expect(check(checks, "mcp").status).toBe("warn");
+    expect(check(checks, "mcp").reason).toContain(`${client.name} (${badScope === "project" ? client.path : badPath})`);
+    expect(run.status).toBe(0);
+    expect(check(checks, "mcp").reason).not.toContain(PINNED);
+  });
+
+  it.each([
+    `[mcp_servers.uberblick]\ncommand = "ub"\n[mcp_servers.uberblick.env]\nUB_WORKSPACE_ID = "${SECRET}"\n`,
+    `[mcp_servers]\nuberblick = { command = "ub", env = { UB_WORKSPACE_ID = "${SECRET}" } }\n`,
+  ])("warns when Codex's workspace pin is incomplete or cannot be read", async text => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const path = clientFile(box, CLIENTS[1], "project");
+    mkdirSync(dirname(path));
+    writeFileSync(path, text, "utf8");
+    const { checks, run } = await doctor(box);
+
+    expect(check(checks, "mcp").status).toBe("warn");
+    expect(check(checks, "mcp").reason).toContain("Codex (.codex/config.toml)");
+    expect(run.output).not.toContain(SECRET);
+  });
+
+  it("skips MCP when the workspace check has no usable binding", async () => {
+    const box = sandbox({ raw: { projectBinding: `{ "workspaceId": "${SECRET}" }\n` } });
+    wireMcp(box, pin(PINNED));
+    const { checks } = await doctor(box);
+
+    expect(check(checks, "workspace").status).toBe("fail");
+    expect(check(checks, "mcp").status).toBe("skipped");
+    expect(check(checks, "mcp").reason).toBe("needs a workspace");
   });
 
   it("names a config it could not read, instead of calling it absent", async () => {
@@ -634,10 +885,37 @@ describe("ub doctor", () => {
     writeFileSync(config, `{ "mcpServers": { "uberblick": "${SECRET}"\n`, "utf8");
     const { run, checks } = await doctor(box);
 
-    expect(check(checks, "mcp").status).toBe("fail");
-    expect(check(checks, "mcp").reason).toContain(config);
+    expect(check(checks, "mcp").status).toBe("warn");
+    expect(check(checks, "mcp").reason).toContain("Claude Code (.mcp.json)");
     expect(check(checks, "mcp").reason).toMatch(/could not read/);
+    expect(check(checks, "mcp").fix).toMatch(/repair or move/);
+    expect(run.status).toBe(0);
     expect(run.output).not.toContain(SECRET);
+  });
+
+  it("names an unreadable Claude user/local config once and never quotes its parser error", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const path = join(homeOf(box), ".claude.json");
+    writeFileSync(path, `{ "mcpServers": { "uberblick": "${SECRET}"\n`, "utf8");
+    const { checks, run } = await doctor(box);
+
+    expect(check(checks, "mcp").status).toBe("warn");
+    expect(check(checks, "mcp").reason).toContain(`Claude Code (${path})`);
+    expect(check(checks, "mcp").reason.split(path)).toHaveLength(2);
+    expect(check(checks, "mcp").fix).toMatch(/repair or move/);
+    expect(run.output).not.toContain(SECRET);
+    expect(run.output).not.toMatch(/SyntaxError|Unexpected token|JSON at position/);
+  });
+
+  it("treats a config path it cannot open as a warning even when another client is set up", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    mkdirSync(join(box.cwd, ".mcp.json"));
+    wireClient(box, CLIENTS[1], "project");
+    const { checks } = await doctor(box);
+
+    expect(check(checks, "mcp").status).toBe("warn");
+    expect(check(checks, "mcp").reason).toContain("Claude Code (.mcp.json)");
+    expect(check(checks, "mcp").reason).toMatch(/could not read/);
   });
 
   it("writes exactly one JSON object to stdout with --json, and nothing else", async () => {
@@ -652,8 +930,8 @@ describe("ub doctor", () => {
     const report = JSON.parse(run.stdout) as { ok: boolean; checks: unknown[] };
     expect(run.stdout.trimEnd().endsWith("}")).toBe(true);
     expect(Array.isArray(report.checks)).toBe(true);
-    expect(report.ok).toBe(false);
-    expect(run.status).toBe(1);
+    expect(report.ok).toBe(true);
+    expect(run.status).toBe(0);
     expect(run.output).not.toContain(SECRET);
   });
 
@@ -662,10 +940,10 @@ describe("ub doctor", () => {
       projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { signingSecret: SECRET },
     });
-    wireMcp(box);
     const { checks, ok, run } = await doctor(box);
 
     expect(check(checks, "hub").status).toBe("warn");
+    expect(check(checks, "mcp").status).toBe("warn");
     expect(check(checks, "clock").status).toBe("skipped");
     expect([...checks.values()].some(one => one.status === "fail")).toBe(false);
     expect(ok).toBe(true);
@@ -674,21 +952,21 @@ describe("ub doctor", () => {
     const human = await runUbAsync(["doctor"], box, { PORT: "1", HUB_HOST: "127.0.0.1" });
     expect(human.stdout).toMatch(/warn {2}hub/);
     expect(human.stdout).toMatch(/skip {2}clock {7}needs the hub/);
-    expect(human.stdout).toMatch(/0 failed, 1 warning, \d+ passed, \d+ skipped/);
+    expect(human.stdout).toMatch(/0 failed, 2 warnings, \d+ passed, \d+ skipped/);
     expect(human.status).toBe(0);
   });
 
-  it("renders the same verdicts for a human, with the fix under the failure", async () => {
+  it("renders the same verdicts for a human, with the fix under the warning", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const run = await runUbAsync(["doctor"], box, { PORT: "1" });
 
     expect(run.stdout).toMatch(/ok {4}workspace/);
     expect(run.stdout).toMatch(/skip {2}credential/);
-    expect(run.stdout).toMatch(/FAIL {2}mcp/);
-    expect(run.stdout).toMatch(/→ .*ub mcp install/);
-    expect(run.stdout).toMatch(/\d+ failed, 0 warnings, \d+ passed, \d+ skipped/);
+    expect(run.stdout).toMatch(/warn {2}mcp/);
+    expect(run.stdout).toContain("→ ub mcp install claude   (or codex)\n");
+    expect(run.stdout).toMatch(/0 failed, 1 warning, \d+ passed, \d+ skipped/);
     expect(run.stdout.match(/→ /g)).toHaveLength(1);
-    expect(run.status).not.toBe(0);
+    expect(run.status).toBe(0);
   });
 
   it.each([0, 1, 2])("renders fix lines only for problems and counts %s warnings", warnings => {
