@@ -15,15 +15,17 @@
    correction preserving that intent; explain why.
 2. **Define success.** Set the smallest useful scope and measurable or observable
    success. Within delegated choices, choose the narrowest solution; widen only
-   for evidenced necessity, such as an inseparable guarantee. Exclude optional
-   extras. Preserve explicit requested outcomes unless settled owner authorization
-   permits deferral or removal; another issue alone is not that authorization.
+   for evidenced necessity, such as an inseparable guarantee, and list the options
+   not chosen under Out of scope. Exclude optional extras. Preserve explicit
+   requested outcomes unless settled owner authorization permits deferral or
+   removal; another issue alone is not that authorization.
    Cite agreed allocation and retain real prerequisites when avoiding duplicate work.
 3. **Resolve.** Resolve factual gaps from evidence; never invent intent or treat
    silence, agent assertions or an invitation to object as approval. Reuse settled
    authorization regardless of issue origin. If intake and live corpus already
    expose an owner choice affecting scope, split or criteria, ask under
-   [human-decisions.md](human-decisions.md) before drafting the dependent contract.
+   [human-decisions.md](human-decisions.md) before code grounding and before
+   drafting the dependent contract.
    Stop dependent work, continue independent work and gather evidence needed for
    the question; code grounding may reveal further questions later. Missing
    required context is not waived. Ask only about unresolved choices or new conflicts.
