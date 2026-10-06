@@ -221,6 +221,10 @@ test("Tab selection is navigation, triple click selects one cell, and cross-cell
     await expect(popup(page)).toHaveCount(0);
   }
 
+  // ProseMirror groups nearby mouse downs within 500 ms, even across the
+  // keyboard setup above. A caret click in another row starts a fresh gesture.
+  await table.locator("td").first().click();
+  await expect(popup(page)).toHaveCount(0);
   await first.locator("p").click({ clickCount: 3 });
   await expect(table.locator(".selectedCell")).toHaveCount(1);
   await expect(toolbar(page)).toBeVisible();
