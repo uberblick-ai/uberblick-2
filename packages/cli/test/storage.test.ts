@@ -226,13 +226,11 @@ describe("`ub doctor`", () => {
 
     expect(report.checks.map((one) => one.name)).toEqual([
       "workspace",
-      "credential",
+      "login",
       "database",
-      "persistence",
       "hub",
       "clock",
-      "port",
-      "bind",
+      "local hub",
       "mcp",
     ]);
   });
