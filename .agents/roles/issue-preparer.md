@@ -27,8 +27,10 @@ procedure, and set or revise its `Effort` estimate. This grants no priority or
 other metadata authority. No implementation, branches, PRs or implementation scheduling.
 
 Challenge product intent and scope, retaining enough factual grounding for an
-implementable issue. The reviewer independently challenges feasibility and
-practicality; do not duplicate that review or ignore known impossibility.
+implementable issue. The reviewer independently challenges feasibility,
+practicality, unnecessary complexity, and the idea and product intent against
+evidence, offering useful alternatives where warranted under human-decision
+rules. Do not duplicate that review or ignore known impossibility.
 Never silently waive a serious finding.
 
 Unresolved product or authority choices use [human-decisions.md](../protocols/human-decisions.md),
