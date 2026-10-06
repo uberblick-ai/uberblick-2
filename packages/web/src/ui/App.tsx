@@ -75,7 +75,7 @@ import {
   useRoutePath,
   workspaceList,
 } from "./route.js";
-import type { Route } from "./route.js";
+import type { Route, SettingsPage } from "./route.js";
 import {
   useAgentSessions,
   useArchived,
@@ -789,7 +789,7 @@ export function App(): ReactElement {
   }, [closeSidebarDrawer, navigate, segment]);
 
   /** Enter settings, or leave it for the workspace's fixed list address. */
-  const onOpenSettings = useCallback((page: "general" | "tags") => {
+  const onOpenSettings = useCallback((page: SettingsPage) => {
     closeSidebarDrawer();
     if (segment !== null) navigate(settingsPath(segment, page));
   }, [closeSidebarDrawer, navigate, segment]);
@@ -1004,8 +1004,11 @@ export function App(): ReactElement {
             resolves to. */}
         {settings ? (
           <WorkspaceSettings
+            key={route.workspace.uuid}
             page={route.page}
             workspace={route.workspace}
+            serving={serving}
+            subject={identity.name}
             endpoint={endpoint}
             connection={directory}
             catalogConnection={catalog}

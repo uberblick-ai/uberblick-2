@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
@@ -17,6 +17,12 @@ import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { HubEndpoint } from "../src/config.js";
 import { WorkspaceSettings } from "../src/ui/WorkspaceSettings.js";
 import type { Workspace } from "../src/ui/route.js";
+import type { AccessAction, AccessAnswer, AccessMember, AccessRole } from "../src/shell/workspace-access.js";
+
+vi.mock("../src/collab/rooms.js", async (original) => ({
+  ...await original<typeof import("../src/collab/rooms.js")>(),
+  mintHubAuthMessage: vi.fn(async () => `local-browser-bearer-${crypto.randomUUID()}`),
+}));
 
 const WORKSPACE: Workspace = {
   uuid: "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4",
@@ -92,6 +98,7 @@ afterEach(() => {
     mounted.host.remove();
     mounted = null;
   }
+  vi.unstubAllGlobals();
 });
 
 async function mount(
@@ -530,4 +537,244 @@ it("waits for settings state and refuses renaming when its room cannot write", a
   settings.update({ writable: true, connected: true, synced: true });
   expect(button.disabled).toBe(false);
   settings.connection.ydoc.destroy();
+});
+
+const ACCESS_HUB = "https://hub.example.test";
+const ADMIN: AccessMember = { principalId: "admin-principal", githubAccountId: "1001", githubUsername: "signed-in-admin", role: "admin" };
+const SECOND_ADMIN: AccessMember = { principalId: "second-principal", githubAccountId: "1002", githubUsername: "second-admin", role: "admin" };
+const NEW_MEMBER: AccessMember = { principalId: "new-principal", githubAccountId: "9001", githubUsername: "current-agent-login", role: "member" };
+
+function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?: string } = {}) {
+  let role: AccessRole = options.role ?? "admin";
+  let members = [{ ...ADMIN }, { ...SECOND_ADMIN }];
+  let devices = [
+    { deviceId: "current-device", signedInAt: Date.UTC(2026, 9, 5, 10), current: true },
+    { deviceId: "other-own-device", signedInAt: Date.UTC(2026, 9, 4, 12), current: false },
+  ];
+  let signedIn = true;
+  let ownRoleStatus = options.ownRoleStatus;
+  let override: ((action: AccessAction) => AccessAnswer | null) | null = null;
+  const calls: { action: AccessAction; init: RequestInit }[] = [];
+  const fetchImpl = vi.fn(async (path: RequestInfo | URL, init?: RequestInit) => {
+    expect(path).toBe("/api/access");
+    const action = JSON.parse(init?.body as string) as AccessAction;
+    calls.push({ action, init: init ?? {} });
+    let body: AccessAnswer;
+    const overridden = override?.(action);
+    if (overridden !== undefined && overridden !== null) body = overridden;
+    else if (options.status !== undefined) body = { status: options.status, hub: options.status === "local-only" ? null : ACCESS_HUB };
+    else if (!signedIn) body = { status: "sign-in-required", hub: ACCESS_HUB };
+    else switch (action.operation) {
+      case "own-role": body = { status: ownRoleStatus ?? "ok", hub: ACCESS_HUB, ...(ownRoleStatus === undefined ? { role } : {}) }; break;
+      case "list-devices": body = { status: "ok", hub: ACCESS_HUB, devices: [...devices] }; break;
+      case "list-members": body = { status: "ok", hub: ACCESS_HUB, members: members.map((item) => ({ ...item })) }; break;
+      case "resolve-account": body = { status: "ok", hub: ACCESS_HUB, githubAccountId: NEW_MEMBER.githubAccountId, githubUsername: NEW_MEMBER.githubUsername }; break;
+      case "grant-member": {
+        const member = members.find((item) => item.githubAccountId === action.githubAccountId);
+        const granted = member ?? { ...NEW_MEMBER, role: action.role ?? "member" };
+        if (member === undefined) members.push(granted);
+        body = { status: member === undefined ? "ok" : "already-member", hub: ACCESS_HUB, member: granted };
+        break;
+      }
+      case "change-role": {
+        const member = members.find((item) => item.principalId === action.principalId);
+        if (member !== undefined) member.role = action.role;
+        if (action.principalId === ADMIN.principalId) role = action.role;
+        body = { status: "ok", hub: ACCESS_HUB };
+        break;
+      }
+      case "remove-member":
+        members = members.filter((item) => item.principalId !== action.principalId);
+        if (action.principalId === ADMIN.principalId) ownRoleStatus = "forbidden";
+        body = { status: "ok", hub: ACCESS_HUB }; break;
+      case "revoke-device":
+        devices = devices.filter((device) => device.deviceId !== action.deviceId);
+        if (action.deviceId === "current-device") signedIn = false;
+        body = { status: "ok", hub: ACCESS_HUB }; break;
+    }
+    return new Response(JSON.stringify(body), { status: body.status === "closure-failed" ? 500 : 200, headers: { "Content-Type": "application/json" } });
+  });
+  vi.stubGlobal("fetch", fetchImpl);
+  return { calls, setOverride: (next: typeof override) => { override = next; },
+    add: (member: AccessMember) => { members.push(member); }, revokeCurrent: () => { signedIn = false; } };
+}
+
+async function mountAccess(local = true, catalogConnection: RoomConnection | null = null, servingWorkspace = WORKSPACE.uuid): Promise<HTMLElement> {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement("div"); document.body.appendChild(host);
+  const root = createRoot(host); mounted = { root, host };
+  await act(async () => root.render(<WorkspaceSettings page="access" workspace={WORKSPACE}
+    serving={local ? { workspace: servingWorkspace, remoteHubUrl: "ws://127.0.0.1:1234", rebound: false } : null}
+    subject="browser-person" endpoint={ENDPOINT} connection={null} catalogConnection={catalogConnection} agentSessions={2} />));
+  return host;
+}
+
+function accessButton(host: ParentNode, label: string): HTMLButtonElement {
+  const button = [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) =>
+    item.getAttribute("aria-label") === label || item.textContent === label);
+  if (button === undefined) throw new Error(`missing button: ${label}`);
+  return button;
+}
+async function clickAccess(host: ParentNode, label: string): Promise<void> {
+  await act(async () => accessButton(host, label).click());
+}
+async function lookUp(host: HTMLElement, handle = "old-agent-login"): Promise<void> {
+  act(() => typeInto(host.querySelector<HTMLInputElement>("#ub-github-account") as HTMLInputElement, handle));
+  await clickAccess(host, "Look up account");
+}
+function selectAccess(host: ParentNode, label: string, value: AccessRole): void {
+  const select = host.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`);
+  if (select === null) throw new Error(`missing select: ${label}`);
+  act(() => { select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); });
+}
+
+it("confirms the hub-resolved login and account ID before the default member grant, then reads a fresh members table", async () => {
+  const hub = accessHub();
+  const catalog = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  setWorkspaceName(catalog.connection.ydoc, "Collaborative settings");
+  const before = Y.encodeStateAsUpdate(catalog.connection.ydoc);
+  const host = await mountAccess(true, catalog.connection);
+  await lookUp(host);
+  expect(host.textContent).toContain("current-agent-login (GitHub account 9001)");
+  expect(hub.calls.some(({ action }) => action.operation === "grant-member")).toBe(false);
+  expect(host.querySelector<HTMLSelectElement>('select[aria-label="Role for new account"]')?.value).toBe("member");
+  await clickAccess(host, "Confirm and add account");
+  expect(hub.calls.find(({ action }) => action.operation === "grant-member")?.action).toEqual({
+    operation: "grant-member", workspaceId: WORKSPACE.uuid, githubAccountId: "9001", role: "member",
+  });
+  expect(host.querySelector('table[aria-label="Members"]')?.textContent).toContain("current-agent-login");
+  expect(host.textContent).toContain("current-agent-login added as member.");
+  expect(hub.calls.filter(({ action }) => action.operation === "list-members")).toHaveLength(2);
+  expect(Y.encodeStateAsUpdate(catalog.connection.ydoc)).toEqual(before);
+  const bearers = hub.calls.map(({ init }) => (init.headers as Record<string, string>).Authorization);
+  expect(new Set(bearers).size).toBe(bearers.length);
+  expect(hub.calls.every(({ init }) => init.cache === "no-store" && init.method === "POST")).toBe(true);
+  expect(hub.calls.every(({ action }) => !Object.hasOwn(action, "token") && !Object.hasOwn(action, "key"))).toBe(true);
+  catalog.connection.ydoc.destroy();
+});
+
+it("requires an explicit admin choice and shows a concurrent existing grant with its preserved role", async () => {
+  const hub = accessHub(); const host = await mountAccess();
+  await lookUp(host); selectAccess(host, "Role for new account", "admin");
+  hub.add({ ...NEW_MEMBER, role: "member" });
+  await clickAccess(host, "Confirm and add account");
+  expect(hub.calls.find(({ action }) => action.operation === "grant-member")?.action).toMatchObject({ role: "admin" });
+  expect(host.textContent).toContain("current-agent-login is already a member as member.");
+  await lookUp(host);
+  expect(host.textContent).toContain("Already a member as member.");
+  expect([...host.querySelectorAll("button")].some((button) => button.textContent === "Confirm and add account")).toBe(false);
+});
+
+it.each([ ["account-not-found", "No such GitHub account"], ["lookup-unavailable", "lookup is unavailable"] ])(
+  "distinguishes %s without granting or keeping a confirmed account", async (status, message) => {
+    const hub = accessHub(); const host = await mountAccess();
+    hub.setOverride((action) => action.operation === "resolve-account" ? { status, hub: ACCESS_HUB } : null);
+    await lookUp(host);
+    expect(host.textContent).toContain(message);
+    expect(hub.calls.some(({ action }) => action.operation === "grant-member")).toBe(false);
+    expect(host.querySelector('select[aria-label="Role for new account"]')).toBeNull();
+  },
+);
+
+it("offers members only their role and own devices with sign-in times and this-computer marker", async () => {
+  const hub = accessHub({ role: "member" }); const host = await mountAccess();
+  expect(host.textContent).toContain("Your role: member.");
+  expect(host.querySelector('table[aria-label="Members"]')).toBeNull();
+  expect(host.querySelector("#ub-github-account")).toBeNull();
+  expect(hub.calls.some(({ action }) => action.operation === "list-members")).toBe(false);
+  const table = host.querySelector('table[aria-label="Your devices"]');
+  expect(table?.querySelectorAll("tbody tr")).toHaveLength(2);
+  expect(table?.textContent).toContain("This computer");
+  expect(table?.querySelector("time")?.getAttribute("datetime")).toBe("2026-10-05T10:00:00.000Z");
+  expect(table?.textContent).not.toContain("another-person");
+});
+
+it("keeps account-scoped own-device revocation available after a forbidden role read", async () => {
+  const hub = accessHub({ ownRoleStatus: "forbidden" }); const host = await mountAccess();
+  expect(host.textContent).toContain("The hub refused access");
+  expect(accessButton(host, "Revoke device other-own-device").disabled).toBe(false);
+  await clickAccess(host, "Revoke device other-own-device");
+  expect(hub.calls.some(({ action }) => action.operation === "revoke-device")).toBe(false);
+  const dialog = document.querySelector('[role="alertdialog"]');
+  expect(dialog?.textContent).toContain("This one device of yours loses access to this hub");
+  expect(dialog?.textContent).toContain("Documents already downloaded stay where they are");
+  expect(dialog?.textContent).not.toContain("every device");
+  await clickAccess(dialog as Element, "Revoke device");
+  expect(hub.calls.find(({ action }) => action.operation === "revoke-device")?.action).toEqual({ operation: "revoke-device", deviceId: "other-own-device" });
+  expect(host.querySelector('table[aria-label="Your devices"]')?.textContent).not.toContain("other-own-device");
+});
+
+it("shows a hub role-change refusal and keeps the hub's unchanged role", async () => {
+  const hub = accessHub(); const host = await mountAccess();
+  hub.setOverride((action) => action.operation === "change-role" ? { status: "last-admin", hub: ACCESS_HUB } : null);
+  selectAccess(host, `Role for ${ADMIN.githubUsername}`, "member");
+  await clickAccess(host, `Save role for ${ADMIN.githubUsername}`);
+  expect(host.textContent).toContain("The hub refused this change: the last admin cannot be removed or demoted.");
+  expect(host.querySelector('table[aria-label="Members"] tbody tr td')?.textContent).toBe("admin");
+  expect(host.querySelector<HTMLSelectElement>(`select[aria-label="Role for ${ADMIN.githubUsername}"]`)?.value).toBe("admin");
+  expect(host.textContent).not.toContain("role changed to member");
+});
+
+it("confirms member removal on every device, then preserves acknowledged self-removal after access is forbidden", async () => {
+  const hub = accessHub(); const host = await mountAccess();
+  await clickAccess(host, `Remove ${ADMIN.githubUsername}`);
+  const dialog = document.querySelector('[role="alertdialog"]');
+  expect(dialog?.textContent).toContain("This person loses this workspace on every device");
+  expect(dialog?.textContent).toContain("Documents already downloaded stay where they are");
+  expect(hub.calls.some(({ action }) => action.operation === "remove-member")).toBe(false);
+  await clickAccess(dialog as Element, "Remove member");
+  expect(host.textContent).toContain("signed-in-admin removed from this workspace.");
+  expect(host.textContent).toContain("The hub refused access");
+  expect(host.querySelector('table[aria-label="Members"]')).toBeNull();
+  expect(accessButton(host, "Revoke device current-device").disabled).toBe(false);
+});
+
+it("acknowledges applied closure failure for this-computer revocation despite sign-in-required follow-up reads", async () => {
+  const hub = accessHub(); const host = await mountAccess();
+  hub.setOverride((action) => {
+    if (action.operation !== "revoke-device") return null;
+    hub.revokeCurrent(); return { status: "closure-failed", applied: true, hub: ACCESS_HUB };
+  });
+  await clickAccess(host, "Revoke device current-device");
+  const dialog = document.querySelector('[role="alertdialog"]');
+  expect(dialog?.textContent).toContain("sync with the hub stops until ub auth login https://hub.example.test is run again");
+  await clickAccess(dialog as Element, "Revoke device");
+  expect(host.textContent).toContain("This computer was revoked.");
+  expect(host.textContent).toContain("The change was applied");
+  expect(host.textContent).toContain("Sign-in is required");
+  expect([...host.querySelectorAll('[role="status"]')].some((item) => item.textContent?.includes("This computer was revoked"))).toBe(true);
+  expect(host.querySelector('table[aria-label="Your devices"]')).toBeNull();
+});
+
+it.each([
+  ["local-only", "no members", "ub workspace promote"],
+  ["not-configured", "no GitHub sign-in configured", "hub owner"],
+  ["sign-in-required", "Sign-in is required", "ub auth login"],
+  ["hub-down", "cannot be reached", "Reconnect"],
+  ["protocol-mismatch", "protocol versions differ", "Update ub"],
+])("offers no changes in %s and gives a recovery step", async (status, message, step) => {
+  accessHub({ status }); const host = await mountAccess();
+  expect(host.textContent).toContain(message); expect(host.textContent).toContain(step);
+  expect(host.querySelector("table")).toBeNull();
+  expect(host.querySelector("input")).toBeNull();
+  expect([...host.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Refresh access"]);
+});
+
+it("does not call the local management route from a direct-served page", async () => {
+  const hub = accessHub(); const host = await mountAccess(false);
+  expect(host.textContent).toContain("Run ub open in its project");
+  expect(hub.calls).toHaveLength(0); expect(host.querySelector("button")).toBeNull();
+});
+
+it("accepts the served workspace's decorated segment and makes new live reads on every visit", async () => {
+  const hub = accessHub({ role: "member" });
+  const host = await mountAccess(true, null, WORKSPACE.segment);
+  expect(host.textContent).toContain("Your role: member.");
+  expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(1);
+  const priorSignals = hub.calls.map(({ init }) => init.signal);
+  act(() => mounted?.root.unmount()); mounted?.host.remove(); mounted = null;
+  expect(priorSignals.every((signal) => signal?.aborted)).toBe(true);
+  await mountAccess(true, null, WORKSPACE.segment);
+  expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(2);
+  expect(hub.calls.filter(({ action }) => action.operation === "list-devices")).toHaveLength(2);
 });

@@ -103,7 +103,7 @@ describe("an address names a document, a workspace mode, or neither", () => {
     expect(canonicalPath(route("/"))).toBe(`/${CONFIGURED}`);
   });
 
-  it("reserves General and Tags as the complete workspace-settings address set", () => {
+  it("reserves General, Tags and Access as the workspace-settings address set", () => {
     expect(route(`/${WS}/settings`)).toEqual({
       kind: "settings",
       workspace,
@@ -121,13 +121,16 @@ describe("an address names a document, a workspace mode, or neither", () => {
     });
     expect(settingsPath(WS)).toBe(`/${WS}/settings`);
     expect(settingsPath(WS, "tags")).toBe(`/${WS}/settings/tags`);
+    expect(route(`/${WS}/settings/access`)).toEqual({ kind: "settings", workspace, page: "access" });
+    expect(settingsPath(WS, "access")).toBe(`/${WS}/settings/access`);
+    expect(canonicalPath(route(`/${WS}/SETTINGS/ACCESS/`))).toBe(`/${WS}/settings/access`);
     expect(canonicalPath(route(`/${WS}/settings/`))).toBe(`/${WS}/settings`);
     expect(canonicalPath(route(`/${WS}/settings/TAGS/`))).toBe(
       `/${WS}/settings/tags`,
     );
     expect(canonicalPath(route(`/${WS}/SETTINGS/TAGS`))).toBe(`/${WS}/settings/tags`);
 
-    for (const invalid of ["general", "unknown", "tags/more"]) {
+    for (const invalid of ["general", "unknown", "tags/more", "access/more"]) {
       const nested = route(`/${WS}/settings/${invalid}`);
       expect(nested.kind).toBe("invalid");
       expect(nested.kind === "invalid" && nested.workspace).toEqual(workspace);
