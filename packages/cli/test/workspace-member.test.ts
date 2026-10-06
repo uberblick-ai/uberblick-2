@@ -11,7 +11,7 @@ import {
   OTHER_WORKSPACE, USERNAME, WORKSPACE, assertPublicOnly, cleanUp, credentialPath,
   privateDeviceRows, rig, savedLogin,
 } from "./auth-fixtures.js";
-import { removeTempDirs, runUbAsync, sandbox, type Run, type Sandbox } from "./helpers.js";
+import { removeTempDirs, runUbAsync, sandbox, unboundSandbox, type Run, type Sandbox } from "./helpers.js";
 
 afterEach(cleanUp);
 afterAll(removeTempDirs);
@@ -106,11 +106,14 @@ describe("workspace member selection and usage", () => {
 
   it("refuses missing and local-only bindings without touching a hub", async () => {
     const remote = await administrator();
-    for (const box of [sandbox(), sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } })]) {
+    for (const [box, message] of [
+      [unboundSandbox(), "No workspace selected"],
+      [sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } }), "local-only"],
+    ] as const) {
       for (const args of [["list"], ["add", LOGIN], ["role", LOGIN, "admin"], ["remove", LOGIN]]) {
         const run = await runUbAsync(["workspace", "member", ...args], box);
         expect(run.status, run.output).toBe(1);
-        expect(run.stderr).toMatch(/binding|local.only|no.*workspace/i);
+        expect(run.stderr).toContain(message);
       }
       expect(existsSync(credentialPath(box))).toBe(false);
     }

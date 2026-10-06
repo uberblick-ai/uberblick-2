@@ -37,9 +37,11 @@
  */
 
 import { build } from "esbuild";
+import type { TestProject } from "vitest/node";
+import { createBoundFixtureParent } from "./binding-fixtures.js";
 import { BUILT_UB, PACKAGE_ROOT } from "./helpers.js";
 
-export default async function setup(): Promise<void> {
+export default async function setup(project: TestProject): Promise<() => void> {
   await build({
     entryPoints: [`${PACKAGE_ROOT}/src/main.ts`],
     outfile: BUILT_UB,
@@ -64,4 +66,7 @@ export default async function setup(): Promise<void> {
     minify: true,
     sourcemap: true,
   });
+  const parent = createBoundFixtureParent();
+  project.provide("boundFixtureRoot", parent.root);
+  return parent.teardown;
 }

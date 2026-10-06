@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
-import { DEAD_HUB_URL, UB_BIN, removeTempDirs, runUb, runUbAsync, sandbox } from "./helpers.js";
+import { DEAD_HUB_URL, UB_BIN, removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
 import type { Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -143,7 +143,7 @@ const WORKSPACE = "1e9b7a30-52c4-4d6f-8a13-c7b204e5f981";
 
 describe("ub mcp serve", () => {
   it("opens a newly created local workspace without a hub or login", async () => {
-    const box = sandbox();
+    const box = unboundSandbox();
     const created = await runUbAsync(["workspace", "create", "Local MCP"], box);
     expect(created.status, created.output).toBe(0);
     const session = await connect(box);

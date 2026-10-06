@@ -16,7 +16,7 @@ import {
   hubless,
   removeTempDirs,
   runUb,
-  sandbox as anySandbox,
+  unboundSandbox as anyUnboundSandbox,
   waitUntil,
 } from "./helpers.js";
 import type { Run, Sandbox, SandboxFiles } from "./helpers.js";
@@ -24,8 +24,8 @@ import type { Run, Sandbox, SandboxFiles } from "./helpers.js";
 afterAll(removeTempDirs);
 
 /** No test here starts a hub, so none waits for one; see {@link hubless}. */
-function sandbox(files?: SandboxFiles): Sandbox {
-  return hubless(anySandbox(files));
+function unboundSandbox(files?: SandboxFiles): Sandbox {
+  return hubless(anyUnboundSandbox(files));
 }
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -121,7 +121,7 @@ syncBuiltinESMExports();
 }
 
 it("asks for a shared name and derives its cosmetic slug from the trimmed answer", async () => {
-  const box = sandbox();
+  const box = unboundSandbox();
   const run = await namedInit(box, "  Product Research  ");
   expect(run.status, run.output).toBe(0);
   expect(run.stdout).toContain("workspace name (optional;");
@@ -135,7 +135,7 @@ it("asks for a shared name and derives its cosmetic slug from the trimmed answer
 });
 
 it("stores a name with no ASCII slug under a bare UUID", async () => {
-  const box = sandbox();
+  const box = unboundSandbox();
   const run = await namedInit(box, "研究");
   expect(run.status, run.output).toBe(0);
   expect(workspace(box)).toMatch(UUID);
@@ -143,7 +143,7 @@ it("stores a name with no ASCII slug under a bare UUID", async () => {
 });
 
 it("leaves a blank interactive answer unnamed", async () => {
-  const box = sandbox();
+  const box = unboundSandbox();
   const run = await namedInit(box, "   ");
   expect(run.status, run.output).toBe(0);
   expect(workspace(box)).toMatch(UUID);
@@ -151,7 +151,7 @@ it("leaves a blank interactive answer unnamed", async () => {
 });
 
 it("leaves unattended init unnamed", () => {
-  const box = sandbox();
+  const box = unboundSandbox();
   const run = runUb(["init", "--name", IDENTITY, "--no-mcp"], box);
   expect(run.status, run.output).toBe(0);
   expect(workspace(box)).toMatch(UUID);
@@ -159,7 +159,7 @@ it("leaves unattended init unnamed", () => {
 });
 
 it.each(["x".repeat(65), "bad\u0000name"])("refuses invalid names before writing (%j)", async (answer) => {
-  const box = sandbox();
+  const box = unboundSandbox();
   const run = await namedInit(box, answer);
   expect(run.status, run.output).toBe(2);
   expect(run.stderr).toContain("Workspace name must be 1–64 characters");
@@ -170,7 +170,7 @@ it.each(["x".repeat(65), "bad\u0000name"])("refuses invalid names before writing
 
 it("never infers a name from an explicit decorated id, or overwrites an existing name", async () => {
   const id = "old-address-64e4bc22-dfd0-4f06-a898-3bc3b0e512e8";
-  const box = sandbox();
+  const box = unboundSandbox();
   const joined = await namedInit(box, "Never written", { args: ["--workspace", id] });
   expect(joined.status, joined.output).toBe(0);
   expect(joined.stdout).not.toContain("workspace name");
@@ -184,7 +184,7 @@ it("never infers a name from an explicit decorated id, or overwrites an existing
 });
 
 it("durably stores a named creator's answer when another run holds the seed lock", async () => {
-  const box = sandbox();
+  const box = unboundSandbox();
   const lock = await acquireInitLock(box.env, { path: seedLockPath(box.env) });
   try {
     const run = await namedInit(box, "Product Research");
@@ -197,7 +197,7 @@ it("durably stores a named creator's answer when another run holds the seed lock
 });
 
 it("durably stores a name even when starter-document reading fails", async () => {
-  const box = sandbox();
+  const box = unboundSandbox();
   const run = await namedInit(box, "Product Research", { failStarters: true });
   expect(run.status, run.output).toBe(0);
   expect(run.stderr).toContain("starter read refused");
@@ -205,7 +205,7 @@ it("durably stores a name even when starter-document reading fails", async () =>
 });
 
 it("an adopting concurrent init never writes its proposed answer to the claimed workspace", async () => {
-  const box = sandbox();
+  const box = unboundSandbox();
   const seedLock = await acquireInitLock(box.env, { path: seedLockPath(box.env) });
   const barrier = join(box.cwd, "release-prompts");
   const prompted = [false, false];
@@ -238,7 +238,7 @@ it("an adopting concurrent init never writes its proposed answer to the claimed 
 });
 
 it("a failed name write exits 1 and points to settings instead of retrying starter seeding", async () => {
-  const box = sandbox();
+  const box = unboundSandbox();
   writeFileSync(box.dataHome, "a file blocks the replica directory", "utf8");
   const run = await namedInit(box, "Product Research");
   expect(run.status, run.output).toBe(1);

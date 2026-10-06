@@ -11,7 +11,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { authenticationOrigin } from "../src/auth.js";
 import { resolveConfig } from "../src/config.js";
 import {
-  DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox, sleep, UB_BIN, waitUntil,
+  DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox, sleep, UB_BIN, unboundSandbox, waitUntil,
   type Run,
 } from "./helpers.js";
 import {
@@ -68,19 +68,21 @@ describe("ub auth local selection and command surface", () => {
 
   it("never uses a legacy machine hub and resolves a complete environment pair for implicit auth", async () => {
     const origin = "https://selected.example.test";
-    const box = sandbox({
+    const box = unboundSandbox({
       userConfig: { workspace: WORKSPACE, hubUrl: "https://legacy.example.test" },
       credentials: { hubLogins: { [origin]: fixture() } },
     });
     const unbound = await runUbAsync(["auth", "status"], box);
     expect(unbound.status).toBe(1);
     expect(unbound.stderr).toContain("no hub given and none bound");
+    expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
     const selected = await runUbAsync(["auth", "status"], box, {
       UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: origin,
     });
     expect(selected.status, selected.output).toBe(0);
     expect(selected.stdout).toContain(origin);
     expect(selected.stdout).not.toContain("legacy.example.test");
+    expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
   });
 
   it("refuses malformed project selection for an implicit hub but permits an explicit login target", async () => {
@@ -216,9 +218,10 @@ describe("ub auth local selection and command surface", () => {
     const old = fixture([]);
     old.identity.githubUsername = `synthetic"\\user\n\u001b\u007f${String.fromCharCode(...Array.from({ length: 32 }, (_, index) => index + 0x80))}`;
     const escaped = `"synthetic\\"\\\\user\\n\\u001b\\u007f${Array.from({ length: 32 }, (_, index) => `\\u${(index + 0x80).toString(16).padStart(4, "0")}`).join("")}"`;
-    const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: old } },
+    const box = (bound ? sandbox : unboundSandbox)({ credentials: { hubLogins: { [OTHER_HUB]: old } },
       ...(bound ? { projectBinding: { workspaceId: WORKSPACE, hubUrl: OTHER_HUB } } : {}),
     });
+    expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(bound);
     const status = await runUbAsync(["auth", "status", OTHER_HUB], box);
     expect(status.status, status.stderr).toBe(0);
     expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  ${escaped}\navailable workspaces: none\n` + (bound

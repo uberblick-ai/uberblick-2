@@ -1,8 +1,8 @@
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { resolveProjectBinding, writeProjectBinding } from "../src/project-binding.js";
-import { sandbox, removeTempDirs } from "./helpers.js";
+import { sandbox, unboundSandbox, removeTempDirs } from "./helpers.js";
 
 afterAll(removeTempDirs);
 const first = "11111111-1111-4111-8111-111111111111";
@@ -19,7 +19,7 @@ describe("atomic project bindings", () => {
     writeProjectBinding({ workspaceId: second, hubUrl: "https://other.example.test" }, { path: nearer });
     expect(resolveProjectBinding(options)).toEqual({ binding: { workspaceId: second, hubUrl: "wss://other.example.test/ws" }, origin: "project config", path: nearer });
     expect(resolveProjectBinding({ env: box.env, cwd: box.cwd }).binding?.workspaceId).toBe(first);
-    const sibling = sandbox();
+    const sibling = unboundSandbox();
     expect(resolveProjectBinding({ env: sibling.env, cwd: sibling.cwd }).binding).toBeNull();
   });
 
@@ -74,6 +74,7 @@ describe("atomic project bindings", () => {
     const box = sandbox();
     const target = join(box.cwd, "other.json");
     const path = join(box.cwd, ".uberblick.json");
+    rmSync(path);
     symlinkSync(target, path);
     expect(() => resolveProjectBinding({ env: box.env, cwd: box.cwd })).toThrow(/regular file/);
     expect(() => writeProjectBinding({ workspaceId: first, hubUrl: null }, { cwd: box.cwd })).toThrow(/regular file/);

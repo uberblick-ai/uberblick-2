@@ -37,6 +37,7 @@ import {
   runUb,
   runUbAsync,
   sandbox as anySandbox,
+  unboundSandbox as anyUnboundSandbox,
   type Sandbox,
   type SandboxFiles,
   sleep,
@@ -48,6 +49,11 @@ afterAll(removeTempDirs);
 /** No test here starts a hub, so none waits for one; see {@link hubless}. */
 function sandbox(files?: SandboxFiles): Sandbox {
   return hubless(anySandbox(files));
+}
+
+/** First-binding and absent-selection cases keep their unbound precondition. */
+function unboundSandbox(files?: SandboxFiles): Sandbox {
+  return hubless(anyUnboundSandbox(files));
 }
 
 const CREDENTIALS = ["uberblick", "credentials.json"] as const;
@@ -108,7 +114,7 @@ describe("ub init", () => {
   it("does not persist a differing environment binding or create a workspace beneath an environment-only binding", () => {
     for (const present of [false, true]) {
       const fileBinding = { workspaceId: JOINED, hubUrl: null };
-      const box = sandbox(present ? { projectBinding: fileBinding } : {});
+      const box = present ? sandbox({ projectBinding: fileBinding }) : unboundSandbox();
       const run = runUb(["init", "--yes"], box, {
         UB_WORKSPACE_ID: "b7c3d914-5a20-4e6f-8d13-9f04a2c68e75", UB_HUB_URL: "local",
       });
@@ -134,7 +140,7 @@ describe("ub init", () => {
   it("refuses legacy implicit migration without creating a corpus or echoing an unsafe URL", () => {
     for (const hubUrl of ["wss://legacy.example.test/ws", "https://user:PRIVATE_LEGACY_SECRET@legacy.example.test/?token=PRIVATE_TOKEN"]) {
       const legacy = { workspace: JOINED, hubUrl, displayName: "Synthetic operator" };
-      const box = sandbox({ userConfig: legacy });
+      const box = unboundSandbox({ userConfig: legacy });
       const run = runUb(["init", "--yes"], box);
       expect(run.status, run.output).toBe(1);
       expect(run.stderr).toContain("legacy machine workspace or hub");
@@ -161,7 +167,7 @@ describe("ub init", () => {
 
   it("creates a fresh workspace in another project after completing the documented legacy migration", () => {
     const oldHub = "ws://localhost:8080/proxy";
-    const box = sandbox({ userConfig: { workspace: JOINED, hubUrl: oldHub, hubAdmission: "device", displayName: "Synthetic operator" } });
+    const box = unboundSandbox({ userConfig: { workspace: JOINED, hubUrl: oldHub, hubAdmission: "device", displayName: "Synthetic operator" } });
     const first = { ...box, cwd: join(box.cwd, "first") };
     const second = { ...box, cwd: join(box.cwd, "second") };
     mkdirSync(first.cwd);
@@ -199,7 +205,7 @@ describe("ub init", () => {
   it("generates an owner-only secret once, prints none of it, and keeps its workspace", () => {
     // Under the widest umask a system will accept: `mode:` on a write is
     // subject to the umask, so the file has to be chmodded afterwards.
-    const box = sandbox({ checkout: true });
+    const box = unboundSandbox({ checkout: true });
     const previous = process.umask(0o000);
     let run: ReturnType<typeof runUb>;
     let again: ReturnType<typeof runUb>;
@@ -288,7 +294,7 @@ describe("ub init", () => {
   });
 
   it("needs no TTY: takes flags, and defaults rather than prompting", () => {
-    const box = sandbox({ checkout: true });
+    const box = unboundSandbox({ checkout: true });
     // No `--yes`, stdin a pipe: this must complete rather than block on input.
     // With nobody to ask for a display slug, the id is the bare uuid.
     expect(runUb(["init"], box).status).toBe(0);
@@ -345,7 +351,7 @@ describe("ub init", () => {
     // not be stricter than it: a workspace `ub status` accepts is not one this
     // command refuses. The slug is display, so the spelling is kept verbatim.
     for (const workspace of [JOINED, `uberblick-${JOINED}`, `team-b-${JOINED}`]) {
-      const box = sandbox({ checkout: true });
+      const box = unboundSandbox({ checkout: true });
       const run = runUb(["init", "--yes", "--workspace", workspace], box);
       expect(run.status, run.stderr).toBe(0);
       expect(projectBinding(box).workspaceId).toBe(workspace);
@@ -378,7 +384,7 @@ describe("ub init", () => {
     // budget sits above their sum so a run that overruns reports itself rather
     // than being cut off by an anonymous test timeout.
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      const box = sandbox({ checkout: true });
+      const box = unboundSandbox({ checkout: true });
       const workspace = randomUUID();
       const runs = await Promise.all(
         Array.from({ length: 6 }, () =>
@@ -432,7 +438,7 @@ describe("ub init", () => {
     // Held by hand, so the interleave is a fact: the run reads an empty
     // configuration, blocks on the lock, and the workspace it has to adopt is
     // published underneath it before it is let go.
-    const box = sandbox({ checkout: true });
+    const box = unboundSandbox({ checkout: true });
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
@@ -471,7 +477,7 @@ describe("ub init", () => {
     // Writing an unusable workspace on would put it into `config.json`, where
     // the next run — or a seed, or a report — is where it would finally go
     // wrong.
-    const box = sandbox({ checkout: true });
+    const box = unboundSandbox({ checkout: true });
     const config = join(box.cwd, ".uberblick.json");
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
@@ -581,7 +587,7 @@ describe("ub init", () => {
   it.skipIf(!hasGit)("creates only the non-secret project binding inside a checkout", () => {
     // The real `.gitignore`: `ub init` writes nothing into a checkout, and this
     // is what would catch it if that ever changed.
-    const box = sandbox({ checkout: true });
+    const box = unboundSandbox({ checkout: true });
     copyFileSync(join(REPO_ROOT, ".gitignore"), join(box.cwd, ".gitignore"));
     const git = (...args: string[]): void => {
       const result = spawnSync("git", args, { cwd: box.cwd, encoding: "utf8" });
