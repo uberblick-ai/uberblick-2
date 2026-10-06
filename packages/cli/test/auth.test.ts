@@ -102,7 +102,7 @@ describe("ub auth local selection and command surface", () => {
     const endpoint = "wss://Hub.Example.TS.net:443/ws";
     const old = fixture();
     const other = fixture([]);
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint },
+    const box = sandbox({ projectBinding: { workspaceId: `project-${WORKSPACE}`, hubUrl: endpoint },
       userConfig: { workspace: WORKSPACE, hubUrl: endpoint },
       credentials: { signingSecret: SIGNING_SECRET, hubLogins: { [origin]: old, [OTHER_HUB]: other } },
     });
@@ -127,16 +127,50 @@ describe("ub auth local selection and command surface", () => {
     expect(missing.output).not.toContain(OTHER_HUB);
   });
 
-  it("explains renewal for a bound workspace outside the credential snapshot", async () => {
-    const box = sandbox({ projectBinding: { workspaceId: OTHER_WORKSPACE, hubUrl: DEAD_HUB_URL },
+  it.each([
+    { workspaceId: OTHER_WORKSPACE, workspaces: [] },
+    { workspaceId: `project-${OTHER_WORKSPACE}`, workspaces: [WORKSPACE] },
+  ])("explains missing project workspace access for $workspaceId with snapshot $workspaces", async ({ workspaceId, workspaces }) => {
+    const box = sandbox({ projectBinding: { workspaceId, hubUrl: DEAD_HUB_URL },
       userConfig: { workspace: OTHER_WORKSPACE, hubUrl: DEAD_HUB_URL },
-      credentials: { hubLogins: { "http://127.0.0.1:1": fixture() } },
+      credentials: { hubLogins: { "http://127.0.0.1:1": fixture(workspaces) } },
     });
+    const before = readFileSync(credentialPath(box), "utf8");
     const status = await runUbAsync(["auth", "status"], box);
     expect(status.status).toBe(0);
-    expect(status.stdout).toBe(`hub        http://127.0.0.1:1\nsigned in  previous-user\navailable workspaces:\n  ${WORKSPACE}\nThe bound workspace ${OTHER_WORKSPACE} is absent from the recorded credential. Remote sync renews this login to discover current memberships; ask a workspace administrator for access if it remains unavailable.\n`);
+    expect(status.stdout).toBe(`hub        http://127.0.0.1:1\nsigned in  previous-user\n${workspaces.length === 0
+      ? "available workspaces: none\n" : `available workspaces:\n  ${WORKSPACE}\n`}\n` +
+      `You might have expected access to ${OTHER_WORKSPACE} as per your .uberblick.json.\n` +
+      "But previous-user has no access to this workspace, or it simply doesn't exist on this hub.\n" +
+      "Ask a workspace admin to grant you access: `ub workspace member add previous-user`\n");
     expect(status.stderr).toBe("");
-    expect(status.output).not.toContain("ub auth login");
+    expect(readFileSync(credentialPath(box), "utf8")).toBe(before);
+  });
+
+  it("names the environment override as the source of the missing workspace", async () => {
+    const origin = "http://127.0.0.1:1";
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: OTHER_HUB },
+      credentials: { hubLogins: { [origin]: fixture() } },
+    });
+    const status = await runUbAsync(["auth", "status"], box, {
+      UB_WORKSPACE_ID: `override-${OTHER_WORKSPACE}`, UB_HUB_URL: DEAD_HUB_URL,
+    });
+    expect(status.status).toBe(0);
+    expect(status.stdout).toBe(`hub        ${origin}\nsigned in  previous-user\navailable workspaces:\n  ${WORKSPACE}\n\n` +
+      `You might have expected access to ${OTHER_WORKSPACE} as per your UB_WORKSPACE_ID.\n` +
+      "But previous-user has no access to this workspace, or it simply doesn't exist on this hub.\n" +
+      "Ask a workspace admin to grant you access: `ub workspace member add previous-user`\n");
+    expect(status.stderr).toBe("");
+  });
+
+  it("omits the missing-workspace note when showing another hub", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: OTHER_WORKSPACE, hubUrl: DEAD_HUB_URL },
+      credentials: { hubLogins: { [OTHER_HUB]: fixture([]) } },
+    });
+    const status = await runUbAsync(["auth", "status", OTHER_HUB], box);
+    expect(status.status).toBe(0);
+    expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  previous-user\navailable workspaces: none\n`);
+    expect(status.stderr).toBe("");
   });
 
   it("lists each stored workspace on its own row without contacting the hub", async () => {
@@ -178,14 +212,20 @@ describe("ub auth local selection and command surface", () => {
     }
   });
 
-  it("quotes invalid stored usernames and escapes C0, DEL and every C1 control in status", async () => {
+  it.each([false, true])("quotes and escapes stored usernames in status with missing workspace %s", async (bound) => {
     const old = fixture([]);
     old.identity.githubUsername = `synthetic"\\user\n\u001b\u007f${String.fromCharCode(...Array.from({ length: 32 }, (_, index) => index + 0x80))}`;
     const escaped = `"synthetic\\"\\\\user\\n\\u001b\\u007f${Array.from({ length: 32 }, (_, index) => `\\u${(index + 0x80).toString(16).padStart(4, "0")}`).join("")}"`;
-    const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: old } } });
+    const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: old } },
+      ...(bound ? { projectBinding: { workspaceId: WORKSPACE, hubUrl: OTHER_HUB } } : {}),
+    });
     const status = await runUbAsync(["auth", "status", OTHER_HUB], box);
     expect(status.status, status.stderr).toBe(0);
-    expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  ${escaped}\navailable workspaces: none\n`);
+    expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  ${escaped}\navailable workspaces: none\n` + (bound
+      ? `\nYou might have expected access to ${WORKSPACE} as per your .uberblick.json.\n` +
+        `But ${escaped} has no access to this workspace, or it simply doesn't exist on this hub.\n` +
+        `Ask a workspace admin to grant you access: \`ub workspace member add ${escaped}\`\n`
+      : ""));
     expect(status.stderr).toBe("");
   });
 
@@ -212,6 +252,7 @@ describe("ub auth local selection and command surface", () => {
     const box = sandbox({
       ...(kind === "missing" ? {} : { credentials: { hubLogins: { [OTHER_HUB]: login } } }),
       ...(kind === "unreadable" ? { raw: { credentials: "{broken" } } : {}),
+      ...(kind === "revoked" ? { projectBinding: { workspaceId: OTHER_WORKSPACE, hubUrl: OTHER_HUB } } : {}),
       ...(kind === "invalid bound workspace" ? { projectBinding: { workspaceId: "not-a-workspace", hubUrl: OTHER_HUB } } : {}),
     });
     const status = await runUbAsync(["auth", "status", ...(kind === "invalid bound workspace" ? [] : [OTHER_HUB])], box);
@@ -221,6 +262,10 @@ describe("ub auth local selection and command surface", () => {
       : kind === "revoked" ? "recorded as revoked" : "workspaceId";
     expect(status.stderr).toContain(expected);
     expect(status.stdout).not.toContain(expected);
+    if (kind === "revoked") {
+      expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  previous-user\navailable workspaces:\n  ${WORKSPACE}\n`);
+      expect(status.stderr).toBe(`ub auth: this stored credential is recorded as revoked. Run \`ub auth login ${OTHER_HUB}\`.\n`);
+    }
   });
 });
 
