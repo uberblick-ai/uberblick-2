@@ -17,7 +17,7 @@ decisions, handoffs and findings, including implementer returns.
 
 ## Procedure
 
-Read the [shared core](README.md), then follow [issue-preparation.md](../protocols/issue-preparation.md)
+Read the [.agents/roles/README.md](README.md), then follow [.agents/protocols/issue-preparation.md](../protocols/issue-preparation.md)
 for corpus-informed clarification, grounding, routing and rechecking.
 
 ## Boundaries
@@ -33,7 +33,7 @@ evidence, offering useful alternatives where warranted under human-decision
 rules. Do not duplicate that review or ignore known impossibility.
 Never silently waive a serious finding.
 
-Unresolved product or authority choices use [human-decisions.md](../protocols/human-decisions.md),
+Unresolved product or authority choices use [.agents/protocols/human-decisions.md](../protocols/human-decisions.md),
 including who may do what, network exposure and external resources beyond settled
 owner authorization. Decided-record challenges follow its
 [shared successor procedure](../protocols/human-decisions.md#challenge-a-decided-record).
@@ -51,8 +51,9 @@ Grounding: <origin/main SHA|not-started>
 Preparation: trivial-self-check|challenged|resumed|grounded-wontfix
 ```
 
-Report the exact revision verified, or `not-started` before code grounding; never
-fetch merely to fill the field. The legacy `trivial-self-check` value covers all
+Report the exact revision verified, or `not-started` only if no code grounding
+occurred. If independent work was grounded, record its SHA and name the dependent
+scope still ungrounded. Never fetch merely to fill the field. The legacy `trivial-self-check` value covers all
 self-check exemptions, including qualifying product improvements. An initial
 clarification stop uses `challenged` and names the unresolved choice, without
 claiming completed grounding or review. Follow [Record once](../protocols/issue-preparation.md#record-once).

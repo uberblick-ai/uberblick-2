@@ -14,9 +14,14 @@
    an explicit human decision, no governing product document, and a mechanical
    correction preserving that intent; explain why.
 2. **Define success.** Establish the smallest useful scope, measurable success
-   where meaningful, otherwise observable success, and deferred work using
-   [narrowing principles](issue-shaping.md#narrow-the-intent). Preserve essential
-   guarantees unless a human authorizes changing them.
+   where meaningful, otherwise observable success. Within delegated scope, choose
+   the narrowest option that solves the stated problem; put optional alternatives
+   out of scope. Widen only for evidenced necessity, such as an inseparable shared
+   guarantee, not convenience or imagined intent. Preserve essential guarantees.
+   Exclude unspecified optional work without asking. An explicit requested outcome
+   remains unless an owner authorizes deferral or removal; another open issue alone
+   does not authorize dropping it. Reuse settled allocation to avoid duplicate work,
+   citing that authorization and preserving real prerequisites.
 3. **Resolve.** Never invent or assume product intent. Resolve factual gaps from
    evidence; missing or ambiguous intent, conflicts or scope changes beyond settled
    authorization require [human clarification](human-decisions.md) and `needs-human`.
@@ -25,6 +30,11 @@
    issue origin; agent assertions, open recommendations, stances, labels and silence
    supply no human approval for protected choices. Do not override corpus intent or
    reopen settled choices without new conflict or evidence; ask only about that difference.
+   Before code grounding, if the intake and live corpus already expose an unresolved
+   owner choice affecting What, decomposition or acceptance criteria, ask then and
+   stop dependent drafting instead of writing the full dependent contract first.
+   Gather evidence needed to formulate the question and continue independent work;
+   later evidence may still reveal a question. An invitation to object is not approval.
 4. **Record.** Put the outcome and pointers in the issue under
    [ISSUE_SPEC](../../.github/ISSUE_SPEC.md#body-sections). Cite sources with short
    reading reasons, including relevant decision topic/record UUIDs and open records
@@ -36,10 +46,19 @@ When code grounding begins, fetch `origin/main` and record its exact SHA. Ground
 relevant claims in that revision's code, interfaces, invariants and tests; retain
 evidence pointers so an implementer can compare its later baseline.
 
+`ready`, `review`, `split` and `wontfix` require completed code grounding at a
+recorded `origin/main` SHA. `not-started` is only for a clarification
+`needs-human` stop before grounding.
+
 Record discovered semantic prerequisites — functionality supplied by another
 issue — using [native relationships](../../.github/ISSUE_SPEC.md#relationships).
-File overlap alone is not a prerequisite; do not scan dependencies exhaustively
-or edit the other issue.
+Also apply [scheduling semantics](workflow.md#scheduling-semantics) to discovered
+open PRs: a rewrite of the same substantive file is not mechanical overlap.
+Record a native blocked-by relationship to the issue that PR closes. Only the
+bounded additive aggregation surfaces named there qualify for mechanical
+reconciliation. If the PR closes no issue, record the overlap in Pointers and
+defer without inventing a dependency. Do not scan open PRs or dependencies
+exhaustively or edit the other issue.
 
 Keep investigation proportional. On resumption or relevant main changes, refresh
 only affected evidence, corpus sources and governing instructions; expand discovery
@@ -52,6 +71,13 @@ Leave ordinary engineering choices to implementation; do not prescribe preferenc
 or exhaustive edge cases. An investigation names its decision, uncertain assumption
 and confirming or refuting observation. A bounded negative result may complete it;
 the eventual feature is not its deliverable.
+
+On every route, challenge bespoke mechanisms against existing primitives and
+libraries, including parsers and file formats, under
+[library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices).
+If the simpler defensible implementation needs a protected runtime dependency,
+seek the owner's answer during preparation; do not prescribe custom machinery
+to evade that approval. Evidence supports the recommendation, not authorization.
 
 Set the existing `Effort` field to your best tentative XS/S/M/L/XL estimate using
 [the field operation](run-operations.md#effort-field). Reassess on feedback and

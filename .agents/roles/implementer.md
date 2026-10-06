@@ -31,9 +31,9 @@ inspect the code and Pointers it depends on.
   blocked by the issue that PR closes (`gh issue edit <N> --add-blocked-by
   <M>`) and finish `defer`, naming it. When that PR closes no issue, finish
   `defer` alone. An overlap the issue's Pointers classify as a mechanical
-  reconciliation is not a block when the open PR's current diff confirms it:
-  text either change can update after the other lands, with no semantic
-  conflict and no prerequisite. Follow the Pointers and build.
+  reconciliation is not a block only when the open PR's current diff confirms
+  the scheduling rule's bounded additive aggregation exception. A rewrite of
+  the same substantive file does not qualify. Follow qualifying Pointers and build.
 - A contract prepared more than six days ago is checked before it is built: the
   `ready` label or the preparer's handoff dates it. Check that its Pointers
   still resolve at that base, that the code it targets still behaves as the body
@@ -49,7 +49,11 @@ For choices left open, verify the proposed mechanism against the governing
 guarantees and concrete failure cases before adopting it; readiness is not proof
 that a suggested design works. Explicit constraints remain binding.
 
-Before building web UI, challenge a custom mechanism that the framework, an
+Challenge bespoke parsers, file-format handling and other custom mechanisms
+against existing primitives and libraries under
+[library and custom-mechanism choices](../protocols/delivery-policy.md#library-and-custom-mechanism-choices).
+A protected dependency needs an owner's answer; custom code is not an approval
+workaround. Before building web UI, challenge a custom mechanism that the framework, an
 existing dependency or a qualifying library would cover. Discover and read the
 live corpus guidance for web UI library selection and custom mechanisms under
 [AGENTS.md](../../AGENTS.md#read-for-the-action). Apply its criteria
@@ -156,11 +160,29 @@ Continue the pull request's remote head; never rebase or force-push it.
   for verification or the Rounds rule still requires a second round, otherwise
   `integrate`. When it leaves nothing to change, finish without a commit.
 
-Run the final validation again on any new head before you finish.
+Apply [handoff merge readiness](#handoff-merge-readiness) on revisions as well as
+initial issue implementations. Run final validation on any new head.
+
+## Handoff merge readiness
+
+Before finishing `review` or `integrate`, fetch `origin/main` and run
+`git merge-tree --write-tree origin/main HEAD`. Exit 0 means the merge is clean;
+exit 1 means conflicts; another error is a failed check, not evidence of
+mergeability. On conflicts, merge `origin/main` into this branch, resolve them
+and commit the result; never rebase or force-push. Do not leave reconciliation
+for the integrator, which makes no fix-up commits. If the check cannot run or
+resolution needs an unresolved owner choice, use the existing defer or human
+decision route rather than reporting a clean handoff.
+
+After synchronization, rerun affected checks and the required final validation,
+verify merge readiness again, and push before handing off. A new commit has a
+new candidate SHA: earlier exact-head review and gate evidence does not transfer.
+Route the new head through the reviews owed and the review protocol's Rounds
+rule; a merge commit does not waive review or authorize a third round.
 
 ## Boundaries
 
-No commits to `main`, no merging, no authoritative review of your own diff, and
+No commits to `main`, no landing PRs, no authoritative review of your own diff, and
 nothing outside the issue's footprint — scope found mid-flight becomes a finding
 or a new issue. The merge tier and the final gates belong to the integrator.
 

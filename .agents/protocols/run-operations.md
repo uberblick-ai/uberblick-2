@@ -1,13 +1,13 @@
 # Run operations
 
 Read the relevant section before posting records, creating scratch or follow-up
-issues, starting a process, or working in a checkout. Headless Claude runs also
-read their runtime section before any shell or file operation. The shared
+issues, starting a process, or working in a checkout. The shared
 [role core](../roles/README.md) and the assigned role bound all these actions.
 
 ## Posting records and scratch
 
-Post comment bodies from files (`gh ... --body-file`), and update a mutable
+Supervised retrospective posts use [the launcher route](retrospectives.md).
+Post other comment bodies from files (`gh ... --body-file`), and update a mutable
 record by its immutable comment id (`gh api ... -F body=@<file>`), never "edit
 last". Preserve literal text and newlines. Confirm scratch-file writes
 succeeded before posting; noclobber can leave stale content.
@@ -93,12 +93,3 @@ pull request you continue, and never rebase or force-push a pull request's
 head. A detached checkout is pushed with `git push origin
 HEAD:refs/heads/<branch>`. Leave other runs' worktrees and
 processes alone.
-
-## Headless Claude
-
-Headless Claude runs deny, without a prompt, any shell command that is not on
-the allow list as written: shell expansion (`$VAR`, `${VAR}`, `$?`, `$(...)`,
-backticks) and loops (`for`, `while`) are denied even when every command inside
-is allowed. Run one plain command per call instead. Files outside the worktree
-and the run's `scratch` directory are not readable; read corpus documents
-through the corpus MCP tools.

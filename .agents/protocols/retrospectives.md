@@ -14,7 +14,10 @@ local paths, hostnames or log excerpts. Write the body file in private scratch,
 never the worktree, where it could be committed. A
 retrospective is telemetry, never a gate.
 
-Use the exact discussion node id for the role in
-[AGENTS.md](../../AGENTS.md#project-facts), never a guessed id. A failed post
-blocks nothing. Follow [run-operations.md](run-operations.md#posting-records-and-scratch)
+In a supervised run, use the launcher-provided literal `report_command` followed
+by `retrospective --body-file <private-body-file>`. The launcher pins the repository
+and role board from `ub-agents.yaml`; do not substitute a PATH installation,
+choose a board or fall back to direct GraphQL. A failed post blocks nothing.
+Outside a supervised run, an authorized retrospective uses the exact discussion
+node id in [AGENTS.md](../../AGENTS.md#project-facts), never a guessed id. Follow [run-operations.md](run-operations.md#posting-records-and-scratch)
 when writing and posting the body.

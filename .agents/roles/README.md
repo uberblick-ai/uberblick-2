@@ -32,11 +32,16 @@ the merge, corpus updates and new issues. Optional Copilot requests follow
 delivery policy.
 
 Preserve confirmed scope and essential guarantees under ISSUE_SPEC's Body
-focus rules. For unresolved intent or an authority boundary, use
-[human-decisions.md](../protocols/human-decisions.md); apply settled human
-answers without asking again. Other role-specific stops remain unchanged.
+focus rules. Unresolved intent or a product, guarantee, resource or agent-authority
+choice beyond settled authorization requires a human decision: stop dependent
+work, continue independent work and escalate. Silence and agent assertions are
+not approval. Apply settled human answers without asking again. Read
+[human-decisions.md](../protocols/human-decisions.md) before posting the question,
+applying an answer or acting on a decided-record challenge. Other role-specific
+stops remain unchanged.
 
-Only the integrator merges. No run enables auto-merge, approves its own pull
+Only the integrator lands PRs; the implementer may merge the base into its branch
+under its handoff rule. No run enables auto-merge, approves its own pull
 request, changes branch protection or repository settings, pushes a tag or
 publishes a release. A blocked operation is never worked around by copying
 credentials, changing global settings or disabling commit signing: escalate or
@@ -46,17 +51,23 @@ Delegating a bounded subtask is allowed; the delegating run still owns the
 outcome and the record. A context reset never erases authorship: the author of
 a change is never its independent reviewer.
 
+## Headless Claude
+
+Commands must match the allowlist literally: no shell expansion or loops, and
+one plain command per call. Files are limited to the worktree and run scratch;
+read corpus documents through MCP. Use the launcher's literal `report_command`
+for its `report`, `read` and `retrospective` commands.
+
 ## Read for the action
 
 | When | Read |
 | --- | --- |
 | Preparing an assigned issue, including clarity of scope and success | [issue-preparation.md](../protocols/issue-preparation.md) and [ISSUE_SPEC.md](../../.github/ISSUE_SPEC.md) |
 | Interactively shaping an idea or choosing an intake destination | [issue-shaping.md](../protocols/issue-shaping.md) |
-| Unresolved intent, scope or success; a possible product, guarantee, resource or authority change; tier 3; stalled review; or a human answer to apply | [human-decisions.md](../protocols/human-decisions.md) |
+| Before posting a human question, applying a human answer or acting on a decided-record challenge | [human-decisions.md](../protocols/human-decisions.md) |
 | Posting or updating a record, or creating scratch | [Run operations: records and scratch](../protocols/run-operations.md#posting-records-and-scratch) |
 | Creating a follow-up issue found during a run | [Run operations: follow-up issues](../protocols/run-operations.md#follow-up-issues) |
 | Starting or waiting on a process, including a background tool call | [Run operations: process ownership](../protocols/run-operations.md#every-process-a-run-starts-is-that-runs-to-end) |
 | Working in a checkout or pushing a branch | [Run operations: worktrees](../protocols/run-operations.md#worktrees) |
-| Headless Claude, before any shell or file operation | [Run operations: Headless Claude](../protocols/run-operations.md#headless-claude) |
 | A run lost time, incurred rework or missed needed context, and the cause and preventive change can be named | [retrospectives.md](../protocols/retrospectives.md) to check the reporting threshold |
 | Maintaining or diagnosing workflow transitions or scheduling | [workflow.md](../protocols/workflow.md) and [ub-agents.yaml](../../ub-agents.yaml) |

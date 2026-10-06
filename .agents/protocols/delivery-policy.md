@@ -165,16 +165,26 @@ base. A tier-3 trigger that fired only in implementation is outside it unless
 the answer named it, and so is later work that materially expands the design
 or scope: escalate again, naming the difference.
 
+### Library and custom-mechanism choices
+
 Tier routes authority; it does not choose the design. Never replace a simpler
 established primitive or dependency with bespoke correctness machinery merely
-to avoid tier 3. For web UI, challenge custom mechanics against the framework,
+to avoid tier 3. Challenge custom mechanisms, including parsers and file-format
+handling, against existing primitives and suitable libraries. Compare the
+supported input contract, correctness burden and maintenance cost; a hand-built
+subset is not automatically simpler because it adds no dependency. Recommend
+the smallest defensible approach with evidence. If it needs a protected runtime
+dependency, ask the owner early, preferably during preparation. This grants no
+new dependency exception and invents no missing corpus selection criteria.
+
+For web UI, challenge custom mechanics against the framework,
 existing dependencies and libraries qualifying under those live selection criteria.
 Custom mechanics still require the evidenced, owner-confirmed exception specified
 by the governing guidance; if that guidance is missing, stop the dependent choice
 rather than assume an exception. Make a shape
 that needs a person's answer visible early and get the answer once.
 
-The tier-3 trigger list is the owner-controlled autonomy boundary. Verify gates
+The tier-3 trigger list remains the owner-controlled autonomy boundary. Verify gates
 at the candidate SHA rather than relying on a session's assertion.
 
 ### Batch merge reports

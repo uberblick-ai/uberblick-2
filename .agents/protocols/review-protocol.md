@@ -29,7 +29,9 @@ consequence. Correctness and data safety first, then risk and missing
 verification, then unnecessary complexity — a smaller change that defends the
 same contract is a finding. No findings is itself a verdict and is stated as one.
 
-For web UI, discover the live corpus guidance for library selection and custom
+Challenge bespoke parsers, file-format handling and other custom mechanisms
+under [library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices),
+preserving dependency approval requirements. For web UI, discover the live corpus guidance for library selection and custom
 mechanisms under [AGENTS.md](../../AGENTS.md#read-for-the-action), then check the PR's
 evidence against it. Challenge a custom mechanism
 that the framework, an existing dependency or a qualifying library would
