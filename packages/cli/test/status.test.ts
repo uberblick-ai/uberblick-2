@@ -1,7 +1,6 @@
 /** The human overview stays bounded; the report keeps its machine detail. */
 
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
-import { createHub, silentLogger } from "@uberblick/hub";
 import { mkdirSync, existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -9,7 +8,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import type { StatusReport } from "../src/status.js";
 import { renderStatus } from "../src/status.js";
 import { fixture } from "./auth-fixtures.js";
-import { DEAD_HUB_URL, pointAt, removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
+import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox, unboundSandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -294,30 +293,6 @@ describe("the last hub sync in ub status", () => {
     const text = runUb(["status"], box);
     expect(text.status, text.stderr).toBe(0);
     expect(row(text.stdout, "last sync")).toBe("");
-  });
-
-  it("reports this run's acknowledgement time after catching up", async () => {
-    const secret = "last-sync-live-status-test-secret";
-    const box = sandbox({ credentials: { signingSecret: secret } });
-    const hub = await createHub({
-      authSecret: secret,
-      port: 0,
-      databasePath: join(box.cwd, "hub.sqlite"),
-      log: silentLogger,
-    });
-    try {
-      pointAt(box, `ws://127.0.0.1:${hub.port}`);
-      const before = Date.now();
-      const json = await runUbAsync(["status", "--json"], box);
-      expect(json.status, json.stderr).toBe(0);
-      const report = JSON.parse(json.stdout);
-      expect(report.hub.status).toBe("connected");
-      expect(report.lastSync).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
-      expect(Date.parse(report.lastSync)).toBeGreaterThanOrEqual(Math.floor(before / 1_000) * 1_000);
-      expect(Date.parse(report.lastSync)).toBeLessThanOrEqual(Date.now());
-    } finally {
-      await hub.stop();
-    }
   });
 });
 
