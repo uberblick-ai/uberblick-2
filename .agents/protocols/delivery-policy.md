@@ -89,8 +89,9 @@ Copilot is optional ([owner decision](https://github.com/uberblick-ai/uberblick-
 request it only when a person asks. A missing, pending, stale-head or
 unavailable Copilot review never by itself defers, escalates or blocks
 integration, even if an older handoff calls it required; an explicit owner
-instruction to hold a merge still applies. Every Copilot remark posted before
-merge falls under the no-unanswered-remarks gate.
+instruction to hold a merge still applies. Record a refusal once, on its review
+record or a PR comment, and do not retry without a person's request. Every
+Copilot remark posted before merge falls under the no-unanswered-remarks gate.
 
 ## Merge policy — the rules are the authority, not a session
 
@@ -112,8 +113,7 @@ merge falls under the no-unanswered-remarks gate.
   applies. Triggers: a breaking or destructive schema change, data migration,
   or break in persisted-data compatibility; a change to CRDT or concurrency
   semantics; a change to decided architecture or to guarantees defined by
-  their owning corpus documents; a new *runtime* dependency, subject to the
-  web UI exception below; auth or token semantics; overruling a major reviewer
+  their owning corpus documents; a new *runtime* dependency; auth or token semantics; overruling a major reviewer
   finding; a process change that alters
   authority, eligibility, merge or approval rules, or destructive automation;
   and a diff that adds or changes the user-facing command surface — new

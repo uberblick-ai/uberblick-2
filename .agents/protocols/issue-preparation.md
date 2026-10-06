@@ -29,8 +29,9 @@ catalog scan; explain why. Resumed work refreshes only affected sources.
 
 Include relevant decisions in that reading guide, including open records the
 implementation would build on: cite the topic and record UUIDs with the reading
-reason. Read the topic's answer in force and its pending records (`find_decisions`);
-an open recommendation never
+reason. Read the topic's answer in force, pending records and conflicts from
+`list_docs` with `kind: decision`, then each record by UUID; an open
+recommendation never
 supplies the approved outcome required by ISSUE_SPEC. A challenge to a decided
 record follows the successor and affected-work stop in the preparer's role.
 
@@ -58,7 +59,8 @@ The eventual feature is not its deliverable.
 Authoring formats and user-visible limits of durable content are owner
 decisions; rendering mechanics are engineering choices within existing
 constraints. An inaccessible reference limits evidence; it never supplies a
-missing product decision. Before escalating the replacement of an established
+missing product decision. A design that lands in an issue body only because the
+corpus was unreachable is debt: say so and move it to the corpus later. Before escalating the replacement of an established
 primitive, name that primitive and the contract it would supply.
 
 Grounded dispositions include:

@@ -124,7 +124,7 @@ Five required `##` headings after the header. The bar for all of them:
 doesn't answer? Then the issue is not `ready`.**
 
 - **What** — one paragraph, the outcome in behavioral terms.
-- **Why** — a sentence or two, tied to an owner decision or a corpus
+- **Why** — a sentence or two, tied to the request's acceptance criteria or a
   document. Keeps the agent from "improving" beyond intent.
 - **Acceptance criteria** — a short checkbox list (`- [ ]`) of **distinct,
   observable and non-obvious outcomes or invariants**. Each checkbox owns a
@@ -152,7 +152,8 @@ Split when the expected change cannot be reviewed coherently in one sitting or
 substantial independent outcomes justify separate work. Different proof
 environments, test stages or tiny enabling changes alone do not justify serial
 children. Keep cohesive work together and declare real prerequisites. Size an
-investigation's prototype and evidence to the uncertainty it must resolve.
+investigation's prototype and evidence to the uncertainty it must resolve;
+needed prototype evidence must remain reproducible.
 
 One `ready` implementation sub-issue describes at most one independently
 reviewable PR; each PR closes its sub-issue, and the parent closes after its

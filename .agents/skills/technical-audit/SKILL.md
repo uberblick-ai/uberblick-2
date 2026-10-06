@@ -92,7 +92,7 @@ Do not demand one-to-one documentation for internal mechanics. Report only a
 gap that could mislead a user or agent, hide an invariant, cause a wrong product
 choice, or make recovery materially harder.
 
-Check AGENTS.md's corpus rules mechanically on the documents the run reads
+Check the documents the run reads for mechanical defects
 and report it as lane-1 evidence: an undescribed document, an h1 block that
 repeats the title, a heading past h3, a paragraph of several hundred words, a raw uuid typed as prose instead of a docLink, a dangling
 document link, or PR, issue and date citations in a non-decision document.
