@@ -364,7 +364,7 @@ ub init            # identity, workspace, signing secret
 ub init <hub-url> --workspace <uuid>  # seed a workspace the stored login permits
 ub update          # update this copy — Homebrew, or a checkout on main
 ub open            # serve the web app and a hub, and open the browser
-ub status          # workspace, hub, stored account, connection, pending work, local log, failures
+ub status          # workspace, hub, stored account, connection, pending work, last sync, local log, failures
 ub status --json   # full report, including account, rooms, configuration and storage paths
 ub workspace       # the workspace in force, and which layer chose it
 ub workspace list  # workspaces this machine has a database for

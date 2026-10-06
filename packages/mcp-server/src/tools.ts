@@ -2629,6 +2629,11 @@ export function registerTools(
         "reconnect — so it can read 1 for a whole document's worth of unsent work. It is in memory and resets " +
         "with the connection. The web client's status line shows the same counter for the room it has open, " +
         "labelled `N sync messages unacked`.\n\n" +
+        "`lastSync` is the stored time this machine last found its full replica caught up: connected to the hub, " +
+        "no pending room or attach drain, and every attached room acknowledged with no unapplied database changes. " +
+        "It is UTC ISO 8601 to the second, or null when no time is stored. It records acknowledgement by the hub, " +
+        "not storage there. Each process records it after settling, at most once every five seconds; `ub open` " +
+        "also checks while idle. The value never moves backwards across processes.\n\n" +
         `${SYNCED_MEANS} The same holds for \`rooms[].synced\` below and for \`unsyncedChanges: 0\`: both are ` +
         "statements about acknowledgement, so a hub that dies inside the debounce comes back missing updates " +
         "this tool has already reported as synced, until a replica holding them reconnects and re-sends.\n\n" +
