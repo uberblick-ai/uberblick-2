@@ -22,6 +22,7 @@ import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { AUTH_REJECTED, SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { afterEach, describe, expect, it } from "vitest";
+import { renderDoctor } from "../src/doctor.js";
 import type { Run, Sandbox } from "./helpers.js";
 import {
   DEAD_HUB_URL,
@@ -86,14 +87,34 @@ async function foreignProcess(): Promise<number> {
  * A server that completes the websocket handshake and then says nothing.
  *
  * The far side that is up, speaks enough of the protocol to open a socket, and
- * never serves the room — which is what a stuck hub looks like, and equally
- * what somebody else's Hocuspocus server looks like.
+ * never serves the room. Its separate HTTP response supplies a clock reading,
+ * including a missing Date or a failed upgrade when a test asks for one.
  */
-async function silentServer(): Promise<number> {
+async function silentServer(
+  offsetSeconds: number | null = 0,
+  upgrade: "accept" | "refuse" | "pending" = "accept",
+): Promise<{ port: number; clockRequests: number }> {
   const sockets: Socket[] = [];
-  const server = createHttpServer();
+  const reading = { port: 0, clockRequests: 0 };
+  const server = createHttpServer((_request, response) => {
+    reading.clockRequests += 1;
+    response.sendDate = false;
+    if (offsetSeconds !== null) {
+      response.setHeader(
+        "Date",
+        new Date(Date.now() + offsetSeconds * 1_000).toUTCString(),
+      );
+    }
+    response.writeHead(200, { "Content-Type": "text/plain" });
+    response.end("hub clock");
+  });
+  server.on("connection", (socket: Socket) => sockets.push(socket));
   server.on("upgrade", (request, socket: Socket) => {
-    sockets.push(socket);
+    if (upgrade === "pending") return;
+    if (upgrade === "refuse") {
+      socket.end("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n");
+      return;
+    }
     const key = request.headers["sec-websocket-key"] ?? "";
     const accept = createHash("sha1")
       .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
@@ -112,35 +133,8 @@ async function silentServer(): Promise<number> {
   if (address === null || typeof address === "string") {
     throw new Error("the silent server did not bind a port");
   }
-  return address.port;
-}
-
-/**
- * A server that answers any HTTP request with a `Date` header `offsetSeconds`
- * away from now — the hub's clock, as this machine would read it.
- *
- * The clock check reads that header and nothing else, so this is the whole of
- * what it needs to see. It never speaks websocket, so the hub check reports it
- * as unreachable; that is a different check and a different assertion.
- */
-async function skewedClock(offsetSeconds: number): Promise<number> {
-  const sockets: Socket[] = [];
-  const server = createHttpServer((_request, response) => {
-    response.setHeader(
-      "Date",
-      new Date(Date.now() + offsetSeconds * 1_000).toUTCString(),
-    );
-    response.writeHead(200, { "Content-Type": "text/plain" });
-    response.end("not really a hub");
-  });
-  server.on("connection", (socket: Socket) => sockets.push(socket));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  servers.push({ server, sockets });
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("the skewed clock did not bind a port");
-  }
-  return address.port;
+  reading.port = address.port;
+  return reading;
 }
 
 /** A port nothing is listening on: bound, read back, and released. */
@@ -157,9 +151,9 @@ async function freePort(): Promise<number> {
 
 interface Check {
   name: string;
-  status: "pass" | "fail" | "skipped";
+  status: "pass" | "warn" | "fail" | "skipped";
   reason: string;
-  remedy: string | null;
+  fix: string | null;
 }
 
 async function doctor(
@@ -175,11 +169,39 @@ async function doctor(
     ...extraEnv,
   });
   const report = JSON.parse(run.stdout) as { ok: boolean; checks: Check[] };
+  for (const one of report.checks) {
+    expect(one.status).toMatch(/^(pass|warn|fail|skipped)$/);
+    expect(one).toHaveProperty("fix");
+    expect(one).not.toHaveProperty("remedy");
+    if (one.status === "warn" || one.status === "fail") {
+      expect(one.fix).toEqual(expect.any(String));
+      expect(one.fix).not.toBe("");
+    } else {
+      expect(one.fix).toBeNull();
+    }
+  }
+  const failed = report.checks.some((one) => one.status === "fail");
+  expect(report.ok).toBe(!failed);
+  expect(run.status).toBe(failed ? 1 : 0);
   return {
     run,
     ok: report.ok,
     checks: new Map(report.checks.map((check) => [check.name, check])),
   };
+}
+
+function wireMcp(box: Sandbox): string {
+  const config = join(box.cwd, ".mcp.json");
+  writeFileSync(
+    config,
+    `${JSON.stringify(
+      { mcpServers: { uberblick: { type: "stdio", command: "ub", args: ["mcp", "serve"] } } },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  return config;
 }
 
 function check(checks: Map<string, Check>, name: string): Check {
@@ -208,21 +230,22 @@ describe("ub doctor", () => {
       "mcp",
     ]);
     for (const one of checks.values()) {
-      expect(one.status).toMatch(/^(pass|fail|skipped)$/);
+      expect(one.status).toMatch(/^(pass|warn|fail|skipped)$/);
       expect(one.reason).not.toBe("");
       if (one.status === "fail") {
-        expect(one.remedy).not.toBeNull();
+        expect(one.fix).not.toBeNull();
       }
     }
     // The one value with no default: a failed check naming the two commands
     // that set one, not a thrown error.
     expect(check(checks, "workspace").status).toBe("fail");
-    expect(check(checks, "workspace").remedy).toMatch(/ub init/);
-    expect(check(checks, "workspace").remedy).toMatch(/ub workspace use/);
-    expect(check(checks, "workspace").remedy).toMatch(/ub workspace join/);
+    expect(check(checks, "workspace").fix).toMatch(/ub init/);
+    expect(check(checks, "workspace").fix).toMatch(/ub workspace use/);
+    expect(check(checks, "workspace").fix).toMatch(/ub workspace join/);
     // The recovery explains the explicit project binding rather than directing
     // the operator to the obsolete machine-wide default.
     expect(check(checks, "workspace").reason).toContain(".uberblick.json");
+    expect(check(checks, "clock").reason).toBe("needs the hub");
     expect(ok).toBe(false);
     expect(run.status).not.toBe(0);
   });
@@ -265,9 +288,12 @@ describe("ub doctor", () => {
     expect(credential.status).toBe("skipped");
     expect(credential.reason).toMatch(/hub sync is disabled/);
     expect(credential.reason).toMatch(/every MCP tool still works/);
-    expect(credential.remedy).toMatch(/ub init/);
+    expect(credential.reason).toMatch(/ub init/);
+    expect(credential.fix).toBeNull();
     // The hub is not dialled either, so nothing here failed on the network.
     expect(check(checks, "hub").status).toBe("skipped");
+    expect(check(checks, "clock").status).toBe("skipped");
+    expect(check(checks, "clock").reason).toBe("needs the hub");
     expect(ok).toBe(false); // the MCP wiring check, which no sandbox has
   });
 
@@ -297,11 +323,11 @@ describe("ub doctor", () => {
     // The secret exists and was refused: a real failure with a one-line fix.
     expect(credential.status).toBe("fail");
     expect(credential.reason).toMatch(/mode 0644/);
-    expect(credential.remedy).toMatch(/chmod 600 .*credentials\.json/);
+    expect(credential.fix).toMatch(/chmod 600 .*credentials\.json/);
     expect(run.output).not.toContain(SECRET);
   });
 
-  it("fails the hub check with no hub running, names the URL it dialled and remedies it with `ub open`", async () => {
+  it("warns with no local hub running, names the URL and fixes it with `ub open`", async () => {
     const { checks, run } = await doctor(
       sandbox({
         projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
@@ -310,12 +336,12 @@ describe("ub doctor", () => {
     );
     const hub = check(checks, "hub");
 
-    expect(hub.status).toBe("fail");
+    expect(hub.status).toBe("warn");
     expect(hub.reason).toContain(DEAD_HUB_URL);
-    // A remedy is only a remedy if the reader can run it: `ub` recommends `ub`,
+    // A fix is only a fix if the reader can run it: `ub` recommends `ub`,
     // never a task that exists in a checkout and nowhere else.
-    expect(hub.remedy).toMatch(/ub open --no-browser/);
-    expect(hub.remedy).not.toMatch(/mise/);
+    expect(hub.fix).toMatch(/ub open --no-browser/);
+    expect(hub.fix).not.toMatch(/mise/);
     expect(run.status).not.toBe(0);
   });
 
@@ -335,13 +361,15 @@ describe("ub doctor", () => {
     const credential = check(checks, "credential");
 
     expect(credential.status).toBe("fail");
-    expect(credential.remedy).toMatch(/ub auth login/);
-    expect(hub.status).toBe("fail");
+    expect(credential.fix).toMatch(/ub auth login/);
+    expect(hub.status).toBe("warn");
     expect(hub.reason).toContain("hub.example.invalid");
-    expect(hub.reason).toContain("nothing answered");
-    expect(hub.remedy).toContain("check that the deployment is running");
-    expect(hub.remedy).not.toMatch(/ub open/);
-    expect(hub.remedy).not.toMatch(/mise/);
+    expect(hub.fix).toMatch(/network/);
+    expect(hub.fix).toMatch(/whoever runs the hub/);
+    expect(hub.fix).toMatch(/work stays here/);
+    expect(hub.fix).toMatch(/syncs once.*back/);
+    expect(hub.fix).not.toMatch(/ub open/);
+    expect(hub.fix).not.toMatch(/mise/);
   });
 
   it.each([false, true])("names sign-in recovery for a reachable device deployment through loopback (recorded admission: %s)", async recorded => {
@@ -355,9 +383,9 @@ describe("ub doctor", () => {
     const { checks } = await doctor(box);
     const upstream = check(checks, "hub");
     expect(upstream.status).toBe("fail");
-    expect(upstream.remedy).toContain(`ub auth login http://127.0.0.1:${hub.port}`);
-    expect(upstream.remedy).not.toContain("signing secret");
-    expect(upstream.remedy).not.toContain("ub open");
+    expect(upstream.fix).toContain(`ub auth login http://127.0.0.1:${hub.port}`);
+    expect(upstream.fix).not.toContain("signing secret");
+    expect(upstream.fix).not.toContain("ub open");
   });
 
   it("does not recommend replacing a stopped loopback device deployment with ub open", async () => {
@@ -367,10 +395,13 @@ describe("ub doctor", () => {
       userConfig: { hubAdmissions: { [endpoint]: "device" } }, credentials: { signingSecret: SECRET } });
     const { checks } = await doctor(box);
     const upstream = check(checks, "hub");
-    expect(upstream.status).toBe("fail");
-    expect(upstream.reason).toContain(`nothing answered ${endpoint}`);
-    expect(upstream.remedy).toContain("check that the deployment is running");
-    expect(upstream.remedy).not.toContain("ub open");
+    expect(upstream.status).toBe("warn");
+    expect(upstream.reason).toContain(endpoint);
+    expect(upstream.fix).toMatch(/network/);
+    expect(upstream.fix).toMatch(/whoever runs the hub/);
+    expect(upstream.fix).toMatch(/work stays here/);
+    expect(upstream.fix).toMatch(/syncs once.*back/);
+    expect(upstream.fix).not.toContain("ub open");
   });
 
   it("passes the hub check against a running hub, and says our hub holds the port", async () => {
@@ -393,7 +424,7 @@ describe("ub doctor", () => {
   it("names both causes when the hub refuses the secret", async () => {
     // The refusal an older hub sends is byte-identical to the one a wrong
     // secret sends — it cannot read this client's envelope at all — so the
-    // remedy has to name both rather than send the reader after the secret
+    // fix has to name both rather than send the reader after the secret
     // alone. Same sentence every other surface prints.
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: "a-secret-this-hub-was-not-deployed-with" } });
     const hub = await startHub(box);
@@ -401,10 +432,11 @@ describe("ub doctor", () => {
     const { checks, run } = await doctor(box);
 
     expect(check(checks, "hub").status).toBe("fail");
-    expect(check(checks, "hub").remedy).toContain(AUTH_REJECTED);
-    expect(check(checks, "hub").remedy).toMatch(/same secret/);
-    expect(check(checks, "hub").remedy).not.toContain("ub status");
+    expect(check(checks, "hub").fix).toContain(AUTH_REJECTED);
+    expect(check(checks, "hub").fix).toMatch(/same secret/);
+    expect(check(checks, "hub").fix).not.toContain("ub status");
     expect(check(checks, "credential").reason).toContain("credentials file");
+    expect(check(checks, "clock").status).toBe("pass");
     // And the probe stays loud here. `ub workspace join` silences its own
     // pre-prompt probe (#447); `probeHub` — this check, and `ub open`, which
     // reduces it to a boolean and so never names a refusal itself — must not
@@ -423,8 +455,9 @@ describe("ub doctor", () => {
     expect(mismatch.status).toBe("fail");
     expect(mismatch.reason).toContain(`this client speaks sync protocol ${SYNC_PROTOCOL_VERSION}`);
     expect(mismatch.reason).toContain(`the hub speaks ${hubVersion}`);
-    expect(`${mismatch.reason} ${mismatch.remedy}`).toContain("update this client");
-    expect(mismatch.remedy).not.toContain("ub status");
+    expect(`${mismatch.reason} ${mismatch.fix}`).toContain("update this client");
+    expect(mismatch.fix).not.toContain("ub status");
+    expect(check(checks, "clock").status).toBe("pass");
     expect(run.status).toBe(1);
   });
 
@@ -442,25 +475,56 @@ describe("ub doctor", () => {
     "a clock %s is a %s",
     async (_name, status, offsetSeconds, direction) => {
       const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
-      const port = await skewedClock(offsetSeconds);
-      pointAt(box, `ws://127.0.0.1:${port}`);
+      const server = await silentServer(offsetSeconds);
+      pointAt(box, `ws://127.0.0.1:${server.port}`);
       const { checks } = await doctor(box);
 
       const clock = check(checks, "clock");
       expect(clock.status).toBe(status);
       expect(clock.reason).toMatch(direction);
+      expect(server.clockRequests).toBe(1);
       if (status === "fail") {
-        expect(clock.remedy).toMatch(/clock/);
+        expect(clock.fix).toMatch(/clock/);
       }
     },
   );
 
-  it("skips the clock check when nothing answers an HTTP request", async () => {
+  it("skips the clock check when the hub does not answer", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
     pointAt(box, DEAD_HUB_URL);
     const { checks } = await doctor(box);
 
     expect(check(checks, "clock").status).toBe("skipped");
+    expect(check(checks, "clock").reason).toBe("needs the hub");
+  });
+
+  it.each(["skipped", "refuse", "pending"] as const)("does not read the HTTP clock when the hub probe is %s", async state => {
+    const server = await silentServer(-61, state === "pending" ? "pending" : "refuse");
+    const endpoint = `ws://127.0.0.1:${server.port}`;
+    const box = sandbox({
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint },
+      ...(state === "skipped" ? {} : { credentials: { signingSecret: SECRET } }),
+    });
+    const { checks } = await doctor(box);
+
+    expect(check(checks, "hub").status).toBe(state === "skipped" ? "skipped" : "warn");
+    expect(check(checks, "clock").status).toBe("skipped");
+    expect(check(checks, "clock").reason).toBe("needs the hub");
+    expect(server.clockRequests).toBe(0);
+  });
+
+  it("keeps the clock skip when a reached hub supplies no usable HTTP Date", async () => {
+    const server = await silentServer(null);
+    const box = sandbox({
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: `ws://127.0.0.1:${server.port}` },
+      credentials: { signingSecret: SECRET },
+    });
+    const { checks } = await doctor(box);
+
+    expect(check(checks, "hub").status).toBe("warn");
+    expect(check(checks, "clock").status).toBe("skipped");
+    expect(check(checks, "clock").reason).toMatch(/answered no HTTP date/);
+    expect(server.clockRequests).toBe(1);
   });
 
   it("names both values when the hub's port and the configured endpoint disagree", async () => {
@@ -479,8 +543,8 @@ describe("ub doctor", () => {
     expect(port.reason).toContain(String(dialled));
     // …and how each half is set: one is an environment variable, the other is
     // this machine's configuration and a `ub` command away.
-    expect(port.remedy).toMatch(/PORT/);
-    expect(port.remedy).toMatch(/ub workspace join/);
+    expect(port.fix).toMatch(/PORT/);
+    expect(port.fix).toMatch(/ub workspace join/);
   });
 
   it("tells a foreign process holding the port from our own hub", async () => {
@@ -495,30 +559,32 @@ describe("ub doctor", () => {
     expect(bind.status).toBe("fail");
     expect(bind.reason).toContain(`127.0.0.1:${port}`);
     expect(bind.reason).toMatch(/not an uberblick hub/);
-    expect(bind.remedy).toMatch(/PORT/);
-    expect(bind.remedy).toMatch(/ub workspace join/);
+    expect(bind.fix).toMatch(/PORT/);
+    expect(bind.fix).toMatch(/ub workspace join/);
   });
 
   it("refuses to call a hub that never serves the room reachable, or the port ours", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
-    const port = await silentServer();
+    const { port } = await silentServer();
     pointAt(box, `ws://127.0.0.1:${port}`);
     const { checks } = await doctor(box, {
       PORT: String(port),
     });
 
     // Up, and serving nothing: a connection is not a hub.
-    expect(check(checks, "hub").status).toBe("fail");
+    expect(check(checks, "hub").status).toBe("warn");
     expect(check(checks, "hub").reason).toMatch(/did not finish syncing/);
     // The endpoint is loopback, so the restart it suggests is one `ub` can do.
-    expect(check(checks, "hub").remedy).toMatch(/ub open --no-browser/);
-    expect(check(checks, "hub").remedy).not.toMatch(/mise/);
+    expect(check(checks, "hub").fix).toMatch(/ub open --no-browser/);
+    expect(check(checks, "hub").fix).not.toMatch(/mise/);
     // And speaking the protocol is not proof of whose server it is — only a
     // directory read with our own token would be.
     expect(check(checks, "bind").status).toBe("skipped");
     expect(check(checks, "bind").reason).toMatch(/speaks the protocol/);
     expect(check(checks, "bind").reason).not.toMatch(/is held by an uberblick hub/);
-    expect(check(checks, "bind").remedy).toMatch(/same signing secret/);
+    expect(check(checks, "bind").reason).toMatch(/same signing secret/);
+    expect(check(checks, "bind").fix).toBeNull();
+    expect(check(checks, "clock").status).toBe("pass");
   });
 
   // `access(W_OK)` is advisory for root, which would make the fixture a
@@ -536,7 +602,7 @@ describe("ub doctor", () => {
 
         expect(check(checks, "database").status).toBe("fail");
         expect(check(checks, "database").reason).toContain(database);
-        expect(check(checks, "database").remedy).toMatch(/UBERBLICK_DB/);
+        expect(check(checks, "database").fix).toMatch(/UBERBLICK_DB/);
       } finally {
         // Or the sandbox cannot be removed afterwards.
         chmodSync(readOnly, 0o700);
@@ -549,19 +615,10 @@ describe("ub doctor", () => {
     const none = await doctor(box);
 
     expect(check(none.checks, "mcp").status).toBe("fail");
-    expect(check(none.checks, "mcp").remedy).toMatch(/ub mcp install/);
+    expect(check(none.checks, "mcp").fix).toMatch(/ub mcp install/);
 
     // Claude Code's project-scoped config, written the way `ub mcp install` does.
-    const config = join(box.cwd, ".mcp.json");
-    writeFileSync(
-      config,
-      `${JSON.stringify(
-        { mcpServers: { uberblick: { type: "stdio", command: "ub", args: ["mcp", "serve"] } } },
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
+    const config = wireMcp(box);
     const wired = await doctor(box);
 
     expect(check(wired.checks, "mcp").status).toBe("pass");
@@ -600,7 +657,28 @@ describe("ub doctor", () => {
     expect(run.output).not.toContain(SECRET);
   });
 
-  it("renders the same verdicts for a human, with the remedy under the failure", async () => {
+  it("passes a script gate when the only problems are warnings and skips", async () => {
+    const box = sandbox({
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      credentials: { signingSecret: SECRET },
+    });
+    wireMcp(box);
+    const { checks, ok, run } = await doctor(box);
+
+    expect(check(checks, "hub").status).toBe("warn");
+    expect(check(checks, "clock").status).toBe("skipped");
+    expect([...checks.values()].some(one => one.status === "fail")).toBe(false);
+    expect(ok).toBe(true);
+    expect(run.status).toBe(0);
+
+    const human = await runUbAsync(["doctor"], box, { PORT: "1", HUB_HOST: "127.0.0.1" });
+    expect(human.stdout).toMatch(/warn {2}hub/);
+    expect(human.stdout).toMatch(/skip {2}clock {7}needs the hub/);
+    expect(human.stdout).toMatch(/0 failed, 1 warning, \d+ passed, \d+ skipped/);
+    expect(human.status).toBe(0);
+  });
+
+  it("renders the same verdicts for a human, with the fix under the failure", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const run = await runUbAsync(["doctor"], box, { PORT: "1" });
 
@@ -608,7 +686,33 @@ describe("ub doctor", () => {
     expect(run.stdout).toMatch(/skip {2}credential/);
     expect(run.stdout).toMatch(/FAIL {2}mcp/);
     expect(run.stdout).toMatch(/→ .*ub mcp install/);
-    expect(run.stdout).toMatch(/\d+ failed, \d+ passed, \d+ skipped/);
+    expect(run.stdout).toMatch(/\d+ failed, 0 warnings, \d+ passed, \d+ skipped/);
+    expect(run.stdout.match(/→ /g)).toHaveLength(1);
     expect(run.status).not.toBe(0);
+  });
+
+  it.each([0, 1, 2])("renders fix lines only for problems and counts %s warnings", warnings => {
+    const checks: Check[] = [
+      { name: "workspace", status: "pass", reason: "configured", fix: null },
+      { name: "credential", status: "skipped", reason: "local-only; use ub init for hub sync", fix: null },
+      { name: "mcp", status: "fail", reason: "not registered", fix: "ub mcp install claude" },
+      ...Array.from({ length: warnings }, (_, index): Check => ({
+        name: `hub ${index + 1}`,
+        status: "warn",
+        reason: "hub unavailable",
+        fix: "check the network",
+      })),
+    ];
+    const text = renderDoctor({ version: "test", ok: false, checks });
+
+    expect(text).toContain("ok    workspace   configured\n");
+    expect(text).toContain("skip  credential  local-only; use ub init for hub sync\n");
+    expect(text).toContain("FAIL  mcp         not registered\n      → ub mcp install claude\n");
+    for (let index = 0; index < warnings; index += 1) {
+      const name = `hub ${index + 1}`;
+      expect(text).toContain(`warn  ${name.padEnd(12)}hub unavailable\n      → check the network\n`);
+    }
+    expect(text.match(/→ /g)).toHaveLength(warnings + 1);
+    expect(text).toContain(`1 failed, ${warnings} ${warnings === 1 ? "warning" : "warnings"}, 1 passed, 1 skipped\n`);
   });
 });
