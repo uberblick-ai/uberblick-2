@@ -675,6 +675,21 @@ describe("ub doctor", () => {
     expect(human.stdout).toContain("ok    mcp         Claude Code (.mcp.json)\n");
   });
 
+  it("ignores another server's multiline args in Codex's user config when Claude Code is set up", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    wireMcp(box);
+    const config = join(homeOf(box), ".codex", "config.toml");
+    mkdirSync(dirname(config), { recursive: true });
+    writeFileSync(config, '[mcp_servers.github]\ncommand = "other"\nargs = [\n' +
+      '  "serve",\n  "--token=SECRET",\n]\n', "utf8");
+    const { checks, run } = await doctor(box);
+
+    expect(check(checks, "mcp")).toEqual({
+      name: "mcp", status: "pass", reason: "Claude Code (.mcp.json)", fix: null,
+    });
+    expect(run.status).toBe(0);
+  });
+
   it.each(CLIENTS)("reads $name's project config beside the binding and ignores a subdirectory's shadow", async client => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     wireClient(box, client, "project", { command: "mise", args: ["exec", "--", "ub", "mcp", "serve"] });

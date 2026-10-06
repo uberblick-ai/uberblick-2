@@ -8,12 +8,12 @@
  * documentation and against what each vendor's CLI actually writes.
  *
  * **Nothing here writes a config file.** `ub mcp install` either runs the
- * vendor's own CLI or prints a snippet for somebody to paste, so the only
- * install asks {@link presence}: is our entry there, and is it the one we would
- * register. Doctor reads only the binding variables through {@link doctorEntry}.
- * `JSON.parse` and a scan for
- * every TOML spelling of the key we own are enough for that — a file nothing
- * splices needs no byte-preserving splicer.
+ * vendor's own CLI or prints a snippet for somebody to paste. Install asks
+ * {@link presence} whether our entry is there and matches what it would register.
+ * Doctor reads only the binding variables through {@link doctorEntry}, using
+ * JSON parsing or a conservative reader for Codex's server and env tables.
+ * Unrelated TOML values are skipped without decoding them. No config is edited,
+ * so no byte-preserving splicer is needed.
  *
  * **Nothing echoes a value back.** {@link presence} answers with one of four
  * words and never with anything it read. A config file is exactly where
@@ -264,7 +264,21 @@ function doctorTomlKey(text: string): string[] | null {
   while (rest !== "") {
     const part = /^(?:[\w-]+|"(?:[^"\\]|\\.)*"|'[^']*')/.exec(rest)?.[0];
     if (part === undefined) return null;
-    const value = part.startsWith('"') || part.startsWith("'") ? doctorTomlString(part) : part;
+    let decoded = part;
+    try {
+      // TOML's wide Unicode escape is valid in any quoted key, including ours.
+      if (part.startsWith('"')) {
+        decoded = part.replace(/\\(?:[btnfr"\\]|u[\da-fA-F]{4}|U([\da-fA-F]{8}))/g, (encoded, wide: string | undefined) => {
+          if (wide === undefined) return encoded;
+          const code = Number.parseInt(wide, 16);
+          if (code >= 0xd800 && code <= 0xdfff) throw new Error();
+          return JSON.stringify(String.fromCodePoint(code)).slice(1, -1);
+        });
+      }
+    } catch {
+      return null;
+    }
+    const value = part.startsWith('"') || part.startsWith("'") ? doctorTomlString(decoded) : part;
     if (value === null) return null;
     key.push(value);
     rest = rest.slice(part.length).trimStart();
@@ -276,34 +290,53 @@ function doctorTomlKey(text: string): string[] | null {
   return null;
 }
 
-/** Refuse incomplete one-line values before they can hide apparent tables. */
-function doctorTomlValue(text: string): boolean {
+/**
+ * Find a value's last line so continuation text cannot masquerade as a table.
+ * Only values in our table need the strict one-line grammar and string decoding.
+ */
+function doctorTomlValueEnd(
+  lines: string[],
+  start: number,
+  value: string,
+  strict: boolean,
+): number | null {
   const brackets: string[] = [];
   let quote = "";
   let quoteStart = 0;
   let content = false;
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index] as string;
-    if (quote !== "") {
-      if (quote === '"' && char === "\\") index += 1;
-      else if (char === quote) {
-        if (doctorTomlString(text.slice(quoteStart, index + 1)) === null) return false;
-        quote = "";
+  for (let row = start; row < lines.length; row += 1) {
+    const text = row === start ? value : lines[row] as string;
+    for (let index = 0; index < text.length; index += 1) {
+      const char = text[index] as string;
+      if (quote !== "") {
+        if (quote.startsWith('"') && char === "\\") index += 1;
+        else if (text.startsWith(quote, index)) {
+          if (strict && doctorTomlString(text.slice(quoteStart, index + 1)) === null) return null;
+          index += quote.length - 1;
+          // A multiline string may end with one or two quotes of content.
+          if (quote.length === 3) while (text[index + 1] === char) index += 1;
+          quote = "";
+        }
+        continue;
       }
-      continue;
+      if (char === "#") break;
+      if (!/\s/.test(char)) content = true;
+      if (char === '"' || char === "'") {
+        const multiline = text.startsWith(char.repeat(3), index);
+        if (strict && multiline) return null;
+        quote = multiline ? char.repeat(3) : char;
+        quoteStart = index;
+        index += quote.length - 1;
+      } else if (char === "[" || char === "{") brackets.push(char);
+      else if (char === "]" || char === "}") {
+        if (brackets.pop() !== (char === "]" ? "[" : "{")) return null;
+      }
     }
-    if (char === "#") break;
-    if (!/\s/.test(char)) content = true;
-    if (char === '"' || char === "'") {
-      if (text.startsWith(char.repeat(3), index)) return false;
-      quote = char;
-      quoteStart = index;
-    } else if (char === "[" || char === "{") brackets.push(char);
-    else if (char === "]" || char === "}") {
-      if (brackets.pop() !== (char === "]" ? "[" : "{")) return false;
-    }
+    if (!content || quote.length === 1) return null;
+    if (quote === "" && brackets.length === 0) return row;
+    if (strict) return null;
   }
-  return content && quote === "" && brackets.length === 0;
+  return null;
 }
 
 /**
@@ -318,8 +351,9 @@ function doctorTomlEntry(text: string): DoctorEntry {
   const env: NodeJS.ProcessEnv = {};
   const envKeys = new Set<string>();
   const serverKeys = new Set<string>();
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
+  const lines = text.split("\n");
+  for (let row = 0; row < lines.length; row += 1) {
+    const line = (lines[row] as string).trim();
     if (line === "" || line.startsWith("#")) continue;
     if (line.startsWith("[")) {
       const header = /^(\[\[?)(.+?)(\]\]?)\s*(?:#.*)?$/.exec(line);
@@ -334,13 +368,18 @@ function doctorTomlEntry(text: string): DoctorEntry {
       else return { status: "unusable" };
       continue;
     }
-    const equals = line.indexOf("=");
-    const key = equals === -1 ? null : doctorTomlKey(line.slice(0, equals));
+    // A quoted key may contain '=' or '#'; neither ends that key.
+    const assignment = /^((?:[^"'=#]|"(?:[^"\\]|\\.)*"|'[^']*')+)=(.*)$/.exec(line);
+    const key = assignment === null ? null : doctorTomlKey(assignment[1] as string);
     const ownsTable = table[0] === "mcp_servers" && table[1] === SERVER_NAME;
-    const value = line.slice(equals + 1).trim();
-    if (key === null || !doctorTomlValue(value)) return { status: "unusable" };
+    const value = (assignment?.[2] ?? "").trim();
+    if (key === null) return { status: "unusable" };
     const absolute = [...table, ...key];
-    if (absolute[0] !== "mcp_servers" || absolute[1] !== SERVER_NAME) continue;
+    const ownsEntry = absolute[0] === "mcp_servers" && absolute[1] === SERVER_NAME;
+    const end = doctorTomlValueEnd(lines, row, value, ownsEntry);
+    if (end === null) return { status: "unusable" };
+    row = end;
+    if (!ownsEntry) continue;
     if (!ownsTable) return { status: "unusable" };
     if (table.length === 2) {
       const name = key.join(".");
