@@ -49,6 +49,7 @@ describe("remote device commands", () => {
     expect(JSON.parse(status.stdout)).toMatchObject({ credentialPresent: true, hub: { status: "connected" } });
     const doctor = await runUbAsync(["doctor", "--json"], box);
     const checks = JSON.parse(doctor.stdout).checks;
+    expect(checks.find((check: { name: string }) => check.name === "login").status).toBe("pass");
     expect(checks.find((check: { name: string }) => check.name === "hub").status).toBe("pass");
     expect(hub.authentications.length).toBeGreaterThan(0);
     for (const auth of hub.authentications) expect(auth.claims?.kid).toBe(login.credential.record.id);
