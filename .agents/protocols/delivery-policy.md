@@ -139,7 +139,9 @@ get the answer once.
 mechanism that the framework, an existing dependency (shadcn over Radix,
 Tailwind) or a well-maintained library would cover. A PR that adds a UI
 library records why it fits: maintenance, size, licence, accessibility and
-touch support. Custom mechanics need a person's confirmation.
+touch support. Custom mechanics need a person's confirmation. The corpus
+document **Web UI system** (`622ca00f-3dbd-4f65-b749-e46a81e704c4`) owns the
+principles, including how to choose a component.
 
 The tier-3 trigger list is the owner-controlled autonomy boundary. Verify gates
 at the candidate SHA rather than relying on a session's assertion.
