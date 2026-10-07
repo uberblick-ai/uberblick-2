@@ -26,12 +26,9 @@ inspect the code and Pointers it depends on.
   earlier run's work: continue it
   on its branch and hand it off. Any other open pull request that closes this
   issue is not yours to replace: escalate, naming it.
-- Apply the [scheduling rules](../protocols/workflow.md#scheduling-semantics) to
-  open pull requests expected to edit the same substantive files. When one blocks
-  this issue, mark this issue blocked by the issue that PR closes
-  (`gh issue edit <N> --add-blocked-by <M>`) and finish
-  `defer`, naming it. A mechanical-overlap classification in Pointers counts only
-  when the open PR's current diff confirms it.
+- An open pull request that edits the same files is not a block: record it
+  in Pointers and build; whichever lands second merges the base
+  ([scheduling rules](../protocols/workflow.md#scheduling-semantics)).
 - A contract prepared more than six days ago is checked before it is built: the
   `ready` label or the preparer's handoff dates it. Check that its Pointers
   still resolve at that base, that the code it targets still behaves as the body

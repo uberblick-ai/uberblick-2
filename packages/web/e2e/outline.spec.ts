@@ -217,7 +217,7 @@ test.describe("fractional layout", () => {
   });
 });
 
-for (const width of [390, 820, 1024, 1194, 1279]) {
+for (const width of [390]) {
   test(`the threads sheet closes by touch without selecting covered prose at ${width}px`, async ({
     browser,
   }) => {

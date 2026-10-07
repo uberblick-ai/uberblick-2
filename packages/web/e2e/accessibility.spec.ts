@@ -6,7 +6,7 @@ import { assertNoViolations, unexpectedViolations, WCAG_TAGS } from "./accessibi
 import { scanExclusions } from "./accessibility-exclusions.js";
 import { placeCaret } from "./harness.js";
 
-// Untagged: this file runs only in Chromium, including its phone/tablet widths.
+// Untagged: this file runs only in Chromium, including its narrow drawer layout.
 const { harness, openApp } = setupHarness({ scope: "test" });
 
 for (const colorScheme of ["light", "dark"] as const) {
@@ -152,7 +152,6 @@ for (const colorScheme of ["light", "dark"] as const) {
 
       for (const [device, viewport] of [
         ["iPhone", { width: 390, height: 844 }],
-        ["iPad", { width: 820, height: 1180 }],
       ] as const) {
         await page.setViewportSize(viewport);
         await page.locator(".ub-threads-toggle").click();

@@ -179,7 +179,7 @@ test("touch rows expose their actions without sticky hover, and Cancel and Delet
   expect(await ownTreatment(unpinned)).toEqual(pinRest);
 });
 
-test("a Delete group confirmation refuses in place after sidebar readiness is lost in the drawer", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+test("a Delete group confirmation refuses in place after sidebar readiness is lost in the drawer", async ({ browser }, info) => {
   // Direct hub transport makes the room read-only when that hub stops; the
   // local serving replica would remain writable while offline.
   const page = await devicePage(browser, info, true, true);

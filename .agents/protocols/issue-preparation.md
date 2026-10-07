@@ -44,9 +44,10 @@ recorded `origin/main` SHA. `not-started` is only for a clarification
 
 Record discovered semantic prerequisites — functionality supplied by another
 issue — using [native relationships](../../.github/ISSUE_SPEC.md#relationships).
-For discovered open PRs, apply [scheduling semantics](workflow.md#scheduling-semantics),
-recording a blocked-by relationship or the overlap in Pointers as it says. Invent
-no dependency, scan no further and leave the other issue unedited.
+Record a discovered open PR that edits the same files in Pointers and finish
+normally; the implementer builds alongside it under
+[scheduling semantics](workflow.md#scheduling-semantics). Invent no dependency,
+scan no further and leave the other issue unedited.
 
 Keep investigation proportional. On resumption or relevant main changes, refresh
 only affected evidence, corpus sources and governing instructions; expand discovery

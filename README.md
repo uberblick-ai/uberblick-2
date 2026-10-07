@@ -178,16 +178,20 @@ Other computers connect over HTTPS for a public DNS name or, as the recommended
 optional network layer, Tailscale. Caddy serves the app and proxies sync and
 sign-in; the hub requires device credentials on every deployment route.
 
-`mise run e2e` is the only task that drives a browser. It starts its own hub on
-an ephemeral port with a throwaway signing secret and a temp database, and its
-own Vite dev server on an ephemeral port, so it needs no fnox key and cannot
-collide with a running `mise run dev`. It covers exactly what jsdom cannot —
+`mise run e2e` is the only task that drives a browser. It builds one shared app
+bundle per run, including filtered runs, and each harness starts its own hub and
+real `ub open` on ephemeral ports with private state. The compiled fallbacks are
+run-owned too, so it needs no fnox key and cannot collide with a running
+`mise run dev`. Spec files run across two workers; tests in a file stay serial
+and share a harness, except proofs that require fresh state per test. Only
+release-runtime, shared-controls and the compiled-loopback fallback proof build
+their own bundles. It covers exactly what jsdom cannot —
 two live clients converging on one block, a rendered remote cursor, and fresh
 and reloaded browsers receiving only what their server sends. Everything else
 belongs in `mise run test`. Arguments after `--` go to Playwright unchanged; for
 example, `mise run e2e -- --repeat-each=3 outline.spec.ts` runs only that spec
 three times. The full suite runs in Chromium; a tagged device and engine set
-also runs in WebKit at iPhone, iPad and 13-inch MacBook sizes. WebKit requires
+also runs in WebKit at iPhone and 13-inch MacBook sizes. WebKit requires
 host system libraries, which CI installs separately; the task downloads engines
 without installing system packages. A missing library fails the full run.
 `mise run e2e -- --project=chromium` runs Chromium alone. Real-device checks for
