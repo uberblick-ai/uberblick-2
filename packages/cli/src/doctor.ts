@@ -35,14 +35,16 @@
 
 
 import { readDeviceLogin } from "@uberblick/hub/device-login";
+import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import {
   CLOCK_SKEW_SECONDS,
   MAX_TOKEN_LIFETIME_SECONDS,
 } from "@uberblick/hub/token";
 import { AUTH_REJECTED, protocolSkew } from "@uberblick/hub/protocol";
+import { parseWorkspaceId } from "@uberblick/schema";
 import type { McpConfig } from "@uberblick/mcp-server";
 import { inspectExistingStore } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "./budget.js";
@@ -51,9 +53,10 @@ import { readCredentials, resolveConfig, requireBinding } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
-import type { Scope } from "./mcp-config.js";
-import { DEFAULT_ENTRY, TARGETS, presence, targetFile } from "./mcp-config.js";
+import type { DoctorEntry, TargetFile, TargetName } from "./mcp-config.js";
+import { TARGETS, claudeDoctorEntries, doctorEntry, targetFile } from "./mcp-config.js";
 import { DEFAULT_WEB_PORT, WEB_HOST, whoHoldsPort, whyNotStartable } from "./open.js";
+import { resolveProjectBinding } from "./project-binding.js";
 import type { Endpoint, HubProbe } from "./probes.js";
 import {
   endpointOf,
@@ -526,56 +529,108 @@ async function localHubCheck(
 
 // --- MCP wiring --------------------------------------------------------------
 
-/** Every scope `ub mcp install` can target, in the order it prefers them. */
-const SCOPES: Scope[] = ["project", "user"];
+const CLIENT_NAMES: Record<TargetName, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  cursor: "Cursor",
+};
+
+/** Claude Code shares local scope with the main checkout of a linked worktree. */
+function claudeProjectKey(projectRoot: string): string {
+  const git = (args: string[]) => spawnSync(
+    "git",
+    ["-C", projectRoot, ...args],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 1_000 },
+  );
+  const metadata = git(["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "--show-toplevel"]);
+  if (metadata.status !== 0) return projectRoot;
+  const [directory, common, root] = metadata.stdout.split("\n");
+  if (directory === common) return root ?? projectRoot;
+  // Main worktree first, with NUL-delimited paths rather than quoted text.
+  // Comparing metadata distinguishes linked worktrees from separate Git dirs.
+  const worktrees = git(["worktree", "list", "--porcelain", "-z"]);
+  const first = worktrees.stdout?.split("\0")[0];
+  return worktrees.status === 0 && first?.startsWith("worktree ")
+    ? first.slice("worktree ".length)
+    : projectRoot;
+}
 
 function mcpCheck(env: NodeJS.ProcessEnv, cwd: string, resolved: ResolvedConfig | null): Check {
-  const binding = resolved?.binding;
-  const wanted = binding == null ? DEFAULT_ENTRY : { ...DEFAULT_ENTRY, env: { UB_HUB_URL: binding.hubUrl ?? "local", UB_WORKSPACE_ID: binding.workspaceId } };
-  const registered: string[] = [];
-  const unusable: string[] = [];
-  let looked = 0;
-  let custom = false;
+  if (resolved === null || resolved.binding === null) return skipped("mcp", "needs a workspace");
+  const binding = resolved.binding;
+  const projectRoot = resolved.paths.projectConfig === null
+    ? resolve(cwd)
+    : dirname(resolved.paths.projectConfig);
+  const setup: string[] = [];
+  const problems: string[] = [];
+  let unreadable = false;
+
+  const inspect = (target: TargetName, file: TargetFile, entry: DoctorEntry, project: boolean) => {
+    if (entry.status === "absent") return;
+    const path = project ? relative(projectRoot, file.path) : file.path;
+    const client = `${CLIENT_NAMES[target]} (${path})`;
+    if (entry.status !== "entry") {
+      problems.push(`could not read ${client}`);
+      unreadable = true;
+      return;
+    }
+    // An unpinned entry follows this project regardless of its spawn command.
+    if (Object.keys(entry.env).length === 0) {
+      setup.push(client);
+      return;
+    }
+    try {
+      // A legacy-only pin (even empty) must not fall through to a project file.
+      if (entry.env.UB_WORKSPACE_ID === undefined && entry.env.UB_HUB_URL === undefined) {
+        throw new Error("legacy pin");
+      }
+      const pinned = resolveProjectBinding({ env: entry.env }).binding;
+      if (pinned === null) throw new Error("unreadable pin");
+      if (
+        parseWorkspaceId(pinned.workspaceId).uuid === parseWorkspaceId(binding.workspaceId).uuid &&
+        pinned.hubUrl === binding.hubUrl
+      ) {
+        setup.push(client);
+      } else {
+        problems.push(`${client} is pinned to another workspace or hub`);
+      }
+    } catch {
+      // Never quote an entry's values or the resolver's parser messages.
+      problems.push(`could not read workspace pin in ${client}`);
+      unreadable = true;
+    }
+  };
 
   for (const target of TARGETS) {
-    for (const scope of SCOPES) {
-      const file = targetFile(target, scope, cwd, env);
-      looked += 1;
-      // The same presence probe `ub mcp install` decides with, so the two
-      // commands cannot disagree about what is wired up. Nothing is quoted back
-      // out of a config file — not its contents, and not a parser's complaint
-      // about them: a file that is there and will not read is named by path.
-      const found = presence(file, wanted);
-      if (found === "absent") {
-        continue;
+    const project = targetFile(target, "project", projectRoot, env);
+    const user = targetFile(target, "user", projectRoot, env);
+    if (target === "claude") {
+      const held = claudeDoctorEntries(user, claudeProjectKey(projectRoot));
+      // Same-name entries do not merge; local hides project, which hides user.
+      if (held.local.status !== "absent") inspect(target, user, held.local, false);
+      else {
+        const entry = doctorEntry(project);
+        if (entry.status !== "absent") inspect(target, project, entry, true);
+        else inspect(target, user, held.user, false);
       }
-      if (found === "unusable") {
-        unusable.push(file.path);
-        continue;
-      }
-      registered.push(`${target} (${scope}): ${file.path}`);
-      custom = custom || found === "foreign";
+    } else {
+      inspect(target, project, doctorEntry(project), true);
+      if (user.path !== project.path) inspect(target, user, doctorEntry(user), false);
     }
   }
 
-  // Reported whether or not something else is wired up: a config a command
-  // cannot read is a fact about this machine either way, and "no client
-  // registers uberblick" would be an answer this check does not have.
-  const unread =
-    unusable.length === 0 ? "" : `; could not read ${unusable.join(", ")}`;
-  const first = registered[0];
-  if (first !== undefined) {
-    const note = custom ? ", registration differs from the selected binding or command" : "";
-    const more = registered.length > 1 ? ` (and ${registered.length - 1} more)` : "";
-    return pass("mcp", `registered in ${first}${more}${note}${unread}`);
+  const install = "ub mcp install claude   (or codex)";
+  if (problems.length > 0) {
+    return warn(
+      "mcp",
+      problems.join("; "),
+      unreadable
+        ? `repair or move the file named above, then ${install}`
+        : "remove or update the workspace pin in the file named above, then restart the agent",
+    );
   }
-  return fail(
-    "mcp",
-    `no MCP client registers uberblick — looked in ${looked} configs for claude, codex and cursor${unread}`,
-    unusable.length === 0
-      ? "wire one up with `ub mcp install [claude|codex|cursor]`"
-      : "repair or move the file named above, then `ub mcp install [claude|codex|cursor]`",
-  );
+  if (setup.length > 0) return pass("mcp", setup.join(", "));
+  return warn("mcp", "MCP client is not set up for this project", install);
 }
 
 // --- the report --------------------------------------------------------------
@@ -636,7 +691,7 @@ export async function doctorReport(
     hub.check,
     await clockCheck(config, hub),
     await localHubCheck(config, endpoint, resolvedEnv, dial),
-    mcpCheck(resolvedEnv, cwd, resolved),
+    mcpCheck(resolvedEnv, cwd, config === null ? null : resolved),
   );
 
   return {
