@@ -80,7 +80,7 @@ describe("ub env", () => {
     expect(run.status).not.toBe(0);
     expect(run.stdout).toBe("");
     expect(run.stderr).toContain("Legacy WORKSPACE_ID / HUB_URL");
-    expect(run.stderr).toContain("UB_WORKSPACE_ID and UB_HUB_URL");
+    expect(run.stderr).toContain("UB_WORKSPACE_ID (add UB_HUB_URL until this machine has its record)");
     expect(run.output).not.toContain(SECRET);
   });
 
