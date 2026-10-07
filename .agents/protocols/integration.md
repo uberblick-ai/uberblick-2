@@ -70,7 +70,7 @@ Allow at most one refresh publication attempt per PR. Any prior durable trusted
 `base-refresh-adopted old=OLD_SHA base=BASE_SHA new=NEW_SHA` comment on this PR
 consumes that allowance, even after later implementer commits. An intent whose
 push failed or cannot be confirmed still reserves the attempt; normal gates
-continue on the unchanged head. This bounds interrupted publication and repair
+continue when the remote head is verified unchanged. This bounds interrupted publication and repair
 without relying on rewritten ancestry to prove whether an earlier push landed.
 Read records from the assignment's trusted comments, not just the windowed
 `feedback`; later handoffs never erase them. Require current-head review evidence
