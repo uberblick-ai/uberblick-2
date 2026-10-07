@@ -112,7 +112,7 @@ function skipped(name: string, reason: string): Check {
 
 const WORKSPACE_REMEDY =
   "`ub init` creates a workspace; `ub workspace join <hub>/<workspace-id>` binds " +
-  "this project to one that already exists; `ub workspace use <id> --hub <url|local>` adopts one " +
+  "this project to one that already exists; `ub workspace use <id>` adopts one " +
   "this machine already has";
 
 /**

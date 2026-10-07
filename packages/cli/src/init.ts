@@ -87,9 +87,10 @@ import { acquireInitLock, seedLockPath } from "./init-lock.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
-import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
+import { type ProjectBinding, resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { normalizeRemoteUrl, remoteProblem } from "./remote.js";
 import { seedStarterDocs } from "./starter.js";
+import { rememberWorkspaceBindings } from "./workspace-registry.js";
 
 /**
  * Awareness colours to default to.
@@ -230,10 +231,12 @@ no endpoint is stored. Remote hubs use this machine’s stored login, never a
 signing secret. What is generated is written to
 $XDG_CONFIG_HOME/uberblick/credentials.json at mode 0600, and is never printed.
 
-The complete UB_WORKSPACE_ID and UB_HUB_URL binding in the environment — a project .mcp.json's pin, or your own
+UB_WORKSPACE_ID in the environment — a project .mcp.json's pin, or your own
 shell — outranks .uberblick.json for commands, but is never implicitly saved by init.
+UB_HUB_URL is needed only until this machine has recorded that workspace's hub;
+use UB_HUB_URL=local for local-only workspaces.
 If it differs from the project file, first select the project with
-\`ub workspace use <id> --hub <url|local>\`, or pass --workspace and a hub URL together.
+\`ub workspace use <id>\`, or pass --workspace and a hub URL together.
 The project file contains only the workspace and hub; identity and credentials
 remain in the private user configuration.
 `;
@@ -426,12 +429,12 @@ export async function initCommand(
   if (resolved.origins.workspace === "environment" &&
       (effective?.workspaceId !== selected.binding?.workspaceId || effective?.hubUrl !== selected.binding?.hubUrl) &&
       !(flags.workspace !== undefined && flags.hub !== undefined)) {
-    io.err("ub init: the environment selects a different binding, or has no matching project binding. Nothing was written. Select the intended project explicitly with `ub workspace use <id> --hub <url|local>`, or pass both --workspace <id> and a hub URL. Environment overrides are not saved implicitly.\n");
+    io.err("ub init: the environment selects a different binding, or has no matching project binding. Nothing was written. Select a recorded workspace with `ub workspace use <id>`, or pass both --workspace <id> and a hub URL. Environment overrides are not saved implicitly.\n");
     return 1;
   }
   if (selected.binding === null && flags.workspace === undefined &&
       (existing.raw?.workspace !== undefined || existing.raw?.hubUrl !== undefined)) {
-    io.err("ub init: a legacy machine workspace or hub is configured, but this project has no binding. Nothing was written or seeded. Review the old configuration, then explicitly select it with `ub workspace use <workspace-id> --hub <hub-url|local>`; use `ub workspace join <workspace-url>` to hydrate a remote workspace. No legacy URL or credential has been copied.\n");
+    io.err("ub init: a legacy machine workspace or hub is configured, but this project has no binding. Nothing was written or seeded. Review the old configuration, then select a recorded workspace with `ub workspace use <workspace-id>`; serve once with UB_WORKSPACE_ID and UB_HUB_URL=local to record an unrecorded local workspace, or use `ub workspace join <workspace-url>` to hydrate a remote workspace. No legacy URL or credential has been copied.\n");
     io.err(`To finish migration after selecting the projects you want to keep, remove only the obsolete workspace and hubUrl keys from ${resolved.paths.userConfig}. Preserve the other fields and credentials.json. Then \`ub init\` can create a fresh workspace in an unbound directory.\n`);
     return 1;
   }
@@ -462,7 +465,7 @@ export async function initCommand(
   if (flags.workspace !== undefined && inForceWorkspace !== null &&
       parseWorkspaceId(flags.workspace).uuid !== parseWorkspaceId(inForceWorkspace).uuid &&
       flags.hub === undefined) {
-    io.err("ub init: a different workspace needs an explicit hub. Use `ub workspace use <id> --hub <url|local>`.\n");
+    io.err("ub init: a different workspace needs an explicit hub. Use `ub workspace use <id>` for a recorded workspace, or `ub workspace join <workspace-url>` to fetch it.\n");
     return 2;
   }
   if (flags.hub !== undefined && bound !== null && bound !== flags.hub) {
@@ -660,6 +663,8 @@ export async function initCommand(
   // run's binding, or one that was already there. Settled under the lock,
   // because that is the only reading of it nothing can race.
   let hubInForce: string | null = null;
+  let previousBinding: ProjectBinding | null = null;
+  let deferredBinding = false;
   // Replaced once the workspace on disk is known.
   let mcpEnv: NodeJS.ProcessEnv = resolved.env;
   try {
@@ -684,6 +689,7 @@ export async function initCommand(
     // argument. The refusal returns from inside the lock, which the `finally`
     // below releases, and nothing has been written yet at this point.
     const settledBinding = resolveProjectBinding({ env: {} });
+    previousBinding = settledBinding.binding;
     const settledHub = settledBinding.binding?.hubUrl ?? null;
     if (binding !== null && settledHub !== null && settledHub !== binding) {
       io.err(
@@ -759,7 +765,16 @@ export async function initCommand(
     if (hubInForce !== null && usesDeviceLogin(hubInForce, { ...process.env, HUB_ADMISSION: undefined })) {
       for (const warning of writeHubAdmission(hubInForce, true).warnings) warnings.add(warning);
     }
-    configPath = writeProjectBinding({ workspaceId: workspace, hubUrl: hubInForce });
+    // A fresh binding claims the generated UUID so concurrent init runs adopt it.
+    // Existing bindings wait until seeding succeeds: then their old workspace is
+    // recorded before replacement, without adding records on a failed run.
+    if (previousBinding === null) {
+      configPath = writeProjectBinding({ workspaceId: workspace, hubUrl: hubInForce }, { record: false });
+    } else {
+      if (settledBinding.path === null) throw new Error("project binding path disappeared");
+      configPath = settledBinding.path;
+      deferredBinding = true;
+    }
 
     // --- the signing secret -------------------------------------------------
     // The raw environment, not `resolved.env`: what matters here is whether
@@ -896,7 +911,8 @@ export async function initCommand(
       // run's to seed either — that is what `--workspace` opting out means.
       const selectedNow = resolveProjectBinding({ env: {} }).binding;
       const configured = selectedNow?.workspaceId ?? null;
-      if (configured !== persistedWorkspace || (selectedNow?.hubUrl ?? null) !== hubInForce) {
+      const expected = deferredBinding ? previousBinding : { workspaceId: persistedWorkspace, hubUrl: hubInForce };
+      if (configured !== expected?.workspaceId || (selectedNow?.hubUrl ?? null) !== expected.hubUrl) {
         warnings.add(
           `this machine is configured for ${configured ?? "no workspace"} now, ` +
             `not ${persistedWorkspace} — another \`ub init\` settled that ` +
@@ -976,14 +992,27 @@ export async function initCommand(
     return 1;
   }
 
+  const recordLock = await acquireInitLock();
+  try {
+    const completedBinding = { workspaceId: persistedWorkspace, hubUrl: hubInForce };
+    if (deferredBinding) {
+      const current = resolveProjectBinding({ env: {} }).binding;
+      if (current?.workspaceId !== previousBinding?.workspaceId || current?.hubUrl !== previousBinding?.hubUrl) {
+        io.err("ub init: the project binding changed while this run was seeding. Its replacement and workspace records were not written; run init again.\n");
+        return 1;
+      }
+      writeProjectBinding(completedBinding, { path: configPath });
+    } else {
+      // Winner adoption already settled persistedWorkspace; a later project
+      // switch must not divert this run's successful registration.
+      rememberWorkspaceBindings([completedBinding]);
+    }
+  } finally {
+    recordLock.release();
+  }
   if (flags.mcp === true) {
-    // The wiring itself lives in `ub mcp install`, and this delegates to it
-    // print-only: `--print` runs nothing, so a bootstrap never reaches for a
-    // vendor CLI and registers a server in somebody's agent as a side effect of
-    // `ub init` — with `claude` on PATH, no flag of it asked for that. What
-    // `--mcp` buys is being shown the snippet and where it goes; running the
-    // vendor is `ub mcp install`, on purpose. A nonzero answer is only a
-    // warning: everything `ub init` was asked to settle is settled already.
+    // Wiring is print-only, and follows the completed binding above. A failed
+    // snippet is a warning: everything init was asked to settle is settled.
     if ((await installCommand(["--print"], io)) !== 0) {
       io.err("ub init: no MCP snippet was printed — see above\n");
     }

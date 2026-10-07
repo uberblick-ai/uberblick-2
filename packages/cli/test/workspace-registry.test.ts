@@ -1,0 +1,80 @@
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { publishOwnerOnly as realPublish } from "@uberblick/hub/safe-write";
+import { acquireInitLock } from "../src/init-lock.js";
+import { writeProjectBinding } from "../src/project-binding.js";
+import { publishOwnerOnly } from "../src/safe-write.js";
+import { readWorkspaceHub, rememberWorkspaceBinding, workspaceRegistryPath } from "../src/workspace-registry.js";
+import { removeTempDirs, runUb, sandbox } from "./helpers.js";
+
+vi.mock("../src/safe-write.js", async (original) => ({
+  ...await original<typeof import("../src/safe-write.js")>(),
+  publishOwnerOnly: vi.fn((...args: Parameters<typeof realPublish>) => realPublish(...args)),
+}));
+afterAll(removeTempDirs);
+afterEach(() => vi.mocked(publishOwnerOnly).mockImplementation(realPublish));
+const previous = "11111111-1111-4111-8111-111111111111";
+const selected = "22222222-2222-4222-8222-222222222222";
+
+describe("workspace record failure boundaries", () => {
+  it.each([false, true])("failed binding publication restores records exactly (existing registry: %s)", async (existing) => {
+    const box = sandbox({ projectBinding: { workspaceId: previous, hubUrl: "wss://previous.example.test/ws" } });
+    if (existing) await rememberWorkspaceBinding({ workspaceId: selected, hubUrl: null }, box.env);
+    const registry = workspaceRegistryPath(box.env);
+    const original = existing ? readFileSync(registry) : null;
+    const path = join(box.cwd, ".uberblick.json");
+    const bindingBefore = readFileSync(path);
+    vi.mocked(publishOwnerOnly).mockImplementation((target, contents, command) => {
+      if (target === path) throw new Error("injected project publication failure");
+      realPublish(target, contents, command);
+    });
+    const lock = await acquireInitLock(box.env);
+    try {
+      expect(() => writeProjectBinding({ workspaceId: selected, hubUrl: "wss://joined.example.test/ws" },
+        { cwd: box.cwd, env: box.env, record: "join" })).toThrow("injected project publication failure");
+    } finally { lock.release(); }
+    expect(readFileSync(path)).toEqual(bindingBefore);
+    expect(readWorkspaceHub(previous, box.env)).toBeUndefined();
+    if (original === null) expect(existsSync(registry)).toBe(false);
+    else expect(readFileSync(registry)).toEqual(original);
+  });
+
+  it("failed registry publication leaves the project and prior records untouched", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: previous, hubUrl: null } });
+    await rememberWorkspaceBinding({ workspaceId: previous, hubUrl: null }, box.env);
+    const registry = workspaceRegistryPath(box.env);
+    const recordsBefore = readFileSync(registry);
+    const path = join(box.cwd, ".uberblick.json");
+    const bindingBefore = readFileSync(path);
+    vi.mocked(publishOwnerOnly).mockImplementation((target, contents, command) => {
+      if (target === registry) throw new Error("injected registry publication failure");
+      realPublish(target, contents, command);
+    });
+    const lock = await acquireInitLock(box.env);
+    try {
+      expect(() => writeProjectBinding({ workspaceId: selected, hubUrl: null }, { cwd: box.cwd, env: box.env }))
+        .toThrow("injected registry publication failure");
+    } finally { lock.release(); }
+    expect(readFileSync(path)).toEqual(bindingBefore);
+    expect(readFileSync(registry)).toEqual(recordsBefore);
+  });
+
+  it("refuses corrupt records instead of treating an unknown workspace as local or overwriting settings", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: previous, hubUrl: null }, userConfig: { displayName: "operator", future: { retained: true } } });
+    await rememberWorkspaceBinding({ workspaceId: selected, hubUrl: null }, box.env);
+    const registry = workspaceRegistryPath(box.env);
+    writeFileSync(registry, "{misplaced-sensitive-value");
+    const path = join(box.cwd, ".uberblick.json");
+    const config = join(box.configHome, "uberblick", "config.json");
+    const bindingBefore = readFileSync(path);
+    const settingsBefore = readFileSync(config);
+    const run = runUb(["workspace", "use", selected], box);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("Invalid workspace records");
+    expect(run.stderr).not.toContain("misplaced-sensitive-value");
+    expect(readFileSync(path)).toEqual(bindingBefore);
+    expect(readFileSync(config)).toEqual(settingsBefore);
+    expect(readFileSync(registry, "utf8")).toBe("{misplaced-sensitive-value");
+  });
+});

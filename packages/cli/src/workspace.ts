@@ -12,7 +12,7 @@ import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";
 import { migrateHubAdmissions, resolveConfig, writeHubAdmission } from "./config.js";
 import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
-import { normalizeRemoteUrl } from "@uberblick/hub/remote-url";
+import { readWorkspaceHub, recordedWorkspaceIds } from "./workspace-registry.js";
 import { takeHelp } from "./help.js";
 import { workspaceMemberCommand } from "./workspace-member.js";
 import type { InitLock } from "./init-lock.js";
@@ -31,7 +31,7 @@ commands:
   join <connection-url>       join an existing hub workspace
   member <command>            grant workspace access and manage members
   list [--json]               workspaces this machine has a database for
-  use <id> --hub <url|local>  select a workspace and hub in this project
+  use <id>                    select a recorded workspace in this project
 
 options:
   -h, --help             show this help; after a command, that command's help
@@ -159,7 +159,8 @@ function showWorkspace(io: Io): number {
     io.err(
       "ub workspace: no workspace configured. There is no default — a guessed " +
         "workspace would open a corpus nobody chose. Run `ub init` to create " +
-        "one, or `ub workspace use <id> --hub <url|local>` to adopt one that exists.\n",
+        "one, or `ub workspace use <id>` to select one this machine has recorded. " +
+        "Fetch a shared workspace with `ub workspace join <workspace-url>`.\n",
     );
     return 1;
   }
@@ -243,9 +244,9 @@ function listCommand(argv: string[], io: Io): number {
 /**
  * What `<id>` names.
  *
- * A full id — bare or decorated — is taken as given, whether or not this machine
- * has heard of it: being handed a uuid *is* how you join a workspace, and the
- * replica hydrates the first time something serves it. Anything else has to
+ * A full id — bare or decorated — is parsed independently of machine knowledge.
+ * `use` checks its record afterward; `mcp install --workspace` can still pin a
+ * complete binding before this machine has served it. Anything else has to
  * resolve against what `list` knows, and the two ways that fails are told apart
  * on purpose: "that is not a uuid" sends you to check what you pasted, "nothing
  * here starts with that" sends you to `ub workspace list`.
@@ -256,7 +257,7 @@ function listCommand(argv: string[], io: Io): number {
  */
 export function resolveWorkspaceId(
   raw: string,
-  known: readonly WorkspaceEntry[],
+  known: readonly Pick<WorkspaceEntry, "uuid">[],
 ): { id: string } | { error: string } {
   try {
     parseWorkspaceId(raw);
@@ -283,8 +284,8 @@ export function resolveWorkspaceId(
     return {
       error:
         `no workspace on this machine starts with ${JSON.stringify(raw)}. ` +
-        "`ub workspace list` shows them; a full uuid is accepted even when it " +
-        "is not among them",
+        "`ub workspace list` shows replicas; fetch a shared workspace with " +
+        "`ub workspace join <workspace-url>`",
     };
   }
   return {
@@ -294,54 +295,52 @@ export function resolveWorkspaceId(
   };
 }
 
-export const WORKSPACE_USE_HELP = `usage: ub workspace use <id> [--hub <url|local>]
+export const WORKSPACE_USE_HELP = `usage: ub workspace use <id>
 
 Select a workspace and hub together in the nearest .uberblick.json, or create
 one in the current directory. Terminal commands and project MCP sessions use it.
 
 operands:
   <id>              a workspace <uuid>, a decorated <slug>-<uuid>, or a unique
-                    prefix of a local UUID
+                    prefix of a recorded UUID
 
 options:
-  --hub <url|local>  explicit hub URL, or local for this computer
   -h, --help        show this help
 
-The hub is required unless the project file already selects this workspace. An existing local
-database does not identify which hub owns it. This command moves no documents
-and verifies no membership; use \`ub workspace join\` to hydrate a remote workspace.
-Complete UB_WORKSPACE_ID and UB_HUB_URL environment overrides still take priority.
+Uses the hub this machine recorded for the workspace, or local. An unknown
+workspace must first be fetched with \`ub workspace join <workspace-url>\`.
+This command moves no documents and verifies no membership.
+UB_WORKSPACE_ID environment overrides still take priority.
 `;
 
 async function useCommand(argv: string[], io: Io): Promise<number> {
   if (takeHelp(argv, io, WORKSPACE_USE_HELP)) return 0;
 
   let raw: string | undefined;
-  let hub: string | null | undefined;
   try {
-    const { positionals, values } = parseArgs({
+    const { positionals } = parseArgs({
       args: argv,
-      options: { hub: { type: "string" } },
+      options: {},
       allowPositionals: true,
     });
     if (positionals.length !== 1) {
       throw new Error("expected exactly one workspace id");
     }
     raw = positionals[0];
-    hub = values.hub === undefined ? undefined : values.hub === "local" ? null : normalizeRemoteUrl(values.hub);
   } catch (error) {
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
-    io.err("usage: ub workspace use <id> [--hub <url|local>]\n");
+    io.err("usage: ub workspace use <id>\n");
     return 2;
   }
   if (raw === undefined) {
-    io.err("usage: ub workspace use <id> [--hub <url|local>]\n");
+    io.err("usage: ub workspace use <id>\n");
     return 2;
   }
 
-  let entries: WorkspaceEntry[];
+  let entries: Pick<WorkspaceEntry, "uuid">[];
   try {
-    entries = listWorkspaces().entries;
+    const ids = new Set([...listWorkspaces().entries.map(entry => entry.uuid), ...recordedWorkspaceIds()]);
+    entries = [...ids].map(uuid => ({ uuid }));
   } catch (error) {
     // Refused rather than resolved against a short list: a prefix that quietly
     // stopped matching would bind this directory to the wrong workspace.
@@ -355,14 +354,10 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   }
   const id = resolved.id;
 
-  // Environment overrides select this process, never a persistence default.
-  const current = resolveProjectBinding({ env: {} }).binding;
+  let hub = readWorkspaceHub(id);
   if (hub === undefined) {
-    if (current === null || parseWorkspaceId(current.workspaceId).uuid !== parseWorkspaceId(id).uuid) {
-      io.err("ub workspace use: specify --hub <url> or --hub local when selecting a different workspace.\n");
-      return 2;
-    }
-    hub = current.hubUrl;
+    io.err("ub workspace use: this machine has no hub record for that workspace. Fetch it with `ub workspace join <workspace-url>`.\n");
+    return 1;
   }
   let path: string;
 
@@ -375,6 +370,9 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   }
 
   try {
+    // A promotion/fetch may have finished while this command waited for the lock.
+    hub = readWorkspaceHub(id);
+    if (hub === undefined) throw new Error("workspace record disappeared; fetch it with `ub workspace join <workspace-url>`");
     // Preserve endpoint metadata before the user removes obsolete selection keys.
     const admission = hub !== null && usesDeviceLogin(hub, { ...process.env, HUB_ADMISSION: undefined })
       ? writeHubAdmission(hub, true)

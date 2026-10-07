@@ -19,6 +19,7 @@ import type { Check, DoctorReport } from "../src/doctor.js";
 import { doctorReport, renderDoctor } from "../src/doctor.js";
 import * as open from "../src/open.js";
 import * as probes from "../src/probes.js";
+import { rememberWorkspaceBinding } from "../src/workspace-registry.js";
 import type { Run, Sandbox } from "./helpers.js";
 import { DEAD_HUB_URL, pointAt, removeTempDirs, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
 
@@ -723,6 +724,38 @@ describe("ub doctor MCP setup", () => {
     const { checks } = await mcpDoctor(box);
 
     expect(check(checks, "mcp").status).toBe("pass");
+  });
+
+  it.each([
+    { hubUrl: DEAD_HUB_URL, workspaceId: WORKSPACE },
+    { hubUrl: null, workspaceId: `a-workspace-${WORKSPACE}` },
+  ])("resolves an id-only MCP pin through this machine's record ($hubUrl)", async ({ hubUrl, workspaceId }) => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl } });
+    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl }, box.env);
+    wireMcp(box, { ...UNPINNED, env: { UB_WORKSPACE_ID: workspaceId } });
+    const { checks } = await mcpDoctor(box);
+
+    expect(check(checks, "mcp").status).toBe("pass");
+    expect(check(checks, "mcp").reason).toBe("Claude Code (.mcp.json)");
+  });
+
+  it("warns about an id-only MCP pin without a machine record even when the project names that workspace", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    wireMcp(box, { ...UNPINNED, env: { UB_WORKSPACE_ID: WORKSPACE } });
+    const { checks } = await mcpDoctor(box);
+
+    expect(check(checks, "mcp").status).toBe("warn");
+    expect(check(checks, "mcp").reason).toContain("could not read workspace pin");
+  });
+
+  it("warns when an id-only MCP pin's recorded hub differs from the project", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: null }, box.env);
+    wireMcp(box, { ...UNPINNED, env: { UB_WORKSPACE_ID: WORKSPACE } });
+    const { checks } = await mcpDoctor(box);
+
+    expect(check(checks, "mcp").status).toBe("warn");
+    expect(check(checks, "mcp").reason).toContain("pinned to another workspace or hub");
   });
 
   it.each([

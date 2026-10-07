@@ -6,6 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { writeHubLogin, removeHubLogin } from "@uberblick/hub/auth-store";
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { resolveConfig } from "../src/config.js";
+import { readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
 import { removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -19,6 +20,12 @@ function bind(box: Sandbox, workspaceId = WORKSPACE, hubUrl: string | null = HUB
 }
 function binding(box: Sandbox): { workspaceId: string; hubUrl: string | null } {
   return JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8"));
+}
+function record(box: Sandbox, id: string, hub: string | null): void {
+  const path = workspaceRegistryPath(box.env);
+  mkdirSync(dirname(path), { recursive: true });
+  const current = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+  writeFileSync(path, JSON.stringify({ ...current, [id]: hub }));
 }
 function withDatabase(box: Sandbox, uuid: string): void {
   const dir = join(box.dataHome, "uberblick");
@@ -44,7 +51,7 @@ describe("ub workspace", () => {
     const shown = runUb(["workspace"], box);
     expect(shown.status).toBe(1);
     expect(shown.stderr).toContain("no workspace configured");
-    expect(shown.stderr).toContain("--hub <url|local>");
+    expect(shown.stderr).toContain("ub workspace join <workspace-url>");
   });
 
   it("reports a complete environment override", () => {
@@ -67,13 +74,15 @@ it("workspace use remembers device admission after logout and never clears anoth
     credential: { record: { id: WORKSPACE, principalId: WORKSPACE, deviceId: OTHER,
       workspaces: [WORKSPACE], issuedAt: 0, revokedAt: null }, key: Buffer.alloc(32).toString("base64url") },
   }, box.env);
-  const selected = runUb(["workspace", "use", WORKSPACE, "--hub", endpoint], box);
+  record(box, WORKSPACE, endpoint);
+  record(box, OTHER, otherEndpoint);
+  const selected = runUb(["workspace", "use", WORKSPACE], box);
   expect(selected.status, selected.output).toBe(0);
   await removeHubLogin("http://localhost:8080", box.env);
   const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
   expect(resolved.env.HUB_ADMISSION).toBe("device");
   expect(resolved.env.HUB_AUTH_TOKEN).toBeUndefined();
-  const next = runUb(["workspace", "use", OTHER, "--hub", otherEndpoint], box);
+  const next = runUb(["workspace", "use", OTHER], box);
   expect(next.status, next.output).toBe(0);
   expect(resolveConfig({ env: box.env, cwd: box.cwd }).env.HUB_ADMISSION).toBeUndefined();
   const previous = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: endpoint }, cwd: box.cwd });
@@ -176,7 +185,8 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
       ], box);
       expect(installed.status, installed.output).toBe(0);
       expect(installed.stdout).toContain(OTHER);
-      const selected = runUb(["workspace", "use", OTHER.slice(0, 8), "--hub", "local"], box);
+      record(box, OTHER, null);
+      const selected = runUb(["workspace", "use", OTHER.slice(0, 8)], box);
       expect(selected.status, selected.output).toBe(0);
       expect(binding(box).workspaceId).toBe(OTHER);
     },
@@ -196,6 +206,7 @@ describe("ub workspace use", () => {
   it("never saves an environment hub when only changing project workspace spelling", () => {
     const box = sandbox();
     bind(box);
+    record(box, WORKSPACE, HUB);
     const run = runUb(["workspace", "use", `docs-${WORKSPACE}`], box, {
       UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "wss://override.example.test/ws",
     });
@@ -204,23 +215,24 @@ describe("ub workspace use", () => {
     expect(run.stderr).toContain("takes precedence");
   });
 
-  it("requires an explicit hub even when the requested UUID matches an environment override", () => {
+  it("requires a record even when the requested UUID matches a complete environment override", () => {
     const box = sandbox();
     bind(box);
     const run = runUb(["workspace", "use", `docs-${OTHER}`], box, {
       UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "wss://override.example.test/ws",
     });
-    expect(run.status, run.output).toBe(2);
+    expect(run.status, run.output).toBe(1);
+    expect(run.stderr).toContain("ub workspace join <workspace-url>");
     expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
   });
 
-  it("requires a complete destination when selecting another UUID, even if it has a local database", () => {
+  it("requires a record even if the requested workspace has a local database", () => {
     const box = sandbox();
     bind(box);
     withDatabase(box, OTHER);
     const run = runUb(["workspace", "use", OTHER], box);
-    expect(run.status).toBe(2);
-    expect(run.stderr).toContain("--hub");
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("ub workspace join <workspace-url>");
     expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
   });
 
@@ -228,7 +240,8 @@ describe("ub workspace use", () => {
     const userConfig = { workspace: WORKSPACE, hubUrl: HUB, displayName: "Synthetic operator" };
     const box = sandbox({ userConfig });
     bind(box);
-    const run = runUb(["workspace", "use", OTHER, "--hub", "https://other.example.test"], box);
+    record(box, OTHER, "wss://other.example.test/ws");
+    const run = runUb(["workspace", "use", OTHER], box);
     expect(run.status, run.output).toBe(0);
     expect(binding(box)).toEqual({ workspaceId: OTHER, hubUrl: "wss://other.example.test/ws" });
     expect(JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"))).toEqual({
@@ -240,24 +253,29 @@ describe("ub workspace use", () => {
   it("retains the selected destination when only changing its decorated spelling", () => {
     const box = sandbox();
     bind(box);
+    record(box, WORKSPACE, HUB);
     const run = runUb(["workspace", "use", `docs-${WORKSPACE}`], box);
     expect(run.status, run.output).toBe(0);
     expect(binding(box)).toEqual({ workspaceId: `docs-${WORKSPACE}`, hubUrl: HUB });
   });
 
-  it("writes explicit local-only selection without inferring a hub", () => {
+  it("uses a recorded local workspace even without a database", () => {
     const box = unboundSandbox();
-    const run = runUb(["workspace", "use", UNRELATED, "--hub", "local"], box);
+    record(box, UNRELATED, null);
+    const run = runUb(["workspace", "use", UNRELATED.slice(0, 8)], box);
     expect(run.status, run.output).toBe(0);
     expect(binding(box)).toEqual({ workspaceId: UNRELATED, hubUrl: null });
   });
 
   it("resolves unique prefixes and refuses ambiguous, missing, and invalid IDs without changing selection", () => {
     const box = unboundSandbox();
-    for (const id of [WORKSPACE, OTHER, UNRELATED]) withDatabase(box, id);
-    expect(runUb(["workspace", "use", "b7c", "--hub", "local"], box).status).toBe(0);
+    for (const id of [WORKSPACE, OTHER, UNRELATED]) {
+      withDatabase(box, id);
+      record(box, id, null);
+    }
+    expect(runUb(["workspace", "use", "b7c"], box).status).toBe(0);
     for (const [id, message] of [["4d8e", "matches 2"], ["ffff", "no workspace"], ["my-notes", "not a workspace id"]]) {
-      const run = runUb(["workspace", "use", id!, "--hub", "local"], box);
+      const run = runUb(["workspace", "use", id!], box);
       expect(run.status).toBe(2);
       expect(run.stderr).toContain(message);
       expect(binding(box).workspaceId).toBe(UNRELATED);
@@ -269,14 +287,16 @@ describe("ub workspace use", () => {
     const path = join(box.cwd, ".uberblick.json");
     const broken = '{"workspaceId":';
     writeFileSync(path, broken);
-    const run = runUb(["workspace", "use", WORKSPACE, "--hub", "local"], box);
+    record(box, WORKSPACE, null);
+    const run = runUb(["workspace", "use", WORKSPACE], box);
     expect(run.status).not.toBe(0);
     expect(readFileSync(path, "utf8")).toBe(broken);
   });
 
   it("warns when environment selection still overrides the written project binding", () => {
     const box = sandbox();
-    const run = runUb(["workspace", "use", OTHER, "--hub", "local"], box, {
+    record(box, OTHER, null);
+    const run = runUb(["workspace", "use", OTHER], box, {
       UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: HUB,
     });
     expect(run.status, run.output).toBe(0);
@@ -287,10 +307,11 @@ describe("ub workspace use", () => {
   it("waits for the init lock and publishes a complete tuple", async () => {
     const box = sandbox();
     bind(box);
+    record(box, OTHER, null);
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
-    const pending = runUbAsync(["workspace", "use", OTHER, "--hub", "local"], box);
+    const pending = runUbAsync(["workspace", "use", OTHER], box);
     await new Promise(resolve => setTimeout(resolve, 400));
     expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
     rmSync(lock);
@@ -298,5 +319,36 @@ describe("ub workspace use", () => {
     expect(run.status, run.output).toBe(0);
     expect(binding(box)).toEqual({ workspaceId: OTHER, hubUrl: null });
     expect(existsSync(lock)).toBe(false);
+  });
+
+  it("rejects the removed hub flag as usage without any writes", () => {
+    const box = unboundSandbox();
+    const run = runUb(["workspace", "use", WORKSPACE, "--hub", "local"], box);
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain("Unknown option '--hub'");
+    expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
+    expect(existsSync(box.configHome)).toBe(false);
+    expect(existsSync(box.dataHome)).toBe(false);
+  });
+
+  it("refuses a full UUID this machine never recorded with no files written", () => {
+    const box = unboundSandbox();
+    const run = runUb(["workspace", "use", WORKSPACE], box);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("ub workspace join <workspace-url>");
+    expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
+    expect(existsSync(box.configHome)).toBe(false);
+    expect(existsSync(box.dataHome)).toBe(false);
+  });
+
+  it("preserves the previous binding's differing record when switching away", () => {
+    const box = sandbox();
+    bind(box);
+    record(box, WORKSPACE, "wss://remembered.example.test/ws");
+    record(box, OTHER, null);
+    expect(runUb(["workspace", "use", OTHER], box).status).toBe(0);
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBe("wss://remembered.example.test/ws");
+    expect(runUb(["workspace", "use", WORKSPACE], box).status).toBe(0);
+    expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: "wss://remembered.example.test/ws" });
   });
 });

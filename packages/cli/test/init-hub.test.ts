@@ -19,6 +19,7 @@ import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { writeHubLogin, removeHubLogin } from "@uberblick/hub/auth-store";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import { resolveConfig } from "../src/config.js";
+import { readWorkspaceHub } from "../src/workspace-registry.js";
 import {
   bridgeConfig,
   inspectRemote,
@@ -146,6 +147,7 @@ describe("ub init <hub-url>", () => {
     expect(run.stdout).toContain(url(hub));
     const workspace = config(box).workspaceId;
     expect(typeof workspace).toBe("string");
+    expect(readWorkspaceHub(workspace as string, box.env)).toBe(url(hub));
 
     // The whole point of doing it in this run: the starter documents are on the
     // hub, not sitting in the local log waiting for a client to be started.
@@ -388,6 +390,7 @@ describe("ub init <hub-url>", () => {
     expect(run.stdout).toContain("uberblick initialised");
     expect(config(box).hubUrl).toBe(endpoint);
     expect(typeof config(box).workspaceId).toBe("string");
+    expect(readWorkspaceHub(config(box).workspaceId as string, box.env)).toBeUndefined();
   });
 
   it("refuses a second endpoint, naming the verb that moves a machine", async () => {
@@ -482,6 +485,7 @@ describe("ub init <hub-url>", () => {
     expect(run.stderr).toContain("ub open");
     expect(run.stdout).toContain("uberblick initialised");
     expect(config(box).hubUrl).toBe(CLOSED);
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
   });
 
   it("agrees with `ub workspace join` about the endpoint that is stored", async () => {

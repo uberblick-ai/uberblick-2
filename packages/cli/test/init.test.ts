@@ -45,6 +45,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { findCheckoutRoot } from "../src/checkout.js";
 import { resolveConfig } from "../src/config.js";
 import { STARTER_GROUP_ID, STARTER_GROUP_NAME, TEMPLATE_DIR } from "../src/starter.js";
+import { readWorkspaceHub, recordedWorkspaceIds, rememberWorkspaceBindings } from "../src/workspace-registry.js";
 import {
   REPO_ROOT,
   hubless,
@@ -235,7 +236,8 @@ describe("ub init", () => {
       const run = runUb(["init", "--yes"], box);
       expect(run.status, run.output).toBe(1);
       expect(run.stderr).toContain("legacy machine workspace or hub");
-      expect(run.stderr).toContain("ub workspace use <workspace-id> --hub <hub-url|local>");
+      expect(run.stderr).toContain("ub workspace use <workspace-id>");
+      expect(readWorkspaceHub(JOINED, box.env)).toBeUndefined();
       expect(run.output).not.toContain(hubUrl);
       expect(run.output).not.toContain("PRIVATE_");
       expect(userConfig(box)).toEqual(legacy);
@@ -263,7 +265,8 @@ describe("ub init", () => {
     const second = { ...box, cwd: join(box.cwd, "second") };
     mkdirSync(first.cwd);
     mkdirSync(second.cwd);
-    const migrated = runUb(["workspace", "use", JOINED, "--hub", "local"], first);
+    rememberWorkspaceBindings([{ workspaceId: JOINED, hubUrl: null }], box.env);
+    const migrated = runUb(["workspace", "use", JOINED], first);
     expect(migrated.status, migrated.output).toBe(0);
     const before = projectBinding(first);
     const refused = runUb(["init", "--yes"], second);
@@ -324,6 +327,7 @@ describe("ub init", () => {
     const workspace = projectBinding(box).workspaceId as string;
     expect(workspace).toMatch(UUID);
     expect(run.stdout).toContain(workspace);
+    expect(readWorkspaceHub(workspace, box.env)).toBeNull();
 
     // Identity is recorded, and the colour is one y-prosemirror will accept.
     expect(typeof userConfig(box).displayName).toBe("string");
@@ -397,7 +401,8 @@ describe("ub init", () => {
     expect(ambiguous.status).toBe(2);
     expect(ambiguous.stderr).toContain("explicit hub");
     expect(projectBinding(box)).toEqual(before);
-    const selected = runUb(["workspace", "use", decorated, "--hub", "local"], box);
+    rememberWorkspaceBindings([{ workspaceId: decorated, hubUrl: null }], box.env);
+    const selected = runUb(["workspace", "use", decorated], box);
     expect(selected.status, selected.output).toBe(0);
     const flagged = runUb(
       ["init", "--name", "Ada", "--color", "#0675c9", "--workspace", decorated],
@@ -488,6 +493,7 @@ describe("ub init", () => {
 
       const authority = storedSecret(box);
       expect(projectBinding(box).workspaceId).toBe(workspace);
+      expect(readWorkspaceHub(workspace, box.env)).toBeNull();
       // Exactly one secret survives: neither process printed its own, and the
       // one on disk is the one both of them now describe.
       for (const run of runs) {
@@ -558,6 +564,8 @@ describe("ub init", () => {
     const run = await running;
     expect(run.status, run.output).toBe(0);
     expect(projectBinding(box).workspaceId).toBe(JOINED);
+    expect(readWorkspaceHub(JOINED, box.env)).toBeNull();
+    expect(recordedWorkspaceIds(box.env)).toEqual([JOINED]);
     // And the report describes the machine rather than the intention.
     expect(run.stdout).toContain(JOINED);
   });
