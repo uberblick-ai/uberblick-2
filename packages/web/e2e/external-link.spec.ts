@@ -151,7 +151,7 @@ async function archiveDoc(page: Page): Promise<void> {
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
 }
 
-test("a link inside a comment wins in editable and read-only panes; other thread gestures still select", { tag: "@webkit" }, async ({ page }) => {
+test("a link inside a comment wins in editable and read-only panes; other thread gestures still select", async ({ page }) => {
   await openDoc(page);
   await commentSentence(page);
   const link = page.locator(".ub-editor a.ub-link");

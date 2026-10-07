@@ -4,7 +4,7 @@ import { placeCaret } from "./harness.js";
 
 const { openApp } = setupHarness();
 
-test("inline marks open after punctuation through typing and plain-text paste @webkit", async ({ browser }) => {
+test("inline marks open after punctuation through typing and plain-text paste", async ({ browser }) => {
   const page = await openApp(browser);
   if ((page.viewportSize()?.width ?? 1280) < 1280) {
     await page.getByRole("button", { name: "Show document list", exact: true }).click();
