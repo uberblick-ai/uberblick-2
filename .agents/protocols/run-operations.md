@@ -90,7 +90,7 @@ wait for is still pending after that, finish `defer` and name it.
 Work in the directory and on the branch the run was given; ub-agents creates
 and removes them. Push only that branch, or the branch of the earlier run's
 pull request you continue. Never rebase or force-push a pull request's head;
-the one exception is an integrator's single published clean base refresh per PR
+the one exception is an integrator's single clean base refresh publication attempt per PR
 under [integration.md](integration.md), with an explicit expected-old-head lease and
 the automatic implementer and review handoff. An integrator in the shared
 operator checkout makes that refresh only in the private scratch clone

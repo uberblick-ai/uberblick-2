@@ -65,15 +65,13 @@ parent/SHA and patch context/line offsets are allowed. Any changed added/removed
 code, unmatched commit or ambiguous correspondence aborts the refresh. The
 implementer independently repeats this preservation check before adoption.
 
-Publish at most one clean refresh per PR. Any durable trusted
+Allow at most one refresh publication attempt per PR. Any prior durable trusted
+`base-refresh-pending old=OLD_SHA base=BASE_SHA new=NEW_SHA` or
 `base-refresh-adopted old=OLD_SHA base=BASE_SHA new=NEW_SHA` comment on this PR
-consumes that allowance, even after later implementer commits. A pending record
-also consumes it when its NEW_SHA equals or is an ancestor of the assigned head;
-this covers a published refresh repaired without an adoption marker. Fetch with
-`git -C SCRATCH/run-RUN-refresh fetch origin PENDING_NEW_SHA` and check with
-`git -C SCRATCH/run-RUN-refresh merge-base --is-ancestor PENDING_NEW_SHA OLD_SHA`.
-A pending record proven outside that ancestry is inert; unavailable objects or
-an inconclusive ancestry check skip publication and proceed to normal gates.
+consumes that allowance, even after later implementer commits. An intent whose
+push failed or cannot be confirmed still reserves the attempt; normal gates
+continue on the unchanged head. This bounds interrupted publication and repair
+without relying on rewritten ancestry to prove whether an earlier push landed.
 Read records from the assignment's trusted comments, not just the windowed
 `feedback`; later handoffs never erase them. Require current-head review evidence
 under normal gates. After the allowance is consumed, still try the clean rebase
