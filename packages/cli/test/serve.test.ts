@@ -10,7 +10,7 @@
  */
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { closeSync, constants, existsSync, openSync, readFileSync, readdirSync } from "node:fs";
+import { closeSync, constants, existsSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -165,6 +165,19 @@ describe("ub mcp serve", () => {
       const content = result.content as { text: string }[];
       expect(JSON.parse(content[0]!.text).hub.url).toBeNull();
       expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(DEAD_HUB_URL);
+    } finally { await session.close(); }
+  });
+
+  it.each([null, DEAD_HUB_URL])("starts with an existing %s record even when a stale init lock remains", async (recordedHub) => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: recordedHub }, box.env);
+    const lock = join(box.configHome, "uberblick", ".init.lock");
+    writeFileSync(lock, "999999\n");
+    const session = await connect(box);
+    try {
+      expect((await session.client.listTools()).tools.length).toBeGreaterThan(0);
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(recordedHub);
+      expect(readFileSync(lock, "utf8")).toBe("999999\n");
     } finally { await session.close(); }
   });
 

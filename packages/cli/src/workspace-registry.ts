@@ -51,7 +51,7 @@ export function recordedWorkspaceIds(env: NodeJS.ProcessEnv = process.env): stri
  * Caller holds the machine init lock. Publish records before replacing a binding,
  * restoring the prior records if that publication fails. The callback is synchronous
  * so another writer cannot enter between publication and restoration.
- * Only verified promotion or fetch may replace an existing workspace's hub.
+ * Only verified promotion, fetch or completed init attach may replace an existing workspace's hub.
  */
 export function withWorkspaceBindings<T>(
   bindings: readonly ProjectBinding[],
@@ -101,6 +101,9 @@ export function rememberWorkspaceBindings(
 
 /** Serving paths hold no binding lock, so serialize their first registration here. */
 export async function rememberWorkspaceBinding(binding: ProjectBinding, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  // Passive serving preserves every existing record, including a differing hub.
+  // An atomic registry publication makes this read safe without taking the lock.
+  if (readWorkspaceHub(binding.workspaceId, env) !== undefined) return;
   const lock = await acquireInitLock(env);
   try { rememberWorkspaceBindings([binding], env); }
   finally { lock.release(); }

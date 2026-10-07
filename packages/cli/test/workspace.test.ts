@@ -233,6 +233,8 @@ describe("ub workspace use", () => {
     const run = runUb(["workspace", "use", OTHER], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("ub workspace join <workspace-url>");
+    expect(run.stderr).toContain(`UB_WORKSPACE_ID=${OTHER} UB_HUB_URL=local ub mcp serve`);
+    expect(run.stderr).toContain("set `UB_HUB_URL=<hub>` for a hub replica");
     expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
   });
 

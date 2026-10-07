@@ -356,7 +356,12 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
 
   let hub = readWorkspaceHub(id);
   if (hub === undefined) {
-    io.err("ub workspace use: this machine has no hub record for that workspace. Fetch it with `ub workspace join <workspace-url>`.\n");
+    io.err(
+      "ub workspace use: this machine has no hub record for that workspace. " +
+      "Fetch a shared workspace with `ub workspace join <workspace-url>`. " +
+      `To register an existing local replica, serve it once with \`UB_WORKSPACE_ID=${id} UB_HUB_URL=local ub mcp serve\`; ` +
+      "set `UB_HUB_URL=<hub>` for a hub replica.\n",
+    );
     return 1;
   }
   let path: string;

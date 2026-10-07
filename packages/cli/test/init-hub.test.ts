@@ -19,7 +19,7 @@ import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { writeHubLogin, removeHubLogin } from "@uberblick/hub/auth-store";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import { resolveConfig } from "../src/config.js";
-import { readWorkspaceHub } from "../src/workspace-registry.js";
+import { readWorkspaceHub, rememberWorkspaceBindings } from "../src/workspace-registry.js";
 import {
   bridgeConfig,
   inspectRemote,
@@ -47,11 +47,11 @@ afterEach(async () => {
 });
 
 async function startHub(
-  options: { authSecret?: string; protocolVersion?: number } = {},
+  options: { authSecret?: string; protocolVersion?: number; port?: number } = {},
 ): Promise<Hub> {
   const hub = await createHub({
     authSecret: options.authSecret ?? SECRET,
-    port: 0,
+    port: options.port ?? 0,
     ...(options.protocolVersion === undefined
       ? {}
       : { protocolVersion: options.protocolVersion }),
@@ -182,6 +182,31 @@ describe("ub init <hub-url>", () => {
     // The same workspace, the same identity, the same endpoint — byte for byte.
     expect(readFileSync(configPath(box), "utf8")).toBe(settled);
     expect(existsSync(credentialsPath(box))).toBe(false);
+  });
+
+  it.each([false, true])("records a completed local attach for id-only selection (prior record: %s)", async (recorded) => {
+    const hub = await startHub();
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    if (recorded) rememberWorkspaceBindings([{ workspaceId: WORKSPACE, hubUrl: null }], box.env);
+
+    const attached = await runUbAsync(["init", url(hub), "--yes"], box, { HUB_AUTH_TOKEN: SECRET });
+    expect(attached.status, attached.output).toBe(0);
+    expect(config(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: url(hub) });
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(url(hub));
+
+    const other = await runUbAsync(["workspace", "create", "Other"], box);
+    expect(other.status, other.output).toBe(0);
+    const switchBack = other.stdout.match(/Switch back: ub (workspace use \S+)/)?.[1];
+    expect(switchBack).toBe(`workspace use ${WORKSPACE}`);
+    const selected = await runUbAsync(switchBack!.split(" "), box);
+    expect(selected.status, selected.output).toBe(0);
+    expect(config(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: url(hub) });
+
+    const override = await runUbAsync(["status", "--json"], { ...box, cwd: unboundSandbox().cwd }, {
+      UB_WORKSPACE_ID: WORKSPACE,
+    });
+    expect(override.status, override.output).toBe(0);
+    expect(JSON.parse(override.stdout).hubUrl).toBe(url(hub));
   });
 
   it("decides on the endpoint under the lock, not on what it read before it", async () => {
@@ -353,14 +378,16 @@ describe("ub init <hub-url>", () => {
     expect(run.output).not.toContain(OTHER_SECRET);
   });
 
-  it("exits non-zero when the starter documents do not reach the hub", async () => {
+  it.each(["fresh", "bound", "recorded"])("exits non-zero when the starter documents do not reach the hub (%s)", async (initial) => {
     // The promise a hub argument adds is that the hub *holds* the workspace when
     // this returns, so an unacknowledged seed is a failure and not a warning.
     // The hub goes away between the probe and the seed, which the lock makes an
     // exact moment rather than a race.
     const hub = await startHub();
     const endpoint = url(hub);
-    const box = unboundSandbox();
+    const box = initial === "fresh" ? unboundSandbox() :
+      sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    if (initial === "recorded") rememberWorkspaceBindings([{ workspaceId: WORKSPACE, hubUrl: null }], box.env);
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
@@ -384,13 +411,28 @@ describe("ub init <hub-url>", () => {
     const run = await running;
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain("did not reach");
-    expect(run.stderr).toContain("ub open");
-    // Local state stands: this machine is configured, and the documents are in
-    // its update log — there is nothing to repair, only to get up.
-    expect(run.stdout).toContain("uberblick initialised");
-    expect(config(box).hubUrl).toBe(endpoint);
-    expect(typeof config(box).workspaceId).toBe("string");
-    expect(readWorkspaceHub(config(box).workspaceId as string, box.env)).toBeUndefined();
+    if (initial === "fresh") {
+      // The fresh UUID was claimed early for concurrent winner adoption.
+      expect(run.stderr).toContain("ub open");
+      expect(run.stdout).toContain("uberblick initialised");
+      expect(config(box).hubUrl).toBe(endpoint);
+      expect(typeof config(box).workspaceId).toBe("string");
+      expect(readWorkspaceHub(config(box).workspaceId as string, box.env)).toBeUndefined();
+    } else {
+      expect(run.stdout).not.toContain("uberblick initialised");
+      expect(run.stderr).toContain("binding and workspace records were not replaced");
+      expect(run.stderr).not.toContain("This machine is configured");
+      expect(config(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: null });
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(initial === "recorded" ? null : undefined);
+
+      // Retrying the advised command must finish the attachment, including
+      // updating a prior local record, without guessing from a mismatched pair.
+      await startHub({ port: hub.port });
+      const retried = await runUbAsync(["init", endpoint, "--yes"], box, { HUB_AUTH_TOKEN: SECRET });
+      expect(retried.status, retried.output).toBe(0);
+      expect(config(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: endpoint });
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(endpoint);
+    }
   });
 
   it("refuses a second endpoint, naming the verb that moves a machine", async () => {
@@ -482,8 +524,8 @@ describe("ub init <hub-url>", () => {
 
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain("did not reach");
-    expect(run.stderr).toContain("ub open");
-    expect(run.stdout).toContain("uberblick initialised");
+    expect(run.stderr).toContain("binding and workspace records were not replaced");
+    expect(run.stdout).not.toContain("uberblick initialised");
     expect(config(box).hubUrl).toBe(CLOSED);
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
   });

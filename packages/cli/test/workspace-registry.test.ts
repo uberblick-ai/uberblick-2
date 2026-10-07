@@ -18,6 +18,19 @@ const previous = "11111111-1111-4111-8111-111111111111";
 const selected = "22222222-2222-4222-8222-222222222222";
 
 describe("workspace record failure boundaries", () => {
+  it.each([null, "wss://recorded.example.test/ws"])("passive registration preserves an existing %s record without waiting on a writer", async (hubUrl) => {
+    const box = sandbox();
+    await rememberWorkspaceBinding({ workspaceId: selected, hubUrl }, box.env);
+    const registry = workspaceRegistryPath(box.env);
+    const before = readFileSync(registry);
+    const lock = await acquireInitLock(box.env);
+    try {
+      await rememberWorkspaceBinding({ workspaceId: selected, hubUrl: "wss://serving.example.test/ws" }, box.env);
+      expect(readFileSync(registry)).toEqual(before);
+      expect(readWorkspaceHub(selected, box.env)).toBe(hubUrl);
+    } finally { lock.release(); }
+  });
+
   it.each([false, true])("failed binding publication restores records exactly (existing registry: %s)", async (existing) => {
     const box = sandbox({ projectBinding: { workspaceId: previous, hubUrl: "wss://previous.example.test/ws" } });
     if (existing) await rememberWorkspaceBinding({ workspaceId: selected, hubUrl: null }, box.env);

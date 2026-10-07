@@ -665,6 +665,7 @@ export async function initCommand(
   let hubInForce: string | null = null;
   let previousBinding: ProjectBinding | null = null;
   let deferredBinding = false;
+  let attachingWorkspace = false;
   // Replaced once the workspace on disk is known.
   let mcpEnv: NodeJS.ProcessEnv = resolved.env;
   try {
@@ -766,8 +767,11 @@ export async function initCommand(
       for (const warning of writeHubAdmission(hubInForce, true).warnings) warnings.add(warning);
     }
     // A fresh binding claims the generated UUID so concurrent init runs adopt it.
-    // Existing bindings wait until seeding succeeds: then their old workspace is
-    // recorded before replacement, without adding records on a failed run.
+    // Existing bindings wait until success, so a failed attach leaves both the
+    // binding and any prior local record consistent for a retry.
+    const sameWorkspace = previousBinding !== null &&
+      parseWorkspaceId(previousBinding.workspaceId).uuid === parseWorkspaceId(workspace).uuid;
+    attachingWorkspace = sameWorkspace && previousBinding?.hubUrl === null && hubInForce !== null;
     if (previousBinding === null) {
       configPath = writeProjectBinding({ workspaceId: workspace, hubUrl: hubInForce }, { record: false });
     } else {
@@ -939,6 +943,45 @@ export async function initCommand(
     io.err(`ub: warning: ${warning}\n`);
   }
 
+  if (deferredBinding && hubInForce !== null && !seeded) {
+    io.err(
+      `ub init: the starter documents did not reach ${hubInForce}. The project ` +
+        "binding and workspace records were not replaced. Run this init command " +
+        "again once the hub is back.\n",
+    );
+    return 1;
+  }
+
+  if (hubInForce === null || seeded) {
+    try {
+      const recordLock = await acquireInitLock();
+      try {
+        const completedBinding = { workspaceId: persistedWorkspace, hubUrl: hubInForce };
+        if (deferredBinding) {
+          const current = resolveProjectBinding({ env: {} }).binding;
+          if (current?.workspaceId !== previousBinding?.workspaceId || current?.hubUrl !== previousBinding?.hubUrl) {
+            io.err("ub init: the project binding changed while this run was seeding. Its replacement and workspace records were not written; run init again.\n");
+            return 1;
+          }
+          writeProjectBinding(completedBinding, {
+            path: configPath,
+            // A completed init attach verifies the hub, just like promotion.
+            ...(attachingWorkspace ? { record: "promote" as const } : {}),
+          });
+        } else {
+          // Winner adoption already settled persistedWorkspace; a later project
+          // switch must not divert this run's successful registration.
+          rememberWorkspaceBindings([completedBinding]);
+        }
+      } finally {
+        recordLock.release();
+      }
+    } catch (error) {
+      io.err(`ub init: ${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+
   let report = "uberblick initialised\n\n";
   report += field("identity", `${name} ${color}`);
   // What is on disk, which under a concurrent run is not always what this
@@ -992,24 +1035,6 @@ export async function initCommand(
     return 1;
   }
 
-  const recordLock = await acquireInitLock();
-  try {
-    const completedBinding = { workspaceId: persistedWorkspace, hubUrl: hubInForce };
-    if (deferredBinding) {
-      const current = resolveProjectBinding({ env: {} }).binding;
-      if (current?.workspaceId !== previousBinding?.workspaceId || current?.hubUrl !== previousBinding?.hubUrl) {
-        io.err("ub init: the project binding changed while this run was seeding. Its replacement and workspace records were not written; run init again.\n");
-        return 1;
-      }
-      writeProjectBinding(completedBinding, { path: configPath });
-    } else {
-      // Winner adoption already settled persistedWorkspace; a later project
-      // switch must not divert this run's successful registration.
-      rememberWorkspaceBindings([completedBinding]);
-    }
-  } finally {
-    recordLock.release();
-  }
   if (flags.mcp === true) {
     // Wiring is print-only, and follows the completed binding above. A failed
     // snippet is a warning: everything init was asked to settle is settled.
