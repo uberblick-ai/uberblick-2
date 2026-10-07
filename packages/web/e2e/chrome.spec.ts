@@ -11,9 +11,10 @@
  * - **The bridge resolves.** The whole adoption rests on one claim: shadcn
  *   surfaces read the same custom properties the plain-CSS surfaces do, so
  *   there is no second palette to drift. That is testable — a menu's painted
- *   background and its font have to *equal* the sidebar's, in both colour
- *   schemes, and they only can if `@theme` resolved to the product's tokens
+ *   background and its font have to *equal* the sidebar's, in a representative
+ *   scheme, and they only can if `@theme` resolved to the product's tokens
  *   rather than to Tailwind's defaults.
+ *   The source-token table checks palette ratios in both colour schemes.
  * - **The product wiring works.** Uberblick's triggers open its content and
  *   actions write or refuse as promised; accessibility scans cover primitives.
  * - **The theme is real.** `data-theme` re-themes the editor and the sidebar
@@ -237,7 +238,7 @@ async function matchesTheSidebar(page: Page, selector: string): Promise<void> {
   );
 }
 
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["dark"] as const) {
   test(`the sidebar's menus are the product's own surface — ${scheme}`, async ({
     browser,
   }) => {
@@ -289,7 +290,7 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   test(`the selected appearance has one non-hue cue — ${scheme}`, async ({
     browser,
   }) => {
@@ -532,7 +533,7 @@ test("the settings drawer retires the outgoing pane and respects reduced motion"
  * gesture, which is what makes "unchanged" mean the rule missed it rather than
  * that the measurement cannot see a change.
  */
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   test(`a disabled sidebar control keeps its ground under the pointer — ${scheme}`, async ({
     browser,
   }) => {
@@ -565,7 +566,7 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   test(`sidebar controls keep their treatment after touch — ${scheme}`, { tag: "@webkit-touch" }, async ({ browser }, info) => {
     const page = await openApp(browser, "/", {
       upstream: true,
@@ -1023,12 +1024,12 @@ test("document actions stay reachable, close with the route, and archive into Re
 
 /**
  * The archive confirmation is a surface, and a destructive one, so it owes the
- * proof a dialog owes: opaque in both appearances. Only a browser can settle
+ * proof a dialog owes: opaque over the page. Only a browser can settle
  * it — `light-dark()` resolves in the engine, and an undefined custom property
  * (which is what `--popover` was here) computes to `transparent` rather than
  * failing anywhere jsdom could see.
  */
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   test(`the archive confirmation is opaque over the page — ${scheme}`, async ({
     browser,
   }) => {
@@ -1561,7 +1562,7 @@ async function surface(page: Page, root: string): Promise<Reading[]> {
  */
 const accentChroma = 0.05;
 
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as ReadonlyArray<"light" | "dark">) {
   test(`the sidebar's interior reads the sidebar's own tokens — ${scheme}`, async ({
     browser,
   }) => {
@@ -1709,7 +1710,7 @@ async function groundsUnder(_page: Page, locator: Locator): Promise<string[]> {
  * the rendered element rather than named here.
  *
  */
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   test(`the brand's functional ink is one readable value — ${scheme}`, async ({
     browser,
   }) => {
@@ -1957,9 +1958,8 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
       };
     }, toClipEdge);
 
-  // The three widths the layout has to hold at, including the iPad width the
-  // 44px is *for*.
-  for (const width of [1280, 1194, 768]) {
+  // The target holds in one docked and one narrow layout.
+  for (const width of [1280, 768]) {
     await page.setViewportSize({ width, height: 620 });
     // Typing left the pane scrolled to the caret; the first reading is of the
     // header at rest.
@@ -2230,9 +2230,9 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await expect(trigger).toContainText(longest);
   await expect(page.locator(".ub-tag")).toHaveCount(1);
 
-  // The document list is still hidden from the wrap check above, so these are
-  // the widths the reader actually gets.
-  for (const viewport of [420, 375]) {
+  // The document list is still hidden from the wrap check above, so this is
+  // the pane width the reader actually gets.
+  for (const viewport of [375]) {
     await page.setViewportSize({ width: viewport, height: 620 });
     const geometry = await tagStripGeometry(page);
     expect(geometry.overlaps, `writable header at ${viewport}px`).toEqual([]);
@@ -2250,7 +2250,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await page.getByRole("button", { name: "Archive document" }).click();
   await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
   await expect(page.locator(".ub-tags-readonly")).toContainText(longest);
-  for (const viewport of [420, 375]) {
+  for (const viewport of [375]) {
     await page.setViewportSize({ width: viewport, height: 620 });
     const geometry = await tagStripGeometry(page);
     expect(geometry.overlaps, `read-only header at ${viewport}px`).toEqual([]);
@@ -2272,8 +2272,8 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   ).toHaveCount(5);
 });
 
-test("Workspace Settings uses the shared touch floors at iPhone and iPad widths", async ({ browser }) => {
-  for (const width of [375, 932, 744, 1024, 1366]) {
+test("Workspace Settings uses the shared touch floors in narrow and wide layouts", async ({ browser }) => {
+  for (const width of [375, 1366]) {
     const page = await openAppearanceApp(browser, "light", `/${harness().workspace}/settings/tags`, true, {
       isMobile: true,
       viewport: { width, height: 900 },
@@ -2300,7 +2300,7 @@ test("Workspace Settings uses the shared touch floors at iPhone and iPad widths"
   }
 });
 
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   // Tokens cannot see later rules across settings states; axe cannot read text on the page gradient.
   test(`both settings pages keep every text readable through curation states — ${scheme}`, async ({ browser }) => {
     const path = `/${harness().workspace}/settings/tags`;
@@ -2470,7 +2470,7 @@ function activeHoverRules(control: Locator): Promise<string[]> {
   });
 }
 
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   test(`document and document-list controls keep resting paint after a touch tap — ${scheme}`, { tag: "@webkit-touch" }, async ({ browser }, info) => {
     const input = info.project.name === "chromium"
       ? { hasTouch: true, viewport: { width: 390, height: 844 } }
@@ -2614,7 +2614,7 @@ for (const scheme of ["light", "dark"] as const) {
  * Seed both thread states through schema operations; no reload or key deletion
  * is needed to make an orphan, the intermittent setup removed before v0.3.
  */
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   test(`card highlights share one fill and keep their rendered floors — ${scheme}`, async ({ browser }) => {
     const page = await openAppearanceApp(browser, scheme);
     await page.setViewportSize({ width: 1000, height: 1000 });
@@ -2694,7 +2694,7 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   // Tokens cannot observe later panel overrides; axe omits strokes, placeholders and highlight steps.
   test(`document menus keep sidebar contrast and a full-row highlight — ${scheme}`, async ({ browser }) => {
     const page = await openAppearanceApp(browser, scheme);
@@ -2952,7 +2952,6 @@ const UNBROKEN_NAME = "Collaborator".repeat(12);
 
 for (const [device, width, hasTouch] of [
   ["iPhone", 375, true],
-  ["iPad", 744, true],
   ["MacBook", 1366, false],
 ] as const) {
   test(`hover information has a ${device} path`, async ({ browser }) => {

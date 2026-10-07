@@ -124,6 +124,7 @@ import { acquireInitLock, tryAcquireInitLock, tryAcquireLock } from "./init-lock
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { readAccessAction, requestAccess, type AccessBinding } from "./open-access.js";
+import { rememberWorkspaceBinding } from "./workspace-registry.js";
 import {
   endpointOf,
   hubBind,
@@ -765,8 +766,8 @@ function resolvedConfigDocument(resolved: ReturnType<typeof resolveConfig>): str
  * The per-request source of the unbound configuration document. It refreshes
  * the hub endpoint and publishes no workspace or browser key.
  *
- * `ub init`, `ub workspace join` and `ub workspace use` publish `credentials.json`
- * and `config.json` as separate atomic writes, holding `.init.lock` across both.
+ * `ub init`, `ub workspace join` and `ub workspace use` publish configuration
+ * files as separate atomic writes, holding `.init.lock` across the publication.
  * Each file is therefore whole whenever it is read. This source uses the same
  * lock so its resolution sees a completed configuration publication.
  *
@@ -1735,6 +1736,13 @@ export async function openCommand(
   const earlyFailure = owned.engineMonitor?.failure() ?? null;
   if (earlyFailure !== null) {
     io.err(`ub open: ${earlyFailure}\n`);
+    return await foreground.shutdown(1);
+  }
+
+  try {
+    await rememberWorkspaceBinding(projectBinding, startupEnv);
+  } catch (error) {
+    io.err(`ub open: could not record this workspace: ${message(error)}\n`);
     return await foreground.shutdown(1);
   }
 

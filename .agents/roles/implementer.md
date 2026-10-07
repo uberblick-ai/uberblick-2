@@ -26,14 +26,9 @@ inspect the code and Pointers it depends on.
   earlier run's work: continue it
   on its branch and hand it off. Any other open pull request that closes this
   issue is not yours to replace: escalate, naming it.
-- If an open pull request is expected to edit the same substantive files
-  semantically ([scheduling rules](../protocols/workflow.md#scheduling-semantics)), mark this issue
-  blocked by the issue that PR closes (`gh issue edit <N> --add-blocked-by
-  <M>`) and finish `defer`, naming it. When that PR closes no issue, record
-  the overlap in Pointers and build; whichever lands second merges the base. An overlap the issue's Pointers classify as a mechanical
-  reconciliation is not a block only when the open PR's current diff confirms
-  the scheduling rule's bounded additive aggregation exception. A rewrite of
-  the same substantive file does not qualify. Follow qualifying Pointers and build.
+- An open pull request that edits the same files is not a block: record it
+  in Pointers and build; whichever lands second merges the base
+  ([scheduling rules](../protocols/workflow.md#scheduling-semantics)).
 - A contract prepared more than six days ago is checked before it is built: the
   `ready` label or the preparer's handoff dates it. Check that its Pointers
   still resolve at that base, that the code it targets still behaves as the body

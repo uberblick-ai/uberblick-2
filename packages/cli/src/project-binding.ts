@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { normalizeRemoteUrl } from "@uberblick/hub/remote-url";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { publishOwnerOnly } from "./safe-write.js";
+import { readWorkspaceHub, withWorkspaceBindings } from "./workspace-registry.js";
 
 export const PROJECT_CONFIG_FILE = ".uberblick.json";
 export const LOCAL_HUB = "local";
@@ -24,7 +25,7 @@ export interface ResolvedBinding {
 }
 
 export const NO_BINDING = "No workspace selected. Add a .uberblick.json binding, run `ub init` for a local workspace, " +
-  "`ub workspace join <workspace-url>` to join a hub, or set both UB_WORKSPACE_ID and UB_HUB_URL (local for local-only).";
+  "`ub workspace join <workspace-url>` to fetch from a hub, or set UB_WORKSPACE_ID (add UB_HUB_URL with a hub address or local until this machine has its record).";
 
 /** Find the nearest entry, including a broken symlink: invalid files must fail. */
 export function findProjectConfig(cwd = process.cwd()): string | null {
@@ -84,13 +85,28 @@ function readProject(path: string): Record<string, unknown> {
 export function resolveProjectBinding(options: BindingOptions = {}): ResolvedBinding {
   const env = options.env ?? process.env;
   if (env.UB_WORKSPACE_ID !== undefined || env.UB_HUB_URL !== undefined) {
-    if (!env.UB_WORKSPACE_ID?.trim() || !env.UB_HUB_URL?.trim()) {
-      throw new Error("Set both UB_WORKSPACE_ID and UB_HUB_URL; incomplete environment bindings cannot use values from a project or machine configuration. Use UB_HUB_URL=local for local-only.");
+    if (!env.UB_WORKSPACE_ID?.trim()) {
+      throw new Error("UB_HUB_URL requires a non-empty UB_WORKSPACE_ID; environment bindings cannot use a workspace from the project file.");
+    }
+    const workspaceId = env.UB_WORKSPACE_ID.trim();
+    parseWorkspaceId(workspaceId, "environment binding: workspaceId");
+    let hubUrl: string | null;
+    if (env.UB_HUB_URL !== undefined) {
+      if (!env.UB_HUB_URL.trim()) throw new Error("UB_HUB_URL must not be empty; use a hub address or local.");
+      hubUrl = env.UB_HUB_URL.trim() === LOCAL_HUB ? null : env.UB_HUB_URL;
+    } else {
+      // `env` can be an MCP entry's own partial map, or {} to read only the
+      // project file. Machine knowledge always comes from this process's roots.
+      const recorded = readWorkspaceHub(workspaceId);
+      if (recorded === undefined) {
+        throw new Error("This machine has no hub record for UB_WORKSPACE_ID. Add UB_HUB_URL (a hub address, or local), or fetch the workspace with `ub workspace join <workspace-url>`.");
+      }
+      hubUrl = recorded;
     }
     return {
       binding: validateProjectBinding({
-        workspaceId: env.UB_WORKSPACE_ID,
-        hubUrl: env.UB_HUB_URL.trim() === LOCAL_HUB ? null : env.UB_HUB_URL,
+        workspaceId,
+        hubUrl,
       }, "environment binding"),
       origin: "environment",
       path: null,
@@ -99,7 +115,7 @@ export function resolveProjectBinding(options: BindingOptions = {}): ResolvedBin
   // Old named MCP entries pinned WORKSPACE_ID only. Ignoring that pin while
   // adopting a project file would silently send that entry to another corpus.
   if (env.WORKSPACE_ID?.trim() || env.HUB_URL?.trim()) {
-    throw new Error("Legacy WORKSPACE_ID / HUB_URL selection is no longer supported. Replace it with a complete UB_WORKSPACE_ID and UB_HUB_URL pair, or remove both legacy variables and explicitly select a .uberblick.json binding. No workspace was opened.");
+    throw new Error("Legacy WORKSPACE_ID / HUB_URL selection is no longer supported. Replace it with UB_WORKSPACE_ID (add UB_HUB_URL until this machine has its record), or remove both legacy variables and explicitly select a .uberblick.json binding. No workspace was opened.");
   }
   const path = findProjectConfig(options.cwd);
   if (path === null) return { binding: null, origin: null, path: null };
@@ -110,10 +126,10 @@ export function resolveProjectBinding(options: BindingOptions = {}): ResolvedBin
   };
 }
 
-/** Persist a complete selection in the nearest project file, or the current folder. */
+/** Persist a complete selection. Caller holds the machine init lock. */
 export function writeProjectBinding(
   value: ProjectBinding,
-  options: BindingOptions & { path?: string } = {},
+  options: BindingOptions & { path?: string; record?: false | "promote" | "join" } = {},
 ): string {
   const binding = validateProjectBinding(value, "project binding");
   const path = options.path ?? findProjectConfig(options.cwd) ?? join(options.cwd ?? process.cwd(), PROJECT_CONFIG_FILE);
@@ -125,6 +141,12 @@ export function writeProjectBinding(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
-  publishOwnerOnly(path, `${JSON.stringify({ ...existing, ...binding }, null, 2)}\n`);
+  const publish = () => publishOwnerOnly(path, `${JSON.stringify({ ...existing, ...binding }, null, 2)}\n`);
+  if (options.record === false) publish();
+  else {
+    const previous = Object.keys(existing).length === 0 ? [] : [validateProjectBinding(existing, path)];
+    withWorkspaceBindings([...previous, binding], publish, options.env ?? process.env,
+      options.record === "promote" || options.record === "join" ? binding.workspaceId : undefined);
+  }
   return path;
 }

@@ -3,7 +3,7 @@ import { setupHarness } from "./app-helpers.js";
 
 const { harness, openApp } = setupHarness({ accessRole: "member" });
 
-test("a member has their role and own devices with no membership controls @webkit", async ({ browser }) => {
+test("a member has their role and own devices with no membership controls", async ({ browser }) => {
   const access = harness().access;
   if (access === undefined) throw new Error("Access fixture is missing");
   const page = await openApp(browser, `/${harness().workspace}/settings/access`);

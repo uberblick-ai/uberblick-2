@@ -23,6 +23,7 @@ import {
 } from "../src/auth-store.js";
 import { credentialsPath, resolveConfig, userConfigPath } from "../src/config.js";
 import { acquireInitLock, initLockPath, tryAcquireInitLock } from "../src/init-lock.js";
+import { readWorkspaceHub } from "../src/workspace-registry.js";
 import * as safeWrite from "@uberblick/hub/safe-write";
 import { PACKAGE_ROOT, SECRET_ON_FILE, removeTempDirs, sandbox, waitUntil, type Sandbox } from "./helpers.js";
 
@@ -294,7 +295,8 @@ describe("hub login store", () => {
       hubLogins: { [HUB]: login(), [OTHER_HUB]: login() },
     });
     expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).hubUrl).toBe("wss://new.example.test/ws");
-    expect(readdirSync(dirname(credentialsPath(box.env)))).toEqual(["credentials.json"]);
+    expect(readdirSync(dirname(credentialsPath(box.env)))).toEqual(["credentials.json", "workspaces.json"]);
+    expect(readWorkspaceHub("5c1f9a72-4d38-4e02-9b6a-7e3f10c85b94", box.env)).toBe("wss://new.example.test/ws");
   });
 
   it("leaves stored bytes and another writer's lock intact when its bounded wait expires", async () => {

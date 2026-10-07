@@ -58,6 +58,7 @@ export function setRemote(
   const admission = writeHubAdmission(url, options.deviceAdmission === true, env);
   const path = writeProjectBinding(binding, {
     env,
+    record: "join",
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
   });
   return { written: [...admission.written, path], warnings: admission.warnings };
@@ -187,7 +188,7 @@ machine’s stored login from \`ub auth login <hub>\`. No \`ub init\` is needed 
 
 It never merges two workspaces and it never seeds. A workspace already on this
 machine under a different id keeps its documents and its \`ub workspace list\`
-entry. Switch back with \`ub workspace use <id> --hub <url|local>\`; the join
+entry. Switch back with \`ub workspace use <id>\`; the join
 report prints the previous complete binding. A replica this machine
 already holds for *this* id is attached, not replaced: it and the remote
 reconcile as CRDTs, so neither side loses anything.
@@ -499,7 +500,7 @@ export async function joinCommand(argv: string[], io: Io): Promise<number> {
       `\n${previous.workspaceId} was not merged into this one and nothing of it was moved. ` +
       "The previous workspace and its documents remain unchanged. " +
       "`ub workspace list` shows local replicas.\n" +
-      `Switch back: ub workspace use ${previous.workspaceId} --hub '${(previous.hubUrl ?? "local").replaceAll("'", "'\\''")}'\n`;
+      `Switch back: ub workspace use ${previous.workspaceId}\n`;
   }
   io.out(report("joined", bridge.target, checked.corpus, persistence, takenAt, note));
 
