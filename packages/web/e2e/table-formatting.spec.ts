@@ -120,7 +120,15 @@ test("header and body selections offer formatting then Comment and keep the sele
   const table = await openTable(page);
   const first = table.locator("th").first();
   await selectCell(first, 0, 0);
-  for (let index = 0; index < 5; index += 1) await page.keyboard.press("Shift+ArrowRight");
+  for (let index = 0; index < 5; index += 1) {
+    await page.keyboard.press("Shift+ArrowRight");
+    // Native selectionchange imports the range into ProseMirror separately
+    // from keydown. Let it paint, and check each actual keyboard step before
+    // another key can read the preceding range.
+    await expect.poll(() => page.evaluate(() => new Promise<string>((resolve) => {
+      requestAnimationFrame(() => resolve(document.getSelection()?.toString() ?? ""));
+    }))).toBe("Alpha".slice(0, index + 1));
+  }
   await expect(toolbar(page)).toBeVisible();
   await expect(toolbar(page).getByRole("button")).toHaveCount(6);
   await expect(toolbar(page).getByRole("button").last()).toHaveText("Comment");
