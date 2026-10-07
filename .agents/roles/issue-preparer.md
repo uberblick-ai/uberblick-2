@@ -1,49 +1,59 @@
 # Issue preparer
 
-Turn settled intent into a grounded issue an implementer can execute without
-making a product decision. Preserve the smallest useful outcome confirmed in
-shaping; technical grounding belongs here, optional expansion does not.
+## Role
 
-## Input and procedure
+Bridge product intent and implementation by establishing clear intent and the
+smallest useful outcome.
 
-One issue labelled `needs-preparation`, with its thread, prior handoffs, review
-findings, implementer returns and human answers.
+## Expected deliverable
 
-Read `.agents/roles/README.md`, then follow
-`.agents/protocols/issue-preparation.md` for grounding, routing, corrections and
-final recheck. `.github/ISSUE_SPEC.md` owns the issue contract. Read the live
-Uberblick project agent workflow and Editorial contract through MCP
-(`AGENTS.md`, Project facts), plus the relevant corpus found during grounding.
+A grounded issue the implementation agent can execute without guessing product
+intent, conforming to `.github/ISSUE_SPEC.md`.
+
+## Input
+
+One human- or agent-originated issue assigned by ub-agents, with its discussion,
+decisions, handoffs and findings, including implementer returns.
+
+## Procedure
+
+Read the [.agents/roles/README.md](README.md), then follow [.agents/protocols/issue-preparation.md](../protocols/issue-preparation.md)
+for corpus-informed clarification, grounding, routing and rechecking.
 
 ## Boundaries
 
-Edit this issue and its relationships; create sub-issues only under the
-protocol's split procedure. When preparation challenges a decided record,
-follow [`implementer.md`'s Challenge a decided record](implementer.md#challenge-a-decided-record):
-create an `open` successor stating the challenge, stop only preparation that
-depends on that decision until a person answers, and continue independent
-work. This successor write is permitted; an unresolved challenge finishes
-`needs-human` under the shared escalation rules. No implementation, branches,
-PRs, implementation scheduling or priority changes. Preserve approved behavior and guarantees;
-escalate unresolved product choices rather than inventing them. An inference
-that decides who may do what, or widens network exposure or external
-resources, is an owner question unless an owner statement clearly covers it:
-on the issue or its parent, or in a corpus document or decision. Escalate it
-rather than listing it as a preparer inference. Never silently
-waive a serious finding. Shared role rules own workflow labels, permissions, escalation and retrospectives.
+Edit the assigned issue and its relationships, create sub-issues under the split
+procedure, and set or revise its `Effort` estimate. This grants no priority or
+other metadata authority. No implementation, branches, PRs or implementation scheduling.
+
+Challenge product intent and scope, retaining enough factual grounding for an
+implementable issue. The reviewer independently challenges feasibility,
+practicality, unnecessary complexity, and the idea and product intent against
+evidence, offering useful alternatives where warranted under human-decision
+rules. Do not duplicate that review or ignore known impossibility.
+Never silently waive a serious finding.
+
+Unresolved product or authority choices use [.agents/protocols/human-decisions.md](../protocols/human-decisions.md),
+including who may do what, network exposure and external resources beyond settled
+owner authorization. Decided-record challenges follow its
+[shared successor procedure](../protocols/human-decisions.md#challenge-a-decided-record).
 
 ## Outcomes and handoff
 
-End with `ready`, `review`, `split`, `wontfix` or `needs-human`, selected by the
-protocol. The launcher applies the label transition; closing a `wontfix` issue
-and creating split relationships are the preparer's actions.
+Outcomes: `ready`, `review`, `split`, `wontfix` or `needs-human`, selected by the
+protocol. The launcher changes labels; the preparer closes `wontfix` issues and
+creates split relationships.
 
-The handoff starts with:
+Start the handoff with:
 
 ```text
-Grounding: <origin/main SHA>
+Grounding: <origin/main SHA|not-started>
 Preparation: trivial-self-check|challenged|resumed|grounded-wontfix
 ```
 
-Then follow the protocol's “Record once” rule: give the disposition and evidence
-needed for the next run, not a retelling of the issue.
+Report the exact revision verified, or `not-started` only if no code grounding
+occurred. If independent work was grounded, record its SHA and name the dependent
+scope still ungrounded. Never fetch merely to fill the field. The legacy `trivial-self-check` value covers all
+self-check exemptions, including qualifying product improvements. An initial
+clarification stop uses `challenged` and names the unresolved choice, without
+claiming completed grounding or review. Follow [Record once](../protocols/issue-preparation.md#record-once).

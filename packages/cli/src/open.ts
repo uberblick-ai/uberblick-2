@@ -123,6 +123,7 @@ import type { InitLock } from "./init-lock.js";
 import { acquireInitLock, tryAcquireInitLock, tryAcquireLock } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
+import { readAccessAction, requestAccess, type AccessBinding } from "./open-access.js";
 import {
   endpointOf,
   hubBind,
@@ -858,6 +859,7 @@ function respond(
 const API_PREFIX = "/api/";
 const SEARCH_PATH = "/api/search";
 const STATUS_PATH = "/api/status";
+const ACCESS_PATH = "/api/access";
 const SEARCH_LIMIT = 100;
 const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
@@ -939,6 +941,8 @@ async function serveApiRequest(
   authenticate: ApiAuthenticator,
   engine: UberblickMcpEngine,
   status: ApiStatus,
+  accessBinding: AccessBinding,
+  expectedOrigin: string,
 ): Promise<void> {
   const queriedToken = TOKEN_QUERY_PARAMS.some((name) =>
     target.searchParams.has(name),
@@ -950,6 +954,35 @@ async function serveApiRequest(
     !(await authenticate(authMessage))
   ) {
     apiResponse(request, response, 401, { error: "unauthorized" });
+    return;
+  }
+
+  if (target.pathname === ACCESS_PATH) {
+    if (request.headers.origin !== expectedOrigin) {
+      apiResponse(request, response, 403, { status: "origin-refused" });
+      return;
+    }
+    if (request.method !== "POST") {
+      apiResponse(request, response, 405, { error: "method_not_allowed" }, { allow: "POST" });
+      return;
+    }
+    const action = await readAccessAction(request);
+    if (action === null) {
+      apiResponse(request, response, 400, { status: "invalid-request" }, { connection: "close" });
+      request.resume();
+      return;
+    }
+    const aborted = new AbortController();
+    const abort = () => { if (!response.writableFinished) aborted.abort(); };
+    request.once("aborted", abort);
+    response.once("close", abort);
+    try {
+      const result = await requestAccess(accessBinding, action, aborted.signal);
+      apiResponse(request, response, result.status, result.body);
+    } finally {
+      request.off("aborted", abort);
+      response.off("close", abort);
+    }
     return;
   }
 
@@ -1004,6 +1037,8 @@ function serveBoundRequest(
   authenticate: ApiAuthenticator,
   engine: UberblickMcpEngine,
   status: ApiStatus,
+  accessBinding: AccessBinding,
+  expectedOrigin: string,
   request: IncomingMessage,
   response: ServerResponse,
 ): void {
@@ -1020,6 +1055,8 @@ function serveBoundRequest(
     authenticate,
     engine,
     status,
+    accessBinding,
+    expectedOrigin,
   ).catch(() => {
     if (!response.headersSent) {
       apiResponse(request, response, 500, { error: "internal_error" });
@@ -1519,7 +1556,7 @@ export async function openCommand(
   const startupEnv: NodeJS.ProcessEnv = { ...process.env };
   const initial = await initialConfig(startupEnv);
   const resolved = initial.resolved;
-  requireBinding(resolved);
+  const projectBinding = requireBinding(resolved);
   for (const warning of resolved.warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }
@@ -1658,6 +1695,8 @@ export async function openCommand(
             authenticateApi,
             engine,
             status,
+            { workspaceId: mcpConfig.workspaceId, hubUrl: projectBinding.hubUrl, env: startupEnv },
+            servedUrl.origin,
             request,
             response,
           );

@@ -17,7 +17,7 @@
  *
  * Hand-rolled on purpose (#68). There are four routes — the workspace, one
  * document, the whole corpus listed (`/<workspace>/all`, #118), and workspace
- * settings (`/<workspace>/settings`, with one Tags child); a router library
+ * settings (`/<workspace>/settings`, with Tags and Access children); a router library
  * would be a new runtime dependency buying nothing but indirection.
  *
  * The address bar is the selection. Nothing else stores "which document is
@@ -37,8 +37,8 @@ export interface Workspace {
   segment: string;
 }
 
-/** The two destinations inside workspace settings. */
-export type SettingsPage = "general" | "tags";
+/** The destinations inside workspace settings. */
+export type SettingsPage = "general" | "tags" | "access";
 
 /**
  * What an address resolves to.
@@ -77,8 +77,9 @@ export const ALL_SEGMENT = "all";
 /** The workspace-settings mode. General keeps the mode's root address. */
 export const SETTINGS_SEGMENT = "settings";
 
-/** The only child address inside workspace settings. */
+/** Child addresses inside workspace settings. */
 export const TAG_SETTINGS_SEGMENT = "tags";
+export const ACCESS_SETTINGS_SEGMENT = "access";
 
 /**
  * One path segment, percent-decoding tolerated.
@@ -160,6 +161,9 @@ export function parseRoute(pathname: string, configured: string | null): Route {
     if (page === undefined) return { kind: "settings", workspace, page: "general" };
     if (segments.length === 3 && page === TAG_SETTINGS_SEGMENT) {
       return { kind: "settings", workspace, page: "tags" };
+    }
+    if (segments.length === 3 && page === ACCESS_SETTINGS_SEGMENT) {
+      return { kind: "settings", workspace, page: "access" };
     }
     return {
       kind: "invalid",
@@ -246,7 +250,7 @@ export function settingsPath(
   page: SettingsPage = "general",
 ): string {
   const root = `/${segment}/${SETTINGS_SEGMENT}`;
-  return page === "tags" ? `${root}/${TAG_SETTINGS_SEGMENT}` : root;
+  return page === "general" ? root : `${root}/${page}`;
 }
 
 /**

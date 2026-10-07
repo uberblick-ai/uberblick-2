@@ -130,7 +130,7 @@ function selectHub(hub: string | undefined, io: Io, describe = true): Selection 
   return { origin, bound, workspace: binding?.workspaceId, bindingOrigin: resolved?.origin ?? null };
 }
 
-function displayUsername(user: string): string {
+export function displayUsername(user: string): string {
   // JSON quoting escapes C0 controls; DEL and C1 also need terminal-safe escapes.
   return isGithubUsername(user) ? user : JSON.stringify(user).replace(/[\u007f-\u009f]/g,
     char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);

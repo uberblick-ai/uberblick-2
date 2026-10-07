@@ -46,14 +46,22 @@ describe("remote device commands", () => {
     expect(readFileSync(file(box, "credentials.json"))).toEqual(before);
     const status = await runUbAsync(["status", "--json"], box);
     expect(status.status, status.stderr).toBe(0);
-    expect(JSON.parse(status.stdout)).toMatchObject({ credentialPresent: true, hub: { status: "connected" } });
+    expect(JSON.parse(status.stdout)).toMatchObject({
+      account: { login: login.identity.githubUsername, provider: "github" },
+      credentialPresent: true, hub: { status: "connected" },
+    });
+    expect(hub.renewalCount).toBe(0);
+    expect(readFileSync(file(box, "credentials.json"))).toEqual(before);
+    const text = await runUbAsync(["status"], box);
+    expect(text.status, text.stderr).toBe(0);
+    expect(text.stdout).toContain(`hub         ${endpoint}\naccount     @${login.identity.githubUsername} (GitHub)\n`);
     const doctor = await runUbAsync(["doctor", "--json"], box);
     const checks = JSON.parse(doctor.stdout).checks;
     expect(checks.find((check: { name: string }) => check.name === "login").status).toBe("pass");
     expect(checks.find((check: { name: string }) => check.name === "hub").status).toBe("pass");
     expect(hub.authentications.length).toBeGreaterThan(0);
     for (const auth of hub.authentications) expect(auth.claims?.kid).toBe(login.credential.record.id);
-    for (const output of [joined.output, status.output, doctor.output]) assertPrivate(output, login.credential.key);
+    for (const output of [joined.output, status.output, text.output, doctor.output]) assertPrivate(output, login.credential.key);
   });
 
   it("initializes a remote binding only under workspace access, without generating or copying a secret", async () => {
@@ -84,6 +92,15 @@ describe("remote device commands", () => {
     for (const command of ["status", "doctor"]) {
       const refused = await runUbAsync([command], box);
       expect(refused.output).toContain(kind === "no-access" ? "administrator for access" : "ub auth login");
+      if (command === "status") {
+        expect(refused.stdout).toContain(`hub         ${endpoint}\naccount     @${login.identity.githubUsername} (GitHub)\n`);
+        const json = await runUbAsync(["status", "--json"], box);
+        expect(JSON.parse(json.stdout)).toMatchObject({
+          account: { login: login.identity.githubUsername, provider: "github" },
+          hub: { status: "auth-failed" },
+        });
+        assertPrivate(json.output, login.credential.key);
+      }
       assertPrivate(refused.output, login.credential.key);
     }
   });

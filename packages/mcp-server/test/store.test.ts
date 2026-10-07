@@ -107,6 +107,54 @@ describe("a database written by the better-sqlite3 build", () => {
   });
 });
 
+describe("last hub acknowledgement time", () => {
+  it("is absent in fresh and historical replicas, and survives reopening", () => {
+    expect(store(legacyDatabase()).readLastSync()).toBeNull();
+    const databasePath = tempDatabasePath();
+    const opened = store(databasePath);
+    expect(opened.readLastSync()).toBeNull();
+
+    const timestamp = Date.parse("2026-10-05T19:58:12.987Z");
+    opened.recordLastSync(timestamp);
+    opened.close();
+    expect(store(databasePath).readLastSync()).toBe(timestamp);
+  });
+
+  it("refuses older readings committed after newer ones on another connection", () => {
+    const databasePath = tempDatabasePath();
+    const slow = store(databasePath);
+    const fast = store(databasePath);
+    const older = Date.parse("2026-10-05T19:58:12Z");
+    const newer = older + 5_000;
+
+    fast.recordLastSync(newer);
+    slow.recordLastSync(older);
+    expect(slow.readLastSync()).toBe(newer);
+    expect(fast.readLastSync()).toBe(newer);
+
+    // A clock that stays behind the shared value remains unable to regress it.
+    fast.recordLastSync(older - 60_000);
+    slow.recordLastSync(newer);
+    expect(fast.readLastSync()).toBe(newer);
+    slow.recordLastSync(newer + 1);
+    expect(fast.readLastSync()).toBe(newer + 1);
+  });
+
+  it("reports invalid metadata without making the replica log unusable", () => {
+    const databasePath = tempDatabasePath();
+    const opened = store(databasePath);
+    const saboteur = new DatabaseSync(databasePath);
+    saboteur
+      .prepare("INSERT INTO meta (key, value) VALUES ('last_sync_at', ?)")
+      .run("invalid timestamp");
+    saboteur.close();
+
+    expect(() => opened.readLastSync()).toThrow(/invalid last_sync_at/);
+    const seq = opened.appendUpdate("a-room", new Uint8Array([1]), "local");
+    expect(opened.pendingRooms()).toEqual([{ room: "a-room", seq }]);
+  });
+});
+
 describe("a payload that is a view into a larger buffer", () => {
   it("is logged as the view, not as the buffer behind it", () => {
     // Yjs hands out `Uint8Array`s, and nothing promises they start at byte zero

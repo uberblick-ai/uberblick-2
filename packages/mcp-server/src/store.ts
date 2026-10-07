@@ -15,8 +15,9 @@
  *    {@link MirrorStore.clearDerived}. It is never authoritative, and no
  *    document state exists only here.
  *
- * Alongside both, `meta` records process-local facts that cannot be derived
+ * Alongside both, `meta` records replica facts that cannot be derived
  * from documents. The permanent `workspace` row binds the file to its corpus;
+ * `last_sync_at` keeps this machine's latest hub acknowledgement time;
  * the serving engine's holder row is meaningful only while its separate
  * process-held SQLite lock is live — see `serving-role.ts`.
  *
@@ -184,11 +185,13 @@ function parseTags(packed: string | null): string[] {
 }
 
 /**
- * Process-local facts about this file, as opposed to document state. The
- * `workspace` row is the uuid whose corpus this replica holds. The index tables
- * carry no workspace column, so the file itself is the boundary. The serving
- * role also keeps its diagnostic holder here; its authority is the separate
- * process-held lock, never this persistent row.
+ * Facts about this file, as opposed to document state. The `workspace` row is
+ * the uuid whose corpus this replica holds. The index tables
+ * carry no workspace column, so the file itself is the boundary. `last_sync_at`
+ * is the latest caught-up reading, in epoch milliseconds, across this machine's
+ * processes. It means acknowledged by the hub, not durably stored there. The
+ * serving role also keeps its diagnostic holder here; its authority is the
+ * separate process-held lock, never this persistent row.
  *
  * Its own script, run before {@link SCHEMA}: it is everything the store is
  * allowed to write to a file it has not yet established is its own. See
@@ -844,6 +847,38 @@ export class MirrorStore {
       data_version: number;
     };
     return Number(row.data_version);
+  }
+
+  /** Last caught-up time on this machine, or null for a replica predating it. */
+  readLastSync(): number | null {
+    const row = this.db
+      .prepare("SELECT value FROM meta WHERE key = 'last_sync_at'")
+      .get() as { value: string } | undefined;
+    if (row === undefined) return null;
+    const timestamp = Number(row.value);
+    if (
+      !Number.isSafeInteger(timestamp) ||
+      Number.isNaN(new Date(timestamp).getTime())
+    ) {
+      throw new Error("invalid last_sync_at timestamp");
+    }
+    return timestamp;
+  }
+
+  /**
+   * Advance the shared acknowledgement time in one SQLite statement. A stale
+   * process or a clock behind the stored time cannot overwrite a newer reading.
+   * Metadata statements are prepared here so their failures remain isolated by
+   * the caller, rather than preventing the replica from opening.
+   */
+  recordLastSync(timestamp: number): void {
+    this.db
+      .prepare(
+        "INSERT INTO meta (key, value) VALUES ('last_sync_at', ?) " +
+          "ON CONFLICT (key) DO UPDATE SET value = excluded.value " +
+          "WHERE CAST(meta.value AS INTEGER) < CAST(excluded.value AS INTEGER)",
+      )
+      .run(String(timestamp));
   }
 
   /**

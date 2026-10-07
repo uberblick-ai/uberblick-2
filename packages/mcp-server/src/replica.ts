@@ -55,6 +55,7 @@ import type { Block, DocMeta, InlineRun } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
 import { githubReference } from "./github-reference.js";
 import { log } from "./log.js";
+import { collectReplicaSyncState } from "./status.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
 import { HubSync } from "./sync.js";
 
@@ -231,6 +232,9 @@ export class Replicas {
 
   /** The settle currently in flight, so concurrent tool calls share one. */
   private settling: Promise<void> | null = null;
+
+  /** Monotonic process time of the last metadata write attempt. */
+  private lastSyncWriteAt: number | null = null;
 
   /**
    * The first failure to persist an update, if any. Sticky and fatal by design
@@ -1130,6 +1134,7 @@ export class Replicas {
       // Cheap and local: pick up anything logged while we were waiting.
       if (this.persistenceFailure === null) {
         this.refreshReplicas();
+        this.recordLastSyncIfCaughtUp();
       }
       if (requireHealthy) {
         this.assertHealthy();
@@ -1175,6 +1180,7 @@ export class Replicas {
     }
     this.releaseQuietRooms();
     this.compactLargeLogs();
+    this.recordLastSyncIfCaughtUp();
   }
 
   /** Replay the log tail and attach newly discovered documents. Synchronous. */
@@ -1224,6 +1230,39 @@ export class Replicas {
     if (this.persistenceFailure !== null) return;
     this.releaseQuietRooms();
     this.compactLargeLogs();
+    this.recordLastSyncIfCaughtUp();
+  }
+
+  /**
+   * Best-effort acknowledgement metadata, independent of replica persistence.
+   * Throttle on a monotonic clock so wall-clock corrections cannot increase
+   * the write rate. The store's atomic max handles other processes and skew.
+   */
+  recordLastSyncIfCaughtUp(): void {
+    if (this.destroyed || this.persistenceFailure !== null) return;
+    const monotonicNow = performance.now();
+    if (this.lastSyncWriteAt !== null && monotonicNow - this.lastSyncWriteAt < 5_000) return;
+    if (this.sync.state().status !== "connected") return;
+    try {
+      if (!collectReplicaSyncState(this).caughtUp) return;
+      // Pace failed attempts too: an unavailable metadata key must not flood
+      // stderr or starve the replica engine's normal work.
+      this.lastSyncWriteAt = monotonicNow;
+      this.store.recordLastSync(Date.now());
+    } catch (error) {
+      log.warn("failed to record last sync time", error);
+    }
+  }
+
+  /** Read optional metadata without turning its failure into a replica failure. */
+  readLastSync(): string | null {
+    try {
+      const timestamp = this.store.readLastSync();
+      return timestamp === null ? null : new Date(timestamp).toISOString().replace(/\.\d{3}Z$/, "Z");
+    } catch (error) {
+      log.warn("failed to read last sync time", error);
+      return null;
+    }
   }
 
   /**
