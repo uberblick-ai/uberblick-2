@@ -33,7 +33,8 @@ import {
   UB_BIN,
   removeTempDirs,
   runUb,
-  sandbox as unboundSandbox,
+  sandbox as boundSandbox,
+  unboundSandbox,
 } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -76,12 +77,10 @@ const LOCAL_BINDING_ENV = { UB_HUB_URL: "local", UB_WORKSPACE_ID: WORKSPACE };
 
 /** These installer cases start with a deliberately selected project binding. */
 function sandbox(files: SandboxFiles = {}): Sandbox {
-  const box = unboundSandbox(files);
-  writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify({
-    workspaceId: WORKSPACE,
-    hubUrl: null,
-  }));
-  return box;
+  return boundSandbox({
+    ...files,
+    projectBinding: { workspaceId: WORKSPACE, hubUrl: null },
+  });
 }
 
 

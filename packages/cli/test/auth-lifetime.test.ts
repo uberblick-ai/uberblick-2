@@ -154,7 +154,7 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
       if (!cancellation) throw new Error("missing cancellation authority from malformed start");
       expect((await (await remote.cancel(cancellation.body)).json() as { status: string }).status).toBe("abandoned");
       expect(remote.requests.some((request) => request.path === "/auth/github/collect")).toBe(false);
-      expect(run.stdout).not.toContain("Approve in a browser");
+      expect(run.stdout).not.toMatch(/^open {2,}/m);
       expect(privateDeviceRows(remote.databasePath)).toHaveLength(0);
       assertPublicOnly(run, remote);
     } else {

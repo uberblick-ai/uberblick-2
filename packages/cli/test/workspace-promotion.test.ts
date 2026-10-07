@@ -9,7 +9,7 @@ import { ensureDeviceLogin } from "@uberblick/hub/device-login";
 import { compareCorpus, createMcpServer, inspectRemote, isIdentical, resolveMcpConfig, syncWorkspace } from "@uberblick/mcp-server";
 import { getWorkspaceName, listDirectory, readSidebar, tombstoneDirectoryEntry } from "@uberblick/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { UB_BIN, removeTempDirs, runUbAsync, sandbox, type Sandbox } from "./helpers.js";
+import { UB_BIN, removeTempDirs, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
 
 const hubs: Hub[] = [];
 afterEach(async () => {
@@ -23,7 +23,7 @@ function offline(box: Sandbox) {
   return { ...resolveMcpConfig({ ...box.env, WORKSPACE_ID: selected(box).workspaceId }), authSecret: null };
 }
 async function localWorkspace(name = "Project notes") {
-  const box = sandbox();
+  const box = unboundSandbox();
   const result = await runUbAsync(["workspace", "create", name], box);
   expect(result.status, result.output).toBe(0);
   return box;
@@ -203,7 +203,7 @@ describe("workspace creation and promotion", () => {
       { UB_WORKSPACE_ID: selected(box).workspaceId, UB_HUB_URL: "local" });
     expect(result.status, result.output).toBe(0);
     expect(result.stdout).toContain(`ub workspace join ${endpoint}/${selected(box).workspaceId}`);
-    expect(result.output).not.toContain("Waiting for GitHub approval");
+    expect(result.output).not.toContain("waiting for approval…");
     expect(result.output).not.toContain(login.credential.key);
     expect(selected(box)).toEqual({ workspaceId: selected(box).workspaceId, hubUrl: endpoint });
     const privateConfig = JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
@@ -219,7 +219,7 @@ describe("workspace creation and promotion", () => {
     expect(after.memberships.filter(row => row.workspace_id === selected(box).workspaceId)).toEqual([
       expect.objectContaining({ principal_id: login.identity.id, role: "admin" }),
     ]);
-    const other = sandbox();
+    const other = unboundSandbox();
     const freshCredential = hub.credentials!.issue({ principalId: login.identity.id, deviceId: randomUUID(), workspaces: [selected(box).workspaceId] });
     await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity: login.identity,
       credential: { record: freshCredential.record, key: Buffer.from(freshCredential.keyBytes).toString("base64url") } }, other.env);
@@ -242,7 +242,7 @@ describe("workspace creation and promotion", () => {
     expect(result.stderr).not.toContain("rerun this command");
     expect(accessRows(hub)).toEqual(before);
     expect(bindingBytes(box)).toBe(binding);
-    expect(result.output).not.toContain("Waiting for GitHub approval");
+    expect(result.output).not.toContain("waiting for approval…");
   });
 
   it("refuses an existing destination and a workspace already bound to a hub", async () => {
@@ -293,7 +293,7 @@ describe("workspace creation and promotion", () => {
   });
 
   it("validates names and URLs without side effects or echoing pasted credentials", async () => {
-    const box = sandbox();
+    const box = unboundSandbox();
     for (const name of ["", "bad\nname", "x".repeat(65)]) expect((await runUbAsync(["workspace", "create", name], box)).status).toBe(2);
     const result = await runUbAsync(["workspace", "promote", "https://user:private-paste@hub.test"], box);
     expect(result.status).toBe(2);
@@ -329,7 +329,7 @@ it("runs GitHub approval when the stored login no longer works", async () => {
   hub.credentials!.revokeDevice(identity.id, issued.record.deviceId);
   const result = await runUbAsync(["workspace", "promote", endpoint], box);
   expect(result.status, result.output).toBe(0);
-  expect(result.output).toContain("Approve in a browser:");
+  expect(result.stdout).toContain("open       https://github.com/login/device\n");
   expect(result.output).not.toContain("fixture-private");
   expect(approvals).toBe(1);
   const rows = accessRows(hub);

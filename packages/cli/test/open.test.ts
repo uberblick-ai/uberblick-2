@@ -27,7 +27,7 @@ import { localBrowserKey } from "../src/browser-key.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import { bundlePlan, ensureBundle } from "../src/open.js";
 import { probePort } from "../src/probes.js";
-import { pointAt, runUbAsync, sandbox, sleep, waitUntil } from "./helpers.js";
+import { pointAt, runUbAsync, sandbox, unboundSandbox, sleep, waitUntil } from "./helpers.js";
 import {
   BANNER,
   BUILD_STAMP,
@@ -850,7 +850,7 @@ describe("ub open", () => {
   });
 
   it("refuses to serve without a binding, even with a signing secret configured", async () => {
-    const box = sandbox({
+    const box = unboundSandbox({
       userConfig: { workspace: WORKSPACE, hubUrl: FIRST_REMOTE },
       credentials: { signingSecret: SECRET },
     });
@@ -888,10 +888,10 @@ describe("ub open", () => {
 });
 
 it("opens a newly created local workspace in the browser without login or promotion", async () => {
-  const box = sandbox();
+  const box = unboundSandbox();
   const created = await runUbAsync(["workspace", "create", "Local browser"], box);
   expect(created.status, created.output).toBe(0);
-  const running = await open(box, [], {
+  const running = await open(box, ["--port", String(await freePort())], {
     UBERBLICK_WEB_DIST: fixtureBundle(box),
     HUB_DB_PATH: join(box.cwd, "local-browser.sqlite"), BROWSER: "none",
   });

@@ -4,7 +4,7 @@
  * The six inline marks — `bold`, `italic`, `strike`, `inlineCode`, `link`,
  * `docLink` — ride
  * the exact mechanism the annotation anchor already proved: Yjs text formatting
- * attributes on the block's single Y.XmlText. Nothing new is stored, and the
+ * attributes on the block's single Y.XmlText (or each table cell's text). Nothing new is stored, and the
  * concurrency properties come for free — a mark is part of the text's own CRDT
  * state, so it survives splits, re-types (`setBlockType` replays the delta) and
  * concurrent edits, which a pair of stored positions would not.
@@ -17,10 +17,10 @@
  *    y-prosemirror turns a text attribute into a mark named for its key with the
  *    value as that mark's attrs, so the editor needs no translation layer in
  *    either direction — the same reason `comment` stores `{ threadId }`.
- * 2. **Marks are not part of a block's `rev`.** A rev hashes the plain text and
- *    the block's attributes only (see `rev.ts`), so formatting a range never
- *    invalidates an edit a caller has already prepared. `editBlock` works on
- *    plain text for the same reason: `old_text`/`new_text` never mention marks.
+ * 2. **Prose marks are not part of a block's `rev`.** Prose revs hash plain text
+ *    and block attributes (see `rev.ts`), so prose edits never mention marks.
+ *    Tables expose inline markdown instead: their cell marks are part of both
+ *    the GFM text and its rev, and edits can change those marks.
  * 3. **The set is closed.** Anything else in a text's attributes is foreign
  *    content, and the web client refuses to bind rather than let y-prosemirror
  *    destroy it. `code` and `mermaid` blocks are source text and carry no inline
@@ -228,7 +228,7 @@ export function inlinePlainText(runs: readonly InlineRun[]): string {
  * the boundary the invariants are enforced at, so no caller — `appendBlock`, an
  * MCP tool, the seed importer — can put another scheme into the document.
  */
-function attributesOf(marks: InlineMarkSet): Record<string, unknown> | null {
+export function attributesOf(marks: InlineMarkSet): Record<string, unknown> | null {
   const attributes: Record<string, unknown> = {};
   for (const flag of FLAGS) {
     if (marks[flag] === true) attributes[flag] = {};

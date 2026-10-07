@@ -196,7 +196,16 @@ test("device recovery readings keep local editing usable on the open page @webki
   const saved = page.locator(".ub-status-word--saved");
   const shared = page.locator(".ub-status-word--hub");
   await expect(shared).toHaveText("synced with hub");
-  const pageInstance = await page.evaluate(() => performance.timeOrigin);
+  // A new document clears this marker; pagehide also catches a departure
+  // followed by restoration from the back/forward cache. Clock readings vary.
+  const samePageMarker = "__uberblickDeviceRecoveryPage";
+  await page.evaluate((key) => {
+    const originalWindow = window as unknown as Record<string, unknown>;
+    originalWindow[key] = true;
+    window.addEventListener("pagehide", () => {
+      originalWindow[key] = false;
+    }, { once: true });
+  }, samePageMarker);
 
   notSharedReason = "sign-in-required";
   await expect(saved).toHaveText("saved here");
@@ -212,9 +221,17 @@ test("device recovery readings keep local editing usable on the open page @webki
   await expect(saved).toHaveText("saved here");
   await expect(shared).toHaveText("not shared with hub");
   await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+  await placeCaret(page);
+  await page.keyboard.type("; edited while membership is refused");
+  await expect(saved).toHaveText("saved here");
+  await expect.poll(() => documentText(page))
+    .toBe("kept here; edited while sign-in is required; edited while membership is refused");
 
   notSharedReason = null;
   await expect(shared).toHaveText("synced with hub");
   await expect(page.locator(".ub-status").getByText(/ask its administrator for membership/)).toHaveCount(0);
-  expect(await page.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
+  expect(await page.evaluate(
+    (key) => (window as unknown as Record<string, unknown>)[key] === true,
+    samePageMarker,
+  )).toBe(true);
 });

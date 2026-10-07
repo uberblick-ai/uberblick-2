@@ -370,6 +370,9 @@ export class HubSync {
   /** A close or failed connect seen since the last successful open. */
   private sawFailure = false;
 
+  /** A dial failed before opening; only a successful open clears it. */
+  private failedDial = false;
+
   /**
    * When the current run of connection attempts started. A socket that has not
    * connected within the connect grace is reported as a hub that is down, even
@@ -593,6 +596,7 @@ export class HubSync {
             this.deviceRetryTimer = null;
           }
           this.sawFailure = false;
+          this.failedDial = false;
           // A new connection has proven nothing yet and dropped nothing yet.
           // This runs before any of its rooms can answer, which is what makes
           // the two sets below a record of this connection and no other.
@@ -619,6 +623,9 @@ export class HubSync {
       },
       onClose: () => {
         this.sawFailure = true;
+        // The configured close callback runs before the provider reports
+        // disconnected. A close after open still deserves reconnect grace.
+        if (this.socketStatus !== "connected") this.failedDial = true;
       },
     });
 
@@ -1347,7 +1354,7 @@ export class HubSync {
 
     const connectDeadline = Date.now() + this.config.connectTimeoutMs;
     while (this.socketStatus !== "connected") {
-      if (this.refusedByHub() || Date.now() >= connectDeadline) {
+      if (this.failedDial || this.refusedByHub() || Date.now() >= connectDeadline) {
         return;
       }
       await sleep(25);
@@ -1360,6 +1367,7 @@ export class HubSync {
     while (!this.allQuiet()) {
       if (
         (this.socketStatus !== "connected" && !this.checkingDeviceRefusal) ||
+        this.failedDial ||
         this.refusedByHub() ||
         Date.now() >= syncDeadline
       ) {

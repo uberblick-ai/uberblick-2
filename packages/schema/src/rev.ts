@@ -9,8 +9,9 @@
  *
  * Deliberately not cryptographic: 64 bits from two independent 32-bit hashes
  * (FNV-1a and djb2), which is ample for optimistic concurrency and costs
- * nothing. Marks are excluded on purpose — annotating a block must not
- * invalidate an edit a caller has already prepared.
+ * nothing. Prose marks and comment anchors are excluded on purpose; a table
+ * instead supplies inline-marked GFM as its text, so its cell formatting is
+ * included. Annotating a block never invalidates a prepared edit.
  */
 
 import type { BlockType, HeadingLevel, ListIndent, ListStyle } from "./types.js";

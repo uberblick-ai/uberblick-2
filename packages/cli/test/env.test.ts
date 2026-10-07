@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 import { afterAll } from "vitest";
-import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox } from "./helpers.js";
+import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox, unboundSandbox } from "./helpers.js";
 import { resolveConfig } from "../src/config.js";
 
 afterAll(removeTempDirs);
@@ -119,7 +119,7 @@ describe("ub env", () => {
   });
 
   it("runs a non-workspace child without selecting the machine's old default", () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const box = unboundSandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     expect(injected(box)).toEqual({ WORKSPACE_ID: null, HUB_URL: null, HUB_AUTH_TOKEN: null });
   });
 

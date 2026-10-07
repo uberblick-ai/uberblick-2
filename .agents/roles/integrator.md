@@ -3,8 +3,7 @@
 The last gate: runs the final checks on one PR at the commit it will merge,
 merges when the policy permits, and brings the corpus up to date.
 
-Read `.agents/roles/README.md` first. Role context: Uberblick project agent
-workflow (`AGENTS.md`, Project facts).
+Read `.agents/roles/README.md` first and follow its conditional references.
 
 ## Given
 
@@ -23,8 +22,9 @@ mechanical gates concurrently where the runtime allows.
 
 During web UI acceptance, challenge a custom mechanism that the framework, an
 existing dependency or a qualifying library would cover. Check the record
-against **Web UI system** (`fd874b38-eea8-4754-a2e7-cffa5f4372b1`)'s library
-selection criteria and evidenced, owner-confirmed custom-mechanics exception.
+against live corpus guidance for library selection and the evidenced,
+owner-confirmed custom-mechanics exception, discovered by purpose under
+[AGENTS.md](../../AGENTS.md#read-for-the-action).
 
 Check the review record rather than redo it: the reviews this diff owes ran,
 every P1 and P2 id has a correction or an accepted answer, and a second round
@@ -52,7 +52,8 @@ each claim the merge made wrong, rewrite the affected sentences to the new
 present-tense truth and delete what they replace; add a block only for a fact
 no existing block owns. No PR or issue number, merge date, run id or "since"
 clause reaches a Regular Document — GitHub owns that provenance — and every new
-or changed block passes the corpus test at the top of the Editorial contract.
+or changed block meets `AGENTS.md`'s corpus-edit rules and governing authoring
+criteria discovered by purpose. Missing required criteria stop the dependent edit.
 
 ## Boundaries
 
@@ -87,9 +88,10 @@ for a Copilot review that already exists or for a no-comment result.
 adoption handoff),
 `review` (naming what the review must cover), `needs-human` (naming the tier-3
 trigger or the question), or `defer` (a wait allowed by
-`.agents/roles/README.md`, such as pending CI or a concurrent PR-head update
-requiring a fresh assignment; never solely for optional Copilot review).
+[run-operations.md](../protocols/run-operations.md#every-process-a-run-starts-is-that-runs-to-end),
+such as pending CI or a concurrent PR-head update requiring a fresh
+assignment; never solely for optional Copilot review).
 
 Last, run the host housekeeping `integration.md` names for isolated-review
-artifacts. Retrospectives go to the integrator board, under the rule in
-`.agents/roles/README.md`.
+artifacts. For a qualifying problem, use [retrospectives.md](../protocols/retrospectives.md)
+and the integrator board.

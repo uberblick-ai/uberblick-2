@@ -26,6 +26,7 @@ import {
   pointAt,
   removeTempDirs,
   sandbox,
+  unboundSandbox,
   waitUntil,
 } from "./helpers.js";
 
@@ -162,7 +163,7 @@ describe("the versioned install payload", () => {
   });
 
   it("runs init, status, MCP and the packaged web app with only Node on PATH", async () => {
-    const box = sandbox();
+    const box = unboundSandbox();
     const initialPayload = treeDigest(payload);
 
     const version = runPayload(box, ["--version"]);
@@ -285,7 +286,12 @@ describe("the versioned install payload", () => {
 
     const run = spawnSync("ub", ["update"], {
       cwd: REPO_ROOT,
-      env: { ...runtimeEnv(box, keg), PATH: `${fakeBin}:${join(keg, "bin")}:${nodeBin}` },
+      env: {
+        ...runtimeEnv(box, keg),
+        UB_WORKSPACE_ID: WORKSPACE,
+        UB_HUB_URL: "local",
+        PATH: `${fakeBin}:${join(keg, "bin")}:${nodeBin}`,
+      },
       encoding: "utf8",
       timeout: 30_000,
     });

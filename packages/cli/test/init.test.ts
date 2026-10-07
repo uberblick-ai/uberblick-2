@@ -26,10 +26,25 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { createConnection } from "node:net";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { readSeedDocs, resolveMcpConfig } from "@uberblick/mcp-server";
+import {
+  directoryRoom,
+  getBlocks,
+  getMeta,
+  isSidebarSeeded,
+  listDirectory,
+  readSidebar,
+  roomForDoc,
+  sidebarRoom,
+} from "@uberblick/schema";
+import * as Y from "yjs";
 import { afterAll, describe, expect, it } from "vitest";
 import { findCheckoutRoot } from "../src/checkout.js";
 import { resolveConfig } from "../src/config.js";
+import { STARTER_GROUP_ID, STARTER_GROUP_NAME, TEMPLATE_DIR } from "../src/starter.js";
 import {
   REPO_ROOT,
   hubless,
@@ -37,6 +52,7 @@ import {
   runUb,
   runUbAsync,
   sandbox as anySandbox,
+  unboundSandbox as anyUnboundSandbox,
   type Sandbox,
   type SandboxFiles,
   sleep,
@@ -48,6 +64,11 @@ afterAll(removeTempDirs);
 /** No test here starts a hub, so none waits for one; see {@link hubless}. */
 function sandbox(files?: SandboxFiles): Sandbox {
   return hubless(anySandbox(files));
+}
+
+/** First-binding and absent-selection cases keep their unbound precondition. */
+function unboundSandbox(files?: SandboxFiles): Sandbox {
+  return hubless(anyUnboundSandbox(files));
 }
 
 const CREDENTIALS = ["uberblick", "credentials.json"] as const;
@@ -105,10 +126,86 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const JOINED = "7c2b91d4-3e05-4a68-9f31-b0d5e6a71c82";
 
 describe("ub init", () => {
+  it("creates its local workspace, secret and starter documents without waiting out refused hub deadlines", async (context) => {
+    // Init with a local binding currently dials the built-in endpoint. Check
+    // it is refused before writing: this proof must never seed a running hub.
+    const endpoint = new URL(resolveMcpConfig({ WORKSPACE_ID: randomUUID() }).hubUrl);
+    const refused = await new Promise<boolean>((resolve) => {
+      const socket = createConnection({ host: endpoint.hostname, port: Number(endpoint.port) });
+      const finish = (result: boolean) => {
+        socket.destroy();
+        resolve(result);
+      };
+      socket.once("connect", () => finish(false));
+      socket.once("error", (error: NodeJS.ErrnoException) => finish(error.code === "ECONNREFUSED"));
+      socket.setTimeout(500, () => finish(false));
+    });
+    if (!refused) context.skip("the built-in local hub endpoint did not refuse the connection");
+
+    // A fresh explicit local binding keeps this fixture independent of a
+    // launcher's enclosing project while still creating the replica and seed.
+    const box = sandbox();
+    const selected = projectBinding(box);
+    delete box.env.UB_TEST_MAX_WAIT_MS;
+    const started = performance.now();
+    const run = runUb(["init", "--yes"], box);
+    const elapsed = performance.now() - started;
+    expect(run.status, run.output).toBe(0);
+    // A loaded test runner gets headroom over the subsecond first-run target;
+    // the regression waits several full 1.5 s connect budgets.
+    expect(elapsed, `offline init took ${elapsed.toFixed(0)} ms`).toBeLessThan(2_000);
+    const binding = projectBinding(box);
+    expect(binding).toEqual(selected);
+    expect(binding.workspaceId).toMatch(UUID);
+    expect(binding.hubUrl).toBeNull();
+    const secret = storedSecret(box);
+    expect(Buffer.from(secret, "base64url").length).toBeGreaterThanOrEqual(32);
+    expect(statSync(credentialsPath(box)).mode & 0o777).toBe(0o600);
+    expect(run.output).not.toContain(secret);
+
+    // Replay durable state directly, so a later replica cannot repair a seed
+    // that returned early with missing documents or sidebar pins.
+    const workspace = binding.workspaceId as string;
+    const db = new DatabaseSync(join(box.dataHome, "uberblick", `${workspace}.sqlite`), { readOnly: true });
+    const docs: Y.Doc[] = [];
+    const replay = (room: string): Y.Doc => {
+      const doc = new Y.Doc();
+      docs.push(doc);
+      for (const row of db.prepare("SELECT state FROM snapshots WHERE room = ?").all(room)) {
+        Y.applyUpdate(doc, new Uint8Array(row.state as Uint8Array));
+      }
+      for (const row of db.prepare("SELECT payload FROM updates WHERE room = ? ORDER BY seq").all(room)) {
+        Y.applyUpdate(doc, new Uint8Array(row.payload as Uint8Array));
+      }
+      return doc;
+    };
+    try {
+      const starters = readSeedDocs(TEMPLATE_DIR);
+      expect(listDirectory(replay(directoryRoom(workspace))).map((doc) => doc.uuid).sort())
+        .toEqual(starters.map((doc) => doc.uuid).sort());
+      for (const starter of starters) {
+        const doc = replay(roomForDoc(workspace, starter.uuid));
+        expect(getMeta(doc)).toMatchObject({ uuid: starter.uuid, title: starter.title, description: starter.description, tags: [] });
+        expect(getBlocks(doc).map(({ type, text }) => ({ type, text })))
+          .toEqual(starter.blocks.map(({ type, text }) => ({ type, text })));
+      }
+      const sidebar = replay(sidebarRoom(workspace));
+      expect(readSidebar(sidebar)).toEqual([{
+        id: STARTER_GROUP_ID,
+        name: STARTER_GROUP_NAME,
+        docs: ["welcome-to-uberblick.md", "how-to-use-it.md"].map((file) => starters.find((doc) => doc.file === file)?.uuid),
+      }]);
+      expect(isSidebarSeeded(sidebar)).toBe(true);
+    } finally {
+      db.close();
+      for (const doc of docs) doc.destroy();
+    }
+  });
+
   it("does not persist a differing environment binding or create a workspace beneath an environment-only binding", () => {
     for (const present of [false, true]) {
       const fileBinding = { workspaceId: JOINED, hubUrl: null };
-      const box = sandbox(present ? { projectBinding: fileBinding } : {});
+      const box = present ? sandbox({ projectBinding: fileBinding }) : unboundSandbox();
       const run = runUb(["init", "--yes"], box, {
         UB_WORKSPACE_ID: "b7c3d914-5a20-4e6f-8d13-9f04a2c68e75", UB_HUB_URL: "local",
       });
@@ -134,7 +231,7 @@ describe("ub init", () => {
   it("refuses legacy implicit migration without creating a corpus or echoing an unsafe URL", () => {
     for (const hubUrl of ["wss://legacy.example.test/ws", "https://user:PRIVATE_LEGACY_SECRET@legacy.example.test/?token=PRIVATE_TOKEN"]) {
       const legacy = { workspace: JOINED, hubUrl, displayName: "Synthetic operator" };
-      const box = sandbox({ userConfig: legacy });
+      const box = unboundSandbox({ userConfig: legacy });
       const run = runUb(["init", "--yes"], box);
       expect(run.status, run.output).toBe(1);
       expect(run.stderr).toContain("legacy machine workspace or hub");
@@ -161,7 +258,7 @@ describe("ub init", () => {
 
   it("creates a fresh workspace in another project after completing the documented legacy migration", () => {
     const oldHub = "ws://localhost:8080/proxy";
-    const box = sandbox({ userConfig: { workspace: JOINED, hubUrl: oldHub, hubAdmission: "device", displayName: "Synthetic operator" } });
+    const box = unboundSandbox({ userConfig: { workspace: JOINED, hubUrl: oldHub, hubAdmission: "device", displayName: "Synthetic operator" } });
     const first = { ...box, cwd: join(box.cwd, "first") };
     const second = { ...box, cwd: join(box.cwd, "second") };
     mkdirSync(first.cwd);
@@ -199,7 +296,7 @@ describe("ub init", () => {
   it("generates an owner-only secret once, prints none of it, and keeps its workspace", () => {
     // Under the widest umask a system will accept: `mode:` on a write is
     // subject to the umask, so the file has to be chmodded afterwards.
-    const box = sandbox({ checkout: true });
+    const box = unboundSandbox({ checkout: true });
     const previous = process.umask(0o000);
     let run: ReturnType<typeof runUb>;
     let again: ReturnType<typeof runUb>;
@@ -288,7 +385,7 @@ describe("ub init", () => {
   });
 
   it("needs no TTY: takes flags, and defaults rather than prompting", () => {
-    const box = sandbox({ checkout: true });
+    const box = unboundSandbox({ checkout: true });
     // No `--yes`, stdin a pipe: this must complete rather than block on input.
     // With nobody to ask for a display slug, the id is the bare uuid.
     expect(runUb(["init"], box).status).toBe(0);
@@ -345,7 +442,7 @@ describe("ub init", () => {
     // not be stricter than it: a workspace `ub status` accepts is not one this
     // command refuses. The slug is display, so the spelling is kept verbatim.
     for (const workspace of [JOINED, `uberblick-${JOINED}`, `team-b-${JOINED}`]) {
-      const box = sandbox({ checkout: true });
+      const box = unboundSandbox({ checkout: true });
       const run = runUb(["init", "--yes", "--workspace", workspace], box);
       expect(run.status, run.stderr).toBe(0);
       expect(projectBinding(box).workspaceId).toBe(workspace);
@@ -378,7 +475,7 @@ describe("ub init", () => {
     // budget sits above their sum so a run that overruns reports itself rather
     // than being cut off by an anonymous test timeout.
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      const box = sandbox({ checkout: true });
+      const box = unboundSandbox({ checkout: true });
       const workspace = randomUUID();
       const runs = await Promise.all(
         Array.from({ length: 6 }, () =>
@@ -432,7 +529,7 @@ describe("ub init", () => {
     // Held by hand, so the interleave is a fact: the run reads an empty
     // configuration, blocks on the lock, and the workspace it has to adopt is
     // published underneath it before it is let go.
-    const box = sandbox({ checkout: true });
+    const box = unboundSandbox({ checkout: true });
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
@@ -471,7 +568,7 @@ describe("ub init", () => {
     // Writing an unusable workspace on would put it into `config.json`, where
     // the next run — or a seed, or a report — is where it would finally go
     // wrong.
-    const box = sandbox({ checkout: true });
+    const box = unboundSandbox({ checkout: true });
     const config = join(box.cwd, ".uberblick.json");
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
@@ -581,7 +678,7 @@ describe("ub init", () => {
   it.skipIf(!hasGit)("creates only the non-secret project binding inside a checkout", () => {
     // The real `.gitignore`: `ub init` writes nothing into a checkout, and this
     // is what would catch it if that ever changed.
-    const box = sandbox({ checkout: true });
+    const box = unboundSandbox({ checkout: true });
     copyFileSync(join(REPO_ROOT, ".gitignore"), join(box.cwd, ".gitignore"));
     const git = (...args: string[]): void => {
       const result = spawnSync("git", args, { cwd: box.cwd, encoding: "utf8" });

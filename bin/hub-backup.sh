@@ -19,7 +19,7 @@
 # worse than none, because it is the one that gets restored.
 #
 # Every compose call goes through `bin/remote-compose.sh`, which resolves and checks
-# this deployment's settings in both a checkout and an extracted hub release.
+# this extracted hub release's settings.
 #
 # The hub is restarted from a trap on every path after the stop — on the normal
 # exit and on HUP/INT/TERM, because in POSIX `sh` an EXIT-only trap does not run

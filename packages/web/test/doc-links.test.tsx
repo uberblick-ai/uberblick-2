@@ -37,6 +37,8 @@ import {
   getMeta,
   initDoc,
   tombstoneDirectoryEntry,
+  tableCellText,
+  tableRows,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
@@ -46,7 +48,12 @@ import { createDocLinkContext } from "../src/editor/doc-links.js";
 import type { DocLinkContext } from "../src/editor/doc-links.js";
 import { EditorPane } from "../src/ui/EditorPane.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
-import { mountEditor, snapshotFragment, typeText } from "./helpers.js";
+import {
+  mountEditor,
+  pastePlainText,
+  snapshotFragment,
+  typeText,
+} from "./helpers.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const DOC = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
@@ -65,23 +72,6 @@ function emptyDoc(): Y.Doc {
 
 function caretAtStart(editor: Editor): void {
   editor.commands.setTextSelection(1);
-}
-
-/**
- * A plain-text paste, as prosemirror-view performs one: the text replaces the
- * selection in a transaction marked `uiEvent: "paste"`, which is what Tiptap's
- * paste-rule plugin keys on. `view.pasteText` would be the door itself, but it
- * constructs a `ClipboardEvent`, and jsdom has no such class.
- */
-function pastePlainText(editor: Editor, text: string): void {
-  const { state } = editor.view;
-  const { from, to } = state.selection;
-  editor.view.dispatch(
-    state.tr
-      .insertText(text, from, to)
-      .setMeta("paste", true)
-      .setMeta("uiEvent", "paste"),
-  );
 }
 
 /** What ProseMirror's clipboard parser makes of an HTML fragment. */
@@ -149,6 +139,27 @@ describe("making a reference", () => {
     } finally {
       editor.destroy();
     }
+  });
+
+  it("uses the same typed document link and workspace-derived anchor in a table cell", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: DOC, title: "Cell references" });
+    appendBlock(ydoc, { type: "table", text: "|  | other |\n| --- | --- |" });
+    const { directory, context } = directoryWith([{ uuid: TARGET, title: "The hub" }]);
+    const { editor, element } = mountEditor(ydoc, { docLinks: context });
+    try {
+      editor.commands.setTextSelection(4);
+      typeText(editor, `see [the hub](${TARGET.toUpperCase()}) today`);
+      const cell = tableRows(getBlocksFragment(ydoc).get(0) as Y.XmlElement)[0]![0]!;
+      expect(tableCellText(cell)!.toDelta()).toEqual([
+        { insert: "see " },
+        { insert: "the hub", attributes: { docLink: { docId: TARGET } } },
+        { insert: " today" },
+      ]);
+      const anchor = element.querySelector("th a.ub-doclink");
+      expect(anchor?.getAttribute("href")).toBe(`/${WORKSPACE}/${TARGET}`);
+      expect(anchor?.getAttribute("data-doc-link-state")).toBe("resolved");
+    } finally { editor.destroy(); ydoc.destroy(); directory.destroy(); }
   });
 
   /** The external rule is untouched: a URL target is still an external link. */

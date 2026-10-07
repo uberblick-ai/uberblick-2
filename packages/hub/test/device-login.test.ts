@@ -93,6 +93,31 @@ process.send("ready");
 }
 
 describe("stored device login renewal", () => {
+  it("replaces names with each stored credential, including an older hub's unnamed reply", async () => {
+    const test = await setup();
+    const before = test.hub.issue({ workspaces: [WORKSPACE] });
+    before.credential.workspaceNames = { [WORKSPACE]: "Before rename" };
+    await writeHubLogin(test.hub.origin, before, test.env);
+    expect((await ensureDeviceLogin(test.hub.url, WORKSPACE, { env: test.env })).status).toBe("ready");
+    expect(test.hub.renewalCount).toBe(0);
+
+    const next = test.hub.issue({ workspaces: [WORKSPACE, OTHER_WORKSPACE], deviceId: before.credential.record.deviceId });
+    next.credential.workspaceNames = { [WORKSPACE]: "After rename", [OTHER_WORKSPACE]: "New grant" };
+    test.hub.setRenewalReply({ status: 200, body: { status: "renewed", credential: next.credential } });
+    const renewed = await ensureDeviceLogin(test.hub.url, OTHER_WORKSPACE, { env: test.env, renewalCooldownMs: 0 });
+    expect(renewed.status).toBe("ready");
+    const stored = readHubLogins(test.env).logins[test.hub.origin]!;
+    expect(stored.credential).toEqual(next.credential);
+    expect(test.hub.renewalCount).toBe(1);
+
+    const unnamed = test.hub.issue({ workspaces: [WORKSPACE, OTHER_WORKSPACE], deviceId: before.credential.record.deviceId });
+    test.hub.setRenewalReply({ status: 200, body: { status: "renewed", credential: unnamed.credential } });
+    const refreshed = await ensureDeviceLogin(test.hub.url, WORKSPACE, { env: test.env, rejected: stored });
+    expect(refreshed.status).toBe("ready");
+    expect(readHubLogins(test.env).logins[test.hub.origin]!.credential).toEqual(unnamed.credential);
+    expect(test.hub.renewalCount).toBe(2);
+  });
+
   it("renews one missing-workspace need across processes and preserves the store", async () => {
     const test = await setup();
     test.hub.grant(WORKSPACE);

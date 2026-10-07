@@ -43,6 +43,7 @@ function fakeEngine(
     refreshes: 0,
   };
   const replicaSet = {
+    store,
     refresh: () => {
       controls.refreshes += 1;
     },

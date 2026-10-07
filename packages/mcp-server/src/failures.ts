@@ -170,7 +170,7 @@ const RECOVERIES: Record<string, Recovery> = {
   invalid_table: {
     recoveryClass: "manual",
     guidance:
-      "Supply exactly one GFM table, with a header and matching delimiter row, then call again. Alignment markers are accepted but not stored; inline markdown remains literal cell text.",
+      "Supply exactly one GFM table, with a header and matching delimiter row, then call again. Alignment markers are accepted but not stored; inline markdown writes cell formatting and escaped punctuation stays literal.",
   },
   table_mapping_required: {
     recoveryClass: "manual",
@@ -238,7 +238,7 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Call get_doc for the block's current text, its type and its `doc_links`, then link a range that fits — " +
       "`reason` says which of the three is in the way: `empty` (the range covers no characters), `not-prose` " +
-      "(a code, mermaid, table or terminal block holds source text and carries no inline links) or `overlap` (the range " +
+      "(code, mermaid and terminal hold source text; table links belong to cells and have no block-level ranges) or `overlap` (the range " +
       "is already an external link, and one range cannot be both).",
   },
   // Never `retry`: the directory is a synced document, so a target this

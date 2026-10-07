@@ -55,6 +55,7 @@ import type { Block, DocMeta, InlineRun } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
 import { githubReference } from "./github-reference.js";
 import { log } from "./log.js";
+import { collectReplicaSyncState } from "./status.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
 import { HubSync } from "./sync.js";
 
@@ -151,8 +152,8 @@ export function docLinkRanges(
   block: Block,
   inline: readonly InlineRun[],
 ): DocLinkRange[] {
-  // Source blocks hold source text and carry no inline links, so a docLink on
-  // one is foreign content: nothing renders it, and nothing here counts it.
+  // Block-level ranges belong to prose. Table links are indexed from each
+  // cell's runs instead, since GFM offsets do not address stored characters.
   if (!isProseBlockType(block.type)) return [];
   const ranges: DocLinkRange[] = [];
   let index = 0;
@@ -231,6 +232,9 @@ export class Replicas {
 
   /** The settle currently in flight, so concurrent tool calls share one. */
   private settling: Promise<void> | null = null;
+
+  /** Monotonic process time of the last metadata write attempt. */
+  private lastSyncWriteAt: number | null = null;
 
   /**
    * The first failure to persist an update, if any. Sticky and fatal by design
@@ -758,8 +762,12 @@ export class Replicas {
         description: meta.description ?? "",
         links: [
           ...meta.links,
-          ...blocks.flatMap(({ block, inline }) =>
-            docLinkRanges(block, inline).map((range) => range.docId),
+          ...blocks.flatMap(({ block, inline, table }) =>
+            table === undefined
+              ? docLinkRanges(block, inline).map((range) => range.docId)
+              : table.flat().flatMap((cell) => cell.flatMap((run) =>
+                run.marks.docLink === undefined ? [] : [run.marks.docLink],
+              )),
           ),
         ],
         githubRefs:
@@ -1126,6 +1134,7 @@ export class Replicas {
       // Cheap and local: pick up anything logged while we were waiting.
       if (this.persistenceFailure === null) {
         this.refreshReplicas();
+        this.recordLastSyncIfCaughtUp();
       }
       if (requireHealthy) {
         this.assertHealthy();
@@ -1171,6 +1180,7 @@ export class Replicas {
     }
     this.releaseQuietRooms();
     this.compactLargeLogs();
+    this.recordLastSyncIfCaughtUp();
   }
 
   /** Replay the log tail and attach newly discovered documents. Synchronous. */
@@ -1220,6 +1230,39 @@ export class Replicas {
     if (this.persistenceFailure !== null) return;
     this.releaseQuietRooms();
     this.compactLargeLogs();
+    this.recordLastSyncIfCaughtUp();
+  }
+
+  /**
+   * Best-effort acknowledgement metadata, independent of replica persistence.
+   * Throttle on a monotonic clock so wall-clock corrections cannot increase
+   * the write rate. The store's atomic max handles other processes and skew.
+   */
+  recordLastSyncIfCaughtUp(): void {
+    if (this.destroyed || this.persistenceFailure !== null) return;
+    const monotonicNow = performance.now();
+    if (this.lastSyncWriteAt !== null && monotonicNow - this.lastSyncWriteAt < 5_000) return;
+    if (this.sync.state().status !== "connected") return;
+    try {
+      if (!collectReplicaSyncState(this).caughtUp) return;
+      // Pace failed attempts too: an unavailable metadata key must not flood
+      // stderr or starve the replica engine's normal work.
+      this.lastSyncWriteAt = monotonicNow;
+      this.store.recordLastSync(Date.now());
+    } catch (error) {
+      log.warn("failed to record last sync time", error);
+    }
+  }
+
+  /** Read optional metadata without turning its failure into a replica failure. */
+  readLastSync(): string | null {
+    try {
+      const timestamp = this.store.readLastSync();
+      return timestamp === null ? null : new Date(timestamp).toISOString().replace(/\.\d{3}Z$/, "Z");
+    } catch (error) {
+      log.warn("failed to read last sync time", error);
+      return null;
+    }
   }
 
   /**

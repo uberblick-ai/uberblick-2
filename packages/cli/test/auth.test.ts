@@ -11,7 +11,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { authenticationOrigin } from "../src/auth.js";
 import { resolveConfig } from "../src/config.js";
 import {
-  DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox, sleep, UB_BIN, waitUntil,
+  DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox, sleep, UB_BIN, unboundSandbox, waitUntil,
   type Run,
 } from "./helpers.js";
 import {
@@ -34,13 +34,18 @@ describe("ub auth local selection and command surface", () => {
       expect(help.stdout).toContain(`ub ${args.join(" ")}`);
       expect(help.stderr).toBe("");
       if (args[1] === "login") {
-        expect(help.stdout).toContain("GitHub's approval page shows the app's name, not the hub.");
-        expect(help.stdout.replace(/\s+/g, " ")).toContain("Approve only a login you started for the displayed hub");
-        expect(help.stdout.replace(/\s+/g, " ")).toContain("the first GitHub account to complete approval claims its default workspace as administrator");
+        expect(help.stdout).toMatch(/revok.*replac|replac.*revok/i);
+        expect(help.stdout.replace(/\s+/g, " ")).toMatch(/approve only a code you just started/i);
+        expect(help.stdout.replace(/\s+/g, " ")).toMatch(/first.*account.*approv.*claim.*default workspace.*admin/i);
       }
+      if (args[1] === "logout") expect(help.stdout).toContain("--all-devices");
     }
-    for (const args of [["auth", "unknown"], ["auth", "login", "--json"], ["auth", "logout", "a", "b"]]) {
-      expect((await runUbAsync(args, box)).status).toBe(2);
+    for (const args of [["auth", "unknown"], ["auth", "login", "--json"], ["auth", "logout", "a", "b"],
+      ["auth", "login", "--all-devices"], ["auth", "status", "--all-devices"], ["auth", "logout", "--unknown"]]) {
+      const run = await runUbAsync(args, box);
+      expect(run.status).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).not.toBe("");
     }
     expect(existsSync(credentialPath(box))).toBe(false);
   });
@@ -63,19 +68,21 @@ describe("ub auth local selection and command surface", () => {
 
   it("never uses a legacy machine hub and resolves a complete environment pair for implicit auth", async () => {
     const origin = "https://selected.example.test";
-    const box = sandbox({
+    const box = unboundSandbox({
       userConfig: { workspace: WORKSPACE, hubUrl: "https://legacy.example.test" },
       credentials: { hubLogins: { [origin]: fixture() } },
     });
     const unbound = await runUbAsync(["auth", "status"], box);
     expect(unbound.status).toBe(1);
     expect(unbound.stderr).toContain("no hub given and none bound");
+    expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
     const selected = await runUbAsync(["auth", "status"], box, {
       UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: origin,
     });
     expect(selected.status, selected.output).toBe(0);
     expect(selected.stdout).toContain(origin);
     expect(selected.stdout).not.toContain("legacy.example.test");
+    expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
   });
 
   it("refuses malformed project selection for an implicit hub but permits an explicit login target", async () => {
@@ -97,7 +104,7 @@ describe("ub auth local selection and command surface", () => {
     const endpoint = "wss://Hub.Example.TS.net:443/ws";
     const old = fixture();
     const other = fixture([]);
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint },
+    const box = sandbox({ projectBinding: { workspaceId: `project-${WORKSPACE}`, hubUrl: endpoint },
       userConfig: { workspace: WORKSPACE, hubUrl: endpoint },
       credentials: { signingSecret: SIGNING_SECRET, hubLogins: { [origin]: old, [OTHER_HUB]: other } },
     });
@@ -105,35 +112,124 @@ describe("ub auth local selection and command surface", () => {
     for (const spelling of [undefined, "Hub.Example.TS.net:443", "https://Hub.Example.TS.net:443", endpoint]) {
       const run = await runUbAsync(["auth", "status", ...(spelling ? [spelling] : [])], box);
       expect(run.status, run.stderr).toBe(0);
-      expect(run.stdout).toContain(origin);
-      expect(run.stdout).toContain(old.identity.githubUsername);
-      expect(run.stdout).toContain(WORKSPACE);
-      expect(run.stdout).toContain(OTHER_HUB);
-      expect(run.output).toMatch(/local|not.*check|not.*verified/i);
+      expect(run.stdout).toBe(`hub        ${origin}\nsigned in  previous-user\navailable workspaces:\n  ${WORKSPACE}\n`);
+      expect(run.stderr).toBe("");
       expect(run.output.includes(old.credential.key)).toBe(false);
     }
     const logout = await runUbAsync(["auth", "logout", "Hub.Example.TS.net:443"], box);
-    expect(logout.status).toBe(0);
-    expect(logout.stdout).toMatch(/until.*revok|revok.*device/i);
+    expect(logout.status).toBe(1);
+    expect(logout.stderr).toContain(`ub auth logout --all-devices ${origin}`);
+    expect(logout.stdout).toBe(`removed    login for ${origin} on this computer\n`);
     expect(readStore(box)).toEqual({ signingSecret: SIGNING_SECRET, hubLogins: { [OTHER_HUB]: other } });
     expect(readFileSync(configPath(box))).toEqual(binding);
     const missing = await runUbAsync(["auth", "status"], box);
     expect(missing.status).toBe(1);
     expect(missing.output).toMatch(/no.*login|not.*signed/i);
     expect(missing.output).toContain("ub auth login");
-    expect(missing.output).toContain(OTHER_HUB);
+    expect(missing.output).not.toContain(OTHER_HUB);
   });
 
-  it("explains renewal for a bound workspace outside the credential snapshot", async () => {
-    const box = sandbox({ projectBinding: { workspaceId: OTHER_WORKSPACE, hubUrl: DEAD_HUB_URL },
+  it.each([
+    { workspaceId: OTHER_WORKSPACE, workspaces: [] },
+    { workspaceId: `project-${OTHER_WORKSPACE}`, workspaces: [WORKSPACE] },
+  ])("explains missing project workspace access for $workspaceId with snapshot $workspaces", async ({ workspaceId, workspaces }) => {
+    const box = sandbox({ projectBinding: { workspaceId, hubUrl: DEAD_HUB_URL },
       userConfig: { workspace: OTHER_WORKSPACE, hubUrl: DEAD_HUB_URL },
-      credentials: { hubLogins: { "http://127.0.0.1:1": fixture() } },
+      credentials: { hubLogins: { "http://127.0.0.1:1": fixture(workspaces) } },
     });
+    const before = readFileSync(credentialPath(box), "utf8");
     const status = await runUbAsync(["auth", "status"], box);
     expect(status.status).toBe(0);
-    expect(status.output).toContain(OTHER_WORKSPACE);
-    expect(status.output).toContain("renews this login");
-    expect(status.output).not.toContain("ub auth login");
+    expect(status.stdout).toBe(`hub        http://127.0.0.1:1\nsigned in  previous-user\n${workspaces.length === 0
+      ? "available workspaces: none\n" : `available workspaces:\n  ${WORKSPACE}\n`}\n` +
+      `You might have expected access to ${OTHER_WORKSPACE} as per your .uberblick.json.\n` +
+      "But previous-user has no access to this workspace, or it simply doesn't exist on this hub.\n" +
+      "Ask a workspace admin to grant you access: `ub workspace member add previous-user`\n");
+    expect(status.stderr).toBe("");
+    expect(readFileSync(credentialPath(box), "utf8")).toBe(before);
+  });
+
+  it("names the environment override as the source of the missing workspace", async () => {
+    const origin = "http://127.0.0.1:1";
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: OTHER_HUB },
+      credentials: { hubLogins: { [origin]: fixture() } },
+    });
+    const status = await runUbAsync(["auth", "status"], box, {
+      UB_WORKSPACE_ID: `override-${OTHER_WORKSPACE}`, UB_HUB_URL: DEAD_HUB_URL,
+    });
+    expect(status.status).toBe(0);
+    expect(status.stdout).toBe(`hub        ${origin}\nsigned in  previous-user\navailable workspaces:\n  ${WORKSPACE}\n\n` +
+      `You might have expected access to ${OTHER_WORKSPACE} as per your UB_WORKSPACE_ID.\n` +
+      "But previous-user has no access to this workspace, or it simply doesn't exist on this hub.\n" +
+      "Ask a workspace admin to grant you access: `ub workspace member add previous-user`\n");
+    expect(status.stderr).toBe("");
+  });
+
+  it("omits the missing-workspace note when showing another hub", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: OTHER_WORKSPACE, hubUrl: DEAD_HUB_URL },
+      credentials: { hubLogins: { [OTHER_HUB]: fixture([]) } },
+    });
+    const status = await runUbAsync(["auth", "status", OTHER_HUB], box);
+    expect(status.status).toBe(0);
+    expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  previous-user\navailable workspaces: none\n`);
+    expect(status.stderr).toBe("");
+  });
+
+  it("lists each stored workspace on its own row without contacting the hub", async () => {
+    const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: fixture([WORKSPACE, OTHER_WORKSPACE]) } } });
+    const status = await runUbAsync(["auth", "status", OTHER_HUB], box);
+    expect(status.status, status.stderr).toBe(0);
+    expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  previous-user\navailable workspaces:\n  ${WORKSPACE}\n  ${OTHER_WORKSPACE}\n`);
+    expect(status.stderr).toBe("");
+  });
+
+  it("shows safe stored names in credential order and leaves stored bytes unchanged", async () => {
+    const old = fixture([WORKSPACE, OTHER_WORKSPACE]);
+    const login = { ...old, credential: { ...old.credential, workspaceNames: {
+      [WORKSPACE]: 'Synthetic 🧭 "workspace" \\',
+      [OTHER_WORKSPACE]: "unsafe\u009bname",
+      "aaaaaaaa-1111-4111-8111-111111111111": "Not in credential",
+    } } };
+    const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: login } } });
+    const before = readFileSync(credentialPath(box), "utf8");
+    const status = await runUbAsync(["auth", "status", OTHER_HUB], box);
+    expect(status.status, status.stderr).toBe(0);
+    expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  previous-user\navailable workspaces:\n  ${WORKSPACE} | Synthetic 🧭 "workspace" \\\n  ${OTHER_WORKSPACE}\n`);
+    expect(status.stderr).toBe("");
+    expect(readFileSync(credentialPath(box), "utf8")).toBe(before);
+  });
+
+  it("keeps malformed names and names without issued workspaces out of status rows", async () => {
+    for (const [workspaces, workspaceNames] of [
+      [[WORKSPACE], "not a map"], [[], { [WORKSPACE]: "Not issued" }],
+    ] as const) {
+      const old = fixture([...workspaces]);
+      const login = { ...old, credential: { ...old.credential, workspaceNames } };
+      const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: login } } });
+      const status = await runUbAsync(["auth", "status", OTHER_HUB], box);
+      expect(status.status, status.stderr).toBe(0);
+      expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  previous-user\n${workspaces.length === 0
+        ? "available workspaces: none\n" : `available workspaces:\n  ${WORKSPACE}\n`}`);
+      expect(status.stderr).toBe("");
+    }
+  });
+
+  it.each([false, true])("quotes and escapes stored usernames in status with missing workspace %s", async (bound) => {
+    const old = fixture([]);
+    old.identity.githubUsername = `synthetic"\\user\n\u001b\u007f${String.fromCharCode(...Array.from({ length: 32 }, (_, index) => index + 0x80))}`;
+    const escaped = `"synthetic\\"\\\\user\\n\\u001b\\u007f${Array.from({ length: 32 }, (_, index) => `\\u${(index + 0x80).toString(16).padStart(4, "0")}`).join("")}"`;
+    const box = (bound ? sandbox : unboundSandbox)({ credentials: { hubLogins: { [OTHER_HUB]: old } },
+      ...(bound ? { projectBinding: { workspaceId: WORKSPACE, hubUrl: OTHER_HUB } } : {}),
+    });
+    expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(bound);
+    const status = await runUbAsync(["auth", "status", OTHER_HUB], box);
+    expect(status.status, status.stderr).toBe(0);
+    expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  ${escaped}\navailable workspaces: none\n` + (bound
+      ? `\nYou might have expected access to ${WORKSPACE} as per your .uberblick.json.\n` +
+        `But ${escaped} has no access to this workspace, or it simply doesn't exist on this hub.\n` +
+        `Ask a workspace admin to grant you access: \`ub workspace member add ${escaped}\`\n`
+      : ""));
+    expect(status.stderr).toBe("");
   });
 
   it("refuses exposed local credentials without presenting identity as signed in", async () => {
@@ -150,6 +246,30 @@ describe("ub auth local selection and command surface", () => {
     expect(run.output).toContain("ub auth login");
     expect(run.output).toMatch(/chmod.*600/);
   });
+
+  it.each(["missing", "unreadable", "revoked", "invalid bound workspace"])("keeps %s status failures on stderr with exit 1", async (kind) => {
+    const old = fixture();
+    const login = kind === "revoked"
+      ? { ...old, credential: { ...old.credential, record: { ...old.credential.record, revokedAt: Date.now() } } }
+      : old;
+    const box = sandbox({
+      ...(kind === "missing" ? {} : { credentials: { hubLogins: { [OTHER_HUB]: login } } }),
+      ...(kind === "unreadable" ? { raw: { credentials: "{broken" } } : {}),
+      ...(kind === "revoked" ? { projectBinding: { workspaceId: OTHER_WORKSPACE, hubUrl: OTHER_HUB } } : {}),
+      ...(kind === "invalid bound workspace" ? { projectBinding: { workspaceId: "not-a-workspace", hubUrl: OTHER_HUB } } : {}),
+    });
+    const status = await runUbAsync(["auth", "status", ...(kind === "invalid bound workspace" ? [] : [OTHER_HUB])], box);
+    expect(status.status).toBe(1);
+    const expected = kind === "missing" ? "no login stored"
+      : kind === "unreadable" ? "stored login unreadable"
+      : kind === "revoked" ? "recorded as revoked" : "workspaceId";
+    expect(status.stderr).toContain(expected);
+    expect(status.stdout).not.toContain(expected);
+    if (kind === "revoked") {
+      expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  previous-user\navailable workspaces:\n  ${WORKSPACE}\n`);
+      expect(status.stderr).toBe(`ub auth: this stored credential is recorded as revoked. Run \`ub auth login ${OTHER_HUB}\`.\n`);
+    }
+  });
 });
 
 describe("hub-driven CLI GitHub sign-in", () => {
@@ -164,18 +284,14 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(stored.credential.record.workspaces).toHaveLength(1);
     expect(workspace).toMatch(/^[0-9a-f-]{36}$/);
     expect(workspace).not.toBe(WORKSPACE);
-    const notice = "This hub is unclaimed. The first GitHub account to complete approval becomes administrator of its default workspace.";
-    expect(login.stdout).toContain(notice);
-    expect(login.stdout.indexOf(notice)).toBeLessThan(login.stdout.indexOf("Approve in a browser:"));
-    const completion = `This login claimed the hub. Default workspace: ${workspace}`;
-    expect(login.stdout).toContain(completion);
-    expect(login.stdout.indexOf(completion)).toBeLessThan(login.stdout.indexOf("Stored login"));
+    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes its admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${workspace}), you are admin\navailable workspaces:\n  ${workspace} | Default workspace\n`);
+    expect(login.stderr).toBe("");
     expect(readFileSync(configPath(box))).toEqual(binding);
     expect(remote.requests[0]).toMatchObject({ path: "/auth/claim-state", method: "GET", body: {} });
     const again = await runUbAsync(["auth", "login", remote.origin], box);
     expect(again.status, again.stderr).toBe(0);
-    expect(again.stdout).not.toContain("This hub is unclaimed");
-    expect(again.stdout).not.toContain("This login claimed");
+    expect(again.stdout).not.toContain("this hub is unclaimed");
+    expect(again.stdout).not.toContain("claimed    ");
     expect(savedLogin(box, remote.origin).credential.record.workspaces).toEqual([workspace]);
     expect(readFileSync(configPath(box))).toEqual(binding);
     assertPublicOnly(login, remote, stored.credential.key);
@@ -188,9 +304,9 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const box = sandbox();
     const login = await runUbAsync(["auth", "login", remote.origin], box);
     expect(login.status, login.stderr).toBe(0);
-    expect(login.stdout).toContain("This hub is unclaimed");
-    expect(login.stdout).not.toContain("This login claimed");
-    expect(login.stdout).toContain("Credential covers no workspaces. Sign-in grants no membership.");
+    expect(login.stdout).toContain("this hub is unclaimed");
+    expect(login.stdout).not.toContain("claimed    ");
+    expect(login.stdout).toContain("available workspaces: none\n");
     expect(savedLogin(box, remote.origin).credential.record.workspaces).toEqual([]);
   });
 
@@ -205,8 +321,8 @@ describe("hub-driven CLI GitHub sign-in", () => {
     };
     const login = await runUbAsync(["auth", "login", remote.origin], sandbox());
     expect(login.status, login.stderr).toBe(0);
-    expect(login.stdout).not.toContain("This hub is unclaimed");
-    expect(login.stdout).toContain(`This login claimed the hub. Default workspace: ${WORKSPACE}`);
+    expect(login.stdout).not.toContain("this hub is unclaimed");
+    expect(login.stdout).toContain(`signed in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${WORKSPACE}), you are admin\n`);
   });
 
   it.each(["hung-body", "unexpected-field"])("continues ordinary login after a %s claim-state read without an unclaimed notice", async (kind) => {
@@ -220,8 +336,8 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const startedAt = Date.now();
     const login = await runUbAsync(["auth", "login", remote.origin], box);
     expect(login.status, login.stderr).toBe(0);
-    expect(login.stdout).not.toContain("This hub is unclaimed");
-    expect(login.stdout).not.toContain("This login claimed");
+    expect(login.stdout).not.toContain("this hub is unclaimed");
+    expect(login.stdout).not.toContain("claimed    ");
     expect(login.output).not.toContain(GITHUB_TOKEN);
     expect(savedLogin(box, remote.origin).credential.record.workspaces).toEqual([]);
     if (kind === "hung-body") expect(Date.now() - startedAt).toBeLessThan(6_000);
@@ -239,7 +355,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const login = await runUbAsync(["auth", "login", remote.origin], box);
     expect(login.status).toBe(1);
     expect(login.stderr).toContain("invalid sign-in claim result");
-    expect(login.stdout).not.toContain("This login claimed");
+    expect(login.stdout).not.toContain("claimed    ");
     expect(login.output).not.toContain(GITHUB_TOKEN);
     expect(readFileSync(credentialPath(box))).toEqual(before);
     expect(privateDeviceRows(remote.databasePath)).toHaveLength(1);
@@ -283,10 +399,8 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const before = readFileSync(configPath(box));
     const login = await runUbAsync(["auth", "login"], box);
     expect(login.status, login.stderr).toBe(0);
-    expect(login.stdout.split("\n")[0]).toBe(`Hub: ${remote.origin}`);
-    expect(login.stdout).toContain(`GitHub sign-in for ${remote.origin}\nApprove in a browser: https://github.com/login/device\nCode: ABCD-EFGH\n`);
-    expect(login.stdout).toContain(USERNAME);
-    for (const workspace of [WORKSPACE, OTHER_WORKSPACE]) expect(login.stdout).toContain(workspace);
+    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\navailable workspaces:\n  ${OTHER_WORKSPACE}\n  ${WORKSPACE}\n`);
+    expect(login.stderr).toBe("");
     const stored = savedLogin(box, remote.origin);
     expect(stored.identity).toMatchObject({ githubAccountId: "1234", githubUsername: USERNAME });
     expect(stored.credential.record.workspaces).toEqual([OTHER_WORKSPACE, WORKSPACE].sort());
@@ -296,7 +410,6 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(readStore(box).signingSecret).toBe(SIGNING_SECRET);
     expect(statSync(credentialPath(box)).mode & 0o077).toBe(0);
     expect(readFileSync(configPath(box))).toEqual(before);
-    expect(login.output).toContain("Remote sync uses this stored login");
     assertPublicOnly(login, remote, stored.credential.key);
     for (const request of remote.requests) {
       expect(request.method).toBe(request.path === "/auth/claim-state" ? "GET" : "POST");
@@ -335,40 +448,83 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const requestCount = remote.requests.length;
     expect((await runUbAsync(["auth", "status"], box)).status).toBe(0);
     const logout = await runUbAsync(["auth", "logout"], box);
-    expect(logout.status).toBe(0);
-    expect(logout.output).toMatch(/until.*revok|revok.*device/i);
+    expect(logout.status).toBe(1);
+    expect(logout.stderr).toContain(`ub auth logout --all-devices ${remote.origin}`);
     expect(privateDeviceRows(remote.databasePath)).toHaveLength(1);
     expect(privateDeviceRows(remote.databasePath)[0]?.revoked_at).toBeNull();
     expect(readStore(box).hubLogins?.[OTHER_HUB]).toEqual(other);
     expect(readFileSync(configPath(box))).toEqual(before);
+    expect(remote.requests).toHaveLength(requestCount + 1);
+    expect(remote.requests.at(-1)).toMatchObject({ path: "/auth/manage", body: { operation: "revoke-device" } });
+  });
+
+  it("stores and prints only safe collected names, excluding flow and credential secrets", async () => {
+    const workspaces = Array.from({ length: 6 }, (_, index) =>
+      `aaaaaaaa-1111-4111-8111-${String(index + 1).padStart(12, "0")}`);
+    const remote = await rig(workspaces);
+    const name = 'Synthetic 🧭 "workspace" \\';
+    remote.controls.transform = (path, status, result, body) => {
+      if (path !== "/auth/github/collect" || result.status !== "complete") return { status, result };
+      const credential = result.credential as { key: string };
+      const values = [name, "unsafe\u009bname", "unsafe\u202ename", " padded ",
+        `key ${credential.key}`, `secret ${String(body.collectionSecret)}`];
+      return { status, result: { ...result, credential: { ...credential,
+        workspaceNames: { ...Object.fromEntries(workspaces.map((workspace, index) => [workspace, values[index]])),
+          [OTHER_WORKSPACE]: "Not issued" },
+      } } };
+    };
+    const box = sandbox();
+    const login = await runUbAsync(["auth", "login", remote.origin], box);
+    expect(login.status, login.stderr).toBe(0);
+    const stored = savedLogin(box, remote.origin);
+    expect((stored.credential as typeof stored.credential & { workspaceNames?: unknown }).workspaceNames)
+      .toEqual({ [workspaces[0]!]: name });
+    expect(stored.credential.record.workspaces).toEqual(workspaces);
+    expect(login.stdout).toContain(`available workspaces:\n  ${workspaces[0]} | ${name}\n${workspaces.slice(1).map(workspace => `  ${workspace}\n`).join("")}`);
+    assertPublicOnly(login, remote, stored.credential.key);
+    const requestCount = remote.requests.length;
+    const status = await runUbAsync(["auth", "status", remote.origin], box);
+    expect(status.status, status.stderr).toBe(0);
+    expect(status.stdout).toContain(`  ${workspaces[0]} | ${name}\n`);
     expect(remote.requests).toHaveLength(requestCount);
   });
 
-  it("signs in with zero workspaces and explicitly leaves a different hub binding unchanged", async () => {
+  it("signs in with zero workspaces and leaves a different hub binding unchanged", async () => {
     const remote = await rig();
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL }, userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const binding = readFileSync(configPath(box));
     const login = await runUbAsync(["auth", "login", remote.origin], box);
     expect(login.status, login.stderr).toBe(0);
-    expect(login.stdout).toContain(`GitHub sign-in for ${remote.origin}\nApprove in a browser: https://github.com/login/device\nCode: ABCD-EFGH\n`);
-    expect(login.stdout).toContain("GitHub's approval page shows the app's name, not the hub.");
-    expect(login.stdout).toContain(`Approve only if you started this login for ${remote.origin}; the app does not vouch for this hub.`);
-    expect(login.stdout).not.toContain("http://127.0.0.1:1");
-    expect(login.output).toContain(USERNAME);
-    expect(login.output).toMatch(/no.*workspace|workspaces.*none/i);
-    expect(login.output).toMatch(/sign.in.*no membership|sign.in.*does not.*membership|no.*membership/i);
-    expect(login.output).toMatch(/binding.*unchanged|unchanged.*binding/i);
+    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\navailable workspaces: none\n`);
+    expect(login.stderr).toBe("");
     expect(savedLogin(box, remote.origin).credential.record.workspaces).toEqual([]);
     const status = await runUbAsync(["auth", "status", remote.origin], box);
     expect(status.status).toBe(0);
-    expect(status.stdout).toMatch(/no.*workspace|workspaces.*none/i);
+    expect(status.stdout).toBe(`hub        ${remote.origin}\nsigned in  ${USERNAME}\navailable workspaces: none\n`);
+    expect(status.stderr).toBe("");
     const logout = await runUbAsync(["auth", "logout", remote.origin], box);
     expect(logout.status).toBe(0);
-    expect(logout.output).toMatch(/binding.*unchanged|unchanged.*binding/i);
+    expect(logout.stdout).toBe(`revoked    this computer on ${remote.origin}\nremoved    login for ${remote.origin} on this computer\n`);
     expect(readFileSync(configPath(box))).toEqual(binding);
   });
 
-  it("keeps an existing login byte-for-byte on denial and replaces it only after completion without revoking", async () => {
+  it("quotes an invalid collected username and escapes its controls before printing login success", async () => {
+    const remote = await rig();
+    const username = 'synthetic"\\user\n\u001b\u007f\u0080\u009b\u009f';
+    remote.controls.transform = (path, status, result) => {
+      if (path !== "/auth/github/collect" || result.status !== "complete") return { status, result };
+      return { status, result: { ...result, identity: { ...(result.identity as Record<string, unknown>), githubUsername: username } } };
+    };
+    const box = sandbox();
+    const login = await runUbAsync(["auth", "login", remote.origin], box);
+    expect(login.status, login.stderr).toBe(0);
+    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  "synthetic\\"\\\\user\\n\\u001b\\u007f\\u0080\\u009b\\u009f" on ${remote.origin}\navailable workspaces: none\n`);
+    expect(login.stderr).toBe("");
+    expect(savedLogin(box, remote.origin).identity.githubUsername).toBe(username);
+    assertPublicOnly(login, remote);
+  });
+
+  it("keeps an existing login byte-for-byte on denial and revokes it only after a replacement completes", async () => {
     const remote = await rig([WORKSPACE]);
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: remote.origin.replace("http:", "ws:") },
       userConfig: { workspace: WORKSPACE, hubUrl: remote.origin.replace("http:", "ws:") },
@@ -385,11 +541,10 @@ describe("hub-driven CLI GitHub sign-in", () => {
     remote.github.identityHook = () => { expect(readFileSync(credentialPath(box))).toEqual(before); };
     const complete = await runUbAsync(["auth", "login"], box);
     expect(complete.status, complete.stderr).toBe(0);
-    expect(complete.output).toMatch(/replaced.*device|previous.*device|old.*device/i);
-    expect(complete.output).toMatch(/until.*revok/i);
     expect(savedLogin(box, remote.origin).identity.githubUsername).toBe(USERNAME);
     expect(privateDeviceRows(remote.databasePath)).toHaveLength(2);
-    expect(privateDeviceRows(remote.databasePath).every((row) => row.revoked_at === null)).toBe(true);
+    expect(privateDeviceRows(remote.databasePath).filter((row) => row.revoked_at === null)).toHaveLength(1);
+    expect(privateDeviceRows(remote.databasePath).filter((row) => row.revoked_at !== null)).toHaveLength(1);
   });
 
   it.each(["denied", "unknown-request"])("reports terminal %s without storing or disturbing earlier state", async (outcome) => {
@@ -424,6 +579,13 @@ describe("hub-driven CLI GitHub sign-in", () => {
 
   it("reports an issued device left on the hub when publication fails after collection", async () => {
     const remote = await rig([], true, true);
+    let claimedWorkspace: string | undefined;
+    remote.controls.transform = (path, status, result) => {
+      if (path === "/auth/github/collect" && result.status === "complete" && typeof result.claimedWorkspaceId === "string") {
+        claimedWorkspace = result.claimedWorkspaceId;
+      }
+      return { status, result };
+    };
     const box = sandbox({ credentials: { signingSecret: SIGNING_SECRET, hubLogins: { [remote.origin]: fixture() } } });
     const before = readFileSync(credentialPath(box));
     const backup = `${credentialPath(box)}.previous`;
@@ -434,7 +596,10 @@ describe("hub-driven CLI GitHub sign-in", () => {
     try {
       const run = await runUbAsync(["auth", "login", remote.origin], box);
       expect(run.status).toBe(1);
-      expect(run.stdout).toMatch(/This login claimed the hub\. Default workspace: [0-9a-f-]{36}/);
+      expect(claimedWorkspace).toMatch(/^[0-9a-f-]{36}$/);
+      expect(run.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes its admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\n`);
+      expect(run.stderr).toContain(`default workspace (${claimedWorkspace})`);
+      expect(run.stderr).toContain("could not store login");
       expect(run.stderr).toMatch(/issued.*device.*remain|issued.*device.*hub|device.*remain.*hub/i);
       expect(privateDeviceRows(remote.databasePath)).toHaveLength(1);
       expect(readFileSync(backup)).toEqual(before);

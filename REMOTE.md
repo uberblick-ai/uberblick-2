@@ -139,10 +139,6 @@ only those four leftover files after the new `bin/` commands work:
 rm -f remote-compose.sh hub-backup.sh hub-restore.sh hub-admin-setup.sh
 ```
 
-This cleanup is for a release directory. A compatibility checkout keeps its
-root `remote-compose.sh` forwarder for older installed clients and an updater
-already running across the move.
-
 Check the selected site and `/ws` again. An existing Tailscale `.env` keeps
 working without edits: the wrapper selects the HTTPS and socket files from
 `TAILSCALE_HOST` and `TAILSCALE_IP`, preserving its sole Tailscale port binding.
@@ -244,7 +240,8 @@ candidate_hub="$candidate_id-hub"
 candidate_hub_data="$candidate_id-hub-data"
 candidate_writer="$candidate_id-writer"
 candidate_reader="$candidate_id-reader"
-candidate_tag="uberblick-candidate:$candidate_sha"
+candidate_hub_tag="uberblick-candidate-hub:$candidate_sha"
+candidate_client_tag="uberblick-candidate-client:$candidate_sha"
 
 candidate_cleanup() {
   docker rm --force "$candidate_hub" "$candidate_writer-command" "$candidate_reader-command" \
@@ -259,16 +256,30 @@ trap 'exit 143' HUP TERM
 
 mkdir "$candidate_root/source"
 git archive "$candidate_sha" | tar -x -C "$candidate_root/source"
-docker build --target hub --label "org.opencontainers.image.revision=$candidate_sha" \
-  --tag "$candidate_tag" "$candidate_root/source"
-candidate_image=$(docker image inspect "$candidate_tag" --format '{{.Id}}')
+candidate_protocol=$(sed -n 's/^export const SYNC_PROTOCOL_VERSION = \([1-9][0-9]*\);$/\1/p' \
+  "$candidate_root/source/packages/hub/src/protocol.ts")
+test -n "$candidate_protocol"
+candidate_build_args=(
+  --platform linux/amd64 --file "$candidate_root/source/Dockerfile.hub-release"
+  --build-arg HUB_RELEASE_VERSION=0.0.0
+  --build-arg "HUB_RELEASE_COMMIT=$candidate_sha"
+  --build-arg "HUB_SYNC_PROTOCOL_VERSION=$candidate_protocol"
+  --build-arg HUB_RELEASE_HUB_IMAGE=ghcr.io/uberblick-ai/hub:0.0.0
+  --build-arg HUB_RELEASE_WEB_IMAGE=ghcr.io/uberblick-ai/hub-web:0.0.0
+)
+docker build "${candidate_build_args[@]}" --target hub \
+  --tag "$candidate_hub_tag" "$candidate_root/source"
+docker build "${candidate_build_args[@]}" --target build \
+  --tag "$candidate_client_tag" "$candidate_root/source"
+candidate_hub_image=$(docker image inspect "$candidate_hub_tag" --format '{{.Id}}')
+candidate_client_image=$(docker image inspect "$candidate_client_tag" --format '{{.Id}}')
 docker network create "$candidate_network"
 docker volume create "$candidate_hub_data"
 docker volume create "$candidate_writer"
 docker volume create "$candidate_reader"
 docker run --detach --name "$candidate_hub" --network "$candidate_network" \
   --network-alias candidate-hub \
-  --mount "type=volume,src=$candidate_hub_data,dst=/data" "$candidate_image"
+  --mount "type=volume,src=$candidate_hub_data,dst=/data" "$candidate_hub_image"
 docker exec "$candidate_hub" node --input-type=module -e '
   const deadline = Date.now() + 30_000;
   for (;;) {
@@ -294,7 +305,7 @@ candidate_ub() {
     --mount "type=volume,src=$candidate_client,dst=/data" \
     --env XDG_CONFIG_HOME=/data/config --env XDG_DATA_HOME=/data/data \
     --env XDG_CACHE_HOME=/data/cache --workdir /data \
-    --entrypoint node "$candidate_image" /app/packages/cli/bin/ub.mjs "$@"
+    --entrypoint node "$candidate_client_image" /source/packages/cli/bin/ub.mjs "$@"
 }
 candidate_mcp_launcher() {
   printf '#!/usr/bin/env bash\nexec '
@@ -302,7 +313,7 @@ candidate_mcp_launcher() {
     --mount "type=volume,src=$1,dst=/data" \
     --env XDG_CONFIG_HOME=/data/config --env XDG_DATA_HOME=/data/data \
     --env XDG_CACHE_HOME=/data/cache --workdir /data \
-    --entrypoint node "$candidate_image" /app/packages/cli/bin/ub.mjs mcp serve
+    --entrypoint node "$candidate_client_image" /source/packages/cli/bin/ub.mjs mcp serve
   printf '\n'
 }
 candidate_mcp_launcher "$candidate_writer" > "$candidate_root/writer-mcp"
@@ -311,8 +322,10 @@ chmod 700 "$candidate_root/writer-mcp" "$candidate_root/reader-mcp"
 candidate_ub auth login ws://candidate-hub:1234
 ```
 
-The checkout hub image contains the candidate CLI source and its dependencies,
-so the image id fixes both sides even if a tag moves. The client containers
+The release Dockerfile builds the bundled hub and a separate build-stage image
+containing the matching CLI source and dependencies. The synthetic `0.0.0`
+metadata permits this local build; no image is published. Both image ids fix
+the reviewed source even if a local tag moves. The client containers
 mount only their fresh volume, with separate configuration, credentials, data
 and cache roots. No host home, existing credentials, database, deployment
 directory or Docker socket enters them; no signing secret is passed. The
@@ -356,7 +369,7 @@ launcher. Read installed tool schemas first; keep this temporary MCP
 configuration separate from the corpus entries. Never copy a credential from
 one client volume to another.
 
-Record the full candidate SHA, immutable image id, Docker resource names,
+Record the full candidate SHA, both immutable image ids, Docker resource names,
 successful GitHub claim and second sign-in, live admission and both document
 directions. Also record actual corpus-launcher resolution against the pinned
 installed client on each relevant host. These are distinct proofs: a candidate
@@ -369,54 +382,73 @@ until a later attended upgrade is chosen.
 
 Close every candidate MCP process, record the evidence outside the temporary
 source directory, then exit this Bash session to delete its fresh containers,
-volumes and network. The local build image may be retained for another
-rehearsal or removed by its exact tag once unused. Use the normal `ub open`
+volumes and network. The local build images may be retained for another
+rehearsal or removed by their exact tags once unused. Use the normal `ub open`
 and two-computer checks below for a deployment chosen for upgrade; this
 container-only rehearsal exposes no local browser server.
 
 ### Switch an existing checkout host to a release
 
-The old and released stacks use the same Compose project and volume names.
-Take [a backup](#backing-the-hub-up) from the checkout first, then extract your
-chosen release into a separate empty directory using the launch commands above,
-with `~/uberblick-hub-release` in place of `~/uberblick-remote`.
-Instead of copying `remote.env.example`, copy the checkout's `.env` to that
-release directory and retain mode `0600`. This preserves host settings, workspaces and any `HUB_GITHUB_CLIENT_ID` override.
-An old `HUB_AUTH_TOKEN` line is ignored and may be removed.
+The old and released stacks use the same service and volume names. Extract
+chosen release files into a separate empty directory using the launch commands
+above, with `~/uberblick-hub-release` in place of `~/uberblick-remote`.
+Instead of copying `remote.env.example`, copy the checkout's `.env` and retain
+mode `0600`. Keep its host settings, workspace list and any
+`HUB_GITHUB_CLIENT_ID` override. An old `HUB_AUTH_TOKEN` line is ignored and
+may be removed. Leave the existing stack running while preparing the release.
 
-For example, with the checkout at `~/uberblick-remote` and the extracted files
-at `~/uberblick-hub-release`, pull before interrupting the existing stack:
+First identify that stack's project from its running hub container:
 
 ```sh
+docker ps --filter label=com.docker.compose.service=hub \
+  --format '{{.ID}} {{.Names}} {{.Label "com.docker.compose.project"}}'
 cp ~/uberblick-remote/.env ~/uberblick-hub-release/.env
 chmod 600 ~/uberblick-hub-release/.env
-cd ~/uberblick-hub-release
-sh bin/remote-compose.sh config --quiet
-sh bin/remote-compose.sh pull
-cd ~/uberblick-remote
-if [ -f bin/remote-compose.sh ]; then
-  sh bin/remote-compose.sh down
-else
-  sh remote-compose.sh down # compatibility for a checkout predating bin/
-fi
-cd ~/uberblick-hub-release
-sh bin/remote-compose.sh up --detach
 ```
 
-Check HTTPS, `/ws` and the existing documents. No database is copied or moved:
-the release containers reopen `uberblick-remote_hub-data`, and Caddy reuses its
-existing named volumes. Keep the backup. Use only the release directory for
-future operations; running the old checkout updater would replace these
-containers with checkout builds. The compatibility commands remain available
-[for hosts still on checkouts](#existing-checkout-deployments-compatibility).
+Select the row for this deployment. The default project is `uberblick-remote`.
+Keep an existing `COMPOSE_PROJECT_NAME` that matches that label; if the old
+stack's project was supplied by a shell setting or `-p`, put that actual project
+name in the copied `.env` as `COMPOSE_PROJECT_NAME=<project-name>` before
+proceeding. Use a host shell with no ambient `COMPOSE_FILE`. If the copied
+`.env` sets it, select the release's route files as described
+[below](#choose-how-clients-reach-the-hub) rather than files outside this release.
+
+From the release directory, inspect the resolved model before any container
+change:
+
+```sh
+cd ~/uberblick-hub-release
+unset COMPOSE_FILE
+sh bin/remote-compose.sh config
+```
+
+Its project must match the recorded label, its images must name the chosen
+release, and its `hub-data`, `caddy-data` and `caddy-config` volumes must keep
+their existing project-prefixed names. Then pull, take
+[a backup](#backing-the-hub-up) through these release scripts, and replace the
+containers:
+
+```sh
+sh bin/remote-compose.sh pull
+sh bin/hub-backup.sh ~/uberblick-hub-before-release.sqlite
+sh bin/remote-compose.sh up --detach --force-recreate
+```
+
+The release scripts find the existing containers by their unchanged project
+and service labels, even if the checkout's stack files have already gone.
+The active database stays in place: the new containers reopen the existing
+named volumes. Check HTTPS, `/ws` and the documents; keep the backup. Use this release
+directory for future operations. Source-checkout launch and update commands
+have been removed. An old updater that advances to this change exits nonzero
+without redeploying; its running containers, volumes and `.env` remain in place.
 
 ## GitHub sign-in
 
 Remote hubs offer GitHub sign-in through the public
 [Uberblick Login](https://github.com/apps/uberblick-login) GitHub App, owned by
 uberblick-ai, by default. You do not need to register an app or copy a client ID:
-leave `HUB_GITHUB_CLIENT_ID` unset or empty in the host's `.env`. This applies to
-the release stack and to existing checkout deployments.
+leave `HUB_GITHUB_CLIENT_ID` unset or empty in the host's `.env`.
 
 Each hub runs [GitHub's device flow](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app#using-the-device-flow-to-generate-a-user-access-token)
 directly with GitHub, using only the public client ID and no scope. It needs no
@@ -554,15 +586,41 @@ login opens GitHub's approval page once after displaying the hub, URL, code and
 approval guidance. Over SSH or with non-terminal stdout it only displays them.
 `BROWSER` names the opener command; `BROWSER=none` suppresses opening. An opener
 failure does not interrupt login, and login exits without waiting for the browser.
-`ub auth status [hub]`
-reads the locally recorded identity and workspace limits, without checking hub
-acceptance. `ub auth logout [hub]` removes only that local login; the device
-keeps hub access until revoked through device management. Credentials live in
-the owner-only `credentials.json` store, separate from `config.json`; these
-commands never change the machine's hub or workspace binding. A new login
-replaces the stored device only after completion and does not revoke the old
-one. Concurrent logins and logout preserve other hubs' logins, the signing
-secret and unrelated credential fields. Sign-in does not create a browser session.
+`ub auth login` and `ub auth status [hub]` list the credential's workspaces as
+`<uuid> | <name>` when a valid stored name is available, or `<uuid>` alone.
+Status reads only the locally recorded identity, workspace limits and names,
+without checking hub acceptance. `ub auth logout [hub]` revokes this computer's
+device at the hub before removing its local login. If the hub does not confirm
+revocation, logout still removes the login, exits 1 and names the recovery:
+run `ub auth logout --all-devices <hub>` from another computer that is still
+signed in. With no stored login, plain logout contacts nothing.
+
+`ub auth logout --all-devices [hub]` revokes every device of the signed-in GitHub
+account on that hub, this computer last, then removes the local login. Sign in
+again on the computers you still use. If device listing fails, it revokes
+nothing and keeps the login. A failure after revocation starts reports the
+confirmed count, keeps the login and exits 1. An unconfirmed revocation of this
+computer is uncertain: the kept login may no longer work. Retry
+`ub auth logout --all-devices <hub>` with a login the hub still accepts; if this
+computer's login is refused, first run `ub auth login <hub>` or use another
+computer still signed in.
+
+Credentials live in the owner-only `credentials.json` store, separate from
+`config.json`. A new login is stored after approval, then revokes the replaced
+device using its previous credential. If that revocation is not confirmed,
+login still succeeds and reports that the previous device is not revoked.
+Names are optional display data inside `credential.workspaceNames`, a map from
+workspace UUID to name. Every stored sign-in or renewal replaces this map with
+the new reply's names; an omitted name is removed. Older stored logins and hubs
+without names remain usable and show UUID-only rows. Status never rewrites the
+store or renews the credential. Names must pass workspace-name validation
+unchanged (1–64 characters, no control or format characters) and contain neither
+the credential key nor the sign-in collection secret; invalid names are ignored
+without invalidating the login.
+These commands never change workspace memberships, the project's hub or
+workspace binding, or local workspace copies. Concurrent logins and logout
+preserve other hubs' logins, the signing secret and unrelated credential
+fields. Sign-in does not create a browser session.
 The hub permits 100 active attempts, independently of finished attempts. Terminal
 statuses expire no later than fifteen minutes after the attempt's expiry; at
 most 100 are retained when new attempts start, evicting oldest requests first. Evicted or restarted
@@ -630,10 +688,21 @@ never URLs or an `Authorization` header; bodies are limited to 4096 bytes and
 all answers are `no-store`.
 
 Renewal needs no GitHub approval or GitHub connection. It retires the presented
-credential and returns `renewed` with `credential: {record, key}` once, for the
+credential and returns `renewed` with `credential: {record, key, workspaceNames?}` once, for the
 same principal and device and exactly its current memberships, including none.
 It grants no membership. Retirement closes and fences any rooms admitted under
 the old credential on a remote hub.
+Both a `complete` sign-in collection and a `renewed` reply can include names
+from the issued workspaces' hub `_settings` rooms. Loaded rooms supply their
+current state; otherwise the hub reads persisted state without loading or
+changing a room. Missing, invalid or unreadable settings leave a workspace
+unnamed and never fail credential delivery. The hub omits names as necessary
+to keep the complete serialized UTF-8 JSON reply within 65,536 bytes whenever
+the reply without names fits; it preserves the full credential and workspace
+list. Names refresh only when an existing renewal trigger or sign-in stores a
+new credential. A rename or new grant can therefore remain absent from status
+until then, and promotion initially shows the UUID alone. Conditional renewal
+with unchanged memberships still returns only `{status: "unchanged"}`.
 Replaying a verified proof under that retired credential returns
 `already-replaced`; unknown, revoked or unverifiable credentials return
 `sign-in-required`, revealing no identity or workspace. If the replacement
@@ -769,6 +838,30 @@ For resolution and grant, an unknown or non-user account returns 404
 or ambiguous answer returns 503 `lookup-unavailable`; retry when lookup is
 available. Malformed handles or IDs return 400 `invalid-request` before any
 GitHub call. Every failed lookup grants nothing.
+
+In the web interface served by `ub open`, workspace settings → **Access**
+reads this management state from the bound hub. Administrators can resolve a
+GitHub handle, confirm the returned login and permanent account ID, and grant
+access immediately, including before the account's first sign-in. The default
+role is member. Administrators can also change roles and remove members;
+everyone can see their own role and list or revoke their own devices.
+
+The browser calls only the local `ub open` process. Its management route
+requires the served host, exact served origin and existing local browser
+authentication, and accepts operations only for the served workspace on its
+bound hub. Device credentials and management proofs stay in that process.
+Every visit and change needs a reachable hub; access state is never saved in
+collaborative settings, stored locally or queued for later. Local-only
+workspaces have no members until `ub workspace promote` shares them, and hubs
+without GitHub sign-in offer no access controls.
+
+Removing a member ends that account's access to this workspace on every device.
+Revoking a device ends that one device's access to the hub. Downloaded documents
+stay where they are in either case. Revoking this computer stops its hub sync
+until `ub auth login <hub>` is run again. An acknowledged change remains applied
+even if the next read is refused, including after removing yourself or revoking
+this computer. A `closure-failed` answer with `applied: true` also reports an
+applied change, with a failed live closure.
 
 ## Establish a workspace's first administrator
 
@@ -1090,18 +1183,6 @@ sh bin/remote-compose.sh up --detach
 ```
 
 Deploying a newer release is [its own runbook](#updating-the-host--deliberately).
-A Linux checkout host stood up before 2026-08-25 carries the retired
-`uberblick-update.timer`; retire it once on that Linux host. These `systemctl`
-commands do not apply to Docker Desktop on macOS:
-
-```sh
-systemctl --user disable --now uberblick-update.timer
-rm -f ~/.config/systemd/user/uberblick-update.timer \
-      ~/.config/systemd/user/uberblick-update.service
-systemctl --user daemon-reload
-systemctl --user list-timers --all | grep uberblick   # expect no output
-```
-
 The hub handles Compose's `SIGTERM` by flushing pending document updates before
 it exits. SQLite is `/data/hub.sqlite` in the `hub-data` named volume, so normal
 container replacement and `sh bin/remote-compose.sh down` preserve it.
@@ -1203,8 +1284,8 @@ just as well as over an existing one, which is the case the drill on #404
 exercises: `down --volumes`, `up`, restore, and a fresh client with empty local
 state enumerating and reading the pre-backup corpus.
 
-Both scripts drive Compose through the shared `sh bin/remote-compose.sh`, in a
-release directory or a compatibility checkout. Restore uses the same shell,
+Both scripts drive Compose through `sh bin/remote-compose.sh` in the release
+directory. Restore uses the same shell,
 Node runtime and `node` user included in the hub image; it needs no host
 database utility.
 
@@ -1348,39 +1429,3 @@ Archived documents move with their content and stay archived until restored.
 Merging two independently populated workspaces is not supported: the URL says
 which workspace `join` is about — that one's two replicas reconcile as CRDTs,
 and the others on the machine are left alone.
-
-
-## Existing checkout deployments (compatibility)
-
-The release procedure above is the supported launch and update path. Existing
-source-checkout hosts retain their Docker Compose stack until they migrate to a
-release. This path remains Linux-only and requires Tailscale, Docker Compose
-2.6+, git and an existing configured checkout. Its root `docker-compose.yml`,
-source-build Dockerfile stages and `bin/remote-compose.sh` remain available.
-
-### Updating a checkout host
-
-The host never updates itself. Run this on the host, from its existing checkout,
-while present to verify the result:
-
-```sh
-sh remote-update.sh
-```
-
-The script fetches `origin/main`, resets the host checkout to it, rebuilds and
-recreates the containers through `bin/remote-compose.sh`, then records the
-successfully deployed commit. It reports either “up to date” or the commit it
-moved to. It preserves the untracked `.env`, including `HUB_GITHUB_CLIENT_ID`.
-Tracked host-local edits are deliberately discarded and reported; the host is a
-deployment checkout, not an editing workspace. No timer or webhook runs this.
-
-A checkout-wide `flock` prevents concurrent deployments from interleaving.
-Contention reports “already running; nothing to do”; a host unable to acquire a
-working lock refuses. Separate checkouts can still deploy independently.
-The comparison is against `refs/uberblick/deployed`, which advances only after
-a successful build. A failed build is retried on the next update.
-
-If a change alters wire semantics, update the hub and every client in the same
-sitting and reload open browser tabs. If both halves cannot be completed now,
-postpone the update. Run client login and `ub workspace join` separately when
-connecting a computer; deployment never selects that computer's workspace.

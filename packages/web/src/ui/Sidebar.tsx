@@ -482,6 +482,17 @@ function SettingsNavigation({
                 Tags
               </button>
             </li>
+            <li>
+              <button
+                type="button"
+                className={SIDEBAR_NAV_CLASSES}
+                aria-current={page === "access" ? "page" : undefined}
+                onClick={() => onSelect("access")}
+              >
+                <GearIcon />
+                Access
+              </button>
+            </li>
           </ul>
         </section>
       </SidebarScrollContent>
