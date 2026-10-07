@@ -1004,9 +1004,86 @@ h3.ub-heading {
 }
 
 .tableWrapper {
-  max-width: 100%;
+  max-width: calc(100% - 88px);
+  margin-right: 88px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
+  /* Always reserved, including at rest: revealing the overlay changes no cell
+     geometry. The frame owns the controls, outside the scrolling editable DOM. */
+  padding: 44px 0 22px;
+}
+
+.ub-table-controls {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  overflow: clip;
+}
+
+.ub-table-controls::before {
+  /* Keep hover across the reserved row lanes, including between buttons,
+     while pointer events over cell content still reach the editor. */
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 88px;
+  height: 100%;
+  pointer-events: auto;
+}
+
+.ub-table-column-controls {
+  height: 44px;
+  /* Hidden overflow still supports the browser's native focus scrolling. The
+     table below supplies pointer/touch scrolling for both surfaces. */
+  overflow-x: hidden;
+  overflow-y: hidden;
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+
+.ub-table-column-controls::-webkit-scrollbar {
+  display: none;
+}
+
+.ub-table-control {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.ub-table-control span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  background: var(--background);
+}
+
+.ub-table-control:hover span,
+.ub-table-control:focus-visible span,
+.ub-table-control[data-state="open"] span {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
+@media (any-pointer: coarse) {
+  .ub-table th,
+  .ub-table td {
+    height: 44px;
+  }
 }
 
 .ub-table,
