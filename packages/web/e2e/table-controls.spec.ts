@@ -195,6 +195,68 @@ test(`hover reveals quiet controls without moving the table and the pointer reac
 }
 
 for (const colorScheme of ["light", "dark"] as const) {
+test(`hover alone reaches row insertion and row menus across their lanes — ${colorScheme}`, { tag: "@webkit" }, async ({ page }, info) => {
+  test.skip(info.project.use.hasTouch === true, "Hover requires a pointer device");
+  await page.emulateMedia({ colorScheme });
+  const table = await openTable(page);
+  const paragraph = editor(page).locator(":scope > p").first();
+  await caretIn(table.locator("tr").nth(1).locator("td").first(), info);
+  await page.keyboard.insertText("Target row");
+  await caretIn(table.locator("tr").last().locator("td").first(), info);
+  await page.keyboard.insertText("Keep last row");
+
+  await caretIn(paragraph, info);
+  await page.mouse.move(0, 0);
+  await expect(controls(page)).toHaveCount(0);
+  await table.locator("tr").nth(1).locator("td").first().hover();
+  await expect(controls(page)).toBeVisible();
+  const insertion = button(page, "Insert row after 2");
+  const insertionBox = await insertion.boundingBox();
+  if (insertionBox === null) throw new Error("e2e: row insertion control has no geometry");
+  await page.mouse.move(insertionBox.x + insertionBox.width / 2, insertionBox.y + insertionBox.height / 2, { steps: 30 });
+  await expect(insertion).toBeVisible();
+  await page.mouse.move(0, 0);
+  await expect(controls(page)).toHaveCount(0);
+  await table.locator("tr").nth(1).locator("td").first().hover();
+  await page.mouse.move(insertionBox.x + insertionBox.width / 2, insertionBox.y + insertionBox.height / 2, { steps: 30 });
+  await expect(insertion).toBeVisible();
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(table.locator("tr")).toHaveCount(4);
+  await expect(table.locator("tr").nth(1)).toContainText("Target row");
+  await expect(table.locator("tr").nth(2).locator("td")).toHaveText(["", "", ""]);
+  await expect(table.locator("tr").last()).toContainText("Keep last row");
+
+  await caretIn(paragraph, info);
+  await page.mouse.move(0, 0);
+  await expect(controls(page)).toHaveCount(0);
+  await table.locator("tr").nth(1).locator("td").first().hover();
+  await expect(controls(page)).toBeVisible();
+  const rowMenu = button(page, "Row 2 actions");
+  const menuBox = await rowMenu.boundingBox();
+  if (menuBox === null) throw new Error("e2e: row menu control has no geometry");
+  await page.mouse.move(menuBox.x + menuBox.width / 2, menuBox.y + menuBox.height / 2, { steps: 30 });
+  await expect(rowMenu).toBeVisible();
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(page.getByRole("menu")).toBeVisible();
+  await page.getByRole("menuitem", { name: "Delete row", exact: true }).click();
+  await expect(table.locator("tr")).toHaveCount(3);
+  await expect(table).not.toContainText("Target row");
+  await expect(table.locator("tr").nth(1).locator("td")).toHaveText(["", "", ""]);
+  await expect(table.locator("tr").last()).toContainText("Keep last row");
+
+  await caretIn(table.locator("tr").last().locator("td").first(), info);
+  await page.keyboard.insertText("Still editable");
+  await expect(table.locator("tr").last()).toContainText("Still editable");
+  await caretIn(paragraph, info);
+  await page.mouse.move(0, 0);
+  await expect(controls(page)).toHaveCount(0);
+  await pageFits(page);
+});
+}
+
+for (const colorScheme of ["light", "dark"] as const) {
 test(`row menus target their row by trigger, right click and keyboard and protect the header — ${colorScheme}`, { tag: "@webkit" }, async ({ page }, info) => {
   await page.emulateMedia({ colorScheme });
   const table = await openTable(page);

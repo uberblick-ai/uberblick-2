@@ -1020,6 +1020,18 @@ h3.ub-heading {
   overflow: clip;
 }
 
+.ub-table-controls::before {
+  /* Keep hover across the reserved row lanes, including between buttons,
+     while pointer events over cell content still reach the editor. */
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 88px;
+  height: 100%;
+  pointer-events: auto;
+}
+
 .ub-table-column-controls {
   height: 44px;
   /* Hidden overflow still supports the browser's native focus scrolling. The
