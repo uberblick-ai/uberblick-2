@@ -42,9 +42,10 @@ for (const scheme of ["light", "dark"] as const) {
         await expect(account(page)).toBeInViewport({ ratio: 1 });
         const placeholder = footer.getByText("Account settings", { exact: true });
         expect(await placeholder.evaluate((element) => ({
-          interactive: element.closest('button, a, [role="button"], [role="link"], [tabindex]') !== null,
+          interactive: element.closest('button, a, [role="button"], [role="link"]') !== null,
+          explicitTabIndex: element.hasAttribute("tabindex"),
           tabIndex: (element as HTMLElement).tabIndex,
-        }))).toEqual({ interactive: false, tabIndex: -1 });
+        }))).toEqual({ interactive: false, explicitTabIndex: false, tabIndex: -1 });
         const url = page.url();
         const pages = page.context().pages().length;
         await placeholder.click();

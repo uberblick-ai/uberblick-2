@@ -266,8 +266,8 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
 
   await page.locator(".ub-workspace").click();
   await expect(page.getByRole("menu").getByRole("menuitem")).toHaveCount(
-    // Two workspaces, plus the unavailable creation item.
-    3,
+    // Only the two configured workspaces.
+    2,
   );
 
   await page.getByRole("menuitem", { name: unnamedLabel(harness().secondWorkspace) }).click();

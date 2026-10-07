@@ -481,12 +481,10 @@ test("settings panes reject the pointer and follow browser history", async ({
   await expect(userPanel).toBeVisible();
   await page.goForward();
   await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
-  // The account panel belongs to the shared footer and remains reachable in
-  // both modes, while the sidebar still hands focus to the incoming header.
-  await expect(userPanel).toBeVisible();
-  await expect(back).toBeFocused();
-  await page.keyboard.press("Escape");
+  // The shared account control stays available in both modes. Radix dismisses
+  // its popover when the sidebar hands focus to the incoming header.
   await expect(userPanel).toBeHidden();
+  await expect(back).toBeFocused();
   await page.goBack();
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
   await expect(settingsEntry).toBeFocused();
@@ -590,7 +588,7 @@ for (const scheme of ["light"] as const) {
         await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
       }
     };
-    const checkHoverAndFocus = async (control: Locator): Promise<string[]> => {
+    const checkHoverAndFocus = async (control: Locator, ring: "native" | "shadcn" = "native"): Promise<string[]> => {
       await expect(control).toBeVisible();
       await page.mouse.move(0, 0);
       const rest = await treatment(control);
@@ -599,7 +597,8 @@ for (const scheme of ["light"] as const) {
       await control.hover();
       expect(await treatment(control)).toEqual(rest);
 
-      // Compare with this engine's native ring rather than pinning its values.
+      // Unchanged controls retain this engine's native ring; the standard
+      // sidebar button supplies its own visible ring through shadcn.
       // The reference stays inside the active focus scope of the drawer/panel.
       await control.evaluate((element) => {
         const reference = document.createElement("button");
@@ -625,7 +624,15 @@ for (const scheme of ["light"] as const) {
         await control.focus();
         await expect(control).toBeFocused();
         expect(await control.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
-        expect(await outline(control)).toEqual(native);
+        const actual = await outline(control);
+        if (ring === "shadcn") {
+          expect(actual[0]).not.toBe("none");
+          expect(Number.parseFloat(actual[1] ?? "0")).toBeGreaterThan(0);
+          expect(Number.parseFloat(actual[2] ?? "0")).toBeGreaterThanOrEqual(0);
+          expect(oklab(await paintedIn(control, "outline-color")).alpha).toBeGreaterThan(0);
+        } else {
+          expect(actual).toEqual(native);
+        }
       } finally {
         await reference.evaluate((element) => element.remove());
       }
@@ -650,7 +657,7 @@ for (const scheme of ["light"] as const) {
     await page.getByLabel("Group name").press("Enter");
 
     const user = page.getByTestId("account-menu");
-    const userRest = await checkHoverAndFocus(user);
+    const userRest = await checkHoverAndFocus(user, "shadcn");
     await user.tap();
     const panel = page.locator(".ub-user-panel");
     await expect(panel).toBeVisible();
