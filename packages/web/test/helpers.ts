@@ -9,6 +9,7 @@ import type { Editor } from "@tiptap/core";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
 import type { DocLinkContext } from "../src/editor/doc-links.js";
 import { plainText } from "../src/editor/ytext.js";
+import { onTestCleanup } from "./test-cleanup.js";
 
 /** Every top-level child of the `blocks` fragment, as a comparable snapshot. */
 export interface FragmentSnapshot {
@@ -58,6 +59,7 @@ export function snapshotFragment(ydoc: Y.Doc): FragmentSnapshot[] {
  * editor that test just mounted. The teardown rides on the editor's own
  * `destroy` event so no call site has to remember it, and `remove()` does not
  * care which parent the element ended up under.
+ * The shared test teardown also destroys any editor an aborted test left open.
  */
 export function mountEditor(
   ydoc: Y.Doc,
@@ -65,6 +67,7 @@ export function mountEditor(
 ): { editor: Editor; element: HTMLElement } {
   const element = document.createElement("div");
   document.body.appendChild(element);
+  const forgetElement = onTestCleanup(() => element.remove());
   const editor = createUberblickEditor({
     element,
     fragment: getBlocksFragment(ydoc),
@@ -76,7 +79,14 @@ export function mountEditor(
     // real state of the app too (see `CreateEditorOptions.docLinks`).
     ...(options.docLinks === undefined ? {} : { docLinks: options.docLinks }),
   });
-  editor.on("destroy", () => element.remove());
+  const forgetEditor = onTestCleanup(() => {
+    if (!editor.isDestroyed) editor.destroy();
+  });
+  editor.on("destroy", () => {
+    element.remove();
+    forgetElement();
+    forgetEditor();
+  });
   return { editor, element };
 }
 

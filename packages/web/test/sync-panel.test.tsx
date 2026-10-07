@@ -13,11 +13,10 @@
  * present-now list that follows awareness in both directions.
  */
 
+import { act, render, type RenderResult } from "./react-render.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, useCallback, useState } from "react";
+import { useCallback, useState } from "react";
 import type { ReactElement } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
 import * as Y from "yjs";
 import { Awareness, removeAwarenessStates } from "y-protocols/awareness";
 import { appendBlock, getBlocksFragment, initDoc, insertBlock } from "@uberblick/schema";
@@ -162,27 +161,21 @@ function mount(
   hubAcked?: boolean | null | undefined,
   lastUpdated?: number | undefined,
   notSharedReason: "no-hub-credentials" | null = null,
-): { host: HTMLElement; root: Root } {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  act(() =>
-    root.render(
-      <Panel
-        fix={fix}
-        endpoint={endpoint}
-        hubAcked={hubAcked}
-        lastUpdated={lastUpdated}
-        notSharedReason={notSharedReason}
-      />,
-    ),
+): { host: HTMLElement; view: RenderResult } {
+  const view = render(
+    <Panel
+      fix={fix}
+      endpoint={endpoint}
+      hubAcked={hubAcked}
+      lastUpdated={lastUpdated}
+      notSharedReason={notSharedReason}
+    />,
   );
+  const host = view.container;
   // Past every settle window, so the state word is what a reader sees rather
   // than the "offline" every mount starts from.
   act(() => void vi.advanceTimersByTime(5_000));
-  return { host, root };
+  return { host, view };
 }
 
 /** The panel's facts, label → value. */
@@ -263,15 +256,14 @@ describe("the sync panel renders the state this client holds", () => {
       Date.now() - 20 * 60_000,
       Date.now() - 90 * 24 * 60 * 60_000,
     ]) {
-      const { host, root } = mount(fixture(), ENDPOINT, undefined, stamp);
+      const { host, view } = mount(fixture(), ENDPOINT, undefined, stamp);
       try {
         expect(facts(host)["Last updated"]).toBe(exact.format(stamp));
         expect(
           host.querySelector(".ub-sync-facts time")?.getAttribute("datetime"),
         ).toBe(new Date(stamp).toISOString());
       } finally {
-        act(() => root.unmount());
-        host.remove();
+        view.unmount();
       }
     }
   });
@@ -279,20 +271,18 @@ describe("the sync panel renders the state this client holds", () => {
   it("has no Last updated row without a usable displayed stamp", () => {
     vi.useFakeTimers();
     for (const stamp of [undefined, Number.NaN, Infinity, Number.MAX_VALUE]) {
-      const { host, root } = mount(fixture(), ENDPOINT, undefined, stamp);
+      const { host, view } = mount(fixture(), ENDPOINT, undefined, stamp);
       try {
         expect(facts(host)["Last updated"]).toBeUndefined();
       } finally {
-        act(() => root.unmount());
-        host.remove();
+        view.unmount();
       }
     }
   });
 
   it("mirrors the shown age immediately on panel open and clears it on room change", () => {
     vi.useFakeTimers();
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
+
     const first = fixture();
     const second = fixture();
     second.connection = {
@@ -300,132 +290,102 @@ describe("the sync panel renders the state this client holds", () => {
       room: `${WORKSPACE}/another-document`,
     };
     const stamp = Date.now() - 20 * 60_000;
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    const render = (
+    const tree = (
+      connection: RoomConnection,
+      open: boolean,
+      value: number | undefined = stamp,
+    ) => (
+      <TimestampSurfaces connection={connection} stamp={value} open={open} />
+    );
+    const view = render(tree(first.connection, true));
+    const host = view.container;
+    const draw = (
       connection: RoomConnection,
       open: boolean,
       value: number | undefined = stamp,
     ): void => {
-      act(() => root.render(
-        <TimestampSurfaces connection={connection} stamp={value} open={open} />,
-      ));
+      view.rerender(tree(connection, open, value));
     };
-    try {
-      render(first.connection, true);
-      expect(host.querySelector(".ub-last-updated")).toBeNull();
-      expect(facts(host)["Last updated"]).toBeUndefined();
-      act(() => void vi.advanceTimersByTime(300));
-      expect(facts(host)["Last updated"]).toBe(
-        host.querySelector(".ub-last-updated time")?.getAttribute("title"),
-      );
-      render(first.connection, false);
-      render(first.connection, true);
-      // The panel's own sync word has a fresh settle window, but the age
-      // already visible in the status line remains available immediately.
-      expect(facts(host).State).toBe("—");
-      expect(facts(host)["Last updated"]).toBe(
-        host.querySelector(".ub-last-updated time")?.getAttribute("title"),
-      );
-      render(second.connection, true);
-      expect(host.querySelector(".ub-last-updated")).toBeNull();
-      expect(facts(host)["Last updated"]).toBeUndefined();
-      act(() => void vi.advanceTimersByTime(300));
-      expect(facts(host)["Last updated"]).toBeDefined();
-      render(second.connection, true, Number.NaN);
-      expect(host.querySelector(".ub-last-updated")).toBeNull();
-      expect(facts(host)["Last updated"]).toBeUndefined();
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    expect(host.querySelector(".ub-last-updated")).toBeNull();
+    expect(facts(host)["Last updated"]).toBeUndefined();
+    act(() => void vi.advanceTimersByTime(300));
+    expect(facts(host)["Last updated"]).toBe(
+      host.querySelector(".ub-last-updated time")?.getAttribute("title"),
+    );
+    draw(first.connection, false);
+    draw(first.connection, true);
+    // The panel's own sync word has a fresh settle window, but the age
+    // already visible in the status line remains available immediately.
+    expect(facts(host).State).toBe("—");
+    expect(facts(host)["Last updated"]).toBe(
+      host.querySelector(".ub-last-updated time")?.getAttribute("title"),
+    );
+    draw(second.connection, true);
+    expect(host.querySelector(".ub-last-updated")).toBeNull();
+    expect(facts(host)["Last updated"]).toBeUndefined();
+    act(() => void vi.advanceTimersByTime(300));
+    expect(facts(host)["Last updated"]).toBeDefined();
+    draw(second.connection, true, Number.NaN);
+    expect(host.querySelector(".ub-last-updated")).toBeNull();
+    expect(facts(host)["Last updated"]).toBeUndefined();
   });
 
   it("makes no room-status claim while the requested connection is absent", () => {
     vi.useFakeTimers();
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() =>
-      root.render(
-        <SyncPanel
-          connection={null}
-          presence={[]}
-          endpoint={ENDPOINT}
-        />,
-      ),
+    const view = render(
+      <SyncPanel
+        connection={null}
+        presence={[]}
+        endpoint={ENDPOINT}
+      />,
     );
-    try {
-      expect(facts(host)).toEqual({
-        Hub: ENDPOINT.url,
-        Source: "served /uberblick-config.json",
-        Room: "—",
-        State: "—",
-        Backlog: "—",
-      });
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    const host = view.container;
+    expect(facts(host)).toEqual({
+      Hub: ENDPOINT.url,
+      Source: "served /uberblick-config.json",
+      Room: "—",
+      State: "—",
+      Backlog: "—",
+    });
   });
 
   it("keeps current raw facts available while the state word settles", () => {
     vi.useFakeTimers();
     const fix = fixture({ unsyncedChanges: 3 });
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() => root.render(<Panel fix={fix} />));
-    try {
-      expect(facts(host)).toEqual({
-        Hub: ENDPOINT.url,
-        Source: "served /uberblick-config.json",
-        Room: ROOM,
-        State: "—",
-        Backlog: "3 sync messages unacked",
-      });
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    const view = render(<Panel fix={fix} />);
+    const host = view.container;
+    expect(facts(host)).toEqual({
+      Hub: ENDPOINT.url,
+      Source: "served /uberblick-config.json",
+      Room: ROOM,
+      State: "—",
+      Backlog: "3 sync messages unacked",
+    });
   });
 
   it("names the endpoint, the room, the state and the backlog's unit", () => {
     vi.useFakeTimers();
     const fix = fixture({ connected: true, synced: true, unsyncedChanges: 4 });
-    const { host, root } = mount(fix);
-    try {
-      expect(facts(host)).toEqual({
-        Hub: ENDPOINT.url,
-        // Which hub this "synced" is about, and who decided it (#362).
-        Source: "served /uberblick-config.json",
-        Room: ROOM,
-        // A backlog is what stops the state being `synced` — the provider's own
-        // flag never comes back down once the handshake raised it.
-        State: "syncing…",
-        // The status line's wording, from the one place both read it.
-        Backlog: "4 sync messages unacked",
-      });
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    const { host } = mount(fix);
+    expect(facts(host)).toEqual({
+      Hub: ENDPOINT.url,
+      // Which hub this "synced" is about, and who decided it (#362).
+      Source: "served /uberblick-config.json",
+      Room: ROOM,
+      // A backlog is what stops the state being `synced` — the provider's own
+      // flag never comes back down once the handshake raised it.
+      State: "syncing…",
+      // The status line's wording, from the one place both read it.
+      Backlog: "4 sync messages unacked",
+    });
   });
 
   it("says offline the moment the hub goes away, with the backlog still named", () => {
     vi.useFakeTimers();
     const fix = fixture({ connected: false, synced: false, unsyncedChanges: 1 });
-    const { host, root } = mount(fix);
-    try {
-      expect(facts(host).State).toBe("offline");
-      expect(facts(host).Backlog).toBe("1 sync message unacked");
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    const { host } = mount(fix);
+    expect(facts(host).State).toBe("offline");
+    expect(facts(host).Backlog).toBe("1 sync message unacked");
   });
 
   it("shows the same two locally served facts as the status line", () => {
@@ -439,7 +399,7 @@ describe("the sync panel renders the state this client holds", () => {
       [true, "synced with hub"],
       [null, "—"],
     ] as const) {
-      const { host, root } = mount(fixture(), remote, hubAcked);
+      const { host, view } = mount(fixture(), remote, hubAcked);
       try {
         expect(facts(host)).toMatchObject({
           Hub: remote.url,
@@ -448,45 +408,34 @@ describe("the sync panel renders the state this client holds", () => {
           "Hub state": expected,
         });
       } finally {
-        act(() => root.unmount());
-        host.remove();
+        view.unmount();
       }
     }
   });
 
   it("suppresses the upstream fact when the local room is not writable", () => {
     vi.useFakeTimers();
-    const { host, root } = mount(
+    const { host } = mount(
       fixture({ connected: false, synced: false, writable: false }),
       ENDPOINT,
       true,
     );
-    try {
-      expect(facts(host)).toMatchObject({
-        Hub: "—",
-        Source: "—",
-        State: "offline",
-      });
-      expect(facts(host)["Hub state"]).toBeUndefined();
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    expect(facts(host)).toMatchObject({
+      Hub: "—",
+      Source: "—",
+      State: "offline",
+    });
+    expect(facts(host)["Hub state"]).toBeUndefined();
   });
 
   it("explains why durable local edits are not shared with the hub", () => {
     vi.useFakeTimers();
-    const { host, root } = mount(fixture(), ENDPOINT, false, undefined, "no-hub-credentials");
-    try {
-      expect(facts(host)).toMatchObject({
-        State: "saved here",
-        "Hub state": "not shared with hub",
-        Reason: "this machine has no credentials for its hub",
-      });
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    const { host } = mount(fixture(), ENDPOINT, false, undefined, "no-hub-credentials");
+    expect(facts(host)).toMatchObject({
+      State: "saved here",
+      "Hub state": "not shared with hub",
+      Reason: "this machine has no credentials for its hub",
+    });
   });
 
   /**
@@ -507,12 +456,11 @@ describe("the sync panel renders the state this client holds", () => {
   it("says synced with nothing unacked, and no two states read the same", () => {
     vi.useFakeTimers();
     const reading = (status: Partial<RoomStatus>): Record<string, string> => {
-      const { host, root } = mount(fixture(status));
+      const { host, view } = mount(fixture(status));
       try {
         return facts(host);
       } finally {
-        act(() => root.unmount());
-        host.remove();
+        view.unmount();
       }
     };
     const offline = reading({ connected: false, synced: false, unsyncedChanges: 0 });
@@ -550,13 +498,12 @@ describe("the sync panel renders the state this client holds", () => {
       ],
     ];
     for (const [word, reason, status] of refused) {
-      const { host, root } = mount(fixture(status));
+      const { host, view } = mount(fixture(status));
       try {
         expect(facts(host).State).toBe(word);
         expect(facts(host).Reason).toBe(reason);
       } finally {
-        act(() => root.unmount());
-        host.remove();
+        view.unmount();
       }
     }
   });
@@ -576,35 +523,30 @@ describe("the sync panel renders the state this client holds", () => {
       null,
       WEB_MARKER,
     );
-    const { host, root } = mount(fix);
-    try {
-      // Sorted by client id, so the list does not reorder itself under a reader.
-      expect(presentNow(host)).toEqual([
-        `${agent} block 2`,
-        // No cursor published: the row is still drawn, and says nothing about
-        // where — a block number nobody could point at would be an invention.
-        person,
-      ]);
-      // Avatar plus name, each in its own presence colour — the one its cursor
-      // carries in the prose (#494).
-      const avatars = [...host.querySelectorAll<HTMLElement>(".ub-avatar")];
-      expect(
-        avatars.map((avatar) => [avatar.textContent, avatar.style.borderColor]),
-      ).toEqual([
-        ["C🤖", "rgb(123, 94, 199)"],
-        ["A", "rgb(12, 133, 61)"],
-      ]);
-      // Announced once: the visible name is the row's accessible name, and the
-      // avatar in front of it is decoration. A labelled avatar here would make
-      // a screen reader read every session twice.
-      for (const avatar of avatars) {
-        expect(avatar.getAttribute("aria-hidden")).toBe("true");
-        expect(avatar.getAttribute("aria-label")).toBeNull();
-        expect(avatar.getAttribute("title")).toBeNull();
-      }
-    } finally {
-      act(() => root.unmount());
-      host.remove();
+    const { host } = mount(fix);
+    // Sorted by client id, so the list does not reorder itself under a reader.
+    expect(presentNow(host)).toEqual([
+      `${agent} block 2`,
+      // No cursor published: the row is still drawn, and says nothing about
+      // where — a block number nobody could point at would be an invention.
+      person,
+    ]);
+    // Avatar plus name, each in its own presence colour — the one its cursor
+    // carries in the prose (#494).
+    const avatars = [...host.querySelectorAll<HTMLElement>(".ub-avatar")];
+    expect(
+      avatars.map((avatar) => [avatar.textContent, avatar.style.borderColor]),
+    ).toEqual([
+      ["C🤖", "rgb(123, 94, 199)"],
+      ["A", "rgb(12, 133, 61)"],
+    ]);
+    // Announced once: the visible name is the row's accessible name, and the
+    // avatar in front of it is decoration. A labelled avatar here would make
+    // a screen reader read every session twice.
+    for (const avatar of avatars) {
+      expect(avatar.getAttribute("aria-hidden")).toBe("true");
+      expect(avatar.getAttribute("aria-label")).toBeNull();
+      expect(avatar.getAttribute("title")).toBeNull();
     }
   });
 
@@ -617,35 +559,25 @@ describe("the sync panel renders the state this client holds", () => {
       { name: "Claude · demo agent", color: "#7b5ec7" },
       1,
     );
-    const { host, root } = mount(fix);
-    try {
-      expect(presentNow(host)).toEqual(["Claude · demo agent block 2"]);
-      act(() => {
-        insertBlock(fix.ydoc, null, { type: "paragraph", text: "a new first" });
-      });
-      expect(presentNow(host)).toEqual(["Claude · demo agent block 3"]);
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    const { host } = mount(fix);
+    expect(presentNow(host)).toEqual(["Claude · demo agent block 2"]);
+    act(() => {
+      insertBlock(fix.ydoc, null, { type: "paragraph", text: "a new first" });
+    });
+    expect(presentNow(host)).toEqual(["Claude · demo agent block 3"]);
   });
 
   it("drops a session when its awareness state goes away", () => {
     vi.useFakeTimers();
     const fix = fixture();
     publish(fix, AGENT_CLIENT, { name: "Claude · demo agent", color: "#7b5ec7" }, 0);
-    const { host, root } = mount(fix);
-    try {
-      expect(presentNow(host)).toEqual(["Claude · demo agent block 1"]);
-      act(() => {
-        removeAwarenessStates(fix.awareness, [AGENT_CLIENT], "test");
-      });
-      expect(presentNow(host)).toEqual([]);
-      expect(host.querySelector(".ub-presence")).toBeNull();
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    const { host } = mount(fix);
+    expect(presentNow(host)).toEqual(["Claude · demo agent block 1"]);
+    act(() => {
+      removeAwarenessStates(fix.awareness, [AGENT_CLIENT], "test");
+    });
+    expect(presentNow(host)).toEqual([]);
+    expect(host.querySelector(".ub-presence")).toBeNull();
   });
 
   /**
@@ -657,55 +589,36 @@ describe("the sync panel renders the state this client holds", () => {
   it("says outright when the endpoint came from compiled values, not the document", () => {
     vi.useFakeTimers();
     const fix = fixture();
-    const { host, root } = mount(fix, {
+    const { host } = mount(fix, {
       url: "ws://localhost:1234",
       source: "define",
     });
-    try {
-      expect(facts(host).Hub).toBe("ws://localhost:1234");
-      expect(facts(host).Source).toBe(
-        "compiled default, /uberblick-config.json not used",
-      );
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    expect(facts(host).Hub).toBe("ws://localhost:1234");
+    expect(facts(host).Source).toBe(
+      "compiled default, /uberblick-config.json not used",
+    );
   });
 
   it("says the same of a build that carried no endpoint of its own", () => {
     vi.useFakeTimers();
     const fix = fixture();
-    const { host, root } = mount(fix, {
+    const { host } = mount(fix, {
       url: "ws://localhost:1234",
       source: "fallback",
     });
-    try {
-      expect(facts(host).Source).toBe(
-        "in-code default, /uberblick-config.json not used",
-      );
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    expect(facts(host).Source).toBe(
+      "in-code default, /uberblick-config.json not used",
+    );
   });
 
   it("says so rather than guessing while the endpoint is still resolving", () => {
     vi.useFakeTimers();
     const fix = fixture();
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() => root.render(<Panel fix={fix} endpoint={null} />));
-    try {
-      // Never a fallback address: the panel exists to say which hub this client
-      // dialled, and a plausible guess is the one answer it must not give.
-      expect(facts(host).Hub).toBe("—");
-      expect(facts(host).Source).toBe("—");
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    const view = render(<Panel fix={fix} endpoint={null} />);
+    const host = view.container;
+    // Never a fallback address: the panel exists to say which hub this client
+    // dialled, and a plausible guess is the one answer it must not give.
+    expect(facts(host).Hub).toBe("—");
+    expect(facts(host).Source).toBe("—");
   });
 });

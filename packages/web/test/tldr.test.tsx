@@ -7,10 +7,8 @@
  * are obeyed without remounting the pane.
  */
 
-import { afterEach, describe, expect, it } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { describe, expect, it } from "vitest";
+import { act, renderSettled, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -67,43 +65,24 @@ function peerOf(local: Y.Doc): Y.Doc {
   return peer;
 }
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
-
-afterEach(() => {
-  const open = mounted;
-  mounted = null;
-  if (open !== null) {
-    act(() => open.root.unmount());
-    open.host.remove();
-  }
-});
-
 async function mountPane(
   ydoc: Y.Doc,
   archived = false,
-): Promise<{ host: HTMLElement; root: Root; connection: RoomConnection }> {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
+): Promise<{ host: HTMLElement; view: RenderResult; connection: RoomConnection }> {
   const connection = connectionFor(ydoc);
-  mounted = { root, host };
-  await act(async () => {
-    root.render(
-      <EditorPane
-        connection={connection}
-        segment={WORKSPACE}
-        presence={[]}
-        author="reader"
-        archived={archived}
-        docLinks={null}
-        onRestore={() => {}}
-        onSelectThread={() => {}}
-      />,
-    );
-  });
-  return { host, root, connection };
+  const view = await renderSettled(
+    <EditorPane
+      connection={connection}
+      segment={WORKSPACE}
+      presence={[]}
+      author="reader"
+      archived={archived}
+      docLinks={null}
+      onRestore={() => {}}
+      onSelectThread={() => {}}
+    />,
+  );
+  return { host: view.container, view, connection };
 }
 
 function typeInto(field: HTMLTextAreaElement | null, value: string): void {
@@ -191,7 +170,7 @@ describe("the document TL;DR", () => {
   it("follows a remote value and guards an edit when the document is archived", async () => {
     const ydoc = documentWith("The first summary.");
     const peer = peerOf(ydoc);
-    const { host, root, connection } = await mountPane(ydoc);
+    const { host, view, connection } = await mountPane(ydoc);
 
     act(() => setTldr(peer, "Changed by another client."));
     expect(host.querySelector(".ub-tldr-body > p")?.textContent).toBe(
@@ -200,19 +179,17 @@ describe("the document TL;DR", () => {
 
     act(() => openActions(host));
     act(() => menuItem("Edit TL;DR")?.click());
-    act(() =>
-      root.render(
-        <EditorPane
-          connection={connection}
-          segment={WORKSPACE}
-          presence={[]}
-          author="reader"
-          archived={true}
-          docLinks={null}
-          onRestore={() => {}}
-          onSelectThread={() => {}}
-        />,
-      ),
+    view.rerender(
+      <EditorPane
+        connection={connection}
+        segment={WORKSPACE}
+        presence={[]}
+        author="reader"
+        archived={true}
+        docLinks={null}
+        onRestore={() => {}}
+        onSelectThread={() => {}}
+      />,
     );
     expect(field(host)?.readOnly).toBe(true);
     expect(host.querySelector(".ub-tldr-form-meta")?.textContent).toContain(

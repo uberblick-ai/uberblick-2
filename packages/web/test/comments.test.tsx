@@ -9,9 +9,8 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { act } from "react";
+import { act, render } from "./react-render.js";
 import type { ComponentProps, ReactElement } from "react";
-import { createRoot } from "react-dom/client";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -158,8 +157,6 @@ function composingKey(
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = function scrollIntoView() {};
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
 });
 
 /** Mount the composer over a mounted editor, and drive it the way a reader does. */
@@ -179,23 +176,18 @@ function mountComposer(
   const created: string[] = [];
   const frame = document.createElement("div");
   document.body.appendChild(frame);
-  const root = createRoot(frame);
-  const draw = (): void => {
-    act(() => {
-      root.render(
-        <CommentComposer
-          editor={editor}
-          contentReadOnly={options.contentReadOnly ?? false}
-          ydoc={ydoc}
-          author={options.author ?? "ben"}
-          mentions={options.mentions ?? []}
-          host={{ current: frame }}
-          onCreated={(threadId) => created.push(threadId)}
-        />,
-      );
-    });
-  };
-  draw();
+  const view = render(
+    <CommentComposer
+      editor={editor}
+      contentReadOnly={options.contentReadOnly ?? false}
+      ydoc={ydoc}
+      author={options.author ?? "ben"}
+      mentions={options.mentions ?? []}
+      host={{ current: frame }}
+      onCreated={(threadId) => created.push(threadId)}
+    />,
+    { container: frame },
+  );
   const query = <T extends Element>(selector: string): T | null =>
     document.querySelector<T>(selector);
   return {
@@ -223,8 +215,7 @@ function mountComposer(
       }),
     query,
     unmount: () => {
-      act(() => root.unmount());
-      frame.remove();
+      view.unmount();
       editor.destroy();
       element.remove();
     },
@@ -1179,19 +1170,15 @@ describe("the rail writes back", () => {
     type: (text: string) => Promise<void>;
     unmount: () => void;
   } {
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() => {
-      root.render(
-        <LiveThreadsPane
-          connection={stubConnection(ydoc)}
-          focused={null}
-          author={author}
-          onFocus={() => {}}
-        />,
-      );
-    });
+    const view = render(
+      <LiveThreadsPane
+        connection={stubConnection(ydoc)}
+        focused={null}
+        author={author}
+        onFocus={() => {}}
+      />,
+    );
+    const host = view.container;
     const cards = (): HTMLElement[] => [
       ...host.querySelectorAll<HTMLElement>(".ub-thread-card"),
     ];
@@ -1217,8 +1204,7 @@ describe("the rail writes back", () => {
           field.dispatchEvent(new Event("input", { bubbles: true }));
         }),
       unmount: () => {
-        act(() => root.unmount());
-        host.remove();
+        view.unmount();
       },
     };
   }

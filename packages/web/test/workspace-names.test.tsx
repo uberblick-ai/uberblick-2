@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, render, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
 import { setWorkspaceName, settingsRoom } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
@@ -36,15 +34,14 @@ function room(workspace: Workspace, name: string | null, received = true): RoomC
   } as RoomConnection;
 }
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
+let mounted: RenderResult | null = null;
 beforeEach(() => {
   held.rooms.clear(); held.acquire.mockClear(); held.release.mockClear();
   vi.stubGlobal("ResizeObserver", class { observe(): void {} unobserve(): void {} disconnect(): void {} });
   Element.prototype.scrollIntoView = () => {};
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 afterEach(() => {
-  act(() => mounted?.root.unmount()); mounted?.host.remove(); mounted = null;
+  mounted = null;
   for (const connection of held.rooms.values()) (connection as RoomConnection).ydoc.destroy();
   vi.unstubAllGlobals();
 });
@@ -56,13 +53,13 @@ function Probe({ current, connection, menuOpen = false, onSwitch = () => {} }: {
   const names = useWorkspaceNames([ONE, TWO], current.uuid, connection, IDENTITY, menuOpen);
   return <WorkspaceSwitcher workspaces={[ONE, TWO]} current={current} names={names} onSwitch={onSwitch} />;
 }
-function render(element: React.ReactElement): HTMLElement {
+function mount(element: React.ReactElement): HTMLElement {
   if (mounted === null) {
-    const host = document.createElement("div"); document.body.appendChild(host);
-    mounted = { host, root: createRoot(host) };
+    mounted = render(element);
+  } else {
+    mounted.rerender(element);
   }
-  act(() => mounted?.root.render(element));
-  return mounted.host;
+  return mounted.container;
 }
 function open(host: HTMLElement): void {
   const trigger = host.querySelector<HTMLButtonElement>(".ub-workspace");
@@ -77,7 +74,7 @@ it("reads other workspace names silently while offered, and keeps duplicate name
   const two = room(TWO, "Product Research");
   held.rooms.set(two.room, two);
   const onSwitch = vi.fn();
-  const host = render(<Probe current={ONE} connection={one} menuOpen onSwitch={onSwitch} />);
+  const host = mount(<Probe current={ONE} connection={one} menuOpen onSwitch={onSwitch} />);
   expect(held.acquire).toHaveBeenCalledWith(settingsRoom(TWO.uuid), IDENTITY, { presence: false });
   open(host);
   expect(entries().map((entry) => entry.querySelector(".ub-menu-text")?.textContent)).toEqual(["Product Research", "Product Research"]);
@@ -88,7 +85,7 @@ it("reads other workspace names silently while offered, and keeps duplicate name
   expect(held.acquire).toHaveBeenCalledOnce();
   act(() => entries()[1]?.click());
   expect(onSwitch).toHaveBeenCalledWith(TWO.segment);
-  render(<Probe current={ONE} connection={one} />);
+  mount(<Probe current={ONE} connection={one} />);
   expect(held.release).toHaveBeenCalledOnce();
   one.ydoc.destroy();
 });
@@ -102,7 +99,7 @@ it("uses distinct neutral labels while names are absent or unreadable, including
   const one = room(ONE, "This name has not arrived", false);
   const two = room(TWO, null, false);
   held.rooms.set(two.room, two);
-  const host = render(<Probe current={ONE} connection={one} menuOpen />);
+  const host = mount(<Probe current={ONE} connection={one} menuOpen />);
   expect(host.querySelector(".ub-workspace-name")?.textContent).toBe("Unnamed workspace · 6f4c8a51");
   expect(host.textContent).not.toContain(ONE.uuid);
   expect(host.textContent).not.toContain(ONE.segment);
@@ -117,9 +114,9 @@ it("uses distinct neutral labels while names are absent or unreadable, including
 
 it("never reuses the previous workspace's name when a route switches before its settings arrive", () => {
   const one = room(ONE, "Original workspace");
-  const host = render(<Probe current={ONE} connection={one} />);
+  const host = mount(<Probe current={ONE} connection={one} />);
   expect(host.querySelector(".ub-workspace-name")?.textContent).toBe("Original workspace");
-  render(<Probe current={TWO} connection={one} />);
+  mount(<Probe current={TWO} connection={one} />);
   expect(host.querySelector(".ub-workspace-name")?.textContent).toBe("Unnamed workspace · b2d9e4c7");
   expect(host.textContent).not.toContain("Original workspace");
   one.ydoc.destroy();

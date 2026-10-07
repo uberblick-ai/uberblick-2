@@ -1,6 +1,5 @@
 /** A settled configuration without an endpoint cannot open rooms. */
-import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { renderSettled } from "./react-render.js";
 import { afterEach, expect, it, vi } from "vitest";
 import { acquireRoom } from "../src/collab/rooms.js";
 import type { ClientConfig } from "../src/config.js";
@@ -28,21 +27,13 @@ function configuration(hubUrl: string): ClientConfig {
 
 afterEach(() => {
   vi.resetAllMocks();
-  document.body.replaceChildren();
 });
 
 it("keeps the room gate closed when the served endpoint could not be resolved", async () => {
   vi.mocked(resolveClientConfig).mockResolvedValue(configuration(""));
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  try {
-    await act(async () => { root.render(<Probe />); });
-    expect(host.textContent).toBe("waiting");
-    expect(acquireRoom).not.toHaveBeenCalled();
-  } finally {
-    act(() => root.unmount());
-  }
+  const { container: host } = await renderSettled(<Probe />);
+  expect(host.textContent).toBe("waiting");
+  expect(acquireRoom).not.toHaveBeenCalled();
 });
 
 it("admits rooms when a served endpoint resolves and releases them on unmount", async () => {
@@ -51,15 +42,10 @@ it("admits rooms when a served endpoint resolves and releases them on unmount", 
   vi.mocked(acquireRoom).mockReturnValue({
     connection: { room: ROOM } as ReturnType<typeof acquireRoom>["connection"], release,
   });
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  try {
-    await act(async () => { root.render(<Probe />); });
-    expect(host.textContent).toBe("ready");
-    expect(acquireRoom).toHaveBeenCalledExactlyOnceWith(ROOM, IDENTITY);
-  } finally {
-    act(() => root.unmount());
-  }
+  const view = await renderSettled(<Probe />);
+  const host = view.container;
+  expect(host.textContent).toBe("ready");
+  expect(acquireRoom).toHaveBeenCalledExactlyOnceWith(ROOM, IDENTITY);
+  view.unmount();
   expect(release).toHaveBeenCalledOnce();
 });

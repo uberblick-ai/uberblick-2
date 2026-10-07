@@ -18,9 +18,8 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
+import { act, render } from "./react-render.js";
 import type { ComponentProps, ReactElement } from "react";
-import { createRoot } from "react-dom/client";
 import * as Y from "yjs";
 import {
   addComment,
@@ -292,8 +291,6 @@ describe("the rail renders its cards", () => {
     // jsdom does not implement scrollIntoView, and the rail scrolls a focused
     // card into view.
     Element.prototype.scrollIntoView = function scrollIntoView() {};
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
   });
 
   /** Only the document matters to the rail: it reads the Y.Doc and nothing else. */
@@ -315,32 +312,22 @@ describe("the rail renders its cards", () => {
     unmount: () => void;
   } {
     const focus: string[] = [];
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
     // Refocusing keeps the same room source; it does not replace the connection.
     const connection = stubConnection(ydoc);
-    const draw = (next: ThreadFocus | null): void => {
-      act(() => {
-        root.render(
-          <LiveThreadsPane
-            connection={connection}
-            focused={next}
-            author="ben"
-            onFocus={(threadId) => focus.push(threadId)}
-          />,
-        );
-      });
-    };
-    draw(focused);
+    const tree = (next: ThreadFocus | null): ReactElement => (
+      <LiveThreadsPane
+        connection={connection}
+        focused={next}
+        author="ben"
+        onFocus={(threadId) => focus.push(threadId)}
+      />
+    );
+    const view = render(tree(focused));
     return {
-      host,
+      host: view.container,
       focus,
-      refocus: draw,
-      unmount: () => {
-        act(() => root.unmount());
-        host.remove();
-      },
+      refocus: (next) => view.rerender(tree(next)),
+      unmount: view.unmount,
     };
   }
 
@@ -512,8 +499,6 @@ describe("the rail renders its cards", () => {
 describe("a highlight and its card focus each other", () => {
   beforeEach(() => {
     Element.prototype.scrollIntoView = function scrollIntoView() {};
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
   });
 
   it("resolves a click inside a highlight to its thread id", () => {
@@ -560,20 +545,16 @@ describe("a highlight and its card focus each other", () => {
     const thread = createAnnotation(ydoc, blocks[1]!, 4, 15, "ben", "why?");
     const { editor, element } = mountEditor(ydoc);
     const focus: string[] = [];
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
+    const view = render(
+      <LiveThreadsPane
+        connection={{ room: `${WORKSPACE}/doc-1`, ydoc } as unknown as RoomConnection}
+        focused={null}
+        author="ben"
+        onFocus={(threadId) => focus.push(threadId)}
+      />,
+    );
+    const host = view.container;
     try {
-      act(() => {
-        root.render(
-          <LiveThreadsPane
-            connection={{ room: `${WORKSPACE}/doc-1`, ydoc } as unknown as RoomConnection}
-            focused={null}
-            author="ben"
-            onFocus={(threadId) => focus.push(threadId)}
-          />,
-        );
-      });
       act(() => host.querySelector<HTMLButtonElement>(".ub-thread")!.click());
 
       expect(focus).toEqual([thread.id]);
@@ -583,8 +564,7 @@ describe("a highlight and its card focus each other", () => {
       expect(highlight?.classList.contains("ub-comment-flash")).toBe(true);
       expect(scrolled).toContain(highlight);
     } finally {
-      act(() => root.unmount());
-      host.remove();
+      view.unmount();
       editor.destroy();
       element.remove();
     }
@@ -601,28 +581,23 @@ describe("a highlight and its card focus each other", () => {
     createAnnotation(ydoc, paragraph, 4, 15, "ben", "why?");
     editBlock(ydoc, paragraph, getBlockText(ydoc, paragraph), "The fox jumps.");
     const { editor, element } = mountEditor(ydoc);
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
+    const view = render(
+      <LiveThreadsPane
+        connection={{ room: `${WORKSPACE}/doc-1`, ydoc } as unknown as RoomConnection}
+        focused={null}
+        author="ben"
+        onFocus={() => {}}
+      />,
+    );
+    const host = view.container;
     try {
-      act(() => {
-        root.render(
-          <LiveThreadsPane
-            connection={{ room: `${WORKSPACE}/doc-1`, ydoc } as unknown as RoomConnection}
-            focused={null}
-            author="ben"
-            onFocus={() => {}}
-          />,
-        );
-      });
       act(() => host.querySelector<HTMLButtonElement>(".ub-thread")!.click());
 
       // Nothing to flash, nothing to scroll to — and no crash.
       expect(element.querySelector("[data-comment-thread]")).toBeNull();
       expect(scrolled).toEqual([]);
     } finally {
-      act(() => root.unmount());
-      host.remove();
+      view.unmount();
       editor.destroy();
       element.remove();
     }

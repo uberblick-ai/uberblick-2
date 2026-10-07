@@ -24,8 +24,7 @@
  */
 
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { act, render } from "./react-render.js";
 import type { ReactElement } from "react";
 import { WorkspaceSwitcher } from "../src/ui/WorkspaceSwitcher.js";
 import { parseRoute, useRoutePath, workspaceList } from "../src/ui/route.js";
@@ -147,16 +146,11 @@ describe("switching workspace is navigating to it", () => {
   beforeEach(() => {
     vi.stubGlobal("ResizeObserver", FakeResizeObserver);
     Element.prototype.scrollIntoView = function scrollIntoView() {};
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
     window.history.replaceState(null, "", `/${UBERBLICK}`);
   });
 
   it("lists both workspaces and puts the chosen one in the address bar", () => {
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() => root.render(<Probe configured={CONFIGURED} />));
+    const { container: host } = render(<Probe configured={CONFIGURED} />);
 
     expect(trigger(host).textContent).toContain("Uberblick");
     open(host);
@@ -178,9 +172,6 @@ describe("switching workspace is navigating to it", () => {
       workspace: research,
     });
     expect(trigger(host).textContent).toContain("Product Research");
-
-    act(() => root.unmount());
-    host.remove();
   });
 
   it("keeps the workspace a deep link carries, listed or not", () => {
@@ -188,10 +179,7 @@ describe("switching workspace is navigating to it", () => {
     // rewrite an address into one of them.
     const uuid = "3231bff4-2f1c-4a49-9f0a-6f8b2c1d7e55";
     window.history.replaceState(null, "", `/${RESEARCH}/${uuid}`);
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() => root.render(<Probe configured={[UBERBLICK]} />));
+    const { container: host } = render(<Probe configured={[UBERBLICK]} />);
 
     expect(window.location.pathname).toBe(`/${RESEARCH}/${uuid}`);
     expect(parseRoute(window.location.pathname, null)).toEqual({
@@ -202,23 +190,14 @@ describe("switching workspace is navigating to it", () => {
     // Unconfigured, and still on the menu — with the configured one beside it.
     open(host);
     expect(offered()).toEqual(["Uberblick", "Product Research"]);
-
-    act(() => root.unmount());
-    host.remove();
   });
 
   it("names the workspace it is at when that is the only one there is", () => {
     // A menu of one still opens, and the reader is told where they are without it.
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() => root.render(<Probe configured={[]} />));
+    const { container: host } = render(<Probe configured={[]} />);
 
     expect(trigger(host).textContent).toContain("Uberblick");
     open(host);
     expect(offered()).toEqual(["Uberblick"]);
-
-    act(() => root.unmount());
-    host.remove();
   });
 });
