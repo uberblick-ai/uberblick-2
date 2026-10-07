@@ -33,12 +33,9 @@ Check the PR's mechanism and evidence under
 [library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices),
 including live web UI criteria and owner-confirmed exceptions where required.
 
-Product intent is read, not inferred from the issue text: read the corpus
-documents the issue's Pointers cite, live through MCP, wherever the change
-touches their product meaning, and follow their links where they govern the
-outcome. If MCP cannot serve a document the judgment needs, finish
-`defer`, naming the document and the failure, rather than judging intent
-without it. The pull request's `Corpus update` is part of the change: a missing
+Product intent is read, not inferred from the issue text: read the corpus the
+issue's Pointers cite wherever the change touches its product meaning, under
+[AGENTS.md's read rules](../../AGENTS.md#read-for-the-action). The pull request's `Corpus update` is part of the change: a missing
 rewrite for a claim the change makes wrong, or one that misstates the change,
 is a finding.
 
@@ -66,8 +63,8 @@ you review, stop with `defer`: a review of another head satisfies nothing.
 - `changes` — a full review finds a P1 or P2.
 - `needs-human` — a corrections review leaves a P1 or P2 unresolved or finds
   a new one; follow [human-decisions.md](human-decisions.md).
-- `defer` — the head moved during review, or a document the judgment needs
-  could not be read.
+- `defer` — the head moved during review, or no live document covering the
+  judgment could be read (AGENTS.md).
 
 Post the verdict once as a review on the assigned head:
 `gh pr review <N> --comment --body-file <file>`, which records that commit.
@@ -114,8 +111,7 @@ ledger is kept:
 When an optional Copilot review has posted findings, one revision answers
 whatever both reviews have posted. Copilot's remarks carry no finding ids:
 they are corrected or answered in their own threads, and any still open at
-integration are the integrator's to answer. Its absence or pending status is
-not a reason to wait; the delivery policy governs optional review requests.
+integration are the integrator's to answer.
 
 ## Settling a finding
 
@@ -156,7 +152,7 @@ An issue gets one review pass (`issue-preparation.md`).
 
 ## Completion
 
-The integrator checks the record rather than the code again: every P1 and P2 id
-has a correction or an accepted answer, and a second round ran where this
-protocol requires one. A P3 left untouched is accepted debt. Merge requires
+The integrator checks the record rather than the code again: the reviews the
+diff owes ran, every P1 and P2 id has a correction or an accepted answer, and a
+second round ran where this protocol requires one. A P3 left untouched is accepted debt. Merge requires
 `delivery-policy.md`'s gates and no open P1 or P2.

@@ -37,9 +37,8 @@ structure visible outside collapsed details:
   they have write access; otherwise `@uberblick-ai/maintainers`. Never address
   the question to an agent or bot.
 - Give one answer destination and one unambiguous next action:
-  `Answer here, then remove needs-human and add <label>.`
-  Use `needs-preparation` for an issue or `needs-changes` for a PR.
-  Do not offer launcher-generated resume steps for the stopped role when a
+  `Answer here, then remove needs-human and add <label>.`, with the label
+  [Pause and resume](#pause-and-resume) names. Do not offer launcher-generated resume steps for the stopped role when a
   correction or handoff requires another role.
 
 Put supporting technical evidence, commits, CI results and resume mechanics in
@@ -77,8 +76,7 @@ before `needs-human`. Independent items continue in their own runs.
 `needs-human` pauses the item: no run picks it up while the label is there.
 The person who answers removes it and adds the label that should run next —
 `needs-preparation` on an issue, `needs-changes` on a pull request — unless
-the answer calls for another. Name that exact removal and addition in the
-question. A comment alone does not resume the run; roles do not change workflow
+the answer calls for another. A comment alone does not resume the run; roles do not change workflow
 labels. The question and answer belong on the assigned GitHub item; the launcher
 posts the handoff, or it links to the decision comment as described above.
 
