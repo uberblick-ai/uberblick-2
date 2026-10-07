@@ -35,6 +35,7 @@ import { statusReading } from "./status-reading.js";
 import { documentSyncFacts } from "./sync-facts.js";
 import { formatTimestamp, useTimestampClock } from "./timestamps.js";
 import { BlockMenu } from "./BlockMenu.js";
+import { TableControls } from "./TableControls.js";
 import { MentionMenu } from "./MentionMenu.js";
 import {
   useDocMeta,
@@ -859,6 +860,9 @@ const BoundEditor = memo(function BoundEditor({
             open. An archive also withholds the comment composer. */}
         {editor !== null && !contentReadOnly && writable && (
           <BlockMenu editor={editor} host={frame} />
+        )}
+        {editor !== null && !contentReadOnly && writable && (
+          <TableControls editor={editor} host={frame} />
         )}
         {editor !== null && !contentReadOnly && writable && (
           <MentionMenu
