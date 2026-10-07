@@ -42,7 +42,7 @@ pushing, require `git remote get-url origin` to identify this same GitHub
 repository; never push a refresh into a local operator checkout. Remove the
 clone only as best-effort housekeeping; a denied cleanup never prevents the
 handoff or changes its outcome. Scratch cleanup for this shared-checkout role
-belongs to the operator under README Records. Do not register a worktree in the
+belongs to the operator under [run operations](run-operations.md#posting-records-and-scratch). Do not register a worktree in the
 operator's Git directory or edit its checkout.
 Compute `MB` with `git merge-base OLD_SHA BASE_SHA`. Require
 `git rev-list --merges MB..OLD_SHA` to be empty before rebasing; never flatten
