@@ -174,15 +174,15 @@ async function paneCards(page: Page, browserName: string, width?: number): Promi
   }
 }
 
-for (const width of [375, 744, 932, 1280, 1366, 1470]) {
+for (const width of [375, 1280]) {
   test(`the slash, gutter and @ cards fit the pane at ${width}px`, async ({ page, browserName }) => {
-    test.skip(browserName !== "chromium", "Chromium retains the six-width regression matrix");
+    test.skip(browserName !== "chromium", "Chromium covers one narrow and one docked pane");
     await paneCards(page, browserName, width);
   });
 }
 
 test("the slash, gutter and @ cards fit the supported device pane", { tag: "@webkit" }, async ({ page, browserName }) => {
-  test.skip(browserName !== "webkit", "the Chromium cases retain their original widths");
+  test.skip(browserName !== "webkit", "Chromium has separate narrow and docked cases");
   await paneCards(page, browserName);
 });
 

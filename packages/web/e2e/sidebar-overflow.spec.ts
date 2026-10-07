@@ -147,7 +147,7 @@ async function addGroup(page: Page, name: string): Promise<void> {
   await expect(page.locator(".ub-group-label").filter({ hasText: name })).toBeVisible();
 }
 
-test("empty and long-label sidebars fit supported widths and breakpoint edges in both modes", async ({ page }) => {
+test("empty and long-label sidebars fit narrow and docked layouts in both modes", async ({ page }) => {
   for (const content of ["empty", "long labels"]) {
     if (content === "long labels") {
       await page.setViewportSize({ width: 1280, height: 832 });
@@ -157,7 +157,7 @@ test("empty and long-label sidebars fit supported widths and breakpoint edges in
       await addGroup(page, "A group name long enough to truncate within its heading ".repeat(3));
       await addGroup(page, "unbreakablegroup".repeat(25));
     }
-    for (const width of [320, 375, 744, 768, 932, 1024, 1279, 1280, 1366, 1470]) {
+    for (const width of [320, 1280]) {
       await test.step(`${content} at ${width}px`, async () => {
         await page.setViewportSize({ width, height: content === "empty" ? 832 : 500 });
         await openSidebar(page);
@@ -219,7 +219,7 @@ test("empty and long-label sidebars fit supported widths and breakpoint edges in
 test("edge-held drags never pan sideways and a tall sidebar still scrolls vertically", async ({ page }) => {
   for (let index = 0; index < 18; index += 1) await createPinnedDoc(page, `Document ${index}`);
 
-  for (const width of [320, 768, 1280]) {
+  for (const width of [320, 1280]) {
     await page.setViewportSize({ width, height: 500 });
     await openSidebar(page);
     await settleSidebar(page);

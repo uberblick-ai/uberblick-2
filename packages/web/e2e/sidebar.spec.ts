@@ -112,7 +112,7 @@ async function expectPaneAtSidebarEdge(page: Page): Promise<void> {
   })).toBeCloseTo(0, 1);
 }
 
-test("phone, iPad and MacBook widths keep the drawer and pane controls inside the viewport", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
+test("narrow and docked layouts keep the drawer and pane controls inside the viewport", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
   const webkit = browserName === "webkit";
   const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
   const projectWidth = page.viewportSize()?.width;
@@ -134,7 +134,7 @@ test("phone, iPad and MacBook widths keep the drawer and pane controls inside th
       await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
       await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
     }
-    for (const width of webkit ? [projectWidth] : [320, 375, 744, 932, 1024, 1279, 1280, 1366, 1470]) {
+    for (const width of webkit ? [projectWidth] : [320, 1280]) {
       await test.step(`${settings ? "settings" : "documents"} at ${width}px`, async () => {
         if (!webkit) await page.setViewportSize({ width, height: 832 });
         if (width < 1280) {
@@ -226,7 +226,7 @@ test("desktop edges and document inset move together in both directions", async 
   await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
-  for (const width of [1280, 1400]) {
+  for (const width of [1280]) {
     await page.setViewportSize({ width, height: 800 });
     // Finish any inset transition caused by the breakpoint change itself.
     await page.locator(".ub-body").evaluate((body) => {

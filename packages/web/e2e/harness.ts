@@ -8,13 +8,13 @@
  *
  * Two things are deliberate:
  *
- * - **Run-owned everything.** The hub binds `port: 0`; the bundle, database and
- *   XDG homes live below one temporary directory; and `ub open` gets a freshly
+ * - **Run-owned everything.** The hub binds `port: 0`; databases and
+ *   XDG homes live below private temporary directories; and `ub open` gets a freshly
  *   selected web port. A bind race is retried, so another e2e run or
  *   `mise run dev` cannot collide with this one.
  *
- * - **The production path.** Vite builds the checkout's current sources into
- *   that private directory, then `ub open` serves them and its real
+ * - **The production path.** Global setup builds the checkout's current sources
+ *   once into a private directory, then every `ub open` serves them and its real
  *   `/uberblick-config.json`. The harness writes the same configuration files
  *   `ub init` writes and removes inherited configuration pins before spawning
  *   it, so no developer machine state can steer the run.
@@ -37,7 +37,7 @@ import { expect } from "@playwright/test";
 import type { Browser, BrowserContext, BrowserContextOptions, Page } from "@playwright/test";
 import { createHub, silentLogger } from "@uberblick/hub";
 import type { Hub, HubConfig } from "@uberblick/hub";
-import { build } from "vite";
+import { buildAppBundle, sharedAppBundle } from "./bundle.js";
 
 /**
  * The hub's HMAC signing secret for the run. Not a secret in any sense worth
@@ -159,22 +159,6 @@ async function startOpen(
   throw new Error("e2e: ub open exhausted its web-port retries");
 }
 
-async function buildBundle(bundleDir: string, hubUrl: string, workspace: string): Promise<void> {
-  await build({
-    configFile: join(packageRoot, "vite.config.ts"),
-    root: packageRoot,
-    logLevel: "error",
-    // Override only the public fallbacks. The served document is authoritative,
-    // and passing them here keeps concurrent harness builds off process.env.
-    define: {
-      __HUB_URL__: JSON.stringify(hubUrl),
-      __WORKSPACE_ID__: JSON.stringify(workspace),
-      __WORKSPACES__: JSON.stringify(""),
-    },
-    build: { outDir: bundleDir, emptyOutDir: true },
-  });
-}
-
 export interface Harness {
   /** Public fixture identities for access-control browser proofs. */
   readonly access?: { otherDeviceId: string; foreignDeviceId: string };
@@ -193,7 +177,7 @@ export interface Harness {
    * context can stand in for.
    */
   readonly authSecret: string;
-  /** The workspace as the bundle spells it — what `/` redirects to. */
+  /** The workspace the served runtime document names — what `/` redirects to. */
   readonly workspace: string;
   /** The same workspace, bare. Room keys and token claims carry only this. */
   readonly workspaceUuid: string;
@@ -205,7 +189,7 @@ export interface Harness {
   stopHub(): Promise<void>;
   /** Restart local serving on the same address after changing hub credentials. */
   restartOpen(options: { authenticated: boolean }): Promise<void>;
-  /** Tear everything down: hub, dev server, temp database. */
+  /** Tear down this harness's hub, serving process and temp database. */
   stop(): Promise<void>;
 }
 
@@ -318,9 +302,14 @@ export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Pro
     .toBe(true);
 }
 
-export async function startHarness(options: { accessRole?: "admin" | "member" } = {}): Promise<Harness> {
+export async function startHarness(options: {
+  accessRole?: "admin" | "member";
+  /** Only the deep-link proof of a compiled loopback fallback needs this. */
+  compiledFallback?: boolean;
+} = {}): Promise<Harness> {
+  const shared = sharedAppBundle();
   const runDir = mkdtempSync(join(tmpdir(), `uberblick-e2e-${process.env.UB_AGENTS_RUN ?? "local"}-`));
-  const bundleDir = join(runDir, "bundle");
+  const bundleDir = options.compiledFallback === true ? join(runDir, "bundle") : shared.directory;
   // Fresh and decorated per harness: room keys stay isolated, while `/`
   // exercises the spelling a person would actually configure.
   const workspaceUuid = randomUUID();
@@ -399,7 +388,9 @@ export async function startHarness(options: { accessRole?: "admin" | "member" } 
     });
     chmodSync(credentials, 0o600);
 
-    await buildBundle(bundleDir, hubUrl, workspace);
+    if (options.compiledFallback === true) {
+      await buildAppBundle({ directory: bundleDir, hubUrl, workspace });
+    }
     const serving = await startOpen(runDir, bundleDir);
     open = serving.child;
     const appUrl = serving.appUrl;
