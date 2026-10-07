@@ -137,8 +137,8 @@ A pointer is a route to the source, not a substitute for reading it.
   never append: change the affected sentences to the new present-tense truth,
   delete what they replace, and add a block only for a fact no existing block
   owns. No PR or issue number, merge date, run id or "since" clause reaches a
-  Regular Document; GitHub owns that provenance, and only decision-record Links
-  may cite GitHub items. Corpus edits
+  Regular Document; GitHub owns that provenance. Decision-record Links may cite
+  GitHub items. Corpus edits
   must stay within recorded authorization: update descriptions of delivered
   behavior, but do not weaken a guarantee or expand agent authority through a
   doc edit. An unsettled change to those commitments requires an owner decision.

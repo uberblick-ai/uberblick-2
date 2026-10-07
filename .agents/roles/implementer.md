@@ -28,7 +28,8 @@ inspect the code and Pointers it depends on.
   issue is not yours to replace: escalate, naming it.
 - Apply the [scheduling rules](../protocols/workflow.md#scheduling-semantics) to
   open pull requests expected to edit the same substantive files. When one blocks
-  this issue, mark it (`gh issue edit <N> --add-blocked-by <M>`) and finish
+  this issue, mark this issue blocked by the issue that PR closes
+  (`gh issue edit <N> --add-blocked-by <M>`) and finish
   `defer`, naming it. A mechanical-overlap classification in Pointers counts only
   when the open PR's current diff confirms it.
 - A contract prepared more than six days ago is checked before it is built: the
