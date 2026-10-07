@@ -53,6 +53,7 @@
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
+  AnnotationCellError,
   AnnotationRangeError,
   BlockNotFoundError,
   ConflictingLinkMarksError,
@@ -63,7 +64,6 @@ import {
   InlineLinkRangeError,
   OldTextMismatchError,
   StaleBlockError,
-  TableAnnotationError,
   TableMappingRequiredError,
 } from "@uberblick/schema";
 import { log } from "./log.js";
@@ -182,10 +182,10 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Correct table_mapping for this table: match the new dimensions, keep header row 0, and use unique increasing old indices in bounds or null for new positions. No table change was written.",
   },
-  table_comments_unavailable: {
+  annotation_cell: {
     recoveryClass: "manual",
     guidance:
-      "New table threads are temporarily unavailable. Read existing threads with get_doc; use annotate with thread_id to reply, resolve or reopen them.",
+      "Call get_doc and name a table cell with both row and column in its zero-based GFM projection (header row 0); omit both coordinates for a non-table block, then annotate its character range.",
   },
   invalid_github_reference: {
     recoveryClass: "manual",
@@ -525,11 +525,12 @@ export function toFailure(tool: string, error: unknown): CallToolResult {
   if (error instanceof InvalidTableError) {
     return stamped(tool, { error: "invalid_table", message: error.message });
   }
-  if (error instanceof TableAnnotationError) {
+  if (error instanceof AnnotationCellError) {
     return stamped(tool, {
-      error: "table_comments_unavailable",
+      error: "annotation_cell",
       message: error.message,
       blockId: error.blockId,
+      reason: error.reason,
     });
   }
   if (error instanceof PersistenceError) {

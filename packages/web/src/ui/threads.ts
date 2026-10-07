@@ -26,7 +26,10 @@ import {
   getBlocks,
   getBlocksFragment,
   listAnnotations,
+  plainXmlText,
   readsAsMark,
+  tableCellTexts,
+  tableRows,
 } from "@uberblick/schema";
 import type {
   AnnotationComment,
@@ -167,6 +170,9 @@ interface Anchor {
   blockId: string;
   start: number;
   end: number;
+  row?: number;
+  column?: number;
+  text: string;
 }
 
 /**
@@ -203,50 +209,57 @@ function anchorsByThread(ydoc: Y.Doc): Map<string, Anchor> {
     const blockId = child.getAttribute("id") ?? "";
     if (blockId === "" || claimed.has(blockId)) continue;
     claimed.add(blockId);
-    const text = child.firstChild;
-    if (!(text instanceof Y.XmlText)) continue;
-
-    // Adjacent ops carrying the same thread are one run: a mark the reader
-    // added inside the annotated range splits the delta but not the anchor.
-    let openId: string | null = null;
-    let start = 0;
-    let end = 0;
-    const close = (): void => {
-      if (openId !== null && !found.has(openId)) {
-        found.set(openId, { blockId, start, end });
-      }
-      openId = null;
-    };
-    let index = 0;
-    for (const op of text.toDelta() as Array<{
-      insert?: unknown;
-      attributes?: unknown;
-    }>) {
-      const length =
-        typeof op.insert === "string" ? op.insert.length : op.insert === undefined ? 0 : 1;
-      if (length === 0) continue;
-      const threadId = threadIdOf(op.attributes);
-      if (threadId !== null && threadId === openId) {
-        end = index + length;
-      } else {
-        close();
-        if (threadId !== null) {
-          openId = threadId;
-          start = index;
-          end = index + length;
+    const read = (texts: Y.XmlText[], cell: { row: number; column: number } | undefined): void => {
+      const plain = texts.map(plainXmlText).join("");
+      // Adjacent ops carrying the same thread are one run, even across texts
+      // left by concurrent first writes into a cell paragraph.
+      let openId: string | null = null;
+      let start = 0;
+      let end = 0;
+      const close = (): void => {
+        if (openId !== null && !found.has(openId)) {
+          found.set(openId, { blockId, start, end, ...cell, text: plain });
         }
+        openId = null;
+      };
+      let index = 0;
+      for (const op of texts.flatMap((text) => text.toDelta()) as Array<{
+        insert?: unknown;
+        attributes?: unknown;
+      }>) {
+        const length =
+          typeof op.insert === "string" ? op.insert.length : op.insert === undefined ? 0 : 1;
+        if (length === 0) continue;
+        const threadId = threadIdOf(op.attributes);
+        if (threadId !== null && threadId === openId) {
+          end = index + length;
+        } else {
+          close();
+          if (threadId !== null) {
+            openId = threadId;
+            start = index;
+            end = index + length;
+          }
+        }
+        index += length;
       }
-      index += length;
+      close();
+    };
+    if (child.nodeName === "table") {
+      for (const [row, cells] of tableRows(child).entries()) {
+        for (const [column, cell] of cells.entries()) read(tableCellTexts(cell), { row, column });
+      }
+    } else {
+      const text = child.firstChild;
+      if (text instanceof Y.XmlText) read([text], undefined);
     }
-    close();
   }
   return found;
 }
 
-function excerptOf(blocks: Map<string, Block>, anchor: Anchor | null): string {
+function excerptOf(anchor: Anchor | null): string {
   if (anchor === null) return "";
-  const text = blocks.get(anchor.blockId)?.text ?? "";
-  const quoted = text.slice(anchor.start, anchor.end);
+  const quoted = anchor.text.slice(anchor.start, anchor.end);
   return quoted.length > EXCERPT_MAX
     ? `${quoted.slice(0, EXCERPT_MAX)}…`
     : quoted;
@@ -296,7 +309,7 @@ export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
       blockId: annotation.blockId,
       anchorBlockId: anchor?.blockId ?? null,
       blockRef: blockRefFor(byId, order, anchor?.blockId ?? annotation.blockId),
-      excerpt: excerptOf(byId, anchor),
+      excerpt: excerptOf(anchor),
       orphaned: anchor === null,
       resolved: annotation.resolved === true,
       comments: annotation.comments.map((comment, index) => ({
@@ -307,19 +320,21 @@ export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
     };
   });
 
-  const position = (view: ThreadView): [number, number] => {
+  const position = (view: ThreadView): [number, number, number, number] => {
     const anchor = anchors.get(view.id);
     // A thread whose block is gone entirely sorts last, not first.
     const index = order.get(anchor?.blockId ?? view.blockId) ?? Number.MAX_SAFE_INTEGER;
     // -1, not 0: an orphan has no offset, and sharing 0 with an anchored thread
     // at the very start of the block would tie the two and let a uuid decide
     // which comes first — stable, but with no pattern a reader could follow.
-    return [index, anchor?.start ?? -1];
+    return [index, anchor?.row ?? -1, anchor?.column ?? -1, anchor?.start ?? -1];
   };
   return views.sort((a, b) => {
-    const [blockA, startA] = position(a);
-    const [blockB, startB] = position(b);
+    const [blockA, rowA, columnA, startA] = position(a);
+    const [blockB, rowB, columnB, startB] = position(b);
     if (blockA !== blockB) return blockA - blockB;
+    if (rowA !== rowB) return rowA - rowB;
+    if (columnA !== columnB) return columnA - columnB;
     if (startA !== startB) return startA - startB;
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   });

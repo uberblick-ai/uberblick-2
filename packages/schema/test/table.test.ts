@@ -1,7 +1,7 @@
 import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
 import {
-  InvalidTableError, InvalidTableMappingError, MarksNotAllowedError, OldTextMismatchError, StaleBlockError, TableAnnotationError, TableMappingRequiredError,
+  AnnotationCellError, InvalidTableError, InvalidTableMappingError, MarksNotAllowedError, OldTextMismatchError, StaleBlockError, TableMappingRequiredError,
   addComment, appendBlock, buildTableRow, createAnnotation, editBlock,
   exportMarkdown, findBlockElement, getBlock, getBlocks, getBlocksFragment,
   getBlockText, initDoc, insertBlock, isSupportedTable, listAnnotations,
@@ -81,7 +81,7 @@ describe("structured table contract", () => {
       expect(() => insertBlock(doc, id, { type: "table", text: bad })).toThrow(InvalidTableError);
       expect(() => editBlock(doc, id, GFM, bad)).toThrow(InvalidTableError);
     }
-    expect(() => createAnnotation(doc, id, 0, 4, "reader", "why?")).toThrow(TableAnnotationError);
+    expect(() => createAnnotation(doc, id, 0, 4, "reader", "why?")).toThrow(AnnotationCellError);
     expect(updates).toBe(0);
     expect(listAnnotations(doc)).toEqual([]);
     expect(getBlocks(doc)).toHaveLength(1);

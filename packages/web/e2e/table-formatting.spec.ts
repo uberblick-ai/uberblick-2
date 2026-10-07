@@ -12,7 +12,7 @@ function popup(page: Page): Locator {
 }
 
 function toolbar(page: Page): Locator {
-  return page.getByRole("toolbar", { name: "Text formatting", exact: true });
+  return page.getByRole("toolbar", { name: "Text formatting and comment", exact: true });
 }
 
 async function openTable(page: Page, wide = false): Promise<Locator> {
@@ -116,14 +116,14 @@ async function activate(control: Locator, info: TestInfo): Promise<void> {
   else await control.click();
 }
 
-test("header and body selections offer only formatting and keep the selected range through controls", { tag: "@webkit" }, async ({ page }, info) => {
+test("header and body selections offer formatting then Comment and keep the selected range through controls", { tag: "@webkit" }, async ({ page }, info) => {
   const table = await openTable(page);
   const first = table.locator("th").first();
   await selectCell(first, 0, 0);
   for (let index = 0; index < 5; index += 1) await page.keyboard.press("Shift+ArrowRight");
   await expect(toolbar(page)).toBeVisible();
-  await expect(toolbar(page).getByRole("button")).toHaveCount(5);
-  await expect(toolbar(page).getByRole("button", { name: "Comment", exact: true })).toHaveCount(0);
+  await expect(toolbar(page).getByRole("button")).toHaveCount(6);
+  await expect(toolbar(page).getByRole("button").last()).toHaveText("Comment");
 
   // Each shortcut uses the editor's real keymap and updates the same popup.
   for (const [key, label, mark] of [
@@ -173,7 +173,7 @@ test("header and body selections offer only formatting and keep the selected ran
   await expect(popup(page)).toHaveCount(0);
 });
 
-test("Tab selection is navigation, triple click selects one cell, and cross-cell gestures offer no popup", { tag: "@webkit" }, async ({ page }, info) => {
+test("Tab selection is navigation, triple click selects one cell, and cross-cell gestures offer clamped Comment", { tag: "@webkit" }, async ({ page }, info) => {
   const table = await openTable(page);
   const first = table.locator("th").first();
   const second = table.locator("th").nth(1);
@@ -233,12 +233,26 @@ test("Tab selection is navigation, triple click selects one cell, and cross-cell
   await selectCell(first, "Alpha words suffix".length, "Alpha words suffix".length);
   await page.keyboard.press("Shift+ArrowRight");
   await expect(table.locator(".selectedCell")).toHaveCount(2);
-  await expect(popup(page)).toHaveCount(0);
+  await expect(toolbar(page)).toHaveCount(0);
+  await expect(popup(page).getByRole("button", { name: "Comment", exact: true })).toBeVisible();
+  await activate(popup(page).getByRole("button", { name: "Comment", exact: true }), info);
+  await expect(popup(page).locator('[data-slot="selection-clamp"]')).toHaveText("first cell only");
+  await expect(popup(page).locator('[data-slot="selection-excerpt"]')).toHaveText("Alpha words suffix");
+  await page.keyboard.press("Escape");
 
   // Native touch handles can leave a TextSelection spanning two cells because
   // the table repair appendTransaction is intentionally disabled.
   await selectCell(first, 2, 4, "touch", second);
-  await expect(popup(page)).toHaveCount(0);
+  await expect(toolbar(page)).toHaveCount(0);
+  await activate(popup(page).getByRole("button", { name: "Comment", exact: true }), info);
+  await expect(popup(page).locator('[data-slot="selection-clamp"]')).toHaveText("first cell only");
+  await expect(popup(page).locator('[data-slot="selection-excerpt"]')).toHaveText("pha words suffix");
+  await popup(page).locator("textarea").fill("Clamped cell discussion");
+  await activate(popup(page).getByRole("button", { name: "Comment", exact: true }), info);
+  await expect(first.locator('[data-comment-thread]')).toHaveText("pha words suffix");
+  await expect(second.locator('[data-comment-thread]')).toHaveCount(0);
+  await expect(page.locator(".ub-thread-card")).toContainText("pha words suffix");
+  await expect(page.locator(".ub-thread-card")).toContainText("Clamped cell discussion");
   await selectCell(first, 0, 5, "mouse");
   await expect(toolbar(page)).toBeVisible();
   await page.keyboard.press("ArrowRight");

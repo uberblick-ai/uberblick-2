@@ -365,8 +365,11 @@ export function isCommentMark(value: unknown): value is CommentMark {
   return typeof threadId === "string" && threadId !== "";
 }
 
-/** A resolved absolute range inside a block's text. */
+/** A resolved range inside a block's text, or one projected table cell's text. */
 export interface AnnotationRange {
+  /** Table-cell coordinates in the GFM projection; absent for prose ranges. */
+  row?: number;
+  column?: number;
   start: number;
   end: number;
   /**

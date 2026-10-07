@@ -200,6 +200,7 @@ export {
 } from "./tags.js";
 
 export {
+  AnnotationCellError,
   AnnotationRangeError,
   BlockNotFoundError,
   ConflictingLinkMarksError,

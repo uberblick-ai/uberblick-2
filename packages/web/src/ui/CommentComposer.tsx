@@ -5,7 +5,7 @@
  * A selection wholly inside one prose block or cell gets the compact toolbar. Source
  * blocks and cross-block ranges keep the older Comment-only affordance because
  * the annotation API can clamp them honestly while inline marks cannot.
- * Cells never offer Comment. Decided records keep Comment outside tables, without formatting or link controls. Archived
+ * Decided records keep Comment, without formatting or link controls. Archived
  * and foreign-content panes never mount this component.
  */
 
@@ -51,10 +51,9 @@ function rangeOf(target: CommentTarget | CellTextTarget): string {
 }
 
 /** Read the editor's stored range even while a link or comment field has focus. */
-function selectionRange(editor: Editor): Range | null {
-  const cell = cellTextTargetOf(editor);
-  const { from, to } = cell === null ? editor.state.selection : {
-    from: cell.contentStart + cell.start, to: cell.contentStart + cell.end,
+function selectionRange(editor: Editor, target: CommentTarget | CellTextTarget | null): Range | null {
+  const { from, to } = target === null ? editor.state.selection : {
+    from: target.contentStart + target.start, to: target.contentStart + target.end,
   };
   try {
     const start = editor.view.domAtPos(from);
@@ -256,10 +255,8 @@ export function CommentComposer({
         cellNavigation.current = navigationInput.current;
       }
       if (composing.current) return;
-      const cell = cellTextTargetOf(editor);
-      const target = cell !== null
-        ? (!contentReadOnly && editor.isEditable && !cellNavigation.current ? cell : null)
-        : commentTargetOf(editor, ydoc);
+      const selected = commentTargetOf(editor, ydoc);
+      const target = selected !== null && "cellPos" in selected && cellNavigation.current ? null : selected;
       if (target === null) {
         setDraft(null);
         setMode("toolbar");
@@ -386,9 +383,9 @@ export function CommentComposer({
     const reference = {
       contextElement,
       getBoundingClientRect: (): DOMRect =>
-        selectionRange(editor)?.getBoundingClientRect?.() ?? new DOMRect(),
+        selectionRange(editor, readDraft()?.target ?? null)?.getBoundingClientRect?.() ?? new DOMRect(),
       getClientRects: (): DOMRect[] =>
-        Array.from(selectionRange(editor)?.getClientRects?.() ?? []),
+        Array.from(selectionRange(editor, readDraft()?.target ?? null)?.getClientRects?.() ?? []),
     };
     const collision = { boundary, padding: 6 };
     let disposed = false;
@@ -446,9 +443,8 @@ export function CommentComposer({
   if (draft === null) return null;
   const { target } = draft;
   const cell = "cellPos" in target;
-  if (cell && (contentReadOnly || !editor.isEditable)) return null;
   const prose = !target.clamped && isProseBlockType(target.blockType);
-  const formatting = (prose || cell) && !contentReadOnly;
+  const formatting = (prose || (cell && !target.clamped)) && !contentReadOnly && editor.isEditable;
   const blockRef = blockRefLabel(target.blockType, target.blockIndex);
 
   const close = (): void => {
@@ -458,7 +454,6 @@ export function CommentComposer({
   };
 
   const create = (text: string): boolean => {
-    if (cell) return false;
     try {
       const thread = createAnnotation(
         ydoc,
@@ -467,6 +462,7 @@ export function CommentComposer({
         target.end,
         author,
         text,
+        cell ? { row: target.row, column: target.column } : undefined,
       );
       close();
       onCreated(thread.id);
@@ -495,7 +491,7 @@ export function CommentComposer({
           <p className="m-0 flex items-center gap-[0.35rem]">
             <span className="mr-auto font-(family-name:--font-mono) text-[0.7rem] tracking-[0.02em] text-(--muted-foreground)">{blockRef}</span>
             {target.clamped && (
-              <span data-slot="selection-clamp" className="rounded-(--radius-sm) bg-(--status-warning-subtle) px-[0.3rem] text-[0.65rem] tracking-[0.04em] text-foreground uppercase">first block only</span>
+              <span data-slot="selection-clamp" className="rounded-(--radius-sm) bg-(--status-warning-subtle) px-[0.3rem] text-[0.65rem] tracking-[0.04em] text-foreground uppercase">{cell ? "first cell only" : "first block only"}</span>
             )}
           </p>
           <p data-slot="selection-excerpt" className="border-l-2 border-(--border) pl-[0.4rem] text-[0.8rem] text-foreground italic before:content-['“'] after:content-['”']">{target.text}</p>
@@ -564,7 +560,7 @@ export function CommentComposer({
         <div
           className="flex flex-wrap items-center gap-[0.15rem]"
           role="toolbar"
-          aria-label={cell ? "Text formatting" : "Text formatting and comment"}
+          aria-label="Text formatting and comment"
         >
           <FormatButton
             label="Bold"
@@ -609,22 +605,18 @@ export function CommentComposer({
           >
             Link
           </Button>
-          {!cell && (
-            <>
-              <span className="mx-[0.2rem] h-4 w-px bg-(--border)" aria-hidden="true" />
-              <Button
-                type="button"
-                variant="selection"
-                size="selection"
-                data-selection-tool
-                aria-label="Comment"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={openComment}
-              >
-                Comment
-              </Button>
-            </>
-          )}
+          <span className="mx-[0.2rem] h-4 w-px bg-(--border)" aria-hidden="true" />
+          <Button
+            type="button"
+            variant="selection"
+            size="selection"
+            data-selection-tool
+            aria-label="Comment"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={openComment}
+          >
+            Comment
+          </Button>
         </div>
       ) : (
         <Button
@@ -635,7 +627,7 @@ export function CommentComposer({
           onMouseDown={(event) => event.preventDefault()}
           onClick={openComment}
         >
-          {prose ? "Comment" : `Comment on ${blockRef}`}
+          {prose || cell ? "Comment" : `Comment on ${blockRef}`}
         </Button>
       )}
     </div>,

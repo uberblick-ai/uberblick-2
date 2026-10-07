@@ -670,7 +670,70 @@ describe("the table-cell selection toolbar", () => {
     })));
   }
 
-  it("names exact header and body ranges and refuses every selection covering more than one cell", () => {
+  it.each([0, 2])("starts a replicated thread over exactly the selected cell %s text without changing table content", (index) => {
+    const ydoc = tableDoc();
+    const remote = mirrorOf(ydoc);
+    const view = mountComposer(ydoc);
+    try {
+      const before = getBlocks(ydoc)[0]!;
+      selectCell(view.editor, index, 0, 5);
+      expect([...document.querySelectorAll('[data-selection-tool]')].at(-1)?.textContent).toBe("Comment");
+      view.open();
+      expect(view.query('[data-slot="selection-excerpt"]')?.textContent).toBe(index === 0 ? "Alpha" : "Gamma");
+      view.type("Discuss these characters");
+      view.submit();
+      expect(view.created).toHaveLength(1);
+      expect(listAnnotationRanges(remote, before.id)).toMatchObject([{
+        threadId: view.created[0], row: index === 0 ? 0 : 1, column: 0, start: 0, end: 5,
+      }]);
+      expect(view.editor.view.dom.querySelector(`[data-comment-thread="${view.created[0]}"]`)?.textContent).toBe(index === 0 ? "Alpha" : "Gamma");
+      expect(getBlocks(remote)[0]).toEqual(before);
+    } finally { view.unmount(); remote.destroy(); ydoc.destroy(); }
+  });
+
+  it("clamps rectangular selections to the first covered cell even when neither endpoint is that cell", () => {
+    const ydoc = tableDoc();
+    const view = mountComposer(ydoc);
+    try {
+      const positions = cells(view.editor);
+      act(() => view.editor.view.dispatch(view.editor.state.tr.setSelection(
+        CellSelection.create(view.editor.state.doc, positions[1]!.pos, positions[2]!.pos),
+      )));
+      expect(commentTargetOf(view.editor, ydoc)).toMatchObject({ row: 0, column: 0, text: "Alpha beta", clamped: true });
+      view.open();
+      view.type("First cell");
+      view.submit();
+      expect(listAnnotationRanges(ydoc, getBlocks(ydoc)[0]!.id)).toMatchObject([{
+        row: 0, column: 0, start: 0, end: 10,
+      }]);
+    } finally { view.unmount(); ydoc.destroy(); }
+  });
+
+  it("anchors visible cell offsets across concurrent Y text children", () => {
+    const ydoc = tableDoc();
+    const table = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
+    const cell = tableRows(table)[1]![0]!;
+    const paragraph = cell.firstChild as Y.XmlElement;
+    ydoc.transact(() => {
+      tableCellText(cell)!.delete(0, 11);
+      tableCellText(cell)!.insert(0, "Gamma");
+      const second = new Y.XmlText();
+      paragraph.insert(1, [second]);
+      second.insert(0, " delta");
+    });
+    const view = mountComposer(ydoc);
+    try {
+      selectCell(view.editor, 2, 3, 8);
+      expect(commentTargetOf(view.editor, ydoc)).toMatchObject({ row: 1, column: 0, start: 3, end: 8, text: "ma de" });
+      view.open();
+      view.type("Across both text children");
+      view.submit();
+      expect(view.editor.view.dom.querySelector(`[data-comment-thread="${view.created[0]}"]`)?.textContent).toBe("ma de");
+      expect(listAnnotationRanges(ydoc, getBlocks(ydoc)[0]!.id)).toMatchObject([{ row: 1, column: 0, start: 3, end: 8 }]);
+    } finally { view.unmount(); ydoc.destroy(); }
+  });
+
+  it("names exact cell ranges and clamps cross-cell comments while refusing cross-cell formatting", () => {
     const ydoc = tableDoc();
     const view = mountComposer(ydoc);
     const { editor } = view;
@@ -687,7 +750,9 @@ describe("the table-cell selection toolbar", () => {
           end: 5,
           text: index === 0 ? "Alpha" : "Gamma",
         });
-        expect(commentTargetOf(editor, ydoc)).toBeNull();
+        expect(commentTargetOf(editor, ydoc)).toMatchObject({
+          row: index === 0 ? 0 : 1, column: 0, start: 0, end: 5, clamped: false,
+        });
       }
 
       // Triple click selects the cell itself, rather than a TextSelection.
@@ -706,7 +771,12 @@ describe("the table-cell selection toolbar", () => {
       expect(multi.$from.node(3)).toBe(multi.$to.node(3));
       act(() => editor.view.dispatch(editor.state.tr.setSelection(multi)));
       expect(cellTextTargetOf(editor)).toBeNull();
-      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(view.query('[role="toolbar"]')).toBeNull();
+      expect(commentTargetOf(editor, ydoc)).toMatchObject({ row: 0, column: 0, text: "Alpha beta", clamped: true });
+      view.open();
+      expect(view.query('[data-slot="selection-clamp"]')?.textContent).toBe("first cell only");
+      expect(view.query('[data-slot="selection-excerpt"]')?.textContent).toBe("Alpha beta");
+      key(editor, "Escape");
 
       for (const [from, to] of [
         [positions[0]!.start + 2, positions[1]!.start + 3],
@@ -717,7 +787,11 @@ describe("the table-cell selection toolbar", () => {
           TextSelection.create(editor.state.doc, from!, to!),
         )));
         expect(cellTextTargetOf(editor)).toBeNull();
-        expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+        expect(view.query('[role="toolbar"]')).toBeNull();
+        expect(commentTargetOf(editor, ydoc)).toMatchObject({
+          column: 0, start: 2, clamped: true,
+          text: from === positions[2]!.start + 2 ? "mma delta" : "pha beta",
+        });
       }
     } finally {
       view.unmount();
@@ -732,9 +806,9 @@ describe("the table-cell selection toolbar", () => {
     try {
       const before = cellDeltas(ydoc);
       selectCell(view.editor, index, 0, 5);
-      expect(view.query('[role="toolbar"]')?.getAttribute("aria-label")).toBe("Text formatting");
-      expect(view.query('[aria-label="Comment"]')).toBeNull();
-      expect([...document.querySelectorAll("[data-selection-tool]")]).toHaveLength(5);
+      expect(view.query('[role="toolbar"]')?.getAttribute("aria-label")).toBe("Text formatting and comment");
+      expect(view.query('[aria-label="Comment"]')).not.toBeNull();
+      expect([...document.querySelectorAll("[data-selection-tool]")]).toHaveLength(6);
       const selection = { from: view.editor.state.selection.from, to: view.editor.state.selection.to };
       for (const label of flags) {
         expect(tool(view, label).getAttribute("aria-pressed")).toBe("false");
@@ -840,7 +914,7 @@ describe("the table-cell selection toolbar", () => {
     }
   });
 
-  it("tracks formatting shortcuts while leaving caret, Tab navigation, cross-cell selection and composition without chrome", () => {
+  it("tracks shortcuts, suppresses caret, Tab and composition chrome, and keeps cross-cell comments", () => {
     const ydoc = tableDoc();
     const view = mountComposer(ydoc);
     try {
@@ -882,11 +956,13 @@ describe("the table-cell selection toolbar", () => {
       act(() => view.editor.view.dispatch(view.editor.state.tr.setSelection(
         CellSelection.create(view.editor.state.doc, positions[0]!.pos, positions[1]!.pos),
       )));
-      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(view.query('[data-slot="selection-composer"]')).not.toBeNull();
+      expect(view.query('[role="toolbar"]')).toBeNull();
       act(() => view.editor.view.dispatch(view.editor.state.tr.setSelection(
         TextSelection.create(view.editor.state.doc, positions[0]!.start + 1, positions[1]!.start + 2),
       )));
-      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(view.query('[data-slot="selection-composer"]')).not.toBeNull();
+      expect(view.query('[role="toolbar"]')).toBeNull();
 
       selectCell(view.editor, 2, 0, 5);
       act(() => view.editor.view.dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
@@ -901,7 +977,7 @@ describe("the table-cell selection toolbar", () => {
     }
   });
 
-  it("keeps Escape dismissal in its cell and hides the complete popup in read-only content", () => {
+  it("keeps Escape dismissal in its cell and offers only Comment in read-only content", () => {
     const ydoc = tableDoc();
     const view = mountComposer(ydoc);
     try {
@@ -916,7 +992,8 @@ describe("the table-cell selection toolbar", () => {
       expect(view.query('[role="toolbar"]')).not.toBeNull();
       act(() => view.editor.setEditable(false));
       selectCell(view.editor, 2, 1, 5);
-      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(view.query('[data-slot="selection-composer"]')).not.toBeNull();
+      expect(view.query('[role="toolbar"]')).toBeNull();
       expect(getBlocks(ydoc)[0]!.text).toBe(source);
     } finally {
       view.unmount();
@@ -925,9 +1002,14 @@ describe("the table-cell selection toolbar", () => {
     const decided = mountComposer(ydoc, { contentReadOnly: true });
     try {
       selectCell(decided.editor, 0, 0, 5);
-      expect(decided.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(decided.query('[role="toolbar"]')).toBeNull();
+      expect(decided.query<HTMLButtonElement>('[data-selection-tool]')?.textContent).toBe("Comment");
+      decided.open();
+      decided.type("Still discussable");
+      decided.submit();
       expect(getBlocks(ydoc)[0]!.text).toBe(source);
-      expect(listAnnotations(ydoc)).toEqual([]);
+      expect(listAnnotationRanges(ydoc, getBlocks(ydoc)[0]!.id)).toMatchObject([{ row: 0, column: 0, start: 0, end: 5 }]);
+      expect(decided.created).toHaveLength(1);
     } finally {
       decided.unmount();
       ydoc.destroy();

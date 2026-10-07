@@ -662,7 +662,7 @@ const ANNOTATE_MODES: readonly ToolMode[] = [
   {
     title: "A reply (`thread_id`)",
     when: { field: "thread_id", present: true },
-    forbids: ["block_id", "start", "end"],
+    forbids: ["block_id", "start", "end", "row", "column"],
   },
   {
     title: "Opening a thread over a range",
@@ -675,7 +675,7 @@ const ANNOTATE_MODES: readonly ToolMode[] = [
 /** What `annotate` says about its two shapes, in the words an agent reads. */
 const ANNOTATE_SHAPES =
   "Two shapes, and a call is exactly one of them: open a thread with `block_id`, `start` and `end` — all three, " +
-  "none of them optional — or reply to one with `thread_id` and no range fields at all. Mixing them, or leaving a " +
+  "none of them optional — plus `row` and `column` for a table cell, or reply to one with `thread_id` and no range fields at all. Mixing them, or leaving a " +
   "range half-stated, is refused at the input boundary before anything is written, rather than resolved by " +
   "ignoring whichever fields do not fit. `text` and `author` belong to both. A reply may also carry `resolved`: " +
   "true resolves the thread and false reopens it in the same document update as the reply; a new thread cannot " +
@@ -2425,9 +2425,15 @@ export function registerTools(
       description:
         "Open an annotation thread over a range of a block's text, or — with `thread_id` — add a comment to an existing thread and optionally resolve or reopen it. " +
         "The range is anchored by a formatting mark on the text itself, so it survives edits, splits and re-types.\n\n" +
-        "New threads on table blocks are temporarily unavailable: `table_comments_unavailable` refuses before " +
-        "anything is written. Existing table threads, including orphaned legacy threads, remain readable and " +
-        "accept replies, resolution and reopening with `thread_id`.\n\n" +
+        "For a table, supply `row` and `column`: zero-based GFM projection indices with the header as row 0, " +
+        "the same indices as `table_mapping`. `start` and `end` count the cell's displayed characters, without " +
+        "inline Markdown syntax or escapes, including stored cell-edge whitespace. Canonical GFM `text` preserves " +
+        "that whitespace and adds one padding space on either side: remove exactly that padding before decoding " +
+        "the cell's inline syntax, rather than trimming it. Offsets are clamped to the cell's text. The returned " +
+        "range adds `row` and `column`, recomputed as cells move; it is null when orphaned. Coordinates on a " +
+        "non-table block, missing coordinates or a cell outside the projection refuse with `annotation_cell` " +
+        "before anything is written. Empty and overlapping ranges refuse with `annotation_range`. " +
+        "Orphaned legacy table threads stay orphaned and accept replies, resolution and reopening.\n\n" +
         ANNOTATE_SHAPES +
         "\n\n" +
         ARCHIVED_IS_READ_ONLY +
@@ -2446,6 +2452,8 @@ export function registerTools(
           block_id: z.string().min(1).optional().describe("The block to annotate. New thread only."),
           start: z.number().int().min(0).optional().describe("Range start, in characters. New thread only."),
           end: z.number().int().min(0).optional().describe("Range end, exclusive. New thread only."),
+          row: z.number().int().min(0).optional().describe("Table cell row in the zero-based GFM projection, header 0. New thread only."),
+          column: z.number().int().min(0).optional().describe("Table cell column in the zero-based GFM projection. New thread only."),
           resolved: z
             .boolean()
             .optional()
@@ -2455,7 +2463,7 @@ export function registerTools(
         ANNOTATE_MODES,
       ),
     },
-    guarded("annotate", async ({ uuid, text, thread_id, block_id, start, end, resolved, author }) => {
+    guarded("annotate", async ({ uuid, text, thread_id, block_id, start, end, row, column, resolved, author }) => {
       await replicas.settle();
       briefing.require();
       const replica = requireWritableDoc(uuid);
@@ -2489,6 +2497,9 @@ export function registerTools(
       // call unless all three range fields came with it — see
       // {@link ANNOTATE_MODES}. The assertions stand in for what TypeScript
       // cannot read off fields the object declares once for both shapes.
+      if ((row === undefined) !== (column === undefined)) {
+        throw new ToolError("annotation_cell", "Table cell coordinates require both row and column", { blockId: block_id, reason: "missing" });
+      }
       const created = createAnnotation(
         replica.doc,
         block_id as string,
@@ -2496,6 +2507,7 @@ export function registerTools(
         end as number,
         who,
         text,
+        row === undefined || column === undefined ? undefined : { row, column },
       );
       return json({
         uuid,

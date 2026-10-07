@@ -3,7 +3,7 @@
  *
  * A thread is one Y.Map in the `annotations` Y.Map, keyed by thread id, and it
  * carries no positions at all. The range lives in the text itself: the block's
- * Y.XmlText carries a `comment` formatting mark whose value is
+ * or table cell's Y.XmlText carries a `comment` formatting mark whose value is
  * `{ threadId }` over exactly the annotated characters.
  *
  * Marks beat relative positions here because they are part of the text's own
@@ -62,8 +62,9 @@
 
 import * as Y from "yjs";
 import { getAnnotationsMap } from "./doc.js";
-import { AnnotationRangeError, BlockNotFoundError, TableAnnotationError } from "./errors.js";
+import { AnnotationCellError, AnnotationRangeError, BlockNotFoundError, InvalidTableError } from "./errors.js";
 import { findBlockElement, requireBlockText } from "./blocks.js";
+import { tableCellTexts, tableRows } from "./table.js";
 import { COMMENT_MARK, isCommentMark } from "./types.js";
 import type {
   Annotation,
@@ -77,6 +78,9 @@ export { COMMENT_MARK };
 /** A contiguous run of one thread's `comment` mark. */
 export interface CommentRun {
   threadId: string;
+  /** Table projection coordinates; absent for a block-level text range. */
+  row?: number;
+  column?: number;
   start: number;
   end: number;
 }
@@ -91,10 +95,10 @@ function threadIdOf(attributes: unknown): string | null {
  * Every `comment` run in a text, in document order, with adjacent runs of the
  * same thread merged. One delta scan.
  */
-function commentRuns(text: Y.XmlText): CommentRun[] {
+function commentRuns(texts: readonly Y.XmlText[]): CommentRun[] {
   const runs: CommentRun[] = [];
   let index = 0;
-  for (const op of text.toDelta() as Array<{
+  for (const op of texts.flatMap((text) => text.toDelta()) as Array<{
     insert?: unknown;
     attributes?: unknown;
   }>) {
@@ -112,6 +116,36 @@ function commentRuns(text: Y.XmlText): CommentRun[] {
     index += length;
   }
   return runs;
+}
+
+/** The editor and GFM projection concatenate adjacent shared texts in a cell. */
+function formatRange(
+  texts: readonly Y.XmlText[],
+  start: number,
+  end: number,
+  value: CommentMark | null,
+): void {
+  let offset = 0;
+  for (const text of texts) {
+    const lo = Math.max(0, start - offset);
+    const hi = Math.min(text.length, end - offset);
+    if (lo < hi) text.format(lo, hi - lo, { [COMMENT_MARK]: value });
+    offset += text.length;
+  }
+}
+
+/** Each cell keeps its own offset space, including ragged projected padding. */
+function annotationTexts(element: Y.XmlElement): Array<{
+  texts: Y.XmlText[];
+  row?: number;
+  column?: number;
+}> {
+  if (element.nodeName !== "table") {
+    return element.firstChild instanceof Y.XmlText ? [{ texts: [element.firstChild] }] : [];
+  }
+  return tableRows(element).flatMap((cells, row) =>
+    cells.map((cell, column) => ({ texts: tableCellTexts(cell), row, column })),
+  );
 }
 
 /** The `comments` key on a thread's map: its conversation, in stored order. */
@@ -171,8 +205,8 @@ function threadMap(ydoc: Y.Doc, threadId: string): ThreadMap | null {
 }
 
 /**
- * Create an annotation thread over `[startIndex, endIndex)` of a block's text
- * and mark that range with the thread's id.
+ * Create an annotation thread over `[startIndex, endIndex)` of a block's text,
+ * or a table cell's displayed text when `cell` supplies projection coordinates.
  *
  * Indices are clamped to the block's text length and swapped if reversed.
  *
@@ -187,18 +221,36 @@ export function createAnnotation(
   endIndex: number,
   author: string,
   text: string,
+  cell?: { row: number; column: number },
 ): Annotation {
   const element = findBlockElement(ydoc, blockId);
   if (element === null) throw new BlockNotFoundError(blockId);
-  if (element.nodeName === "table") throw new TableAnnotationError(blockId);
-
-  const ytext = requireBlockText(ydoc, element, blockId);
-  const length = ytext.length;
+  let texts: Y.XmlText[];
+  if (element.nodeName === "table") {
+    if (cell === undefined) throw new AnnotationCellError("missing", blockId);
+    const rows = tableRows(element);
+    const width = Math.max(0, ...rows.map((row) => row.length));
+    if (!Number.isSafeInteger(cell.row) || !Number.isSafeInteger(cell.column) ||
+      cell.row < 0 || cell.row >= rows.length || cell.column < 0 || cell.column >= width) {
+      throw new AnnotationCellError("out-of-bounds", blockId);
+    }
+    const target = rows[cell.row]?.[cell.column];
+    texts = target === undefined ? [] : tableCellTexts(target);
+    // Embeds consume Yjs indices but are absent from the cell's displayed text
+    // projection. Refuse rather than mark a different character than requested.
+    if (texts.some((value) => (value.toDelta() as Array<{ insert?: unknown }>).some((op) => typeof op.insert !== "string"))) {
+      throw new InvalidTableError();
+    }
+  } else {
+    if (cell !== undefined) throw new AnnotationCellError("not-table", blockId);
+    texts = [requireBlockText(ydoc, element, blockId)];
+  }
+  const length = texts.reduce((total, value) => total + value.length, 0);
   const lo = Math.max(0, Math.min(length, Math.min(startIndex, endIndex)));
   const hi = Math.max(0, Math.min(length, Math.max(startIndex, endIndex)));
   if (lo === hi) throw new AnnotationRangeError("empty", blockId);
 
-  const clash = commentRuns(ytext).find((run) => run.start < hi && lo < run.end);
+  const clash = commentRuns(texts).find((run) => run.start < hi && lo < run.end);
   if (clash !== undefined) {
     throw new AnnotationRangeError("overlap", blockId, clash.threadId);
   }
@@ -214,7 +266,7 @@ export function createAnnotation(
   const thread: ThreadMap = new Y.Map<unknown>();
   const comments = new Y.Array<unknown>();
   ydoc.transact(() => {
-    ytext.format(lo, hi - lo, { [COMMENT_MARK]: mark });
+    formatRange(texts, lo, hi, mark);
     annotations.set(id, thread);
     thread.set("id", id);
     thread.set("blockId", blockId);
@@ -263,13 +315,14 @@ export function listAnnotationRanges(
 ): CommentRun[] {
   const element = findBlockElement(ydoc, blockId);
   if (element === null) return [];
-  const ytext = element.firstChild;
-  return ytext instanceof Y.XmlText ? commentRuns(ytext) : [];
+  return annotationTexts(element).flatMap(({ texts, ...coordinates }) =>
+    commentRuns(texts).map((run) => ({ ...run, ...coordinates })),
+  );
 }
 
 /**
- * Resolve a thread's anchored range to absolute indices in its block's current
- * text.
+ * Resolve a thread's anchored range to indices in its block's current text,
+ * or table-cell text with the cell's current projection coordinates.
  *
  * Returns null when the thread is unknown, when its block has been deleted, or
  * when its mark is no longer in the text because every annotated character was
@@ -288,10 +341,15 @@ export function resolveAnnotationRange(
     (run) => run.threadId === threadId,
   );
   const first = runs[0];
-  const last = runs[runs.length - 1];
-  if (first === undefined || last === undefined) return null;
+  if (first === undefined) return null;
+  // Foreign writers can copy marks into other cells. A cell thread still has
+  // one cell's offset space, so resolve the first marked cell in reading order.
+  const sameCell = runs.filter((run) => run.row === first.row && run.column === first.column);
+  const last = sameCell[sameCell.length - 1];
+  if (last === undefined) return null;
 
   return {
+    ...(first.row === undefined || first.column === undefined ? {} : { row: first.row, column: first.column }),
     start: first.start,
     end: last.end,
     collapsed: first.start === last.end,
@@ -368,13 +426,13 @@ export function deleteAnnotation(ydoc: Y.Doc, threadId: string): boolean {
   }
 
   const element = findBlockElement(ydoc, thread.get("blockId") as string);
-  const ytext = element === null ? null : element.firstChild;
+  const targets = element === null ? [] : annotationTexts(element);
   ydoc.transact(() => {
-    if (ytext instanceof Y.XmlText) {
-      for (const run of commentRuns(ytext).filter(
+    for (const { texts } of targets) {
+      for (const run of commentRuns(texts).filter(
         (candidate) => candidate.threadId === threadId,
       )) {
-        ytext.format(run.start, run.end - run.start, { [COMMENT_MARK]: null });
+        formatRange(texts, run.start, run.end, null);
       }
     }
     annotations.delete(threadId);

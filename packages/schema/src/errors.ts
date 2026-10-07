@@ -40,12 +40,31 @@ export class InvalidTableMappingError extends Error {
   }
 }
 
-/** New table threads await cell-text anchors; existing conversations remain usable. */
+/** Block-level text offsets cannot address a structured table's cell text. */
 export class TableAnnotationError extends Error {
   readonly blockId: string;
   constructor(blockId: string) {
     super("New comment threads on tables are unavailable");
     this.name = "TableAnnotationError";
+    this.blockId = blockId;
+  }
+}
+
+/** A new annotation names no usable cell in the table's GFM projection. */
+export class AnnotationCellError extends Error {
+  readonly reason: "missing" | "not-table" | "out-of-bounds";
+  readonly blockId: string;
+
+  constructor(reason: "missing" | "not-table" | "out-of-bounds", blockId: string) {
+    super(
+      reason === "missing"
+        ? "A table comment requires both row and column coordinates"
+        : reason === "not-table"
+          ? "Row and column coordinates apply only to table comments"
+          : "The comment cell is outside the table's GFM projection",
+    );
+    this.name = "AnnotationCellError";
+    this.reason = reason;
     this.blockId = blockId;
   }
 }

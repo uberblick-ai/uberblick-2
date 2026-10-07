@@ -812,7 +812,7 @@ export function exportMarkdown(
         .join(" | ");
       const line = renderAnnotationComment(
         annotation.id,
-        `range=${range.start}-${range.end}`,
+        `${range.row === undefined ? "" : `row=${range.row} column=${range.column} `}range=${range.start}-${range.end}`,
         annotation.resolved === true,
         body,
       );
