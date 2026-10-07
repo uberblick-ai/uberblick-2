@@ -366,7 +366,7 @@ export function CommentComposer({
       editorDom.removeEventListener("keydown", keyboard, true);
       ownerDocument.removeEventListener("keydown", dismiss, true);
     };
-  }, [editor, ydoc, contentReadOnly]);
+  }, [editor, ydoc]);
 
   const open = draft !== null;
   const selectedCellStart = draft !== null && "cellPos" in draft.target ? draft.target.contentStart : null;

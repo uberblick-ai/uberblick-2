@@ -214,7 +214,7 @@ describe("annotate", () => {
       {
         title: "A reply (`thread_id`)",
         required: ["thread_id"],
-        properties: { block_id: false, start: false, end: false },
+        properties: { block_id: false, start: false, end: false, row: false, column: false },
       },
       {
         title: "Opening a thread over a range",
@@ -257,6 +257,8 @@ describe("annotate", () => {
       { thread_id: threadId, block_id: doc.blockId },
       { thread_id: threadId, start: 0 },
       { thread_id: threadId, end: 3 },
+      { thread_id: threadId, row: 0 },
+      { thread_id: threadId, column: 0 },
       // And a create that never finished stating its range.
       { block_id: doc.blockId },
       { block_id: doc.blockId, start: 4 },

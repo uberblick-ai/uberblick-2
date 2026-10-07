@@ -120,7 +120,7 @@ describe("structured tables through MCP", () => {
     const deleted = await rig.ok("get_doc", { uuid: created.uuid });
     expect(deleted.blocks[0]).toEqual(before);
     expect(deleted.approvalChanged).toBe(false);
-    expect(alpha.toDelta().every(op => op.attributes?.comment === undefined)).toBe(true);
+    expect(alpha.toDelta().every((op: { attributes?: Record<string, unknown> }) => op.attributes?.comment === undefined)).toBe(true);
   });
 
   it("refuses missing, misplaced, outside, empty and overlapping cell ranges before a write", async () => {
