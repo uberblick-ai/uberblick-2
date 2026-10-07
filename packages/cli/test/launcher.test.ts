@@ -9,7 +9,7 @@
  * inherit — and a bundle can be perfectly green while the file a user runs is
  * broken.
  *
- * The two:
+ * The three:
  *
  * 1. **It resolves `tsx` relative to itself**, so `ub` works from anywhere. A
  *    `#!/usr/bin/env -S node --import tsx` shebang would resolve `tsx` against
@@ -22,10 +22,13 @@
  *    are driven here rather than inferred, and by a warning this test raises
  *    itself, so the assertion does not depend on which warnings a given Node
  *    build happens to emit.
+ * 3. **A stale install says so.** A pull that adds a dependency leaves
+ *    `node_modules` behind until `pnpm install`; the launcher names the missing
+ *    package and the command that fixes it instead of a module-resolution stack.
  */
 
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
@@ -74,5 +77,29 @@ describe("bin/ub.mjs", () => {
     // rather than merely harmless.
     expect(run.stderr).toContain("ProbeWarning: a warning ub did not raise");
     expect(run.stderr).not.toMatch(/\(node:\d+\)/);
+  });
+
+  it("names the missing package and says to run pnpm install when node_modules is stale", () => {
+    const box = sandbox();
+
+    // The shim alone in a checkout-shaped tree with nothing installed, so even
+    // `tsx` is missing: the same failure a new dependency hits after a pull.
+    const checkout = join(box.cwd, "checkout");
+    const bin = join(checkout, "packages", "cli", "bin");
+    mkdirSync(bin, { recursive: true });
+    copyFileSync(SHIPPED_UB, join(bin, "ub.mjs"));
+
+    const run = spawnSync(process.execPath, [join(bin, "ub.mjs"), "--version"], {
+      cwd: box.cwd,
+      env: box.env,
+      encoding: "utf8",
+      timeout: 25_000,
+    });
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toBe(
+      "ub: package 'tsx' is not installed; this checkout's dependencies are out of date.\n" +
+        `Run \`pnpm install\` in ${checkout} and try again.\n`,
+    );
   });
 });
