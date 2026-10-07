@@ -19,68 +19,77 @@ adoption; do not gate or merge that unadopted rewrite. If the base is already an
 the normal gates. Otherwise proactively attempt a clean rebase when eligible;
 routine maintenance needs no new human decision.
 
-A refresh is eligible only with explicit shared project permission, for a
-same-repository PR whose remote branch matches the assignment's `branch`, and
-without `different-runtime-from` on the integrator. The launcher elected this
-run and excludes overlapping issue/PR branch owners. Before a push, read only
-its own coordination comment. Resolve the supplied lease id with
-`node -p process.env.UB_AGENTS_LEASE_ID`, then use that numeric literal in
-`gh api repos/OWNER/REPO/issues/comments/LEASE_ID --jq .body`, with literal values.
-Its v3 lease must match the assignment's run, repository item and branch, still
-be `running` and expire in the future. This is a cooperative ownership check,
-not write fencing or a substitute for the push lease. If the read cannot be
-completed or permission/topology disallows rebasing, skip the refresh and run
-normal gates; do not manufacture implementer work or a human hold. A known lost
-or expired lease stops all writes under the existing coordination rules.
+The [run-operations worktree exception](run-operations.md#worktrees) permits
+this refresh for a same-repository PR whose remote branch matches the
+assignment's `branch`, and without `different-runtime-from` on the integrator.
+The launcher supplies and supervises ownership and excludes overlapping
+issue/PR branch owners; do not parse its private coordination records. The
+explicit expected-old-head push lease below guards the remote branch contents.
+If permission/topology disallows rebasing, skip the refresh and run normal gates;
+do not manufacture implementer work or a human hold. A known lost or expired
+assignment stops all writes under the existing coordination rules.
 
 The base must be `main`; otherwise follow the stacked-PR rule below. Create a
 private clone inside the run's supplied `scratch` directory, namespaced by its
 run id, using the literal GitHub URL:
 `git clone https://github.com/uberblick-ai/uberblick-2.git SCRATCH/run-RUN-refresh`.
-Fetch the literal head and base into that clone and detach at OLD_SHA. Before
-pushing, require `git remote get-url origin` to identify this same GitHub
-repository; never push a refresh into a local operator checkout. Remove the
+Replace path, run, branch and SHA placeholders with assignment literals and run
+each command separately. Fetch the literal head and base into that clone with
+`git -C SCRATCH/run-RUN-refresh fetch origin OLD_SHA BASE_SHA`, then detach with
+`git -C SCRATCH/run-RUN-refresh checkout --detach OLD_SHA`. Before
+pushing, require `git -C SCRATCH/run-RUN-refresh remote get-url origin` to identify
+this same GitHub repository; never push a refresh into a local operator checkout. Remove the
 clone only as best-effort housekeeping; a denied cleanup never prevents the
 handoff or changes its outcome. Scratch cleanup for this shared-checkout role
 belongs to the operator under [run operations](run-operations.md#posting-records-and-scratch). Do not register a worktree in the
 operator's Git directory or edit its checkout.
-Compute `MB` with `git merge-base OLD_SHA BASE_SHA`. Require
-`git rev-list --merges MB..OLD_SHA` to be empty before rebasing; never flatten
-merge commits. Then use `git -c rerere.enabled=false rebase --no-autosquash
+Compute `MB` with `git -C SCRATCH/run-RUN-refresh merge-base OLD_SHA BASE_SHA`.
+Require `git -C SCRATCH/run-RUN-refresh rev-list --merges MB..OLD_SHA` to be empty
+before rebasing; never flatten merge commits. Then use
+`git -C SCRATCH/run-RUN-refresh -c rerere.enabled=false rebase --no-autosquash
 --no-update-refs --reapply-cherry-picks --empty=stop BASE_SHA`, substituting literal
-SHAs. Abort on conflicts, empty commits, rejected flags or signing failures;
+SHAs. Read NEW_SHA with `git -C SCRATCH/run-RUN-refresh rev-parse HEAD`.
+Abort on conflicts, empty commits, rejected flags or signing failures with
+`git -C SCRATCH/run-RUN-refresh rebase --abort` when a rebase is in progress;
 never resolve conflicts, drop commits or edit implementation in integration.
 A failed or unsupported rebase leaves the original PR intact and proceeds to
 normal gates. Actual base merge conflicts or other failed gates go back to the
 implementer with `changes`, naming the repair.
 
-Compare `git range-diff MB..OLD_SHA BASE_SHA..NEW_SHA` and require equal counts
-from `git rev-list --count` for those two ranges. Every old commit must map to
-one new commit in the same order, with the same message and patch; only changed
+Compare `git -C SCRATCH/run-RUN-refresh range-diff MB..OLD_SHA BASE_SHA..NEW_SHA`
+and require equal counts from
+`git -C SCRATCH/run-RUN-refresh rev-list --count MB..OLD_SHA` and
+`git -C SCRATCH/run-RUN-refresh rev-list --count BASE_SHA..NEW_SHA`. Every old
+commit must map to one new commit in the same order, with the same message and patch; only changed
 parent/SHA and patch context/line offsets are allowed. Any changed added/removed
 code, unmatched commit or ambiguous correspondence aborts the refresh. The
 implementer independently repeats this preservation check before adoption.
 
-Do not publish another refresh solely because main advanced while this same
-candidate was adopted and reviewed. The durable trusted PR comment
-`base-refresh-adopted old=OLD_SHA base=BASE_SHA new=NEW_SHA` identifies that cycle
-only when NEW_SHA equals the assigned head. Read it from the assignment's trusted
-comments, not just the windowed `feedback`; later no-commit handoffs never erase
-it. Require current-head review evidence under normal gates as well. Still try the clean rebase locally
-when eligible, then discard it and run normal base-freshness gates on the assigned
-head. A new substantive implementer commit starts a new cycle. Whenever main is not
+Publish at most one clean refresh per PR. Any durable trusted
+`base-refresh-adopted old=OLD_SHA base=BASE_SHA new=NEW_SHA` comment on this PR
+consumes that allowance, even after later implementer commits. A pending record
+also consumes it when its NEW_SHA equals or is an ancestor of the assigned head;
+this covers a published refresh repaired without an adoption marker. Fetch with
+`git -C SCRATCH/run-RUN-refresh fetch origin PENDING_NEW_SHA` and check with
+`git -C SCRATCH/run-RUN-refresh merge-base --is-ancestor PENDING_NEW_SHA OLD_SHA`.
+A pending record proven outside that ancestry is inert; unavailable objects or
+an inconclusive ancestry check skip publication and proceed to normal gates.
+Read records from the assignment's trusted comments, not just the windowed
+`feedback`; later handoffs never erase them. Require current-head review evidence
+under normal gates. After the allowance is consumed, still try the clean rebase
+locally when eligible, then discard it and run normal base-freshness gates on the
+assigned head. Whenever main is not
 an ancestor of the assigned head and no refresh is published, run the existing
 merged-tree gate at this fetched main in addition to the exact-head gates, even
 if that base advance happened before this run's base-freshness point. This prevents
 endless successful refresh/review handoffs on a busy base without skipping gates.
 
-Before the first push in the cycle, post `base-refresh-pending old=OLD_SHA
+Before an allowed push, post `base-refresh-pending old=OLD_SHA
 base=BASE_SHA new=NEW_SHA` as a PR comment from a body file in run scratch, using
 `gh pr comment N --body-file PATH` with literal values. Record its immutable
-comment id/link. Do not push unless this durable intent is confirmed; a pending
-record whose NEW_SHA never becomes the PR head is inert. Then reread the own
-lease and remote head and push only the assigned PR branch using
-`git push --force-with-lease=refs/heads/BRANCH:OLD_SHA origin
+comment id/link. Do not push unless this durable intent is confirmed. Then reread the remote
+head and push only the assigned PR branch using
+`git -C SCRATCH/run-RUN-refresh push --force-with-lease=refs/heads/BRANCH:OLD_SHA origin
 HEAD:refs/heads/BRANCH`. A rejected lease or a head moving again after the push
 ends with `defer` and the race evidence; never change the expected SHA or use a
 blind force push.

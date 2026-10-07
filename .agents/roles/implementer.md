@@ -149,8 +149,10 @@ conflicts or other base synchronization through a non-rewriting merge.
 - **An integrator's `changes`:** fix what it names and finish `integrate`, except
   feedback beginning `base-refresh old=OLD_SHA base=BASE_SHA new=NEW_SHA`:
   independently repeat `integration.md`'s merge-base/range-diff/count preservation
-  check, adopt and validate the new remote head, then finish `review` even when
-  no additional commit or ordinary agent review would otherwise be owed. Include
+  check in the assigned worktree using `git -C WORKTREE` with its literal path;
+  do not reuse the integrator's scratch clone. Adopt and validate the new remote
+  head, then finish `review` even when no additional commit or ordinary agent
+  review would otherwise be owed. Include
   `base-refresh-adopted old=OLD_SHA base=BASE_SHA new=NEW_SHA` in that summary only
   when the pushed head still equals NEW_SHA. Record adoption/validation of an
   integrator-produced refresh rather than claiming authorship of the rewrite;

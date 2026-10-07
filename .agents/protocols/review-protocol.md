@@ -152,12 +152,13 @@ the missing second round itself. A person's answer to an escalation makes the
 next corrections review a fresh second round; the implementer asks for it when
 the answer asks for verification or the rule above still requires one.
 
-An adopted clean refresh (`integration.md`'s matching durable
+The first adopted clean refresh on a PR (`integration.md`'s matching durable
 `base-refresh-adopted` record at the current NEW_SHA) starts a fresh full first
-round at that head, even if the prior head exhausted its two rounds. Restart once
-for that adoption, not for every later unchanged-head handoff; ordinary second
-round and escalation limits apply within the new count. Prior findings keep
-their recorded settlements, and new findings follow the normal correction rule.
+round at that head, even if the prior head exhausted its two rounds. This refresh
+restart is allowed at most once per PR; later handoffs and substantive implementer
+commits retain the count. Ordinary second-round and escalation limits apply
+within it. Prior findings keep their recorded settlements, and new findings
+follow the normal correction rule.
 
 An issue gets one review pass (`issue-preparation.md`).
 
