@@ -63,7 +63,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(page.locator("[data-slot=dropdown-menu-content]")).toBeVisible();
       await scan("workspace switcher");
       await page.keyboard.press("Escape");
-      await page.locator(".ub-user-card").click();
+      await page.getByTestId("account-menu").click();
       await expect(page.locator("[data-slot=popover-content]")).toBeVisible();
       await scan("user menu");
       await page.keyboard.press("Escape");

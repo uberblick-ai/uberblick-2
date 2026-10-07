@@ -273,16 +273,14 @@ for (const scheme of ["dark"] as const) {
     await expect(configured).toHaveAttribute("data-highlighted", /.*/);
     expect(await paintedIn(configured, "background-color")).not.toBe(ground);
 
-    // Machine-owned creation stays unavailable. Settings has its fixed footer entry.
-    await expect(menu.getByRole("menuitem", { name: "New workspace" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
+    // Settings stays in the fixed footer; the switcher only lists workspaces.
+    await expect(menu.getByRole("menuitem", { name: "New workspace" })).toHaveCount(0);
+    await expect(menu.locator('[data-slot="dropdown-menu-separator"]')).toHaveCount(0);
     await expect(menu.getByRole("menuitem", { name: "Workspace settings" })).toHaveCount(0);
     await page.keyboard.press("Escape");
 
     // The user panel: the same surface, opened from the foot of the column.
-    await page.locator(".ub-user-card").click();
+    await page.getByTestId("account-menu").click();
     const panel = page.locator("[data-slot=popover-content]");
     await expect(panel).toBeVisible();
     await matchesTheSidebar(page, "[data-slot=popover-content]");
@@ -295,7 +293,7 @@ for (const scheme of ["light"] as const) {
     browser,
   }) => {
     const page = await openAppearanceApp(browser, scheme);
-    await page.locator(".ub-user-card").click();
+    await page.getByTestId("account-menu").click();
     const panel = page.locator("[data-slot=popover-content]");
     await expect(panel).toBeVisible();
     await page.evaluate(
@@ -376,7 +374,7 @@ for (const scheme of ["light", "dark"] as const) {
     browser,
   }) => {
     const page = await openAppearanceApp(browser, scheme);
-    await page.locator(".ub-user-card").click();
+    await page.getByTestId("account-menu").click();
     const panel = page.locator("[data-slot=popover-content]");
     await expect(panel).toBeVisible();
     const swatches = panel
@@ -466,9 +464,7 @@ test("settings panes reject the pointer and follow browser history", async ({
   await expect(settingsEntry).toBeFocused();
   await expectPaneRejectsPointer(settings);
 
-  // Portalled controls sit outside the pane's inert subtree. Browser Forward
-  // changes the address without clicking underneath them, and the mode change
-  // must still take each outgoing surface and its focus away.
+  // Browser Forward retires the outgoing document pane's portalled menu.
   await page.locator(".ub-workspace").click();
   const workspaceMenu = page.locator("[data-slot=dropdown-menu-content]");
   await expect(workspaceMenu).toBeVisible();
@@ -480,11 +476,13 @@ test("settings panes reject the pointer and follow browser history", async ({
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
   await expect(settingsEntry).toBeFocused();
 
-  await page.locator(".ub-user-card").click();
+  await page.getByTestId("account-menu").click();
   const userPanel = page.locator("[data-slot=popover-content]");
   await expect(userPanel).toBeVisible();
   await page.goForward();
   await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  // The shared account control stays available in both modes. Radix dismisses
+  // its popover when the sidebar hands focus to the incoming header.
   await expect(userPanel).toBeHidden();
   await expect(back).toBeFocused();
   await page.goBack();
@@ -590,7 +588,7 @@ for (const scheme of ["light"] as const) {
         await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
       }
     };
-    const checkHoverAndFocus = async (control: Locator): Promise<string[]> => {
+    const checkHoverAndFocus = async (control: Locator, ring: "native" | "shadcn" = "native"): Promise<string[]> => {
       await expect(control).toBeVisible();
       await page.mouse.move(0, 0);
       const rest = await treatment(control);
@@ -599,7 +597,8 @@ for (const scheme of ["light"] as const) {
       await control.hover();
       expect(await treatment(control)).toEqual(rest);
 
-      // Compare with this engine's native ring rather than pinning its values.
+      // Unchanged controls retain this engine's native ring; the standard
+      // sidebar button supplies its own visible ring through shadcn.
       // The reference stays inside the active focus scope of the drawer/panel.
       await control.evaluate((element) => {
         const reference = document.createElement("button");
@@ -625,7 +624,15 @@ for (const scheme of ["light"] as const) {
         await control.focus();
         await expect(control).toBeFocused();
         expect(await control.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
-        expect(await outline(control)).toEqual(native);
+        const actual = await outline(control);
+        if (ring === "shadcn") {
+          expect(actual[0]).not.toBe("none");
+          expect(Number.parseFloat(actual[1] ?? "0")).toBeGreaterThan(0);
+          expect(Number.parseFloat(actual[2] ?? "0")).toBeGreaterThanOrEqual(0);
+          expect(oklab(await paintedIn(control, "outline-color")).alpha).toBeGreaterThan(0);
+        } else {
+          expect(actual).toEqual(native);
+        }
       } finally {
         await reference.evaluate((element) => element.remove());
       }
@@ -649,8 +656,8 @@ for (const scheme of ["light"] as const) {
     await page.getByLabel("Group name").fill(`Touch hover ${scheme}`);
     await page.getByLabel("Group name").press("Enter");
 
-    const user = page.locator(".ub-user-card");
-    const userRest = await checkHoverAndFocus(user);
+    const user = page.getByTestId("account-menu");
+    const userRest = await checkHoverAndFocus(user, "shadcn");
     await user.tap();
     const panel = page.locator(".ub-user-panel");
     await expect(panel).toBeVisible();
@@ -719,7 +726,7 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   const sidebar = await painted(page, ".ub-list", "background-color");
   const prose = await painted(page, ".ub-editor .ub-paragraph", "color");
 
-  await page.locator(".ub-user-card").click();
+  await page.getByTestId("account-menu").click();
   await page.getByRole("button", { name: "Dark", exact: true }).click();
 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -737,7 +744,7 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   expect(await painted(page, ".ub-list", "background-color")).toBe(dark);
 
   // Back to the system's answer, which is this context's light.
-  await page.locator(".ub-user-card").click();
+  await page.getByTestId("account-menu").click();
   await page.getByRole("button", { name: "System", exact: true }).click();
   await expect(page.locator("html")).not.toHaveAttribute("data-theme", /.*/);
   expect(await painted(page, ".ub-list", "background-color")).toBe(sidebar);
@@ -1070,7 +1077,7 @@ test("MCP connections counts a connected agent session, and stops when it goes",
   const page = await openAppearanceApp(browser, "dark");
   const connections = page.locator(".ub-panel-fact", { hasText: "MCP connections" });
 
-  await page.locator(".ub-user-card").click();
+  await page.getByTestId("account-menu").click();
   await expect(connections).toContainText("0");
 
   // An agent, as far as the hub and the awareness map are concerned: a client
@@ -1614,7 +1621,7 @@ for (const scheme of ["light"] as ReadonlyArray<"light" | "dark">) {
     const highlight = await painted(page, ".ub-menu-current", "background-color");
     readings.push(...(await surface(page, "[data-slot=dropdown-menu-content]")));
     await page.keyboard.press("Escape");
-    await page.locator(".ub-user-card").click();
+    await page.getByTestId("account-menu").click();
     await expect(page.locator("[data-slot=popover-content]")).toBeVisible();
     readings.push(...(await surface(page, "[data-slot=popover-content]")));
 

@@ -11,7 +11,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./shadcn/dropdown-menu.js";
 import { SidebarMenu, SidebarMenuItem, SidebarMenuButton } from "./shadcn/sidebar.js";
@@ -87,9 +86,6 @@ export function WorkspaceSwitcher({
                 </DropdownMenuItem>
               );
             })}
-            <DropdownMenuSeparator />
-            {/* Workspace creation still belongs to ub init. */}
-            <DropdownMenuItem className="[@media(any-pointer:coarse)]:min-h-11" disabled>New workspace</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

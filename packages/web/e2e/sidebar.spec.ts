@@ -318,7 +318,7 @@ test("collapse isolates contents and portals immediately, and rapid reversal kee
   await restore.click();
   await expect(sidebar).toBeVisible();
   await expectPaneAtSidebarEdge(page);
-  await page.getByRole("button", { name: "You" }).click();
+  await page.getByTestId("account-menu").click();
   await expect(page.locator(".ub-user-panel")).toBeVisible();
   await sidebar.locator(".ub-sidebar-hide").evaluate((button: HTMLButtonElement) => {
     button.click();

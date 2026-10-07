@@ -30,6 +30,9 @@ async function statusGeometry(page: Page) {
 test("local-only edits survive a restart and reach the hub after authentication returns", async ({ browser }) => {
   test.setTimeout(90_000);
   const page = await openApp(browser, "/", { contextOptions: { reducedMotion: "reduce" } });
+  // A shared-secret connection has no GitHub account to claim, even though
+  // the hub accepts edits from this running local service.
+  await expect(page.getByTestId("account-menu")).toContainText("Not signed in");
   await createDoc(page, docTitle("local-credentials"), { pin: true });
   await placeCaret(page);
   await page.keyboard.type("before restart");
@@ -48,6 +51,7 @@ test("local-only edits survive a restart and reach the hub after authentication 
   await expect(shared).toHaveText("not shared with hub");
   await expect(reason).toBeVisible();
   await expect(reason).toHaveText("this machine has no credentials for its hub");
+  await expect(page.getByTestId("account-menu")).toContainText("Account unavailable");
   expect(await statusGeometry(page)).toEqual(authenticatedGeometry);
   for (const width of [320]) {
     await page.setViewportSize({ width, height: 844 });
@@ -80,6 +84,7 @@ test("local-only edits survive a restart and reach the hub after authentication 
   await expect.poll(() => documentText(observer)).toBe("before restart; saved locally");
   await expect(shared).toHaveText("synced with hub");
   await expect(reason).toBeHidden();
+  await expect(page.getByTestId("account-menu")).toContainText("Not signed in");
   expect(await statusGeometry(page)).toEqual(localGeometry);
 
   await harness().restartOpen({ authenticated: false });

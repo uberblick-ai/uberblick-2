@@ -189,6 +189,10 @@ export interface Harness {
   stopHub(): Promise<void>;
   /** Restart local serving on the same address after changing hub credentials. */
   restartOpen(options: { authenticated: boolean }): Promise<void>;
+  /** Change this computer's login while the same local serving process runs. */
+  setStoredLogin(authenticated: boolean): void;
+  /** Rebind project configuration without replacing the served workspace. */
+  rebindProject(hubUrl: string): void;
   /** Tear down this harness's hub, serving process and temp database. */
   stop(): Promise<void>;
 }
@@ -388,6 +392,15 @@ export async function startHarness(options: {
     });
     chmodSync(credentials, 0o600);
 
+    const setStoredLogin = (authenticated: boolean): void => {
+      if (!authenticated) {
+        rmSync(credentials, { force: true });
+        return;
+      }
+      writeFileSync(credentials, `${JSON.stringify(storedCredentials, null, 2)}\n`, { mode: 0o600 });
+      chmodSync(credentials, 0o600);
+    };
+
     if (options.compiledFallback === true) {
       await buildAppBundle({ directory: bundleDir, hubUrl, workspace });
     }
@@ -415,18 +428,16 @@ export async function startHarness(options: {
         hub = await createHub({ ...config, port }, options.accessRole === undefined ? {} : { deviceCredentials: true });
       },
       stopHub,
+      setStoredLogin,
+      rebindProject(reboundHubUrl) {
+        writeFileSync(join(runDir, ".uberblick.json"),
+          `${JSON.stringify({ workspaceId: workspace, hubUrl: reboundHubUrl }, null, 2)}\n`, { mode: 0o600 });
+      },
       async restartOpen({ authenticated }) {
         const child = open;
         open = null;
         if (child !== null) await stopChild(child);
-        if (authenticated) {
-          writeFileSync(credentials, `${JSON.stringify({ signingSecret: SECRET }, null, 2)}\n`, {
-            mode: 0o600,
-          });
-          chmodSync(credentials, 0o600);
-        } else {
-          rmSync(credentials, { force: true });
-        }
+        setStoredLogin(authenticated);
         const restarted = await startOpen(runDir, bundleDir, Number(new URL(appUrl).port));
         open = restarted.child;
       },

@@ -691,13 +691,15 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     const host = await openApp(`/${WORKSPACE}`);
     const documents = pane(host, ".ub-document-sidebar");
     const settings = pane(host, ".ub-settings-sidebar");
-    const settingsEntry = documents.querySelector<HTMLButtonElement>(
+    const settingsEntry = host.querySelector<HTMLButtonElement>(
       ".ub-settings-entry",
     );
 
     expectLive(documents);
     expectDead(settings);
-    expect(host.querySelectorAll(".ub-user-card")).toHaveLength(1);
+    expect(host.querySelectorAll('[data-testid="account-menu"]')).toHaveLength(1);
+    const accountControl = host.querySelector('[data-testid="account-menu"]');
+    expect(accountControl?.closest(".ub-sidebar-pane")).toBeNull();
 
     settingsEntry?.focus();
     act(() => settingsEntry?.click());
@@ -709,7 +711,8 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     );
     expectDead(documents);
     expectLive(settings);
-    expect(host.querySelectorAll(".ub-user-card")).toHaveLength(1);
+    expect(host.querySelectorAll('[data-testid="account-menu"]')).toHaveLength(1);
+    expect(host.querySelector('[data-testid="account-menu"]')).toBe(accountControl);
     expect(document.activeElement).toBe(
       settings.querySelector(".ub-settings-back"),
     );
@@ -795,7 +798,7 @@ describe("the sidebar's fixed navigation", () => {
     ]);
 
     // A pin arrives and the groups appear under it; the section has not moved,
-    // and the footer keeps the settings entry and user card.
+    // and the footer keeps the settings entry and account control.
     act(() => {
       const sidebar = sidebarDoc();
       pinDoc(sidebar, createGroup(sidebar, "Reading"), ONE);
@@ -807,7 +810,7 @@ describe("the sidebar's fixed navigation", () => {
     ]);
     expect(host.querySelector('[data-slot="sidebar-footer"] .ub-all-open-entry')).toBeNull();
     expect(host.querySelector('[data-slot="sidebar-footer"] .ub-settings-entry')).not.toBeNull();
-    expect(host.querySelector('[data-slot="sidebar-footer"] .ub-user-card')).not.toBeNull();
+    expect(host.querySelector('[data-slot="sidebar-footer"] [data-testid="account-menu"]')).not.toBeNull();
 
     // Chrome, not curation: nothing in it can be dragged, and no drag of any
     // kind can land in it.
