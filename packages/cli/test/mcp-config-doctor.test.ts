@@ -69,65 +69,48 @@ describe("doctor's MCP config reads", () => {
       .toEqual({ status: "entry", env: {} });
   });
 
-  it.each([
-    {
-      setting: "another server's multiline array",
-      text: '[mcp_servers.github]\nargs = [\n' +
-        '  "# not a comment ]", # ignored closing bracket ]\n' +
-        '  ["nested", "[quoted]"],\n' +
-        '  { setting = "braces } and brackets ]" },\n' +
-        ']\ncommand = "other"\n',
-    },
-    {
-      setting: "a multiline basic string",
-      text: '[other]\ninstructions = """\n' +
-        'Text with [brackets], {braces} and a # character.\n' +
-        '"""\n',
-    },
-    {
-      setting: "a multiline basic string with an escaped quote",
-      text: '[other]\ninstructions = """a\\"""\n"""\n',
-    },
-    {
-      setting: "a multiline literal string",
-      text: "[other]\ninstructions = '''\n" +
-        'Text with [brackets], {braces} and a # character.\n' +
-        "'''\n",
-    },
-    {
-      setting: "a valid escape outside the binding grammar",
-      text: '[other]\nprefix = "\\U0001F600"\n',
-    },
-    {
-      setting: "quoted keys with delimiters and wide Unicode escapes",
-      text: '["\\U0001F600"]\n"a=b#c" = "value"\n"\\U0001F600" = "value"\n',
-    },
-  ])("ignores $setting outside Uberblick's entry", ({ text }) => {
-    const server = '[mcp_servers.uberblick]\ncommand = "custom"\n' +
-      '[mcp_servers.uberblick.env]\nUB_WORKSPACE_ID = "workspace"\nUB_HUB_URL = "local"\n';
-    expect(doctorEntry(config(text, "toml"))).toEqual({ status: "absent" });
-    for (const combined of [text + server, server + text]) {
-      expect(doctorEntry(config(combined, "toml"))).toEqual({
-        status: "entry", env: { UB_WORKSPACE_ID: "workspace", UB_HUB_URL: "local" },
-      });
-    }
-  });
-
   it("reads the current install entry beside unrelated multiline settings", () => {
     const text = snippet("toml", DEFAULT_ENTRY) +
-      '[other]\ninstructions = """\nUnrelated multiline setting.\n"""\n';
+      '[other]\ninstructions = """\nUnrelated multiline setting.\n"""\n' +
+      'large_integer = 9007199254740993\n';
     expect(doctorEntry(config(text, "toml"))).toEqual({ status: "entry", env: {} });
   });
 
-  it("recognizes wide Unicode escapes in server and binding keys", () => {
-    const text = '[mcp_servers."\\U00000075berblick"]\ncommand = "custom"\n' +
-      '[mcp_servers.uberblick.env]\n"\\U00000055B_WORKSPACE_ID" = "workspace"\n';
+  it.each([
+    {
+      layout: "inline env",
+      text: '[mcp_servers.uberblick]\ncommand = "custom"\n' +
+        'env = { UB_WORKSPACE_ID = "workspace", UB_HUB_URL = "local", API_TOKEN = "SECRET", unrelated = 1 }\n',
+    },
+    {
+      layout: "dotted env keys",
+      text: '[mcp_servers.uberblick]\ncommand = "custom"\n' +
+        'env.UB_WORKSPACE_ID = "workspace"\nenv.UB_HUB_URL = "local"\n',
+    },
+    {
+      layout: "an inline server",
+      text: '[mcp_servers]\nuberblick = { command = "custom", ' +
+        'env = { UB_WORKSPACE_ID = "workspace", UB_HUB_URL = "local" } }\n',
+    },
+    {
+      layout: "a dotted server",
+      text: 'mcp_servers.uberblick.command = "custom"\n' +
+        'mcp_servers.uberblick.env.UB_WORKSPACE_ID = "workspace"\n' +
+        'mcp_servers.uberblick.env.UB_HUB_URL = "local"\n',
+    },
+    {
+      layout: "an implicit server table",
+      text: '[mcp_servers.uberblick.env]\nUB_WORKSPACE_ID = "workspace"\nUB_HUB_URL = "local"\n',
+    },
+    {
+      layout: "multiline and wide-Unicode string pins",
+      text: '[mcp_servers.uberblick.env]\n' +
+        'UB_WORKSPACE_ID = """workspace"""\nUB_HUB_URL = "\\U0000006cocal"\n',
+    },
+  ])("reads Codex's pins from $layout", ({ text }) => {
     expect(doctorEntry(config(text, "toml"))).toEqual({
-      status: "entry", env: { UB_WORKSPACE_ID: "workspace" },
+      status: "entry", env: { UB_WORKSPACE_ID: "workspace", UB_HUB_URL: "local" },
     });
-    expect(doctorEntry(config('[mcp_servers.uberblick]\ncommand = "custom"\n' +
-      "[mcp_servers.uberblick.env]\n'\\U00000055B_WORKSPACE_ID' = \"unrelated\"\n", "toml")))
-      .toEqual({ status: "entry", env: {} });
   });
 
   it("keeps an apparent pin inside an unrelated multiline string out of the entry", () => {
@@ -137,26 +120,20 @@ describe("doctor's MCP config reads", () => {
     expect(doctorEntry(config(text, "toml"))).toEqual({ status: "entry", env: {} });
   });
 
-  it("never treats unsupported Codex definitions or unreadable pins as unpinned", () => {
+  it("never treats malformed Codex config or unreadable pins as unpinned", () => {
     const server = '[mcp_servers.uberblick]\ncommand = "custom"\n';
     for (const text of [
-      '[mcp_servers]\nuberblick = { command = "custom" }\n',
-      'mcp_servers.uberblick.command = "custom"\n',
-      '[mcp_servers.uberblick.env]\nUB_WORKSPACE_ID = "workspace"\n',
-      `${server}env = { UB_WORKSPACE_ID = "workspace" }\n`,
-      `${server}env.UB_WORKSPACE_ID = "workspace"\n`,
+      'mcp_servers = "SECRET"\n',
+      '[mcp_servers]\nuberblick = "SECRET"\n',
+      `${server}env = ["SECRET"]\n`,
+      'mcp_servers = 1979-05-27\n',
+      '[mcp_servers]\nuberblick = 1979-05-27\n',
+      `${server}env = 1979-05-27\n`,
       `${server}[mcp_servers.uberblick.env]\nUB_WORKSPACE_ID = 1\n`,
-      `${server}[mcp_servers.uberblick.env]\nUB_WORKSPACE_ID = "\\U0001F600"\n`,
       `${server}[mcp_servers.uberblick.env]\nUB_WORKSPACE_ID = "first"\nUB_WORKSPACE_ID = "second"\n`,
       `${server}[mcp_servers.uberblick]\ncommand = "second"\n`,
-      `${server}command = "second"\n`,
-      `instructions = """\n${server}"""\n`,
-      '[mcp_servers.uberblick]\ncommand = "unterminated\n',
-      `${server}args = ["unterminated array"\n`,
-      `${server}args = { setting = "unterminated table"\n`,
+      '[mcp_servers.uberblick]\ncommand = "unterminated SECRET\n',
       `${server}unparseable SECRET\n`,
-      `[other]\nargs = [\n${server}`,
-      `[other]\ninstructions = """\n${server}`,
     ]) expect(doctorEntry(config(text, "toml"))).toEqual({ status: "unusable" });
     expect(doctorEntry(config('[mcp_servers.other]\ncommand = "custom"\n', "toml")))
       .toEqual({ status: "absent" });

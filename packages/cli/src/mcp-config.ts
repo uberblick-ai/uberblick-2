@@ -11,9 +11,9 @@
  * vendor's own CLI or prints a snippet for somebody to paste. Install asks
  * {@link presence} whether our entry is there and matches what it would register.
  * Doctor reads only the binding variables through {@link doctorEntry}, using
- * JSON parsing or a conservative reader for Codex's server and env tables.
- * Unrelated TOML values are skipped without decoding them. No config is edited,
- * so no byte-preserving splicer is needed.
+ * JSON or TOML parsing and shared entry validation. Install's TOML presence
+ * comparison stays separate. No config is edited, so no byte-preserving
+ * splicer is needed.
  *
  * **Nothing echoes a value back.** {@link presence} answers with one of four
  * words and never with anything it read. A config file is exactly where
@@ -25,6 +25,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { parse as parseToml } from "smol-toml";
 
 /** The name uberblick registers itself under, in every client. */
 export const SERVER_NAME = "uberblick";
@@ -193,15 +194,20 @@ function doctorJson(text: string): Record<string, unknown> | null {
   }
 }
 
+/** TOML date/time scalars are JS objects, but cannot be server or env tables. */
+function doctorTable(value: unknown): value is Record<string, unknown> {
+  return isObject(value) && !(value instanceof Date);
+}
+
 function doctorJsonEntry(doc: unknown): DoctorEntry {
   if (!isObject(doc)) return { status: "unusable" };
   if (doc.mcpServers === undefined) return { status: "absent" };
-  if (!isObject(doc.mcpServers)) return { status: "unusable" };
+  if (!doctorTable(doc.mcpServers)) return { status: "unusable" };
   if (!Object.hasOwn(doc.mcpServers, SERVER_NAME)) return { status: "absent" };
   const held = doc.mcpServers[SERVER_NAME];
-  if (!isObject(held)) return { status: "unusable" };
+  if (!doctorTable(held)) return { status: "unusable" };
   if (held.env === undefined) return { status: "entry", env: {} };
-  if (!isObject(held.env)) return { status: "unusable" };
+  if (!doctorTable(held.env)) return { status: "unusable" };
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(held.env)) {
     if (!PIN_KEYS.has(key)) continue;
@@ -238,173 +244,16 @@ export function claudeDoctorEntries(
   return { local, user: doctorJsonEntry(doc) };
 }
 
-/** A one-line TOML string, including comments, but never an expression. */
-function doctorTomlString(text: string): string | null {
-  if ([...text].some((char) => {
-    const code = char.charCodeAt(0);
-    return (code < 0x20 && code !== 9) || code === 0x7f;
-  })) return null;
-  const literal = /^'([^']*)'\s*(?:#.*)?$/.exec(text);
-  if (literal !== null) return literal[1] as string;
-  const basic = /^"(?:[^"\\]|\\[btnfr"\\]|\\u[\da-fA-F]{4})*"\s*(?:#.*)?$/.exec(text);
-  if (basic === null) return null;
-  try {
-    // The closing quote is followed only by whitespace and an optional comment.
-    const string = /^"(?:[^"\\]|\\.)*"/.exec(text)?.[0];
-    return JSON.parse(string as string) as string;
-  } catch {
-    return null;
-  }
-}
-
-/** Decode keys so an escaped binding-variable name cannot hide a pin. */
-function doctorTomlKey(text: string): string[] | null {
-  const key: string[] = [];
-  let rest = text.trim();
-  while (rest !== "") {
-    const part = /^(?:[\w-]+|"(?:[^"\\]|\\.)*"|'[^']*')/.exec(rest)?.[0];
-    if (part === undefined) return null;
-    let decoded = part;
-    try {
-      // TOML's wide Unicode escape is valid in any quoted key, including ours.
-      if (part.startsWith('"')) {
-        decoded = part.replace(/\\(?:[btnfr"\\]|u[\da-fA-F]{4}|U([\da-fA-F]{8}))/g, (encoded, wide: string | undefined) => {
-          if (wide === undefined) return encoded;
-          const code = Number.parseInt(wide, 16);
-          if (code >= 0xd800 && code <= 0xdfff) throw new Error();
-          return JSON.stringify(String.fromCodePoint(code)).slice(1, -1);
-        });
-      }
-    } catch {
-      return null;
-    }
-    const value = part.startsWith('"') || part.startsWith("'") ? doctorTomlString(decoded) : part;
-    if (value === null) return null;
-    key.push(value);
-    rest = rest.slice(part.length).trimStart();
-    if (rest === "") return key;
-    if (!rest.startsWith(".")) return null;
-    rest = rest.slice(1).trimStart();
-    if (rest === "") return null;
-  }
-  return null;
-}
-
-/**
- * Find a value's last line so continuation text cannot masquerade as a table.
- * Only values in our table need the strict one-line grammar and string decoding.
- */
-function doctorTomlValueEnd(
-  lines: string[],
-  start: number,
-  value: string,
-  strict: boolean,
-): number | null {
-  const brackets: string[] = [];
-  let quote = "";
-  let quoteStart = 0;
-  let content = false;
-  for (let row = start; row < lines.length; row += 1) {
-    const text = row === start ? value : lines[row] as string;
-    for (let index = 0; index < text.length; index += 1) {
-      const char = text[index] as string;
-      if (quote !== "") {
-        if (quote.startsWith('"') && char === "\\") index += 1;
-        else if (text.startsWith(quote, index)) {
-          if (strict && doctorTomlString(text.slice(quoteStart, index + 1)) === null) return null;
-          index += quote.length - 1;
-          // A multiline string may end with one or two quotes of content.
-          if (quote.length === 3) while (text[index + 1] === char) index += 1;
-          quote = "";
-        }
-        continue;
-      }
-      if (char === "#") break;
-      if (!/\s/.test(char)) content = true;
-      if (char === '"' || char === "'") {
-        const multiline = text.startsWith(char.repeat(3), index);
-        if (strict && multiline) return null;
-        quote = multiline ? char.repeat(3) : char;
-        quoteStart = index;
-        index += quote.length - 1;
-      } else if (char === "[" || char === "{") brackets.push(char);
-      else if (char === "]" || char === "}") {
-        if (brackets.pop() !== (char === "]" ? "[" : "{")) return null;
-      }
-    }
-    if (!content || quote.length === 1) return null;
-    if (quote === "" && brackets.length === 0) return row;
-    if (strict) return null;
-  }
-  return null;
-}
-
-/**
- * Read Codex's normal server table and string-valued env sub-table. Other TOML
- * definitions of the server are deliberately unreadable rather than unpinned.
- * In particular an inline/dotted environment must not hide a workspace pin.
- */
+/** Parse Codex's config once, then apply the same entry/pin rules as JSON. */
 function doctorTomlEntry(text: string): DoctorEntry {
-  let table: string[] = [];
-  let found = false;
-  let foundEnv = false;
-  const env: NodeJS.ProcessEnv = {};
-  const envKeys = new Set<string>();
-  const serverKeys = new Set<string>();
-  const lines = text.split("\n");
-  for (let row = 0; row < lines.length; row += 1) {
-    const line = (lines[row] as string).trim();
-    if (line === "" || line.startsWith("#")) continue;
-    if (line.startsWith("[")) {
-      const header = /^(\[\[?)(.+?)(\]\]?)\s*(?:#.*)?$/.exec(line);
-      if (header === null) return { status: "unusable" };
-      const key = doctorTomlKey(header[2] as string);
-      if (key === null) return { status: "unusable" };
-      table = key;
-      if (key[0] !== "mcp_servers" || key[1] !== SERVER_NAME) continue;
-      if (header[1] !== "[" || header[3] !== "]") return { status: "unusable" };
-      if (key.length === 2 && !found) found = true;
-      else if (key.length === 3 && key[2] === "env" && !foundEnv) foundEnv = true;
-      else return { status: "unusable" };
-      continue;
-    }
-    // A quoted key may contain '=' or '#'; neither ends that key.
-    const assignment = /^((?:[^"'=#]|"(?:[^"\\]|\\.)*"|'[^']*')+)=(.*)$/.exec(line);
-    const key = assignment === null ? null : doctorTomlKey(assignment[1] as string);
-    const ownsTable = table[0] === "mcp_servers" && table[1] === SERVER_NAME;
-    const value = (assignment?.[2] ?? "").trim();
-    if (key === null) return { status: "unusable" };
-    const absolute = [...table, ...key];
-    const ownsEntry = absolute[0] === "mcp_servers" && absolute[1] === SERVER_NAME;
-    const end = doctorTomlValueEnd(lines, row, value, ownsEntry);
-    if (end === null) return { status: "unusable" };
-    row = end;
-    if (!ownsEntry) continue;
-    if (!ownsTable) return { status: "unusable" };
-    if (table.length === 2) {
-      const name = key.join(".");
-      if (serverKeys.has(name)) return { status: "unusable" };
-      serverKeys.add(name);
-      if (key[0] === "env") {
-        if (key.length !== 1 || foundEnv || !/^\{\s*\}\s*(?:#.*)?$/.test(value)) {
-          return { status: "unusable" };
-        }
-        foundEnv = true;
-      }
-      continue;
-    }
-    if (key.length !== 1 || envKeys.has(key[0] as string)) return { status: "unusable" };
-    const name = key[0] as string;
-    envKeys.add(name);
-    if (PIN_KEYS.has(name)) {
-      const scalar = doctorTomlString(value);
-      if (scalar === null) return { status: "unusable" };
-      env[name] = scalar;
-    }
+  try {
+    // Valid unrelated 64-bit integers must not make a config unreadable.
+    const doc = parseToml(text, { integersAsBigInt: "asNeeded" });
+    return doctorJsonEntry({ mcpServers: doc.mcp_servers });
+  } catch {
+    // Parser errors quote source lines that may contain credentials.
+    return { status: "unusable" };
   }
-  return found
-    ? { status: "entry", env }
-    : { status: foundEnv || mentionsServer(text, SERVER_NAME) ? "unusable" : "absent" };
 }
 
 /**

@@ -635,13 +635,38 @@ describe("ub doctor MCP setup", () => {
     const config = join(homeOf(box), ".codex", "config.toml");
     mkdirSync(dirname(config), { recursive: true });
     writeFileSync(config, '[mcp_servers.github]\ncommand = "other"\nargs = [\n' +
-      '  "serve",\n  "--token=SECRET",\n]\n', "utf8");
+      '  "serve",\n  "--token=SECRET",\n]\nlarge_integer = 9007199254740993\n', "utf8");
     const { checks, run } = await mcpDoctor(box);
 
     expect(check(checks, "mcp")).toEqual({
       name: "mcp", status: "pass", reason: "Claude Code (.mcp.json)", fix: null,
     });
     expect(run.status).toBe(0);
+  });
+
+  it.each([
+    {
+      layout: "inline env",
+      text: '[mcp_servers.uberblick]\ncommand = "custom"\n' +
+        `env = { UB_WORKSPACE_ID = "${WORKSPACE}", UB_HUB_URL = "${DEAD_HUB_URL}", API_TOKEN = "${SECRET}" }\n`,
+    },
+    {
+      layout: "dotted env keys",
+      text: '[mcp_servers.uberblick]\ncommand = "custom"\n' +
+        `env.UB_WORKSPACE_ID = "${WORKSPACE}"\nenv.UB_HUB_URL = "${DEAD_HUB_URL}"\nenv.API_TOKEN = "${SECRET}"\n`,
+    },
+  ])("accepts Codex's current pins in $layout", async ({ text }) => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const path = clientFile(box, CLIENTS[1], "project");
+    mkdirSync(dirname(path));
+    writeFileSync(path, text, "utf8");
+    const { checks, run } = await mcpDoctor(box);
+
+    expect(check(checks, "mcp")).toEqual({
+      name: "mcp", status: "pass", reason: "Codex (.codex/config.toml)", fix: null,
+    });
+    expect(run.status).toBe(0);
+    expect(run.output).not.toContain(SECRET);
   });
 
   it.each(CLIENTS)("reads $name's project config beside the binding and ignores a subdirectory's shadow", async client => {
@@ -847,7 +872,7 @@ describe("ub doctor MCP setup", () => {
   it.each([
     `[mcp_servers.uberblick]\ncommand = "ub"\n[mcp_servers.uberblick.env]\nUB_WORKSPACE_ID = "${SECRET}"\n`,
     `[mcp_servers]\nuberblick = { command = "ub", env = { UB_WORKSPACE_ID = "${SECRET}" } }\n`,
-  ])("warns when Codex's workspace pin is incomplete or cannot be read", async text => {
+  ])("warns when Codex's workspace pin is incomplete", async text => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const path = clientFile(box, CLIENTS[1], "project");
     mkdirSync(dirname(path));
@@ -857,6 +882,29 @@ describe("ub doctor MCP setup", () => {
     expect(check(checks, "mcp").status).toBe("warn");
     expect(check(checks, "mcp").reason).toContain("Codex (.codex/config.toml)");
     expect(run.output).not.toContain(SECRET);
+  });
+
+  it("reports malformed Codex TOML without exposing its source or parser diagnostics", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    wireMcp(box);
+    const path = clientFile(box, CLIENTS[1], "project");
+    mkdirSync(dirname(path));
+    writeFileSync(path, `[mcp_servers.uberblick]\ncommand = "${SECRET}\n`, "utf8");
+    const { checks, run } = await mcpDoctor(box);
+
+    expect(check(checks, "mcp")).toEqual({
+      name: "mcp", status: "warn", reason: "could not read Codex (.codex/config.toml)",
+      fix: "repair or move the file named above, then ub mcp install claude   (or codex)",
+    });
+    const human = await runUbAsync(["doctor"], box, {
+      PORT: "1", HUB_HOST: "127.0.0.1", CODEX_HOME: join(homeOf(box), ".codex"),
+    });
+    expect(human.stdout).toContain("warn  mcp         could not read Codex (.codex/config.toml)\n");
+    for (const result of [run, human]) {
+      expect(result.status).toBe(0);
+      expect(result.output).not.toContain(SECRET);
+      expect(result.output).not.toMatch(/SyntaxError|TomlError|Invalid TOML|parse error|line \d|column \d/);
+    }
   });
 
   it("skips MCP when the workspace check has no usable binding", async () => {
