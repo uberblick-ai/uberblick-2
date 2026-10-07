@@ -62,6 +62,8 @@ import { useWorkspaceNames } from "./workspace-names.js";
 import { focusThread } from "./threads.js";
 import type { SelectThread, ThreadFocus, ThreadView } from "./threads.js";
 import { useServingRoomStatus } from "./serving-status.js";
+import { useServingAccount } from "./serving-account.js";
+import { createAccountClient } from "../shell/account.js";
 import { DocumentList } from "../shell/DocumentList.js";
 import { createDocumentSearchClient } from "../shell/document-search.js";
 import {
@@ -383,6 +385,13 @@ export function App(): ReactElement {
           : createDocumentSearchClient(workspaceUuid, identity.name),
     [hubReady, identity.name, serving, workspaceUuid],
   );
+  const accountClient = useMemo(
+    () => serving === null || workspaceUuid === null
+      ? null
+      : createAccountClient(workspaceUuid, identity.name),
+    [identity.name, serving, workspaceUuid],
+  );
+  const account = useServingAccount(accountClient);
   const selected = route.kind === "doc" ? route.uuid : null;
   const settings = route.kind === "settings";
   // Both addresses that name the workspace render the document list, so the
@@ -983,6 +992,7 @@ export function App(): ReactElement {
           onWorkspaceMenuOpenChange={setWorkspaceMenuOpen}
           onSwitchWorkspace={onSwitchWorkspace}
           identity={identity}
+          account={servingStatus?.notSharedReason ? { state: "unavailable" } : account}
           agentSessions={agentSessions}
           selected={selected}
           onSelect={onSelect}

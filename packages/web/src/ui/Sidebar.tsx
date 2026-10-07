@@ -30,6 +30,7 @@ import {
 } from "@uberblick/schema";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import type { AwarenessUser } from "../collab/identity.js";
+import type { AccountIdentity } from "../shell/account.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useDirectory, useRoomStatus, useStoredFlag } from "./hooks.js";
 import { rawSyncState } from "./calm.js";
@@ -111,8 +112,9 @@ type SidebarProps = {
   onWorkspaceMenuOpenChange?: (open: boolean) => void;
   /** Go to a workspace. Switching is navigating; see `WorkspaceSwitcher`. */
   onSwitchWorkspace: (segment: string) => void;
-  /** This tab's awareness identity — what the user card is about. */
+  /** This tab's awareness identity, separate from its served hub account. */
   identity: AwarenessUser;
+  account?: AccountIdentity;
   /** Agent sessions in the workspace, for the user menu's readout. */
   agentSessions: number;
   selected: string | null;
@@ -182,6 +184,7 @@ function SidebarContent({
   onWorkspaceMenuOpenChange,
   onSwitchWorkspace,
   identity,
+  account,
   agentSessions,
   selected,
   onSelect,
@@ -230,7 +233,7 @@ function SidebarContent({
     shownMode.current = settingsOpen;
     sidebarRoot.current
       ?.querySelector<HTMLElement>(
-        ".ub-sidebar-pane:not([inert]) [data-swap-focus]",
+        settingsOpen ? ".ub-settings-back" : ".ub-settings-entry",
       )
       ?.focus();
   }, [settingsOpen, sidebarRoot]);
@@ -381,34 +384,30 @@ function SidebarContent({
               + group
             </button>
           </SidebarScrollContent>
-          <SidebarFooter className="border-t border-sidebar-border">
-            {workspace !== null && (
-              <button
-                type="button"
-                className={`ub-settings-entry ${SIDEBAR_ROW_CLASSES} w-full`}
-                data-swap-focus
-                onClick={() => onOpenSettings("general")}
-              >
-                <GearIcon />
-                Workspace settings
-              </button>
-            )}
-            {!settingsOpen && !collapsed && (
-              <UserMenu identity={identity} agentSessions={agentSessions} />
-            )}
-          </SidebarFooter>
         </nav>
         <SettingsNavigation
           drawer={drawer}
           workspaceLabel={workspace === null ? "workspace" : workspaceLabel(workspace, workspaceNames ?? new Map(), workspaces)}
-          identity={identity}
-          agentSessions={agentSessions}
           active={settingsOpen && !collapsed}
           page={settingsPage}
           onSelect={onOpenSettings}
           onBack={onBackToWorkspace}
         />
       </div>
+      <SidebarFooter className="border-t border-sidebar-border" aria-hidden={collapsed} inert={collapsed}>
+        {workspace !== null && (
+          <button
+            type="button"
+            className={`ub-settings-entry ${SIDEBAR_ROW_CLASSES} w-full`}
+            data-swap-focus
+            onClick={() => onOpenSettings("general")}
+          >
+            <GearIcon />
+            Workspace settings
+          </button>
+        )}
+        <UserMenu identity={identity} account={account} agentSessions={agentSessions} active={!collapsed} />
+      </SidebarFooter>
       </SidebarDragProvider>
     </>
   );
@@ -418,8 +417,6 @@ function SidebarContent({
 function SettingsNavigation({
   drawer,
   workspaceLabel: label,
-  identity,
-  agentSessions,
   active,
   page,
   onSelect,
@@ -427,8 +424,6 @@ function SettingsNavigation({
 }: {
   drawer: boolean;
   workspaceLabel: string;
-  identity: AwarenessUser;
-  agentSessions: number;
   active: boolean;
   page: SettingsPage | null;
   onSelect: (page: SettingsPage) => void;
@@ -496,9 +491,6 @@ function SettingsNavigation({
           </ul>
         </section>
       </SidebarScrollContent>
-      <SidebarFooter className="border-t border-sidebar-border">
-        {active && <UserMenu identity={identity} agentSessions={agentSessions} />}
-      </SidebarFooter>
     </nav>
   );
 }

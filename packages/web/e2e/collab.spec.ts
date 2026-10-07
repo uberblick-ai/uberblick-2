@@ -143,10 +143,13 @@ test("a peer's cursor renders in the other context with its name and colour", as
 
   // Awareness only carries a cursor while that editor has focus, so A's caret
   // has to be in the block for there to be anything to render.
+  await a.getByTestId("account-menu").click();
+  const name = (await a.locator(".ub-user-heading").innerText()).replace(/^Presence name: /, "").trim();
+  const color = await a.locator('.ub-swatch[aria-pressed="true"]').evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
+  );
+  await a.keyboard.press("Escape");
   await placeCaret(a);
-
-  const name = (await a.locator(".ub-user-name").innerText()).trim();
-  const identity = a.locator(".ub-user-tile");
   // Only the peer's cursor is ever decorated; a client never renders its own.
   const label = b.locator(".ub-editor .ProseMirror-yjs-cursor > div");
   await expect(label).toHaveText(name);
@@ -154,16 +157,13 @@ test("a peer's cursor renders in the other context with its name and colour", as
 
   // The colour travels in the same awareness payload as the name, and reaches
   // the label only through y-prosemirror's cursor builder.
-  const color = await identity.evaluate(
-    (element) => getComputedStyle(element).backgroundColor,
-  );
   await expect(label).toHaveCSS("background-color", color);
 
   // And when A picks a different presence colour (#74), B's copy of A's cursor
   // follows it live — the choice is an awareness republish, not something that
-  // waits for a reconnect. The colour is read back off A's own tile, so this
+  // waits for a reconnect. The colour is read back off A's selected swatch, so this
   // asserts the two ends agree rather than pinning a hex.
-  await a.locator(".ub-user-card").click();
+  await a.getByTestId("account-menu").click();
   // Anything but the one it was dealt, which is random per tab.
   const dealt = await a
     .locator('.ub-swatch[aria-pressed="true"]')
@@ -171,7 +171,7 @@ test("a peer's cursor renders in the other context with its name and colour", as
   await a
     .getByRole("button", { name: dealt === "teal" ? "violet" : "teal", exact: true })
     .click();
-  const chosen = await identity.evaluate(
+  const chosen = await a.locator('.ub-swatch[aria-pressed="true"]').evaluate(
     (element) => getComputedStyle(element).backgroundColor,
   );
   expect(chosen).not.toBe(color);

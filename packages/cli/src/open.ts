@@ -124,6 +124,7 @@ import { acquireInitLock, tryAcquireInitLock, tryAcquireLock } from "./init-lock
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { readAccessAction, requestAccess, type AccessBinding } from "./open-access.js";
+import { requestAccount } from "./open-account.js";
 import { rememberWorkspaceBinding } from "./workspace-registry.js";
 import {
   endpointOf,
@@ -861,6 +862,7 @@ const API_PREFIX = "/api/";
 const SEARCH_PATH = "/api/search";
 const STATUS_PATH = "/api/status";
 const ACCESS_PATH = "/api/access";
+const ACCOUNT_PATH = "/api/account";
 const SEARCH_LIMIT = 100;
 const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
@@ -999,6 +1001,19 @@ async function serveApiRequest(
   }
   if (target.pathname === STATUS_PATH) {
     apiResponse(request, response, 200, status());
+    return;
+  }
+  if (target.pathname === ACCOUNT_PATH) {
+    const aborted = new AbortController();
+    const abort = () => { if (!response.writableFinished) aborted.abort(); };
+    request.once("aborted", abort);
+    response.once("close", abort);
+    try {
+      apiResponse(request, response, 200, await requestAccount(accessBinding, () => status().notSharedReason, aborted.signal));
+    } finally {
+      request.off("aborted", abort);
+      response.off("close", abort);
+    }
     return;
   }
   if (target.pathname !== SEARCH_PATH) {

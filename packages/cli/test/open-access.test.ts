@@ -3,10 +3,10 @@ import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { createHub, silentLogger, type Hub } from "@uberblick/hub";
-import { writeHubLogin, type StoredHubLogin } from "@uberblick/hub/auth-store";
+import { removeHubLogin, writeHubLogin, type StoredHubLogin } from "@uberblick/hub/auth-store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localBrowserKey } from "../src/browser-key.js";
-import { pointAt } from "./helpers.js";
+import { pointAt, waitUntil } from "./helpers.js";
 import { authMessage, bearer, cleanUp, configured, configDir, freePort, get, hubs, open, startHub,
   WORKSPACE, REBOUND_WORKSPACE, SECRET, writeBinding } from "./open-fixtures.js";
 
@@ -54,6 +54,55 @@ async function rig(role: "admin" | "member" | null = "admin", snapshot?: string[
 }
 
 describe("ub open: live Access bridge", () => {
+  it("authenticates account reads and exposes only the served hub's verified handle after a rebind", async () => {
+    const { app, box, login, headers } = await rig();
+    try {
+      await writeHubLogin("https://another-hub.example", { ...login, identity: { ...login.identity, githubUsername: "other-person" } }, box.env);
+      const account = async () => {
+        const response = await fetch(`${app.url}api/account`, { headers });
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        expect(response.headers.get("access-control-allow-origin")).toBeNull();
+        return await response.json() as Record<string, unknown>;
+      };
+      await waitUntil("verified served account", async () => (await account()).state === "signed-in");
+      expect(await account()).toEqual({ state: "signed-in", handle: "this-person" });
+      writeBinding(box, "wss://another-hub.example/ws", REBOUND_WORKSPACE);
+      expect(await account()).toEqual({ state: "signed-in", handle: "this-person" });
+      for (const request of [
+        { headers: { authorization: "" } },
+        { headers: bearer(await authMessage(SECRET)) },
+        { headers, suffix: "?token=private" },
+      ]) {
+        const response = await fetch(`${app.url}api/account${request.suffix ?? ""}`, { headers: request.headers });
+        expect(response.status).toBe(401);
+        await response.text();
+      }
+      const mutation = await fetch(`${app.url}api/account`, { method: "POST", headers });
+      expect(mutation.status).toBe(405);
+      expect(mutation.headers.get("allow")).toBe("GET");
+      await mutation.text();
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
+  it("reflects removed and replaced logins and live workspace refusal without restarting", async () => {
+    const { app, box, hub, login, other, headers, origin } = await rig();
+    const account = async () => await (await fetch(`${app.url}api/account`, { headers })).json() as Record<string, unknown>;
+    try {
+      await waitUntil("initial verified account", async () => (await account()).state === "signed-in");
+      await removeHubLogin(origin, box.env);
+      expect(await account()).toEqual({ state: "signed-out" });
+      const replacement = issue(hub, "9876", "replacement-person", "member");
+      await writeHubLogin(origin, replacement, box.env);
+      await waitUntil("replacement account without restart", async () => (await account()).handle === "replacement-person", 80_000);
+      hub.memberships!.remove({ workspaceId: WORKSPACE, actorPrincipalId: other.identity.id, principalId: replacement.identity.id });
+      expect(await account()).toEqual({ state: "unavailable" });
+      await writeHubLogin(origin, login, box.env);
+      await waitUntil("original account returns", async () => (await account()).handle === "this-person", 80_000);
+      hub.credentials!.revoke(login.credential.record.id);
+      expect(await account()).toEqual({ state: "signed-out" });
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
   it("distinguishes an explicitly local workspace, a shared-secret hub and an unreachable hub", async () => {
     const { box, env } = configured();
     // Local-only Access needs no upstream credential or implicit default-port hub.
