@@ -17,40 +17,29 @@ review, the merged-tree gate when the base moved, the acceptance criteria, the
 declared `Touches` footprint and no unanswered remarks. Run independent
 mechanical gates concurrently where the runtime allows.
 
-During web UI acceptance, challenge a custom mechanism that the framework, an
-existing dependency or a qualifying library would cover. Check the record
-against live corpus guidance for library selection and the evidenced,
-owner-confirmed custom-mechanics exception, discovered by purpose under
-[AGENTS.md](../../AGENTS.md#read-for-the-action).
+During web UI acceptance, apply
+[library and custom-mechanism choices](../protocols/delivery-policy.md#library-and-custom-mechanism-choices)
+to the PR's record.
 
-Check the review record rather than redo it: the reviews this diff owes ran,
-every P1 and P2 id has a correction or an accepted answer, and a second round
-ran where `.agents/protocols/review-protocol.md` requires one. A P3 left
-untouched is accepted debt, not a gap. When the `agent` review is missing,
-finish `review`; when its required second round is missing, finish `review`
-listing the finding ids it must verify, which makes it that corrections review.
-Apply the current delivery policy when an older handoff requires Copilot:
-its missing, pending, stale-head or unavailable review is not an integration
-stop, and no automatic request or retry is owed.
-Answer each Copilot remark still open in one line — accepted as P3 debt, or
+Check the review record rather than redo it, under
+[review-protocol.md's Completion](../protocols/review-protocol.md#completion).
+When the `agent` review is missing, finish `review`; when its required second
+round is missing, finish `review` listing the finding ids it must verify, which
+makes it that corrections review. Copilot stays optional under
+[delivery-policy.md](../protocols/delivery-policy.md#reviews-owed) even when an
+older handoff requires it. Answer each Copilot remark still open in one line — accepted as P3 debt, or
 rejected with the reason — or finish `changes` when one needs a fix.
 
 Classify the tier from the full diff. Tier 3 without a person's answer that
 covers this diff is an escalation naming the trigger. Otherwise merge as the
 delivery policy's merge policy says.
 
-After the merge, close a parent whose last open sub-issue this merge closed,
-and apply the pull request's `Corpus update` through MCP, checked against the
-merged code; draft a rewrite yourself only for a claim the merge made wrong
-that the update missed. Create any new decision record drafted in the update
-through `create_doc` under [the implementer's Decision records](implementer.md#decision-records).
-For existing documents, the documentation pass rewrites, it never appends. For
-each claim the merge made wrong, rewrite the affected sentences to the new
-present-tense truth and delete what they replace; add a block only for a fact
-no existing block owns. No PR or issue number, merge date, run id or "since"
-clause reaches a Regular Document — GitHub owns that provenance — and every new
-or changed block meets `AGENTS.md`'s corpus-edit rules and governing authoring
-criteria discovered by purpose. Missing required criteria stop the dependent edit.
+After the merge, follow [integration.md's After the merge](../protocols/integration.md#after-the-merge).
+Draft a rewrite yourself only for a claim the merge made wrong that the
+`Corpus update` missed, and create any new decision record it drafts through
+`create_doc` under [the implementer's Decision records](implementer.md#decision-records).
+Every corpus edit follows [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action)
+and governing authoring criteria discovered by purpose.
 
 ## Boundaries
 

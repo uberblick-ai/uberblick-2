@@ -44,12 +44,9 @@ recorded `origin/main` SHA. `not-started` is only for a clarification
 
 Record discovered semantic prerequisites — functionality supplied by another
 issue — using [native relationships](../../.github/ISSUE_SPEC.md#relationships).
-For discovered open PRs, apply [scheduling semantics](workflow.md#scheduling-semantics):
-substantive file rewrites require a blocked-by relationship to the issue the PR
-closes; only bounded additive aggregation qualifies as mechanical overlap.
-If it closes no issue, record the overlap in Pointers and finish normally;
-the implementer builds alongside it under that rule. Invent no dependency, scan
-no further and leave the other issue unedited.
+For discovered open PRs, apply [scheduling semantics](workflow.md#scheduling-semantics),
+recording a blocked-by relationship or the overlap in Pointers as it says. Invent
+no dependency, scan no further and leave the other issue unedited.
 
 Keep investigation proportional. On resumption or relevant main changes, refresh
 only affected evidence, corpus sources and governing instructions; expand discovery

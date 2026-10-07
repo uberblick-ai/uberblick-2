@@ -18,10 +18,9 @@ derivable** (dependencies, footprint, scope) must be declared, once.
 Dependencies and splits are GitHub issue relationships, not body text:
 
 - **Blocked by** — a real ordering prerequisite: this issue cannot be built
-  until that one closes. When ordering depends on an open PR, the issue is
-  blocked by the issue that PR closes. If the PR closes no issue, record the
-  overlap in Pointers and let the file-overlap rule queue it instead of
-  inventing a dependency. Set it with `gh issue create --blocked-by` or
+  until that one closes. Ordering on an open PR follows
+  [scheduling semantics](../.agents/protocols/workflow.md#scheduling-semantics).
+  Set it with `gh issue create --blocked-by` or
   `gh issue edit --add-blocked-by`.
 - **Sub-issue** — the split relation: this issue is one piece of that parent.
   Set it with `gh issue create --parent` or `gh issue edit --parent`. The

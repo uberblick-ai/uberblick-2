@@ -26,14 +26,11 @@ inspect the code and Pointers it depends on.
   earlier run's work: continue it
   on its branch and hand it off. Any other open pull request that closes this
   issue is not yours to replace: escalate, naming it.
-- If an open pull request is expected to edit the same substantive files
-  semantically ([scheduling rules](../protocols/workflow.md#scheduling-semantics)), mark this issue
-  blocked by the issue that PR closes (`gh issue edit <N> --add-blocked-by
-  <M>`) and finish `defer`, naming it. When that PR closes no issue, record
-  the overlap in Pointers and build; whichever lands second merges the base. An overlap the issue's Pointers classify as a mechanical
-  reconciliation is not a block only when the open PR's current diff confirms
-  the scheduling rule's bounded additive aggregation exception. A rewrite of
-  the same substantive file does not qualify. Follow qualifying Pointers and build.
+- Apply the [scheduling rules](../protocols/workflow.md#scheduling-semantics) to
+  open pull requests expected to edit the same substantive files. When one blocks
+  this issue, mark it (`gh issue edit <N> --add-blocked-by <M>`) and finish
+  `defer`, naming it. A mechanical-overlap classification in Pointers counts only
+  when the open PR's current diff confirms it.
 - A contract prepared more than six days ago is checked before it is built: the
   `ready` label or the preparer's handoff dates it. Check that its Pointers
   still resolve at that base, that the code it targets still behaves as the body
@@ -75,9 +72,8 @@ under that policy and is not requested automatically.
 When the change makes a corpus claim wrong, or adds behavior a corpus
 document should describe, draft the rewrite under the pull request's
 `Corpus update`: each document by title and UUID, the block, and its new text,
-following `AGENTS.md`'s corpus-edit rules and any governing authoring guidance
-discovered by purpose — rewrite, never append; Regular Document
-rewrites carry no PR or issue numbers. The integrator applies it after merge,
+following [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action)
+and any governing authoring guidance discovered by purpose. The integrator applies it after merge,
 so the corpus never describes unmerged code. Keep it current with every revision.
 
 ## Decision records
@@ -105,11 +101,6 @@ through review; if a person decides it first, use the
 [shared decided-record challenge procedure](../protocols/human-decisions.md#challenge-a-decided-record).
 Use its returned topic UUID in the built-on line and link the
 GitHub item in its Links under the procedure below, without a post-merge fix-up.
-
-A missing-record finding under `review-protocol.md` is corrected here like any
-other finding: the reviewer flags it, the implementer writes it, and the PR
-does not wait for a person's confirmation of a first stance or open recommendation. Existing
-review and merge gates still apply.
 
 ### Build on an open decision
 
@@ -174,13 +165,11 @@ No commits to `main`, no landing PRs, no authoritative review of your own diff, 
 nothing outside the issue's footprint — scope found mid-flight becomes a finding
 or a new issue. The merge tier and the final gates belong to the integrator.
 
-Read the preparer-selected corpus documents and relevant linked decisions.
-Expand discovery if the code or findings expose missing context. A corpus
-document the issue cites is a required live read whenever the change may affect
-its product meaning. If the MCP route cannot serve it, stop before editing and
-finish `defer`, recording the exact tool and failure; a copied summary is not a
-substitute. A strictly mechanical change may continue, and its handoff says why
-no product context could affect it.
+Read the corpus the issue's Pointers cite, and relevant linked decisions,
+under [AGENTS.md's read rules](../../AGENTS.md#read-for-the-action), which own
+stale pointers and when missing context stops an edit (`defer`, naming the
+tool and failure). A strictly mechanical change says in its handoff why no
+product context could affect it.
 
 ## Outcomes
 
