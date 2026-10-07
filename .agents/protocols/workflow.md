@@ -48,16 +48,11 @@ Implementation eligibility requires `ready` and no open blocker. Blocking applie
 at every stage: no preparation, review or implementation starts until blockers
 close. Sub-issue status itself never affects eligibility.
 
-Parallelism is judged at file level; overlapping `Touches` sets alone do not
-serialize work, including `schema`. For expected semantic edits to the same
-substantive files, the later implementer blocks its issue on the issue the open
-PR closes and finishes `defer`. If the PR closes none, record the overlap in
-Pointers and build without inventing a dependency; whichever lands second
-merges the base. Bounded overlap in purely
-additive aggregation surfaces (barrel exports, independent error collections)
-is reconciled mechanically: after the earlier merge, synchronize with a
-non-rewriting merge only if mergeability requires it, then rerun every exact-head
-gate. Schema risk uses those reviews and gates, not package locks.
+File overlap never serializes work, including `schema`. Record an overlapping
+open PR in Pointers and build; whichever lands second merges the base and
+reruns every exact-head gate. Only a semantic
+prerequisite, functionality another issue supplies, blocks. Schema risk uses
+those reviews and gates, not package locks.
 
 ### Priority
 
