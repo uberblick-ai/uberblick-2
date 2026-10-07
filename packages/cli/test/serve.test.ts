@@ -10,11 +10,12 @@
  */
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { closeSync, constants, existsSync, openSync, readdirSync } from "node:fs";
+import { closeSync, constants, existsSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
+import { readWorkspaceHub, rememberWorkspaceBinding } from "../src/workspace-registry.js";
 import { DEAD_HUB_URL, UB_BIN, removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
 import type { Sandbox } from "./helpers.js";
 
@@ -142,6 +143,81 @@ function clientStdin(path: string): { childEnd: number; writer: number } {
 const WORKSPACE = "1e9b7a30-52c4-4d6f-8a13-c7b204e5f981";
 
 describe("ub mcp serve", () => {
+  it.each([null, DEAD_HUB_URL])("remembers a first project binding with hub %s", async (hubUrl) => {
+    const box = sandbox({
+      projectBinding: { workspaceId: `serve-${WORKSPACE}`, hubUrl },
+      credentials: { signingSecret: "cli-first-serve-secret" },
+    });
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
+    const session = await connect(box);
+    try {
+      expect((await session.client.listTools()).tools.length).toBeGreaterThan(0);
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(hubUrl);
+    } finally { await session.close(); }
+  });
+
+  it("serves a complete environment binding without replacing a different recorded hub", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL }, box.env);
+    const session = await connect(box, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" });
+    try {
+      const result = await session.client.callTool({ name: "sync_status", arguments: {} });
+      const content = result.content as { text: string }[];
+      expect(JSON.parse(content[0]!.text).hub.url).toBeNull();
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(DEAD_HUB_URL);
+    } finally { await session.close(); }
+  });
+
+  it.each([null, DEAD_HUB_URL])("starts with an existing %s record even when a stale init lock remains", async (recordedHub) => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: recordedHub }, box.env);
+    const lock = join(box.configHome, "uberblick", ".init.lock");
+    writeFileSync(lock, "999999\n");
+    const session = await connect(box);
+    try {
+      expect((await session.client.listTools()).tools.length).toBeGreaterThan(0);
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(recordedHub);
+      expect(readFileSync(lock, "utf8")).toBe("999999\n");
+    } finally { await session.close(); }
+  });
+
+  it("records concurrent first environment bindings without changing per-user settings", async () => {
+    const box = unboundSandbox({ userConfig: {
+      displayName: "Existing user", color: "#123abc", futureSetting: { enabled: true },
+      hubAdmissions: { "wss://admitted.example.test/ws": "device" },
+    } });
+    const configPath = join(box.configHome, "uberblick", "config.json");
+    const originalConfig = readFileSync(configPath, "utf8");
+    const bindings = [
+      { workspaceId: WORKSPACE, hubUrl: null },
+      { workspaceId: "8f21c604-3b7d-4a15-9c62-0d5e8b3f7a29", hubUrl: DEAD_HUB_URL },
+      { workspaceId: "5cb9a7a5-3cc0-4cdb-bd20-fd348fbf1311", hubUrl: "wss://other.example.test/ws" },
+    ];
+    const sessions: Session[] = [];
+    try {
+      await Promise.all(bindings.map(async (binding) => {
+        const session = await connect(box, {
+          UB_WORKSPACE_ID: `environment-${binding.workspaceId}`,
+          UB_HUB_URL: binding.hubUrl ?? "local",
+        });
+        sessions.push(session);
+      }));
+      for (const binding of bindings) {
+        expect(readWorkspaceHub(binding.workspaceId, box.env)).toBe(binding.hubUrl);
+      }
+      expect(readFileSync(configPath, "utf8")).toBe(originalConfig);
+    } finally { await Promise.all(sessions.map(session => session.close())); }
+  });
+
+  it("records nothing when serve arguments are refused", () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const result = runUb(["mcp", "serve", "extra"], box);
+    expect(result.status).toBe(2);
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
+    expect(existsSync(box.configHome)).toBe(false);
+    expect(existsSync(box.dataHome)).toBe(false);
+  });
+
   it("opens a newly created local workspace without a hub or login", async () => {
     const box = unboundSandbox();
     const created = await runUbAsync(["workspace", "create", "Local MCP"], box);

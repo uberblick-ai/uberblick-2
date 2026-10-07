@@ -27,6 +27,7 @@ import { localBrowserKey } from "../src/browser-key.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import { bundlePlan, ensureBundle } from "../src/open.js";
 import { probePort } from "../src/probes.js";
+import { readWorkspaceHub, rememberWorkspaceBinding } from "../src/workspace-registry.js";
 import { pointAt, runUbAsync, sandbox, unboundSandbox, sleep, waitUntil } from "./helpers.js";
 import {
   BANNER,
@@ -67,6 +68,49 @@ import {
 afterEach(cleanUp);
 
 describe("ub open", () => {
+  it.each([
+    { source: "project", hubUrl: null },
+    { source: "project", hubUrl: FIRST_REMOTE },
+    { source: "environment", hubUrl: null },
+    { source: "environment", hubUrl: FIRST_REMOTE },
+  ])("remembers a first $source binding with hub $hubUrl after serving", async ({ source, hubUrl }) => {
+    const box = source === "project"
+      ? sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl } })
+      : unboundSandbox();
+    const env = {
+      UBERBLICK_WEB_DIST: fixtureBundle(box), BROWSER: "none",
+      ...(source === "environment" ? {
+        UB_WORKSPACE_ID: `browser-${WORKSPACE}`, UB_HUB_URL: hubUrl ?? "local",
+      } : {}),
+    };
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
+    const app = await open(box, ["--port", String(await freePort())], env);
+    try {
+      expect((await get(app.url)).status).toBe(200);
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(hubUrl);
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
+  it("preserves a different recorded hub while serving the project's binding", async () => {
+    const { box, env } = configured();
+    pointAt(box, FIRST_REMOTE);
+    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: null }, box.env);
+    const app = await open(box, ["--port", String(await freePort())], env);
+    try {
+      const document = await (await get(`${app.url}uberblick-config.json`)).json() as { remoteHubUrl: string };
+      expect(document.remoteHubUrl).toBe(FIRST_REMOTE);
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBeNull();
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
+  it("records nothing when a complete binding cannot serve its bundle", async () => {
+    const { box, env, bundle } = configured();
+    stamp(bundle, SYNC_PROTOCOL_VERSION + 1);
+    const refused = await openFails(box, ["--port", String(await freePort())], env);
+    expect(refused.status).toBe(1);
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
+  });
+
   it("serves the local browser endpoint and names the configured upstream", async () => {
     const { box, env } = configured();
     const remote = "wss://hub.example.ts.net/ws";

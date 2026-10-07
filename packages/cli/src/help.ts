@@ -14,10 +14,10 @@
  * command with `--help` in it, and must not print help instead.
  *
  * The scan runs before `parseArgs`, so it cannot tell an option's *value* from
- * an option: `ub workspace use --hub -h` prints help before changing a binding
- * into a directory called `-h`. That is the accepted price of help winning over
- * validation, and it costs nothing real — no option here takes a value that
- * plausibly spells `-h` or `--help`, and the fix is to write `--dir=-h`.
+ * an option: `ub mcp install --hub -h` prints help before validating `-h` as a
+ * hub address. That is the accepted price of help winning over validation,
+ * and it costs nothing real — no option here takes a value that plausibly
+ * spells `-h` or `--help`; a literal option value can use `--hub=-h`.
  */
 
 import type { Io } from "./io.js";

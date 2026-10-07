@@ -1,10 +1,12 @@
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { resolveProjectBinding, writeProjectBinding } from "../src/project-binding.js";
-import { sandbox, unboundSandbox, removeTempDirs } from "./helpers.js";
+import { rememberWorkspaceBinding, readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
+import { sandbox, unboundSandbox, removeTempDirs, runUb } from "./helpers.js";
 
 afterAll(removeTempDirs);
+afterEach(() => vi.unstubAllEnvs());
 const first = "11111111-1111-4111-8111-111111111111";
 const second = "22222222-2222-4222-8222-222222222222";
 
@@ -16,7 +18,7 @@ describe("atomic project bindings", () => {
     const options = { env: box.env, cwd: child };
     expect(resolveProjectBinding(options).binding).toEqual({ workspaceId: first, hubUrl: null });
     const nearer = join(box.cwd, "nested", ".uberblick.json");
-    writeProjectBinding({ workspaceId: second, hubUrl: "https://other.example.test" }, { path: nearer });
+    writeProjectBinding({ workspaceId: second, hubUrl: "https://other.example.test" }, { path: nearer, env: box.env });
     expect(resolveProjectBinding(options)).toEqual({ binding: { workspaceId: second, hubUrl: "wss://other.example.test/ws" }, origin: "project config", path: nearer });
     expect(resolveProjectBinding({ env: box.env, cwd: box.cwd }).binding?.workspaceId).toBe(first);
     const sibling = unboundSandbox();
@@ -37,7 +39,8 @@ describe("atomic project bindings", () => {
     { UB_WORKSPACE_ID: "", UB_HUB_URL: "local" },
   ])("refuses an incomplete override without borrowing project fields", (overrides) => {
     const box = sandbox({ projectBinding: { workspaceId: first, hubUrl: "https://project.example.test" } });
-    expect(() => resolveProjectBinding({ env: { ...box.env, ...overrides }, cwd: box.cwd })).toThrow(/Set both UB_WORKSPACE_ID and UB_HUB_URL/);
+    vi.stubEnv("XDG_CONFIG_HOME", box.configHome);
+    expect(() => resolveProjectBinding({ env: { ...box.env, ...overrides }, cwd: box.cwd })).toThrow(/UB_WORKSPACE_ID|UB_HUB_URL/);
   });
 
   it.each([{ WORKSPACE_ID: second }, { HUB_URL: "https://old.example.test" }])("refuses legacy MCP or shell pins instead of adopting another project binding", (legacy) => {
@@ -66,8 +69,10 @@ describe("atomic project bindings", () => {
 
   it("writes only the complete selection and preserves unrelated project metadata", () => {
     const box = sandbox({ projectBinding: { workspaceId: first, hubUrl: null, name: "test" } });
-    const path = writeProjectBinding({ workspaceId: second, hubUrl: "https://hub.example.test" }, { cwd: box.cwd });
+    const path = writeProjectBinding({ workspaceId: second, hubUrl: "https://hub.example.test" }, { cwd: box.cwd, env: box.env });
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ workspaceId: second, hubUrl: "wss://hub.example.test/ws", name: "test" });
+    expect(readWorkspaceHub(first, box.env)).toBeNull();
+    expect(readWorkspaceHub(second, box.env)).toBe("wss://hub.example.test/ws");
   });
 
   it("refuses symlinks, including broken ones, for resolution and updates", () => {
@@ -77,9 +82,54 @@ describe("atomic project bindings", () => {
     rmSync(path);
     symlinkSync(target, path);
     expect(() => resolveProjectBinding({ env: box.env, cwd: box.cwd })).toThrow(/regular file/);
-    expect(() => writeProjectBinding({ workspaceId: first, hubUrl: null }, { cwd: box.cwd })).toThrow(/regular file/);
+    expect(() => writeProjectBinding({ workspaceId: first, hubUrl: null }, { cwd: box.cwd, env: box.env })).toThrow(/regular file/);
     writeFileSync(target, JSON.stringify({ workspaceId: second, hubUrl: null }));
-    expect(() => writeProjectBinding({ workspaceId: first, hubUrl: null }, { cwd: box.cwd })).toThrow(/regular file/);
+    expect(() => writeProjectBinding({ workspaceId: first, hubUrl: null }, { cwd: box.cwd, env: box.env })).toThrow(/regular file/);
     expect(JSON.parse(readFileSync(target, "utf8")).workspaceId).toBe(second);
+  });
+
+  it.each([null, "wss://recorded.example.test/ws"])("resolves id-only overrides by machine record (%s) and keeps child environments complete", async (hubUrl) => {
+    const box = sandbox({ projectBinding: { workspaceId: second, hubUrl: "https://project.example.test" } });
+    await rememberWorkspaceBinding({ workspaceId: first, hubUrl }, box.env);
+    for (const id of [first, `notes-${first}`]) {
+      const run = runUb(["workspace"], box, { UB_WORKSPACE_ID: id });
+      expect(run.status, run.output).toBe(0);
+      expect(run.stdout).toContain(id);
+      expect(run.stdout).toContain(hubUrl ?? "local (this computer)");
+      const child = runUb(["env", "--", process.execPath, "-e",
+        "process.stdout.write(JSON.stringify([process.env.UB_WORKSPACE_ID,process.env.UB_HUB_URL]))"], box, { UB_WORKSPACE_ID: id });
+      expect(child.status, child.output).toBe(0);
+      expect(JSON.parse(child.stdout)).toEqual([id, hubUrl ?? "local"]);
+    }
+  });
+
+  it("takes registry roots from the process even when checking an MCP entry's partial env", async () => {
+    const box = sandbox();
+    const wrong = sandbox();
+    await rememberWorkspaceBinding({ workspaceId: first, hubUrl: "wss://recorded.example.test/ws" }, box.env);
+    await rememberWorkspaceBinding({ workspaceId: first, hubUrl: null }, wrong.env);
+    vi.stubEnv("XDG_CONFIG_HOME", box.configHome);
+    expect(resolveProjectBinding({ env: { UB_WORKSPACE_ID: `notes-${first}`, XDG_CONFIG_HOME: wrong.configHome } }).binding)
+      .toEqual({ workspaceId: `notes-${first}`, hubUrl: "wss://recorded.example.test/ws" });
+    expect(resolveProjectBinding({ env: {}, cwd: box.cwd }).origin).toBe("project config");
+  });
+
+  it.each([first, `notes-${first}`])("refuses an unknown id-only override instead of inferring local or using the project hub: %s", (id) => {
+    const box = sandbox({ projectBinding: { workspaceId: first, hubUrl: "https://project.example.test" } });
+    const run = runUb(["workspace"], box, { UB_WORKSPACE_ID: id });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("Add UB_HUB_URL (a hub address, or local)");
+    expect(run.stderr).toContain("ub workspace join <workspace-url>");
+    expect(readWorkspaceHub(first, box.env)).toBeUndefined();
+  });
+
+  it("complete overrides keep precedence without rewriting a conflicting record", async () => {
+    const box = sandbox();
+    await rememberWorkspaceBinding({ workspaceId: first, hubUrl: null }, box.env);
+    const before = readFileSync(workspaceRegistryPath(box.env));
+    const run = runUb(["workspace"], box, { UB_WORKSPACE_ID: first, UB_HUB_URL: "https://explicit.example.test" });
+    expect(run.status, run.output).toBe(0);
+    expect(run.stdout).toContain("wss://explicit.example.test/ws");
+    expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(before);
   });
 });

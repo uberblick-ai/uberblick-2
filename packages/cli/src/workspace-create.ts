@@ -78,7 +78,7 @@ export async function createWorkspaceCommand(argv: string[], io: Io): Promise<nu
     io.out(`Created ${name} (${uuid}), local-only.\nSelected in ${path}.\nRun \`ub open\` to open it.\n`);
     if (previous !== null) {
       io.out(`Previous workspace ${previous.workspaceId} (${previous.hubUrl ?? "local"}) and its documents remain unchanged.\n` +
-        `Switch back: ub workspace use ${previous.workspaceId} --hub '${(previous.hubUrl ?? "local").replaceAll("'", "'\\''")}'\n`);
+        `Switch back: ub workspace use ${previous.workspaceId}\n`);
     }
     reportWorkspacePins(binding, io);
     return 0;

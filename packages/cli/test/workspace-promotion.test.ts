@@ -10,6 +10,7 @@ import { compareCorpus, createMcpServer, inspectRemote, isIdentical, resolveMcpC
 import { getWorkspaceName, listDirectory, readSidebar, tombstoneDirectoryEntry } from "@uberblick/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UB_BIN, removeTempDirs, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
+import { readWorkspaceHub } from "../src/workspace-registry.js";
 
 const hubs: Hub[] = [];
 afterEach(async () => {
@@ -26,6 +27,7 @@ async function localWorkspace(name = "Project notes") {
   const box = unboundSandbox();
   const result = await runUbAsync(["workspace", "create", name], box);
   expect(result.status, result.output).toBe(0);
+  expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBeNull();
   return box;
 }
 async function hubFor(box: Sandbox, role: "admin" | "member" | null = "admin") {
@@ -102,15 +104,19 @@ describe("workspace creation and promotion", () => {
   });
 
   it("identifies a replaced binding and provides a working switch-back command", async () => {
-    const box = await localWorkspace("Original");
-    const previous = { ...selected(box), hubUrl: null };
-    writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify(previous));
+    // A complete old binding can exist before this machine has its replica.
+    const previous = { workspaceId: randomUUID(), hubUrl: "wss://old.example.test/ws" };
+    const box = sandbox({ projectBinding: previous });
+    expect(readWorkspaceHub(previous.workspaceId, box.env)).toBeUndefined();
     const result = await runUbAsync(["workspace", "create", "Second"], box);
     expect(result.status, result.output).toBe(0);
     expect(selected(box).workspaceId).not.toBe(previous.workspaceId);
-    expect(result.stdout).toContain(`Previous workspace ${previous.workspaceId} (local)`);
-    expect(result.stdout).toContain(`Switch back: ub workspace use ${previous.workspaceId} --hub 'local'`);
-    const switched = await runUbAsync(["workspace", "use", previous.workspaceId, "--hub", "local"], box);
+    expect(readWorkspaceHub(previous.workspaceId, box.env)).toBe(previous.hubUrl);
+    expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBeNull();
+    expect(existsSync(join(box.dataHome, "uberblick", `${previous.workspaceId}.sqlite`))).toBe(false);
+    expect(result.stdout).toContain(`Previous workspace ${previous.workspaceId} (${previous.hubUrl})`);
+    expect(result.stdout).toContain(`Switch back: ub workspace use ${previous.workspaceId}\n`);
+    const switched = await runUbAsync(["workspace", "use", previous.workspaceId], box);
     expect(switched.status, switched.output).toBe(0);
     expect(selected(box)).toEqual(previous);
   });
@@ -121,6 +127,7 @@ describe("workspace creation and promotion", () => {
     const result = await runUbAsync(["workspace", "promote", endpoint], box);
     expect(result.status, result.output).toBe(0);
     expect(Object.keys(selected(box)).sort()).toEqual(["hubUrl", "workspaceId"]);
+    expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBe(endpoint);
     await removeHubLogin(`http://127.0.0.1:${hub.port}`, box.env);
     const status = await runUbAsync(["status", "--json"], box, { HUB_AUTH_TOKEN: "synthetic-local-secret" });
     expect(JSON.parse(status.stdout).hub.status).toBe("auth-failed");
@@ -151,6 +158,7 @@ describe("workspace creation and promotion", () => {
     expect(accessRows(hub).receipts).toHaveLength(1);
     expect(bindingBytes(box)).toBe(before);
     expect(result.output).toContain("Project binding unchanged");
+    expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBeNull();
   });
 
   it("refuses a different environment binding before reserving or replacing the project selection", async () => {
@@ -206,6 +214,7 @@ describe("workspace creation and promotion", () => {
     expect(result.output).not.toContain("waiting for approval…");
     expect(result.output).not.toContain(login.credential.key);
     expect(selected(box)).toEqual({ workspaceId: selected(box).workspaceId, hubUrl: endpoint });
+    expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBe(endpoint);
     const privateConfig = JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
     expect(privateConfig.hubAdmissions).toEqual({ [endpoint]: "device" });
     const remote = await inspectRemote(resolveMcpConfig({ ...box.env, WORKSPACE_ID: selected(box).workspaceId, HUB_URL: endpoint, HUB_ADMISSION: "device" }), { documents: true, workspace: true });
