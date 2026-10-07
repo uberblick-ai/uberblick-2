@@ -114,8 +114,8 @@ test("a row menu keeps its original row through a collaborator edit and insertio
     await page.goto(new URL(`/${ws()}/${fixture.uuid}`, harness().appUrl).href);
     const table = page.locator(".ub-table");
     await expect(table.locator("tr")).toHaveCount(3);
-    await table.locator("tr").last().locator("td").first().click();
-    await page.keyboard.press("Control+Alt+r");
+    await table.hover();
+    await page.getByRole("button", { name: "Row 3 actions", exact: true }).click();
     const remove = page.getByRole("menuitem", { name: "Delete row", exact: true });
     await expect(remove).toBeVisible();
     const edited = SOURCE.replace("beta", "edited beta");
