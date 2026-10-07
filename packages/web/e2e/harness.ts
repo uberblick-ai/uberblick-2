@@ -176,6 +176,8 @@ async function buildBundle(bundleDir: string, hubUrl: string, workspace: string)
 }
 
 export interface Harness {
+  /** Public fixture identities for access-control browser proofs. */
+  readonly access?: { otherDeviceId: string; foreignDeviceId: string };
   /** Where the browser goes. This run's real `ub open` address. */
   readonly appUrl: string;
   /**
@@ -316,7 +318,7 @@ export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Pro
     .toBe(true);
 }
 
-export async function startHarness(): Promise<Harness> {
+export async function startHarness(options: { accessRole?: "admin" | "member" } = {}): Promise<Harness> {
   const runDir = mkdtempSync(join(tmpdir(), `uberblick-e2e-${process.env.UB_AGENTS_RUN ?? "local"}-`));
   const bundleDir = join(runDir, "bundle");
   // Fresh and decorated per harness: room keys stay isolated, while `/`
@@ -336,6 +338,17 @@ export async function startHarness(): Promise<Harness> {
     debounce: 200,
     maxDebounce: 1_000,
     shutdownTimeoutMs: 5_000,
+    ...(options.accessRole === undefined ? {} : {
+      github: { clientId: "Iv1.0123456789abcdef", fetch: async (input: Parameters<typeof fetch>[0]) => {
+        const url = String(input);
+        if (url.endsWith("/users/missing-user")) return Response.json({}, { status: 404 });
+        if (url.endsWith("/users/rate-limited")) return Response.json({}, { status: 429 });
+        if (url.endsWith("/users/new-agent") || url.endsWith("/user/9001")) {
+          return Response.json({ id: 9001, login: "new-agent", type: "User" });
+        }
+        throw new Error("Unexpected GitHub request in access browser fixture");
+      } },
+    }),
   };
 
   let hub: Hub | null = null;
@@ -346,7 +359,7 @@ export async function startHarness(): Promise<Harness> {
   // listening socket, no stray database — and must surface its own error rather
   // than a cleanup error on top of it.
   try {
-    hub = await createHub(config);
+    hub = await createHub(config, options.accessRole === undefined ? {} : { deviceCredentials: true });
     // Every later start reuses the port the first one was given, so the served
     // HUB_URL keeps pointing at the hub across a restart.
     const port = hub.port;
@@ -360,7 +373,28 @@ export async function startHarness(): Promise<Harness> {
       { mode: 0o600 },
     );
     const credentials = join(configDir, "credentials.json");
-    writeFileSync(credentials, `${JSON.stringify({ signingSecret: SECRET }, null, 2)}\n`, {
+    let storedCredentials: unknown = { signingSecret: SECRET };
+    let access: Harness["access"];
+    if (options.accessRole !== undefined) {
+      const { principals, memberships, credentials: registry } = hub;
+      if (principals === undefined || memberships === undefined || registry === undefined) {
+        throw new Error("Access browser fixture needs GitHub registries");
+      }
+      const principal = principals.identify("1234", "browser-person");
+      memberships.grant({ workspaceId: workspaceUuid, principalId: principal.id, role: options.accessRole });
+      const foreign = principals.identify("5678", "other-admin");
+      memberships.grant({ workspaceId: workspaceUuid, principalId: foreign.id, role: "admin" });
+      const issue = (principalId: string) => registry.issue({ principalId, deviceId: randomUUID(), workspaces: [workspaceUuid] });
+      const current = issue(principal.id);
+      const other = issue(principal.id);
+      const foreignDevice = issue(foreign.id);
+      const { replacedAt: _replaced, ...record } = current.record;
+      storedCredentials = { hubLogins: { [`http://127.0.0.1:${port}`]: {
+        identity: principal, credential: { record, key: Buffer.from(current.keyBytes).toString("base64url") },
+      } } };
+      access = { otherDeviceId: other.record.deviceId, foreignDeviceId: foreignDevice.record.deviceId };
+    }
+    writeFileSync(credentials, `${JSON.stringify(storedCredentials, null, 2)}\n`, {
       mode: 0o600,
     });
     chmodSync(credentials, 0o600);
@@ -378,6 +412,7 @@ export async function startHarness(): Promise<Harness> {
     };
 
     return {
+      ...(access === undefined ? {} : { access }),
       appUrl,
       hubUrl,
       authSecret: SECRET,
@@ -386,7 +421,7 @@ export async function startHarness(): Promise<Harness> {
       secondWorkspace,
       async startHub() {
         if (hub !== null) return;
-        hub = await createHub({ ...config, port });
+        hub = await createHub({ ...config, port }, options.accessRole === undefined ? {} : { deviceCredentials: true });
       },
       stopHub,
       async restartOpen({ authenticated }) {

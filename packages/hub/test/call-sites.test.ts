@@ -55,8 +55,8 @@ describe("production token minting sites", () => {
     ]);
     // Operation-bound request proofs: 60 seconds, stored credential kid.
     expect(mentioning("mintRequestProof(")).toEqual([
-      "packages/cli/src/access-management.ts",
       "packages/hub/src/device-login.ts",
+      "packages/hub/src/management-client.ts",
     ]);
   });
 });

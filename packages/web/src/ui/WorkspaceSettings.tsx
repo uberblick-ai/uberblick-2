@@ -1,4 +1,4 @@
-/** General facts and the workspace tag-catalog curation page. */
+/** General facts, tag-catalog curation and live workspace access. */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent, ReactElement, ReactNode } from "react";
@@ -17,7 +17,7 @@ import {
 } from "@uberblick/schema";
 import type { TagCatalogEntry } from "@uberblick/schema";
 import { endpointSourceLabel } from "../config.js";
-import type { HubEndpoint } from "../config.js";
+import type { HubEndpoint, LocalServing } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
 import { useRoomStatus } from "./hooks.js";
@@ -27,6 +27,7 @@ import { Input } from "./shadcn/input.js";
 import { statusReading } from "./status-reading.js";
 import { useTagCatalog } from "./tags.js";
 import { useWorkspaceName } from "./workspace-names.js";
+import { AccessSettings } from "./AccessSettings.js";
 
 /** What a SyncPanel-style fact reads as before this client knows it. */
 const UNKNOWN = "—";
@@ -409,6 +410,8 @@ export function WorkspaceSettings({
   connection,
   catalogConnection = null,
   agentSessions,
+  serving = null,
+  subject = "browser",
 }: {
   page?: SettingsPage;
   workspace: Workspace;
@@ -416,8 +419,12 @@ export function WorkspaceSettings({
   connection: RoomConnection | null;
   catalogConnection?: RoomConnection | null;
   agentSessions: number;
+  serving?: LocalServing | null;
+  subject?: string;
 }): ReactElement {
-  return page === "tags" ? (
+  return page === "access" ? (
+    <AccessSettings key={workspace.uuid} workspace={workspace} serving={serving} subject={subject} />
+  ) : page === "tags" ? (
     <TagSettings workspace={workspace} connection={catalogConnection} />
   ) : (
     <GeneralSettings

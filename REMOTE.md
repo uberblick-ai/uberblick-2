@@ -839,6 +839,30 @@ or ambiguous answer returns 503 `lookup-unavailable`; retry when lookup is
 available. Malformed handles or IDs return 400 `invalid-request` before any
 GitHub call. Every failed lookup grants nothing.
 
+In the web interface served by `ub open`, workspace settings → **Access**
+reads this management state from the bound hub. Administrators can resolve a
+GitHub handle, confirm the returned login and permanent account ID, and grant
+access immediately, including before the account's first sign-in. The default
+role is member. Administrators can also change roles and remove members;
+everyone can see their own role and list or revoke their own devices.
+
+The browser calls only the local `ub open` process. Its management route
+requires the served host, exact served origin and existing local browser
+authentication, and accepts operations only for the served workspace on its
+bound hub. Device credentials and management proofs stay in that process.
+Every visit and change needs a reachable hub; access state is never saved in
+collaborative settings, stored locally or queued for later. Local-only
+workspaces have no members until `ub workspace promote` shares them, and hubs
+without GitHub sign-in offer no access controls.
+
+Removing a member ends that account's access to this workspace on every device.
+Revoking a device ends that one device's access to the hub. Downloaded documents
+stay where they are in either case. Revoking this computer stops its hub sync
+until `ub auth login <hub>` is run again. An acknowledged change remains applied
+even if the next read is refused, including after removing yourself or revoking
+this computer. A `closure-failed` answer with `applied: true` also reports an
+applied change, with a failed live closure.
+
 ## Establish a workspace's first administrator
 
 For an existing deployment, or a workspace other than a fresh hub's default,
