@@ -127,6 +127,8 @@ async function capture(page: Page, info: TestInfo, label: string, colorScheme: "
 async function tabTo(page: Page, name: string): Promise<void> {
   const target = button(page, name);
   for (let index = 0; index < 40; index += 1) {
+    const focusedName = await page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.tagName);
+    expect(await target.count(), `Tab reached ${focusedName ?? "no element"} and lost the table controls`).toBe(1);
     if (await target.evaluate((element) => element === document.activeElement)) return;
     await page.keyboard.press("Tab");
   }
@@ -137,6 +139,7 @@ test("a caret table and another hovered table reveal their own controls together
   const initial = await openTable(page);
   const originalId = await initial.getAttribute("id");
   if (originalId === null) throw new Error("e2e: table has no block identity");
+  await editor(page).locator(":scope > p").first().click();
   await placeCaret(page);
   await page.keyboard.press("Enter");
   await page.keyboard.type("/table");
@@ -248,17 +251,29 @@ test("keyboard reaches insertion buttons from a table caret and each button inse
   await expect(button(page, "Insert column before 1")).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(table.locator("th")).toHaveCount(4);
-  await activate(table.locator("td").first(), info);
-  await page.keyboard.press("Control+Alt+t");
-  await tabTo(page, "Insert column after 4");
-  await page.keyboard.press("Space");
+  if (info.project.name === "webkit-iphone") {
+    // iOS's native Tab leaves the button set; caret shortcuts keep every
+    // insertion available to an attached keyboard there.
+    await caretIn(table.locator("tr").nth(1).locator("td").last(), info);
+    await page.keyboard.press("Control+Alt+ArrowRight");
+  } else {
+    await activate(table.locator("td").first(), info);
+    await page.keyboard.press("Control+Alt+t");
+    await tabTo(page, "Insert column after 4");
+    await page.keyboard.press("Space");
+  }
   await expect(table.locator("th")).toHaveCount(5);
   await expect(table.locator("tr").nth(1).locator("td")).toHaveCount(5);
 
-  await activate(table.locator("td").first(), info);
-  await page.keyboard.press("Control+Alt+t");
-  await tabTo(page, "Insert row after 3");
-  await page.keyboard.press("Enter");
+  if (info.project.name === "webkit-iphone") {
+    await caretIn(table.locator("tr").last().locator("td").first(), info);
+    await page.keyboard.press("Control+Alt+ArrowDown");
+  } else {
+    await activate(table.locator("td").first(), info);
+    await page.keyboard.press("Control+Alt+t");
+    await tabTo(page, "Insert row after 3");
+    await page.keyboard.press("Enter");
+  }
   await expect(table.locator("tr")).toHaveCount(4);
   await expect(table.locator("tr").last().locator("td")).toHaveCount(5);
   await caretIn(table.locator("tr").last().locator("td").first(), info);
@@ -267,6 +282,45 @@ test("keyboard reaches insertion buttons from a table caret and each button inse
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(button(page, "Row 4 actions")).toBeFocused();
+  await pageFits(page);
+});
+
+test("caret shortcuts insert on each side of the current cell and preserve the header", { tag: "@webkit" }, async ({ page }, info) => {
+  const table = await openTable(page);
+  await caretIn(table.locator("th").nth(1), info);
+  await page.keyboard.insertText("Target header");
+  await caretIn(table.locator("tr").nth(1).locator("td").nth(1), info);
+  await page.keyboard.insertText("Target body");
+  await caretIn(table.locator("tr").last().locator("td").nth(1), info);
+  await page.keyboard.insertText("Last body");
+
+  await caretIn(table.locator("th").nth(1), info);
+  await page.keyboard.press("Control+Alt+ArrowLeft");
+  await expect(table.locator("th")).toHaveCount(4);
+  await expect(table.locator("th").nth(2)).toHaveText("Target header");
+  await caretIn(table.locator("th").nth(2), info);
+  await page.keyboard.press("Control+Alt+ArrowRight");
+  await expect(table.locator("th")).toHaveCount(5);
+  await expect(table.locator("th").nth(2)).toHaveText("Target header");
+  await expect(table.locator("tr").nth(1).locator("td")).toHaveCount(5);
+  await expect(table.locator("tr").last().locator("td")).toHaveCount(5);
+
+  await caretIn(table.locator("tr").nth(1).locator("td").nth(2), info);
+  await page.keyboard.press("Control+Alt+ArrowUp");
+  await expect(table.locator("tr")).toHaveCount(4);
+  await expect(table.locator("tr").nth(1).locator("td")).toHaveText(["", "", "", "", ""]);
+  await expect(table.locator("tr").nth(2)).toContainText("Target body");
+  await caretIn(table.locator("tr").nth(2).locator("td").nth(2), info);
+  await page.keyboard.press("Control+Alt+ArrowDown");
+  await expect(table.locator("tr")).toHaveCount(5);
+  await expect(table.locator("tr").nth(3).locator("td")).toHaveText(["", "", "", "", ""]);
+  await expect(table.locator("tr").last()).toContainText("Last body");
+
+  await caretIn(table.locator("th").nth(2), info);
+  await page.keyboard.press("Control+Alt+ArrowUp");
+  await expect(table.locator("tr")).toHaveCount(5);
+  await expect(table.locator("tr").first().locator("td")).toHaveCount(0);
+  await expect(table.locator("th").nth(2)).toHaveText("Target header");
   await pageFits(page);
 });
 

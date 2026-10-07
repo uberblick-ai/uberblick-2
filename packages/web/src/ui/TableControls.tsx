@@ -74,7 +74,7 @@ function TableControlSurface({ tableId, editor, host }: {
   const [menu, setMenu] = useState<TableRowTarget | null>(null);
   const menuRef = useRef<TableRowTarget | null>(null);
   const hovered = useRef<string | null>(null);
-  const touch = useRef(editor.view.dom.ownerDocument.defaultView?.matchMedia("(pointer: coarse)").matches ?? false);
+  const touch = useRef(editor.view.dom.ownerDocument.defaultView?.matchMedia?.("(pointer: coarse)").matches ?? false);
   const pendingFocus = useRef(false);
   const controls = useRef<HTMLDivElement | null>(null);
   const columnStrip = useRef<HTMLDivElement | null>(null);
@@ -178,11 +178,24 @@ function TableControlSurface({ tableId, editor, host }: {
       if (event.isComposing || !editor.isEditable) return;
       const rowMenu = event.key === "F10" && event.shiftKey || event.ctrlKey && event.altKey && event.code === "KeyR";
       const insertion = event.ctrlKey && event.altKey && event.code === "KeyT";
-      if (!rowMenu && !insertion) return;
+      const actions: Record<string, TableAction> = {
+        ArrowLeft: "column-before", ArrowRight: "column-after", ArrowUp: "row-before", ArrowDown: "row-after",
+      };
+      const action = event.ctrlKey && event.altKey ? actions[event.key] : undefined;
+      if (!rowMenu && !insertion && action === undefined) return;
       const caret = caretTable(editor);
       if (caret?.id !== tableId) return;
       const target = caret === null ? null : tableRowTarget(editor, caret.id, caret.row);
       if (target === null) return;
+      // Native button Tab navigation varies on iOS. These caret shortcuts use
+      // the same guarded TableKit action and require no custom focus traversal.
+      if (action !== undefined) {
+        if (actOnTable(editor, target, editor.state.selection.$head.index(2), action)) {
+          event.preventDefault();
+          editor.view.focus();
+        }
+        return;
+      }
       event.preventDefault();
       if (rowMenu) {
         acted.current = false;
@@ -204,8 +217,8 @@ function TableControlSurface({ tableId, editor, host }: {
     editor.on("focus", read);
     editor.on("blur", blur);
     // Table text can reflow after fonts load or the pane changes width.
-    const observer = new ResizeObserver(read);
-    observer.observe(dom);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(read);
+    observer?.observe(dom);
     refresh.current = read;
     read();
     return () => {
@@ -220,7 +233,7 @@ function TableControlSurface({ tableId, editor, host }: {
       editor.off("transaction", read);
       editor.off("focus", read);
       editor.off("blur", blur);
-      observer.disconnect();
+      observer?.disconnect();
       refresh.current = () => {};
     };
   }, [editor, host, tableId]);
@@ -235,6 +248,7 @@ function TableControlSurface({ tableId, editor, host }: {
   }, [geometry]);
 
   useEffect(() => {
+    const dom = editor.view.dom;
     const context = (event: MouseEvent): void => {
       const element = event.target instanceof Element ? event.target : null;
       const row = element?.closest("tr");
@@ -247,8 +261,8 @@ function TableControlSurface({ tableId, editor, host }: {
       acted.current = false;
       setTarget(target);
     };
-    editor.view.dom.addEventListener("contextmenu", context);
-    return () => editor.view.dom.removeEventListener("contextmenu", context);
+    dom.addEventListener("contextmenu", context);
+    return () => dom.removeEventListener("contextmenu", context);
   }, [editor, setTarget, tableId]);
 
   if (geometry === null) return null;
@@ -285,7 +299,7 @@ function TableControlSurface({ tableId, editor, host }: {
         <button key={boundary} type="button" className={button}
           style={{ left, top: 0, width: size, height: size }}
           aria-label={boundary === 0 ? "Insert column before 1" : `Insert column after ${boundary}`}
-          title="Insert column · Control+Alt+T reaches table controls"
+          title="Insert column · Control+Alt+Left/Right from a cell; Control+Alt+T reaches controls"
           aria-keyshortcuts="Control+Alt+T"
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => act(0, boundary === 0 ? 0 : boundary - 1, boundary === 0 ? "column-before" : "column-after")}>
@@ -297,7 +311,7 @@ function TableControlSurface({ tableId, editor, host }: {
       {geometry.rows.map((row, index) => (
         <button key={`insert-${row.key}`} type="button" className={button}
           style={{ right: 44, top: row.bottom - size / 2, width: size, height: size }}
-          aria-label={`Insert row after ${index + 1}`} title="Insert row"
+          aria-label={`Insert row after ${index + 1}`} title="Insert row · Control+Alt+Up/Down from a cell"
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => act(index, 0, "row-after")}>
           <span aria-hidden="true">+</span>

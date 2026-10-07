@@ -28,7 +28,10 @@ async function publishTable(options: { source?: string; ragged?: boolean; decisi
   initDoc(doc, { uuid, title });
   const source = options.source ?? SOURCE;
   const id = appendBlock(doc, { type: "table", text: source });
-  if (options.decision) setKind(doc, "decision");
+  if (options.decision) {
+    setKind(doc, "decision");
+    setStatus(doc, "open");
+  }
   if (options.ragged) {
     const other = new Y.Doc();
     try {
@@ -170,8 +173,9 @@ test("deciding a record closes its table menu and removes structural controls", 
     await page.goto(new URL(`/${ws()}/${fixture.uuid}`, harness().appUrl).href);
     const table = page.locator(".ub-table");
     await expect(table.locator("tr")).toHaveCount(3);
-    await table.locator("td").first().click();
-    await page.keyboard.press("Control+Alt+r");
+    await expect(page.locator(".ub-editor .ProseMirror")).toHaveAttribute("contenteditable", "true");
+    await table.hover();
+    await page.getByRole("button", { name: "Row 2 actions", exact: true }).click();
     await expect(page.getByRole("menuitem", { name: "Delete row", exact: true })).toBeVisible();
     setStatus(fixture.doc, "decided");
     upsertDirectoryEntry(fixture.directory, {
