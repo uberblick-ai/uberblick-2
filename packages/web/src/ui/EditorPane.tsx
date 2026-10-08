@@ -293,7 +293,8 @@ function TldrCallout({
  *    redraw cadence is.
  * 2. The mark and the word each sit in a fixed-width slot, so swapping the dot
  *    for the spinner and "synced" for "syncing…" moves nothing to their right.
- * 3. The fixed sync slots keep the stable freshness and peer readings still
+ * 3. The fixed sync slots keep the freshness and peer readings still. In a
+ *    document, the reserved warning band keeps the rule and prose still too,
  *    while the transient backlog fact appears only when relevant.
  *
  * The suppression in (3) is safe only because a non-empty backlog is itself
@@ -311,6 +312,7 @@ export function StatusLine({
   notSharedReason = null,
   syncDetails = false,
   onActivatePresence,
+  documentLayout = false,
 }: {
   connection: RoomConnection;
   /**
@@ -338,6 +340,8 @@ export function StatusLine({
   syncDetails?: boolean;
   /** Reveal one currently resolvable remote caret without following it. */
   onActivatePresence?: ((session: RemotePresence) => void) | undefined;
+  /** Reserve warnings and presence only beside hydrated prose. */
+  documentLayout?: boolean;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const raw = rawSyncState(status);
@@ -353,7 +357,7 @@ export function StatusLine({
   // current room's roster in its ordinary slot while that word is blank; the
   // directory's roster is already excluded by App's room pairing (#606).
   const peerStrip = (
-    <PeerCluster presence={presence} onActivate={onActivatePresence} />
+    <PeerCluster presence={presence} onActivate={onActivatePresence} reserveSpace={documentLayout} />
   );
   const mark = (tone: SyncState | null): ReactElement => (
     <span className="ub-status-mark" aria-hidden="true">
@@ -456,7 +460,9 @@ export function StatusLine({
       <div className="flex min-w-0 min-h-7 items-center gap-2">
         {syncReading}
         {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
+        {!documentLayout && !blank && saveNote}
         {!blank && updatedReading}
+        {!documentLayout && !blank && pendingReading}
         {/* Circles, not name pills (#494): the strip is the constrained surface,
             and a row of words pushes the status line around as sessions come and
             go. The detail a name carried is on the avatar's hover instead — which
@@ -464,12 +470,13 @@ export function StatusLine({
             caret sits in is resolved once, in `readPresence`. */}
         {reading.detail === null && peerStrip}
       </div>
-      {/* Supplementary warnings can wrap independently without consuming the
-          sync facts' reserved widths or colliding with the capped cluster. */}
-      {!blank && (saveNote !== null || pendingReading !== null) && (
-        <div className="ub-status-notes flex min-w-0 flex-wrap items-center gap-2 mt-2">
-          {saveNote}
-          {pendingReading}
+      {/* Reserve two lines for simultaneous not-saved and backlog readings,
+          including a long count. Only ink changes while typing or reconnecting,
+          even when a desktop Threads rail leaves too little room inline. */}
+      {documentLayout && (
+        <div className="ub-status-notes flex min-w-0 min-h-[2lh] items-start gap-2 mt-2 [&>.ub-not-saved]:flex-none [&>.ub-pending]:min-w-0">
+          {!blank && saveNote}
+          {!blank && pendingReading}
         </div>
       )}
       {/* Reserve the full wrapping line even before the first status answer,
@@ -1066,6 +1073,7 @@ export function EditorPane({
             everything else to the waiting screen. */}
         <StatusLine
           connection={connection}
+          documentLayout
           presence={presence}
           lastUpdated={updatedAt}
           onLastUpdatedChange={onLastUpdatedChange}

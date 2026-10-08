@@ -4,17 +4,17 @@
  * The word fixtures below change only rendered readings, keeping the production
  * slots and marks. They exercise every label without manufacturing transport
  * failures; status-line and serving-status unit tests own state selection.
+ * Real delayed acknowledgements and hub loss prove note transitions preserve
+ * the status rule and the prose, including beside the desktop threads rail.
  */
 
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
-import { AUTH_REJECTED } from "@uberblick/hub/protocol";
-import { STORE_REFUSED, TOKEN_MISSING } from "../src/ui/status-reading.js";
 
 const { harness, openApp } = setupHarness();
-const drawerWidths = [375, 390, 430, 744, 932, 1279];
+const layoutWidths = [375, 390, 430, 744, 932, 1279, 1280, 1440];
 const directReadings = [
   "", "synced", "syncing…", "offline", "update required", "no hub token",
   "not authorized", "edit refused",
@@ -28,22 +28,20 @@ const hubReasons = [
   "this machine cannot read its login — run ub auth status and follow its credential-store recovery",
   "this hub cannot renew the login — ask its operator to configure sign-in",
 ];
-const additionalReadings = [
-  { word: "offline", saved: "not saved", detail: null, pending: null },
-  { word: "offline", saved: "not saved", detail: null, pending: "1 sync message unacked" },
-  { word: "syncing…", saved: null, detail: null, pending: "1 sync message unacked" },
-  { word: "update required", saved: null, detail: "this app is older than the hub — update it and reload (app 1, hub 2); this document is not saved", pending: null },
-  { word: "no hub token", saved: null, detail: TOKEN_MISSING, pending: null },
-  { word: "not authorized", saved: null, detail: `${AUTH_REJECTED}; this document is not saved`, pending: null },
-  { word: "edit refused", saved: null, detail: STORE_REFUSED, pending: null },
-];
 
 async function settlePane(page: Page): Promise<void> {
   await page.locator(".ub-document-pane").evaluate(async (pane) => {
     // Read style to instantiate the resize transition, then wait for that
-    // finite pane animation. Spinner and caret animations are unrelated.
-    getComputedStyle(pane).paddingInlineStart;
-    await Promise.all(pane.getAnimations().map((animation) => animation.finished));
+    // finite pane animation. Crossing xl can cancel and replace a transition;
+    // wait for the replacement too. Spinner and caret animations are unrelated.
+    while (true) {
+      getComputedStyle(pane).paddingInlineStart;
+      const animations = pane.getAnimations().filter((animation) =>
+        animation.playState === "running" || animation.pending,
+      );
+      if (animations.length === 0) return;
+      await Promise.allSettled(animations.map((animation) => animation.finished));
+    }
   });
 }
 
@@ -67,7 +65,9 @@ async function statusGeometry(page: Page) {
     const peerCluster = status.querySelector(".ub-peers");
     const cluster = peerCluster === null ? null : box(peerCluster);
     const updated = box(find(".ub-last-updated"));
-    const notes = [...status.querySelectorAll(".ub-not-saved, .ub-pending, .ub-status-reason, [data-status-layout-detail]")].map((note) => ({ text: note.textContent, rect: box(note) }));
+    const notes = [...status.querySelectorAll(".ub-not-saved, .ub-pending, .ub-status-reason")]
+      .filter((note) => note.getClientRects().length > 0)
+      .map((note) => ({ text: note.textContent, rect: box(note) }));
     const facts = [...status.querySelectorAll(".ub-status-word")].map((word) => {
       const range = document.createRange();
       range.selectNodeContents(word);
@@ -186,85 +186,6 @@ async function checkReadings(page: Page, upstream: boolean) {
   return positions;
 }
 
-/**
- * Match StatusLine's supplementary line: pending and not-saved wrap below the
- * readings; a refusal has one fact plus its cause and suppresses presence.
- * This is a layout fixture, never evidence for transport or state selection.
- */
-async function checkAdditionalReadings(page: Page, upstream: boolean) {
-  const positions: Array<{ status: Awaited<ReturnType<typeof statusGeometry>>["status"]; prose: Awaited<ReturnType<typeof statusGeometry>>["prose"] }> = [];
-  for (const fixture of additionalReadings) {
-    await page.evaluate(({ reading, direct }) => {
-      const sync = document.querySelector<HTMLElement>(".ub-sync-toggle");
-      const primary = sync?.querySelector<HTMLElement>(".ub-status-word");
-      const row = sync?.parentElement;
-      const status = sync?.closest(".ub-status");
-      if (sync === null || sync === undefined || primary === null || primary === undefined || row === null || row === undefined || status === null || status === undefined) throw new Error("e2e: missing status fixture row");
-      const originals = [...row.childNodes];
-      const statusNodes = [...status.childNodes];
-      const factNodes = [...sync.childNodes];
-      const primaryClass = primary.className;
-      const primaryText = primary.textContent;
-      const hubWord = sync.querySelector(".ub-status-word--hub");
-      const hubText = hubWord?.textContent ?? null;
-      const restore = () => {
-        primary.className = primaryClass;
-        primary.textContent = primaryText;
-        if (hubWord !== null) hubWord.textContent = hubText;
-        sync.replaceChildren(...factNodes);
-        row.replaceChildren(...originals);
-        status.replaceChildren(...statusNodes);
-      };
-      // Store only a synchronous cleanup callback on the page for the next
-      // evaluation; no production state or transport is overridden.
-      (window as unknown as { restoreStatusLayout?: () => void }).restoreStatusLayout = restore;
-      const notes = document.createElement("div");
-      notes.className = "ub-status-notes flex min-w-0 flex-wrap items-center gap-2 mt-2";
-      const add = (text: string | null, className: string, detail = false) => {
-        if (text === null) return;
-        const note = document.createElement("span");
-        note.className = className;
-        note.textContent = text;
-        if (detail) note.dataset.statusLayoutDetail = "";
-        if (detail) row.insertBefore(note, row.querySelector(".ub-last-updated"));
-        else notes.appendChild(note);
-      };
-      if (reading.word === "syncing…" && !direct) {
-        primary.textContent = "saving here…";
-        if (hubWord !== null) hubWord.textContent = "not synced with hub";
-      } else {
-        primary.classList.remove("ub-status-word--saved");
-        primary.textContent = reading.word;
-        if (factNodes[1] !== undefined) factNodes[1].remove();
-      }
-      if (reading.detail !== null) row.querySelector(".ub-peers")?.remove();
-      add(reading.saved, "ub-muted ub-not-saved");
-      add(reading.detail, "ub-muted", true);
-      if (reading.pending !== null) {
-        const pending = document.createElement("span");
-        pending.className = "ub-pending rounded-(--radius-sm) bg-(--status-warning-subtle) text-(--foreground) px-[0.3rem]";
-        pending.textContent = reading.pending;
-        notes.appendChild(pending);
-      }
-      if (notes.childNodes.length > 0) status.insertBefore(notes, row.nextSibling);
-    }, { reading: fixture, direct: upstream });
-    try {
-      const geometry = await statusGeometry(page);
-      const label = `${page.viewportSize()?.width}px: ${fixture.word} / ${fixture.pending ?? fixture.detail ?? fixture.saved}`;
-      expect(geometry.scrollWidth, label).toBe(geometry.clientWidth);
-      expect(geometry.problems, label).toEqual([]);
-      positions.push({ status: geometry.status, prose: geometry.prose });
-    } finally {
-      await page.evaluate(() => {
-        const fixtureWindow = window as unknown as { restoreStatusLayout?: () => void };
-        fixtureWindow.restoreStatusLayout?.();
-        delete fixtureWindow.restoreStatusLayout;
-      });
-    }
-  }
-  return positions;
-}
-
 for (const upstream of [true, false]) {
   test(`Contents leaves every status reading contained and presence stable — ${upstream ? "hub direct" : "ub open"} @webkit`, async ({
     browser, browserName, contextOptions, viewport, hasTouch, isMobile,
@@ -276,7 +197,27 @@ for (const upstream of [true, false]) {
       ...(deviceScaleFactor === undefined ? {} : { deviceScaleFactor }),
       ...(userAgent === undefined ? {} : { userAgent }),
     };
-    const page = await openApp(browser, "/", { upstream, contextOptions: device });
+    let holdReplies = false;
+    const replies: Array<() => void> = [];
+    const releaseReplies = () => {
+      holdReplies = false;
+      for (const send of replies.splice(0)) send();
+    };
+    const page = await openApp(browser, "/", {
+      upstream,
+      contextOptions: device,
+      beforeNavigate: async (target) => {
+        // Delay real server acknowledgements after hydration. Browser writes
+        // still reach the serving boundary; no status or markup is replaced.
+        await target.routeWebSocket("**", (socket) => {
+          const server = socket.connectToServer();
+          server.onMessage((message) => {
+            if (holdReplies) replies.push(() => socket.send(message));
+            else socket.send(message);
+          });
+        });
+      },
+    });
     if (await page.getByRole("button", { name: "Show document list", exact: true }).isVisible()) {
       await page.getByRole("button", { name: "Show document list", exact: true }).click();
     }
@@ -293,18 +234,41 @@ for (const upstream of [true, false]) {
     if (!upstream) await expect(page.locator(".ub-status-word--hub")).toHaveText("synced with hub");
     await expect(page.locator(".ub-peers [data-peer-id]")).toHaveCount(0);
 
-    const widths = browserName === "chromium" ? drawerWidths : [page.viewportSize()?.width ?? 1280];
+    const widths = browserName === "chromium" ? layoutWidths : [page.viewportSize()?.width ?? 1280];
     const height = page.viewportSize()?.height ?? 800;
     const empty = new Map<number, Awaited<ReturnType<typeof statusGeometry>>>();
     const emptyReadings = new Map<number, Awaited<ReturnType<typeof checkReadings>>>();
-    const emptyAdditional = new Map<number, Awaited<ReturnType<typeof checkAdditionalReadings>>>();
+    const queueUpdate = async () => {
+      // placeCaret proves the first block's edge. Desktop retains the old
+      // paragraph selection, so move to the document start before using it.
+      if (browserName === "chromium") {
+        await editor(page).focus();
+        await page.keyboard.press("Control+Home");
+      }
+      await placeCaret(page);
+      // Real whitespace update, without another rendered prose line.
+      await page.keyboard.type(" ");
+      await page.locator(".ub-title").focus();
+      await expect(page.locator(".ub-pending:visible")).toHaveText(/\d+ sync messages? unacked/);
+    };
+    const expectStable = async (state: string) => {
+      for (const width of widths) {
+        if (browserName === "chromium") await page.setViewportSize({ width, height });
+        await settlePane(page);
+        const geometry = await statusGeometry(page);
+        const label = `${state} at ${width}px`;
+        expect(geometry.scrollWidth, label).toBe(geometry.clientWidth);
+        expect(geometry.problems, label).toEqual([]);
+        expect(geometry.status, `${label}: status moved`).toEqual(empty.get(width)?.status);
+        expect(geometry.prose, `${label}: prose moved`).toEqual(empty.get(width)?.prose);
+      }
+    };
     for (const width of widths) {
       if (browserName === "chromium") await page.setViewportSize({ width, height });
       await settlePane(page);
       await expect(page.getByRole("button", { name: "Contents 1" })).toBeVisible();
       empty.set(width, await statusGeometry(page));
       emptyReadings.set(width, await checkReadings(page, upstream));
-      emptyAdditional.set(width, await checkAdditionalReadings(page, upstream));
     }
 
     const peers: Page[] = [];
@@ -323,7 +287,6 @@ for (const upstream of [true, false]) {
         if (browserName === "chromium") await page.setViewportSize({ width, height });
         await settlePane(page);
         expect(await checkReadings(page, upstream), `readings moved after joining at ${width}px`).toEqual(emptyReadings.get(width));
-        expect(await checkAdditionalReadings(page, upstream), `supplementary readings moved after joining at ${width}px`).toEqual(emptyAdditional.get(width));
         const full = await statusGeometry(page);
         expect(full.status, `status moved after joining at ${width}px`).toEqual(empty.get(width)?.status);
         expect(full.prose, `prose moved after joining at ${width}px`).toEqual(empty.get(width)?.prose);
@@ -333,7 +296,20 @@ for (const upstream of [true, false]) {
           expect(circle.overlap).toBeLessThan(circle.width / 2);
         }
       }
+      await expect(page.locator(".ub-pending:visible")).toHaveCount(0);
+      holdReplies = true;
+      try {
+        await queueUpdate();
+        await expect.poll(() => replies.length).toBeGreaterThan(0);
+        await expectStable("real unacknowledged update");
+      } finally {
+        releaseReplies();
+      }
+      await expect(page.locator(".ub-pending:visible")).toHaveCount(0);
+      await expect(page.locator(".ub-status-word").first()).toHaveText(upstream ? "synced" : "saved here");
+      await expectStable("acknowledged update");
     } finally {
+      releaseReplies();
       await Promise.all(peers.map((peer) => peer.context().close()));
     }
     await expect(page.locator(".ub-peers [data-peer-id]")).toHaveCount(0);
@@ -345,25 +321,79 @@ for (const upstream of [true, false]) {
       expect(left.status, `status moved after leaving at ${width}px`).toEqual(empty.get(width)?.status);
       expect(left.prose, `prose moved after leaving at ${width}px`).toEqual(empty.get(width)?.prose);
       expect(await checkReadings(page, upstream), `readings moved after leaving at ${width}px`).toEqual(emptyReadings.get(width));
-      expect(await checkAdditionalReadings(page, upstream), `supplementary readings moved after leaving at ${width}px`).toEqual(emptyAdditional.get(width));
     }
     if (upstream) {
-      // Exercise production note placement too: the label fixtures above own
-      // geometry, but must not substitute for rendering a real not-saved note.
+      await expect(page.locator(".ub-not-saved:visible")).toHaveCount(0);
+      holdReplies = true;
+      await queueUpdate();
+      await expectStable("pending update before hub loss");
       await harness().stopHub();
+      // The closed transport loses these delayed replies; a new connection
+      // must obtain a real acknowledgement through its sync handshake.
+      holdReplies = false;
+      replies.splice(0);
       try {
         await expect(page.locator(".ub-status-word").first()).toHaveText("offline");
-        await expect(page.locator(".ub-not-saved")).toHaveText("not saved");
-        for (const width of widths) {
-          if (browserName === "chromium") await page.setViewportSize({ width, height });
-          await settlePane(page);
-          const offline = await statusGeometry(page);
-          expect(offline.scrollWidth, `offline at ${width}px`).toBe(offline.clientWidth);
-          expect(offline.problems, `offline at ${width}px`).toEqual([]);
+        await expect(page.locator(".ub-not-saved:visible")).toHaveText("not saved");
+        await expect(page.locator(".ub-pending:visible")).toHaveText(/\d+ sync messages? unacked/);
+        await expectStable("real offline / not saved / pending update");
+        const waiting = await openApp(browser, new URL(page.url()).pathname, {
+          upstream: true,
+          contextOptions: device,
+        });
+        try {
+          await expect(waiting.locator(".ub-waiting-meta")).toBeVisible();
+          const waitingPeers = waiting.locator(".ub-waiting-meta .ub-peers");
+          await expect(waitingPeers).toBeAttached();
+          expect(await waitingPeers.evaluate((node) => node.getBoundingClientRect().width), "empty presence does not reserve a gap on the waiting screen").toBe(0);
+        } finally {
+          await waiting.context().close();
         }
       } finally {
         await harness().startHub();
       }
+      await expect(page.locator(".ub-status-word").first()).toHaveText("synced", { timeout: 40_000 });
+      await expect(page.locator(".ub-not-saved:visible")).toHaveCount(0);
+      await expect(page.locator(".ub-pending:visible")).toHaveCount(0);
+      await expectStable("reconnected / saved");
+    }
+    if (browserName === "chromium" || (page.viewportSize()?.width ?? 0) >= 1280) {
+      const paragraph = page.locator(".ub-editor .ub-paragraph").first();
+      await paragraph.click();
+      await paragraph.evaluate((node) => {
+        const doc = node.ownerDocument;
+        const range = doc.createRange();
+        range.selectNodeContents(node);
+        const selection = doc.getSelection();
+        if (selection === null) throw new Error("e2e: paragraph selection is unavailable");
+        selection.removeAllRanges();
+        selection.addRange(range);
+        doc.dispatchEvent(new Event("selectionchange"));
+      });
+      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      await page.getByPlaceholder(/Comment as/).fill("Status alongside the threads rail");
+      await page.keyboard.press("Enter");
+      await expect(page.locator("#ub-rail")).toBeVisible();
+      if (browserName === "chromium") await page.setViewportSize({ width: 1280, height });
+      await settlePane(page);
+      await page.locator(".ub-title").focus();
+      await expect(page.locator(".ub-pending:visible")).toHaveCount(0);
+      const baseline = await statusGeometry(page);
+      holdReplies = true;
+      try {
+        await queueUpdate();
+        const busy = await statusGeometry(page);
+        expect(busy.scrollWidth, "threads rail / real backlog").toBe(busy.clientWidth);
+        expect(busy.problems, "threads rail / real backlog").toEqual([]);
+        expect(busy.status, "threads rail / real backlog").toEqual(baseline.status);
+        expect(busy.prose, "threads rail / real backlog").toEqual(baseline.prose);
+      } finally {
+        releaseReplies();
+      }
+      await expect(page.locator(".ub-pending:visible")).toHaveCount(0);
+      const recovered = await statusGeometry(page);
+      expect(recovered.status, "threads rail / ack").toEqual(baseline.status);
+      expect(recovered.prose, "threads rail / ack").toEqual(baseline.prose);
     }
   });
 }
