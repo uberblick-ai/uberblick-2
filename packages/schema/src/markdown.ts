@@ -44,6 +44,7 @@
 import type * as Y from "yjs";
 import { getBlocksWithInline } from "./blocks.js";
 import { getMeta } from "./doc.js";
+import { hasDocData } from "./data.js";
 import { readDecisions } from "./decisions.js";
 import { listAnnotations, resolveAnnotationRange } from "./annotations.js";
 import {
@@ -874,6 +875,10 @@ export function exportMarkdown(
         .map((reference) => renderDecision(reference))
         .join("\n"),
     );
+  }
+
+  if (hasDocData(ydoc)) {
+    push("> Structured document data is omitted from this Markdown export.");
   }
 
   if (sections.length === 0) return "";

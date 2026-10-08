@@ -36,8 +36,8 @@
  *    snapshot this was verified against is already stale.
  *
  * **What counts as agreement.** {@link docFingerprint} covers the whole
- * schema-owned surface — meta, blocks, the inline marks on them, the ordered
- * and the annotations map — because `Block.rev` alone covers
+ * schema-owned surface — meta, blocks, their inline marks, annotations and
+ * structured data — because `Block.rev` alone covers
  * type, text and attributes and would let a remote missing every bold run and
  * every comment thread pass.
  * Alongside it, state vectors are compared directly, which catches any struct
@@ -68,6 +68,7 @@ import {
   findBlockElement,
   getBlocks,
   getMeta,
+  getDocDataEntries,
   listAnnotationRanges,
   listDirectory,
   roomForDoc,
@@ -269,6 +270,7 @@ function tableContent(element: Y.XmlElement | null): unknown {
 export function docFingerprint(doc: Y.Doc): string {
   const meta = getMeta(doc);
   const annotations = getAnnotationsMap(doc).toJSON();
+  const data = getDocDataEntries(doc);
   const state = {
     meta: canonical({
       ...meta,
@@ -297,6 +299,9 @@ export function docFingerprint(doc: Y.Doc): string {
     annotations: Object.keys(annotations)
       .sort()
       .map((key) => [key, canonical(annotations[key])]),
+    // Data is content even when a merged schema is unsupported or records are
+    // invalid. Empty/absent data preserves historical promotion fingerprints.
+    ...(data.length === 0 ? {} : { data: canonical(data) }),
   };
   return createHash("sha256")
     .update(JSON.stringify(state))

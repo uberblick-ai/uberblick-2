@@ -205,7 +205,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     const replica = requireDoc(uuid);
     const meta = getMeta(replica.doc);
     if (contentMutation && meta.kind === "decision" && meta.status === "decided") {
-      throw new ToolError("decision_read_only", "A decided record's title, decision line and blocks are read-only; create a superseding record.", { uuid, kind: meta.kind, status: meta.status });
+      throw new ToolError("decision_read_only", "A decided record's title, decision line, blocks and structured data are read-only; create a superseding record.", { uuid, kind: meta.kind, status: meta.status });
     }
     return replica;
   };

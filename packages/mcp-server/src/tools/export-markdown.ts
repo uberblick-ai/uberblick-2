@@ -17,6 +17,7 @@ export function registerExportMarkdown(server: McpServer, context: ToolContext):
       description:
         "Render the document as markdown, including fenced code, mermaid and terminal blocks. Tables export as " +
         "GFM padded to their widest row, with cell formatting as inline markdown and literal cell punctuation escaped. " +
+        "Structured document data is omitted; documents holding data include an omission notice. " +
         "Export only: markdown is never the storage format, and there is no import tool." +
         failureContract("export_markdown"),
       inputSchema: strictInput({

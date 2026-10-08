@@ -57,6 +57,7 @@ import {
   AnnotationRangeError,
   BlockNotFoundError,
   ConflictingLinkMarksError,
+  DataError,
   InvalidDocumentLifecycleError,
   InvalidTableError,
   InvalidTableMappingError,
@@ -167,6 +168,26 @@ interface Recovery {
  * the call that finishes it — but never contradict the class.
  */
 const RECOVERIES: Record<string, Recovery> = {
+  data_invalid_input: {
+    recoveryClass: "manual",
+    guidance:
+      "Correct the collection operation, record ids or JSON values named in this failure, then apply the update again. No data was written.",
+  },
+  data_schema_invalid: {
+    recoveryClass: "manual",
+    guidance:
+      "Correct the collection schema at the reported path using the supported vocabulary and version, then apply the update again. No data was written.",
+  },
+  data_record_invalid: {
+    recoveryClass: "manual",
+    guidance:
+      "Correct the named record or change its collection schema so every retained record validates, then apply the update again. No data was written.",
+  },
+  data_limit_exceeded: {
+    recoveryClass: "manual",
+    guidance:
+      "Reduce the reported data size or nesting depth to its limit, or shrink an already over-limit area, then apply the update again. No data was written.",
+  },
   invalid_table: {
     recoveryClass: "manual",
     guidance:
@@ -287,7 +308,7 @@ const RECOVERIES: Record<string, Recovery> = {
   decision_read_only: {
     recoveryClass: "manual",
     guidance:
-      "A decided record's title, decision line and blocks are read-only. Create an open superseding record " +
+      "A decided record's title, decision line, blocks and structured data are read-only. Create an open superseding record " +
       "for any content change, then record a person's answer to decide it. Comments stay open.",
   },
   decision_answer_required: {
@@ -516,6 +537,13 @@ function stamped(
  * caller can re-diff and retry without another round trip.
  */
 export function toFailure(tool: string, error: unknown): CallToolResult {
+  if (error instanceof DataError) {
+    return stamped(tool, {
+      error: error.code,
+      message: error.message,
+      ...error.details,
+    });
+  }
   if (error instanceof TableMappingRequiredError) {
     return stamped(tool, { error: "table_mapping_required", message: error.message });
   }

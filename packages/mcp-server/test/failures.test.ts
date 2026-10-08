@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { createTagCatalogEntry, setTags, upsertDirectoryEntry } from "@uberblick/schema";
+import { applyDocData, createTagCatalogEntry, DATA_LIMITS, DataError, setTags, upsertDirectoryEntry } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   FAILURE_CODES,
@@ -22,6 +22,7 @@ import {
   MUTATING_TOOLS,
   READ_ONLY_TOOLS,
   hydrationRecovery,
+  toFailure,
 } from "../src/failures.js";
 import { MirrorStore } from "../src/store.js";
 import type { SearchHit } from "../src/store.js";
@@ -94,6 +95,13 @@ const EXPECTED: Record<
   string,
   { recoveryClass: string | null; detail: string[] }
 > = {
+  data_invalid_input: { recoveryClass: "manual", detail: ["collection", "recordId"] },
+  data_schema_invalid: { recoveryClass: "manual", detail: ["collection", "path"] },
+  data_record_invalid: { recoveryClass: "manual", detail: ["collection", "recordId", "path"] },
+  data_limit_exceeded: {
+    recoveryClass: "manual",
+    detail: ["collection", "recordId", "limit", "value", "attempted"],
+  },
   invalid_table: { recoveryClass: "manual", detail: [] },
   table_mapping_required: { recoveryClass: "manual", detail: [] },
   invalid_table_mapping: { recoveryClass: "manual", detail: [] },
@@ -409,6 +417,57 @@ describe("the failure contract", () => {
         })
       ).payload,
     );
+
+    // No data tool is introduced in this slice. Exercise the shared operation
+    // errors through the same adapter a later dedicated tool will use.
+    const dataDoc = rig.instance.replicas.replica(doc.uuid).doc;
+    const directory = rig.instance.replicas.directory().doc;
+    const dataSchema = {
+      version: 1 as const,
+      schema: {
+        type: "object" as const,
+        properties: { count: { type: "number" as const }, text: { type: "string" as const } },
+        required: ["count"],
+        additionalProperties: false as const,
+      },
+    };
+    const unsupportedSchema = {
+      version: 1 as const,
+      schema: { type: "object" as const, uniqueItems: true },
+    };
+    const dataRefusals = [
+      () => applyDocData(dataDoc, directory, [{
+        collection: "observations", schema: dataSchema,
+        upsert: [{ id: "row-1", value: { count: 1 } }, { id: "row-1", value: { count: 2 } }],
+      }]),
+      () => applyDocData(dataDoc, directory, [{ collection: "observations", schema: unsupportedSchema }]),
+      () => applyDocData(dataDoc, directory, [{
+        collection: "observations", schema: dataSchema,
+        upsert: [{ id: "row-1", value: { count: "invalid number" } }],
+      }]),
+      () => applyDocData(dataDoc, directory, [{
+        collection: "observations", schema: dataSchema,
+        upsert: [{ id: "row-1", value: { count: 1, text: "x".repeat(DATA_LIMITS.record) } }],
+      }]),
+    ];
+    for (const refuse of dataRefusals) {
+      let rejected = false;
+      try {
+        refuse();
+      } catch (error) {
+        if (!(error instanceof DataError)) throw error;
+        rejected = true;
+        const failure = toFailure("edit_block", error);
+        const payload = JSON.parse((failure.content[0] as { text: string }).text);
+        expect(failure.isError).toBe(true);
+        expect(payload).toMatchObject({
+          error: error.code, message: error.message, ...error.details,
+          recoveryClass: "manual", applied: false, partial: false, synced: false,
+        });
+        record(payload);
+      }
+      expect(rejected, "the shared data operation must refuse this input").toBe(true);
+    }
 
     const guidanceTag = createTagCatalogEntry(rig.instance.replicas.settings().doc, "guidance");
     setTags(rig.instance.replicas.replica(doc.uuid).doc, [guidanceTag.id]);

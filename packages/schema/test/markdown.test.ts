@@ -60,6 +60,27 @@ function docFrom(markdown: string): Y.Doc {
   return doc;
 }
 
+describe("structured data omission", () => {
+  it("preserves data-free exports and notices data without exporting its contents", () => {
+    const doc = docFrom(SOURCE);
+    const original = exportMarkdown(doc);
+    doc.getMap("data");
+    expect(exportMarkdown(doc)).toBe(original);
+    doc.getMap("data").set(JSON.stringify(["record", "observations", "row-a"]), {
+      secretObservation: "DATA_SENTINEL",
+    });
+    const exported = exportMarkdown(doc);
+    expect(exported).toBe(`${original}\n> Structured document data is omitted from this Markdown export.\n`);
+    expect(exported).not.toContain("DATA_SENTINEL");
+    expect(exportMarkdown(doc, { frontmatter: false })).toContain(
+      "> Structured document data is omitted from this Markdown export.",
+    );
+    doc.getMap("data").clear();
+    expect(exportMarkdown(doc)).toBe(original);
+    doc.destroy();
+  });
+});
+
 describe("importMarkdown", () => {
   it("parses frontmatter, headings, fences and paragraphs", () => {
     const imported = importMarkdown(SOURCE);
