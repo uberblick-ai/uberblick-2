@@ -97,7 +97,6 @@ import { openBrowser } from "./browser.js";
 import { resolveConfig, requireBinding } from "./config.js";
 import { takeHelp } from "./help.js";
 import { isInstallPayload } from "./installation.js";
-import type { InitLock } from "./init-lock.js";
 import { acquireInitLock, tryAcquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";

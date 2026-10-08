@@ -37,7 +37,7 @@ function checkout(head: string): { root: string; cliDir: string } {
 }
 
 function snapshot(root: string): unknown[] {
-  return readdirSync(root, { recursive: true }).sort().map((name) => {
+  return readdirSync(root, { recursive: true, encoding: "utf8" }).sort().map((name) => {
     const path = join(root, name);
     const stat = statSync(path);
     return [name, stat.mtimeMs, stat.isDirectory() ? null : readFileSync(path)];

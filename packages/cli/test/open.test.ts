@@ -28,7 +28,7 @@ import { localBrowserKey } from "../src/browser-key.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import { probePort } from "../src/probes.js";
 import { readWorkspaceHub, rememberWorkspaceBinding } from "../src/workspace-registry.js";
-import { UB_BIN, pointAt, runUbAsync, sandbox, unboundSandbox, sleep, waitUntil } from "./helpers.js";
+import { UB_BIN, pointAt, runUbAsync, sandbox, unboundSandbox, sleep } from "./helpers.js";
 import {
   BANNER,
   BUILD_STAMP,
@@ -509,7 +509,7 @@ describe("ub open", () => {
         { mode: 0o755 },
       );
     }
-    const checkoutEnv = { ...box.env, ...env, PATH: tools };
+    const checkoutEnv: NodeJS.ProcessEnv = { ...box.env, ...env, PATH: tools };
     delete checkoutEnv.UBERBLICK_WEB_DIST;
 
     const refused = spawnSync(process.execPath, [bin, "open", "--no-browser", "--port", String(webPort)], {
