@@ -1,0 +1,36 @@
+{
+  "method": "In-memory schema API and Yjs full-state roundtrip; no hub, browser or historical client binary",
+  "versions": {
+    "yjs": "13.6.32",
+    "zod": "4.4.3"
+  },
+  "converter": [
+    { "name": "uniqueItems", "accepted": true },
+    { "name": "contains", "accepted": true },
+    { "name": "minProperties", "accepted": true },
+    { "name": "required", "accepted": false },
+    { "name": "minimum", "accepted": false },
+    { "name": "additionalProperties", "accepted": false },
+    { "name": "if-then", "error": "Conditional schemas (if/then/else) are not supported" }
+  ],
+  "compatibility": {
+    "dataOnlyFingerprintUnchanged": true,
+    "dataRootSurvivesExistingTitleWrite": {
+      "version": 1,
+      "collections": {
+        "points": [
+          { "id": "point-a", "value": 42, "note": "synthetic-value-42" }
+        ],
+        "labels": [
+          { "id": "label-a", "label": "synthetic label" }
+        ]
+      }
+    },
+    "unknownMetaSurvives": "preserve",
+    "getMetaExposesUnknown": false,
+    "markdownExposesData": false,
+    "unknownNodeProjection": [
+      { "id": "foreign-a", "type": "paragraph", "text": "synthetic chart text" }
+    ]
+  }
+}

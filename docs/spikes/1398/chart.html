@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Document-owned data: isolated feasibility demonstration</title>
+    <style>
+      body { margin: 36px; color: #172033; background: #f5f7fb; font: 16px system-ui, sans-serif; }
+      main { max-width: 1000px; margin: auto; padding: 28px; background: white; border: 1px solid #dfe5ee; border-radius: 12px; }
+      h1 { margin-top: 0; font-size: 26px; }
+      .muted { color: #52617a; }
+      .chart { height: 430px; }
+      #status { font-variant-numeric: tabular-nums; }
+      #events { max-height: 130px; overflow: hidden; font: 13px ui-monospace, monospace; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>In-document data, observed live</h1>
+      <p>A synthetic existing document holds prose plus three collections. This chart reads its optional data area.</p>
+      <p class="muted">Separate writer → disposable local hub → this already-open tab. Chart.js redraws from a Yjs observer.</p>
+      <p id="status">Waiting for the initial document state.</p>
+      <div class="chart"><canvas id="chart"></canvas></div>
+      <p class="muted">Prototype only: no product block, data tools, or production dependency.</p>
+      <div id="events"></div>
+    </main>
+    <script type="module" src="/chart.mjs"></script>
+  </body>
+</html>

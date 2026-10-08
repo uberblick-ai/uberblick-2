@@ -1,0 +1,1595 @@
+{
+  "measuredAt": "2026-10-08T11:35:44.271Z",
+  "environment": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "architecture": "arm64",
+    "cpuModel": "Apple M2 Ultra",
+    "logicalCpuCount": 24,
+    "memoryBytes": 68719476736,
+    "node": "v26.7.0",
+    "v8": "14.6.202.34-node.28",
+    "sqlite": "3.53.4",
+    "yjs": "13.6.32",
+    "hocuspocusServer": "4.6.0",
+    "tsx": "4.23.12"
+  },
+  "method": {
+    "encoding": "Yjs v1; default gc=true; fixed producer clientID=1398; no compression; byteLength exact",
+    "data": "Deterministic generator, 3 equally distributed collections (remainder assigned summaries then issues), 25 top-level fields, nested labels/metrics/extra, short synthetic notes or 4096 ASCII-character notes",
+    "updates": "Initial write to empty document; append one generated summaries record with next ordinal; correct summaries-000000.value to 9999 after append; one local transaction each",
+    "apply": "Y.applyUpdate only timed with performance.now; initial applies to fresh doc, append to fresh doc preloaded with initial state, correction to fresh doc preloaded with post-append state; setup excluded; 5 warmups plus 30 measured samples, median lower middle (sample 15), p95 nearest rank (sample 29)",
+    "scope": "Microbenchmarks and direct storage APIs, not network or end-to-end latency; no production index work, scheduler, hub debounce, authentication, compression or competing workload",
+    "storage": "Fresh actual MirrorStore and HubDatabase files for each case; inspect SQLite BLOB lengths; filenames/files/wal sizes separate; no vacuum; stores and readers closed then disposable directory removed"
+  },
+  "measurements": [
+    {
+      "records": 300,
+      "longValues": false,
+      "variant": "document-envelope",
+      "logicalJsonUtf8Bytes": 175455,
+      "updateBytes": {
+        "initial": 152794,
+        "append": 153269,
+        "correction": 153271
+      },
+      "fullStateBytes": {
+        "initial": 152794,
+        "append": 153291,
+        "correction": 153293
+      },
+      "apply": {
+        "initial": {
+          "medianMs": 1.8296250000000214,
+          "p95Ms": 2.2771669999999915,
+          "minMs": 1.7037079999999776,
+          "maxMs": 2.406583000000012,
+          "samples": 30,
+          "warmups": 5
+        },
+        "append": {
+          "medianMs": 1.8199579999999855,
+          "p95Ms": 2.0073750000000246,
+          "minMs": 1.7207920000000172,
+          "maxMs": 3.3002500000000055,
+          "samples": 30,
+          "warmups": 5
+        },
+        "correction": {
+          "medianMs": 1.8033750000000168,
+          "p95Ms": 3.1802920000000086,
+          "minMs": 1.7115420000000086,
+          "maxMs": 3.5644170000000486,
+          "samples": 30,
+          "warmups": 5
+        }
+      },
+      "storageGrowth": {
+        "variant": "document-envelope",
+        "records": 300,
+        "longValues": false,
+        "cadence": "Unpaced sequential initial write then 10 corrections; one transaction per correction; hub snapshot upsert awaited after every update",
+        "correctionsMeasured": 10,
+        "compaction": "Harness calls existing MirrorStore.compact at 500 logged rows, mirroring default threshold, rather than waiting for ReplicaEngine scheduling",
+        "checkpoints": [
+          {
+            "corrections": 0,
+            "phase": "initial",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 152794,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 152794,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 354352,
+            "hubDatabaseFileBytes": 163840
+          },
+          {
+            "corrections": 1,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 305578,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 152806,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 527392,
+            "hubDatabaseFileBytes": 315392
+          },
+          {
+            "corrections": 10,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 11,
+            "localLogBlobBytes": 1680634,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 152806,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 2109472,
+            "hubDatabaseFileBytes": 315392
+          }
+        ],
+        "appendUpdateTimings": {
+          "medianMs": 0.3931249999999409,
+          "p95Ms": 0.418166000000042,
+          "samples": 6,
+          "warmups": 5
+        },
+        "hubSnapshotStoreTimings": {
+          "medianMs": 1.302583000000027,
+          "p95Ms": 1.397874999999999,
+          "samples": 6,
+          "warmups": 5
+        },
+        "recoveryAssertions": "Local snapshot + log tail and hub snapshot both reconstruct the final logical dataset"
+      }
+    },
+    {
+      "records": 300,
+      "longValues": false,
+      "variant": "collection-envelopes",
+      "logicalJsonUtf8Bytes": 175455,
+      "updateBytes": {
+        "initial": 152841,
+        "append": 51904,
+        "correction": 51906
+      },
+      "fullStateBytes": {
+        "initial": 152841,
+        "append": 153338,
+        "correction": 153347
+      },
+      "apply": {
+        "initial": {
+          "medianMs": 1.818208000000027,
+          "p95Ms": 2.8647079999999505,
+          "minMs": 1.7064169999999876,
+          "maxMs": 3.1172500000000127,
+          "samples": 30,
+          "warmups": 5
+        },
+        "append": {
+          "medianMs": 0.6081659999999829,
+          "p95Ms": 0.6688750000000709,
+          "minMs": 0.5717500000000655,
+          "maxMs": 0.6704999999999472,
+          "samples": 30,
+          "warmups": 5
+        },
+        "correction": {
+          "medianMs": 0.6029999999999518,
+          "p95Ms": 0.6421250000000782,
+          "minMs": 0.5701249999999618,
+          "maxMs": 2.005999999999972,
+          "samples": 30,
+          "warmups": 5
+        }
+      },
+      "storageGrowth": {
+        "variant": "collection-envelopes",
+        "records": 300,
+        "longValues": false,
+        "cadence": "Unpaced sequential initial write then 10 corrections; one transaction per correction; hub snapshot upsert awaited after every update",
+        "correctionsMeasured": 10,
+        "compaction": "Harness calls existing MirrorStore.compact at 500 logged rows, mirroring default threshold, rather than waiting for ReplicaEngine scheduling",
+        "checkpoints": [
+          {
+            "corrections": 0,
+            "phase": "initial",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 152841,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 152841,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 354352,
+            "hubDatabaseFileBytes": 163840
+          },
+          {
+            "corrections": 1,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 204260,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 152853,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 424392,
+            "hubDatabaseFileBytes": 315392
+          },
+          {
+            "corrections": 10,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 11,
+            "localLogBlobBytes": 667031,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 152860,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 1095952,
+            "hubDatabaseFileBytes": 315392
+          }
+        ],
+        "appendUpdateTimings": {
+          "medianMs": 0.19012499999996635,
+          "p95Ms": 0.20945900000003803,
+          "samples": 6,
+          "warmups": 5
+        },
+        "hubSnapshotStoreTimings": {
+          "medianMs": 1.2347499999999627,
+          "p95Ms": 1.2716249999999718,
+          "samples": 6,
+          "warmups": 5
+        },
+        "recoveryAssertions": "Local snapshot + log tail and hub snapshot both reconstruct the final logical dataset"
+      }
+    },
+    {
+      "records": 300,
+      "longValues": false,
+      "variant": "keyed-records",
+      "logicalJsonUtf8Bytes": 175455,
+      "updateBytes": {
+        "initial": 163612,
+        "append": 531,
+        "correction": 481
+      },
+      "fullStateBytes": {
+        "initial": 163612,
+        "append": 164136,
+        "correction": 164148
+      },
+      "apply": {
+        "initial": {
+          "medianMs": 1.8964579999999387,
+          "p95Ms": 2.228666999999973,
+          "minMs": 1.8674160000000484,
+          "maxMs": 2.5807920000000877,
+          "samples": 30,
+          "warmups": 5
+        },
+        "append": {
+          "medianMs": 0.00854099999992286,
+          "p95Ms": 0.012375000000020009,
+          "minMs": 0.008000000000038199,
+          "maxMs": 0.02762499999994361,
+          "samples": 30,
+          "warmups": 5
+        },
+        "correction": {
+          "medianMs": 0.009208999999827938,
+          "p95Ms": 0.024249999999938154,
+          "minMs": 0.008374999999887223,
+          "maxMs": 0.040292000000135886,
+          "samples": 30,
+          "warmups": 5
+        }
+      },
+      "storageGrowth": {
+        "variant": "keyed-records",
+        "records": 300,
+        "longValues": false,
+        "cadence": "Unpaced sequential initial write then 10 corrections; one transaction per correction; hub snapshot upsert awaited after every update",
+        "correctionsMeasured": 10,
+        "compaction": "Harness calls existing MirrorStore.compact at 500 logged rows, mirroring default threshold, rather than waiting for ReplicaEngine scheduling",
+        "checkpoints": [
+          {
+            "corrections": 0,
+            "phase": "initial",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 163612,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 163612,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 366712,
+            "hubDatabaseFileBytes": 172032
+          },
+          {
+            "corrections": 1,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 164093,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 163624,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 383192,
+            "hubDatabaseFileBytes": 335872
+          },
+          {
+            "corrections": 10,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 11,
+            "localLogBlobBytes": 168440,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 163633,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 543872,
+            "hubDatabaseFileBytes": 339968
+          }
+        ],
+        "appendUpdateTimings": {
+          "medianMs": 0.09287500000004911,
+          "p95Ms": 0.10416700000018864,
+          "samples": 6,
+          "warmups": 5
+        },
+        "hubSnapshotStoreTimings": {
+          "medianMs": 1.2800419999998667,
+          "p95Ms": 1.2929999999998927,
+          "samples": 6,
+          "warmups": 5
+        },
+        "recoveryAssertions": "Local snapshot + log tail and hub snapshot both reconstruct the final logical dataset"
+      }
+    },
+    {
+      "records": 1500,
+      "longValues": false,
+      "variant": "document-envelope",
+      "logicalJsonUtf8Bytes": 866948,
+      "updateBytes": {
+        "initial": 755650,
+        "append": 756128,
+        "correction": 756130
+      },
+      "fullStateBytes": {
+        "initial": 755650,
+        "append": 756150,
+        "correction": 756152
+      },
+      "apply": {
+        "initial": {
+          "medianMs": 8.76475000000005,
+          "p95Ms": 10.227624999999989,
+          "minMs": 8.302083999999923,
+          "maxMs": 13.546540999999934,
+          "samples": 30,
+          "warmups": 5
+        },
+        "append": {
+          "medianMs": 8.696709000000055,
+          "p95Ms": 9.99245800000017,
+          "minMs": 8.331625000000031,
+          "maxMs": 10.060750000000098,
+          "samples": 30,
+          "warmups": 5
+        },
+        "correction": {
+          "medianMs": 8.762707999999748,
+          "p95Ms": 10.216542000000118,
+          "minMs": 8.50799999999981,
+          "maxMs": 13.146500000000287,
+          "samples": 30,
+          "warmups": 5
+        }
+      },
+      "storageGrowth": {
+        "variant": "document-envelope",
+        "records": 1500,
+        "longValues": false,
+        "cadence": "Unpaced sequential initial write then 501 corrections; one transaction per correction; hub snapshot upsert awaited after every update",
+        "correctionsMeasured": 501,
+        "compaction": "Harness calls existing MirrorStore.compact at 500 logged rows, mirroring default threshold, rather than waiting for ReplicaEngine scheduling",
+        "checkpoints": [
+          {
+            "corrections": 0,
+            "phase": "initial",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 755650,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755650,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 959992,
+            "hubDatabaseFileBytes": 765952
+          },
+          {
+            "corrections": 1,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 1511290,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755662,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 1746912,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 10,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 11,
+            "localLogBlobBytes": 8312050,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755662,
+            "localDatabaseFileBytes": 4661248,
+            "localWalFileBytes": 4878112,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 100,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 101,
+            "localLogBlobBytes": 76319650,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755662,
+            "localDatabaseFileBytes": 72859648,
+            "localWalFileBytes": 4878112,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 498,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 499,
+            "localLogBlobBytes": 377065481,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755665,
+            "localDatabaseFileBytes": 377499648,
+            "localWalFileBytes": 4878112,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 499,
+            "phase": "threshold-before-compaction",
+            "compactionMs": null,
+            "localLogRows": 500,
+            "localLogBlobBytes": 377821124,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755665,
+            "localDatabaseFileBytes": 377499648,
+            "localWalFileBytes": 4878112,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 499,
+            "phase": "after-compaction",
+            "compactionMs": 68.78120800000033,
+            "localLogRows": 0,
+            "localLogBlobBytes": 0,
+            "localSnapshotBlobBytes": 755665,
+            "localSnapshotThroughSeq": 500,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755665,
+            "localDatabaseFileBytes": 377499648,
+            "localWalFileBytes": 4878112,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 500,
+            "phase": "after-later-correction",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 755643,
+            "localSnapshotBlobBytes": 755665,
+            "localSnapshotThroughSeq": 500,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755665,
+            "localDatabaseFileBytes": 377499648,
+            "localWalFileBytes": 4878112,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 501,
+            "phase": "after-later-correction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 1511286,
+            "localSnapshotBlobBytes": 755665,
+            "localSnapshotThroughSeq": 500,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755665,
+            "localDatabaseFileBytes": 379768832,
+            "localWalFileBytes": 4878112,
+            "hubDatabaseFileBytes": 1519616
+          }
+        ],
+        "appendUpdateTimings": {
+          "medianMs": 1.063125000000582,
+          "p95Ms": 5.738790999999765,
+          "samples": 497,
+          "warmups": 5
+        },
+        "hubSnapshotStoreTimings": {
+          "medianMs": 4.994999999999891,
+          "p95Ms": 5.255834000000505,
+          "samples": 497,
+          "warmups": 5
+        },
+        "recoveryAssertions": "Local snapshot + log tail and hub snapshot both reconstruct the final logical dataset"
+      }
+    },
+    {
+      "records": 1500,
+      "longValues": false,
+      "variant": "collection-envelopes",
+      "logicalJsonUtf8Bytes": 866948,
+      "updateBytes": {
+        "initial": 755697,
+        "append": 254859,
+        "correction": 254861
+      },
+      "fullStateBytes": {
+        "initial": 755697,
+        "append": 756197,
+        "correction": 756206
+      },
+      "apply": {
+        "initial": {
+          "medianMs": 8.8387500000008,
+          "p95Ms": 10.103750000000218,
+          "minMs": 8.327290999999605,
+          "maxMs": 12.758250000000771,
+          "samples": 30,
+          "warmups": 5
+        },
+        "append": {
+          "medianMs": 2.9009580000001733,
+          "p95Ms": 2.996833000001061,
+          "minMs": 2.785250000000815,
+          "maxMs": 3.017708000001221,
+          "samples": 30,
+          "warmups": 5
+        },
+        "correction": {
+          "medianMs": 2.86408400000073,
+          "p95Ms": 3.117500000000291,
+          "minMs": 2.759291000000303,
+          "maxMs": 3.172833000000537,
+          "samples": 30,
+          "warmups": 5
+        }
+      },
+      "storageGrowth": {
+        "variant": "collection-envelopes",
+        "records": 1500,
+        "longValues": false,
+        "cadence": "Unpaced sequential initial write then 501 corrections; one transaction per correction; hub snapshot upsert awaited after every update",
+        "correctionsMeasured": 501,
+        "compaction": "Harness calls existing MirrorStore.compact at 500 logged rows, mirroring default threshold, rather than waiting for ReplicaEngine scheduling",
+        "checkpoints": [
+          {
+            "corrections": 0,
+            "phase": "initial",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 755697,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755697,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 959992,
+            "hubDatabaseFileBytes": 765952
+          },
+          {
+            "corrections": 1,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 1010068,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755709,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 1236032,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 10,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 11,
+            "localLogBlobBytes": 3299407,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755716,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 3732752,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 100,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 101,
+            "localLogBlobBytes": 26192797,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755716,
+            "localDatabaseFileBytes": 23040000,
+            "localWalFileBytes": 4288952,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 498,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 499,
+            "localLogBlobBytes": 127433575,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755719,
+            "localDatabaseFileBytes": 126242816,
+            "localWalFileBytes": 4288952,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 499,
+            "phase": "threshold-before-compaction",
+            "compactionMs": null,
+            "localLogRows": 500,
+            "localLogBlobBytes": 127687949,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755719,
+            "localDatabaseFileBytes": 126242816,
+            "localWalFileBytes": 4288952,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 499,
+            "phase": "after-compaction",
+            "compactionMs": 27.31908300000032,
+            "localLogRows": 0,
+            "localLogBlobBytes": 0,
+            "localSnapshotBlobBytes": 755719,
+            "localSnapshotThroughSeq": 500,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755719,
+            "localDatabaseFileBytes": 126242816,
+            "localWalFileBytes": 4288952,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 500,
+            "phase": "after-later-correction",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 254374,
+            "localSnapshotBlobBytes": 755719,
+            "localSnapshotThroughSeq": 500,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755719,
+            "localDatabaseFileBytes": 126242816,
+            "localWalFileBytes": 4288952,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 501,
+            "phase": "after-later-correction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 508748,
+            "localSnapshotBlobBytes": 755719,
+            "localSnapshotThroughSeq": 500,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 755719,
+            "localDatabaseFileBytes": 126242816,
+            "localWalFileBytes": 4288952,
+            "hubDatabaseFileBytes": 1519616
+          }
+        ],
+        "appendUpdateTimings": {
+          "medianMs": 0.3942079999997077,
+          "p95Ms": 3.9690000000009604,
+          "samples": 497,
+          "warmups": 5
+        },
+        "hubSnapshotStoreTimings": {
+          "medianMs": 5.05658300000141,
+          "p95Ms": 5.5133329999989655,
+          "samples": 497,
+          "warmups": 5
+        },
+        "recoveryAssertions": "Local snapshot + log tail and hub snapshot both reconstruct the final logical dataset"
+      }
+    },
+    {
+      "records": 1500,
+      "longValues": false,
+      "variant": "keyed-records",
+      "logicalJsonUtf8Bytes": 866948,
+      "updateBytes": {
+        "initial": 809665,
+        "append": 534,
+        "correction": 481
+      },
+      "fullStateBytes": {
+        "initial": 809665,
+        "append": 810192,
+        "correction": 810204
+      },
+      "apply": {
+        "initial": {
+          "medianMs": 9.680833999998868,
+          "p95Ms": 10.125499999998283,
+          "minMs": 9.204999999998108,
+          "maxMs": 10.199208999998518,
+          "samples": 30,
+          "warmups": 5
+        },
+        "append": {
+          "medianMs": 0.008791000000201166,
+          "p95Ms": 0.011125000000902219,
+          "minMs": 0.007792000000335975,
+          "maxMs": 0.02750000000014552,
+          "samples": 30,
+          "warmups": 5
+        },
+        "correction": {
+          "medianMs": 0.009583000002749031,
+          "p95Ms": 0.015666999999666587,
+          "minMs": 0.008125000000291038,
+          "maxMs": 0.017833000001701294,
+          "samples": 30,
+          "warmups": 5
+        }
+      },
+      "storageGrowth": {
+        "variant": "keyed-records",
+        "records": 1500,
+        "longValues": false,
+        "cadence": "Unpaced sequential initial write then 501 corrections; one transaction per correction; hub snapshot upsert awaited after every update",
+        "correctionsMeasured": 501,
+        "compaction": "Harness calls existing MirrorStore.compact at 500 logged rows, mirroring default threshold, rather than waiting for ReplicaEngine scheduling",
+        "checkpoints": [
+          {
+            "corrections": 0,
+            "phase": "initial",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 809665,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 809665,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 1013552,
+            "hubDatabaseFileBytes": 819200
+          },
+          {
+            "corrections": 1,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 810146,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 809677,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 1042392,
+            "hubDatabaseFileBytes": 1626112
+          },
+          {
+            "corrections": 10,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 11,
+            "localLogBlobBytes": 814493,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 809686,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 1198952,
+            "hubDatabaseFileBytes": 1626112
+          },
+          {
+            "corrections": 100,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 101,
+            "localLogBlobBytes": 857963,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 809686,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 2789272,
+            "hubDatabaseFileBytes": 1626112
+          },
+          {
+            "corrections": 498,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 499,
+            "localLogBlobBytes": 1050197,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 809688,
+            "localDatabaseFileBytes": 1179648,
+            "localWalFileBytes": 4140632,
+            "hubDatabaseFileBytes": 1626112
+          },
+          {
+            "corrections": 499,
+            "phase": "threshold-before-compaction",
+            "compactionMs": null,
+            "localLogRows": 500,
+            "localLogBlobBytes": 1050680,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 809688,
+            "localDatabaseFileBytes": 1179648,
+            "localWalFileBytes": 4140632,
+            "hubDatabaseFileBytes": 1626112
+          },
+          {
+            "corrections": 499,
+            "phase": "after-compaction",
+            "compactionMs": 6.679000000000087,
+            "localLogRows": 0,
+            "localLogBlobBytes": 0,
+            "localSnapshotBlobBytes": 809688,
+            "localSnapshotThroughSeq": 500,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 809688,
+            "localDatabaseFileBytes": 1179648,
+            "localWalFileBytes": 4140632,
+            "hubDatabaseFileBytes": 1626112
+          },
+          {
+            "corrections": 500,
+            "phase": "after-later-correction",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 483,
+            "localSnapshotBlobBytes": 809688,
+            "localSnapshotThroughSeq": 500,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 809688,
+            "localDatabaseFileBytes": 1179648,
+            "localWalFileBytes": 4140632,
+            "hubDatabaseFileBytes": 1626112
+          },
+          {
+            "corrections": 501,
+            "phase": "after-later-correction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 966,
+            "localSnapshotBlobBytes": 809688,
+            "localSnapshotThroughSeq": 500,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 809688,
+            "localDatabaseFileBytes": 1179648,
+            "localWalFileBytes": 4140632,
+            "hubDatabaseFileBytes": 1626112
+          }
+        ],
+        "appendUpdateTimings": {
+          "medianMs": 0.0656249999992724,
+          "p95Ms": 0.15395899999930407,
+          "samples": 497,
+          "warmups": 5
+        },
+        "hubSnapshotStoreTimings": {
+          "medianMs": 5.240874999999505,
+          "p95Ms": 6.115249999998923,
+          "samples": 497,
+          "warmups": 5
+        },
+        "recoveryAssertions": "Local snapshot + log tail and hub snapshot both reconstruct the final logical dataset"
+      }
+    },
+    {
+      "records": 3000,
+      "longValues": false,
+      "variant": "document-envelope",
+      "logicalJsonUtf8Bytes": 1731305,
+      "updateBytes": {
+        "initial": 1509225,
+        "append": 1509703,
+        "correction": 1509705
+      },
+      "fullStateBytes": {
+        "initial": 1509225,
+        "append": 1509725,
+        "correction": 1509727
+      },
+      "apply": {
+        "initial": {
+          "medianMs": 18.38799999999901,
+          "p95Ms": 18.80645799999911,
+          "minMs": 16.831208999999944,
+          "maxMs": 18.93804100000125,
+          "samples": 30,
+          "warmups": 5
+        },
+        "append": {
+          "medianMs": 18.4187090000014,
+          "p95Ms": 19.357334000000264,
+          "minMs": 18.03912499999933,
+          "maxMs": 23.41045799999847,
+          "samples": 30,
+          "warmups": 5
+        },
+        "correction": {
+          "medianMs": 18.252583000001323,
+          "p95Ms": 23.190332999998645,
+          "minMs": 16.890584000000672,
+          "maxMs": 23.790000000000873,
+          "samples": 30,
+          "warmups": 5
+        }
+      },
+      "storageGrowth": {
+        "variant": "document-envelope",
+        "records": 3000,
+        "longValues": false,
+        "cadence": "Unpaced sequential initial write then 10 corrections; one transaction per correction; hub snapshot upsert awaited after every update",
+        "correctionsMeasured": 10,
+        "compaction": "Harness calls existing MirrorStore.compact at 500 logged rows, mirroring default threshold, rather than waiting for ReplicaEngine scheduling",
+        "checkpoints": [
+          {
+            "corrections": 0,
+            "phase": "initial",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 1509225,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 1509225,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 1718072,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 1,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 3018440,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 1509237,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 3263072,
+            "hubDatabaseFileBytes": 3026944
+          },
+          {
+            "corrections": 10,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 11,
+            "localLogBlobBytes": 16601375,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 1509237,
+            "localDatabaseFileBytes": 13717504,
+            "localWalFileBytes": 4803952,
+            "hubDatabaseFileBytes": 3026944
+          }
+        ],
+        "appendUpdateTimings": {
+          "medianMs": 2.2363750000004075,
+          "p95Ms": 8.473375000001397,
+          "samples": 6,
+          "warmups": 5
+        },
+        "hubSnapshotStoreTimings": {
+          "medianMs": 9.879791999999725,
+          "p95Ms": 9.972542000003159,
+          "samples": 6,
+          "warmups": 5
+        },
+        "recoveryAssertions": "Local snapshot + log tail and hub snapshot both reconstruct the final logical dataset"
+      }
+    },
+    {
+      "records": 3000,
+      "longValues": false,
+      "variant": "collection-envelopes",
+      "logicalJsonUtf8Bytes": 1731305,
+      "updateBytes": {
+        "initial": 1509272,
+        "append": 508550,
+        "correction": 508552
+      },
+      "fullStateBytes": {
+        "initial": 1509272,
+        "append": 1509772,
+        "correction": 1509781
+      },
+      "apply": {
+        "initial": {
+          "medianMs": 18.36358299999847,
+          "p95Ms": 19.314249999999447,
+          "minMs": 16.82287499999802,
+          "maxMs": 22.876541000001453,
+          "samples": 30,
+          "warmups": 5
+        },
+        "append": {
+          "medianMs": 5.784792000002199,
+          "p95Ms": 5.948041999999987,
+          "minMs": 5.587542000001122,
+          "maxMs": 6.020208999998431,
+          "samples": 30,
+          "warmups": 5
+        },
+        "correction": {
+          "medianMs": 6.8684170000015,
+          "p95Ms": 7.318458000001556,
+          "minMs": 5.6000829999975394,
+          "maxMs": 7.365874999999505,
+          "samples": 30,
+          "warmups": 5
+        }
+      },
+      "storageGrowth": {
+        "variant": "collection-envelopes",
+        "records": 3000,
+        "longValues": false,
+        "cadence": "Unpaced sequential initial write then 10 corrections; one transaction per correction; hub snapshot upsert awaited after every update",
+        "correctionsMeasured": 10,
+        "compaction": "Harness calls existing MirrorStore.compact at 500 logged rows, mirroring default threshold, rather than waiting for ReplicaEngine scheduling",
+        "checkpoints": [
+          {
+            "corrections": 0,
+            "phase": "initial",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 1509272,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 1509272,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 1718072,
+            "hubDatabaseFileBytes": 1519616
+          },
+          {
+            "corrections": 1,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 2017334,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 1509284,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 2257792,
+            "hubDatabaseFileBytes": 3026944
+          },
+          {
+            "corrections": 10,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 11,
+            "localLogBlobBytes": 6589892,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 1509291,
+            "localDatabaseFileBytes": 4169728,
+            "localWalFileBytes": 4383712,
+            "hubDatabaseFileBytes": 3026944
+          }
+        ],
+        "appendUpdateTimings": {
+          "medianMs": 0.7510000000002037,
+          "p95Ms": 6.8729999999995925,
+          "samples": 6,
+          "warmups": 5
+        },
+        "hubSnapshotStoreTimings": {
+          "medianMs": 9.797332999998616,
+          "p95Ms": 9.907415999998193,
+          "samples": 6,
+          "warmups": 5
+        },
+        "recoveryAssertions": "Local snapshot + log tail and hub snapshot both reconstruct the final logical dataset"
+      }
+    },
+    {
+      "records": 3000,
+      "longValues": false,
+      "variant": "keyed-records",
+      "logicalJsonUtf8Bytes": 1731305,
+      "updateBytes": {
+        "initial": 1617240,
+        "append": 534,
+        "correction": 481
+      },
+      "fullStateBytes": {
+        "initial": 1617240,
+        "append": 1617767,
+        "correction": 1617779
+      },
+      "apply": {
+        "initial": {
+          "medianMs": 19.212040999998862,
+          "p95Ms": 19.83075000000099,
+          "minMs": 18.51954200000182,
+          "maxMs": 19.964625000000524,
+          "samples": 30,
+          "warmups": 5
+        },
+        "append": {
+          "medianMs": 0.009833000000071479,
+          "p95Ms": 0.02012499999909778,
+          "minMs": 0.008083999997325009,
+          "maxMs": 0.03225000000020373,
+          "samples": 30,
+          "warmups": 5
+        },
+        "correction": {
+          "medianMs": 0.01204199999847333,
+          "p95Ms": 0.021375000000261934,
+          "minMs": 0.009833000000071479,
+          "maxMs": 0.021749999999883585,
+          "samples": 30,
+          "warmups": 5
+        }
+      },
+      "storageGrowth": {
+        "variant": "keyed-records",
+        "records": 3000,
+        "longValues": false,
+        "cadence": "Unpaced sequential initial write then 10 corrections; one transaction per correction; hub snapshot upsert awaited after every update",
+        "correctionsMeasured": 10,
+        "compaction": "Harness calls existing MirrorStore.compact at 500 logged rows, mirroring default threshold, rather than waiting for ReplicaEngine scheduling",
+        "checkpoints": [
+          {
+            "corrections": 0,
+            "phase": "initial",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 1617240,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 1617240,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 1829312,
+            "hubDatabaseFileBytes": 1630208
+          },
+          {
+            "corrections": 1,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 1617721,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 1617252,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 1845792,
+            "hubDatabaseFileBytes": 3248128
+          },
+          {
+            "corrections": 10,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 11,
+            "localLogBlobBytes": 1622068,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 1617261,
+            "localDatabaseFileBytes": 4096,
+            "localWalFileBytes": 2006472,
+            "hubDatabaseFileBytes": 3248128
+          }
+        ],
+        "appendUpdateTimings": {
+          "medianMs": 0.12137500000244472,
+          "p95Ms": 0.14070800000263262,
+          "samples": 6,
+          "warmups": 5
+        },
+        "hubSnapshotStoreTimings": {
+          "medianMs": 10.21295900000041,
+          "p95Ms": 10.648250000002008,
+          "samples": 6,
+          "warmups": 5
+        },
+        "recoveryAssertions": "Local snapshot + log tail and hub snapshot both reconstruct the final logical dataset"
+      }
+    },
+    {
+      "records": 1500,
+      "longValues": true,
+      "variant": "document-envelope",
+      "logicalJsonUtf8Bytes": 6961778,
+      "updateBytes": {
+        "initial": 6851980,
+        "append": 6856521,
+        "correction": 6856523
+      },
+      "fullStateBytes": {
+        "initial": 6851980,
+        "append": 6856543,
+        "correction": 6856545
+      },
+      "apply": {
+        "initial": {
+          "medianMs": 9.829125000000204,
+          "p95Ms": 11.189916999999696,
+          "minMs": 8.682457999999315,
+          "maxMs": 12.830041999997775,
+          "samples": 30,
+          "warmups": 5
+        },
+        "append": {
+          "medianMs": 9.866125000000466,
+          "p95Ms": 10.22441699999763,
+          "minMs": 8.529959000003146,
+          "maxMs": 14.42241699999795,
+          "samples": 30,
+          "warmups": 5
+        },
+        "correction": {
+          "medianMs": 10.031208000000333,
+          "p95Ms": 10.3748749999977,
+          "minMs": 8.77979200000118,
+          "maxMs": 10.568959000000177,
+          "samples": 30,
+          "warmups": 5
+        }
+      },
+      "storageGrowth": {
+        "variant": "document-envelope",
+        "records": 1500,
+        "longValues": true,
+        "cadence": "Unpaced sequential initial write then 10 corrections; one transaction per correction; hub snapshot upsert awaited after every update",
+        "correctionsMeasured": 10,
+        "compaction": "Harness calls existing MirrorStore.compact at 500 logged rows, mirroring default threshold, rather than waiting for ReplicaEngine scheduling",
+        "checkpoints": [
+          {
+            "corrections": 0,
+            "phase": "initial",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 6851980,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 6851980,
+            "localDatabaseFileBytes": 6971392,
+            "localWalFileBytes": 7098792,
+            "hubDatabaseFileBytes": 6868992
+          },
+          {
+            "corrections": 1,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 13703950,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 6851992,
+            "localDatabaseFileBytes": 13828096,
+            "localWalFileBytes": 7098792,
+            "hubDatabaseFileBytes": 13725696
+          },
+          {
+            "corrections": 10,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 11,
+            "localLogBlobBytes": 75371680,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 6851992,
+            "localDatabaseFileBytes": 75563008,
+            "localWalFileBytes": 7098792,
+            "hubDatabaseFileBytes": 13725696
+          }
+        ],
+        "appendUpdateTimings": {
+          "medianMs": 18.676374999999098,
+          "p95Ms": 19.081624999998894,
+          "samples": 6,
+          "warmups": 5
+        },
+        "hubSnapshotStoreTimings": {
+          "medianMs": 25.97137500000099,
+          "p95Ms": 26.052875000001222,
+          "samples": 6,
+          "warmups": 5
+        },
+        "recoveryAssertions": "Local snapshot + log tail and hub snapshot both reconstruct the final logical dataset"
+      }
+    },
+    {
+      "records": 1500,
+      "longValues": true,
+      "variant": "collection-envelopes",
+      "logicalJsonUtf8Bytes": 6961778,
+      "updateBytes": {
+        "initial": 6852027,
+        "append": 2290532,
+        "correction": 2290534
+      },
+      "fullStateBytes": {
+        "initial": 6852027,
+        "append": 6856590,
+        "correction": 6856599
+      },
+      "apply": {
+        "initial": {
+          "medianMs": 9.808666000000812,
+          "p95Ms": 10.4875409999986,
+          "minMs": 8.725250000003143,
+          "maxMs": 12.998500000001513,
+          "samples": 30,
+          "warmups": 5
+        },
+        "append": {
+          "medianMs": 2.967499999998836,
+          "p95Ms": 4.09824999999546,
+          "minMs": 2.846750000004249,
+          "maxMs": 9.196791000002122,
+          "samples": 30,
+          "warmups": 5
+        },
+        "correction": {
+          "medianMs": 3.142667000000074,
+          "p95Ms": 4.110333000004175,
+          "minMs": 2.8554579999981797,
+          "maxMs": 4.116083000000799,
+          "samples": 30,
+          "warmups": 5
+        }
+      },
+      "storageGrowth": {
+        "variant": "collection-envelopes",
+        "records": 1500,
+        "longValues": true,
+        "cadence": "Unpaced sequential initial write then 10 corrections; one transaction per correction; hub snapshot upsert awaited after every update",
+        "correctionsMeasured": 10,
+        "compaction": "Harness calls existing MirrorStore.compact at 500 logged rows, mirroring default threshold, rather than waiting for ReplicaEngine scheduling",
+        "checkpoints": [
+          {
+            "corrections": 0,
+            "phase": "initial",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 6852027,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 6852027,
+            "localDatabaseFileBytes": 6971392,
+            "localWalFileBytes": 7098792,
+            "hubDatabaseFileBytes": 6868992
+          },
+          {
+            "corrections": 1,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 9138008,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 6852039,
+            "localDatabaseFileBytes": 6971392,
+            "localWalFileBytes": 7098792,
+            "hubDatabaseFileBytes": 13725696
+          },
+          {
+            "corrections": 10,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 11,
+            "localLogBlobBytes": 29711837,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 6852046,
+            "localDatabaseFileBytes": 29872128,
+            "localWalFileBytes": 7098792,
+            "hubDatabaseFileBytes": 13725696
+          }
+        ],
+        "appendUpdateTimings": {
+          "medianMs": 9.756833000006736,
+          "p95Ms": 10.628042000003916,
+          "samples": 6,
+          "warmups": 5
+        },
+        "hubSnapshotStoreTimings": {
+          "medianMs": 25.12670800000342,
+          "p95Ms": 30.212083000005805,
+          "samples": 6,
+          "warmups": 5
+        },
+        "recoveryAssertions": "Local snapshot + log tail and hub snapshot both reconstruct the final logical dataset"
+      }
+    },
+    {
+      "records": 1500,
+      "longValues": true,
+      "variant": "keyed-records",
+      "logicalJsonUtf8Bytes": 6961778,
+      "updateBytes": {
+        "initial": 6905995,
+        "append": 4597,
+        "correction": 4546
+      },
+      "fullStateBytes": {
+        "initial": 6905995,
+        "append": 6910585,
+        "correction": 6910597
+      },
+      "apply": {
+        "initial": {
+          "medianMs": 9.924584000000323,
+          "p95Ms": 10.52341599999636,
+          "minMs": 9.458666999998968,
+          "maxMs": 10.66337499999645,
+          "samples": 30,
+          "warmups": 5
+        },
+        "append": {
+          "medianMs": 0.0090829999971902,
+          "p95Ms": 0.0141250000015134,
+          "minMs": 0.008333000005222857,
+          "maxMs": 0.014374999998835847,
+          "samples": 30,
+          "warmups": 5
+        },
+        "correction": {
+          "medianMs": 0.0105829999956768,
+          "p95Ms": 0.027791000000433996,
+          "minMs": 0.009333000001788605,
+          "maxMs": 0.03250000000116415,
+          "samples": 30,
+          "warmups": 5
+        }
+      },
+      "storageGrowth": {
+        "variant": "keyed-records",
+        "records": 1500,
+        "longValues": true,
+        "cadence": "Unpaced sequential initial write then 10 corrections; one transaction per correction; hub snapshot upsert awaited after every update",
+        "correctionsMeasured": 10,
+        "compaction": "Harness calls existing MirrorStore.compact at 500 logged rows, mirroring default threshold, rather than waiting for ReplicaEngine scheduling",
+        "checkpoints": [
+          {
+            "corrections": 0,
+            "phase": "initial",
+            "compactionMs": null,
+            "localLogRows": 1,
+            "localLogBlobBytes": 6905995,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 6905995,
+            "localDatabaseFileBytes": 7024640,
+            "localWalFileBytes": 7152352,
+            "hubDatabaseFileBytes": 6922240
+          },
+          {
+            "corrections": 1,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 2,
+            "localLogBlobBytes": 6910541,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 6906007,
+            "localDatabaseFileBytes": 7024640,
+            "localWalFileBytes": 7152352,
+            "hubDatabaseFileBytes": 13832192
+          },
+          {
+            "corrections": 10,
+            "phase": "before-compaction",
+            "compactionMs": null,
+            "localLogRows": 11,
+            "localLogBlobBytes": 6951473,
+            "localSnapshotBlobBytes": 0,
+            "localSnapshotThroughSeq": 0,
+            "hubSnapshotRows": 1,
+            "hubSnapshotBlobBytes": 6906016,
+            "localDatabaseFileBytes": 7024640,
+            "localWalFileBytes": 7152352,
+            "hubDatabaseFileBytes": 13832192
+          }
+        ],
+        "appendUpdateTimings": {
+          "medianMs": 0.11241699999663979,
+          "p95Ms": 0.11499999999796273,
+          "samples": 6,
+          "warmups": 5
+        },
+        "hubSnapshotStoreTimings": {
+          "medianMs": 25.386959000003117,
+          "p95Ms": 25.565374999998312,
+          "samples": 6,
+          "warmups": 5
+        },
+        "recoveryAssertions": "Local snapshot + log tail and hub snapshot both reconstruct the final logical dataset"
+      }
+    }
+  ],
+  "convergence": {
+    "clientIds": {
+      "base": 1,
+      "left": 2,
+      "right": 3
+    },
+    "crossKeyResult": {
+      "schema": {
+        "version": 2
+      },
+      "row:a": {
+        "schemaVersion": 1,
+        "id": "a"
+      },
+      "row:b": {
+        "schemaVersion": 2,
+        "id": "b"
+      }
+    },
+    "envelopeResult": {
+      "envelope": {
+        "schemaVersion": 2,
+        "records": [
+          {
+            "id": "b",
+            "schemaVersion": 2
+          }
+        ]
+      }
+    },
+    "conclusion": "Transactions batch local events; concurrent conflict resolution happens per key, so different-key rows survive under one winning schema. A whole envelope keeps its own schema/rows together by losing the competing envelope, including its row."
+  }
+}
