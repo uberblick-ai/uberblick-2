@@ -12,6 +12,7 @@ import {
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { editor, setupHarness } from "./app-helpers.js";
+import { keys } from "./harness.js";
 
 const { harness, trackContext, ws } = setupHarness();
 const SOURCE = "| A | B |\n| --- | --- |\n| alpha | one |\n| beta | two |\n| gamma | three |";
@@ -480,10 +481,13 @@ test("native touch holds pick up rows and swallow release clicks, including canc
   const session = await page.context().newCDPSession(page);
   try {
     const table = await openTable(page, fixture.uuid);
-    for (const ending of ["own", "escape", "cancel", "move"] as const) {
+    for (const [round, ending] of (["own", "escape", "cancel", "move"] as const).entries()) {
       const cell = table.locator("tr").nth(1).locator("td").nth(1);
-      await cell.tap();
-      await page.keyboard.press("End");
+      // ProseMirror groups mouse downs within 500 ms and 10 px into double and
+      // triple clicks. A fast round would make this tap a triple click, which
+      // selects the paragraph without focusing the editor.
+      await cell.tap({ position: { x: 8 + round * 16, y: (await box(cell)).height / 2 } });
+      await page.keyboard.press(keys.lineEnd);
       const offset = await cell.evaluate(() => document.getSelection()?.anchorOffset);
       const bounds = await box(handle(page, 1));
       const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
