@@ -1130,8 +1130,8 @@ h3.ub-heading {
 .ub-terminal-source,
 .ub-terminal-frame {
   font-family: var(--font-mono);
-  font-size: 0.85rem;
-  white-space: pre-wrap;
+  font-size: 0.8rem;
+  white-space: pre;
 }
 
 .ub-code,
@@ -1142,7 +1142,21 @@ h3.ub-heading {
   border-left: 3px solid var(--muted-foreground);
   border-radius: var(--radius-sm);
   padding: 0.6rem 0.75rem;
+}
+
+.ub-code > code,
+.ub-mermaid pre,
+.ub-terminal-source,
+.ub-terminal-screen {
   overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+/* Only the editable source scrolls; the caption and copy button stay in the
+   panel's chrome. Keep the NodeView and serialized pre/code structure alike. */
+.ub-code > code {
+  display: block;
+  font: inherit;
 }
 
 .ub-code,
@@ -1250,7 +1264,6 @@ h3.ub-heading {
   background: var(--terminal-screen);
   padding: 1.6rem 0.9rem 0.75rem;
   cursor: text;
-  overflow-x: auto;
 }
 
 /* Terminal screens and annotations keep keyboard focus visible over
@@ -1268,7 +1281,6 @@ h3.ub-heading {
   min-height: 4.5em;
   color: var(--terminal-ink);
   line-height: 1.5;
-  word-break: break-word;
 }
 
 /* The typing cursor stays solid, adding no animation to the demonstration. */
