@@ -202,9 +202,14 @@ test.describe("fractional layout", () => {
       const toggle = page.locator(".ub-threads-toggle");
       await expect(toggle).toBeVisible();
       await expect(page.locator("aside.ub-rail")).toHaveCount(0);
+      const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
+      // Creation reveals the new card. Dismiss its modal before testing the
+      // background sidebar handle and the explicit rail toggle.
+      await expect(sheet).toBeVisible();
+      await expect(sheet).toContainText("fractional conversation");
+      await sheet.getByRole("button", { name: "Close threads" }).click();
       await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
       await toggle.click();
-      const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
       await expect(sheet).toBeVisible();
       await expect(sheet).toContainText("fractional conversation");
       await expect(page.locator('[data-slot="sheet-overlay"]')).toBeVisible();
