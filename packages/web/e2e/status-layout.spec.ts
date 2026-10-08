@@ -140,7 +140,7 @@ async function checkReadings(page: Page, upstream: boolean) {
   const originalHub = upstream ? null : await hub.textContent();
   const originalReason = upstream ? null : await reason.evaluate((node) => ({
     text: node.textContent,
-    className: node.className,
+    className: node.getAttribute("class") ?? "",
     ariaHidden: node.getAttribute("aria-hidden"),
   }));
   const positions: Array<{ status: Awaited<ReturnType<typeof statusGeometry>>["status"]; prose: Awaited<ReturnType<typeof statusGeometry>>["prose"] }> = [];
@@ -177,7 +177,7 @@ async function checkReadings(page: Page, upstream: boolean) {
     if (originalReason !== null) {
       await reason.evaluate((node, saved) => {
         node.textContent = saved.text;
-        node.className = saved.className;
+        node.setAttribute("class", saved.className);
         if (saved.ariaHidden === null) node.removeAttribute("aria-hidden");
         else node.setAttribute("aria-hidden", saved.ariaHidden);
       }, originalReason);
