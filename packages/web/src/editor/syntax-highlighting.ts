@@ -15,6 +15,9 @@ import { common, createLowlight } from "lowlight";
 
 const highlighter = createLowlight(common);
 
+/** Canonical fence names from the same registry that colours the source. */
+export const codeLanguages: readonly string[] = highlighter.listLanguages();
+
 interface CodeToken {
   from: number;
   to: number;

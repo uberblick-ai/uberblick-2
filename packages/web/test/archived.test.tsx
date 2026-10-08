@@ -634,3 +634,45 @@ describe("starting a thread requires a writable document", () => {
     });
   }
 });
+
+describe("code language requires a writable document", () => {
+  for (const cause of ["archived", "not writable"] as const) {
+    it(`keeps the caption while ${cause} and restores the block control when writing returns`, async () => {
+      const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+      const directory = room(directoryRoom(WORKSPACE)).ydoc;
+      const docRoom = roomForDoc(WORKSPACE, UUID);
+      const ydoc = room(docRoom).ydoc;
+      initDoc(ydoc, { uuid: UUID, title: "Source example" });
+      appendBlock(ydoc, { type: "code", text: "const answer = 42;", language: "ts" });
+      upsertDirectoryEntry(directory, { uuid: UUID, title: "Source example" });
+      if (cause === "archived") tombstoneDirectoryEntry(directory, UUID);
+      else roomStatus.set(docRoom, { ...LIVE, writable: false });
+
+      const host = await openApp(`/${WORKSPACE}/${UUID}`);
+      const editor = binding.mock.results[0]?.value.editor;
+      if (editor == null) throw new Error("fixture document did not bind an editor");
+      const before = Y.encodeStateAsUpdate(ydoc);
+      act(() => editor.commands.setTextSelection(3));
+      expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("ts");
+      expect(screen.queryByRole("button", { name: "Code language" })).toBeNull();
+      expect(host.querySelector(".ub-toolbar")).toBeNull();
+      expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
+
+      await act(async () => {
+        if (cause === "archived") restoreButton(host)?.click();
+        else emitStatus(docRoom, { writable: true });
+      });
+      const control = screen.getByRole("button", { name: "Code language" });
+      expect(host.querySelector(".ub-code-caption")?.contains(control)).toBe(true);
+      expect(control.textContent).toContain("ts");
+      expect(host.querySelector(".ub-toolbar")).toBeNull();
+
+      await act(async () => {
+        if (cause === "archived") tombstoneDirectoryEntry(directory, UUID);
+        else emitStatus(docRoom, { writable: false });
+      });
+      expect(screen.queryByRole("button", { name: "Code language" })).toBeNull();
+      expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("ts");
+    });
+  }
+});
