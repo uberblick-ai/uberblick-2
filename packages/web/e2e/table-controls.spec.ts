@@ -81,9 +81,11 @@ async function minimumTargets(targets: Locator): Promise<void> {
     return { width: bounds.width, height: bounds.height };
   }));
   expect(dimensions.length).toBeGreaterThan(0);
+  // WebKit reports a 44px menu item as 43.999969px at fractional portal offsets.
+  // Allow only coordinate precision loss, well below a layout pixel fraction.
   for (const size of dimensions) {
-    expect(size.width).toBeGreaterThanOrEqual(44);
-    expect(size.height).toBeGreaterThanOrEqual(44);
+    expect(size.width + 0.001).toBeGreaterThanOrEqual(44);
+    expect(size.height + 0.001).toBeGreaterThanOrEqual(44);
   }
 }
 

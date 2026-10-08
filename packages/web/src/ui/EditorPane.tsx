@@ -293,7 +293,8 @@ function TldrCallout({
  *    redraw cadence is.
  * 2. The mark and the word each sit in a fixed-width slot, so swapping the dot
  *    for the spinner and "synced" for "syncing…" moves nothing to their right.
- * 3. The fixed sync slots keep the stable freshness and peer readings still
+ * 3. The fixed sync slots keep the freshness and peer readings still. In a
+ *    document, the reserved warning band keeps the rule and prose still too,
  *    while the transient backlog fact appears only when relevant.
  *
  * The suppression in (3) is safe only because a non-empty backlog is itself
@@ -311,6 +312,7 @@ export function StatusLine({
   notSharedReason = null,
   syncDetails = false,
   onActivatePresence,
+  documentLayout = false,
 }: {
   connection: RoomConnection;
   /**
@@ -338,6 +340,8 @@ export function StatusLine({
   syncDetails?: boolean;
   /** Reveal one currently resolvable remote caret without following it. */
   onActivatePresence?: ((session: RemotePresence) => void) | undefined;
+  /** Reserve warnings and presence only beside hydrated prose. */
+  documentLayout?: boolean;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const raw = rawSyncState(status);
@@ -353,7 +357,7 @@ export function StatusLine({
   // current room's roster in its ordinary slot while that word is blank; the
   // directory's roster is already excluded by App's room pairing (#606).
   const peerStrip = (
-    <PeerCluster presence={presence} onActivate={onActivatePresence} />
+    <PeerCluster presence={presence} onActivate={onActivatePresence} reserveSpace={documentLayout} />
   );
   const mark = (tone: SyncState | null): ReactElement => (
     <span className="ub-status-mark" aria-hidden="true">
@@ -367,7 +371,7 @@ export function StatusLine({
     </span>
   );
   const primary = (
-    <span className="inline-flex items-center gap-2">
+    <span className="inline-flex flex-none items-center gap-2">
       {mark(facts.primaryTone)}
       <span
         className={`ub-status-word${facts.twoFact ? " ub-status-word--saved" : ""}`}
@@ -377,12 +381,18 @@ export function StatusLine({
     </span>
   );
   const hubFact = facts.twoFact && !localWorkspace ? (
-    <span className="inline-flex items-center gap-2">
+    <span className="inline-flex flex-none items-center gap-2">
       {mark(facts.hubTone)}
       <span className="ub-status-word ub-status-word--hub">{facts.hub}</span>
     </span>
   ) : null;
   const blank = facts.primary === null;
+  const pendingReading =
+    reading.detail === null && state !== "synced" && status.unsyncedChanges > 0 ? (
+      <span className="ub-pending rounded-(--radius-sm) bg-(--status-warning-subtle) text-(--foreground) px-[0.3rem]">
+        {backlogLabel(status.unsyncedChanges)}
+      </span>
+    ) : null;
   const hub =
     endpoint === null || (hubAcked !== undefined && !facts.twoFact)
       ? null
@@ -400,7 +410,7 @@ export function StatusLine({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className={`ub-status-sync ub-sync-toggle inline-flex cursor-pointer items-center gap-2 -my-[0.2rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.3rem] py-[0.2rem] [font:inherit] text-inherit hover:bg-(--card-accent) hover:text-(--secondary-foreground) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1${hubAcked === undefined ? "" : " min-w-0 max-w-full flex-wrap"}`}
+          className={`ub-status-sync ub-sync-toggle inline-flex cursor-pointer items-center gap-2 -my-[0.2rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.3rem] py-[0.2rem] [font:inherit] text-inherit hover:bg-(--card-accent) hover:text-(--secondary-foreground) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1${hubAcked === undefined ? " flex-none" : " min-w-min max-w-full flex-wrap"}`}
           aria-label={
             factLabel.length === 0
               ? hub === null
@@ -450,16 +460,9 @@ export function StatusLine({
       <div className="flex min-w-0 min-h-7 items-center gap-2">
         {syncReading}
         {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
-        {!blank && saveNote}
+        {!documentLayout && !blank && saveNote}
         {!blank && updatedReading}
-        {!blank &&
-          reading.detail === null &&
-          state !== "synced" &&
-          status.unsyncedChanges > 0 && (
-            <span className="ub-pending">
-              {backlogLabel(status.unsyncedChanges)}
-            </span>
-          )}
+        {!documentLayout && !blank && pendingReading}
         {/* Circles, not name pills (#494): the strip is the constrained surface,
             and a row of words pushes the status line around as sessions come and
             go. The detail a name carried is on the avatar's hover instead — which
@@ -467,6 +470,15 @@ export function StatusLine({
             caret sits in is resolved once, in `readPresence`. */}
         {reading.detail === null && peerStrip}
       </div>
+      {/* Reserve two lines for simultaneous not-saved and backlog readings,
+          including a long count. Only ink changes while typing or reconnecting,
+          even when a desktop Threads rail leaves too little room inline. */}
+      {documentLayout && (
+        <div className="ub-status-notes flex min-w-0 min-h-[2lh] items-start gap-2 mt-2 [&>.ub-not-saved]:flex-none [&>.ub-pending]:min-w-0">
+          {!blank && saveNote}
+          {!blank && pendingReading}
+        </div>
+      )}
       {/* Reserve the full wrapping line even before the first status answer,
           through room changes, failed polls and refusals. Visibility changes
           ink only; the readings row and prose keep their geometry. */}
@@ -1061,6 +1073,7 @@ export function EditorPane({
             everything else to the waiting screen. */}
         <StatusLine
           connection={connection}
+          documentLayout
           presence={presence}
           lastUpdated={updatedAt}
           onLastUpdatedChange={onLastUpdatedChange}

@@ -760,21 +760,6 @@ h1.ub-heading {
   white-space: nowrap;
 }
 
-.ub-pending {
-  background: var(--status-warning-subtle);
-  color: var(--foreground);
-  border-radius: var(--radius-sm);
-  padding: 0 0.3rem;
-}
-
-.ub-peers {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex: none;
-  margin-left: auto;
-}
-
 /* Small identity initials and overflow counts keep their heavier UI weight. */
 .ub-avatar {
   font-family: var(--font-sans);
