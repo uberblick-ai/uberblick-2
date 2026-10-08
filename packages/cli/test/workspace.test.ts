@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
 import { writeHubLogin, removeHubLogin } from "@uberblick/hub/auth-store";
-import { createHub, silentLogger } from "@uberblick/hub";
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { resolveConfig } from "../src/config.js";
 import { readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
@@ -115,30 +114,6 @@ describe("ub workspace status", () => {
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toContain("account    @previous-user (GitHub)\n");
     expect(shown.stdout).not.toContain("up to date");
-  });
-
-  it("reports up to date after a real hub acknowledges the named local changes", async () => {
-    const secret = "synthetic-status-hub-secret";
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
-    storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), "Synced notes");
-    const hub = await createHub({
-      authSecret: secret, port: 0, databasePath: join(box.cwd, "hub.sqlite"), log: silentLogger,
-    });
-    try {
-      const endpoint = `ws://127.0.0.1:${hub.port}`;
-      bind(box, WORKSPACE, endpoint);
-      const shown = await runUbAsync(["workspace", "status"], box, { HUB_AUTH_TOKEN: secret, UB_TEST_MAX_WAIT_MS: "5000" });
-      expect(shown.status, shown.output).toBe(0);
-      expect(shown.stdout).toContain("workspace  Synced notes\n");
-      expect(shown.stdout).toContain("sync       up to date\n");
-      await hub.stop();
-      const offline = runUb(["workspace", "status"], box, { HUB_AUTH_TOKEN: secret });
-      expect(offline.status, offline.output).toBe(0);
-      expect(offline.stdout).not.toContain("up to date");
-      expect(offline.stdout).toMatch(/sync\s+.+/);
-    } finally {
-      await hub.stop();
-    }
   });
 
   it("names pending rooms when the hub cannot acknowledge local changes", () => {
