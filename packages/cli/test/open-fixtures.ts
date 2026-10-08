@@ -594,7 +594,12 @@ export function servingDocumentOf(
     hubAuthToken: secret,
     remoteHubUrl,
     ...(rebound ? { rebound: true } : {}),
-    servedWorkspaces: { [workspace]: { browserKey: secret, remoteHubUrl }, ...otherWorkspaces },
+    servedWorkspaces: {
+      [workspace]: { browserKey: secret, name: null, remoteHubUrl },
+      ...Object.fromEntries(Object.entries(otherWorkspaces).map(([id, entry]) => [id, {
+        browserKey: entry.browserKey, name: null, remoteHubUrl: entry.remoteHubUrl,
+      }])),
+    },
   });
 }
 
