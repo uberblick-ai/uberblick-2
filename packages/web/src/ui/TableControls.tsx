@@ -101,7 +101,7 @@ function TableControlSurface({ tableId, editor, host }: {
   const [geometry, setGeometry] = useState<Geometry | null>(null);
   const [menu, setMenu] = useState<TableRowTarget | null>(null);
   const menuRef = useRef<TableRowTarget | null>(null);
-  const hovered = useRef<{ id: string; row: number | null; point?: { x: number; y: number } } | null>(null);
+  const hovered = useRef<{ id: string; row: number | null; y?: number | undefined } | null>(null);
   const touch = useRef(editor.view.dom.ownerDocument.defaultView?.matchMedia?.("(pointer: coarse)").matches ?? false);
   const pendingFocus = useRef(false);
   const controls = useRef<HTMLDivElement | null>(null);
@@ -184,12 +184,12 @@ function TableControlSurface({ tableId, editor, host }: {
         rows.push({ key, target, middle: (rect.top + rect.bottom) / 2 - box.top, bottom: rect.bottom - box.top });
       }
       let hoveredRow = hovered.current?.id === id ? hovered.current.row : null;
-      const point = hovered.current?.id === id ? hovered.current.point : undefined;
-      if (point !== undefined) {
+      const pointerY = hovered.current?.id === id ? hovered.current.y : undefined;
+      if (pointerY !== undefined) {
         // Collapsed borders can hit-test as the next row in Chromium. Resolve
         // the pointer against the fresh boxes that also draw the controls,
         // including the first hover after a hidden table moves or reflows.
-        const y = point.y - box.top;
+        const y = pointerY - box.top;
         const index = rows.findIndex((row) => y >= 2 * row.middle - row.bottom && y <= row.bottom);
         hoveredRow = index < 0 ? null : index;
       }
@@ -216,7 +216,7 @@ function TableControlSurface({ tableId, editor, host }: {
       const element = event.target instanceof Element ? event.target : null;
       hovered.current = id === null ? null : {
         id, row: rowAt(event.target),
-        point: element?.closest(".tableWrapper") ? { x: event.clientX, y: event.clientY } : undefined,
+        y: element?.closest(".tableWrapper") ? event.clientY : undefined,
       };
       // The column strip straddles the top border without intercepting cell
       // input between its buttons. Keep the short path through that empty
@@ -234,7 +234,10 @@ function TableControlSurface({ tableId, editor, host }: {
       if (touch.current) hovered.current = null;
       else {
         const id = tableIdAt(event.target);
-        hovered.current = id === null ? null : { id, row: rowAt(event.target) };
+        const element = event.target instanceof Element ? event.target : null;
+        hovered.current = id === null ? null : {
+          id, row: rowAt(event.target), y: element?.closest(".tableWrapper") ? event.clientY : undefined,
+        };
       }
       read();
     };
