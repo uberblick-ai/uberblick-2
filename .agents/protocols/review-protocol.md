@@ -90,8 +90,10 @@ obvious bug to the person it affects, such as a duplicate row or an edit that
 vanishes in front of the person who made it. It is P3 at most, whatever
 guarantee the issue states. Name it as a known limit; it is not an owner
 question and never blocks, escalates or reopens settled work. If it happens in
-use, it is filed as a bug then. A hidden bug or a loss nobody would notice is
-not one, nor is secret exposure or damage the product cannot repair.
+use, it is filed as a bug then. The test is whether accepting it saves a loop
+round or avoids edge-case code; when it does either, prefer the known limit over
+a fix or a question. A hidden bug or a loss nobody would notice is not one, nor
+is secret exposure or damage the product cannot repair.
 
 A finding keeps its id across heads. Reopen a settled one only when changed
 code or new evidence invalidates how it was settled.
