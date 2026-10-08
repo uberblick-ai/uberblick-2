@@ -85,14 +85,13 @@ limitation.
 - **P3:** minor or theoretical impact.
 
 A visible edge case is accepted by default: a failure that needs an unlikely
-sequence (a race, two people acting at once, an odd input) and either shows
-itself plainly to the person it affects and is fixed by hand, or drops one
-person's in-flight edit when two people change the same content at the same
-moment. It is P3 at most, whatever guarantee the issue states. Name it as a
-known limit; it is not an owner question and never blocks, escalates or reopens
-settled work. If it happens in use, it is filed as a bug then. Any other lost
-work, a silent wrong result, secret exposure or damage the product cannot
-repair is not one.
+sequence (a race, two people acting at once, an odd input) and surfaces as an
+obvious bug to the person it affects, such as a duplicate row or an edit that
+vanishes in front of the person who made it. It is P3 at most, whatever
+guarantee the issue states. Name it as a known limit; it is not an owner
+question and never blocks, escalates or reopens settled work. If it happens in
+use, it is filed as a bug then. A hidden bug or a loss nobody would notice is
+not one, nor is secret exposure or damage the product cannot repair.
 
 A finding keeps its id across heads. Reopen a settled one only when changed
 code or new evidence invalidates how it was settled.
