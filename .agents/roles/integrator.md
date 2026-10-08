@@ -70,9 +70,8 @@ for a Copilot review that already exists or for a no-comment result.
 `merged`, `changes` (naming the failed gate or the remark that needs a fix),
 `review` (naming what the review must cover), `needs-human` (naming the tier-3
 trigger or the question), or `defer` (a wait allowed by
-[run-operations.md](../protocols/run-operations.md#every-process-a-run-starts-is-that-runs-to-end),
-such as pending CI; never solely for optional
-Copilot review).
+[run-operations.md](../protocols/run-operations.md#every-process-a-run-starts-is-that-runs-to-end);
+never solely for optional Copilot review).
 
 Last, run the host housekeeping `integration.md` names for isolated-review
 artifacts. For a qualifying problem, use [retrospectives.md](../protocols/retrospectives.md)
