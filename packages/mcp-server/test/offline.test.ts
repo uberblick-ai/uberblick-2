@@ -56,6 +56,7 @@ describe("with the hub stopped", () => {
       "edit_block",
       "export_markdown",
       "find_decisions",
+      "get_data",
       "get_doc",
       "get_sidebar",
       "insert_block",
@@ -75,6 +76,7 @@ describe("with the hub stopped", () => {
       "sidebar_group",
       "sync_status",
       "unpin_doc",
+      "update_data",
     ]);
 
     // insert_block accepts every block type the schema owns, so its
