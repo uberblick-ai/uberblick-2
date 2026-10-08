@@ -44,16 +44,27 @@ import {
   STARTER_GROUP_NAME,
 } from "../src/starter.js";
 import {
-  DEAD_HUB_URL,
   PACKAGE_ROOT,
+  hubless,
   removeTempDirs,
   runUb,
   runUbAsync,
-  sandbox,
+  sandbox as anySandbox,
+  unboundSandbox as anyUnboundSandbox,
 } from "./helpers.js";
-import type { Run, Sandbox } from "./helpers.js";
+import type { Run, Sandbox, SandboxFiles } from "./helpers.js";
 
 afterAll(removeTempDirs);
+
+/** No test here starts a hub, so none waits for one; see {@link hubless}. */
+function sandbox(files?: SandboxFiles): Sandbox {
+  return hubless(anySandbox(files));
+}
+
+/** Starter creation also covers the first binding written by init. */
+function unboundSandbox(files?: SandboxFiles): Sandbox {
+  return hubless(anyUnboundSandbox(files));
+}
 
 /** The shipped templates, in the order the sidebar pins them. */
 const TEMPLATES = [
@@ -95,16 +106,14 @@ const DESCRIBED_WORKSPACE = "9d3b6f27-1c84-4a05-b7e9-2f61c8d05a3b";
 
 /** `ub init` on a machine with no hub and nothing to install. */
 function init(target: Sandbox = box): Run {
-  const run = runUb(["init", "--yes", "--no-mcp"], target, {
-    HUB_URL: DEAD_HUB_URL,
-  });
+  const run = runUb(["init", "--yes", "--no-mcp"], target);
   expect(run.status, run.output).toBe(0);
   return run;
 }
 
 function workspace(target: Sandbox = box): string {
-  const path = join(target.configHome, "uberblick", "config.json");
-  return JSON.parse(readFileSync(path, "utf8")).workspace;
+  const path = join(target.cwd, ".uberblick.json");
+  return JSON.parse(readFileSync(path, "utf8")).workspaceId;
 }
 
 /**
@@ -187,7 +196,7 @@ async function withTools<T>(
 }
 
 beforeAll(() => {
-  box = sandbox();
+  box = unboundSandbox();
   init();
 });
 
@@ -256,7 +265,7 @@ it("describes both starter documents, in the document and in the stub", () => {
 it("leaves a freshly seeded document nothing to backfill", async () => {
   // The point of the descriptions: a document that arrives described does not
   // meet its first agent with a `descriptionHint` telling it to write one.
-  const seeded = sandbox({ userConfig: { workspace: DESCRIBED_WORKSPACE } });
+  const seeded = sandbox({ projectBinding: { workspaceId: DESCRIBED_WORKSPACE, hubUrl: null } });
   await importSeedDir(
     join(PACKAGE_ROOT, "templates"),
     resolveMcpConfig({
@@ -359,7 +368,7 @@ it("finishes a workspace whose seed stopped after the first document", async () 
   // the other missing, and no sidebar — reached through the importer itself
   // rather than by crashing one: what matters is that `ub init` reads what is
   // missing instead of remembering that it once ran.
-  const half = sandbox({ userConfig: { workspace: HALF_WORKSPACE } });
+  const half = sandbox({ projectBinding: { workspaceId: HALF_WORKSPACE, hubUrl: null } });
   const partial = join(half.cwd, "one-template");
   const first = TEMPLATES[0]!.file;
   mkdirSync(partial, { recursive: true });
@@ -397,7 +406,7 @@ it("repairs an unseeded sidebar in a workspace holding only the starter document
   // Both documents landed, the pins never did — the workspace a `ub init` from
   // before this feature leaves behind, and the one an init interrupted between
   // the two writes leaves behind. The next run finishes the layout.
-  const unpinned = sandbox({ userConfig: { workspace: UNPINNED_WORKSPACE } });
+  const unpinned = sandbox({ projectBinding: { workspaceId: UNPINNED_WORKSPACE, hubUrl: null } });
   await importSeedDir(
     join(PACKAGE_ROOT, "templates"),
     resolveMcpConfig({
@@ -451,7 +460,7 @@ it("adds nothing to a workspace that already holds other documents", async () =>
   // The upgrade case, and the joined-workspace case: a corpus that is already
   // somebody's is not one to write starter documents into, however little of
   // the starter corpus it happens to hold.
-  const owned = sandbox({ userConfig: { workspace: OWNED_WORKSPACE } });
+  const owned = sandbox({ projectBinding: { workspaceId: OWNED_WORKSPACE, hubUrl: null } });
   await withTools(
     async (call) =>
       call("create_doc", {
@@ -476,7 +485,7 @@ it("adds nothing when an archived stub has no document room", async () => {
   // A different replica can deliver a tombstone without ever having attached
   // the archived room. The stub is still evidence that this workspace belongs
   // to somebody, so `ub init` must not seed starter documents into it.
-  const owned = sandbox({ userConfig: { workspace: OWNED_WORKSPACE } });
+  const owned = sandbox({ projectBinding: { workspaceId: OWNED_WORKSPACE, hubUrl: null } });
   const config = resolveMcpConfig({
     WORKSPACE_ID: OWNED_WORKSPACE,
     XDG_DATA_HOME: owned.dataHome,
@@ -545,10 +554,10 @@ it("does not duplicate a document when two ub init runs race", async () => {
   // else can write between the two, which is what the init lock is for here:
   // without it both runs read an empty workspace and both write Welcome into
   // the same room, where Yjs merges two copies of every block.
-  const race = sandbox();
+  const race = unboundSandbox();
   const runs = await Promise.all([
-    runUbAsync(["init", "--yes", "--no-mcp"], race, { HUB_URL: DEAD_HUB_URL }),
-    runUbAsync(["init", "--yes", "--no-mcp"], race, { HUB_URL: DEAD_HUB_URL }),
+    runUbAsync(["init", "--yes", "--no-mcp"], race),
+    runUbAsync(["init", "--yes", "--no-mcp"], race),
   ]);
   // Both still succeed: the loser leaves the documents to the run that holds
   // the seed lock rather than failing over a lock it has no stake in.
@@ -636,6 +645,8 @@ it("ships the templates inside the package", () => {
     execFileSync("npm", ["pack", "--dry-run", "--json"], {
       cwd: PACKAGE_ROOT,
       encoding: "utf8",
+      // npm warns about every pnpm setting it finds in the environment.
+      stdio: ["ignore", "pipe", "ignore"],
     }),
   );
   const paths = packed[0].files.map((file: { path: string }) => file.path);

@@ -454,6 +454,7 @@ export function DocMetaLine({
   meta,
   archived,
   readOnly = false,
+  contentReadOnly = false,
   pinned = false,
   onTogglePin = null,
   onArchive = null,
@@ -471,6 +472,8 @@ export function DocMetaLine({
   archived: boolean;
   /** Whether the document room currently refuses writes. */
   readOnly?: boolean;
+  /** Decided content stays immutable without withholding tags or placement. */
+  contentReadOnly?: boolean;
   pinned?: boolean;
   onTogglePin?: (() => void) | null;
   /** Null means this replica cannot establish a current live directory stub. */
@@ -513,6 +516,7 @@ export function DocMetaLine({
               onArchive={onArchive}
               onConfirmationFocusChange={onArchiveConfirmationFocusChange}
               hasTldr={hasTldr}
+              contentReadOnly={contentReadOnly}
               onEditTldr={readOnly ? null : (onEditTldr ?? null)}
             />
           )}
@@ -540,6 +544,7 @@ function DocumentActions({
   onArchive,
   onConfirmationFocusChange,
   hasTldr,
+  contentReadOnly,
   onEditTldr,
 }: {
   title: string;
@@ -548,6 +553,7 @@ function DocumentActions({
   onArchive: (() => void) | null;
   onConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
   hasTldr: boolean;
+  contentReadOnly: boolean;
   onEditTldr: (() => void) | null;
 }): ReactElement {
   const [confirming, setConfirming] = useState(false);
@@ -603,17 +609,19 @@ function DocumentActions({
                   ? "Unpin from sidebar"
                   : "Pin to sidebar"}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={onEditTldr === null}
-              onSelect={() => {
-                openingTldrEditor.current = true;
-                onEditTldr?.();
-              }}
-            >
-              {onEditTldr === null
-                ? `${hasTldr ? "Edit" : "Add"} TL;DR unavailable — document is read-only`
-                : `${hasTldr ? "Edit" : "Add"} TL;DR`}
-            </DropdownMenuItem>
+            {!contentReadOnly && (
+              <DropdownMenuItem
+                disabled={onEditTldr === null}
+                onSelect={() => {
+                  openingTldrEditor.current = true;
+                  onEditTldr?.();
+                }}
+              >
+                {onEditTldr === null
+                  ? `${hasTldr ? "Edit" : "Add"} TL;DR unavailable — document is read-only`
+                  : `${hasTldr ? "Edit" : "Add"} TL;DR`}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               aria-disabled={onArchive === null}

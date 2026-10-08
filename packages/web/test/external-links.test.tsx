@@ -4,8 +4,7 @@
  * and which browser defaults the comment delegation must refuse.
  */
 
-import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { act, renderSettled } from "./react-render.js";
 import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { appendBlock, getBlocksFragment, initDoc } from "@uberblick/schema";
@@ -78,8 +77,6 @@ describe("external link URL safety", () => {
 
   it("refuses unsafe anchor clicks and Enter before a surrounding thread, in either pane", async () => {
     const opened = vi.spyOn(window, "open").mockReturnValue(null);
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
     try {
       for (const archived of [false, true]) {
         const ydoc = linkedDoc();
@@ -88,24 +85,20 @@ describe("external link URL safety", () => {
           comment: { threadId: "t-1" },
         });
         const selected = vi.fn();
-        const host = document.createElement("div");
-        document.body.appendChild(host);
-        const root = createRoot(host);
+        const view = await renderSettled(
+          <EditorPane
+            connection={connectionFor(ydoc)}
+            segment={WORKSPACE}
+            presence={[]}
+            author="tester"
+            archived={archived}
+            docLinks={null}
+            onRestore={() => {}}
+            onSelectThread={selected}
+          />,
+        );
+        const host = view.container;
         try {
-          await act(async () => {
-            root.render(
-              <EditorPane
-                connection={connectionFor(ydoc)}
-                segment={WORKSPACE}
-                presence={[]}
-                author="tester"
-                archived={archived}
-                docLinks={null}
-                onRestore={() => {}}
-                onSelectThread={selected}
-              />,
-            );
-          });
           const anchor = host.querySelector<HTMLAnchorElement>("a.ub-link");
           expect(anchor?.closest("[data-comment-thread]")).not.toBeNull();
           for (const href of REFUSED) {
@@ -131,8 +124,7 @@ describe("external link URL safety", () => {
           expect(opened).not.toHaveBeenCalled();
           expect(selected).not.toHaveBeenCalled();
         } finally {
-          await act(async () => root.unmount());
-          host.remove();
+          view.unmount();
           ydoc.destroy();
         }
       }

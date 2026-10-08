@@ -385,6 +385,9 @@ it("keeps a store-refused room read-only across reacquire without dropping peers
   expect(other.latest().writable).toBe(true);
 }, TEST_TIMEOUT_MS);
 
+/** The forced-drop window the cooldown test runs under; see that test. */
+const COOLDOWN_MS = 1_000;
+
 it("repairs a document close that arrives during the forced-drop cooldown", async () => {
   const path = databasePath();
   const hub = await startHub(0, path);
@@ -394,6 +397,13 @@ it("repairs a document close that arrives during the forced-drop cooldown", asyn
   const tab = await openTab(room, hub.port);
   teardown.push(() => sharedSocket(tab.connection).destroy());
   await seedDocument(tab, uuid);
+  // A 1s window instead of the app's 2.5–5s band: the deferral is the same
+  // code, and the second close below lands ~50ms into the window on an idle
+  // machine. The window is asserted rather than assumed, so a close that
+  // arrives after it fails here instead of quietly proving nothing.
+  const { setForcedDropCooldownForTesting } = await import("../src/collab/rooms.js");
+  setForcedDropCooldownForTesting({ minMs: COOLDOWN_MS, maxMs: COOLDOWN_MS });
+  const cooldownStart = Date.now();
 
   // First close: repaired immediately, and it starts the cooldown.
   const beforeFirstClose = tab.lostSyncCount();
@@ -411,6 +421,7 @@ it("repairs a document close that arrives during the forced-drop cooldown", asyn
   // repair away: this close is the only signal that the room needs re-joining,
   // and nothing else will ever repeat it.
   const beforeSecondClose = tab.lostSyncCount();
+  expect(Date.now() - cooldownStart, "the second close must land inside the cooldown").toBeLessThan(COOLDOWN_MS);
   hub.hocuspocus.closeConnections(room);
   await waitFor(
     "the second close to reach the tab",
@@ -531,7 +542,12 @@ it("paces live name rooms below the hub ceiling, including after a reconnect", a
       setWorkspaceName(doc, `Workspace ${index}`);
       provider.awareness?.setLocalStateField("user", { name: "test" });
     }
-    await expect.poll(() => providers.every((provider) => provider.isSynced), { timeout: 10_000 }).toBe(true);
+    // The handshake alone does not acknowledge the queued names' upload.
+    await waitFor(
+      "all name rooms to sync and upload their names",
+      () => providers.every((provider) => provider.isSynced && provider.unsyncedChanges === 0),
+      10_000,
+    );
     expect(disconnects).toBe(0);
     for (const [index, provider] of providers.entries()) {
       expect(getWorkspaceName(hub.hocuspocus.documents.get(provider.configuration.name)!)).toBe(`Workspace ${index}`);
@@ -586,7 +602,11 @@ it("discards a token that resolves after its socket generation ended", async () 
     socket.disconnect();
     await expect.poll(() => disconnects).toBe(1);
     await socket.connect();
-    await expect.poll(() => provider.isSynced, { timeout: 10_000 }).toBe(true);
+    await waitFor(
+      "the replacement room to sync and upload its name",
+      () => provider.isSynced && provider.unsyncedChanges === 0,
+      10_000,
+    );
     expect(authFrames).toBe(1);
     finishOld(await admissionToken());
     await oldToken;

@@ -18,7 +18,6 @@ import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { openCommand } from "./open.js";
-import { remoteCommand } from "./remote.js";
 import { serveCommand } from "./serve.js";
 import { statusCommand } from "./status.js";
 import { updateCommand } from "./update.js";
@@ -38,9 +37,8 @@ commands:
                          open the browser
   status [--json]        workspace, hub, connection, pending work and failures
   doctor [--json]        check the local stack against its known failure modes
-  workspace [command]    which workspace is in force, and how to change it
-  remote [command]       the endpoint documents sync with, and the one-time bridge
-  auth <command>         sign in to a remote hub and manage this machine's login
+  workspace [command]    create, promote, join, list or select a workspace
+  auth [command]         sign in to a remote hub and manage this machine's login
   mcp <command>          register uberblick with an MCP client
   env -- <command...>    run a command with uberblick's configuration in its
                          environment
@@ -51,7 +49,7 @@ options:
 `;
 
 /**
- * `ub mcp` is a group like `workspace` and `remote`, with one human child.
+ * `ub mcp` is a group like `workspace`, with one human child.
  *
  * `serve` is left out for the same reason it is left out of the top-level help:
  * it is the stdio line a client config points at, written there by machine.
@@ -97,9 +95,6 @@ export async function runCli(
   }
   if (command === "workspace") {
     return await workspaceCommand(rest, io);
-  }
-  if (command === "remote") {
-    return await remoteCommand(rest, io);
   }
   if (command === "auth") {
     return await authCommand(rest, io);

@@ -33,6 +33,11 @@
  *
  * ## The trigger is derived, never remembered
  *
+ * Web UI system's Exceptions records the owner-confirmed slash and `@` trigger
+ * and session exception: Uberblick owns these rules because adopting
+ * `@tiptap/suggestion` would retain the custom matchers while adding substantial
+ * integration machinery.
+ *
  * {@link slashTriggerAt} answers "does the editor state still describe a slash
  * session?": caret at the end of a top-level paragraph whose whole text is `/`
  * plus a run of non-space characters. Because the answer is recomputed rather
@@ -57,6 +62,7 @@
  * gone (see {@link findBlockById}).
  */
 
+import { tableFromRows } from "./table.js";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
@@ -437,7 +443,14 @@ export function convertBlockAtTrigger(
   const tr = editor.state.tr;
   const contentStart = found.pos + 1;
   tr.delete(contentStart, contentStart + found.node.content.size);
-  retypeBlockInTransaction(tr, found.pos, entry.type, entry.attrs);
+  if (entry.type === "table") {
+    const emptied = tr.doc.nodeAt(found.pos);
+    if (emptied === null) return false;
+    tr.replaceWith(found.pos, found.pos + emptied.nodeSize,
+      tableFromRows(editor.state.schema, [["", "", ""], ["", "", ""], ["", "", ""]], live.blockId));
+  } else {
+    retypeBlockInTransaction(tr, found.pos, entry.type, entry.attrs);
+  }
   tr.setSelection(TextSelection.near(tr.doc.resolve(contentStart)));
 
   editor.view.dispatch(tr);
@@ -465,7 +478,9 @@ export function insertBlockBelow(
 
   const nodeType = state.schema.nodes[entry.type];
   if (nodeType === undefined) return false;
-  const fresh = nodeType.createAndFill(attrsForNewBlock(entry));
+  const fresh = entry.type === "table"
+    ? tableFromRows(state.schema, [["", "", ""], ["", "", ""], ["", "", ""]], null)
+    : nodeType.createAndFill(attrsForNewBlock(entry));
   if (fresh === null) return false;
 
   endUndoCapture(state);

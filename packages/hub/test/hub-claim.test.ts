@@ -1,10 +1,6 @@
-import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
 import { getWorkspaceName, setWorkspaceName, validateWorkspaceName } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
@@ -123,51 +119,6 @@ afterEach(async () => {
 });
 
 describe("fresh deployed hub initialization", () => {
-  it("the deployed entry point initializes an empty hub and reuses its state on replacement", async () => {
-    const path = databasePath();
-    const startDeployment = async () => {
-      const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"),
-        fileURLToPath(new URL("../src/main.ts", import.meta.url))], {
-        cwd: tmpdir(), timeout: 5000, stdio: ["ignore", "ignore", "pipe"],
-        env: { ...process.env, HUB_AUTH_TOKEN: TEST_SECRET, HUB_DB_PATH: path, HUB_HOST: "127.0.0.1", PORT: "0", HUB_GITHUB_CLIENT_ID: "" },
-      });
-      const exited = once(child, "exit");
-      try {
-        const port = await new Promise<number>((resolve, reject) => {
-          let output = "";
-          child.on("error", reject);
-          child.once("exit", () => reject(new Error("deployed hub exited before listening")));
-          child.stderr.setEncoding("utf8");
-          child.stderr.on("data", (chunk: string) => {
-            output += chunk;
-            for (;;) {
-              const newline = output.indexOf("\n");
-              if (newline < 0) break;
-              const line = output.slice(0, newline);
-              output = output.slice(newline + 1);
-              try {
-                const record = JSON.parse(line);
-                if (record.event === "hub.listen") resolve(record.port);
-              } catch { /* Node warnings are not hub log records. */ }
-            }
-          });
-        });
-        const response = await fetch(`http://127.0.0.1:${port}/auth/claim-state`, { signal: AbortSignal.timeout(2000) });
-        expect(await response.json()).toEqual({ unclaimed: true, canClaim: true });
-        const database = new DatabaseSync(path, { readOnly: true });
-        try { return database.prepare("SELECT * FROM hub_claim_state").all(); }
-        finally { database.close(); }
-      } finally {
-        if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-        await exited;
-      }
-    };
-    const first = await startDeployment();
-    expect(first).toHaveLength(1);
-    expect(first[0]!.default_workspace_id).toEqual(expect.any(String));
-    expect(await startDeployment()).toEqual(first);
-  });
-
   it("initializes empty schemas once and preserves the workspace and later rename across restart", () => {
     const first = rig();
     const workspaceId = defaultWorkspace(first);
@@ -238,6 +189,20 @@ describe("fresh deployed hub initialization", () => {
 });
 
 describe("first-completed GitHub sign-in claim", () => {
+  it("delivers a claimed credential when the workspace settings cannot be decoded", async () => {
+    const testRig = rig();
+    const workspaceId = defaultWorkspace(testRig);
+    testRig.database.connection.prepare("UPDATE documents SET data = ? WHERE name = ?")
+      .run(new Uint8Array([255]), `${workspaceId}/_settings`);
+    const { flow, github } = signIn(testRig);
+    const collected = await complete(flow, github);
+    expect(collected.credential.record.workspaces).toEqual([workspaceId]);
+    expect(collected.credential.workspaceNames).toBeUndefined();
+    expect(collected.credential.key).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(testRig.credentials.get(collected.credential.record.id)).toEqual(collected.credential.record);
+    expect(testRig.claims!.state(true)).toEqual({ unclaimed: false, canClaim: false });
+  });
+
   it("claims with the issued credential and never changes membership on later sign-ins", async () => {
     const testRig = rig();
     const workspaceId = defaultWorkspace(testRig);
@@ -245,6 +210,7 @@ describe("first-completed GitHub sign-in claim", () => {
     const claim = await complete(flow, github);
     expect(claim.claimedWorkspaceId).toBe(workspaceId);
     expect(claim.credential.record.workspaces).toEqual([workspaceId]);
+    expect(claim.credential.workspaceNames).toEqual({ [workspaceId]: "Default workspace" });
     expect(rows(testRig).hub_memberships).toEqual([{ workspace_id: workspaceId, principal_id: claim.identity.id, role: "admin" }]);
     const membership = rows(testRig).hub_memberships;
     const again = await complete(flow, github);
@@ -300,7 +266,7 @@ describe("first-completed GitHub sign-in claim", () => {
     expect(await complete(flow, github)).toMatchObject({ claimedWorkspaceId: defaultWorkspace(testRig), identity: { githubAccountId: "5678" } });
   });
 
-  it.each(["cancel", "expire", "stop"])("%s before completion leaves claiming open", async (action) => {
+  it("cancel before completion leaves claiming open", async () => {
     const testRig = rig();
     const { flow, github } = signIn(testRig);
     const before = rows(testRig);
@@ -313,11 +279,9 @@ describe("first-completed GitHub sign-in claim", () => {
     github.time += 1000;
     const collecting = flow.collect(request.requestId, request.collectionSecret);
     await entered;
-    if (action === "cancel") flow.cancel(request.requestId, request.collectionSecret);
-    if (action === "expire") github.time += 900_000;
-    if (action === "stop") flow.stop();
+    flow.cancel(request.requestId, request.collectionSecret);
     resume();
-    expect(await collecting).toEqual({ status: action === "cancel" ? "abandoned" : action === "expire" ? "expired" : "failed" });
+    expect(await collecting).toEqual({ status: "abandoned" });
     expect(rows(testRig)).toEqual(before);
     expect(testRig.claims!.state(true)).toEqual({ unclaimed: true, canClaim: true });
   });
@@ -345,10 +309,10 @@ describe("first-completed GitHub sign-in claim", () => {
 });
 
 describe("credential-free claim-state report", () => {
-  it.each([true, false])("reports only the two facts with GitHub configured=%s and mutates nothing", async (configured) => {
+  // The configured case is read from the deployed entry point in shutdown.test.ts.
+  it("reports only the two facts without GitHub configured and mutates nothing", async () => {
     const path = databasePath();
     const hub = await createHub({ authSecret: TEST_SECRET, databasePath: path, address: "127.0.0.1", port: 0, log: silentLogger,
-      ...(configured ? { github: { clientId: CLIENT_ID } } : {}),
     }, { initializeDefaultWorkspace: true });
     hubs.push(hub);
     const inspect = rig(path);
@@ -356,7 +320,7 @@ describe("credential-free claim-state report", () => {
     const response = await fetch(`http://127.0.0.1:${hub.port}/auth/claim-state`);
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ unclaimed: true, canClaim: configured });
+    expect(await response.json()).toEqual({ unclaimed: true, canClaim: false });
     expect(rows(inspect)).toEqual(before);
   });
 

@@ -23,9 +23,8 @@
  * server and a real browser profile — `e2e/deep-link.spec.ts`.
  */
 
+import { act, render } from "./react-render.js";
 import { afterEach, describe, expect, it, beforeEach } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
 import type { ReactElement } from "react";
 import * as Y from "yjs";
 import {
@@ -103,7 +102,7 @@ describe("an address names a document, a workspace mode, or neither", () => {
     expect(canonicalPath(route("/"))).toBe(`/${CONFIGURED}`);
   });
 
-  it("reserves General and Tags as the complete workspace-settings address set", () => {
+  it("reserves General, Tags and Access as the workspace-settings address set", () => {
     expect(route(`/${WS}/settings`)).toEqual({
       kind: "settings",
       workspace,
@@ -121,13 +120,16 @@ describe("an address names a document, a workspace mode, or neither", () => {
     });
     expect(settingsPath(WS)).toBe(`/${WS}/settings`);
     expect(settingsPath(WS, "tags")).toBe(`/${WS}/settings/tags`);
+    expect(route(`/${WS}/settings/access`)).toEqual({ kind: "settings", workspace, page: "access" });
+    expect(settingsPath(WS, "access")).toBe(`/${WS}/settings/access`);
+    expect(canonicalPath(route(`/${WS}/SETTINGS/ACCESS/`))).toBe(`/${WS}/settings/access`);
     expect(canonicalPath(route(`/${WS}/settings/`))).toBe(`/${WS}/settings`);
     expect(canonicalPath(route(`/${WS}/settings/TAGS/`))).toBe(
       `/${WS}/settings/tags`,
     );
     expect(canonicalPath(route(`/${WS}/SETTINGS/TAGS`))).toBe(`/${WS}/settings/tags`);
 
-    for (const invalid of ["general", "unknown", "tags/more"]) {
+    for (const invalid of ["general", "unknown", "tags/more", "access/more"]) {
       const nested = route(`/${WS}/settings/${invalid}`);
       expect(nested.kind).toBe("invalid");
       expect(nested.kind === "invalid" && nested.workspace).toEqual(workspace);
@@ -255,20 +257,16 @@ function Probe({ to }: { to: string }): ReactElement {
 
 describe("the URL and the app are two-way bound", () => {
   beforeEach(() => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
     window.history.replaceState(null, "", `/${WS}`);
   });
 
   it("pushes on navigation, and follows Back and Forward out of the history", async () => {
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
+    const view = render(<Probe to={`/${WS}/${UUID}`} />);
+    const host = view.container;
     const probe = (): HTMLButtonElement =>
       host.querySelector<HTMLButtonElement>(".probe") as HTMLButtonElement;
     const shown = (): string => probe().textContent ?? "";
 
-    act(() => root.render(<Probe to={`/${WS}/${UUID}`} />));
     expect(shown()).toBe(`/${WS}`);
 
     // Our own navigation. The browser does not announce a pushState, so the
@@ -277,7 +275,7 @@ describe("the URL and the app are two-way bound", () => {
     expect(window.location.pathname).toBe(`/${WS}/${UUID}`);
     expect(shown()).toBe(`/${WS}/${UUID}`);
 
-    act(() => root.render(<Probe to={`/${WS}/${OTHER}`} />));
+    view.rerender(<Probe to={`/${WS}/${OTHER}`} />);
     act(() => probe().click());
     expect(shown()).toBe(`/${WS}/${OTHER}`);
 
@@ -295,9 +293,6 @@ describe("the URL and the app are two-way bound", () => {
       await waitForPop();
     });
     expect(shown()).toBe(`/${WS}/${OTHER}`);
-
-    act(() => root.unmount());
-    host.remove();
   });
 });
 
@@ -357,9 +352,6 @@ function LinkedPane({
 
 describe("a fresh deep link does not open a writable empty replica", () => {
   it("keeps waiting while only the directory knows the uuid, and opens on the merge", () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
-
     // The ordering a fresh link actually hits: the directory doc is small and
     // syncs first, so the workspace knows this uuid before the document's own
     // room has delivered a single byte.
@@ -368,12 +360,8 @@ describe("a fresh deep link does not open a writable empty replica", () => {
     expect(listDirectory(directory).map((entry) => entry.uuid)).toEqual([UUID]);
 
     const local = new Y.Doc();
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() =>
-      root.render(<LinkedPane connection={liveConnection(local, `${WS}/${UUID}`)} uuid={UUID} />),
-    );
+    const view = render(<LinkedPane connection={liveConnection(local, `${WS}/${UUID}`)} uuid={UUID} />);
+    const host = view.container;
 
     // The stub is not a licence to edit: binding here would put blocks and
     // metadata into a replica the real document is about to merge into.
@@ -402,9 +390,6 @@ describe("a fresh deep link does not open a writable empty replica", () => {
     // Resolved live, with nothing polled and nothing reloaded.
     expect(host.querySelector(".ub-notice")).toBeNull();
     expect(host.querySelector(".ub-editor")).not.toBeNull();
-
-    act(() => root.unmount());
-    host.remove();
   });
 });
 
@@ -454,23 +439,15 @@ function openingConnection(room: string): {
   };
 }
 
-/** Mount `LinkedPane` on `connection` and return the host plus a teardown. */
+/** Mount `LinkedPane` on `connection` and return its host. */
 function mountLinked(
   connection: RoomConnection,
   uuid: string,
-): { host: HTMLElement; done: () => void } {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  act(() => root.render(<LinkedPane connection={connection} uuid={uuid} />));
+): { host: HTMLElement } {
+  const view = render(<LinkedPane connection={connection} uuid={uuid} />);
+  const host = view.container;
   return {
     host,
-    done: () => {
-      act(() => root.unmount());
-      host.remove();
-    },
   };
 }
 
@@ -481,7 +458,7 @@ describe("a room that has not answered is not a different document (#161)", () =
     // holds — and reading that as "answered, and not this document" flashes the
     // waiting screen across the pane for a frame.
     const { connection, answer } = openingConnection(`${WS}/${UUID}`);
-    const { host, done } = mountLinked(connection, UUID);
+    const { host } = mountLinked(connection, UUID);
 
     expect(host.querySelector(".ub-notice")).toBeNull();
     expect(host.querySelector(".ub-editor")).toBeNull();
@@ -493,7 +470,6 @@ describe("a room that has not answered is not a different document (#161)", () =
 
     expect(host.querySelector(".ub-notice")).toBeNull();
     expect(host.querySelector(".ub-editor")).not.toBeNull();
-    done();
   });
 
   it("waits once the server has answered and the document is not in the room", () => {
@@ -501,7 +477,7 @@ describe("a room that has not answered is not a different document (#161)", () =
     // "empty means unknown": a deep link whose room is empty must keep its
     // waiting screen.
     const { connection, answer } = openingConnection(`${WS}/${UUID}`);
-    const { host, done } = mountLinked(connection, UUID);
+    const { host } = mountLinked(connection, UUID);
 
     expect(host.querySelector(".ub-notice")).toBeNull();
 
@@ -511,7 +487,6 @@ describe("a room that has not answered is not a different document (#161)", () =
       "Waiting for sync",
     );
     expect(host.querySelector(".ub-editor")).toBeNull();
-    done();
   });
 });
 
@@ -558,29 +533,22 @@ function stubConnection(room: string): RoomConnection {
  * is genuinely empty.
  */
 function paneText(target: Route, docMeta: DocMeta | null): string {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  act(() =>
-    root.render(
-      <RoutePane
-        route={target}
-        connection={target.kind === "doc" ? stubConnection(`${WS}/${UUID}`) : null}
-        presence={NOBODY}
-        meta={docMeta}
-        author="tester"
-        archived={false}
-        docLinks={null}
-        onRestore={() => {}}
-        onSelectThread={() => {}}
-      />,
-    ),
+  const view = render(
+    <RoutePane
+      route={target}
+      connection={target.kind === "doc" ? stubConnection(`${WS}/${UUID}`) : null}
+      presence={NOBODY}
+      meta={docMeta}
+      author="tester"
+      archived={false}
+      docLinks={null}
+      onRestore={() => {}}
+      onSelectThread={() => {}}
+    />,
   );
+  const host = view.container;
   const text = host.querySelector(".ub-notice")?.textContent ?? "";
-  act(() => root.unmount());
-  host.remove();
+
   return text.replace(/\s+/g, " ").trim();
 }
 
@@ -648,21 +616,15 @@ async function clickCopy(
   said: string;
   revisionIsInsideControl: boolean;
 }> {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  act(() =>
-    root.render(
-      <DocMetaLine
-        connection={stubConnection(`${WS}/${UUID}`)}
-        segment={segment}
-        meta={meta(UUID)}
-        archived={false}
-      />,
-    ),
+  const view = render(
+    <DocMetaLine
+      connection={stubConnection(`${WS}/${UUID}`)}
+      segment={segment}
+      meta={meta(UUID)}
+      archived={false}
+    />,
   );
+  const host = view.container;
 
   const button = host.querySelector<HTMLButtonElement>(".ub-copy-link");
   const label = button?.textContent ?? "";
@@ -674,8 +636,6 @@ async function clickCopy(
   });
   const said = host.querySelector(".ub-copied")?.textContent ?? "";
 
-  act(() => root.unmount());
-  host.remove();
   return { label, ariaLabel, said, revisionIsInsideControl };
 }
 

@@ -16,10 +16,8 @@
  * dotless `ı`.
  */
 
-import { afterEach, describe, expect, it } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { describe, expect, it } from "vitest";
+import { act, renderSettled } from "./react-render.js";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { DocumentList } from "../src/shell/DocumentList.js";
 import { filterMentions } from "../src/editor/mention-menu.js";
@@ -50,16 +48,6 @@ const CANDIDATES: DocLinkCandidate[] = CORPUS.map(([docId, label]) => ({
 
 const EVERY_TITLE = CORPUS.map(([, title]) => title);
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
-
-afterEach(() => {
-  if (mounted === null) return;
-  const { root, host } = mounted;
-  mounted = null;
-  act(() => root.unmount());
-  host.remove();
-});
-
 /** Change a controlled input through the native setter, like a keystroke. */
 function typeInto(input: HTMLInputElement, value: string): void {
   const native = Object.getOwnPropertyDescriptor(
@@ -72,23 +60,15 @@ function typeInto(input: HTMLInputElement, value: string): void {
 
 /** The titles the Documents page keeps for `query`, in a comparable order. */
 async function listAnswer(query: string): Promise<string[]> {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => {
-    root.render(
-      <DocumentList
-        connection={null}
-        entries={ENTRIES}
-        groups={[]}
-        onSelect={() => {}}
-        onTogglePin={null}
-      />,
-    );
-  });
+  const { container: host } = await renderSettled(
+    <DocumentList
+      connection={null}
+      entries={ENTRIES}
+      groups={[]}
+      onSelect={() => {}}
+      onTogglePin={null}
+    />,
+  );
   const field = host.querySelector<HTMLInputElement>(".ub-docs-search");
   if (field === null) throw new Error("the filter field is missing");
   await act(async () => typeInto(field, query));
@@ -105,7 +85,13 @@ function pickerAnswer(query: string): string[] {
 }
 
 describe("the Documents filter and the @ picker match one title one way", () => {
-  it.each([
+  /**
+   * Every case is checked against the picker, which is pure and costs nothing;
+   * the rendered list, which costs a render per query, takes the cases that
+   * differ in kind. Both surfaces fold through one function (below), so a case
+   * the picker answers is the list's answer too.
+   */
+  const cases: Array<[string, string[]]> = [
     // The two matches #956 lost, and the direction the store's index already
     // folds: a non-spacing mark is not part of what was typed.
     ["ecole", ["École"]],
@@ -129,10 +115,21 @@ describe("the Documents filter and the @ picker match one title one way", () => 
     ["I", ["ISPARTA", "İSTANBUL", "İstanbul harbour"]],
     // An empty field lists everything, on both surfaces.
     ["", EVERY_TITLE],
-  ])("answers %j with the same documents on both surfaces", async (query, expected) => {
-    const wanted = [...expected].sort();
-    expect(await listAnswer(query)).toEqual(wanted);
-    expect(pickerAnswer(query)).toEqual(wanted);
+  ];
+
+  it.each(cases.filter(([query]) => ["ecole", "istanbul", "कतब", ""].includes(query)))(
+    "answers %j with the same documents on both surfaces",
+    async (query, expected) => {
+      const wanted = [...expected].sort();
+      expect(await listAnswer(query)).toEqual(wanted);
+      expect(pickerAnswer(query)).toEqual(wanted);
+    },
+  );
+
+  it("answers every case the same way in the @ picker", () => {
+    for (const [query, expected] of cases) {
+      expect(pickerAnswer(query), JSON.stringify(query)).toEqual([...expected].sort());
+    }
   });
 
   it("folds the query and the title through one function, not two copies", () => {

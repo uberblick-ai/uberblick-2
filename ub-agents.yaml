@@ -1,5 +1,5 @@
 # Uberblick's delivery workflow. Roles and outcomes live in .agents/roles/; the
-# label changes below mirror the outcome table in .agents/roles/README.md.
+# label changes below mirror the outcome table in .agents/protocols/workflow.md.
 repository: uberblick-ai/uberblick-2
 
 queue:
@@ -17,6 +17,7 @@ cleanup:
 
 agents:
   issue-preparer:
+    retrospectives: 1014
     runtime: "claude:claude-opus-5-5:xhigh"
     kind: issue
     trigger: needs-preparation
@@ -33,9 +34,16 @@ agents:
       - acceptEdits
       - --permission-prompts
       - none
+      # The run's private scratch directory, writable without a prompt.
+      - --add-dir
+      - "{scratch}"
       - --allowedTools
       - "Bash(git *)"
       - "Bash(gh *)"
+      # Reports go through the launcher's own installation, not whatever `ub-agents` PATH finds.
+      - "Bash({report_command} report *)"
+      - "Bash({report_command} read *)"
+      - "Bash({report_command} retrospective *)"
       - "Bash(ub-agents *)"
       - "Bash(mise *)"
       - "mcp__uberblick__*"
@@ -59,11 +67,9 @@ agents:
       - "Bash(find *)"
       - "Bash(jq *)"
       - "Bash(node *)"
-      - --strict-mcp-config
-      - --mcp-config
-      - .mcp.json
 
   issue-reviewer:
+    retrospectives: 1016
     runtime: "codex:gpt-6.1-sol:xhigh"
     kind: issue
     trigger: needs-review
@@ -77,13 +83,14 @@ agents:
       - --sandbox
       - danger-full-access
       - -c
-      - 'mcp_servers.uberblick.command="ub"'
+      - 'mcp_servers.uberblick.command="mise"'
       - -c
-      - 'mcp_servers.uberblick.args=["mcp", "serve"]'
+      - 'mcp_servers.uberblick.args=["exec", "--", "ub", "mcp", "serve"]'
       - -c
       - 'mcp_servers.uberblick.default_tools_approval_mode="approve"'
 
   implementer:
+    retrospectives: 1015
     runtime: "codex:gpt-6.1-sol:ultra"
     trigger: [needs-changes, ready]
     instructions: .agents/roles/implementer.md
@@ -97,6 +104,7 @@ agents:
     runtime-args: *codex-scoped
 
   pr-reviewer:
+    retrospectives: 1016
     runtime: "claude:claude-opus-5-5:xhigh"
     kind: pr
     trigger: needs-review
@@ -111,6 +119,7 @@ agents:
     runtime-args: *claude-scoped
 
   integrator:
+    retrospectives: 1017
     runtime: "claude:claude-opus-5-5:xhigh"
     kind: pr
     trigger: ready-to-merge

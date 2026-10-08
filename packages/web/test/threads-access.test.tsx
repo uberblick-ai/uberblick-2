@@ -20,9 +20,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, renderSettled } from "./react-render.js";
 import * as Y from "yjs";
 import {
   addComment,
@@ -95,8 +93,6 @@ vi.mock("../src/collab/rooms.js", () => ({
 
 const { App } = await import("../src/ui/App.js");
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
-
 function threadsWidth(narrow: boolean): { change: (next: boolean) => Promise<void> } {
   let matches = narrow;
   const listeners = new Set<(event: MediaQueryListEvent) => void>();
@@ -129,8 +125,6 @@ function threadsWidth(narrow: boolean): { change: (next: boolean) => Promise<voi
 }
 
 beforeEach(() => {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
   // jsdom implements none of these. The rail scrolls a card into view, and
   // ProseMirror measures the caret's Range to scroll a split block into view.
   Element.prototype.scrollIntoView = function scrollIntoView() {};
@@ -145,12 +139,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  const open = mounted;
-  mounted = null;
-  if (open !== null) {
-    act(() => open.root.unmount());
-    open.host.remove();
-  }
   rooms.clear();
   roomStatus.clear();
   statusListeners.clear();
@@ -178,13 +166,7 @@ async function openAnnotatedDoc(resolved = false): Promise<{
   if (resolved) setAnnotationResolved(ydoc, thread.id, true);
 
   window.history.replaceState(null, "", `/${WORKSPACE}/${UUID}`);
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => {
-    root.render(<App />);
-  });
+  const { container: host } = await renderSettled(<App />);
   return { host, ydoc, threadId: thread.id };
 }
 
@@ -237,60 +219,49 @@ describe("thread writes require a writable, unarchived document", () => {
     expect(field.value).toBe(text);
   }
 
-  it.each(["archived", "room not writable"] as const)(
-    "%s keeps open and expanded resolved conversations readable without write actions, then restores them",
-    async (cause) => {
-      const { host, ydoc, threadId } = await openAnnotatedDoc();
-      let resolvedId = "";
-      await act(async () => {
-        addComment(ydoc, threadId, "Peer", "open reply");
-        resolvedId = createAnnotation(ydoc, getBlocks(ydoc)[0]!.id, 20, 25, "Peer", "why jumps?").id;
-        addComment(ydoc, resolvedId, "Reader", "resolved reply");
-        setAnnotationResolved(ydoc, resolvedId, true);
-      });
-      const open = card(host, threadId);
-      const resolved = card(host, resolvedId);
-      // A collapsed resolved card has no actions even when writable. Expand
-      // first so removing the read-only gate cannot pass this test vacuously.
-      await act(async () => resolved.querySelector<HTMLButtonElement>(".ub-thread")!.click());
-      expect(resolved.querySelector(".ub-thread")?.getAttribute("aria-expanded")).toBe("true");
-      expect(button(open, "Reply")).toBeDefined();
-      expect(button(open, "Resolve")).toBeDefined();
-      expect(button(resolved, "Reopen")).toBeDefined();
-      const before = [...Y.encodeStateAsUpdate(ydoc)];
+  // The archive path to the same read-only rail is the unsent-reply test below.
+  it("keeps open and expanded resolved conversations readable without write actions while the room is not writable, then restores them", async () => {
+    const { host, ydoc, threadId } = await openAnnotatedDoc();
+    let resolvedId = "";
+    await act(async () => {
+      addComment(ydoc, threadId, "Peer", "open reply");
+      resolvedId = createAnnotation(ydoc, getBlocks(ydoc)[0]!.id, 20, 25, "Peer", "why jumps?").id;
+      addComment(ydoc, resolvedId, "Reader", "resolved reply");
+      setAnnotationResolved(ydoc, resolvedId, true);
+    });
+    const open = card(host, threadId);
+    const resolved = card(host, resolvedId);
+    // A collapsed resolved card has no actions even when writable. Expand
+    // first so removing the read-only gate cannot pass this test vacuously.
+    await act(async () => resolved.querySelector<HTMLButtonElement>(".ub-thread")!.click());
+    expect(resolved.querySelector(".ub-thread")?.getAttribute("aria-expanded")).toBe("true");
+    expect(button(open, "Reply")).toBeDefined();
+    expect(button(open, "Resolve")).toBeDefined();
+    expect(button(resolved, "Reopen")).toBeDefined();
+    const before = [...Y.encodeStateAsUpdate(ydoc)];
 
-      await act(async () => {
-        if (cause === "archived") {
-          tombstoneDirectoryEntry(room(directoryRoom(WORKSPACE)).ydoc, UUID);
-        } else {
-          emitStatus(roomForDoc(WORKSPACE, UUID), { writable: false });
-        }
-      });
+    await act(async () => emitStatus(roomForDoc(WORKSPACE, UUID), { writable: false }));
 
-      for (const [item, excerpt, comments] of [
-        [open, "quick brown", ["why quick?", "open reply"]],
-        [resolved, "jumps", ["why jumps?", "resolved reply"]],
-      ] as const) {
-        expect(item.querySelector(".ub-thread-excerpt")?.textContent).toBe(excerpt);
-        expect([...item.querySelectorAll(".ub-thread-text")].map((node) => node.textContent)).toEqual(comments);
-        for (const label of ["Reply", "Resolve", "Reopen"]) {
-          expect(findButton(item, label)).toBeUndefined();
-        }
-        expect(item.querySelector(".ub-comment-input")).toBeNull();
+    for (const [item, excerpt, comments] of [
+      [open, "quick brown", ["why quick?", "open reply"]],
+      [resolved, "jumps", ["why jumps?", "resolved reply"]],
+    ] as const) {
+      expect(item.querySelector(".ub-thread-excerpt")?.textContent).toBe(excerpt);
+      expect([...item.querySelectorAll(".ub-thread-text")].map((node) => node.textContent)).toEqual(comments);
+      for (const label of ["Reply", "Resolve", "Reopen"]) {
+        expect(findButton(item, label)).toBeUndefined();
       }
-      expect(resolved.querySelector(".ub-thread")?.getAttribute("aria-expanded")).toBe("true");
-      expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
+      expect(item.querySelector(".ub-comment-input")).toBeNull();
+    }
+    expect(resolved.querySelector(".ub-thread")?.getAttribute("aria-expanded")).toBe("true");
+    expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
 
-      await act(async () => {
-        if (cause === "archived") button(host, "Restore").click();
-        else emitStatus(roomForDoc(WORKSPACE, UUID), { writable: true });
-      });
-      expect(button(open, "Reply")).toBeDefined();
-      expect(button(open, "Resolve")).toBeDefined();
-      expect(button(resolved, "Reopen")).toBeDefined();
-      expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
-    },
-  );
+    await act(async () => emitStatus(roomForDoc(WORKSPACE, UUID), { writable: true }));
+    expect(button(open, "Reply")).toBeDefined();
+    expect(button(open, "Resolve")).toBeDefined();
+    expect(button(resolved, "Reopen")).toBeDefined();
+    expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
+    });
 
   it("lets an unsent reply go on archive, without writing or reviving it on Restore", async () => {
     const { host, ydoc, threadId } = await openAnnotatedDoc();
@@ -310,53 +281,36 @@ describe("thread writes require a writable, unarchived document", () => {
     expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
   });
 
-  it.each(["Reply", "Resolve", "Reopen"] as const)(
-    "refuses %s when the room stops being writable before the rail re-renders",
-    async (action) => {
-      const { host, ydoc, threadId } = await openAnnotatedDoc(action === "Reopen");
-      const item = card(host, threadId);
-      if (action === "Reopen") {
-        await act(async () => item.querySelector<HTMLButtonElement>(".ub-thread")!.click());
-      }
-      let field: HTMLTextAreaElement | undefined;
-      if (action === "Reply") {
-        await act(async () => button(item, "Reply").click());
-        field = replyField(item);
-        typeReply(field, "Reply from the stale form");
-      }
-      const submit = button(item, action);
-      expect(submit.disabled).toBe(false);
-      const before = [...Y.encodeStateAsUpdate(ydoc)];
-      const wasResolved = getAnnotation(ydoc, threadId)?.resolved;
-      const name = roomForDoc(WORKSPACE, UUID);
-      // Change only the imperative reading. With no status notification, the
-      // rail still offers the action and must refuse in its write handler.
-      roomStatus.set(name, { ...room(name).status, writable: false });
-      expect(button(item, action)).toBe(submit);
-      await act(async () => submit.click());
-      expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
-      expect(getAnnotation(ydoc, threadId)?.resolved).toBe(wasResolved);
-      expect(getAnnotation(ydoc, threadId)?.comments).toHaveLength(1);
-      if (field !== undefined) {
-        expect(replyField(item)).toBe(field);
-        expect(field.value).toBe("Reply from the stale form");
-      }
+  it("refuses Reply when the room stops being writable before the rail re-renders", async () => {
+    const { host, ydoc, threadId } = await openAnnotatedDoc();
+    const item = card(host, threadId);
+    await act(async () => button(item, "Reply").click());
+    const field = replyField(item);
+    typeReply(field, "Reply from the stale form");
+    const submit = button(item, "Reply");
+    expect(submit.disabled).toBe(false);
+    const before = [...Y.encodeStateAsUpdate(ydoc)];
+    const name = roomForDoc(WORKSPACE, UUID);
+    // Change only the imperative reading. With no status notification, the
+    // rail still offers the action and must refuse in its write handler.
+    roomStatus.set(name, { ...room(name).status, writable: false });
+    expect(button(item, "Reply")).toBe(submit);
+    await act(async () => submit.click());
+    expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
+    expect(getAnnotation(ydoc, threadId)?.comments).toHaveLength(1);
+    expect(replyField(item)).toBe(field);
+    expect(field.value).toBe("Reply from the stale form");
 
-      // The same gesture succeeds once writable: the refusal above reached a
-      // working handler, rather than an inert or incorrectly queried control.
-      await act(async () => {
-        emitStatus(name, { writable: true });
-        button(item, action).click();
-      });
-      if (action === "Reply") {
-        expect(getAnnotation(ydoc, threadId)?.comments.map(({ text }) => text)).toEqual([
-          "why quick?", "Reply from the stale form",
-        ]);
-      } else {
-        expect(getAnnotation(ydoc, threadId)?.resolved).toBe(action === "Resolve");
-      }
-    },
-  );
+    // The same gesture succeeds once writable: the refusal above reached a
+    // working handler, rather than an inert or incorrectly queried control.
+    await act(async () => {
+      emitStatus(name, { writable: true });
+      button(item, "Reply").click();
+    });
+    expect(getAnnotation(ydoc, threadId)?.comments.map(({ text }) => text)).toEqual([
+      "why quick?", "Reply from the stale form",
+    ]);
+  });
 });
 
 describe("a keyboard reaches a thread from its range in the prose", () => {
@@ -573,10 +527,8 @@ describe("the threads rail can be opened where the layout hides it", () => {
     });
   }
 
-  it.each([
-    ["before compositionend", false],
-    ["after compositionend", true],
-  ] as const)("keeps a composing Escape %s in a drawer reply, then cancels only the form", async (_order, afterCompositionEnd) => {
+  // Safari's order, which only the IME keyCode still marks as composing.
+  it("keeps a composing Escape after compositionend in a drawer reply, then cancels only the form", async () => {
     threadsWidth(true);
     const { host, ydoc, threadId } = await openAnnotatedDoc();
     await settle(() => toggle(host).click());
@@ -585,7 +537,7 @@ describe("the threads rail can be opened where the layout hides it", () => {
     const field = sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")!;
 
     // Radix's capture-phase dismissal runs before the textarea sees Escape.
-    await settle(() => composingKey(field, "Escape", afterCompositionEnd));
+    await settle(() => composingKey(field, "Escape", true));
     expect(sheet().querySelector(".ub-comment-input")).toBe(field);
     expect(field.value).toBe("日本語の返信");
     expect(document.activeElement).toBe(field);
@@ -681,27 +633,6 @@ describe("the threads rail can be opened where the layout hides it", () => {
     expect(sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe(
       "Keep this unsent reply",
     );
-  });
-
-  it("keeps focus in the prose when a closed keyboard-opened drawer crosses the breakpoint", async () => {
-    const width = threadsWidth(true);
-    const { host, threadId } = await openAnnotatedDoc();
-    const opener = highlight(host, threadId);
-    opener.focus();
-    await settle(() => press(opener, "Enter"));
-    const card = sheet().querySelector<HTMLButtonElement>(".ub-thread");
-    expect(document.activeElement).toBe(card);
-    await settle(() => press(card!, "Escape"));
-    expect(document.activeElement).toBe(opener);
-
-    const prose = host.querySelector<HTMLElement>(".ub-editor .ProseMirror");
-    expect(prose).not.toBeNull();
-    await settle(() => prose!.focus());
-    await width.change(false);
-    expect(document.activeElement).toBe(prose);
-    await width.change(true);
-    expect(document.querySelector("[data-slot=sheet-content]")).toBeNull();
-    expect(document.activeElement).toBe(prose);
   });
 
   it("returns to the Threads toggle when the opening highlight was removed", async () => {

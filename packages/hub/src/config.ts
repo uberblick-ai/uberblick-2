@@ -7,10 +7,8 @@
  * addresses creep in. `PORT` defaults to 1234 and `HUB_HOST` to 127.0.0.1 —
  * the two address-ish defaults in the repo.
  *
- * The loopback default is the security model, not a convenience: live room
- * admission uses a single dev secret shared by every client, so a wildcard bind
- * would offer the whole LAN a hub that trusts anyone holding it. A hosted
- * deployment opts in with `HUB_HOST=0.0.0.0`.
+ * Loopback hubs use the local shared-secret model. Any other bind, including
+ * a wildcard, requires device credentials and current workspace membership.
  *
  * `HUB_DB_PATH` names the SQLite file outright. With none set the hub opens
  * `hub.sqlite` in the user's data root — see `@uberblick/hub/storage` — and
@@ -18,16 +16,15 @@
  * mise task in this checkout sets `HUB_DB_PATH` to a checkout-local file, so
  * development never touches the packaged user's database.
  *
- * `HUB_AUTH_TOKEN` is the HMAC secret for {@link mintToken}/{@link verifyToken},
- * delivered by `fnox exec` (see the `mise run hub` task). There is no fallback:
- * a hub with no secret would accept anything, so an absent secret is a startup
- * error, not a warning.
+ * `HUB_AUTH_TOKEN` is required only for loopback admission. Remote hubs never
+ * read it for admission, including a value left by an earlier deployment.
  */
 
 import type { HubLogger } from "./log.js";
 import type { GithubSignInConfig } from "./github-sign-in.js";
 import type { StorageOptions } from "./storage.js";
 import { resolveStorage } from "./storage.js";
+import { isLoopbackHost } from "./loopback.js";
 
 /** The only hardcoded address-ish defaults in the repo. */
 export const DEFAULT_PORT = 1234;
@@ -79,9 +76,9 @@ export interface HubConfig {
    * missing. `":memory:"` works and loses everything on restart.
    */
   databasePath?: string;
-  /** HMAC secret tokens are signed with (`HUB_AUTH_TOKEN`). Required. */
-  authSecret: string;
-  /** Optional remote GitHub sign-in; never changes room admission. */
+  /** Local-only HMAC signing secret (`HUB_AUTH_TOKEN`). */
+  authSecret?: string;
+  /** Remote device admission is unavailable without configured sign-in. */
   github?: GithubSignInConfig;
   log?: HubLogger;
   /**
@@ -172,28 +169,29 @@ export function validateGithubClientId(clientId: string): void {
 /**
  * Build a config from the environment.
  *
- * @throws when `HUB_AUTH_TOKEN` is missing or `PORT` is not a valid port.
+ * @throws when a loopback hub has no `HUB_AUTH_TOKEN`, or the port is invalid.
  * `createHub` validates GitHub configuration before opening the database.
  */
 export function resolveHubConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): HubConfig {
-  const authSecret = env.HUB_AUTH_TOKEN;
-  if (authSecret === undefined || authSecret === "") {
+  const host = env.HUB_HOST?.trim();
+  const address = host === undefined || host === "" ? DEFAULT_HOST : host;
+  const authSecret = isLoopbackHost(address) ? env.HUB_AUTH_TOKEN : undefined;
+  if (isLoopbackHost(address) && (authSecret === undefined || authSecret === "")) {
     throw new Error(
       "HUB_AUTH_TOKEN is not set. It is the HMAC secret hub tokens are signed with; " +
         "run the hub through `mise run hub`, which wraps the command in `fnox exec`.",
     );
   }
 
-  const host = env.HUB_HOST?.trim();
   const githubClientId = env.HUB_GITHUB_CLIENT_ID;
 
   return {
     port: parsePort(env.PORT),
-    address: host === undefined || host === "" ? DEFAULT_HOST : host,
+    address,
     databasePath: hubDatabasePath(env),
-    authSecret,
+    ...(authSecret === undefined ? {} : { authSecret }),
     ...(githubClientId === undefined || githubClientId === "" ? {} : { github: { clientId: githubClientId } }),
   };
 }

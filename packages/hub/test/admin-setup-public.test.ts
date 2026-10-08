@@ -43,17 +43,22 @@ function host(path: string, body: unknown) {
 async function rig(configured = true) {
   let account = 1234;
   let sequence = 0;
+  // Device codes whose approval GitHub still reports as pending.
+  let holdNext = false;
+  const held = new Set<string>();
   const identities = new Map<string, number>();
   now = 1000;
   const hub = await createHub({ authSecret: TEST_SECRET, port: 0, databasePath: tempDatabasePath(), log: () => {},
-    ...(configured ? { github: { clientId: CLIENT_ID, now: () => now, fetch: (async (url, init) => {
+    ...(configured ? { github: { clientId: CLIENT_ID, now: () => now, setupPollMs: 5, fetch: (async (url, init) => {
       if (String(url) === "https://github.com/login/device/code") {
         const code = String(++sequence);
         identities.set(code, account);
+        if (holdNext) { held.add(code); holdNext = false; }
         return Response.json({ device_code: code, user_code: "ABCD-EFGH", verification_uri: "https://github.com/login/device", interval: 1, expires_in: 900 });
       }
       if (String(url) === "https://github.com/login/oauth/access_token") {
         const code = new URLSearchParams(String(init?.body)).get("device_code");
+        if (held.has(code!)) return Response.json({ error: "authorization_pending" });
         return Response.json({ access_token: `${TOKEN}:${code}`, token_type: "bearer", scope: "" });
       }
       const code = new Headers(init?.headers).get("Authorization")!.split(":")[1]!;
@@ -77,7 +82,8 @@ async function rig(configured = true) {
     expect(result.status).toBe("complete");
     return result;
   };
-  return { hub, post, signIn, setAccount: (id: number) => { account = id; } };
+  return { hub, post, signIn, setAccount: (id: number) => { account = id; },
+    holdNextApproval: () => { holdNext = true; }, releaseApprovals: () => { held.clear(); } };
 }
 
 function snapshot(hub: Hub) {
@@ -115,6 +121,7 @@ it("public sign-in remains membership-neutral before/during/after setup and cann
   expect(approving.credential.record.workspaces).toEqual([]);
   expect(snapshot(r.hub).memberships).toEqual([]);
   r.setAccount(1234);
+  r.holdNextApproval();
   const setup = host(adminSocketPath(r.hub.databasePath), { action: "start", workspaceId: WORKSPACE });
   const starting = await setup.next();
   const pending = await setup.next();
@@ -130,6 +137,7 @@ it("public sign-in remains membership-neutral before/during/after setup and cann
     expect((await r.post(`/auth/admin-setup/${action}`, { setupId: starting.setupId })).code).toBe(404);
   }
   const countBefore = snapshot(r.hub).credentials.length;
+  r.releaseApprovals();
   now += 1000;
   const completed = await setup.next();
   expect(completed).toMatchObject({ status: "complete", identity: approving.identity, workspaceId: WORKSPACE, hadDocuments: false });
@@ -171,15 +179,14 @@ it("the browserless command prints identity/adoption and status, with distinct n
   expect(c.output()).toContain("hub held no documents");
   expect(c.output() + c.errors()).not.toContain(TOKEN);
   const id = /Setup ([0-9a-f-]{36})/.exec(c.output())![1]!;
-  const lookup = command(r.hub, ["status", id]);
-  expect(await lookup.ended).toBe(0);
-  expect(lookup.output()).toContain("complete:");
-  const unknown = command(r.hub, ["status", crypto.randomUUID()]);
-  expect(await unknown.ended).toBe(1);
-  expect(unknown.errors()).toContain("does not establish that nothing changed");
+  // Independent invocations, run side by side.
   const missing = await rig(false);
+  const lookup = command(r.hub, ["status", id]);
+  const unknown = command(r.hub, ["status", crypto.randomUUID()]);
   const unavailable = command(missing.hub, [WORKSPACE]);
-  expect(await unavailable.ended).toBe(1);
+  expect(await Promise.all([lookup.ended, unknown.ended, unavailable.ended])).toEqual([0, 1, 1]);
+  expect(lookup.output()).toContain("complete:");
+  expect(unknown.errors()).toContain("does not establish that nothing changed");
   expect(unavailable.output()).toContain("not-configured");
 }, 10_000);
 

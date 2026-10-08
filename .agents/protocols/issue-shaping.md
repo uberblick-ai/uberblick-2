@@ -1,85 +1,76 @@
 # Issue shaping — intent to a focused intake
 
-Use this protocol when a human explores functionality or discusses an issue,
-even before asking to file it. The goal is to condense their intent into the
-smallest useful product outcome: an MVP with clear scope, not a technical plan.
-Discussion may end without creating anything. The issue preparer owns technical
-grounding, acceptance criteria, dependencies and implementation-sized work.
+Use with a human for interactive exploration of ideas or refinement of existing
+issues, including assigned ones; this grants no interactive authority to unattended
+roles. Discussion may end without a write. [Preparation](issue-preparation.md) reuses settled intent
+and owns technical grounding, acceptance criteria, dependencies and implementation-sized work.
 
 ## Narrow the intent
 
-Actively help a broad or rambling idea converge. Identify the core problem and
-propose the smallest outcome that would solve it; distinguish essential behavior
-from optional additions and later ambitions. Ask one focused question at a time
-when its answer changes the outcome, scope or trade-off. Questions need not be
-the opening move. If the intent is already clear, proceed without a questionnaire
-or repeating settled answers.
+Identify the core problem and smallest useful outcome, separating essentials
+from optional ambitions. Never invent intent. Use evidence for factual gaps and
+ask one focused human question when the answer changes outcome, scope or tradeoff;
+clear intent needs no questionnaire or repeated approval.
 
-Treat a suggested mechanism as a clue to the desired outcome unless the human
-makes it binding. Do not drift into architecture, file lists or exhaustive edge
-cases. Read available evidence for factual uncertainty, ask about unresolved
-human choices, and leave ordinary engineering judgment to preparation and
-implementation. Distinguish verified facts, human decisions and your inferences.
-
-An MVP must still be useful and preserve essential guarantees. Do not silently
-drop requested behavior, safety or data-preservation constraints to shrink it.
-Offer a narrower first outcome for the human to adopt; keep optional follow-ups
-outside that intake without automatically creating more issues. Do not force a
-cohesive outcome into tiny technical fragments. Reopen a settled choice only
-when new evidence or changed direction conflicts with it, naming the conflict.
-
-Raise a durable choice that passes
-[`delivery-policy.md`'s when-to-record test](delivery-policy.md#decision-records)
-as a decision record rather than leaving the decision in issue text. Read
-**Decision logs** (`b7fdc6d7-ce5c-4733-a083-3fc30196f0b3`) and **MCP interface
-contract** (`6e73bb70-e5da-4ee6-98ff-93ec9804856d`) for its shape and calls.
-The authorization rule below also governs this write: confirm its meaning and
-destination before creating it. With the person present, record their actual
-choice through `create_doc` or `set_status` as `decided` with
-`answer: {who, when, where}`,
-not as an agent stance; an unanswered topic stays `open` with a recommendation.
-A change to a decided record is an `open` successor naming it in `supersedes`,
-effective only after the person's recorded approval. Link the record from the
-intake instead of copying its reasoning there; it grants no queue authority.
+Treat suggested mechanisms as clues unless the human makes them binding.
+Distinguish facts, human decisions and inferences; leave engineering choices to
+preparation and implementation, without architecture, file lists or exhaustive
+edge cases. Preserve requested behavior, safety and data-preservation guarantees.
+During interactive exploration, actively propose smaller useful scopes and
+meaningful alternative ways to achieve the goal, with their implications and
+tradeoffs. Corpus or code evidence may support a materially different approach.
+Help the human choose or refine the outcome; do not silently decide
+or force options on already-clear intent. Unattended preparation uses
+[human-decisions.md](human-decisions.md) for unresolved choices, without waiting
+for live dialogue. Defer optional follow-ups without automatically filing them
+or fragmenting cohesive work. Reopen settled choices
+only for new evidence or changed direction, naming the conflict.
 
 ## Keep the effort oriented
 
-For a larger effort, keep a compact overview of the intended outcome, settled
-decisions, open questions and deferred work. Refresh it when direction changes
-or the conversation resumes, not after each message. Small requests need none.
-Preserve it on an existing effort issue only when authorized, as a short comment
-linking the source decisions; this grants no queue or relationship changes.
+**Discussion overview.** For larger discussions, keep the outcome, settled
+decisions, open questions and deferred work compact; refresh on material change
+or resumption, not every exchange. Small requests need none. Only when authorized,
+preserve it as a short comment on the existing effort issue, linking decisions;
+this grants no queue or relationship changes.
 
-Before suggesting a spike, name the decision it informs, the uncertain
-assumption and the cheapest observation that could support or overturn it.
-A bounded negative result can answer the question; implementing the eventual
-feature is not the spike's goal. Shaping uses read-only exploration; experiments
-need the authorization and repository rules that apply to them.
+**Investigation.** A spike identifies its decision, uncertain assumption and
+cheapest confirming or refuting observation. A bounded negative result can suffice;
+the eventual feature is not its goal. Exploration is read-only; experiments need
+applicable authorization.
 
 ## Confirm the scope and destination
 
-Reflect the meaning briefly: the problem and useful outcome, an example of
-success, essential constraints, and what is deferred or out of scope. Mark any
-unresolved human choice. If no priority was given, ask for it, suggesting a value
-when useful; never infer or assign one yourself.
+Reflect the problem, useful outcome, measurable success where meaningful
+(otherwise observable), essential constraints, deferred work and unresolved choices.
 
-Write only after explicit authorization for that meaning and destination.
-Existing authorization counts: “file it” or “queue it for preparation” already
-chooses an issue. Do not repeat a confirmation or menu the human has answered;
-silence and a request for more analysis are not approval.
-
-When the destination is undecided, offer the two supported paths:
+Writing requires explicit authorization for meaning and destination. Reuse prior
+authorization: “file it” or “queue it for preparation” chooses an issue. Silence
+or a request for more analysis is not approval. If undecided, offer:
 
 - **Discuss with coworkers:** publish a draft requirement.
-- **Create an intake:** file the confirmed scope for a maintainer to start.
+- **Create an intake:** file confirmed scope for a maintainer to start.
 
-Never choose from size or confidence alone. Neither path authorizes `ready` or
-implementation. For shared drafts and requirement resumption by UUID, read
-[requirement-resumption.md](requirement-resumption.md) only when that path applies.
+Do not choose from size or confidence, or repeat an answered menu. Neither path
+authorizes `ready` or implementation. Read [requirement-resumption.md](requirement-resumption.md)
+only for shared drafts or resumption by UUID.
+
+## Record durable choices
+
+Apply [delivery policy's when-to-record test](delivery-policy.md#decision-records).
+Qualifying choices need decision records, not just issue text. Discover relevant
+decision records and any governing lifecycle guidance by purpose under
+[AGENTS.md](../../AGENTS.md#read-for-the-action); use installed MCP schemas for calls.
+The meaning/destination authorization above applies. With the person present,
+record their actual choice as `decided` through `create_doc` or `set_status`
+with `answer: {who, when, where}`, not an agent stance; unanswered topics stay
+`open` with a recommendation. Changes to decided records require an `open`
+successor naming `supersedes`, effective only after recorded human approval.
+Link the record from the intake instead of copying its reasoning; it grants no queue authority.
 
 ## Create a small intake
 
-Keep the handoff short enough for the human to recognize:
+Use this minimal handoff:
 
 ```text
 Title: <concise behavioral title>
@@ -95,15 +86,17 @@ Known constraints:
 omit if absent>
 ```
 
-Create it with `gh issue create --repo uberblick-ai/uberblick-2`. When this
-session posts as a maintainer, add `--label needs-preparation`, which starts it.
-When it posts as `uberblick-agent`, add no trigger label and ask the human to add
-`needs-preparation` from their own account. Add only the `priority:<value>` the human stated, recording
-that decision in a comment; otherwise leave priority unset. Tell the human to
-set Request Source `Human` in the sidebar. Do not invent `Touches`, relationships,
-architecture, acceptance criteria, Pointers or `ready`: the preparer supplies
-the grounded contract under `issue-preparation.md` and `.github/ISSUE_SPEC.md`.
+For issue creation, reuse any priority the human already stated; otherwise ask,
+suggesting a value when useful. Never infer or choose priority for the human.
 
-Stop after the authorized draft or intake is created. If creation is unavailable,
-return the handoff and chosen destination to the coordinator, stating the
-limitation; never claim it was created, prepared or readied.
+Create with `gh issue create --repo uberblick-ai/uberblick-2`. Posting as a
+maintainer: add `--label needs-preparation`. Posting as `uberblick-agent`: add
+no trigger label; ask the human to add `needs-preparation` from their account.
+Add only the human-stated `priority:<value>`, recording that decision in a comment;
+otherwise leave it unset. Tell the human to set Request Source `Human` in the sidebar.
+
+Do not invent `Touches`, relationships, architecture, acceptance criteria,
+Pointers or `ready`; preparation supplies the grounded contract under ISSUE_SPEC.
+Stop after the authorized draft or intake. If creation is unavailable, return the
+handoff, chosen destination and limitation to the coordinator; never claim creation,
+preparation or readiness.

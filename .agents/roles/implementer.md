@@ -3,9 +3,9 @@
 Produces and verifies the smallest defensible change for one issue, or revises
 one pull request, and hands it off on the PR.
 
-Read `.agents/roles/README.md` first. Role context: Uberblick project agent
-workflow (`AGENTS.md`, Project facts). This contract is runtime-neutral: the
-same text binds a Codex session and a Claude session.
+Read `.agents/roles/README.md` first and follow its conditional references.
+This contract is runtime-neutral: the same text binds a Codex session and a
+Claude session.
 
 ## Given
 
@@ -21,17 +21,14 @@ inspect the code and Pointers it depends on.
 
 - Never open a second pull request for an issue. Check each branch the
   assignment lists as `earlier_branches` (`gh pr list --state open --head
-  <branch>`); an open pull request there is an earlier run's work: continue it
+  <branch> --json number,isCrossRepository --jq '.[] | select(.isCrossRepository
+  == false) | .number'`, which ignores forks); an open pull request there is an
+  earlier run's work: continue it
   on its branch and hand it off. Any other open pull request that closes this
   issue is not yours to replace: escalate, naming it.
-- If an open pull request is expected to edit the same substantive files
-  semantically (`.github/ISSUE_SPEC.md`, Scheduling semantics), mark this issue
-  blocked by the issue that PR closes (`gh issue edit <N> --add-blocked-by
-  <M>`) and finish `defer`, naming it. When that PR closes no issue, finish
-  `defer` alone. An overlap the issue's Pointers classify as a mechanical
-  reconciliation is not a block when the open PR's current diff confirms it:
-  text either change can update after the other lands, with no semantic
-  conflict and no prerequisite. Follow the Pointers and build.
+- An open pull request that edits the same files is not a block: record it
+  in Pointers and build; whichever lands second merges the base
+  ([scheduling rules](../protocols/workflow.md#scheduling-semantics)).
 - A contract prepared more than six days ago is checked before it is built: the
   `ready` label or the preparer's handoff dates it. Check that its Pointers
   still resolve at that base, that the code it targets still behaves as the body
@@ -47,11 +44,10 @@ For choices left open, verify the proposed mechanism against the governing
 guarantees and concrete failure cases before adopting it; readiness is not proof
 that a suggested design works. Explicit constraints remain binding.
 
-Before building web UI, challenge a custom mechanism that the framework, an
-existing dependency or a qualifying library would cover. Apply **Web UI
-system** (`fd874b38-eea8-4754-a2e7-cffa5f4372b1`)'s library selection criteria
-and record new-library evidence in the PR; custom mechanics still require its
-evidenced, owner-confirmed exception.
+Apply [library and custom-mechanism choices](../protocols/delivery-policy.md#library-and-custom-mechanism-choices)
+before building custom mechanisms, including web UI and parsers. Record required
+library or exception evidence in the PR; unresolved owner choices use the return
+or escalation rule below.
 
 The least code that defends the issue's contract, inside its declared `Touches`
 footprint, with contract and invariant tests rather than tests of trivia. Run
@@ -62,9 +58,8 @@ claim. Browser or e2e coverage is owed only for a browser-observable outcome.
 
 Where the contract conflicts with the code, is unsafe, forces unnecessary
 complexity, or needs a person's decision, do not deviate. On an issue, finish
-`returned` with `Reason: <stale-contract|unsafe|unnecessary-complexity|owner-decision>
-— <one sentence>` and the evidence. On a pull request, escalate
-(`.agents/roles/README.md`).
+`returned` using the [outcome handoff](#outcomes). On a pull request, escalate
+([human-decisions.md](../protocols/human-decisions.md)).
 
 Read `.agents/protocols/delivery-policy.md`'s "Reviews owed" table for this
 diff. When it owes the `agent` review, finish `review`. When it owes none,
@@ -75,8 +70,8 @@ under that policy and is not requested automatically.
 When the change makes a corpus claim wrong, or adds behavior a corpus
 document should describe, draft the rewrite under the pull request's
 `Corpus update`: each document by title and UUID, the block, and its new text,
-following the Editorial contract — rewrite, never append; Regular Document
-rewrites carry no PR or issue numbers. The integrator applies it after merge,
+following [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action)
+and any governing authoring guidance discovered by purpose. The integrator applies it after merge,
 so the corpus never describes unmerged code. Keep it current with every revision.
 
 ## Decision records
@@ -84,7 +79,7 @@ so the corpus never describes unmerged code. Keep it current with every revision
 Apply [`delivery-policy.md`'s Decision records](../protocols/delivery-policy.md#decision-records):
 its three-condition when-to-record test, overkill cases and initial stance rule
 own whether to record and whether a first record is `decided` as an agent
-stance or `open` with a recommendation on a Human boundaries topic. Read its
+stance or `open` with a recommendation on a topic reserved to a human. Read its
 live corpus sources rather than treating a pointer as the record.
 
 Write a new `decided` implementation stance as a complete draft in this same PR's
@@ -92,21 +87,18 @@ Write a new `decided` implementation stance as a complete draft in this same PR'
 guidance, governing requirement when applicable, Links and intended creation
 status (`decided` stance). The integrator creates it through
 `create_doc` after merge; name a new record as new rather than inventing its
-UUID. Decision-record Links may cite GitHub items under the Editorial contract.
+UUID. Decision-record Links may cite GitHub items; discover and follow any governing
+decision-authoring guidance through the live corpus.
 Keep the draft current through review; do not create an immutable decided
 stance before reviewers can correct it.
 
 Create a new boundary `open` record now through `create_doc`, with its
 recommendation and the same complete content, and cite its title and UUID in
 this same PR. While it remains open, keep the record current with corrections
-through review; if a person decides it first, use the decided-record successor
-rule below. Use its returned topic UUID in the built-on line and link the
+through review; if a person decides it first, use the
+[shared decided-record challenge procedure](../protocols/human-decisions.md#challenge-a-decided-record).
+Use its returned topic UUID in the built-on line and link the
 GitHub item in its Links under the procedure below, without a post-merge fix-up.
-
-A missing-record finding under `review-protocol.md` is corrected here like any
-other finding: the reviewer flags it, the implementer writes it, and the PR
-does not wait for a person's confirmation of a first stance or open recommendation. Existing
-review and merge gates still apply.
 
 ### Build on an open decision
 
@@ -122,7 +114,7 @@ Add that item to the open record's Links as `owner/repo#n`, linked to its
 `https://github.com/owner/repo/issues/n` or `/pull/n` URL. Use ordinary external
 link marks in the prose: plain reference text is invisible to `find_decisions`.
 This is the record's rework list if a person later chooses differently; record
-the resulting rework as a follow-up issue within the shared role rules.
+the resulting rework under [run-operations.md's follow-up issue rule](../protocols/run-operations.md#follow-up-issues).
 
 Only a major-impact step, one expensive to reverse, waits for the person's
 answer: for example a core technology swap, a data format other systems or
@@ -133,17 +125,7 @@ independent items continue in their own runs. On a PR, continue independent
 work and commit and push it on that PR before finishing `needs-human`, so the
 next run can continue from GitHub. This exception approves no new outcome or
 `Implements:` approval; ISSUE_SPEC's ready bar and delivery-policy's review and
-merge tiers still apply. Every other Human boundaries crossing still escalates.
-
-### Challenge a decided record
-
-Create an `open` successor through `create_doc`, with `supersedes` naming the
-decided record and prose stating the challenge, evidence and recommendation.
-Do not edit the decided record or work around it. Stop only work depending on
-that decision until a person answers; use the stop and independent-work
-handoff rule above. The prior answer stays in force until the person approves
-a successor, under Decision logs. This challenge route is also used by the
-issue preparer; its role permits the successor write.
+merge tiers still apply. Every other human-authority boundary crossing still escalates.
 
 ## Revising a pull request
 
@@ -161,26 +143,44 @@ Continue the pull request's remote head; never rebase or force-push it.
   for verification or the Rounds rule still requires a second round, otherwise
   `integrate`. When it leaves nothing to change, finish without a commit.
 
-Run the final validation again on any new head before you finish.
+Apply [handoff merge readiness](#handoff-merge-readiness) on revisions as well as
+initial issue implementations. Run final validation on any new head.
+
+## Handoff merge readiness
+
+Before handing off an issue implementation or PR revision as `review` or
+`integrate`, fetch `origin/main` and run `git merge-tree --write-tree origin/main HEAD`.
+Exit 0 is clean, 1 means conflicts, and other errors mean the check failed.
+Resolve conflicts by merging the base into the assigned branch, never rebasing
+or force-pushing; the integrator makes no fix-up commits. Rerun affected and
+required final checks, verify merge readiness, then push and hand off the new
+SHA under the existing exact-head review and rounds rules. Use existing defer
+or human-decision routes for a failed check or unresolved owner choice.
 
 ## Boundaries
 
-No commits to `main`, no merging, no authoritative review of your own diff, and
+No commits to `main`, no landing PRs, no authoritative review of your own diff, and
 nothing outside the issue's footprint — scope found mid-flight becomes a finding
 or a new issue. The merge tier and the final gates belong to the integrator.
 
-Read the preparer-selected corpus documents and relevant linked decisions.
-Expand discovery if the code or findings expose missing context. A corpus
-document the issue cites is a required live read whenever the change may affect
-its product meaning. If the MCP route cannot serve it, stop before editing and
-finish `defer`, recording the exact tool and failure; a copied summary is not a
-substitute. A strictly mechanical change may continue, and its handoff says why
-no product context could affect it.
+Read the corpus the issue's Pointers cite, and relevant linked decisions,
+under [AGENTS.md's read rules](../../AGENTS.md#read-for-the-action), which own
+stale pointers and when missing context stops an edit (`defer`, naming the
+tool and failure). A strictly mechanical change says in its handoff why no
+product context could affect it.
 
 ## Outcomes
 
 `review`, `integrate`, `returned` (issue runs only), `needs-human`, or
 `defer`.
+
+For `returned`, name the missing or invalid contract and use this summary:
+
+```text
+Grounding: <origin/main SHA>
+Reason: <stale-contract|unsafe|unnecessary-complexity|owner-decision> — <one sentence>
+Evidence: <URL or concise pointer>
+```
 
 On an issue, push the branch you were given and open its pull request against
 `main` with this body, as short as complete, before finishing `review` or
@@ -210,5 +210,5 @@ Corpus: not used — <why no product choice needed it> | <title> (<uuid>) — <o
 Link logs instead of pasting counts. The summary links the pull request, names
 the grounding SHA and the reviews owed, and nothing else.
 
-Retrospectives go to the implementer board, under the rule in
-`.agents/roles/README.md`.
+For a qualifying problem, use [retrospectives.md](../protocols/retrospectives.md)
+and the implementer board.

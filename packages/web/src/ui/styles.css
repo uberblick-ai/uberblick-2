@@ -229,7 +229,8 @@ body {
 
 /* The rebound notice occupies its own row above every route, keeping the
    panes visible and operable. */
-.ub-rebound-notice {
+.ub-rebound-notice,
+.ub-replica-unavailable {
   flex: none;
   margin: 0;
   padding: 0.55rem 0.75rem;
@@ -314,7 +315,6 @@ body {
 }
 
 .ub-list-head,
-.ub-user-card,
 .ub-doc-meta,
 .ub-waiting-meta,
 .ub-tldr-form-meta,
@@ -343,12 +343,6 @@ body {
 
 /* Keep font resets scoped to product selectors: unlayered rules outrank
    every Tailwind utility, including shadcn controls. */
-.ub-list-head button,
-.ub-list .ub-nav li button:not(.ub-nav-soon),
-.ub-settings-entry,
-.ub-group-add,
-.ub-user-card,
-.ub-appearance-option,
 .ub-mention,
 .ub-tags:not(.ub-tag-picker-trigger),
 .ub-tool,
@@ -359,13 +353,7 @@ body {
   font: inherit;
 }
 
-.ub-list-head button,
-.ub-list .ub-nav li button:not(.ub-nav-soon),
-.ub-settings-entry,
-.ub-group-add,
-.ub-user-card,
 .ub-swatch,
-.ub-appearance-option,
 .ub-mention,
 .ub-tool,
 .ub-terminal-toggle,
@@ -374,54 +362,10 @@ body {
   cursor: pointer;
 }
 
-/* Sidebar rows can grow for wrapped labels. Reserve the selected row's
-   1px edge in the resting border so selection shifts no content. */
-.ub-list-head button,
-.ub-list .ub-nav li button:not(.ub-nav-soon),
-.ub-settings-entry,
-.ub-group-add {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 6px 8px;
-  border: 1px solid transparent;
-  border-radius: 0.42rem;
-  color: var(--sidebar-row-foreground);
-  font-size: 14px;
-  text-align: left;
-}
-
-/* Disabled controls and aria-disabled navigation rows get no hover fill. */
-.ub-list-head button:hover:not(:disabled),
-.ub-list .ub-nav li button:not(.ub-nav-soon):hover:not(:disabled, [aria-disabled="true"]),
-.ub-settings-entry:hover,
-.ub-group-add:hover:not(:disabled) {
-  background: var(--sidebar-accent);
-  color: var(--sidebar-foreground);
-}
-
-/* The current navigation destination keeps its edge and emphasis. */
-.ub-list .ub-nav li button:not(.ub-nav-soon)[aria-current="page"] {
-  background: var(--sidebar-accent);
-  border-color: var(--sidebar-selected-border);
-  color: var(--sidebar-foreground);
-  font-weight: 500;
-}
-
-.ub-list-head button:disabled {
-  color: var(--sidebar-muted-foreground);
-  cursor: default;
-}
-
 .ub-list ul {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.ub-list .ub-nav li button:not(.ub-nav-soon) {
-  width: 100%;
 }
 
 /* Row glyphs share one fixed box and sidebar icon tint. */
@@ -452,7 +396,6 @@ body {
 /* Truncate titles, names and metadata without growing their rows. Pinned
    titles keep their suffix inside the same flex child. */
 .ub-pin-label,
-.ub-user-name,
 .ub-group-label,
 .ub-last-updated,
 .ub-peer-overflow-name,
@@ -467,10 +410,6 @@ body {
   padding: 0.4rem;
 }
 
-.ub-settings-entry {
-  width: 100%;
-}
-
 .ub-settings-nav {
   margin-top: 0.25rem;
 }
@@ -478,12 +417,6 @@ body {
 /* Portalled menus sit outside `.ub-app`, so their selectors must match
    classes on the menu or its descendants. */
 
-.ub-menu-caret {
-  color: var(--sidebar-muted-foreground);
-  font-size: 0.7rem;
-}
-
-.ub-user-card,
 .ub-terminal-toggle,
 .ub-copy,
 .ub-docs-open,
@@ -491,59 +424,20 @@ body {
   border: 0;
 }
 
-.ub-user-card,
-.ub-appearance-option,
 .ub-docs-open {
   color: inherit;
 }
 
-.ub-user-card,
 .ub-docs-open {
   width: 100%;
   border-radius: var(--radius-sm);
   text-align: left;
 }
 
-.ub-user-card {
-  margin-top: 0.15rem;
-  padding: 0.3rem 0.4rem;
-}
-
-.ub-user-card:hover,
-.ub-appearance-option:hover {
-  background: var(--sidebar-accent);
-  color: var(--accent-foreground);
-}
-
-.ub-identity-tile,
 .ub-copied {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-/* Sidebar identity tiles are rounded squares; present-session avatars
-   are circles, so the two kinds of identity remain visually distinct. */
-.ub-identity-tile {
-  flex: none;
-  width: 1.75rem;
-  height: 1.75rem;
-  border-radius: var(--radius-sm);
-  font-size: 0.8rem;
-  /* Identity tiles use the default 500 emphasis weight. */
-  font-weight: 500;
-  line-height: 1;
-  user-select: none;
-}
-
-/* White ink keeps at least 4.69:1 contrast on every inline presence fill
-   in both appearances. */
-.ub-user-tile {
-  color: var(--cursor-label-foreground);
-}
-
-.ub-user-name {
-  flex: 1;
 }
 
 .ub-user-panel {
@@ -606,18 +500,6 @@ body {
   gap: 0.25rem;
 }
 
-.ub-appearance-option {
-  padding: 0.25rem 0.4rem;
-  border: 1px solid var(--sidebar-border);
-  border-radius: var(--radius-sm);
-  font-size: 0.8rem;
-}
-
-.ub-appearance-option[aria-pressed="true"] {
-  background: var(--brand-subtle);
-  border-color: var(--foreground);
-}
-
 .ub-panel-facts {
   display: grid;
   gap: 0.2rem;
@@ -672,14 +554,8 @@ body {
   border-top: 1px solid var(--sidebar-border);
 }
 
-.ub-group-add {
-  align-self: flex-start;
-  margin-top: 0.35rem;
-}
-
 .ub-comment-buttons .ub-tool:disabled,
-.ub-tldr-actions .ub-tool:disabled,
-.ub-group-add:disabled {
+.ub-tldr-actions .ub-tool:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -868,12 +744,6 @@ h1.ub-heading {
   display: none;
 }
 
-.ub-list-head button,
-.ub-list .ub-nav li button:not(.ub-nav-soon),
-.ub-settings-entry,
-.ub-group-add,
-.ub-user-card,
-.ub-appearance-option,
 .ub-title,
 .ub-copy-identity .ub-copied,
 .ub-terminal-toggle,
@@ -1112,39 +982,123 @@ h3.ub-heading {
   font-style: italic;
 }
 
-.ub-table,
+.tableWrapper,
 .ub-mermaid,
 .ub-terminal {
   position: relative;
   margin: 0.7em 0;
 }
 
-.ub-table-render {
+.tableWrapper {
+  max-width: calc(100% - 88px);
+  margin-right: 88px;
   overflow-x: auto;
-  cursor: text;
+  overscroll-behavior-x: contain;
+  /* Always reserved, including at rest: revealing the overlay changes no cell
+     geometry. The frame owns the controls, outside the scrolling editable DOM. */
+  padding: 44px 0 22px;
 }
 
-.ub-table table,
+.ub-table-controls {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  overflow: clip;
+}
+
+.ub-table-controls::before {
+  /* Keep hover across the reserved row lanes, including between buttons,
+     while pointer events over cell content still reach the editor. */
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 88px;
+  height: 100%;
+  pointer-events: auto;
+}
+
+.ub-table-column-controls {
+  height: 44px;
+  /* Hidden overflow still supports the browser's native focus scrolling. The
+     table below supplies pointer/touch scrolling for both surfaces. */
+  overflow-x: hidden;
+  overflow-y: hidden;
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+
+.ub-table-column-controls::-webkit-scrollbar {
+  display: none;
+}
+
+.ub-table-control {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.ub-table-control span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  background: var(--background);
+}
+
+.ub-table-control:hover span,
+.ub-table-control:focus-visible span,
+.ub-table-control[data-state="open"] span {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
+@media (any-pointer: coarse) {
+  .ub-table th,
+  .ub-table td {
+    height: 44px;
+  }
+}
+
+.ub-table,
 .ub-docs-table {
   border-collapse: collapse;
   width: 100%;
 }
 
-.ub-table table {
-  font-size: 0.9rem;
+.ub-table {
+  font-size: 1rem;
 }
 
 .ub-table th,
 .ub-table td {
+  position: relative;
+  min-width: 120px;
   border: 1px solid var(--border);
   padding: 0.3rem 0.55rem;
   text-align: left;
   vertical-align: top;
 }
 
+.ub-table p {
+  margin: 0;
+}
+
 .ub-table th {
   background: var(--muted);
-  font-weight: 500;
+  font-weight: 600;
   color: var(--foreground);
 }
 
@@ -1152,7 +1106,10 @@ h3.ub-heading {
   color: var(--prose-text);
 }
 
-.ub-table-source,
+.ub-table .selectedCell {
+  box-shadow: inset 0 0 0 2px var(--brand);
+}
+
 .ub-code,
 .ub-mermaid pre,
 .ub-terminal-source,
@@ -1162,7 +1119,6 @@ h3.ub-heading {
   white-space: pre-wrap;
 }
 
-.ub-table-source,
 .ub-code,
 .ub-mermaid pre,
 .ub-terminal-source {
@@ -1172,24 +1128,6 @@ h3.ub-heading {
   border-radius: var(--radius-sm);
   padding: 0.6rem 0.75rem;
   overflow-x: auto;
-}
-
-/* Reveal GFM source while editing or when parsing fails; otherwise show
-   the table. Incomplete source must stay visible instead of becoming an
-   empty rendered box. */
-.ub-table-source {
-  display: none;
-  margin: 0;
-}
-
-.ub-table.ub-table-editing .ub-table-source,
-.ub-table[data-parsed="false"] .ub-table-source {
-  display: block;
-}
-
-.ub-table.ub-table-editing .ub-table-render,
-.ub-table[data-parsed="false"] .ub-table-render {
-  display: none;
 }
 
 .ub-code,

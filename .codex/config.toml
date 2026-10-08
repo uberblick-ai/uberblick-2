@@ -1,4 +1,4 @@
 [mcp_servers.uberblick]
-command = "ub"
-args = ["mcp", "serve"]
+command = "mise"
+args = ["exec", "--", "ub", "mcp", "serve"]
 default_tools_approval_mode = "approve"

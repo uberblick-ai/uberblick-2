@@ -1,14 +1,4 @@
-/**
- * Configuration resolution is the contract every `ub` subcommand inherits, and
- * precedence is the part that is easy to get subtly wrong.
- *
- * The workspace and the signing secret have two layers: the environment — which
- * is how a project MCP entry's `WORKSPACE_ID` pin and `fnox exec`'s secret
- * arrive — then the user's own config, then the built-in defaults, which live
- * in the MCP server and are not redefined here. **The endpoint has one**: this
- * machine's `config.json`. An ambient `HUB_URL` is not read and is not passed
- * on, because two sources for the endpoint is the island trap (#376, #385).
- */
+/** Private credentials and shared atomic selection regressions. */
 
 import { join } from "node:path";
 import {
@@ -26,7 +16,6 @@ import {
   claimSigningSecret,
   credentialsPath,
   resolveConfig,
-  userConfigPath,
   writeCredentials,
 } from "../src/config.js";
 import {
@@ -35,6 +24,7 @@ import {
   SECRET_ON_FILE,
   removeTempDirs,
   sandbox,
+  unboundSandbox,
   tracesOf,
 } from "./helpers.js";
 
@@ -46,8 +36,8 @@ const FROM_ENV = "cccccccc-3333-4333-8333-333333333333";
 
 /**
  * The MCP config for a resolved environment, with a workspace supplied when the
- * layers under test do not carry one — most cases here are about the signing
- * secret or the hub URL, and a sandbox has no workspace unless it was given one.
+ * layers under test do not carry one — the explicitly unbound cases keep
+ * their absent selection while testing legacy admission or machine defaults.
  * An environment that does carry a workspace still wins.
  */
 function mcpConfig(env: NodeJS.ProcessEnv) {
@@ -55,147 +45,123 @@ function mcpConfig(env: NodeJS.ProcessEnv) {
 }
 
 describe("resolveConfig", () => {
-  it("defaults when no configuration file exists anywhere", () => {
-    const box = sandbox();
-    const resolved = resolveConfig({ env: box.env });
-
-    expect(resolved.warnings).toEqual([]);
-    expect(resolved.origins).toEqual({
-      workspace: "default",
-      hubUrl: "default",
-      credential: null,
+  it("resolves joined device admission by the explicit endpoint, including complete environment pins", () => {
+    const first = "ws://localhost:8080/custom-path";
+    const second = "ws://localhost:8081/other-path";
+    const box = sandbox({
+      projectBinding: { workspaceId: FROM_USER, hubUrl: first },
+      userConfig: { hubAdmissions: { [first]: "device", [second]: "device" } },
+      credentials: { signingSecret: SECRET_ON_FILE },
     });
+    for (const extra of [{}, { UB_WORKSPACE_ID: FROM_ENV, UB_HUB_URL: second }]) {
+      const resolved = resolveConfig({ env: { ...box.env, ...extra, HUB_AUTH_TOKEN: SECRET_IN_ENV }, cwd: box.cwd });
+      expect(resolved.binding?.hubUrl).toBe(extra.UB_HUB_URL ?? first);
+      expect(resolved.env.HUB_ADMISSION).toBe("device");
+      expect(resolved.env.HUB_AUTH_TOKEN).toBeUndefined();
+      expect(resolved.origins.credential).toBeNull();
+      expect(resolved.warnings).toEqual([]);
+      expect(mcpConfig(resolved.env).deviceLogin).toBeDefined();
+    }
+  });
 
-    // The workspace is the one value with no default: nothing may guess which
-    // corpus this machine belongs to.
+  it("does not carry device admission to an unrelated endpoint or the embedded local binding", () => {
+    const first = "ws://localhost:8080/ws";
+    const box = sandbox({
+      projectBinding: { workspaceId: FROM_USER, hubUrl: first },
+      userConfig: { hubAdmissions: { [first]: "device" } },
+      credentials: { signingSecret: SECRET_ON_FILE },
+    });
+    for (const hub of ["ws://localhost:1234", "ws://localhost:8080/other", "local"]) {
+      const resolved = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: FROM_ENV, UB_HUB_URL: hub, HUB_ADMISSION: "device" }, cwd: box.cwd });
+      expect(resolved.env.HUB_ADMISSION).toBeUndefined();
+      expect(resolved.env.HUB_AUTH_TOKEN).toBe(SECRET_ON_FILE);
+      expect(mcpConfig(resolved.env).deviceLogin).toBeUndefined();
+    }
+  });
+
+  it("uses legacy admission only for its validated matching endpoint and never for selection", () => {
+    const legacyHub = "http://localhost:8080/custom-path";
+    const endpoint = "ws://localhost:8080/custom-path";
+    const box = unboundSandbox({
+      userConfig: { workspace: FROM_USER, hubUrl: legacyHub, hubAdmission: "device" },
+      credentials: { signingSecret: SECRET_ON_FILE },
+    });
+    const unbound = resolveConfig({ env: box.env, cwd: box.cwd });
+    expect(unbound.binding).toBeNull();
+    expect(unbound.env.HUB_ADMISSION).toBeUndefined();
+    for (const hub of [endpoint, "ws://localhost:1234"]) {
+      const resolved = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: FROM_ENV, UB_HUB_URL: hub }, cwd: box.cwd });
+      expect(resolved.env.HUB_ADMISSION).toBe(hub === endpoint ? "device" : undefined);
+      expect(resolved.env.HUB_AUTH_TOKEN).toBe(hub === endpoint ? undefined : SECRET_ON_FILE);
+    }
+  });
+
+  it("does not echo or use unsafe legacy admission endpoints", () => {
+    const box = sandbox({
+      projectBinding: { workspaceId: FROM_USER, hubUrl: "ws://localhost:1234" },
+      userConfig: { hubUrl: "http://user:PRIVATE_SENTINEL@localhost:1234/ws", hubAdmission: "device" },
+      credentials: { signingSecret: SECRET_ON_FILE },
+    });
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
+    expect(resolved.env.HUB_ADMISSION).toBeUndefined();
+    expect(resolved.env.HUB_AUTH_TOKEN).toBe(SECRET_ON_FILE);
+    expect(resolved.warnings.join(" ")).not.toContain("PRIVATE_SENTINEL");
+  });
+
+  it("does not use a legacy workspace or hub, and does not pass either to children", () => {
+    const box = unboundSandbox({ userConfig: { workspace: FROM_USER, hubUrl: "wss://old.example.test/ws" } });
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
+    expect(resolved.binding).toBeNull();
     expect(resolved.env.WORKSPACE_ID).toBeUndefined();
-    // And the refusal is the whole answer for a machine that is not bound
-    // yet: the exact file `ub` takes a workspace from, and both commands that
-    // write it — `ub remote join` being the one a flag-day re-bind runs. The
-    // path comes from the cli's own resolver rather than a literal, so the
-    // message and `ub` cannot drift apart without failing here.
-    expect(() => resolveMcpConfig(resolved.env)).toThrow(
-      userConfigPath(box.env),
-    );
-    expect(() => resolveMcpConfig(resolved.env)).toThrow(/ub init/);
-    expect(() => resolveMcpConfig(resolved.env)).toThrow(/ub remote join/);
-
-    // The rest of the defaults are the MCP server's, reached by handing it the
-    // resolved environment — one definition of the hub and the database path.
-    const config = resolveMcpConfig({
-      ...resolved.env,
-      WORKSPACE_ID: FROM_USER,
-    });
-    expect(config.hubUrl).toBe(DEFAULT_HUB_URL);
-    expect(config.authSecret).toBeNull();
-    expect(config.databasePath).toBe(
-      join(box.dataHome, "uberblick", `${FROM_USER}.sqlite`),
-    );
+    expect(resolved.env.HUB_URL).toBeUndefined();
+    expect(resolved.warnings.join("\n")).toMatch(/Legacy machine/);
   });
 
-  it("keeps a decorated workspace as typed, and resolves it to its uuid", () => {
-    // Storage and display keep the spelling its owner chose; everything the
-    // MCP server keys by — rooms, the token claim, the database — is the uuid.
-    const decorated = `uberblick-${FROM_USER}`;
-    const box = sandbox({ userConfig: { workspace: decorated } });
-    const resolved = resolveConfig({ env: box.env });
-
-    expect(resolved.env.WORKSPACE_ID).toBe(decorated);
+  it("resolves the complete project pair and preserves the decorated ID", () => {
+    const workspaceId = `team-${FROM_USER}`;
+    const box = sandbox({ projectBinding: { workspaceId, hubUrl: "https://hub.example.test" } });
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
+    expect(resolved.binding).toEqual({ workspaceId, hubUrl: "wss://hub.example.test/ws" });
     expect(mcpConfig(resolved.env).workspaceId).toBe(FROM_USER);
-    expect(mcpConfig(resolved.env).databasePath).toBe(
-      join(box.dataHome, "uberblick", `${FROM_USER}.sqlite`),
-    );
+    expect(resolved.env.UB_HUB_URL).toBe("wss://hub.example.test/ws");
+    expect(resolved.origins.workspace).toBe("project config");
+    expect(resolved.origins.hubUrl).toBe("project config");
   });
 
-  it("takes the workspace from the environment first, then the user config", () => {
-    const userConfig = { workspace: FROM_USER, hubUrl: "ws://user:1" };
-
-    const user = sandbox({ userConfig });
-    const fromUser = resolveConfig({ env: user.env });
-    expect(mcpConfig(fromUser.env).workspaceId).toBe(FROM_USER);
-    expect(fromUser.origins.workspace).toBe("user config");
-
-    // The environment is what a project MCP entry's `WORKSPACE_ID` pin arrives
-    // as, so this is also what makes such a pin outrank the user's default.
-    const withEnv = sandbox({ userConfig });
-    const fromEnv = resolveConfig({
-      env: { ...withEnv.env, WORKSPACE_ID: FROM_ENV },
-    });
-    expect(mcpConfig(fromEnv.env).workspaceId).toBe(FROM_ENV);
-    expect(fromEnv.origins.workspace).toBe("environment");
+  it("uses an entire environment pair without mixing with the project", () => {
+    const box = sandbox({ projectBinding: { workspaceId: FROM_USER, hubUrl: "https://project.example.test" } });
+    const resolved = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: FROM_ENV, UB_HUB_URL: "local" }, cwd: box.cwd });
+    expect(resolved.binding).toEqual({ workspaceId: FROM_ENV, hubUrl: null });
+    expect(resolved.env.HUB_URL).toBeUndefined();
+    expect(mcpConfig(resolved.env).hubUrl).toBe(DEFAULT_HUB_URL);
+    expect(resolved.origins.workspace).toBe("environment");
+    expect(resolved.origins.hubUrl).toBe("environment");
   });
 
-  it("takes the endpoint from the user config alone, whatever the environment says", () => {
-    // The layer that made an activated checkout outrank a machine bound to a
-    // remote hub, so that writes reported `synced` against a hub nobody else
-    // was reading (#376). It is gone, and gone means not passed on either: the
-    // map handed to `ub mcp serve`'s child carries the configured endpoint, or
-    // none at all, never the ambient one.
-    const box = sandbox({ userConfig: { workspace: FROM_USER, hubUrl: "ws://user:1" } });
-    const resolved = resolveConfig({
-      env: { ...box.env, HUB_URL: "ws://ambient:3" },
-    });
-    expect(resolved.origins.hubUrl).toBe("user config");
-    expect(resolved.env.HUB_URL).toBe("ws://user:1");
-    expect(mcpConfig(resolved.env).hubUrl).toBe("ws://user:1");
-
-    // With nothing configured the ambient value is removed rather than passed
-    // through, so the child falls back to the in-code default.
-    const bare = sandbox({ userConfig: { workspace: FROM_USER } });
-    const unconfigured = resolveConfig({
-      env: { ...bare.env, HUB_URL: "ws://ambient:3" },
-    });
-    expect(unconfigured.origins.hubUrl).toBe("default");
-    expect(unconfigured.env.HUB_URL).toBeUndefined();
-    expect(mcpConfig(unconfigured.env).hubUrl).toBe(DEFAULT_HUB_URL);
+  it("never forwards the local signing secret to a remote hub", () => {
+    const box = sandbox({ projectBinding: { workspaceId: FROM_USER, hubUrl: "https://hub.example.test" }, credentials: { signingSecret: SECRET_ON_FILE } });
+    const resolved = resolveConfig({ cwd: box.cwd,
+      env: { ...box.env, HUB_AUTH_TOKEN: SECRET_IN_ENV } });
+    expect(resolved.env.HUB_AUTH_TOKEN).toBeUndefined();
+    expect(resolved.origins.credential).toBeNull();
+    expect(mcpConfig(resolved.env).authSecret).toBeNull();
+    expect(mcpConfig(resolved.env).deviceLogin).toBeDefined();
+    expect(tracesOf(SECRET_ON_FILE, JSON.stringify(resolved.warnings))).toEqual([]);
   });
 
   it("takes the signing secret from credentials.json, and the environment first", () => {
     const box = sandbox({ credentials: { signingSecret: "from-file" } });
 
-    const fromFile = resolveConfig({ env: box.env });
+    const fromFile = resolveConfig({ env: box.env, cwd: box.cwd });
     expect(fromFile.origins.credential).toBe("credentials file");
     expect(mcpConfig(fromFile.env).authSecret).toBe("from-file");
 
     const fromEnv = resolveConfig({
+      cwd: box.cwd,
       env: { ...box.env, HUB_AUTH_TOKEN: "from-env" },
     });
     expect(fromEnv.origins.credential).toBe("environment");
     expect(mcpConfig(fromEnv.env).authSecret).toBe("from-env");
-  });
-
-  it("rejects a workspace that is not a workspace id, naming the source", () => {
-    // Schema's rule, applied to file-sourced values too. `main` is in the list
-    // because it used to be the default: a checkout that still names it is
-    // told so rather than quietly opening a workspace nobody owns.
-    for (const workspace of ["a/b", "..", ".", "..\\outside", "main", "team-b"]) {
-      const box = sandbox({ userConfig: { workspace } });
-      expect(() => resolveConfig({ env: box.env })).toThrow(/config\.json/);
-    }
-
-    const fromEnv = sandbox();
-    expect(() =>
-      resolveConfig({
-        env: { ...fromEnv.env, WORKSPACE_ID: "a/b" },
-      }),
-    ).toThrow(/WORKSPACE_ID/);
-  });
-
-  it("warns about a file it cannot use, and falls through to the layer below", () => {
-    const box = sandbox({ raw: { userConfig: "{ not json" } });
-    const resolved = resolveConfig({
-      env: { ...box.env, WORKSPACE_ID: FROM_ENV },
-    });
-
-    expect(resolved.warnings.join("\n")).toMatch(/config\.json: invalid JSON/);
-    expect(mcpConfig(resolved.env).workspaceId).toBe(FROM_ENV);
-
-    // A known key of the wrong type is the same story: warn, do not adopt.
-    const typed = sandbox({ userConfig: { workspace: 42 } });
-    const fromTyped = resolveConfig({ env: typed.env });
-    expect(fromTyped.warnings.join("\n")).toMatch(/"workspace".*non-empty string/);
-    // Nothing below it either, so there is no workspace at all — not a default.
-    expect(fromTyped.env.WORKSPACE_ID).toBeUndefined();
   });
 
   it("refuses a credentials file anyone else can read, rather than using it", () => {
@@ -208,7 +174,7 @@ describe("resolveConfig", () => {
       credentialsMode: 0o644,
     });
 
-    const refused = resolveConfig({ env: box.env });
+    const refused = resolveConfig({ env: box.env, cwd: box.cwd });
     const warning = refused.warnings.join("\n");
     // Both facts and the fix: the mode, that the secret went unused, the chmod.
     expect(warning).toMatch(/refusing .*credentials\.json: mode 0644/);
@@ -222,6 +188,7 @@ describe("resolveConfig", () => {
 
     // Refusal is the file layer only: the environment still wins and still works.
     const fromEnv = resolveConfig({
+      cwd: box.cwd,
       env: { ...box.env, HUB_AUTH_TOKEN: "from-env" },
     });
     expect(fromEnv.origins.credential).toBe("environment");
@@ -242,7 +209,7 @@ describe("resolveConfig", () => {
     const secret = "bare-unquoted-signing-secret-8ac3";
     for (const file of ["credentials", "userConfig"] as const) {
       const box = sandbox({ raw: { [file]: `${secret}\n` } });
-      const resolved = resolveConfig({ env: box.env });
+      const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
 
       expect(resolved.warnings.join("\n")).toMatch(/: invalid JSON$/);
       expect(resolved.warnings.join("\n")).not.toContain(secret);
@@ -252,81 +219,16 @@ describe("resolveConfig", () => {
 
   it("refuses a signing secret in a file that is not credentials.json", () => {
     const box = sandbox({ userConfig: { signingSecret: "nope" } });
-    const resolved = resolveConfig({ env: box.env });
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
 
     expect(resolved.warnings.join("\n")).toMatch(/credentials\.json/);
     expect(mcpConfig(resolved.env).authSecret).toBeNull();
   });
 
-  // --- when the environment and a file disagree -----------------------------
-  //
-  // The environment winning is the design; nothing reporting the disagreement
-  // is what let `ub doctor` call a workspace healthy while `config.json` named
-  // another one. So: the same winner, plus a warning.
-
-  it("warns when the environment and the file name different workspaces", () => {
-    const box = sandbox({ userConfig: { workspace: FROM_USER } });
-    const resolved = resolveConfig({
-      env: { ...box.env, WORKSPACE_ID: FROM_ENV },
-    });
-
-    const warning = resolved.warnings.join("\n");
-    // Both ids, because neither is a secret and "which corpus is this?" is the
-    // whole question — plus the file to look in.
-    expect(warning).toContain(FROM_ENV);
-    expect(warning).toContain(FROM_USER);
-    expect(warning).toContain(userConfigPath(box.env));
-    // Informative, not fatal: a repository pin is legitimate and still wins.
-    expect(warning).toMatch(/pinned checkout/);
-    expect(mcpConfig(resolved.env).workspaceId).toBe(FROM_ENV);
-    expect(resolved.origins.workspace).toBe("environment");
-    expect(resolved.shadowed).toEqual([
-      { setting: "workspace", layer: "user config" },
-    ]);
-  });
-
-  it("says nothing when the layers agree, or when only one names a workspace", () => {
-    // Identity, not spelling: `<slug>-<uuid>` and the bare uuid are one
-    // workspace, so a decorated pin over the same id is not a disagreement.
-    const box = sandbox({ userConfig: { workspace: FROM_USER } });
-    const decorated = resolveConfig({
-      env: { ...box.env, WORKSPACE_ID: `team-${FROM_USER}` },
-    });
-    expect(decorated.warnings).toEqual([]);
-    expect(decorated.shadowed).toEqual([]);
-
-    // And a deliberate pin with no competing file stays silent.
-    const pinned = sandbox();
-    const alone = resolveConfig({
-      env: { ...pinned.env, WORKSPACE_ID: FROM_ENV },
-    });
-    expect(alone.warnings).toEqual([]);
-    expect(alone.shadowed).toEqual([]);
-  });
-
-  it("compares a workspace the file got wrong by path, never by value", () => {
-    // The losing layer is parsed here for the first time — resolution validates
-    // only the winner — so this must not start throwing where a valid pin used
-    // to carry the run. And a secret pasted into that field is the mistake
-    // actually observed, so the value is named nowhere: not whole, not in
-    // fragments, not by its length.
-    const box = sandbox({ userConfig: { workspace: SECRET_ON_FILE } });
-    const resolved = resolveConfig({
-      env: { ...box.env, WORKSPACE_ID: FROM_ENV },
-    });
-
-    const warning = resolved.warnings.join("\n");
-    expect(warning).toContain(userConfigPath(box.env));
-    expect(warning).toMatch(/is not a workspace id/);
-    expect(tracesOf(SECRET_ON_FILE, warning)).toEqual([]);
-    expect(mcpConfig(resolved.env).workspaceId).toBe(FROM_ENV);
-    // Nothing proves it names a *different* workspace, so nothing claims it.
-    expect(resolved.shadowed).toEqual([]);
-  });
-
   it("warns that two signing secrets differ, in one fixed sentence", () => {
     const box = sandbox({ credentials: { signingSecret: SECRET_ON_FILE } });
     const resolved = resolveConfig({
+      cwd: box.cwd,
       env: { ...box.env, HUB_AUTH_TOKEN: SECRET_IN_ENV },
     });
 
@@ -353,6 +255,7 @@ describe("resolveConfig", () => {
     // Equal layers are not a conflict — the common case of `fnox exec` handing
     // over the very secret `ub init` wrote.
     const agreeing = resolveConfig({
+      cwd: box.cwd,
       env: { ...box.env, HUB_AUTH_TOKEN: SECRET_ON_FILE },
     });
     expect(agreeing.warnings).toEqual([]);
@@ -370,7 +273,7 @@ describe("claimSigningSecret", () => {
     expect(claimSigningSecret("first-candidate", box.env)).toBe("first-candidate");
     expect(claimSigningSecret("second-candidate", box.env)).toBe("first-candidate");
 
-    const resolved = resolveConfig({ env: box.env });
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
     expect(mcpConfig(resolved.env).authSecret).toBe("first-candidate");
     expect(statSync(credentialsPath(box.env)).mode & 0o777).toBe(0o600);
   });
@@ -441,7 +344,7 @@ describe("writeCredentials", () => {
     // The repair is what makes the file usable at all: at 0644 the reader would
     // refuse it. (That the tighten happens *before* the truncate is the other
     // half of the guarantee — see writeCredentials — and is racy to assert.)
-    const repaired = resolveConfig({ env: box.env });
+    const repaired = resolveConfig({ env: box.env, cwd: box.cwd });
     expect(repaired.warnings).toEqual([]);
     expect(mcpConfig(repaired.env).authSecret).toBe("new");
 
@@ -449,7 +352,7 @@ describe("writeCredentials", () => {
     const created = writeCredentials({ signingSecret: "new" }, fresh.env);
     expect(statSync(created).mode & 0o777).toBe(0o600);
     expect(
-      mcpConfig(resolveConfig({ env: fresh.env }).env)
+      mcpConfig(resolveConfig({ env: fresh.env, cwd: fresh.cwd }).env)
         .authSecret,
     ).toBe("new");
   });

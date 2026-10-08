@@ -57,10 +57,14 @@ import {
   BlockNotFoundError,
   ConflictingLinkMarksError,
   InvalidDocumentLifecycleError,
+  InvalidTableError,
+  InvalidTableMappingError,
   InvalidTagAssignmentError,
   InlineLinkRangeError,
   OldTextMismatchError,
   StaleBlockError,
+  TableAnnotationError,
+  TableMappingRequiredError,
 } from "@uberblick/schema";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
@@ -163,6 +167,26 @@ interface Recovery {
  * the call that finishes it — but never contradict the class.
  */
 const RECOVERIES: Record<string, Recovery> = {
+  invalid_table: {
+    recoveryClass: "manual",
+    guidance:
+      "Supply exactly one GFM table, with a header and matching delimiter row, then call again. Alignment markers are accepted but not stored; inline markdown writes cell formatting and escaped punctuation stays literal.",
+  },
+  table_mapping_required: {
+    recoveryClass: "manual",
+    guidance:
+      "Supply table_mapping with rows and columns naming the surviving old projection indices, or null for new positions. Include header row 0; an identity map supports a positional multi-cell batch. No table change was written.",
+  },
+  invalid_table_mapping: {
+    recoveryClass: "manual",
+    guidance:
+      "Correct table_mapping for this table: match the new dimensions, keep header row 0, and use unique increasing old indices in bounds or null for new positions. No table change was written.",
+  },
+  table_comments_unavailable: {
+    recoveryClass: "manual",
+    guidance:
+      "New table threads are temporarily unavailable. Read existing threads with get_doc; use annotate with thread_id to reply, resolve or reopen them.",
+  },
   invalid_github_reference: {
     recoveryClass: "manual",
     guidance:
@@ -214,7 +238,7 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Call get_doc for the block's current text, its type and its `doc_links`, then link a range that fits — " +
       "`reason` says which of the three is in the way: `empty` (the range covers no characters), `not-prose` " +
-      "(a code, mermaid, table or terminal block holds source text and carries no inline links) or `overlap` (the range " +
+      "(code, mermaid and terminal hold source text; table links belong to cells and have no block-level ranges) or `overlap` (the range " +
       "is already an external link, and one range cannot be both).",
   },
   // Never `retry`: the directory is a synced document, so a target this
@@ -492,6 +516,22 @@ function stamped(
  * caller can re-diff and retry without another round trip.
  */
 export function toFailure(tool: string, error: unknown): CallToolResult {
+  if (error instanceof TableMappingRequiredError) {
+    return stamped(tool, { error: "table_mapping_required", message: error.message });
+  }
+  if (error instanceof InvalidTableMappingError) {
+    return stamped(tool, { error: "invalid_table_mapping", message: error.message });
+  }
+  if (error instanceof InvalidTableError) {
+    return stamped(tool, { error: "invalid_table", message: error.message });
+  }
+  if (error instanceof TableAnnotationError) {
+    return stamped(tool, {
+      error: "table_comments_unavailable",
+      message: error.message,
+      blockId: error.blockId,
+    });
+  }
   if (error instanceof PersistenceError) {
     // Fail-stop: every later call lands here too, until the server is restarted
     // — reads included, because a replica ahead of its own log may not hand out

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /** The browser trusts only a validated local status answer. */
 
 import { describe, expect, it, vi } from "vitest";
@@ -29,6 +30,13 @@ describe("local status answers", () => {
     });
   });
 
+  it.each(["sign-in-required", "no-workspace-access", "credential-store", "renewal-unavailable"])(
+    "keeps the remote device recovery %s without assuming any acknowledgement", async (notSharedReason) => {
+      await expect(read({ caughtUp: false, rooms: {}, notSharedReason }))
+        .resolves.toEqual({ caughtUp: false, rooms: {}, notSharedReason });
+    },
+  );
+
   it("accepts an older server without inventing a not-shared cause", async () => {
     await expect(read({ caughtUp: true, rooms: {} })).resolves.toEqual({
       caughtUp: true,
@@ -43,4 +51,14 @@ describe("local status answers", () => {
         .rejects.toThrow("malformed status answer");
     }
   });
+
+  it.each(["replica-held", "replica-quarantined", "replica-failed"])(
+    "retains a workspace-local unavailable reading: %s", async (reason) => {
+      const fetchImpl = vi.fn(async () => Response.json({ error: "replica_unavailable", reason }, { status: 503 }));
+      await expect(createDocumentSearchClient("workspace", "browser", fetchImpl as typeof fetch)
+        .status(new AbortController().signal)).resolves.toEqual({
+          caughtUp: false, rooms: {}, notSharedReason: null, replicaUnavailable: reason,
+        });
+    },
+  );
 });

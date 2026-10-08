@@ -56,7 +56,7 @@ import {
 } from "./marks.js";
 import { canonicalDocumentUuid } from "./rooms.js";
 import { listNumbers } from "./lists.js";
-import { parseGfmTable } from "./table.js";
+import { parseGfmTable, writeGfmTable } from "./table.js";
 import { resolveTagAssignments } from "./tags.js";
 import { MAX_LIST_INDENT } from "./types.js";
 import type {
@@ -179,6 +179,8 @@ function nestedMarksOf(marks: InlineMarkSet): NestedMark[] {
 }
 
 interface EscapeContext {
+  /** Tables also escape pipes, HTML/autolink openers and entity ampersands. */
+  table?: boolean;
   /**
    * Within a link label the first unescaped `]` ends the label, so a label
    * holding one must escape it or the link does not survive the round trip.
@@ -213,7 +215,7 @@ function escapeInline(text: string, context: EscapeContext): string {
   let out = "";
   for (let i = 0; i < text.length; i += 1) {
     const char = text[i] as string;
-    if (char === "\\" || char === "`" || char === "*" || char === "[") {
+    if (char === "\\" || char === "`" || char === "*" || char === "[" || (context.table === true && ["<", ">", "&", "!", "]"].includes(char))) {
       out += `\\${char}`;
     } else if (char === "]" && context.insideLabel) {
       out += "\\]";
@@ -418,6 +420,8 @@ interface OpenMark {
   target: string;
   /** The spelling this mark was opened with; a closer must match it. */
   spelling: string;
+  /** Where the opener starts, so a link emptied by whitespace hugging can go. */
+  start: number;
 }
 
 /**
@@ -482,7 +486,8 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
 }
 
 /**
- * Render runs as GFM.
+ * Render runs as GFM. Table mode escapes literal HTML punctuation; the outer
+ * `writeGfmTable` layer escapes pipes, including pipes in code and link targets.
  *
  * The emitter is a stack, and everything else follows from that. For each run it
  * closes marks from the top until every mark still open is one this run wants,
@@ -518,7 +523,7 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
  * with nothing writable between them. Both are the format's limits rather than this
  * code's, and `expressibleInGfm` in the test names them structurally.
  */
-function renderInline(source: readonly InlineRun[]): string {
+export function renderInline(source: readonly InlineRun[], table = false): string {
   let out = "";
   const open: OpenMark[] = [];
 
@@ -547,8 +552,15 @@ function renderInline(source: readonly InlineRun[]): string {
     for (let i = open.length - 1; i >= depth; i -= 1) {
       const entry = open[i];
       if (entry === undefined) continue;
-      out +=
-        entry.name === "link" ? `](${renderTarget(entry.target)})` : entry.spelling;
+      if (entry.name === "link" && out.length === entry.start + 1) {
+        // Hugging an outer emphasis can take the link's entire whitespace label
+        // out of it. An empty label is literal syntax to the reader, so drop only
+        // the link's opener and keep the held characters after the emphasis.
+        out = out.slice(0, entry.start);
+      } else {
+        out +=
+          entry.name === "link" ? `](${renderTarget(entry.target)})` : entry.spelling;
+      }
       if (i === lastEmphasis) out += held;
     }
     if (lastEmphasis === -1) out += held;
@@ -606,8 +618,9 @@ function renderInline(source: readonly InlineRun[]): string {
         text = text.slice(lead.length);
       }
       const spelling = name === "link" ? "[" : DELIMITER[name];
+      const start = out.length;
       out += spelling;
-      open.push({ name, target, spelling });
+      open.push({ name, target, spelling, start });
     }
 
 
@@ -617,6 +630,7 @@ function renderInline(source: readonly InlineRun[]): string {
         : escapeInline(text, {
             insideLabel: open.some((entry) => entry.name === "link"),
             hugged,
+            table,
           });
   }
 
@@ -693,8 +707,8 @@ function renderBlock(
         .map((line) => `> ${line}`.trimEnd())
         .join("\n");
     case "table":
-      // The source *is* the markdown: a table goes out exactly as it is stored,
-      // down to the spacing someone lined its pipes up with.
+      // Fallback for an unnormalized legacy table. Structured cells are
+      // rendered with their marks in the document traversal below.
       return block.text;
     case "paragraph":
       return renderInline(inline);
@@ -736,7 +750,7 @@ function renderDecision(reference: DecisionReference): string {
  * headings → `#`×level, paragraphs → their text, code → a fenced block tagged
  * with its language, mermaid → a ```mermaid fence, terminal → a ```terminal
  * fence, list items → a `- `/`1. ` line indented by their level, quotes → `> `
- * on every line, tables → their source verbatim.
+ * on every line, tables → padded GFM rows with cell marks as inline markdown.
  *
  * Blocks are separated by a blank line, except two adjacent list items: a blank
  * line between them is what makes a reader render the list *loose*, so a run of
@@ -824,11 +838,13 @@ export function exportMarkdown(
   // them, blank lines and all, which ends the list for any reader, so the next
   // item would come back at depth zero. Indented, it is inside the item and the
   // run carries on.
-  for (const [index, { block, inline }] of entries.entries()) {
+  for (const [index, { block, inline, table }] of entries.entries()) {
     const listItem = block.type === "list-item";
     const marker = listItem ? listMarker(block, numbers[index] ?? null) : "";
     push(
-      renderBlock(
+      block.type === "table" && table !== undefined && table.length > 0
+        ? writeGfmTable(table.map((row) => row.map((cell) => renderInline(cell, true))))
+        : renderBlock(
         block,
         inline.length === 0 ? [{ text: block.text, marks: {} }] : inline,
         marker,
@@ -1249,7 +1265,7 @@ function flanking(
 }
 
 /** Pass 1: `source` as text, code and delimiter tokens, with `marks` in scope. */
-function tokenizeInline(source: string, marks: InlineMarkSet): Token[] {
+function tokenizeInline(source: string, marks: InlineMarkSet, table = false): Token[] {
   const tokens: Token[] = [];
   let plain = "";
   const flush = (): void => {
@@ -1263,7 +1279,7 @@ function tokenizeInline(source: string, marks: InlineMarkSet): Token[] {
 
     if (char === "\\") {
       const next = source[i + 1];
-      if (next !== undefined && "\\`*_~[]".includes(next)) {
+      if (next !== undefined && ("\\`*_~[]".includes(next) || (table && "<>&!".includes(next)))) {
         plain += next;
         i += 2;
         continue;
@@ -1288,7 +1304,7 @@ function tokenizeInline(source: string, marks: InlineMarkSet): Token[] {
       const link = matchLink(source, i);
       if (link !== null) {
         flush();
-        tokens.push(...tokenizeInline(link.label, { ...marks, ...link.marks }));
+        tokens.push(...tokenizeInline(link.label, { ...marks, ...link.marks }, table));
         i = link.next;
         continue;
       }
@@ -1566,8 +1582,8 @@ function marksFor(
  * union of the marks covering it. Unclaimed delimiter characters come through as
  * the text they are.
  */
-function scanInline(source: string, out: InlineRun[]): void {
-  const tokens = tokenizeInline(source, {});
+function scanInline(source: string, out: InlineRun[], table = false): void {
+  const tokens = tokenizeInline(source, {}, table);
   const { spans, unclaimed } = matchNesting(tokens);
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
@@ -1578,6 +1594,13 @@ function scanInline(source: string, out: InlineRun[]): void {
         : token.char.repeat(unclaimed[i] ?? 0);
     pushInlineRun(out, text, marksFor(token, spans, i));
   }
+}
+
+/** The prose inline reader; table mode also undoes its escaped HTML punctuation. */
+export function parseInline(source: string, table = false): InlineRun[] {
+  const runs: InlineRun[] = [];
+  scanInline(source, runs, table);
+  return runs;
 }
 
 /**
@@ -1755,8 +1778,8 @@ export function importMarkdown(markdown: string): ImportedDoc {
       // every one of them is a perfectly good one-column row, so asking it
       // first swallows the rest of the document up to the next blank line.
       // Then, and only then: does the block still parse as one table? That is
-      // the parser's own boundary, and asking it keeps the reader from storing
-      // source it would itself read differently.
+      // the parser's own boundary, and asking it keeps the imported GFM cells
+      // consistent with the table write boundary.
       //
       // The blank line is tested here rather than left to the parser because a
       // *trailing* one is trimmed off any source before it is parsed; inside the

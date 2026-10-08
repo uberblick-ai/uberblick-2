@@ -27,10 +27,10 @@
  *     below, stated as code: one dev secret, held by everyone. (`ub` itself
  *     never calls this; it mints through `HubSync`.) The ladder that ends this
  *     replaces those three call sites with credential keys.
- *   - {@link importCredentialKey} — the 32 raw bytes a client parsed out of its
- *     credential with {@link parseCredential}. Credential keys are independent
- *     random bytes issued by the hub's registry; neither the root secret nor
- *     another device's key can derive them.
+ *   - {@link importCredentialKey} — the 32 raw bytes of a device's credential
+ *     key. Credential keys are independent random bytes issued by the hub's
+ *     registry; neither the root secret nor another device's key can derive
+ *     them.
  *
  * Why WebCrypto and not `node:crypto`: the same module runs in the browser
  * client and in Node (hub, MCP server), so it must not import a Node builtin.
@@ -41,12 +41,12 @@
  * server or a deployed bundle from before this change must be restarted or
  * redeployed.
  *
- * Live admission still uses the root secret shared by every client. The
- * credential registry and its admission path are built separately, pending
- * the coordinated hub and client switch.
+ * Remote admission uses independent device keys. Loopback admission retains
+ * the shared local secret.
  */
 
 import { parseWorkspaceId } from "@uberblick/schema";
+import { isGithubAccountId, isGithubUsername } from "./github-identity.js";
 
 /** What a token is allowed to do. Read-only connections can sync down only. */
 export type TokenScope = "read-write" | "read-only";
@@ -122,19 +122,31 @@ export type TokenRequest = Omit<TokenClaims, "iat" | "exp"> & {
   iat?: number;
 };
 
-/** An HTTP proof authorizes only the operation it names. */
-export type RequestOperation = "renew-credential";
+/** An HTTP proof binds the operation and every authority-bearing target. */
+export type RequestAction =
+  | { operation: "renew-credential" }
+  | { operation: "promote-workspace"; workspaceId: string; attemptId: string }
+  | { operation: "list-devices" }
+  | { operation: "revoke-device"; deviceId: string }
+  | { operation: "own-role"; workspaceId: string }
+  | { operation: "list-members"; workspaceId: string }
+  | { operation: "resolve-account"; workspaceId: string; githubUsername: string }
+  | { operation: "grant-member"; workspaceId: string; githubAccountId: string; role?: "admin" | "member" }
+  | { operation: "change-role"; workspaceId: string; principalId: string; role: "admin" | "member" }
+  | { operation: "remove-member"; workspaceId: string; principalId: string };
 
-export interface RequestProofClaims {
+export type RequestOperation = RequestAction["operation"];
+
+export type RequestProofClaims = RequestAction & {
   typ: "request";
   /** A credential key, never the shared root secret. */
   kid: string;
-  operation: RequestOperation;
   iat: number;
   exp: number;
-}
+};
 
-export type RequestProofRequest = Omit<RequestProofClaims, "typ" | "iat" | "exp"> & {
+export type RequestProofRequest = RequestAction & {
+  kid: string;
   lifetimeSeconds: number;
   iat?: number;
 };
@@ -217,34 +229,17 @@ export async function importRootSecret(secret: string): Promise<CryptoKey> {
   return hmacKey(textEncoder.encode(secret));
 }
 
-// --- the credential contract -------------------------------------------------
-
-/**
- * The credential string's prefix, and the version of everything below it: the
- * base64url key encoding and the checksum. A future
- * format is `ubc2`, never a reinterpretation of this one.
- */
-const CREDENTIAL_PREFIX = "ubc1";
-
-/**
- * The credential's field separator. Its own constant even though a token's
- * happens to be the same character: these are two wire formats, and a change to
- * one must not silently change the other.
- */
-const CREDENTIAL_SEPARATOR = ".";
+// --- the credential key ------------------------------------------------------
 
 /** A credential key's independent random bytes. */
 const CREDENTIAL_KEY_BYTES = 32;
-
-/** Those 32 bytes as unpadded base64url: one length, one spelling. */
-const CREDENTIAL_KEY_CHARS = 43;
 
 /** A credential id, and the same 8-4-4-4-12 lowercase spelling as a uuid. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
- * The 32 raw bytes of a credential key as a signing key — what a client does
- * with what {@link parseCredential} handed it.
+ * The 32 raw bytes of a credential key as a signing key — what a device does
+ * with the key the hub's registry issued it.
  */
 export async function importCredentialKey(
   keyBytes: Uint8Array,
@@ -255,150 +250,6 @@ export async function importCredentialKey(
     );
   }
   return hmacKey(keyBytes);
-}
-
-/**
- * CRC-32 (IEEE 802.3, reflected, init/final `0xffffffff`) over `text`'s UTF-8
- * bytes, as 8 lowercase hex digits.
- *
- * **A typo detector, explicitly not a security control.** It catches a
- * credential that was truncated by a line wrap or mistyped by a hand; it
- * catches nothing an adversary does, since anyone editing the string can
- * recompute it. The security of a credential is entirely in the 32 secret bytes
- * it carries.
- *
- * CRC-32 rather than a hash because it is synchronous and dependency-free,
- * which is what lets {@link parseCredential} diagnose a bad credential on the
- * boot path with no WebCrypto call and no network.
- */
-function crc32Hex(text: string): string {
-  let crc = 0xffffffff;
-  for (const byte of textEncoder.encode(text)) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit += 1) {
-      // 0xedb88320, the reflection of the CRC-32 polynomial 0x04c11db7 —
-      // bit-at-a-time, because a table would be more code than this is worth.
-      crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
-    }
-  }
-  return ((crc ^ 0xffffffff) >>> 0).toString(16).padStart(8, "0");
-}
-
-export interface CredentialParts {
-  workspaceUuid: string;
-  credId: string;
-  /** The 32 raw bytes of `K_c`. */
-  keyBytes: Uint8Array;
-}
-
-/** Why a string is not a credential. Stable strings: a caller may branch. */
-export type CredentialProblem =
-  /** Not a `ubc1` credential at all — wrong prefix, or not five segments. */
-  | "not-a-credential"
-  | "malformed-workspace"
-  | "malformed-cred-id"
-  | "malformed-key"
-  /** It reads as a credential, but one character of it is wrong. */
-  | "checksum-mismatch";
-
-export type ParsedCredential = CredentialParts | { invalid: CredentialProblem };
-
-/**
- * Render a credential for its holder:
- * `ubc1.<workspace>.<credId>.<key>.<checksum>`.
- *
- * `<key>` is base64url of the 32 raw `K_c` bytes — the holder imports exactly
- * those bytes. `<workspace>` is a single-workspace boot hint in this format;
- * the hub registry remains the authority for the credential's workspace set.
- * `<checksum>` is {@link crc32Hex} over everything before it.
- *
- * Issued by the hub. There is no other writer.
- */
-export function formatCredential({
-  workspaceUuid,
-  credId,
-  keyBytes,
-}: CredentialParts): string {
-  if (!isWorkspace(workspaceUuid)) {
-    throw new Error(
-      "formatCredential: workspaceUuid must be a workspace uuid, undecorated",
-    );
-  }
-  if (!UUID.test(credId)) {
-    throw new Error("formatCredential: credId must be a uuid");
-  }
-  if (keyBytes.length !== CREDENTIAL_KEY_BYTES) {
-    throw new Error(
-      `formatCredential: a credential key is ${CREDENTIAL_KEY_BYTES} bytes, got ${keyBytes.length}`,
-    );
-  }
-  const body = [
-    CREDENTIAL_PREFIX,
-    workspaceUuid,
-    credId,
-    base64urlEncode(keyBytes),
-  ].join(CREDENTIAL_SEPARATOR);
-  return `${body}${CREDENTIAL_SEPARATOR}${crc32Hex(body)}`;
-}
-
-/**
- * Read a credential, or say what is wrong with it.
- *
- * **Synchronous, and it touches neither crypto nor the network** — that is the
- * point of it. A client reads its credential on the boot path, where the hub
- * may be unreachable and where refusing to start would break offline-first; a
- * mistyped credential has to be diagnosable there, locally, before anything
- * dials.
- *
- * The cheap syntactic checks run first and the checksum last: a segment count
- * or a key length is free to check and names the fault precisely, while the
- * checksum is the catch-all that turns "this looks right but one character of
- * it is wrong" into a refusal instead of an opaque auth failure later.
- */
-export function parseCredential(value: string): ParsedCredential {
-  const parts = value.split(CREDENTIAL_SEPARATOR);
-  if (parts.length !== 5 || parts[0] !== CREDENTIAL_PREFIX) {
-    return { invalid: "not-a-credential" };
-  }
-  const [, workspaceUuid, credId, key, checksum] = parts as [
-    string,
-    string,
-    string,
-    string,
-    string,
-  ];
-
-  if (!isWorkspace(workspaceUuid)) {
-    return { invalid: "malformed-workspace" };
-  }
-  if (!UUID.test(credId)) {
-    return { invalid: "malformed-cred-id" };
-  }
-
-  // 32 bytes are exactly 43 unpadded base64url characters. Checked before the
-  // decode so a padded, standard-alphabet or whitespace-bearing spelling of the
-  // right bytes is refused rather than quietly normalised into a credential.
-  if (key.length !== CREDENTIAL_KEY_CHARS || !BASE64URL.test(key)) {
-    return { invalid: "malformed-key" };
-  }
-  let keyBytes: Uint8Array;
-  try {
-    keyBytes = base64urlDecode(key);
-  } catch {
-    return { invalid: "malformed-key" };
-  }
-  if (keyBytes.length !== CREDENTIAL_KEY_BYTES) {
-    return { invalid: "malformed-key" };
-  }
-
-  const body = [CREDENTIAL_PREFIX, workspaceUuid, credId, key].join(
-    CREDENTIAL_SEPARATOR,
-  );
-  if (checksum !== crc32Hex(body)) {
-    return { invalid: "checksum-mismatch" };
-  }
-
-  return { workspaceUuid, credId, keyBytes };
 }
 
 // --- minting and verification ------------------------------------------------
@@ -513,9 +364,9 @@ export async function mintToken(
 }
 
 /**
- * Prove possession of a credential key for one HTTP operation. Workspace and
- * subject authority come from the hub's record, so even a credential issued
- * with no workspaces can authorize this request.
+ * Prove possession of a credential key for one HTTP operation and its targets.
+ * The hub still decides authority from its own current credential and
+ * membership records; signed targets confer no authority themselves.
  */
 export async function mintRequestProof(
   key: CryptoKey,
@@ -524,8 +375,9 @@ export async function mintRequestProof(
   if (typeof claims.kid !== "string" || !UUID.test(claims.kid)) {
     throw new Error("mintRequestProof: kid must be a credential uuid");
   }
-  if (!isRequestOperation(claims.operation)) {
-    throw new Error("mintRequestProof: unknown operation");
+  const action = readRequestAction(claims);
+  if (action === null) {
+    throw new Error("mintRequestProof: unsupported operation or targets");
   }
   if (claims.iat !== undefined && !isEpochSeconds(claims.iat)) {
     throw new Error("mintRequestProof: iat must be a non-negative integer");
@@ -546,7 +398,7 @@ export async function mintRequestProof(
   }
   return signClaims(
     key,
-    { typ: "request", kid: claims.kid, operation: claims.operation, iat, exp },
+    { typ: "request", kid: claims.kid, ...action, iat, exp },
     "mintRequestProof",
   );
 }
@@ -576,28 +428,81 @@ async function signClaims(
   return minted;
 }
 
-function isRequestOperation(value: unknown): value is RequestOperation {
-  return value === "renew-credential";
+const REQUEST_TARGET_FIELDS = ["deviceId", "workspaceId", "principalId", "role", "attemptId", "githubUsername", "githubAccountId"] as const;
+
+/** Parse target semantics, allowing request/proof metadata but no unrelated targets. */
+export function readRequestAction(payload: Record<string, unknown>): RequestAction | null {
+  const { operation, deviceId, workspaceId, principalId, role, attemptId, githubUsername, githubAccountId } = payload;
+  let action: RequestAction;
+  switch (operation) {
+    case "renew-credential":
+      // Renewal predates management and has no targets; its existing proof
+      // contract ignores extra payload fields.
+      return { operation };
+    case "promote-workspace":
+      if (!isWorkspace(workspaceId) || typeof attemptId !== "string" || !UUID.test(attemptId)) return null;
+      action = { operation, workspaceId, attemptId };
+      break;
+    case "list-devices":
+      action = { operation };
+      break;
+    case "revoke-device":
+      if (!isSubject(deviceId)) return null;
+      action = { operation, deviceId };
+      break;
+    case "own-role":
+    case "list-members":
+      if (!isWorkspace(workspaceId)) return null;
+      action = { operation, workspaceId };
+      break;
+    case "resolve-account":
+      if (!isWorkspace(workspaceId) || !isGithubUsername(githubUsername)) return null;
+      action = { operation, workspaceId, githubUsername };
+      break;
+    case "grant-member":
+      if (!isWorkspace(workspaceId) || !isGithubAccountId(githubAccountId) ||
+        (role !== undefined && role !== "admin" && role !== "member")) return null;
+      action = { operation, workspaceId, githubAccountId, role: role ?? "member" };
+      break;
+    case "change-role":
+      if (!isWorkspace(workspaceId) || !isSubject(principalId) || (role !== "admin" && role !== "member")) {
+        return null;
+      }
+      action = { operation, workspaceId, principalId, role };
+      break;
+    case "remove-member":
+      if (!isWorkspace(workspaceId) || !isSubject(principalId)) return null;
+      action = { operation, workspaceId, principalId };
+      break;
+    default:
+      return null;
+  }
+  return REQUEST_TARGET_FIELDS.some((field) => Object.hasOwn(payload, field) && !Object.hasOwn(action, field))
+    ? null
+    : action;
 }
 
 function parseRequestProofClaims(
   payload: Record<string, unknown>,
-  operation: RequestOperation,
+  expected: RequestAction | "renew-credential",
 ): RequestProofClaims | null {
   const { typ, kid, iat, exp } = payload;
+  const action = readRequestAction(payload);
+  const expectedAction = readRequestAction(typeof expected === "string" ? { operation: expected } : expected);
   if (
     typ !== "request" ||
     typeof kid !== "string" ||
     !UUID.test(kid) ||
-    !isRequestOperation(payload.operation) ||
-    payload.operation !== operation ||
+    action === null ||
+    expectedAction === null ||
+    Object.entries(expectedAction).some(([field, value]) => (action as Record<string, unknown>)[field] !== value) ||
     !isEpochSeconds(iat) ||
     !isEpochSeconds(exp) ||
     exp <= iat
   ) {
     return null;
   }
-  return { typ, kid, operation, iat, exp };
+  return { typ, kid, ...action, iat, exp };
 }
 
 function parseClaims(payload: Record<string, unknown>): TokenClaims | null {
@@ -776,14 +681,15 @@ async function verifySignature(
 }
 
 /**
- * Verify an operation-bound request proof, using the same bounded canonical
- * wire format as room tokens. Time is checked separately with clampToken.
+ * Verify a request proof bound to its operation and exact targets, using the
+ * same bounded canonical wire format as room tokens. Time is checked separately
+ * with clampToken.
  * Rejections reflect no caller-supplied claims or key material.
  */
 export async function inspectRequestProof(
   key: CryptoKey,
   token: string,
-  operation: RequestOperation,
+  expected: RequestAction | "renew-credential",
 ): Promise<RequestProofClaims | TokenRejection> {
   const parsed = parseToken(token);
   if (parsed === null) return UNPARSEABLE;
@@ -792,7 +698,7 @@ export async function inspectRequestProof(
   const identity: TokenIdentity = { typ: null, sub: null };
   if (!signed) return { failure: "bad-signature", identity };
   return (
-    parseRequestProofClaims(parsed.payload, operation) ?? {
+    parseRequestProofClaims(parsed.payload, expected) ?? {
       failure: "unsupported-claims",
       identity,
     }

@@ -55,9 +55,9 @@ const BUILD_STAMP = "uberblick-build.json";
  * Stamp the built bundle with the sync protocol version it speaks.
  *
  * A plugin rather than a `package.json` postbuild step because that would run
- * for one entrance only: `ub open`, the Dockerfile and `mise run build-web` all
- * shell out to `pnpm --filter @uberblick/web build`, but
- * `test/bundle-secret.test.ts` calls Vite's `build()` directly.
+ * for one entrance only: `ub open` and `mise run build-web` shell out to
+ * `pnpm --filter @uberblick/web build`, while the release payload invokes Vite
+ * directly and `test/bundle-secret.test.ts` calls its `build()` API.
  * `generateBundle` is common to all four, so no build produces an unstamped
  * bundle — including the one the suite scans.
  *
@@ -114,6 +114,10 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["test/setup-dom.ts"],
     include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
+    // CI output, as in packages/schema/vitest.config.ts.
+    reporters: process.env.CI ? ["dot"] : ["default"],
+    silent: "passed-only",
+    execArgv: ["--no-experimental-webstorage"],
     // The reconnect suite runs real hubs on real sockets, and its `afterEach`
     // stops two of them. Vitest's default 5s hook budget is what a shutdown
     // under load overruns, and it overruns it anonymously — the hook has no
@@ -122,5 +126,10 @@ export default defineConfig({
     // anonymous one is kept out of the way. Per-test budgets are set in the
     // file that needs them.
     hookTimeout: 120_000,
+    // One worker per core rather than Vitest's cores-1 default. Workers spend
+    // most of their time starting jsdom and importing the editor, not idling
+    // on the main process, and measured on a 4-core box under load the extra
+    // worker took the suite from ~37s to ~32s.
+    maxWorkers: "100%",
   },
 });

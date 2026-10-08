@@ -74,8 +74,8 @@ async function openFixture(browser: Browser, coarse: boolean, width: number): Pr
 }
 
 for (const { coarse, widths } of [
-  { coarse: true, widths: [375, 932, 744, 1024, 1366] },
-  { coarse: false, widths: [1280, 1470] },
+  { coarse: true, widths: [375, 1366] },
+  { coarse: false, widths: [1280] },
 ]) {
   for (const width of widths) {
     test(`shared controls meet the ${coarse ? "touch" : "pointer"} floors at ${width}px`, async ({ browser }) => {

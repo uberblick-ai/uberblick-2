@@ -5,11 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { readHubLogins, writeHubLogin } from "@uberblick/hub/auth-store";
-import { DEVICE_RENEWAL_COOLDOWN_MS } from "@uberblick/hub/device-login";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import { getMeta, roomForDoc } from "@uberblick/schema";
 import type { Rig } from "./helpers.js";
 import { sleep, startServer, testConfig, waitUntil } from "./helpers.js";
+
+const COOLDOWN_MS = 1_000;
 
 async function caughtUp(rig: Rig, timeoutMs = 20_000): Promise<void> {
   await waitUntil("all local writes to be acknowledged", async () => {
@@ -19,7 +20,7 @@ async function caughtUp(rig: Rig, timeoutMs = 20_000): Promise<void> {
   }, timeoutMs);
 }
 
-it("keeps a shared credential stable after no access and resumes pending work after a new login", async () => {
+it("keeps a shared credential stable while polling denied access and resumes after a later grant", async () => {
   const directory = mkdtempSync(join(tmpdir(), `device-no-access-${process.env.UB_AGENTS_RUN ?? "test"}-`));
   const fixture = await startDeviceSyncHub({ directory });
   const clients: Rig[] = [];
@@ -30,6 +31,10 @@ it("keeps a shared credential stable after no access and resumes pending work af
     ...testConfig({ workspaceId, hubUrl: fixture.url, databasePath: join(directory, databaseName) }),
     deviceLogin: { env },
     reconnectMaxDelayMs: 2_000,
+    // The production cooldown and polling ceiling are thirty seconds each; a
+    // shorter pair crosses the same two cooldown boundaries in real time.
+    deviceRenewalCooldownMs: COOLDOWN_MS,
+    deviceRetryMaxDelayMs: 2_000,
   });
 
   try {
@@ -54,11 +59,12 @@ it("keeps a shared credential stable after no access and resumes pending work af
     expect(local).toMatchObject({ applied: true, synced: false });
     expect((await second.ok("sync_status")).pendingRooms.length).toBeGreaterThan(0);
 
-    // Cross two production cooldowns with real clocks, crypto, stores and hubs.
-    // A repeated renewal would retire the first engine's working credential.
-    await sleep(DEVICE_RENEWAL_COOLDOWN_MS * 2 + 5_000);
-    expect(fixture.renewalCount).toBe(1);
-    expect(readHubLogins(env).logins[fixture.origin]!.credential.record.id).toBe(shared.credential.record.id);
+    // Cross two cooldowns with real clocks, crypto, stores and hubs.
+    // Conditional checks discover later grants without retiring the first
+    // engine's working credential while its authority is unchanged.
+    await sleep(COOLDOWN_MS * 2 + 2_500);
+    expect(fixture.renewalCount).toBeGreaterThan(1);
+    expect(readHubLogins(env).logins[fixture.origin]).toEqual(shared);
     for (const { claims } of fixture.authentications.slice(admissionStart)) {
       if (claims?.workspace === firstWorkspace) expect(claims.kid).toBe(shared.credential.record.id);
     }
@@ -70,12 +76,17 @@ it("keeps a shared credential stable after no access and resumes pending work af
     expect((await second.ok("sync_status")).pendingRooms.length).toBeGreaterThan(0);
     expect(fixture.readRoom(roomForDoc(secondWorkspace, local.uuid))).toBeUndefined();
 
+    await second.instance.replicas.sync.waitForDeviceWork();
+    const checksBeforeGrant = fixture.renewalCount;
     fixture.grant(secondWorkspace);
-    const replacement = fixture.issue({ workspaces: [firstWorkspace, secondWorkspace] });
-    await writeHubLogin(fixture.origin, replacement, env);
-    await caughtUp(second, 40_000);
+    await caughtUp(second);
+    await caughtUp(first);
+    const replacement = readHubLogins(env).logins[fixture.origin]!;
+    expect(replacement.identity).toEqual(shared.identity);
+    expect(replacement.credential.record.id).not.toBe(shared.credential.record.id);
+    expect(replacement.credential.record.workspaces).toEqual([firstWorkspace, secondWorkspace].sort());
     expect(getMeta(fixture.readRoom(roomForDoc(secondWorkspace, local.uuid))!).title).toBe("Waiting for workspace access");
-    expect(fixture.renewalCount).toBe(1);
+    expect(fixture.renewalCount).toBeGreaterThan(checksBeforeGrant);
     expect(fixture.authentications.some(({ claims }) =>
       claims?.workspace === secondWorkspace && claims.kid === replacement.credential.record.id)).toBe(true);
   } finally {
@@ -83,4 +94,4 @@ it("keeps a shared credential stable after no access and resumes pending work af
     await fixture.close();
     rmSync(directory, { recursive: true, force: true });
   }
-}, 180_000);
+});

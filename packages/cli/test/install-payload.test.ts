@@ -26,6 +26,7 @@ import {
   pointAt,
   removeTempDirs,
   sandbox,
+  unboundSandbox,
   waitUntil,
 } from "./helpers.js";
 
@@ -162,7 +163,7 @@ describe("the versioned install payload", () => {
   });
 
   it("runs init, status, MCP and the packaged web app with only Node on PATH", async () => {
-    const box = sandbox();
+    const box = unboundSandbox();
     const initialPayload = treeDigest(payload);
 
     const version = runPayload(box, ["--version"]);
@@ -177,9 +178,7 @@ describe("the versioned install payload", () => {
     expect(help.status, help.stderr).toBe(0);
     expect(filesBelow(payload).some((path) => path.endsWith(".map"))).toBe(false);
 
-    const initialized = runPayload(box, ["init", "--yes", "--no-mcp"], {
-      cwd: REPO_ROOT,
-    });
+    const initialized = runPayload(box, ["init", "--yes", "--no-mcp"]);
     expect(initialized.status, initialized.stderr).toBe(0);
     expect(initialized.stdout).toContain("ub open");
     expect(initialized.stdout).not.toMatch(/mise run|pnpm/);
@@ -246,8 +245,9 @@ describe("the versioned install payload", () => {
     const home = dirname(box.cwd);
     for (const file of filesBelow(home)) {
       expect(
-        file.startsWith(box.configHome) || file.startsWith(box.dataHome),
-        `${file} is outside the XDG roots`,
+        file.startsWith(box.configHome) || file.startsWith(box.dataHome) ||
+          file === join(box.cwd, ".uberblick.json"),
+        `${file} is outside the project binding and XDG roots`,
       ).toBe(true);
     }
     expect(treeDigest(payload)).toBe(initialPayload);
@@ -286,7 +286,12 @@ describe("the versioned install payload", () => {
 
     const run = spawnSync("ub", ["update"], {
       cwd: REPO_ROOT,
-      env: { ...runtimeEnv(box, keg), PATH: `${fakeBin}:${join(keg, "bin")}:${nodeBin}` },
+      env: {
+        ...runtimeEnv(box, keg),
+        UB_WORKSPACE_ID: WORKSPACE,
+        UB_HUB_URL: "local",
+        PATH: `${fakeBin}:${join(keg, "bin")}:${nodeBin}`,
+      },
       encoding: "utf8",
       timeout: 30_000,
     });
@@ -361,7 +366,7 @@ describe("the versioned install payload", () => {
     cpSync(payload, broken, { recursive: true });
     breakWeb(broken);
     const before = treeDigest(broken);
-    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
 
     const opened = runPayload(box, ["open", "--no-browser"], { root: broken });
     expect(opened.status).toBe(1);

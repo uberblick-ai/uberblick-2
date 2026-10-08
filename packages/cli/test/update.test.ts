@@ -268,7 +268,14 @@ describe("ub update against real git", () => {
       installPayload: false,
       capture: (command, args) => real.capture(command, args),
       run: (command, args, cwd) => {
-        if (command === "git") return real.run(command, args, cwd);
+        if (command === "git") {
+          // Real git, with its chatter on the console, where Vitest shows it
+          // only for a test that fails.
+          const result = spawnSync(command, args, { cwd, encoding: "utf8" });
+          const said = `${result.stdout ?? ""}${result.stderr ?? ""}`.trimEnd();
+          if (said !== "") console.error(said);
+          return Promise.resolve(result.status === 0 ? null : `git exited ${result.status}`);
+        }
         refreshed.push([command, ...args].join(" "));
         return Promise.resolve(null);
       },

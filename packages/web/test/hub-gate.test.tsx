@@ -12,8 +12,7 @@
  */
 
 import { afterEach, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { act, renderSettled } from "./react-render.js";
 import * as Y from "yjs";
 import { directoryRoom } from "@uberblick/schema";
 
@@ -59,35 +58,29 @@ afterEach(() => {
 });
 
 it("shows the restart state only for a rebound local-serving document", async () => {
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
   const serving = {
     workspace: WORKSPACE,
     remoteHubUrl: "wss://remote.example/ws",
     rebound: false,
   };
 
+  const view = await renderSettled(<ReboundNotice serving={serving} />);
+  const container = view.container;
+  expect(container.querySelector(".ub-rebound-notice")).toBeNull();
+
   await act(async () => {
-    root.render(<ReboundNotice serving={serving} />);
+    view.rerender(<ReboundNotice serving={null} />);
   });
   expect(container.querySelector(".ub-rebound-notice")).toBeNull();
 
   await act(async () => {
-    root.render(<ReboundNotice serving={null} />);
-  });
-  expect(container.querySelector(".ub-rebound-notice")).toBeNull();
-
-  await act(async () => {
-    root.render(<ReboundNotice serving={{ ...serving, rebound: true }} />);
+    view.rerender(<ReboundNotice serving={{ ...serving, rebound: true }} />);
   });
   const notice = container.querySelector(".ub-rebound-notice");
   expect(notice?.textContent).toContain(WORKSPACE);
   expect(notice?.textContent).toContain("wss://remote.example/ws");
   expect(notice?.querySelector("button")).toBeNull();
 
-  await act(async () => root.unmount());
-  container.remove();
 });
 
 it("holds the first connect until the endpoint resolves, without holding the render", async () => {
@@ -98,12 +91,7 @@ it("holds the first connect until the endpoint resolves, without holding the ren
   acquireRoom.mockImplementation((room: string) => fakeHandle(room));
 
   window.history.replaceState(null, "", `/${WORKSPACE}`);
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
-  await act(async () => {
-    root.render(<App />);
-  });
+  const { container } = await renderSettled(<App />);
 
   // The shell is up — the read gates the connect, not the render.
   expect(container.querySelector(".ub-app")).not.toBeNull();
@@ -112,7 +100,7 @@ it("holds the first connect until the endpoint resolves, without holding the ren
   await act(async () => {
     answer(
       new Response(
-        JSON.stringify({ hubUrl: "wss://hub.example/ws" }),
+        JSON.stringify({ hubUrl: "ws://127.0.0.1:4321" }),
         { status: 200 },
       ),
     );
@@ -123,10 +111,6 @@ it("holds the first connect until the endpoint resolves, without holding the ren
     expect.anything(),
   );
 
-  await act(async () => {
-    root.unmount();
-  });
-  container.remove();
 });
 
 it("keeps the rebound notice visible across routes without replacing the page", async () => {
@@ -137,12 +121,7 @@ it("keeps the rebound notice visible across routes without replacing the page", 
   acquireRoom.mockImplementation((room: string) => fakeHandle(room));
 
   window.history.replaceState(null, "", `/${WORKSPACE}`);
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
-  await act(async () => {
-    root.render(<App />);
-  });
+  const { container } = await renderSettled(<App />);
 
   await act(async () => {
     answer(
@@ -174,8 +153,4 @@ it("keeps the rebound notice visible across routes without replacing the page", 
     "Restart ub open",
   );
 
-  await act(async () => {
-    root.unmount();
-  });
-  container.remove();
 });

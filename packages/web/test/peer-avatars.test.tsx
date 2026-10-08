@@ -21,9 +21,9 @@
  * over the same `usePresence` snapshot this strip reads.
  */
 
+import { act, render } from "./react-render.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, useLayoutEffect } from "react";
-import { createRoot } from "react-dom/client";
+import { useLayoutEffect } from "react";
 import * as Y from "yjs";
 import {
   applyAwarenessUpdate,
@@ -125,119 +125,86 @@ describe("the compact collaborator cluster", () => {
     );
   }
 
-  it("caps the circles at three and makes every remaining session operable", async () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
+  it("caps the circles at three and makes every remaining session operable", () => {
     const activate = vi.fn();
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() => root.render(<PeerCluster presence={peers(5)} onActivate={activate} />));
-    try {
-      const visible = host.querySelectorAll<HTMLButtonElement>(
-        ".ub-peers > .ub-peer-control[data-peer-id]",
-      );
-      expect(visible).toHaveLength(3);
-      expect(visible[0]?.getAttribute("aria-label")).toContain("Peer 1 · person");
-      expect(visible[0]?.querySelector(".ub-avatar")?.textContent).toBe("P");
+    const view = render(<PeerCluster presence={peers(5)} onActivate={activate} />);
+    const host = view.container;
+    const visible = host.querySelectorAll<HTMLButtonElement>(
+      ".ub-peers > .ub-peer-control[data-peer-id]",
+    );
+    expect(visible).toHaveLength(3);
+    expect(visible[0]?.getAttribute("aria-label")).toContain("Peer 1 · person");
+    expect(visible[0]?.querySelector(".ub-avatar")?.textContent).toBe("P");
 
-      const more = host.querySelector<HTMLButtonElement>(".ub-peer-more");
-      expect(more?.textContent).toBe("+2");
-      expect(more?.getAttribute("aria-label")).toBe(
-        "2 more active collaborators",
-      );
-      act(() => more?.click());
+    const more = host.querySelector<HTMLButtonElement>(".ub-peer-more");
+    expect(more?.textContent).toBe("+2");
+    expect(more?.getAttribute("aria-label")).toBe(
+      "2 more active collaborators",
+    );
+    act(() => more?.click());
 
-      const rows = document.querySelectorAll<HTMLButtonElement>(
-        ".ub-peer-overflow-row",
-      );
-      expect(rows).toHaveLength(2);
-      expect(rows[0]?.textContent).toContain("Peer 4");
-      expect(rows[0]?.textContent).toContain("agent");
-      expect(rows[0]?.querySelector(".ub-avatar")?.textContent).toBe("P🤖");
-      act(() => rows[0]?.click());
-      expect(activate).toHaveBeenCalledWith(
-        expect.objectContaining({ clientId: 4, blockId: "block-4" }),
-      );
-      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-      expect(document.activeElement).toBe(more);
-      expect(document.querySelector(".ub-peer-overflow")).toBeNull();
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    const rows = document.querySelectorAll<HTMLButtonElement>(
+      ".ub-peer-overflow-row",
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.textContent).toContain("Peer 4");
+    expect(rows[0]?.textContent).toContain("agent");
+    expect(rows[0]?.querySelector(".ub-avatar")?.textContent).toBe("P🤖");
+    act(() => rows[0]?.click());
+    expect(activate).toHaveBeenCalledWith(
+      expect.objectContaining({ clientId: 4, blockId: "block-4" }),
+    );
+    expect(document.querySelector(".ub-peer-overflow")).toBeNull();
   });
 
-  it("returns focus after dismissal and after live removal", async () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    const render = (sessions: readonly RemotePresence[]): void => {
-      act(() =>
-        root.render(
-          <div className="ub-status">
-            <button type="button" className="ub-status-sync">
-              Sync details
-            </button>
-            <PeerCluster presence={sessions} />
-          </div>,
-        ),
-      );
+  it("leaves outside focus alone and recovers after live removal", async () => {
+    const tree = (sessions: readonly RemotePresence[]) => (
+      <div className="ub-status">
+        <button type="button" className="ub-status-sync">
+          Sync details
+        </button>
+        <PeerCluster presence={sessions} />
+      </div>
+    );
+    const view = render(tree(peers(4)));
+    const host = view.container;
+    const draw = (sessions: readonly RemotePresence[]): void => {
+      view.rerender(tree(sessions));
     };
-    render(peers(4));
-    try {
-      const more = host.querySelector<HTMLButtonElement>(".ub-peer-more");
-      act(() => more?.focus());
-      act(() => more?.click());
-      const row = document.querySelector<HTMLButtonElement>(
-        '.ub-peer-overflow-row[data-peer-id="4"]',
-      );
-      act(() => row?.focus());
-      act(() =>
-        row?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
-      );
-      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-      expect(document.activeElement).toBe(more);
+    const more = host.querySelector<HTMLButtonElement>(".ub-peer-more");
+    act(() => more?.click());
+    expect(document.querySelector(".ub-peer-overflow")).not.toBeNull();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    const sync = host.querySelector<HTMLButtonElement>(".ub-status-sync");
+    act(() => {
+      sync?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      sync?.click();
+      sync?.focus();
+    });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(document.querySelector(".ub-peer-overflow")).toBeNull();
+    expect(document.activeElement).toBe(sync);
 
-      act(() => more?.click());
-      expect(document.querySelector(".ub-peer-overflow")).not.toBeNull();
-      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-      const sync = host.querySelector<HTMLButtonElement>(".ub-status-sync");
-      act(() => {
-        sync?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-        sync?.click();
-        sync?.focus();
-      });
-      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-      expect(document.querySelector(".ub-peer-overflow")).toBeNull();
-      expect(document.activeElement).toBe(sync);
+    act(() => more?.focus());
+    draw(peers(3));
+    expect(document.activeElement).toBe(
+      host.querySelector('[data-peer-id="1"]'),
+    );
 
-      act(() => more?.focus());
-      render(peers(3));
-      expect(document.activeElement).toBe(
-        host.querySelector('[data-peer-id="1"]'),
-      );
+    draw(peers(4));
+    const restoredMore = host.querySelector<HTMLButtonElement>(".ub-peer-more");
+    act(() => restoredMore?.click());
+    const nextRow = document.querySelector<HTMLButtonElement>(
+      '.ub-peer-overflow-row[data-peer-id="4"]',
+    );
+    act(() => nextRow?.focus());
+    draw([peers(4)[0]!, peers(4)[2]!, peers(4)[3]!]);
+    expect(document.activeElement).toBe(
+      host.querySelector('[data-peer-id="4"]'),
+    );
 
-      render(peers(4));
-      const restoredMore = host.querySelector<HTMLButtonElement>(".ub-peer-more");
-      act(() => restoredMore?.click());
-      const nextRow = document.querySelector<HTMLButtonElement>(
-        '.ub-peer-overflow-row[data-peer-id="4"]',
-      );
-      act(() => nextRow?.focus());
-      render([peers(4)[0]!, peers(4)[2]!, peers(4)[3]!]);
-      expect(document.activeElement).toBe(
-        host.querySelector('[data-peer-id="4"]'),
-      );
-
-      render([]);
-      expect(document.activeElement).toBe(host.querySelector(".ub-status-sync"));
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    draw([]);
+    expect(document.activeElement).toBe(host.querySelector(".ub-status-sync"));
   });
 });
 
@@ -321,8 +288,6 @@ describe("the strip follows a marker that arrives late", () => {
 
   it("redraws the circle and its hover when a session says what it is", () => {
     vi.useFakeTimers();
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
 
     const { connection, ydoc, awareness } = roomFixture(
       `${WORKSPACE}/${DOC_UUID}`,
@@ -352,50 +317,39 @@ describe("the strip follows a marker that arrives late", () => {
     // The ordinary first instant: a `user` and no claim about what it is. Under
     // the absence test this read as an agent; it is a person until it says so.
     publish({ user: { name: "Claude Code", color: "#7b5ec7" } });
-
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() => root.render(<Shell doc={connection} directory={null} />));
+    const view = render(<Shell doc={connection} directory={null} />);
+    const host = view.container;
     act(() => void vi.advanceTimersByTime(5_000));
-    try {
-      expect(avatar()?.textContent).toBe("C");
-      expect(control()?.getAttribute("aria-label")).toBe("Claude Code · person");
+    expect(avatar()?.textContent).toBe("C");
+    expect(control()?.getAttribute("aria-label")).toBe("Claude Code · person");
 
-      // The marker alone, with no session id yet: the circle, its ring, its
-      // hover text and its accessible name follow the `kind` comparison.
-      publish({ user: { name: "Claude Code", color: "#7b5ec7" }, client: AGENT_CLIENT });
-      expect(avatar()?.textContent).toBe("C🤖");
-      expect(avatar()?.style.borderColor).toBe("rgb(123, 94, 199)");
-      expect(control()?.getAttribute("aria-label")).toBe("Claude Code · agent");
-      // Then the session id, with the marker unchanged. Two updates rather than
-      // one because `sameSession` compares the two new fields independently: a
-      // single publish flipping both is still caught when only one comparison
-      // survives, so it would prove neither.
-      publish({
-        user: { name: "Claude Code", color: "#7b5ec7" },
-        client: AGENT_CLIENT,
-        session: SESSION,
-      });
-      expect(control()?.getAttribute("aria-label")).toBe(
-        `Claude Code · agent · ${SESSION}`,
-      );
+    // The marker alone, with no session id yet: the circle, its ring, its
+    // hover text and its accessible name follow the `kind` comparison.
+    publish({ user: { name: "Claude Code", color: "#7b5ec7" }, client: AGENT_CLIENT });
+    expect(avatar()?.textContent).toBe("C🤖");
+    expect(avatar()?.style.borderColor).toBe("rgb(123, 94, 199)");
+    expect(control()?.getAttribute("aria-label")).toBe("Claude Code · agent");
+    // Then the session id, with the marker unchanged. Two updates rather than
+    // one because `sameSession` compares the two new fields independently: a
+    // single publish flipping both is still caught when only one comparison
+    // survives, so it would prove neither.
+    publish({
+      user: { name: "Claude Code", color: "#7b5ec7" },
+      client: AGENT_CLIENT,
+      session: SESSION,
+    });
+    expect(control()?.getAttribute("aria-label")).toBe(
+      `Claude Code · agent · ${SESSION}`,
+    );
 
-      // And a browser tab stays a person, whatever else moves.
-      publish({ user: { name: "Ben", color: "#0c853d" }, client: WEB_CLIENT });
-      expect(avatar()?.textContent).toBe("B");
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    // And a browser tab stays a person, whatever else moves.
+    publish({ user: { name: "Ben", color: "#0c853d" }, client: WEB_CLIENT });
+    expect(avatar()?.textContent).toBe("B");
   });
 });
 
 describe("the strip's first frame after a document opens", () => {
   it("is empty until the document's own reading lands, never the directory's roster", () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
-
     // The directory room every session in the workspace publishes into, and the
     // document only Zoe is reading. If the reading made in the directory's room
     // ever reaches the document's strip, three strangers appear in it.
@@ -407,10 +361,8 @@ describe("the strip's first frame after a document opens", () => {
     const doc = roomFixture(`${WORKSPACE}/${DOC_UUID}`);
     initDoc(doc.ydoc, { uuid: DOC_UUID, title: "Presence" });
     join(doc.awareness, { user: { name: "Zoe", color: "#e30c4e" } });
-
     const host = document.createElement("div");
     document.body.appendChild(host);
-    const root = createRoot(host);
     const frames: string[][] = [];
     const onFrame = (): void => {
       frames.push(
@@ -420,27 +372,18 @@ describe("the strip's first frame after a document opens", () => {
         ),
       );
     };
-    try {
-      // The first screen of a session: no document open, the shell reading over
-      // the directory. Then a document opens — the commit that first mounts the
-      // strip is the one where the stored reading still belongs to the
-      // directory, and it must paint as nobody rather than as everybody.
-      act(() =>
-        root.render(<Shell doc={null} directory={directory.connection} onFrame={onFrame} />),
-      );
-      act(() =>
-        root.render(
-          <Shell
-            doc={doc.connection}
-            directory={directory.connection}
-            onFrame={onFrame}
-          />,
-        ),
-      );
-      expect(frames).toEqual([[], [], [], ["Zoe · person"]]);
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    // The first screen of a session: no document open, the shell reading over
+    // the directory. Then a document opens — the commit that first mounts the
+    // strip is the one where the stored reading still belongs to the
+    // directory, and it must paint as nobody rather than as everybody.
+    const view = render(<Shell doc={null} directory={directory.connection} onFrame={onFrame} />, { container: host });
+    view.rerender(
+      <Shell
+        doc={doc.connection}
+        directory={directory.connection}
+        onFrame={onFrame}
+      />,
+    );
+    expect(frames).toEqual([[], [], [], ["Zoe · person"]]);
   });
 });

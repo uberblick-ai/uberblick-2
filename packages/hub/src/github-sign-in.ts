@@ -7,11 +7,12 @@ import type { MembershipRegistry } from "./memberships.js";
 import type { PrincipalRecord, PrincipalRegistry } from "./principals.js";
 import type { HubClaimState } from "./hub-claim.js";
 import type { HubDatabase } from "./persistence.js";
+import { addWorkspaceNames, WorkspaceNameReader } from "./workspace-names.js";
 
 export type { GithubSignInConfig } from "./github-device-flow.js";
 interface SignInResult {
   identity: PrincipalRecord;
-  credential: { record: CredentialRecord; key: string };
+  credential: { record: CredentialRecord; key: string; workspaceNames?: Record<string, string> };
   claimedWorkspaceId?: string;
 }
 export type SignInCollection = DeviceFlowCollection<SignInResult>;
@@ -19,7 +20,7 @@ export type SignInCollection = DeviceFlowCollection<SignInResult>;
 export class GithubSignIn extends GithubDeviceFlow<SignInResult> {
   constructor(config: GithubSignInConfig, database: HubDatabase, principals: PrincipalRegistry,
     credentials: CredentialRegistry, memberships: MembershipRegistry, log: HubLogger = stderrLogger,
-    claims?: HubClaimState) {
+    claims?: HubClaimState, private readonly workspaceNames = new WorkspaceNameReader(database)) {
     super(config, ({ accountId, username }) => {
       // Completion is synchronous and shares host setup's connection. Starting
       // or polling a flow reserves nothing; only this commit can win the claim.
@@ -40,6 +41,11 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult> {
         throw error;
       }
     }, log);
+  }
+
+  override async collect(requestId: string, secret: string): Promise<SignInCollection> {
+    const result = await super.collect(requestId, secret);
+    return result.status === "complete" ? addWorkspaceNames(result, this.workspaceNames, secret) : result;
   }
 }
 

@@ -17,6 +17,7 @@
     "./init-lock": "./src/init-lock.ts",
     "./remote-url": "./src/remote-url.ts",
     "./device-login": "./src/device-login.ts",
+    "./management-client": "./src/management-client.ts",
     "./test-device-sync": "./test/device-sync-hub.ts"
   },
   "scripts": {

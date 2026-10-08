@@ -23,9 +23,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, renderSettled, type RenderResult } from "./react-render.js";
 import type { ReactNode } from "react";
 import * as Y from "yjs";
 import {
@@ -117,7 +115,7 @@ function installStorage(): void {
   });
 }
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
+let mounted: RenderResult | null = null;
 
 beforeEach(() => {
   installStorage();
@@ -125,31 +123,19 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  unmount();
+  mounted = null;
   rooms.clear();
   vi.restoreAllMocks();
 });
 
 function unmount(): void {
-  const open = mounted;
+  mounted?.unmount();
   mounted = null;
-  if (open !== null) {
-    act(() => open.root.unmount());
-    open.host.remove();
-  }
 }
 
 async function mount(node: ReactNode): Promise<HTMLElement> {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => {
-    root.render(node);
-  });
-  return host;
+  mounted = await renderSettled(node);
+  return mounted.container;
 }
 
 async function openApp(path: string): Promise<HTMLElement> {
@@ -763,6 +749,21 @@ describe("the filter", () => {
     ]);
   });
 
+  it("does not match the body of a document the page has already opened", async () => {
+    const directory = directoryDoc();
+    upsertDirectoryEntry(directory, { uuid: ONE, title: "Overview" });
+    const target = room(roomForDoc(WORKSPACE, ONE)).ydoc;
+    initDoc(target, { uuid: ONE, title: "Overview" });
+    appendBlock(target, { type: "paragraph", text: "bodyonly quasartrail" });
+
+    const host = await openApp(`/${WORKSPACE}/${ONE}`);
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>(".ub-all-open-entry")?.click(),
+    );
+    await act(async () => typeInto(filter(host), "bodyonly"));
+    expect(rowTitles(host)).toEqual([]);
+  });
+
   it("never matches the Untitled a row draws in place of an absent title", async () => {
     const host = await mount(
       <DocumentList
@@ -991,15 +992,13 @@ describe("the sidebar entry", () => {
     expect(pin()?.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it.each([
-    ["offline", { connected: false, writable: false }],
-    ["connected read-only", { writable: false }],
-    ["not yet synced", { synced: false }],
-  ] as const)("visibly explains disabled pin controls while the sidebar is %s", async (_state, patch) => {
+  // One reading stands for all of them: offline and not-yet-synced disable the
+  // same pin with the same sentence (sidebar.test.tsx covers the gate itself).
+  it("visibly explains disabled pin controls while the sidebar is connected read-only", async () => {
     upsertDirectoryEntry(directoryDoc(), { uuid: ONE, title: "Overview" });
     const name = sidebarRoom(WORKSPACE);
     const connection = room(name);
-    const status = { ...LIVE, ...patch };
+    const status = { ...LIVE, writable: false };
     rooms.set(name, {
       ...connection,
       status,

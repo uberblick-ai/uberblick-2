@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The two recovery timers the web client owns, and the band each declares.
  *

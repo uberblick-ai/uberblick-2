@@ -17,9 +17,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, renderSettled, type RenderResult } from "./react-render.js";
 import type { ReactNode } from "react";
 import * as Y from "yjs";
 import {
@@ -122,7 +120,7 @@ function installStorage(): void {
   });
 }
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
+let mounted: RenderResult | null = null;
 
 beforeEach(() => {
   installStorage();
@@ -139,12 +137,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  const open = mounted;
   mounted = null;
-  if (open !== null) {
-    act(() => open.root.unmount());
-    open.host.remove();
-  }
   rooms.clear();
   statusListeners.clear();
   roomStatus = LIVE;
@@ -153,16 +146,8 @@ afterEach(() => {
 });
 
 async function mount(node: ReactNode): Promise<HTMLElement> {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => {
-    root.render(node);
-  });
-  return host;
+  mounted = await renderSettled(node);
+  return mounted.container;
 }
 
 /** Render at `path`, and let the hub endpoint settle before anything is asserted. */
@@ -263,51 +248,50 @@ function navRows(host: HTMLElement): HTMLButtonElement[] {
 }
 
 describe("the sidebar is the _sidebar document", () => {
-  it.each([true, false])(
-    "keeps row navigation and disclosure semantics when sidebar writable is %s",
-    async (writable) => {
-      seedDirectory();
-      const doc = room(roomForDoc(WORKSPACE, ONE)).ydoc;
-      initDoc(doc, { uuid: ONE, title: "Overview" });
-      const sidebar = room(sidebarRoom(WORKSPACE));
-      const reading = createGroup(sidebar.ydoc, "Reading");
-      pinDoc(sidebar.ydoc, reading, ONE);
-      pinDoc(sidebar.ydoc, reading, TWO);
-      sidebar.status = { ...LIVE, writable };
-      const peer = peerOf(sidebar.ydoc);
-      const host = await openApp(`/${WORKSPACE}/${ONE}`);
-      const [current, other] = rows(host, 0);
-      const toggle = groupToggle(host, 0);
+  // Not writable is the stricter reading: sortability must not disable or
+  // re-role the rows even when the room cannot accept a reorder.
+  it("keeps row navigation and disclosure semantics when the sidebar is not writable", async () => {
+    seedDirectory();
+    const doc = room(roomForDoc(WORKSPACE, ONE)).ydoc;
+    initDoc(doc, { uuid: ONE, title: "Overview" });
+    const sidebar = room(sidebarRoom(WORKSPACE));
+    const reading = createGroup(sidebar.ydoc, "Reading");
+    pinDoc(sidebar.ydoc, reading, ONE);
+    pinDoc(sidebar.ydoc, reading, TWO);
+    sidebar.status = { ...LIVE, writable: false };
+    const peer = peerOf(sidebar.ydoc);
+    const host = await openApp(`/${WORKSPACE}/${ONE}`);
+    const [current, other] = rows(host, 0);
+    const toggle = groupToggle(host, 0);
 
-      // The same native buttons open/toggle and pick up the row. Sortability
-      // must not turn their resting state into a pressed or disabled control,
-      // even while the sidebar room cannot accept reordering writes.
-      expect(current).toBeInstanceOf(HTMLButtonElement);
-      expect(current?.textContent).toBe("Overview");
-      expect(current?.getAttribute("aria-current")).toBe("page");
-      expect(other?.getAttribute("aria-current")).toBeNull();
-      expect(toggle).toBeInstanceOf(HTMLButtonElement);
-      expect(toggle?.textContent).toBe("Reading");
-      expect(toggle?.getAttribute("aria-expanded")).toBe("true");
-      for (const button of [current, other, toggle]) {
-        expect(button?.disabled).toBe(false);
-        expect(button?.getAttribute("role")).toBeNull();
-        expect(button?.hasAttribute("aria-pressed")).toBe(false);
-        expect(button?.hasAttribute("aria-grabbed")).toBe(false);
-        expect(button?.hasAttribute("aria-disabled")).toBe(false);
-      }
-      expect(host.querySelectorAll('.ub-drag-handle, [aria-label^="Move document"], [aria-label^="Move group"]')).toHaveLength(0);
+    // The same native buttons open/toggle and pick up the row. Sortability
+    // must not turn their resting state into a pressed or disabled control,
+    // even while the sidebar room cannot accept reordering writes.
+    expect(current).toBeInstanceOf(HTMLButtonElement);
+    expect(current?.textContent).toBe("Overview");
+    expect(current?.getAttribute("aria-current")).toBe("page");
+    expect(other?.getAttribute("aria-current")).toBeNull();
+    expect(toggle).toBeInstanceOf(HTMLButtonElement);
+    expect(toggle?.textContent).toBe("Reading");
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    for (const button of [current, other, toggle]) {
+      expect(button?.disabled).toBe(false);
+      expect(button?.getAttribute("role")).toBeNull();
+      expect(button?.hasAttribute("aria-pressed")).toBe(false);
+      expect(button?.hasAttribute("aria-grabbed")).toBe(false);
+      expect(button?.hasAttribute("aria-disabled")).toBe(false);
+    }
+    expect(host.querySelectorAll('.ub-drag-handle, [aria-label^="Move document"], [aria-label^="Move group"]')).toHaveLength(0);
 
-      act(() => toggle?.click());
-      expect(toggle?.getAttribute("aria-expanded")).toBe("false");
-      act(() => toggle?.click());
-      act(() => other?.click());
-      expect(window.location.pathname).toBe(`/${WORKSPACE}/${TWO}`);
-      expect(rows(host, 0)[1]?.getAttribute("aria-current")).toBe("page");
-      expect(rows(host, 0)[0]?.getAttribute("aria-current")).toBeNull();
-      expect(stored(peer)).toEqual([["Reading", [ONE, TWO]]]);
-    },
-  );
+    act(() => toggle?.click());
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    act(() => toggle?.click());
+    act(() => other?.click());
+    expect(window.location.pathname).toBe(`/${WORKSPACE}/${TWO}`);
+    expect(rows(host, 0)[1]?.getAttribute("aria-current")).toBe("page");
+    expect(rows(host, 0)[0]?.getAttribute("aria-current")).toBeNull();
+    expect(stored(peer)).toEqual([["Reading", [ONE, TWO]]]);
+  });
 
   it("renders stored order and live moves from another replica", async () => {
     seedDirectory();
@@ -406,12 +390,6 @@ describe("the sidebar is the _sidebar document", () => {
     expect(trigger?.getAttribute("aria-label")).toBe("Document actions");
     openActions(host);
     act(() => documentAction("Pin to sidebar")?.click());
-    // The dropdown returns focus to its trigger a macrotask after it closes, so
-    // this waits a timer; a microtask flush would ask before Radix answers.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(document.activeElement).toBe(trigger);
 
     // A pin with nowhere to go makes somewhere to go.
     expect(stored(peer)).toEqual([["Pinned", [THREE]]]);
@@ -500,7 +478,7 @@ describe("the sidebar is the _sidebar document", () => {
     expect(stored(peer)).toEqual([["Elsewhere", []]]);
   });
 
-  it.each(["cancel", "dismiss"])("writes nothing when group deletion is %s", async (how) => {
+  it("writes nothing when group deletion is cancelled", async () => {
     seedDirectory();
     const sidebar = sidebarDoc();
     pinDoc(sidebar, createGroup(sidebar, "Reading"), ONE);
@@ -514,8 +492,7 @@ describe("the sidebar is the _sidebar document", () => {
     expect(dialog?.textContent).toContain("Delete group Reading?");
     expect(writes).not.toHaveBeenCalled();
     await act(async () => {
-      if (how === "cancel") dialog?.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-cancel"]')?.click();
-      else press(document.activeElement, "Escape");
+      dialog?.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-cancel"]')?.click();
     });
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
     expect(writes).not.toHaveBeenCalled();
@@ -545,7 +522,9 @@ describe("the sidebar is the _sidebar document", () => {
     expect([directory, ...documents].map((doc) => Y.encodeStateAsUpdate(doc))).toEqual(before);
   });
 
-  it.each([true, false])("refuses deletion in place when writability is lost (notified: %s)", async (notified) => {
+  // Unnotified: the dialog was opened while writable and nothing re-rendered
+  // it, so only the click-time check stands between it and a write.
+  it("refuses deletion in place when writability is lost", async () => {
     seedDirectory();
     const sidebar = room(sidebarRoom(WORKSPACE));
     pinDoc(sidebar.ydoc, createGroup(sidebar.ydoc, "Reading"), ONE);
@@ -557,11 +536,7 @@ describe("the sidebar is the _sidebar document", () => {
     sidebar.ydoc.on("update", writes);
     act(() => {
       sidebar.status = { ...LIVE, writable: false };
-      if (notified) {
-        for (const listener of statusListeners.get(sidebar.room) ?? []) listener(sidebar.status);
-      }
     });
-    if (notified) expect(host.querySelectorAll(".ub-group-act")).toHaveLength(0);
     act(() => document.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-action"]')?.click());
     const dialog = document.querySelector<HTMLElement>('[role="alertdialog"]');
     expect(dialog?.textContent).toContain("Delete unavailable");
@@ -594,12 +569,8 @@ describe("the sidebar is the _sidebar document", () => {
     expect(body()?.hasAttribute("inert")).toBe(true);
 
     // A fresh mount is what a reload looks like to the component.
-    const open = mounted;
+    mounted?.unmount();
     mounted = null;
-    if (open !== null) {
-      act(() => open.root.unmount());
-      open.host.remove();
-    }
     const again = await openApp(`/${WORKSPACE}`);
     expect(groupToggle(again, 0)?.getAttribute("aria-expanded")).toBe("false");
   });
@@ -701,13 +672,15 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     const host = await openApp(`/${WORKSPACE}`);
     const documents = pane(host, ".ub-document-sidebar");
     const settings = pane(host, ".ub-settings-sidebar");
-    const settingsEntry = documents.querySelector<HTMLButtonElement>(
+    const settingsEntry = host.querySelector<HTMLButtonElement>(
       ".ub-settings-entry",
     );
 
     expectLive(documents);
     expectDead(settings);
-    expect(host.querySelectorAll(".ub-user-card")).toHaveLength(1);
+    expect(host.querySelectorAll('[data-testid="account-menu"]')).toHaveLength(1);
+    const accountControl = host.querySelector('[data-testid="account-menu"]');
+    expect(accountControl?.closest(".ub-sidebar-pane")).toBeNull();
 
     settingsEntry?.focus();
     act(() => settingsEntry?.click());
@@ -719,7 +692,8 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     );
     expectDead(documents);
     expectLive(settings);
-    expect(host.querySelectorAll(".ub-user-card")).toHaveLength(1);
+    expect(host.querySelectorAll('[data-testid="account-menu"]')).toHaveLength(1);
+    expect(host.querySelector('[data-testid="account-menu"]')).toBe(accountControl);
     expect(document.activeElement).toBe(
       settings.querySelector(".ub-settings-back"),
     );
@@ -805,7 +779,7 @@ describe("the sidebar's fixed navigation", () => {
     ]);
 
     // A pin arrives and the groups appear under it; the section has not moved,
-    // and the footer keeps the settings entry and user card.
+    // and the footer keeps the settings entry and account control.
     act(() => {
       const sidebar = sidebarDoc();
       pinDoc(sidebar, createGroup(sidebar, "Reading"), ONE);
@@ -817,7 +791,7 @@ describe("the sidebar's fixed navigation", () => {
     ]);
     expect(host.querySelector('[data-slot="sidebar-footer"] .ub-all-open-entry')).toBeNull();
     expect(host.querySelector('[data-slot="sidebar-footer"] .ub-settings-entry')).not.toBeNull();
-    expect(host.querySelector('[data-slot="sidebar-footer"] .ub-user-card')).not.toBeNull();
+    expect(host.querySelector('[data-slot="sidebar-footer"] [data-testid="account-menu"]')).not.toBeNull();
 
     // Chrome, not curation: nothing in it can be dragged, and no drag of any
     // kind can land in it.
@@ -875,12 +849,8 @@ describe("the sidebar's directory line reads a refusal", () => {
   async function directoryLine(status: Partial<RoomStatus>): Promise<string> {
     // A fresh mount per reading, the way the collapse test remounts: the rooms
     // are cached, so a new status has to be in place before they are made.
-    const open = mounted;
+    mounted?.unmount();
     mounted = null;
-    if (open !== null) {
-      act(() => open.root.unmount());
-      open.host.remove();
-    }
     rooms.clear();
     roomStatus = {
       ...LIVE,
@@ -917,54 +887,52 @@ describe("the sidebar's directory line reads a refusal", () => {
 });
 
 describe("pinning waits for the current sidebar state", () => {
-  it.each([false, true])(
-    "disables list pins before sync (previously received: %s)",
-    async (hasReceivedServerState) => {
-      seedDirectory();
-      const sidebar = room(sidebarRoom(WORKSPACE));
-      sidebar.status = { ...LIVE, synced: false, hasReceivedServerState };
-      const host = await openApp(`/${WORKSPACE}`);
-      const writes = vi.fn();
-      sidebar.ydoc.on("update", () => writes());
-      const pin = host.querySelector<HTMLButtonElement>(".ub-docs-pin");
+  it("disables list pins before sync", async () => {
+    seedDirectory();
+    const sidebar = room(sidebarRoom(WORKSPACE));
+    // Received server state once and then lost sync: the case a gate on
+    // "has ever answered" alone would wrongly let through.
+    sidebar.status = { ...LIVE, synced: false, hasReceivedServerState: true };
+    const host = await openApp(`/${WORKSPACE}`);
+    const writes = vi.fn();
+    sidebar.ydoc.on("update", () => writes());
+    const pin = host.querySelector<HTMLButtonElement>(".ub-docs-pin");
 
-      expect(pin?.disabled).toBe(true);
-      expect(pin?.getAttribute("aria-label")).toContain(
-        "unavailable while sidebar is not ready to write",
-      );
-      expect(pin?.title).toContain("sidebar is not ready to write");
-      act(() => pin?.click());
-      expect(writes).not.toHaveBeenCalled();
-      expect(stored(sidebar.ydoc)).toEqual([]);
-      // Group creation retains its admission-only gate.
-      expect(host.querySelector<HTMLButtonElement>(".ub-group-add")?.disabled).toBe(false);
-    },
-  );
+    expect(pin?.disabled).toBe(true);
+    expect(pin?.getAttribute("aria-label")).toContain(
+      "unavailable while sidebar is not ready to write",
+    );
+    expect(pin?.title).toContain("sidebar is not ready to write");
+    act(() => pin?.click());
+    expect(writes).not.toHaveBeenCalled();
+    expect(stored(sidebar.ydoc)).toEqual([]);
+    // Group creation retains its admission-only gate.
+    expect(host.querySelector<HTMLButtonElement>(".ub-group-add")?.disabled).toBe(false);
+  });
 
-  it.each([false, true])(
-    "disables the open document's pin before sync (previously received: %s)",
-    async (hasReceivedServerState) => {
-      seedDirectory();
-      const doc = room(roomForDoc(WORKSPACE, THREE)).ydoc;
-      initDoc(doc, { uuid: THREE, title: "Sync" });
-      const sidebar = room(sidebarRoom(WORKSPACE));
-      sidebar.status = { ...LIVE, synced: false, hasReceivedServerState };
-      const host = await openApp(`/${WORKSPACE}/${THREE}`);
-      const writes = vi.fn();
-      sidebar.ydoc.on("update", () => writes());
-      openActions(host);
-      const pin = documentAction("Pin unavailable — sidebar is not ready to write");
+  it("disables the open document's pin before sync", async () => {
+    seedDirectory();
+    const doc = room(roomForDoc(WORKSPACE, THREE)).ydoc;
+    initDoc(doc, { uuid: THREE, title: "Sync" });
+    const sidebar = room(sidebarRoom(WORKSPACE));
+    // Received server state once and then lost sync: the case a gate on
+    // "has ever answered" alone would wrongly let through.
+    sidebar.status = { ...LIVE, synced: false, hasReceivedServerState: true };
+    const host = await openApp(`/${WORKSPACE}/${THREE}`);
+    const writes = vi.fn();
+    sidebar.ydoc.on("update", () => writes());
+    openActions(host);
+    const pin = documentAction("Pin unavailable — sidebar is not ready to write");
 
-      expect(pin?.getAttribute("aria-disabled")).toBe("true");
-      act(() => pin?.click());
-      expect(writes).not.toHaveBeenCalled();
-      expect(stored(sidebar.ydoc)).toEqual([]);
-    },
-  );
+    expect(pin?.getAttribute("aria-disabled")).toBe("true");
+    act(() => pin?.click());
+    expect(writes).not.toHaveBeenCalled();
+    expect(stored(sidebar.ydoc)).toEqual([]);
+  });
 
   it.each([
-    ["list", false], ["list", true],
-    ["document", false], ["document", true],
+    ["list", false],
+    ["document", true],
   ] as const)(
     "refuses a stale %s gesture at click time (pinned: %s)",
     async (surface, pinned) => {

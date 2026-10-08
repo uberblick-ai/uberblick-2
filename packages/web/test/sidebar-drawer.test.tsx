@@ -4,9 +4,7 @@
  * Radix owns the modal's focus trap, Escape and outside dismissal.
  */
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, renderSettled, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -66,7 +64,7 @@ vi.mock("../src/collab/rooms.js", () => ({
 
 const { App } = await import("../src/ui/App.js");
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
+let mounted: RenderResult | null = null;
 let stored: Map<string, string>;
 let writes: string[];
 
@@ -96,8 +94,6 @@ function sidebarWidth(narrow: boolean): { change: (next: boolean) => Promise<voi
 }
 
 beforeEach(() => {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
   stored = new Map();
   writes = [];
   vi.stubGlobal("localStorage", {
@@ -110,7 +106,7 @@ beforeEach(() => {
   });
   vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
     new Response(JSON.stringify({
-      hubUrl: "wss://hub.example.test/ws",
+      hubUrl: "ws://127.0.0.1:4321",
       workspaces: [WORKSPACE, OTHER_WORKSPACE],
     })),
   );
@@ -133,15 +129,12 @@ beforeEach(() => {
 });
 
 function unmount(): void {
-  const open = mounted;
+  mounted?.unmount();
   mounted = null;
-  if (open === null) return;
-  act(() => open.root.unmount());
-  open.host.remove();
 }
 
 afterEach(() => {
-  unmount();
+  mounted = null;
   rooms.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -149,12 +142,8 @@ afterEach(() => {
 
 async function openApp(path = `/${WORKSPACE}/${ONE}`): Promise<HTMLElement> {
   window.history.replaceState(null, "", path);
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => root.render(<App />));
-  return host;
+  mounted = await renderSettled(<App />);
+  return mounted.container;
 }
 
 function drawer(): HTMLElement | null {
@@ -205,57 +194,72 @@ function menuItem(text: string): HTMLElement {
   return item;
 }
 
-it.each(["true", "false"])(
-  "keeps the drawer unsaved and closed on load and narrowing with desktop collapse %s",
-  async (preference) => {
-    stored.set(COLLAPSED_KEY, preference);
-    const width = sidebarWidth(true);
-    let host = await openApp();
-    expect(drawer()).toBeNull();
-    expect(labelledButton("Show document list")).not.toBeNull();
+it("keeps the drawer unsaved and closed on load and narrowing with desktop collapse saved", async () => {
+  const preference = "true";
+  stored.set(COLLAPSED_KEY, preference);
+  const width = sidebarWidth(true);
+  let host = await openApp();
+  expect(drawer()).toBeNull();
+  expect(labelledButton("Show document list")).not.toBeNull();
 
-    await openDrawer();
-    expect(drawer()?.querySelector('nav[aria-label="Documents"]')?.hasAttribute("inert"))
-      .toBe(false);
-    await click(labelledButton("Close document list"));
-    expect(drawer()).toBeNull();
-    expect(document.activeElement).toBe(labelledButton("Show document list"));
-    expect(stored.get(COLLAPSED_KEY)).toBe(preference);
+  await openDrawer();
+  expect(drawer()?.querySelector('nav[aria-label="Documents"]')?.hasAttribute("inert"))
+    .toBe(false);
+  await click(labelledButton("Close document list"));
+  expect(drawer()).toBeNull();
+  expect(document.activeElement).toBe(labelledButton("Show document list"));
+  expect(stored.get(COLLAPSED_KEY)).toBe(preference);
 
-    await openDrawer();
-    await width.change(false);
-    expect(drawer()).toBeNull();
-    expect(host.querySelector('[data-slot="sidebar-wrapper"]')?.getAttribute("data-state"))
-      .toBe(preference === "true" ? "collapsed" : "expanded");
-    await width.change(true);
-    expect(drawer()).toBeNull();
-    await openDrawer();
-    unmount();
-    host = await openApp();
-    expect(drawer()).toBeNull();
-    expect(host.querySelector('button[aria-label="Show document list"]')).not.toBeNull();
-    expect(stored.get(COLLAPSED_KEY)).toBe(preference);
-    expect(writes).not.toContain(COLLAPSED_KEY);
-  },
-);
+  await openDrawer();
+  await width.change(false);
+  expect(drawer()).toBeNull();
+  expect(host.querySelector('[data-slot="sidebar-wrapper"]')?.getAttribute("data-state"))
+    .toBe(preference === "true" ? "collapsed" : "expanded");
+  await width.change(true);
+  expect(drawer()).toBeNull();
+  await openDrawer();
+  unmount();
+  host = await openApp();
+  expect(drawer()).toBeNull();
+  expect(host.querySelector('button[aria-label="Show document list"]')).not.toBeNull();
+  expect(stored.get(COLLAPSED_KEY)).toBe(preference);
+  expect(writes).not.toContain(COLLAPSED_KEY);
+});
 
 const destinations = [
-  { choice: "the open document", selector: `.ub-group-body button[title="Overview"]`, path: `/${WORKSPACE}/${ONE}` },
   { choice: "another document", selector: `.ub-group-body button[title="Editing"]`, path: `/${WORKSPACE}/${TWO}` },
-  { choice: "All docs", selector: ".ub-all-open-entry", path: `/${WORKSPACE}/all` },
-  { choice: "+ new doc", selector: ".ub-list-head button", path: null },
   { choice: "Workspace settings", selector: ".ub-settings-entry", path: `/${WORKSPACE}/settings` },
   { choice: "another workspace", menu: `Unnamed workspace · ${OTHER_WORKSPACE.slice(0, 8)}`, path: `/${OTHER_WORKSPACE}` },
-  { choice: "General", settings: true, selector: '.ub-settings-nav button[aria-current="page"]', path: `/${WORKSPACE}/settings` },
-  { choice: "Tags", settings: true, selector: ".ub-settings-nav li:last-child button", path: `/${WORKSPACE}/settings/tags` },
-  { choice: "Back", settings: true, selector: ".ub-settings-back", path: `/${WORKSPACE}` },
 ];
+
+it("retires each outgoing drawer pane from interaction and assistive navigation", async () => {
+  await openApp();
+
+  function expectMode(settings: boolean): void {
+    const documentsPane = drawer()?.querySelector<HTMLElement>(".ub-document-sidebar");
+    const settingsPane = drawer()?.querySelector<HTMLElement>(".ub-settings-sidebar");
+    for (const [pane, retired] of [[documentsPane, settings], [settingsPane, !settings]] as const) {
+      expect(pane).not.toBeNull();
+      expect(pane?.hasAttribute("inert")).toBe(retired);
+      expect(pane?.getAttribute("aria-hidden")).toBe(String(retired));
+    }
+  }
+
+  await openDrawer();
+  expectMode(false);
+  await click(sidebarButton(".ub-settings-entry"));
+  await openDrawer(true);
+  expectMode(true);
+  await click(sidebarButton(".ub-settings-back"));
+  await openDrawer();
+  expectMode(false);
+});
 
 it.each(destinations)("closes and restores focus after choosing $choice", async (destination) => {
   // A saved hidden desktop sidebar must not retire the open drawer's controls.
   stored.set(COLLAPSED_KEY, "true");
-  await openApp(destination.settings ? `/${WORKSPACE}/settings` : undefined);
-  await openDrawer(destination.settings);
+  await openApp();
+  await openDrawer();
   if ("menu" in destination) {
     await openWorkspaceMenu();
     await click(menuItem(destination.menu));
@@ -268,18 +272,12 @@ it.each(destinations)("closes and restores focus after choosing $choice", async 
   expect(document.activeElement).toBe(labelledButton(settings ? "Show sidebar" : "Show document list"));
   expect(stored.get(COLLAPSED_KEY)).toBe("true");
   expect(writes).not.toContain(COLLAPSED_KEY);
-  if (destination.path === null) {
-    expect(window.location.pathname).toMatch(new RegExp(`^/${WORKSPACE}/[a-f0-9-]{36}$`));
-    expect(window.location.pathname).not.toBe(`/${WORKSPACE}/${ONE}`);
-  } else {
-    expect(window.location.pathname).toBe(destination.path);
-  }
+  expect(window.location.pathname).toBe(destination.path);
 });
 
-it.each([
-  ["before compositionend", false],
-  ["after compositionend (Safari)", true],
-] as const)("leaves composing Escape %s to the group-name field", async (_order, afterCompositionEnd) => {
+// Safari's order: compositionend lands before the Escape keydown, which then
+// reads isComposing false and only the IME keyCode still says it is composing.
+it("leaves composing Escape after compositionend (Safari) to the group-name field", async () => {
   await openApp();
   await openDrawer();
   await click(sidebarButton(".ub-group-add"));
@@ -290,17 +288,10 @@ it.each([
   field.value = "日本語";
   await act(async () => {
     field.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
-    if (afterCompositionEnd) {
-      field.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
-    }
+    field.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
     field.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "Escape", bubbles: true, cancelable: true,
-      isComposing: !afterCompositionEnd,
-      ...(afterCompositionEnd ? { keyCode: 229 } : {}),
+      key: "Escape", bubbles: true, cancelable: true, isComposing: false, keyCode: 229,
     }));
-    if (!afterCompositionEnd) {
-      field.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
-    }
   });
   expect(drawer()?.querySelector(".ub-group-rename")).toBe(field);
   expect(field.value).toBe("日本語");

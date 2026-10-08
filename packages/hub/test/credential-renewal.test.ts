@@ -85,13 +85,35 @@ afterEach(() => {
 });
 
 describe("device credential renewal", () => {
-  it("renews an initially empty credential to exactly current memberships without GitHub or grants", async () => {
+  it("checks unchanged memberships without retirement, then replaces only after a grant", async () => {
+    const { db, store, memberships } = registry();
+    memberships.grant({ principalId: PRINCIPAL, workspaceId: WORKSPACE, role: "admin" });
+    const original = issue(store);
+    const request = await proof(original);
+    const closed = vi.fn();
+    store.onRevoke(closed);
+    const before = states(db);
+    expect(await store.renew(request, memberships, { ifWorkspacesChanged: true })).toEqual({ status: "unchanged" });
+    expect(states(db)).toEqual(before);
+    expect(closed).not.toHaveBeenCalled();
+    memberships.grant({ principalId: PRINCIPAL, workspaceId: OTHER_WORKSPACE, role: "member" });
+    const next = replacement(await store.renew(request, memberships, { ifWorkspacesChanged: true }));
+    expect(next.record.workspaces).toEqual([WORKSPACE, OTHER_WORKSPACE].sort());
+    expect(closed).toHaveBeenCalledExactlyOnceWith(original.record.id);
+    expect(await store.renew(request, memberships, { ifWorkspacesChanged: true })).toEqual({ status: "already-replaced" });
+    store.revoke(next.record.id);
+    expect(await store.renew(await proof(next), memberships, { ifWorkspacesChanged: true })).toEqual({ status: "sign-in-required" });
+  });
+
+  it("renews an initially empty credential after direct admin grants without GitHub or further grants", async () => {
     const { db, store, memberships } = registry();
     const original = issue(store, []);
     const originalRoom = await roomToken(original);
     const request = await proof(original);
-    memberships.grant({ principalId: PRINCIPAL, workspaceId: WORKSPACE, role: "member" });
-    memberships.grant({ principalId: PRINCIPAL, workspaceId: OTHER_WORKSPACE, role: "admin" });
+    memberships.grant({ principalId: "admin", workspaceId: WORKSPACE, role: "admin" });
+    memberships.grant({ principalId: "admin", workspaceId: OTHER_WORKSPACE, role: "admin" });
+    memberships.grantMember({ actorPrincipalId: "admin", principalId: PRINCIPAL, workspaceId: WORKSPACE, role: "member" });
+    memberships.grantMember({ actorPrincipalId: "admin", principalId: PRINCIPAL, workspaceId: OTHER_WORKSPACE, role: "admin" });
     memberships.grant({ principalId: "another-person", workspaceId: crypto.randomUUID(), role: "admin" });
     const membersBefore = db.connection.prepare("SELECT * FROM hub_memberships ORDER BY workspace_id, principal_id").all();
     const github = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("GitHub is unreachable"));

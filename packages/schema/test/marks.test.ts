@@ -35,6 +35,7 @@ import {
   setInlineLink,
 } from "../src/index.js";
 import type { InlineRun } from "../src/index.js";
+import { parseInline, renderInline } from "../src/markdown.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
 const UUID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
@@ -680,7 +681,7 @@ describe("inline marks in the document", () => {
     ]);
 
     // And `inline` on a source-block input is ignored, not written.
-    for (const type of ["code", "mermaid", "table", "terminal"] as const) {
+    for (const type of ["code", "mermaid", "terminal"] as const) {
       const other = seeded();
       const id = appendBlock(other, {
         type,
@@ -1410,6 +1411,28 @@ describe("export and import are closed over the marks the model allows", () => {
       markdown: exportMarkdown(doc, { frontmatter: false }),
     };
   }
+
+  it("preserves text when emphasis hugging empties a linked whitespace label", () => {
+    for (const link of [{ link: "https://e.t" }, { docLink: TARGET }]) {
+      for (const table of [false, true]) {
+        const runs: InlineRun[] = [
+          { text: "Go", marks: { bold: true } },
+          { text: " ", marks: { bold: true, ...link } },
+          { text: " ", marks: { bold: true } },
+          { text: "now", marks: {} },
+        ];
+        const first = renderInline(runs, table);
+        const one = parseInline(first, table);
+        const second = renderInline(one, table);
+        const two = parseInline(second, table);
+
+        expect(first).toBe("**Go**  now");
+        expect(one.map((run) => run.text).join("")).toBe("Go  now");
+        expect(two).toEqual(one);
+        expect(second).toBe(first);
+      }
+    }
+  });
 
   it("preserves text and marks and settles, for 200 documents", () => {
     const next = generator(20260821);

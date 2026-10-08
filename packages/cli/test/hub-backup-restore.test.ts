@@ -6,8 +6,7 @@
  * be written when the hub's shutdown flush failed, and a restore must not touch
  * the volume for a file it has not read. Neither survives being mocked, so the
  * scripts are copied into a directory without a checkout and run as themselves
- * against a stub `remote-compose.sh` — the wrapper is the shared seam for a
- * checkout and a hub release (`remote-update.test.ts` uses the same one).
+ * against a stub `remote-compose.sh` — the release wrapper is their shared seam.
  * No Docker runs here.
  *
  * Nothing the scripts hand the hub image is faked either. The stub executes the

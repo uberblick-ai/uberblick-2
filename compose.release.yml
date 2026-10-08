@@ -5,7 +5,6 @@ services:
     image: __HUB_IMAGE__
     platform: linux/amd64
     environment:
-      HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
       # Unset/empty uses public Uberblick Login: no app registration is needed.
       # Optionally use your own Device Flow app to control its settings/budget.
       # Remove and recreate to use the default again. GitHub names the app, not
@@ -23,17 +22,18 @@ services:
     depends_on:
       - hub
     environment:
-      TAILSCALE_HOST: "${TAILSCALE_HOST:?set TAILSCALE_HOST in .env}"
+      WEB_HOST: "${WEB_HOST:-}"
+      TAILSCALE_HOST: "${TAILSCALE_HOST:-}"
+      TAILSCALE_IP: "${TAILSCALE_IP:-}"
+      HTTPS_BIND_IP: "${HTTPS_BIND_IP:-}"
+      LOOPBACK_PORT: "${LOOPBACK_PORT:-8080}"
       WEB_HUB_URL: "${WEB_HUB_URL:-}"
       WEB_WORKSPACES: "${WEB_WORKSPACES:-}"
       # Entrypoints validate all document inputs, including with plain Compose.
-      HUB_AUTH_TOKEN: "${HUB_AUTH_TOKEN:?set HUB_AUTH_TOKEN in .env}"
     ports:
-      - "${TAILSCALE_IP:?set TAILSCALE_IP in .env}:443:443"
+      - "127.0.0.1:${LOOPBACK_PORT:-8080}:80"
     restart: unless-stopped
-    user: "0:0"
     volumes:
-      - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
       - caddy-data:/data
       - caddy-config:/config
 

@@ -5,19 +5,15 @@ fnox = "1"
 
 # Plaintext local defaults. Only real secrets belong in fnox.toml.
 #
-# No HUB_URL here, and none in a task's `env` either (#376, #385). This block is
-# ambient: it reaches every process born in an activated checkout, and an
-# endpoint is not something two sources may disagree about. There is exactly one
-# authority for it — this machine's config.json, written by `ub init` and
-# `ub remote join` — and the tasks below consume it by wrapping their command in
-# `ub env`, which hands over the same environment `ub mcp serve` gives the MCP
-# server. A checkout is not a configuration layer of its own.
+# No committed hub selection. Project-local .uberblick.json or a complete
+# UB_WORKSPACE_ID / UB_HUB_URL environment pair selects the workspace and hub.
+# Tasks consume that atomic binding through `ub env`; credentials stay private.
 #
 # The hub itself binds HUB_HOST:PORT — default 127.0.0.1:1234 in code — and
 # never reads HUB_URL, so the two must be moved together when the hub runs
 # somewhere else. The bind address is loopback until someone opts into more: the
-# hub's only credential is a shared dev secret, so `HUB_HOST=0.0.0.0` is a
-# deliberate choice.
+# loopback hub trusts the local dev secret. Any non-loopback bind requires
+# device credentials with current membership and configured GitHub sign-in.
 [env]
 
 # The hub's SQLite file, checkout-local and gitignored. Absent this, a hub opens
@@ -80,7 +76,7 @@ run = "fnox exec --if-missing warn -- node packages/cli/bin/ub.mjs init"
 
 [tasks.hub]
 description = "Start the Hocuspocus sync hub (binds HUB_HOST:PORT, default 127.0.0.1:1234)"
-# `ub env --` puts this machine's own configuration in front of the command:
+# `ub env --` puts the project's binding and private credentials in front of the command:
 # WORKSPACE_ID, the endpoint and the signing secret, resolved exactly as
 # `ub mcp serve` resolves them for the MCP server. `fnox exec` stays outside it,
 # because a decryptable HUB_AUTH_TOKEN is the owner's path and outranks the
@@ -95,22 +91,24 @@ run = "fnox exec --if-missing warn -- ub env -- pnpm --silent --filter @uberblic
 
 [tasks.web]
 description = "Start the Vite dev server"
-# Through `ub env` like the hub: the endpoint the bundle dials is this machine's
-# configured one, so a checkout follows a `ub remote join` without anything
-# being written into it.
+# Through `ub env` like the hub: the endpoint the bundle dials is the project's
+# selected one. The Vite browser path supports loopback development; a
+# remote binding uses `ub auth login` with `ub open` instead.
 #
 # The dev server serves this environment — the signing secret included — at
 # /uberblick-config.json (#426, packages/web/dev-config-document.ts). `vite`
-# binds loopback; adding `--host` would publish the owner's own secret to
-# everything on the LAN, which is acceptable only inside the tailnet boundary
-# REMOTE.md records.
+# binds loopback; keep its local development signing secret on that boundary.
+# Remote deployments serve no secret, and a dev browser does not sign in.
 run = "fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web dev"
 
 [tasks.build-web]
 description = "Build the web client into packages/web/dist (no secret in the bundle; HUB_URL only as the fallback)"
 # `--if-missing warn`, not `error`: since #426 the build needs no secret at all,
 # so a contributor without the age key builds the same bundle the deployment
-# does.
+# does. `install` first, so a checkout whose node_modules predates the lockfile
+# (a second machine, a fresh pull) builds instead of failing in tsc on missing
+# modules; with nothing to change the frozen install is a quick no-op.
+depends = ["install"]
 run = "fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web build"
 
 [tasks.build-install-payload]
@@ -179,9 +177,8 @@ description = "Run the browser end-to-end proof points (Chromium and tagged WebK
 # The harness builds the current checkout into private storage, starts its own
 # hub on an ephemeral port, and serves that bundle through a real `ub open`
 # under private XDG homes. Nothing needs the developer's configuration and no
-# socket or artifact collides with `mise run dev` or another e2e run. It still
-# runs under the same `fnox exec -- ub env --` wrapper as every other task; the
-# spawned `ub open` removes those inherited pins and reads the run's files.
+# socket or artifact collides with `mise run dev` or another e2e run. The
+# harness supplies its own project binding; no contributor selection is needed.
 #
 # `playwright install` runs first because the browser is a download, not a
 # dependency pnpm can fetch: it is a no-op once pinned Chromium and WebKit are
@@ -329,7 +326,12 @@ rm -rf "$context/.dockerignore"
 git -C "$root" show "$main_sha:.dockerignore" > "$context/.dockerignore"
 
 review_tag="uberblick-review:${review_sha}"
-docker build --file "$runner/Dockerfile.review" --tag "$review_tag" "$context"
+# The build log is only worth reading when the build fails.
+if ! docker build --file "$runner/Dockerfile.review" --tag "$review_tag" "$context" > "$parent/build.log" 2>&1; then
+  cat "$parent/build.log" >&2
+  printf 'review: the image build failed.\n' >&2
+  exit 1
+fi
 docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges "$review_tag"
 printf 'Review image retained for probes: %s\\n' "$review_tag"
 """

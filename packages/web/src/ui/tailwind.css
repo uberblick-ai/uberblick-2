@@ -59,12 +59,14 @@
 @source "./CommentComposer.tsx";
 @source "./Sidebar.tsx";
 @source "./App.tsx";
+@source "./RemoteHubGuide.tsx";
 @source "./ThreadsPane.tsx";
 @source "./BlockMenu.tsx";
 @source "./CaretMenu.tsx";
 @source "./MentionMenu.tsx";
 @source "./WorkspaceSettings.tsx";
 @source "./WorkspaceSwitcher.tsx";
+@source "./UserMenu.tsx";
 @source "./OutlinePane.tsx";
 @source "./DocChrome.tsx";
 @source "./EditorPane.tsx";

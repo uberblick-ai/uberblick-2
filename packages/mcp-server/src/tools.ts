@@ -70,6 +70,8 @@ import {
   isProseBlockType,
   listAnnotations,
   listDirectory,
+  parseTableCell,
+  parseTableInput,
   readDirectoryTags,
   readDecisions,
   readDocumentTags,
@@ -100,6 +102,7 @@ import type {
   HeadingLevel,
   InlineMarkSet,
   InlineRun,
+  TableMapping,
 } from "@uberblick/schema";
 import { z } from "zod";
 import {
@@ -417,8 +420,8 @@ const INLINE_RUNS =
   "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: " +
   "`[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) " +
   "and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the " +
-  "run texts joined together are the block's text. Source blocks — code, mermaid, table, terminal — hold source " +
-  "text and ignore it.\n\n" +
+  "run texts joined together are the block's text. Code, mermaid and terminal hold source text and ignore it; " +
+  "tables also ignore it and take exactly one GFM table through `text`.\n\n" +
   "A `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", " +
   "marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this " +
   "replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes " +
@@ -509,7 +512,9 @@ function inlineMarks(
 
 const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
-  text: z.string().optional(),
+  text: z.string().optional().describe(
+    "Block text. For a table, exactly one GFM table with inline markdown cell formatting (code, bold, italic, strike, external and document links). Alignment markers are accepted but not stored; escaped punctuation stays literal.",
+  ),
   level: z
     .number()
     .int()
@@ -1001,30 +1006,48 @@ export function registerTools(
       return { text: title === "" ? docId : title, marks };
     });
 
+  /** Check newly written targets; surviving cells may already hold unresolved links. */
+  const validateTableTargets = (source: string, previous?: string, mapping?: TableMapping): void => {
+    const table = parseTableInput(source);
+    const oldTable = previous === undefined ? undefined : parseTableInput(previous);
+    const oldCells = oldTable === undefined ? [] : [oldTable.header, ...oldTable.rows];
+    for (const [row, cells] of [table.header, ...table.rows].entries()) {
+      for (const [column, cell] of cells.entries()) {
+        const oldRow = mapping === undefined ? row : mapping.rows[row];
+        const oldColumn = mapping === undefined ? column : mapping.columns[column];
+        const oldCell = oldRow == null || oldColumn == null ? undefined : oldCells[oldRow]?.[oldColumn];
+        if (oldCell === cell) continue;
+        const oldTargets = new Set(parseTableCell(oldCell ?? "").map(run => run.marks.docLink));
+        for (const run of parseTableCell(cell)) {
+          if (run.marks.docLink !== undefined && !oldTargets.has(run.marks.docLink)) linkTitle(run.marks.docLink);
+        }
+      }
+    }
+  };
+
   /**
-   * One block input, with `inline` resolved only where it is going to be used.
-   *
-   * A source block — code, mermaid, table, terminal — carries no inline marks, so the
-   * schema writes its `text` and drops `inline` entirely. Resolving anyway
-   * would make an unknown reference target refuse a call whose inline runs were
-   * never going to be written, so the type check lives here, once, in front of
-   * both call sites.
+   * Resolve `inline` only for prose; source blocks ignore it, and tables read
+   * their cell marks from GFM. Validate all seeds before create_doc opens a room.
    */
   const blockInputFor = (
     block: z.infer<typeof blockInputSchema>,
-  ): BlockInput =>
-    toBlockInput(
+  ): BlockInput => {
+    // Validate every seed before create_doc opens its first room. Schema also
+    // checks at its write boundary, but a bad later seed must not leave an
+    // earlier block or document metadata behind.
+    if (block.type === "table") validateTableTargets(block.text ?? "");
+    return toBlockInput(
       block,
       isProseBlockType(block.type) ? resolveInline(block.inline) : undefined,
     );
+  };
 
   /**
    * A document's blocks as a read answers with them: every block exactly as it
    * has always been, plus the inline references it carries.
    *
-   * `doc_links` is additive and absent where a block has none. `text` and `rev`
-   * are untouched — they come off the same `Block` as before, and neither has
-   * ever seen a mark.
+   * `doc_links` names prose character ranges; table cell links are carried by
+   * their inline markdown in `text`, which also determines the table's `rev`.
    */
   const blocksJson = (replica: Replica): Record<string, unknown>[] =>
     getBlocksWithInline(replica.doc).map(({ block, inline }) => {
@@ -1496,9 +1519,12 @@ export function registerTools(
         DECISION_AUTHORITY +
         "\n\n" +
         "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
-        "`text` is plain and mark-free, as it has always been. A block that carries inline references to other " +
+        "For a table, `text` is canonical GFM with cell formatting as inline markdown, literal punctuation and pipes " +
+        "escaped, and every row padded to the widest row; `rev` includes that formatting. For other blocks `text` " +
+        "is plain text and `rev` ignores marks. A prose block that carries inline references to other " +
         "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
-        "link_range speak in, and absent where there are none. Only prose blocks can hold them.\n\n" +
+        "link_range speak in, and absent where there are none. Table cell links count toward backlinks but do not " +
+        "have block-level `doc_links` ranges.\n\n" +
         "Reading eligible guidance with get_doc counts toward this process’s briefing. The last required read " +
         "starts a ten-minute lease; expiry requires fresh reads. This best-effort memory never fails the read " +
         "or writes usage to a room or update log, and is lost on restart." +
@@ -1669,8 +1695,8 @@ export function registerTools(
       description:
         "Documents that reference this one, by UUID and never by path or title. The answer is the union of two " +
         "kinds of edge, which it does not distinguish: the curated doc-level `links` set_links owns, and every " +
-        "inline reference in a prose block — the `doc_links` get_doc reports, written by link_range or by an " +
-        "`inline` run. A document citing this one in a sentence needs no `links` entry to appear here.\n\n" +
+        "inline reference in a prose block or table cell — written by link_range, an `inline` run, or a " +
+        "table cell's inline markdown. A citation needs no `links` entry to appear here.\n\n" +
         "Each one carries its `description` — null where it has none — so a citing document can be judged without " +
         "opening it." +
         failureContract("backlinks"),
@@ -1737,9 +1763,34 @@ export function registerTools(
         "so a concurrent human edit elsewhere in the block survives.\n\n" +
         MARKS_ANCHOR_TO_POSITIONS +
         "\n\n" +
-        "Plain text, both ways: `old_text` and `new_text` are the block's text with no markdown in it, the text " +
-        "get_doc returns. Spliced-in text inherits the formatting of the character to its left, and `rev` " +
-        "ignores marks, so formatting a range never makes a prepared edit stale.\n\n" +
+        "`old_text` and `new_text` are the block text get_doc returns. For a table this is GFM: each must be " +
+        "exactly one table, or `invalid_table` refuses the write. Alignment markers are accepted but not stored; " +
+        "inline markdown writes cell formatting and escaped punctuation stays literal. Newly added cell document targets must be known " +
+        "to this replica's directory or `doclink_target_not_known_locally` refuses before writing. Existing targets in " +
+        "surviving cells remain editable. A table no-op " +
+        "keeps every stored character and mark, including those GFM cannot express. Table edits splice only changed " +
+        "characters and mark keys in changed cells. Without `table_mapping`, " +
+        "only a parsed no-op or exactly one positional cell change at unchanged dimensions is accepted. " +
+        "Structural and multi-cell edits require `table_mapping`, including an identity mapping for a positional batch; " +
+        "otherwise `table_mapping_required` refuses before any mutation.\n\n" +
+        "`table_mapping` applies only to tables and has both `rows` and `columns` arrays. Each new position names " +
+        "its surviving old zero-based GFM projection index, or null for a new row or column; omitted old indices " +
+        "are deleted. Rows include the header, and `rows[0]` must be 0. Array lengths must match the new table; " +
+        "non-null indices must be safe non-negative integers in old bounds, unique and strictly increasing. " +
+        "Body rows cannot reuse the header. If a retained ragged row selects only virtual empty padding, " +
+        "one fresh empty cell keeps that row editable; other padding stays virtual. Reordering is not supported. " +
+        "Untouched surviving shared cells keep their identity, " +
+        "formatting and delayed collaborator edits; null entries create fresh shared cells. An explicit nonidentity " +
+        "mapping executes even when the GFM text is unchanged. A semantically invalid mapping returns " +
+        "`invalid_table_mapping`; both mapping refusals have manual recovery and `applied: false`, " +
+        "`partial: false`, `synced: false`. Stale assertions retain precedence and invalid GFM remains `invalid_table`. " +
+        "Malformed input shapes are refused by the MCP input schema before the handler. Previously accepted " +
+        "structural and multi-cell table calls must now supply mappings as part of the coordinated table cutover. " +
+        "Other blocks use plain text with no markdown and reject `table_mapping`. " +
+        "In other blocks, spliced-in text inherits the formatting of the character to its left, and `rev` " +
+        "ignores marks. A table's `rev` includes its projected formatting. Inserting a read table's GFM preserves " +
+        "representable cells and marks, subject to trimmed cell-edge whitespace and renderInline's marked whitespace " +
+        "and meeting code-span limits; after one round trip the text is stable.\n\n" +
         "Pass `old_text` (and the `rev` from get_doc) to assert what you are editing. A mismatched asserted rev " +
         "refuses with `stale_block`. When the rev is current but `old_text` is wrong, the refusal is " +
         "`old_text_mismatch`; without a rev, a text mismatch remains `stale_block` because the server cannot tell " +
@@ -1765,14 +1816,26 @@ export function registerTools(
           .min(1)
           .optional()
           .describe("The block's `rev` from get_doc. Asserted alongside old_text."),
+        table_mapping: z.object({
+          rows: z.array(z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable())
+            .describe("For each new row, its old projection index or null; includes header row 0."),
+          columns: z.array(z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable())
+            .describe("For each new column, its old projection index or null."),
+        }).strict().optional().describe("Explicit surviving table positions. Both arrays are required; omitted old positions are deleted."),
       }),
     },
-    guarded("edit_block", async ({ uuid, block_id, old_text, new_text, rev }) => {
+    guarded("edit_block", async ({ uuid, block_id, old_text, new_text, rev, table_mapping }) => {
       await replicas.settle();
       briefing.require();
       const replica = requireWritableDoc(uuid, true);
+      const current = getBlock(replica.doc, block_id);
+      // Keep stale assertions ahead of content validation, as editBlock does.
+      // Validate before its transaction: a Yjs write cannot be rolled back.
+      if (current?.type === "table" && current.text === old_text &&
+          (rev === undefined || current.rev === rev)) validateTableTargets(new_text, old_text, table_mapping);
       editBlock(replica.doc, block_id, old_text, new_text, {
         ...(rev === undefined ? {} : { rev }),
+        ...(table_mapping === undefined ? {} : { tableMapping: table_mapping }),
       });
       replicas.publishCursor(replica, block_id, new_text.length);
       return json({
@@ -1790,8 +1853,12 @@ export function registerTools(
       description:
         "Insert one block after `after_block_id`, or at the top of the document when it is omitted. " +
         `Block types are the closed set the schema owns — ${BLOCK_TYPES.join(", ")} — which is the editor's ` +
-        "whole palette too. Nothing nests: a list is a run of adjacent list-item blocks, a table's text is " +
-        "GFM table source, and a terminal's text is a transcript in which a line beginning `$ ` is a command " +
+        "whole palette too. A list is a run of adjacent list-item blocks. A table's `text` must be exactly one " +
+        "GFM table, or `invalid_table` refuses the write; its rows and cells are stored structurally. Alignment " +
+        "markers are accepted but not stored. Inline markdown stores cell formatting and escaped punctuation stays " +
+        "literal. Document-link targets must be known to this replica's directory, otherwise " +
+        "`doclink_target_not_known_locally` refuses before any write. A terminal's text is " +
+        "a transcript in which a line beginning `$ ` is a command " +
         "typed out and every other line is output shown whole — the format has no escape, so an output line " +
         "that itself begins `$ ` cannot be written. Every block has one text an agent can edit.\n\n" +
         DECIDED_IS_READ_ONLY +
@@ -2358,6 +2425,9 @@ export function registerTools(
       description:
         "Open an annotation thread over a range of a block's text, or — with `thread_id` — add a comment to an existing thread and optionally resolve or reopen it. " +
         "The range is anchored by a formatting mark on the text itself, so it survives edits, splits and re-types.\n\n" +
+        "New threads on table blocks are temporarily unavailable: `table_comments_unavailable` refuses before " +
+        "anything is written. Existing table threads, including orphaned legacy threads, remain readable and " +
+        "accept replies, resolution and reopening with `thread_id`.\n\n" +
         ANNOTATE_SHAPES +
         "\n\n" +
         ARCHIVED_IS_READ_ONLY +
@@ -2499,7 +2569,8 @@ export function registerTools(
     {
       title: "Export a document as markdown",
       description:
-        "Render the document as markdown, including fenced code, mermaid and terminal blocks. " +
+        "Render the document as markdown, including fenced code, mermaid and terminal blocks. Tables export as " +
+        "GFM padded to their widest row, with cell formatting as inline markdown and literal cell punctuation escaped. " +
         "Export only: markdown is never the storage format, and there is no import tool." +
         failureContract("export_markdown"),
       inputSchema: strictInput({
@@ -2558,6 +2629,11 @@ export function registerTools(
         "reconnect — so it can read 1 for a whole document's worth of unsent work. It is in memory and resets " +
         "with the connection. The web client's status line shows the same counter for the room it has open, " +
         "labelled `N sync messages unacked`.\n\n" +
+        "`lastSync` is the stored time this machine last found its full replica caught up: connected to the hub, " +
+        "no pending room or attach drain, and every attached room acknowledged with no unapplied database changes. " +
+        "It is UTC ISO 8601 to the second, or null when no time is stored. It records acknowledgement by the hub, " +
+        "not storage there. Each process records it after settling, at most once every five seconds; `ub open` " +
+        "also checks while idle. The value never moves backwards across processes.\n\n" +
         `${SYNCED_MEANS} The same holds for \`rooms[].synced\` below and for \`unsyncedChanges: 0\`: both are ` +
         "statements about acknowledgement, so a hub that dies inside the debounce comes back missing updates " +
         "this tool has already reported as synced, until a replica holding them reconnects and re-sends.\n\n" +

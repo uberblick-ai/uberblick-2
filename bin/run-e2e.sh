@@ -67,4 +67,5 @@ cd "$root"
 # Download engines only. Host system libraries are operator-owned; a missing
 # WebKit library must remain a visible Playwright launch failure.
 pnpm --filter @uberblick/web exec playwright install chromium webkit
-fnox exec --if-missing warn -- ub env -- pnpm --filter @uberblick/web run e2e "$@"
+# The harness supplies its own project binding; a contributor selection is not required.
+fnox exec --if-missing warn -- pnpm --filter @uberblick/web run e2e "$@"

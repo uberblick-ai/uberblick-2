@@ -54,6 +54,7 @@ import {
 } from "@uberblick/hub/protocol";
 import { ensureDeviceLogin, readDeviceLogin, type DeviceLoginFailure } from "@uberblick/hub/device-login";
 import type { StoredHubLogin } from "@uberblick/hub/auth-store";
+import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
 import type * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
 import type { McpConfig } from "./config.js";
@@ -79,7 +80,7 @@ export interface HubState {
   reason?: string;
   /** Recovery keeps the established status meanings; no new status values. */
   recoveryClass?: "retry" | "manual";
-  /** Safe detail for the inactive device-login path, never credential contents. */
+  /** Safe device-login recovery detail, never credential contents. */
   authRecovery?: "sign-in-required" | "no-workspace-access" | "credential-store" | "renewal-unavailable";
   /**
    * The sync protocol this client speaks. Reported on every reading, including
@@ -216,12 +217,13 @@ export function deviceRetryDelayMs(
   reconnectMaxDelayMs: number,
   afterRefusal = false,
   random: () => number = Math.random,
+  maxDelayMs = 30_000,
 ): number {
   if (afterRefusal && attempts === 0) {
     return rebuildDelayMs(0, socketBackoff(reconnectMaxDelayMs).delay, reconnectMaxDelayMs, random);
   }
   const base = Math.max(1_000, reconnectMaxDelayMs);
-  return rebuildDelayMs(attempts, base, Math.max(base, 30_000), random);
+  return rebuildDelayMs(attempts, base, Math.max(base, maxDelayMs), random);
 }
 
 export interface AttachOptions {
@@ -329,7 +331,7 @@ export interface HubSyncOptions {
    *
    * For a client whose caller holds the return value and renders a verdict from
    * it — {@link inspectRemote} with `silent`, and only there. A probe's answer
-   * is an answer, not an incident: `ub remote join` reads a hub before it can
+   * is an answer, not an incident: `ub workspace join` reads a hub before it can
    * even ask for the secret, and that reading logging itself put an ERROR about
    * a rejected token, or a WARN about running local-only, in front of the
    * prompt on a command that then succeeded (#447).
@@ -352,7 +354,7 @@ export class HubSync {
   /** False when neither signing-secret nor device-login sync is composed. */
   readonly enabled: boolean;
 
-  private readonly config: McpConfig;
+  private config: McpConfig;
 
   private readonly onConnected: () => void;
 
@@ -367,6 +369,9 @@ export class HubSync {
 
   /** A close or failed connect seen since the last successful open. */
   private sawFailure = false;
+
+  /** A dial failed before opening; only a successful open clears it. */
+  private failedDial = false;
 
   /**
    * When the current run of connection attempts started. A socket that has not
@@ -417,7 +422,8 @@ export class HubSync {
    */
   private refusedByHub(): boolean {
     return this.authRejected || this.hubProtocolVersion !== null ||
-      (this.deviceReading !== null && !this.checkingDeviceRefusal);
+      (this.deviceReading !== null && !this.checkingDeviceRefusal &&
+        (this.socketStatus === "connected" || this.deviceReading.status !== "auth-failed"));
   }
 
   /** The socket's own first retry delay, reused by {@link rebuild}. */
@@ -527,6 +533,9 @@ export class HubSync {
     onConnected: () => void,
     options: HubSyncOptions = {},
   ) {
+    if (!isLoopbackEndpoint(config.hubUrl)) {
+      config = { ...config, authSecret: null, deviceLogin: config.deviceLogin ?? {} };
+    }
     this.config = config;
     this.onConnected = onConnected;
     this.enabled = config.deviceLogin !== undefined || config.authSecret !== null;
@@ -551,7 +560,7 @@ export class HubSync {
     }
 
     if (!this.enabled) {
-      if (!this.silent) {
+      if (!this.silent && config.authEnv?.UB_HUB_URL !== "local") {
         log.warn(
           "HUB_AUTH_TOKEN is not set: running local-only, no hub sync (every tool still works)",
         );
@@ -579,11 +588,15 @@ export class HubSync {
           }
         }
         if (status === "connected") {
+          // The provider repeats this status after its first inbound message.
+          // Only a new socket may reset room state or cancel a recovery poll.
+          if (previous === "connected") return;
           if (this.deviceRetryTimer !== null) {
             clearTimeout(this.deviceRetryTimer);
             this.deviceRetryTimer = null;
           }
           this.sawFailure = false;
+          this.failedDial = false;
           // A new connection has proven nothing yet and dropped nothing yet.
           // This runs before any of its rooms can answer, which is what makes
           // the two sets below a record of this connection and no other.
@@ -610,6 +623,9 @@ export class HubSync {
       },
       onClose: () => {
         this.sawFailure = true;
+        // The configured close callback runs before the provider reports
+        // disconnected. A close after open still deserves reconnect grace.
+        if (this.socketStatus !== "connected") this.failedDial = true;
       },
     });
 
@@ -729,12 +745,13 @@ export class HubSync {
         ...(this.config.deviceLogin.env === undefined ? {} : { env: this.config.deviceLogin.env }),
         ...(rejected === undefined ? {} : { rejected }),
         signal: this.deviceAbort.signal,
+        ...(this.config.deviceRenewalCooldownMs === undefined ? {} : { renewalCooldownMs: this.config.deviceRenewalCooldownMs }),
       });
       this.deviceWork.add(work);
       const result = await work.finally(() => this.deviceWork.delete(work));
       if (this.stopped) return null;
       // A token already minting before the refusal says nothing about it.
-      if (rejected !== undefined) this.checkingDeviceRefusal = false;
+      if (rejected !== undefined || this.offeredLogins.size === 0) this.checkingDeviceRefusal = false;
       if (result.status !== "ready") {
         this.deviceReading = this.deviceFailure(result);
         if (result.status === "update-required" && result.hubVersion !== undefined) {
@@ -808,13 +825,23 @@ export class HubSync {
    */
   private retryDeviceConnection(afterRefusal = false): void {
     if (this.stopped || this.deviceRetryTimer !== null) return;
-    const delay = deviceRetryDelayMs(this.deviceRetryAttempts, this.config.reconnectMaxDelayMs, afterRefusal);
+    const delay = deviceRetryDelayMs(
+      this.deviceRetryAttempts, this.config.reconnectMaxDelayMs, afterRefusal, Math.random, this.config.deviceRetryMaxDelayMs,
+    );
     this.deviceRetryAttempts += 1;
     this.deviceRetryTimer = setTimeout(() => {
       this.deviceRetryTimer = null;
-      if (this.stopped || this.socketStatus !== "connected") return;
-      this.rebuilding = true;
-      this.socket?.disconnect();
+      if (this.stopped) return;
+      if (this.socketStatus === "connected") {
+        this.rebuilding = true;
+        this.socket?.disconnect();
+      } else {
+        // Refusal can close the socket before this timer fires. connect() also
+        // re-enables a disconnected provider, so a later login is observed even
+        // after its ordinary reconnect loop has stopped.
+        void this.socket?.connect().catch(() => {});
+        this.retryDeviceConnection();
+      }
     }, delay);
   }
 
@@ -1001,6 +1028,16 @@ export class HubSync {
         if (hubProtocol !== null) {
           this.stopForProtocolMismatch(hubProtocol);
           return;
+        }
+        // A Docker proxy may be reached over loopback while the hub itself
+        // requires device authority. Its strict sentinel can select stronger
+        // admission, but never authorize a secret on a non-loopback endpoint.
+        if (reason === "device-credential-refused" && this.config.deviceLogin === undefined) {
+          this.config = {
+            ...this.config, authSecret: null,
+            deviceLogin: { ...(this.config.authEnv === undefined ? {} : { env: this.config.authEnv }) },
+          };
+          this.authRejected = false;
         }
         if (this.config.deviceLogin !== undefined) {
           this.rejectedLogin ??= this.offeredLogins.get(room);
@@ -1196,7 +1233,9 @@ export class HubSync {
         reason: AUTH_REJECTED,
       };
     }
-    if (this.deviceReading !== null) return this.deviceReading;
+    if (this.deviceReading !== null && (this.socketStatus === "connected" ||
+        this.deviceReading.status !== "auth-failed" ||
+        (!this.sawFailure && Date.now() - this.connectingSince <= this.config.connectTimeoutMs))) return this.deviceReading;
     if (this.socketStatus === "connected") {
       return { status: "connected", url: this.config.hubUrl };
     }
@@ -1315,7 +1354,7 @@ export class HubSync {
 
     const connectDeadline = Date.now() + this.config.connectTimeoutMs;
     while (this.socketStatus !== "connected") {
-      if (this.refusedByHub() || Date.now() >= connectDeadline) {
+      if (this.failedDial || this.refusedByHub() || Date.now() >= connectDeadline) {
         return;
       }
       await sleep(25);
@@ -1328,6 +1367,7 @@ export class HubSync {
     while (!this.allQuiet()) {
       if (
         (this.socketStatus !== "connected" && !this.checkingDeviceRefusal) ||
+        this.failedDial ||
         this.refusedByHub() ||
         Date.now() >= syncDeadline
       ) {

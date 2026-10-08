@@ -29,17 +29,16 @@ describe("shared workspace name", () => {
     expect(getWorkspaceName(restored)).toBe("Product Research");
   });
 
-  it.each(["", "   ", "a".repeat(65), "a\nb", "a\u0000b", "a\u200Db"])(
-    "refuses invalid input %j before changing state",
-    (input) => {
-      const settings = new Y.Doc();
-      setWorkspaceName(settings, "Original");
-      const before = Y.encodeStateAsUpdate(settings);
-      expect(() => setWorkspaceName(settings, input)).toThrow(/1–64.*control or format/);
-      expect(Y.encodeStateAsUpdate(settings)).toEqual(before);
-      expect(getWorkspaceName(settings)).toBe("Original");
-    },
-  );
+  it("refuses invalid input before changing state", () => {
+    const settings = new Y.Doc();
+    setWorkspaceName(settings, "Original");
+    const before = Y.encodeStateAsUpdate(settings);
+    for (const input of ["", "   ", "a".repeat(65), "a\nb", "a\u0000b", "a\u200Db"]) {
+      expect(() => setWorkspaceName(settings, input), JSON.stringify(input)).toThrow(/1–64.*control or format/);
+    }
+    expect(Y.encodeStateAsUpdate(settings)).toEqual(before);
+    expect(getWorkspaceName(settings)).toBe("Original");
+  });
 
   it("accepts the same Unicode length rule as a display name", () => {
     expect(validateWorkspaceName("  研究  ")).toBe("研究");

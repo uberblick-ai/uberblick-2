@@ -7,23 +7,26 @@
  * questions to decide whether it has to start a hub before opening a document.
  *
  * **The hub probe is a real client, not a socket test.** It mints a token from
- * the configured signing secret, sends it in Hocuspocus' auth message and reads
- * the workspace's directory room — the same path the MCP server and `ub remote`
+ * the stored device login for a remote endpoint or local signing secret,
+ * sends it in Hocuspocus' auth message and reads
+ * the workspace's directory room — the same path the MCP server and `ub workspace join`
  * take. So a probe that says `connected` means a client would connect, not
  * merely that something accepted a TCP connection; and `auth-failed` stays
- * distinct from `hub-down`, because one is a secret a human must fix and the
- * other is a process that is not running.
+ * distinct from `hub-down`, because authentication and reachability need
+ * different next actions.
  *
  * **The port probe binds rather than dials**, because the question it answers is
  * the hub's: can `HUB_HOST`:`PORT` be bound, or is it taken. A dial cannot tell
  * a free port from one held by something that ignores connections.
  *
- * Nothing here writes anything, and nothing here throws: every failure is a
+ * Probes never write documents or bindings; credential renewal may replace the
+ * stored login. Nothing here throws: every failure is a
  * value, since the caller's whole job is to report failures.
  */
 
 import { createServer } from "node:net";
 import { DEFAULT_HOST, DEFAULT_PORT } from "@uberblick/hub/config";
+import { isLoopbackHost } from "@uberblick/hub/remote-url";
 import type { HubState, McpConfig } from "@uberblick/mcp-server";
 import { inspectRemote } from "@uberblick/mcp-server";
 import { budget } from "./budget.js";
@@ -240,25 +243,8 @@ export function endpointOf(hubUrl: string): Endpoint | null {
   return { host, port };
 }
 
-/** Hosts that name this machine — the only ones a local hub could be bound to. */
-const LOCAL_HOSTS = new Set([
-  "localhost",
-  "::1",
-  "0.0.0.0",
-  "::",
-  "[::]",
-]);
-
-/**
- * Whether an endpoint could be served by a hub on this machine.
- *
- * The port checks are about a hub *here*; a `HUB_URL` naming somebody else's
- * host has no local `PORT` to disagree with, and probing a remote address would
- * answer a question nobody asked.
- */
-export function isLocalHost(host: string): boolean {
-  return LOCAL_HOSTS.has(host) || /^127\./.test(host);
-}
+/** Strict loopback classification shared with hub admission and clients. */
+export const isLocalHost = isLoopbackHost;
 
 /**
  * The address to dial to reach a hub bound to `host`.

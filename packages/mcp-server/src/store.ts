@@ -15,8 +15,9 @@
  *    {@link MirrorStore.clearDerived}. It is never authoritative, and no
  *    document state exists only here.
  *
- * Alongside both, `meta` records process-local facts that cannot be derived
+ * Alongside both, `meta` records replica facts that cannot be derived
  * from documents. The permanent `workspace` row binds the file to its corpus;
+ * `last_sync_at` keeps this machine's latest hub acknowledgement time;
  * the serving engine's holder row is meaningful only while its separate
  * process-held SQLite lock is live — see `serving-role.ts`.
  *
@@ -44,6 +45,8 @@ import { chmodSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createDataDirectory } from "@uberblick/hub/storage";
+import { getWorkspaceName, settingsRoom } from "@uberblick/schema";
+import * as Y from "yjs";
 import type {
   SQLInputValue,
   SQLOutputValue,
@@ -182,11 +185,13 @@ function parseTags(packed: string | null): string[] {
 }
 
 /**
- * Process-local facts about this file, as opposed to document state. The
- * `workspace` row is the uuid whose corpus this replica holds. The index tables
- * carry no workspace column, so the file itself is the boundary. The serving
- * role also keeps its diagnostic holder here; its authority is the separate
- * process-held lock, never this persistent row.
+ * Facts about this file, as opposed to document state. The `workspace` row is
+ * the uuid whose corpus this replica holds. The index tables
+ * carry no workspace column, so the file itself is the boundary. `last_sync_at`
+ * is the latest caught-up reading, in epoch milliseconds, across this machine's
+ * processes. It means acknowledged by the hub, not durably stored there. The
+ * serving role also keeps its diagnostic holder here; its authority is the
+ * separate process-held lock, never this persistent row.
  *
  * Its own script, run before {@link SCHEMA}: it is everything the store is
  * allowed to write to a file it has not yet established is its own. See
@@ -345,6 +350,104 @@ function transactional<A extends unknown[], R>(
       throw error;
     }
   };
+}
+
+/**
+ * Inspect an existing local replica without constructing a store: that would
+ * create files, claim the workspace and migrate its schema. Names are optional;
+ * a missing, old or unreadable database must not hide its workspace from a list.
+ */
+export function readWorkspaceName(databasePath: string, workspaceId: string): string | null {
+  const doc = new Y.Doc();
+  try {
+    const db = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const room = settingsRoom(workspaceId);
+      // Like readSinceTx, pin snapshot and tail to one log state. A concurrent
+      // compactor may replace and prune the tail between these two queries.
+      const { snapshot, updates } = transactional(db, () => {
+        const snapshot = db.prepare(
+          "SELECT state, through_seq FROM snapshots WHERE room = ?",
+        ).get(room);
+        const updates = db.prepare(
+          "SELECT payload FROM updates WHERE room = ? AND seq > ? ORDER BY seq",
+        ).all(room, snapshot?.through_seq ?? 0);
+        return { snapshot, updates };
+      })();
+      if (snapshot !== undefined) {
+        Y.applyUpdate(doc, snapshot.state as Uint8Array);
+      }
+      for (const update of updates) {
+        Y.applyUpdate(doc, update.payload as Uint8Array);
+      }
+      return getWorkspaceName(doc);
+    } finally {
+      db.close();
+    }
+  } catch {
+    return null;
+  } finally {
+    doc.destroy();
+  }
+}
+
+/**
+ * Check an existing replica without opening the write-capable store. Replaying
+ * into bare Y.Docs validates its authoritative state without replica repairs,
+ * and absent tables or workspace claims remain valid pre-migration states.
+ */
+export function inspectExistingStore(databasePath: string, workspaceId: string): void {
+  const db = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    transactional(db, () => {
+      const checks = db.prepare("PRAGMA quick_check").all();
+      if (checks.some((check) => Object.values(check).some((value) => value !== "ok"))) {
+        throw new Error("The database failed SQLite's integrity check.");
+      }
+      const tables = new Set(
+        (db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all() as { name: string }[])
+          .map((table) => table.name),
+      );
+      if (tables.has("meta")) {
+        const row = db.prepare("SELECT value FROM meta WHERE key = 'workspace'").get();
+        const recorded = row?.value;
+        if (recorded !== undefined && recorded !== workspaceId) {
+          throw new Error(
+            `${databasePath} is the replica of workspace ${recorded ?? "unknown"}, ` +
+              `but this server is configured for workspace ${workspaceId}. One ` +
+              "database holds one workspace: unset UBERBLICK_DB to use the " +
+              "per-workspace default file, or point it at a different path.",
+          );
+        }
+      }
+      const roomQueries = [];
+      const snapshot = tables.has("snapshots")
+        ? db.prepare("SELECT state, through_seq FROM snapshots WHERE room = ?")
+        : null;
+      const updates = tables.has("updates")
+        ? db.prepare("SELECT payload FROM updates WHERE room = ? AND seq > ? ORDER BY seq")
+        : null;
+      if (snapshot !== null) roomQueries.push("SELECT room FROM snapshots");
+      if (updates !== null) roomQueries.push("SELECT room FROM updates");
+      if (roomQueries.length === 0) return;
+
+      const rooms = db.prepare(roomQueries.join(" UNION ")).all() as { room: string }[];
+      for (const { room } of rooms) {
+        const doc = new Y.Doc();
+        try {
+          const stored = snapshot?.get(room);
+          if (stored !== undefined) Y.applyUpdate(doc, stored.state as Uint8Array);
+          for (const update of updates?.all(room, stored?.through_seq ?? 0) ?? []) {
+            Y.applyUpdate(doc, update.payload as Uint8Array);
+          }
+        } finally {
+          doc.destroy();
+        }
+      }
+    })();
+  } finally {
+    db.close();
+  }
 }
 
 export class MirrorStore {
@@ -744,6 +847,38 @@ export class MirrorStore {
       data_version: number;
     };
     return Number(row.data_version);
+  }
+
+  /** Last caught-up time on this machine, or null for a replica predating it. */
+  readLastSync(): number | null {
+    const row = this.db
+      .prepare("SELECT value FROM meta WHERE key = 'last_sync_at'")
+      .get() as { value: string } | undefined;
+    if (row === undefined) return null;
+    const timestamp = Number(row.value);
+    if (
+      !Number.isSafeInteger(timestamp) ||
+      Number.isNaN(new Date(timestamp).getTime())
+    ) {
+      throw new Error("invalid last_sync_at timestamp");
+    }
+    return timestamp;
+  }
+
+  /**
+   * Advance the shared acknowledgement time in one SQLite statement. A stale
+   * process or a clock behind the stored time cannot overwrite a newer reading.
+   * Metadata statements are prepared here so their failures remain isolated by
+   * the caller, rather than preventing the replica from opening.
+   */
+  recordLastSync(timestamp: number): void {
+    this.db
+      .prepare(
+        "INSERT INTO meta (key, value) VALUES ('last_sync_at', ?) " +
+          "ON CONFLICT (key) DO UPDATE SET value = excluded.value " +
+          "WHERE CAST(meta.value AS INTEGER) < CAST(excluded.value AS INTEGER)",
+      )
+      .run(String(timestamp));
   }
 
   /**

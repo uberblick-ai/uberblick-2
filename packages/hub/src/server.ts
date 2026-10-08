@@ -59,9 +59,14 @@ import {
 } from "./config.js";
 import type { HubLogger } from "./log.js";
 import { CredentialRegistry } from "./credentials.js";
+import { CredentialAdmission, type CredentialContext } from "./credential-admission.js";
 import { handleCredentialRenewal } from "./credential-renewal.js";
+import { WorkspaceNameReader } from "./workspace-names.js";
+import { WorkspacePromotions } from "./workspace-promotion.js";
+import { handleAccessManagement } from "./access-management.js";
 import { startAdminSetup } from "./admin-setup.js";
 import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
+import { GithubAccountLookup } from "./github-account-lookup.js";
 import { HubClaimState, handleHubClaimState } from "./hub-claim.js";
 import { MembershipRegistry } from "./memberships.js";
 import { PrincipalRegistry } from "./principals.js";
@@ -80,13 +85,13 @@ import type {
   TokenIdentity,
 } from "./token.js";
 import { clampToken, importRootSecret, inspectToken } from "./token.js";
+import { isLoopbackHost } from "./remote-url.js";
 
 /**
- * Connection context. The claims *are* the context: everything downstream
- * (readOnly, future awareness identity) should derive from what the token
- * asserted, never from what the client says about itself.
+ * Local connections carry verified claims. Remote connections carry the
+ * hub-owned credential and principal, with an access fence shared by hooks.
  */
-export type HubContext = TokenClaims;
+export type HubContext = TokenClaims | CredentialContext;
 
 export interface Hub {
   /** The bound port. The real one, even when `config.port` was 0. */
@@ -94,6 +99,10 @@ export interface Hub {
   readonly databasePath: string;
   readonly server: Server<HubContext>;
   readonly hocuspocus: Hocuspocus<HubContext>;
+  /** Hub-internal authorities; never exposed through a public route. */
+  readonly credentials?: CredentialRegistry;
+  readonly memberships?: MembershipRegistry;
+  readonly principals?: PrincipalRegistry;
   /**
    * Execute every pending debounced `onStoreDocument` now and await it, so
    * that everything currently in memory is on disk when this resolves.
@@ -268,19 +277,30 @@ export type RoomAuthenticator = (
 /**
  * Build the hub's room-authentication boundary for any Hocuspocus server.
  *
- * `ub open` serves rooms from one workspace-local store, so it supplies
- * `servedWorkspace`; the ordinary hub omits it and may admit any workspace
- * whose room and signed claim agree. Everything else — query-token refusal,
+ * `ub open` supplies keys scoped to its served workspace-local stores; the
+ * ordinary hub uses one root key and may admit any workspace whose room and
+ * signed claim agree. Everything else — query-token refusal,
  * protocol envelope, signature and lifetime checks, read-only scope and log
  * vocabulary — is deliberately one implementation.
  */
 export async function createRoomAuthenticator(options: {
-  authSecret: string;
   protocolVersion: number;
   log: HubLogger;
-  servedWorkspace?: string;
-}): Promise<RoomAuthenticator> {
-  const rootKey = await importRootSecret(options.authSecret);
+} & (
+  | { authSecret: string; workspaceKeys?: never }
+  | {
+      workspaceKeys: ReadonlyMap<string, string>;
+      authSecret?: never;
+    }
+)): Promise<RoomAuthenticator> {
+  const rootKey = options.authSecret === undefined
+    ? undefined
+    : await importRootSecret(options.authSecret);
+  const workspaceKeys = options.workspaceKeys === undefined
+    ? undefined
+    : new Map(await Promise.all([...options.workspaceKeys].map(
+        async ([workspace, secret]) => [workspace, await importRootSecret(secret)] as const,
+      )));
 
   return async ({
     token,
@@ -340,7 +360,17 @@ export async function createRoomAuthenticator(options: {
       );
     }
 
-    const inspected = await inspectToken(rootKey, envelope.token);
+    const workspace = roomWorkspace(documentName);
+    // Select by the requested room, never by an unverified token claim. A
+    // served workspace's key cannot mint admission to a different store.
+    const verificationKey = workspaceKeys === undefined
+      ? rootKey
+      : workspace === null ? undefined : workspaceKeys.get(workspace);
+    if (verificationKey === undefined) {
+      options.log(rejected("workspace-mismatch"));
+      throw new AuthError("workspace-mismatch", "room is outside the served workspaces");
+    }
+    const inspected = await inspectToken(verificationKey, envelope.token);
     if ("failure" in inspected) {
       options.log(rejected(inspected.failure, tokenFields(inspected.identity)));
       throw new AuthError(
@@ -362,13 +392,7 @@ export async function createRoomAuthenticator(options: {
       );
     }
 
-    const workspace = roomWorkspace(documentName);
-    if (
-      workspace === null ||
-      workspace !== claims.workspace ||
-      (options.servedWorkspace !== undefined &&
-        workspace !== options.servedWorkspace)
-    ) {
+    if (workspace === null || workspace !== claims.workspace) {
       options.log(
         rejected("workspace-mismatch", {
           typ: claims.typ,
@@ -574,9 +598,13 @@ async function listen(
 export async function createHub(config: HubConfig, options: {
   operatorSetup?: boolean;
   initializeDefaultWorkspace?: boolean;
+  /** Test seam that can only make loopback admission stricter. */
+  deviceCredentials?: true;
 } = {}): Promise<Hub> {
   if (config.github !== undefined) validateGithubClientId(config.github.clientId);
-  if (config.authSecret === "") {
+  const address = config.address ?? DEFAULT_HOST;
+  const deviceCredentials = !isLoopbackHost(address) || options.deviceCredentials === true;
+  if (!deviceCredentials && (config.authSecret === undefined || config.authSecret === "")) {
     throw new Error(
       "createHub: authSecret must not be empty — it is the HMAC secret tokens are signed with",
     );
@@ -593,13 +621,12 @@ export async function createHub(config: HubConfig, options: {
       `createHub: protocolVersion must be an integer between 1 and 999999, got ${protocolVersion}`,
     );
   }
-  const authenticate = await createRoomAuthenticator({
-    authSecret: config.authSecret,
+  const authenticate = deviceCredentials ? undefined : await createRoomAuthenticator({
+    authSecret: config.authSecret ?? "",
     protocolVersion,
     log,
   });
   const databasePath = config.databasePath ?? defaultDatabasePath();
-  const address = config.address ?? DEFAULT_HOST;
   const shutdownTimeoutMs = config.shutdownTimeoutMs ?? 10_000;
 
   // Sticky on purpose: once a store has failed, the hub cannot claim that what
@@ -642,10 +669,14 @@ export async function createHub(config: HubConfig, options: {
   }
 
   let signIn: GithubSignIn | undefined;
+  let accounts: GithubAccountLookup | undefined;
   let credentials: CredentialRegistry | undefined;
   let principals: PrincipalRegistry | undefined;
   let memberships: MembershipRegistry | undefined;
   let claims: HubClaimState | undefined;
+  let admission: CredentialAdmission | undefined;
+  let promotions: WorkspacePromotions | undefined;
+  const workspaceNames = new WorkspaceNameReader(database, room => server.hocuspocus.documents.get(room));
   try {
     // Standalone entry points opt in. ub open's embedded hub never initializes
     // or claims, even when it offers an explicitly configured GitHub sign-in.
@@ -655,8 +686,14 @@ export async function createHub(config: HubConfig, options: {
       memberships = new MembershipRegistry(database);
       if (config.github !== undefined) {
         credentials = new CredentialRegistry(database);
-        signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims);
+        promotions = new WorkspacePromotions(database, memberships, workspaceId =>
+          [...server.hocuspocus.documents.keys()].some(name => name.startsWith(`${workspaceId}/`)));
+        signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims, workspaceNames);
+        accounts = new GithubAccountLookup(config.github.fetch);
       }
+    }
+    if (deviceCredentials && credentials !== undefined && memberships !== undefined) {
+      admission = new CredentialAdmission(credentials, memberships, { protocolVersion, log });
     }
   } catch (error) {
     closeDatabase();
@@ -681,7 +718,7 @@ export async function createHub(config: HubConfig, options: {
     ...(config.maxDebounce === undefined
       ? {}
       : { maxDebounce: config.maxDebounce }),
-    extensions: [database],
+    extensions: [database, ...(admission === undefined ? [] : [admission])],
 
     /**
      * Stamp the direct peer's address onto the upgrade request, the one place
@@ -693,11 +730,23 @@ export async function createHub(config: HubConfig, options: {
       request.headers[PEER_ADDRESS_HEADER] = request.socket?.remoteAddress ?? "";
     },
 
-    onAuthenticate: authenticate,
+    ...(authenticate !== undefined ? { onAuthenticate: authenticate } :
+      admission !== undefined ? {} : {
+        async onAuthenticate({ token }: onAuthenticatePayload<HubContext>): Promise<never> {
+          const envelope = readAuthEnvelope(token);
+          const reason = envelope === null || envelope.protocolVersion !== protocolVersion
+            ? protocolMismatchReason(protocolVersion) : "device-sign-in-unavailable";
+          log({ event: "hub.auth.rejected", cause: "sign-in-not-configured" });
+          throw new AuthError(reason, "Remote hub requires configured GitHub sign-in");
+        },
+      }),
 
     async onRequest({ request, response }) {
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return Promise.reject();
-      if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response)) {
+      if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) {
+        return Promise.reject();
+      }
+      if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts)) {
         return Promise.reject();
       }
       if (await handleGithubSignIn(signIn, request, response)) return Promise.reject();
@@ -727,7 +776,7 @@ export async function createHub(config: HubConfig, options: {
       log({
         event: "hub.room.connected",
         room: documentName,
-        sub: context.sub,
+        sub: "principalId" in context ? context.principalId : context.sub,
         socketId,
       });
 
@@ -735,7 +784,7 @@ export async function createHub(config: HubConfig, options: {
         log({
           event: "hub.room.closed",
           room: documentName,
-          sub: context.sub,
+          sub: "principalId" in context ? context.principalId : context.sub,
           socketId,
           code: event?.code ?? null,
           reason: event?.reason || "client-gone",
@@ -760,6 +809,7 @@ export async function createHub(config: HubConfig, options: {
     // Half a hub is worse than none: release the socket and the handle so the
     // caller sees a rejection and nothing else.
     signIn?.stop();
+    accounts?.stop();
     await adminSetup?.stop();
     await server.destroy().catch((cleanup: unknown) => {
       log({ event: "hub.start.cleanupFailed", error: String(cleanup) });
@@ -770,6 +820,9 @@ export async function createHub(config: HubConfig, options: {
   const port = server.address.port;
 
   log({ event: "hub.listen", address, port, database: databasePath });
+  if (deviceCredentials && signIn === undefined) {
+    log({ event: "hub.auth.unavailable", reason: "GitHub sign-in is not configured; this remote hub admits no clients" });
+  }
 
   /** The sticky store failure, as the error a durability claim should not hide. */
   const storeError = (): Error | undefined =>
@@ -794,6 +847,7 @@ export async function createHub(config: HubConfig, options: {
     // Fence asynchronous identity reads before any database teardown. An
     // outstanding HTTP request can complete only with a safe failure now.
     signIn?.stop();
+    accounts?.stop();
     await adminSetup?.stop();
     // Collected before the rooms are closed, because closing one removes the
     // connection that names its socket. See openSockets.
@@ -863,6 +917,9 @@ export async function createHub(config: HubConfig, options: {
     databasePath,
     server,
     hocuspocus,
+    ...(credentials === undefined ? {} : { credentials }),
+    ...(memberships === undefined ? {} : { memberships }),
+    ...(principals === undefined ? {} : { principals }),
     flush,
     stop() {
       stopping ??= runStop();

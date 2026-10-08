@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The presence colour is a preference that *leaves the machine* (#74).
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The local settings store (#176): one namespaced key, a subscription open UI
  * can follow, and defaults rather than a crash when what is in storage is not
@@ -17,9 +18,9 @@ import {
 } from "../src/settings.js";
 
 /**
- * A fresh in-memory Storage. Node's own experimental `localStorage` global
- * shadows jsdom's here and is unusable without `--localstorage-file`, so the
- * test provides the one thing the settings module needs.
+ * A fresh in-memory Storage. Node's own experimental `localStorage` global is
+ * unusable without `--localstorage-file`, so the test provides the one thing
+ * the settings module needs.
  */
 function installStorage(): void {
   const store = new Map<string, string>();

@@ -122,7 +122,7 @@ test("a short-lived MCP client's caret stays long enough to be read, labelled an
 
   // The session itself is gone the moment it left — the grace is a decoration
   // in this editor, not presence. Nothing counts it any more...
-  await page.locator(".ub-user-card").click();
+  await page.getByTestId("account-menu").click();
   await expect(
     page.locator(".ub-panel-fact", { hasText: "MCP connections" }),
   ).toContainText("0");
@@ -161,7 +161,7 @@ test("a short-lived MCP client's caret stays long enough to be read, labelled an
   await expect(label).toBeVisible();
   // Also observe this session's actual departure, then defend the same
   // labelled retention and automatic expiry for the client-name fallback.
-  await page.locator(".ub-user-card").click();
+  await page.getByTestId("account-menu").click();
   await expect(page.locator(".ub-panel-fact", { hasText: "MCP connections" })).toContainText("0");
   await page.keyboard.press("Escape");
   await page.locator(".ub-sync-toggle").click();

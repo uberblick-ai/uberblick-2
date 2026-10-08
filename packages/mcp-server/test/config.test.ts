@@ -19,6 +19,8 @@ import {
   resolveMcpConfig,
 } from "../src/config.js";
 import { PACKAGE_ROOT, mainTsProcess } from "./helpers.js";
+import { bridgeConfig } from "../src/remote.js";
+import { writeHubLogin } from "@uberblick/hub/auth-store";
 
 const WORKSPACE = "9c1f0b4a-6d27-4e83-9b5a-1f2e3d4c5b6a";
 const DATA_HOME = "/tmp/uberblick-config-test";
@@ -49,6 +51,54 @@ function runServer(
 }
 
 describe("resolveMcpConfig", () => {
+  it.each(["wss://hub.example/ws", "ws://0.0.0.0:1234", "ws://[::]:1234", "ws://127.attacker.example:1234"])("requires stored login and suppresses the secret for %s", hubUrl => {
+    const config = resolveMcpConfig(env({ HUB_URL: hubUrl, HUB_AUTH_TOKEN: "local-only-secret" }));
+    expect(config.authSecret).toBeNull();
+    expect(config.deviceLogin).toBeDefined();
+  });
+
+  it.each(["ws://localhost:1234", "ws://127.42.0.9:1234", "ws://[::1]:1234"])("keeps loopback secret admission for %s", hubUrl => {
+    const config = resolveMcpConfig(env({ HUB_URL: hubUrl, HUB_AUTH_TOKEN: "local-only-secret" }));
+    expect(config.authSecret).toBe("local-only-secret");
+    expect(config.deviceLogin).toBeUndefined();
+  });
+
+  it("selects the stored origin login for a loopback proxy and keeps other local hubs separate", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "loopback-device-config-"));
+    const authEnv = env({ XDG_CONFIG_HOME: directory, HUB_AUTH_TOKEN: "local-only-secret" });
+    const id = "2a51045f-070a-4f56-b3d7-3a9fa4396823";
+    try {
+      await writeHubLogin("http://localhost:8080", {
+        identity: { id, githubAccountId: "12345", githubUsername: "test-person" },
+        credential: { record: { id, principalId: id, deviceId: id,
+          workspaces: [WORKSPACE], issuedAt: 0, revokedAt: null }, key: Buffer.alloc(32).toString("base64url") },
+      }, authEnv);
+      const proxy = resolveMcpConfig({ ...authEnv, HUB_URL: "ws://localhost:8080/arbitrary-proxy-path" });
+      expect(proxy.deviceLogin).toBeDefined();
+      expect(proxy.authSecret).toBeNull();
+      const local = bridgeConfig(proxy, { hubUrl: "ws://localhost:1234", authSecret: "local-only-secret" });
+      expect(local.deviceLogin).toBeUndefined();
+      expect(local.authSecret).toBe("local-only-secret");
+      const sameOrigin = bridgeConfig(local, { hubUrl: "ws://localhost:8080/another-path", authSecret: "never-send-this" });
+      expect(sameOrigin.deviceLogin).toBeDefined();
+      expect(sameOrigin.authSecret).toBeNull();
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  it("retains device admission without a login and drops it when a bridge targets another local hub", () => {
+    const proxy = resolveMcpConfig(env({ HUB_URL: "ws://localhost:8080/ws", HUB_ADMISSION: "device", HUB_AUTH_TOKEN: "never-send-this" }));
+    expect(proxy.authSecret).toBeNull();
+    expect(proxy.deviceLogin).toBeDefined();
+    expect(bridgeConfig(proxy, { hubUrl: "ws://localhost:1234" }).deviceLogin).toBeUndefined();
+  });
+
+  it("reclassifies bridge endpoint overrides without moving a login between hubs", () => {
+    const local = resolveMcpConfig(env({ HUB_AUTH_TOKEN: "local-only-secret" }));
+    const remote = bridgeConfig(local, { hubUrl: "wss://hub.example/ws", authSecret: "never-send-this" });
+    expect(remote.authSecret).toBeNull();
+    expect(remote.deviceLogin).toBeDefined();
+    expect(bridgeConfig(remote, { hubUrl: "ws://127.0.0.1:1234" }).deviceLogin).toBeUndefined();
+  });
   it("keys the rooms and the database by the workspace uuid", () => {
     const config = resolveMcpConfig(env());
     expect(config.workspaceId).toBe(WORKSPACE);

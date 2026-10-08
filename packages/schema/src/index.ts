@@ -6,11 +6,12 @@
  *                        `tag-assigned:<identity>` presence entries,
  *                        links-by-UUID, kind, status and decision metadata
  *   - `blocks`      Y.XmlFragment: one Y.XmlElement per block, each holding a
- *                   single Y.XmlText of plain-text source
+ *                   single Y.XmlText, except tables containing TableKit rows,
+ *                   cells and one paragraph per cell
  *                   (types: paragraph, heading, code, mermaid, list-item,
  *                   quote, table, terminal), formatted by the closed inline-mark set
  *                   (bold, italic, strike, inlineCode, link, docLink) on
- *                   prose blocks
+ *                   prose blocks and table cells
  *   - `annotations` Y.Map of one Y.Map per thread — anchor, resolved flag and
  *                   the conversation as a nested Y.Array — anchored by
  *                   `comment` formatting marks on the block's text
@@ -25,7 +26,7 @@
  * Three rules hold everywhere: identity is UUIDs (titles and paths are display
  * data); writes are block-scoped, so there is no whole-document replace, by
  * construction; and a block's type changes only through `setBlockType`, which
- * keeps the id and the text delta.
+ * keeps the id and preserves representable marks, refusing lossy conversions.
  */
 
 export {
@@ -54,6 +55,7 @@ export {
   appendBlock,
   deleteBlock,
   editBlock,
+  findBlockElement,
   getBlock,
   getBlockInline,
   getBlockRev,
@@ -61,6 +63,7 @@ export {
   getBlocks,
   getBlocksWithInline,
   insertBlock,
+  normalizeLegacyTables,
   repairDuplicateBlocks,
   setBlockLanguage,
   setBlockLevel,
@@ -96,8 +99,12 @@ export type { CommentRun } from "./annotations.js";
 export { listNumbers } from "./lists.js";
 export type { ListMarkerInput } from "./lists.js";
 
-export { parseGfmTable } from "./table.js";
-export type { ColumnAlign, GfmTable } from "./table.js";
+export {
+  TABLE_CELL_MARKS, buildTableCell, buildTableElement, buildTableRow,
+  isSupportedTable, parseGfmTable, parseTableInput, parseTableCell, plainXmlText,
+  seedNewTableCells, tableCellText, tableCellTexts, tableRows, tableText, writeGfmTable,
+} from "./table.js";
+export type { ColumnAlign, GfmTable, TableMapping } from "./table.js";
 
 export { exportMarkdown, importMarkdown } from "./markdown.js";
 export type {
@@ -209,6 +216,10 @@ export {
   MarksNotAllowedError,
   OldTextMismatchError,
   StaleBlockError,
+  InvalidTableError,
+  InvalidTableMappingError,
+  TableMappingRequiredError,
+  TableAnnotationError,
 } from "./errors.js";
 export type {
   AnnotationRangeErrorReason,

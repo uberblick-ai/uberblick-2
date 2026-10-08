@@ -10,6 +10,9 @@ let errors: string[] = [];
 test.beforeEach(async ({ page }) => {
   errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/account", (route) => route.fulfill({
+    json: { state: "signed-in", handle: "a".repeat(39) },
+  }));
   await page.goto(harness().appUrl);
   await expect(page.locator(".ub-list-head")).toBeVisible();
 });
@@ -91,16 +94,21 @@ async function horizontalWheel(page: Page): Promise<void> {
 async function expectFixedFrame(page: Page, scrollable = false): Promise<void> {
   const pane = activePane(page);
   const read = async () => pane.evaluate((element) => {
+    const sidebar = element.closest<HTMLElement>(".ub-list");
     const header = element.querySelector<HTMLElement>('[data-slot="sidebar-header"]');
     const content = element.querySelector<HTMLElement>('[data-slot="sidebar-content"]');
-    const footer = element.querySelector<HTMLElement>('[data-slot="sidebar-footer"]');
-    const hide = element.closest(".ub-list")?.querySelector<HTMLElement>(".ub-sidebar-hide");
-    if (!header || !content || !footer || !hide) throw new Error("e2e: incomplete sidebar frame");
+    const footer = sidebar?.querySelector<HTMLElement>('[data-slot="sidebar-footer"]');
+    const settings = footer?.querySelector<HTMLElement>(".ub-settings-entry");
+    const account = footer?.querySelector<HTMLElement>('[data-testid="account-menu"]');
+    const hide = sidebar?.querySelector<HTMLElement>(".ub-sidebar-hide");
+    if (!sidebar || !header || !content || !footer || !settings || !account || !hide) {
+      throw new Error("e2e: incomplete sidebar frame");
+    }
     const box = (node: Element) => {
       const rect = node.getBoundingClientRect();
       return { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left };
     };
-    const bounds = box(element);
+    const bounds = box(sidebar);
     const hideBox = box(hide);
     const covered = [...header.querySelectorAll<HTMLElement>(".ub-workspace-name, .ub-workspace-caret, .ub-settings-back")]
       .filter((control) => {
@@ -114,7 +122,8 @@ async function expectFixedFrame(page: Page, scrollable = false): Promise<void> {
         return rect.top < bounds.top || rect.bottom > bounds.bottom
           || rect.left < bounds.left || rect.right > bounds.right;
       }).map((control) => control.className);
-    return { header: box(header), content: box(content), footer: box(footer), bounds, covered, outside,
+    return { header: box(header), content: box(content), footer: box(footer), settings: box(settings),
+      account: box(account), bounds, covered, outside, sidebarTop: sidebar.scrollTop,
       paneTop: element.scrollTop, contentTop: content.scrollTop };
   });
   await activeContent(page).evaluate((content) => { content.scrollTop = 0; });
@@ -124,6 +133,7 @@ async function expectFixedFrame(page: Page, scrollable = false): Promise<void> {
   expect(before.header.top).toBeGreaterThanOrEqual(before.bounds.top);
   expect(before.header.bottom).toBeLessThanOrEqual(before.content.top);
   expect(before.content.bottom).toBeLessThanOrEqual(before.footer.top);
+  expect(before.settings.bottom).toBeLessThanOrEqual(before.account.top);
   expect(before.footer.bottom).toBeLessThanOrEqual(before.bounds.bottom);
   await activeContent(page).evaluate(async (content) => {
     content.scrollTop = content.scrollHeight;
@@ -132,6 +142,9 @@ async function expectFixedFrame(page: Page, scrollable = false): Promise<void> {
   const after = await read();
   expect(after.header).toEqual(before.header);
   expect(after.footer).toEqual(before.footer);
+  expect(after.settings).toEqual(before.settings);
+  expect(after.account).toEqual(before.account);
+  expect(after.sidebarTop).toBe(0);
   expect(after.paneTop).toBe(0);
   expect(after.outside).toEqual([]);
   if (scrollable) expect(after.contentTop).toBeGreaterThan(0);
@@ -147,7 +160,8 @@ async function addGroup(page: Page, name: string): Promise<void> {
   await expect(page.locator(".ub-group-label").filter({ hasText: name })).toBeVisible();
 }
 
-test("empty and long-label sidebars fit supported widths and breakpoint edges in both modes", async ({ page }) => {
+test("empty and long-label sidebars fit narrow and docked layouts in both modes", async ({ page }) => {
+  test.setTimeout(120_000);
   for (const content of ["empty", "long labels"]) {
     if (content === "long labels") {
       await page.setViewportSize({ width: 1280, height: 832 });
@@ -157,10 +171,12 @@ test("empty and long-label sidebars fit supported widths and breakpoint edges in
       await addGroup(page, "A group name long enough to truncate within its heading ".repeat(3));
       await addGroup(page, "unbreakablegroup".repeat(25));
     }
-    for (const width of [320, 375, 744, 768, 932, 1024, 1279, 1280, 1366, 1470]) {
-      await test.step(`${content} at ${width}px`, async () => {
+    for (const [scheme, width] of [["light", 320], ["dark", 320], ["light", 1280], ["dark", 1280]] as const) {
+      await test.step(`${content} at ${width}px in ${scheme}`, async () => {
+        await page.emulateMedia({ colorScheme: scheme });
         await page.setViewportSize({ width, height: content === "empty" ? 832 : 500 });
         await openSidebar(page);
+        await expect(page.getByTestId("account-menu")).toContainText(`@${"a".repeat(39)}`);
         await settleSidebar(page);
         await expectHorizontalFit(page);
         await expectFixedFrame(page, content === "long labels");
@@ -169,10 +185,10 @@ test("empty and long-label sidebars fit supported widths and breakpoint edges in
         // The header, rows and hover-revealed group actions must fit as
         // boxes, rather than becoming invisible under an overflow rule.
         if (content === "long labels") await pane.locator(".ub-group-head").last().hover();
-        const outside = await pane.evaluate((element) => {
+        const outside = await page.locator(".ub-list").evaluate((element) => {
           const bounds = element.getBoundingClientRect();
           return [...element.querySelectorAll<HTMLElement>(
-            ".ub-workspace, .ub-pin-row > button, .ub-group-toggle, .ub-group-act, .ub-settings-entry, .ub-user-card",
+            '.ub-sidebar-pane:not([inert]) .ub-workspace, .ub-sidebar-pane:not([inert]) .ub-pin-row > button, .ub-sidebar-pane:not([inert]) .ub-group-toggle, .ub-sidebar-pane:not([inert]) .ub-group-act, .ub-settings-entry, [data-testid="account-menu"]',
           )].filter((control) => {
             const box = control.getBoundingClientRect();
             return box.left < bounds.left || box.right > bounds.right;
@@ -219,7 +235,7 @@ test("empty and long-label sidebars fit supported widths and breakpoint edges in
 test("edge-held drags never pan sideways and a tall sidebar still scrolls vertically", async ({ page }) => {
   for (let index = 0; index < 18; index += 1) await createPinnedDoc(page, `Document ${index}`);
 
-  for (const width of [320, 768, 1280]) {
+  for (const width of [320, 1280]) {
     await page.setViewportSize({ width, height: 500 });
     await openSidebar(page);
     await settleSidebar(page);

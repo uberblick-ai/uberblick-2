@@ -11,6 +11,11 @@
  *
  * ## The trigger is derived, never remembered
  *
+ * Web UI system's Exceptions records the owner-confirmed slash and `@` trigger
+ * and session exception: Uberblick owns these rules because adopting
+ * `@tiptap/suggestion` would retain the custom matchers while adding substantial
+ * integration machinery.
+ *
  * {@link mentionTriggerAt} answers "does the editor state still describe a
  * mention?": caret in a prose block, and the text immediately before it is an
  * `@` — at the start of the block or after a space — followed by a run of

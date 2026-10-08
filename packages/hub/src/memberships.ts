@@ -22,6 +22,20 @@ export interface RemoveMembershipRequest {
   principalId: string;
 }
 
+/** Stable actor refusals; messages remain compatible with internal callers. */
+export class MembershipRefusal extends Error {
+  constructor(readonly code: "admin-required" | "member-required" | "member-not-found" | "last-admin") {
+    const messages = {
+      "admin-required": "MembershipRegistry: workspace admin required",
+      "member-required": "MembershipRegistry: workspace member required",
+      "member-not-found": "MembershipRegistry: member not found",
+      "last-admin": "MembershipRegistry: final workspace admin must remain",
+    };
+    super(messages[code]);
+    this.name = "MembershipRefusal";
+  }
+}
+
 const SCHEMA = `CREATE TABLE IF NOT EXISTS hub_memberships (
   workspace_id TEXT NOT NULL,
   principal_id TEXT NOT NULL CHECK(length(principal_id) > 0),
@@ -47,13 +61,13 @@ function validateRole(role: MembershipRole): void {
 }
 
 /**
- * Only trusted hub callers grant a membership. Actor-facing operations cannot
- * add one, and read the actor's current authority from this database. Admission
+ * Trusted hub callers grant initial memberships; actor-facing grants and other
+ * management read the actor's current authority from this database. Admission
  * and management must share this instance so removal reaches its subscribers.
  * Checks and each single-statement mutation stay synchronous on the hub's one
  * database connection, so another operation cannot interleave between them.
  * Sign-in grants only when claiming a fresh deployed hub; afterwards it reads
- * this registry. Live credential and membership admission await the cutover.
+ * this registry. Remote admission uses these same membership records.
  */
 export class MembershipRegistry {
   private readonly insert: StatementSync;
@@ -72,6 +86,7 @@ export class MembershipRegistry {
     this.insert = db.prepare(`
       INSERT INTO hub_memberships (workspace_id, principal_id, role)
       VALUES ($workspaceId, $principalId, $role)
+      ON CONFLICT(workspace_id, principal_id) DO NOTHING
     `);
     this.selectRole = db.prepare(`
       SELECT role FROM hub_memberships
@@ -100,8 +115,8 @@ export class MembershipRegistry {
     `);
   }
 
-  /** Internal grant for hub claiming, first-admin setup and invitation acceptance. */
-  grant(record: MembershipRecord): void {
+  /** Internal grant for hub claiming, first-admin setup and authorized management. */
+  grant(record: MembershipRecord): MembershipRecord {
     validateIdentity(record.workspaceId, record.principalId);
     validateRole(record.role);
     // A duplicate grant never overwrites an existing role.
@@ -110,6 +125,15 @@ export class MembershipRegistry {
       principalId: record.principalId,
       role: record.role,
     });
+    const role = this.roleFor(record.workspaceId, record.principalId);
+    if (role === null) throw new Error("MembershipRegistry: membership was not persisted");
+    return { workspaceId: record.workspaceId, principalId: record.principalId, role };
+  }
+
+  /** Check current authority and insert without an intervening asynchronous step. */
+  grantMember(request: ChangeMembershipRoleRequest): MembershipRecord {
+    this.requireAdmin(request.workspaceId, request.actorPrincipalId);
+    return this.grant({ workspaceId: request.workspaceId, principalId: request.principalId, role: request.role });
   }
 
   /** Internal first-admin guard: even a non-admin membership prevents setup. */
@@ -129,16 +153,16 @@ export class MembershipRegistry {
     return this.selectWorkspaces.all({ principalId }).map((row) => row.workspace_id as string);
   }
 
-  /** Reusable by invitation creation and other workspace access management. */
+  /** Reusable by account resolution and workspace access management. */
   requireAdmin(workspaceId: string, actorPrincipalId: string): void {
     if (this.roleFor(workspaceId, actorPrincipalId) !== "admin") {
-      throw new Error("MembershipRegistry: workspace admin required");
+      throw new MembershipRefusal("admin-required");
     }
   }
 
   ownRole(workspaceId: string, actorPrincipalId: string): MembershipRole {
     const role = this.roleFor(workspaceId, actorPrincipalId);
-    if (role === null) throw new Error("MembershipRegistry: workspace member required");
+    if (role === null) throw new MembershipRefusal("member-required");
     return role;
   }
 
@@ -156,7 +180,7 @@ export class MembershipRegistry {
     validateRole(request.role);
     this.requireAdmin(request.workspaceId, request.actorPrincipalId);
     const previousRole = this.roleFor(request.workspaceId, request.principalId);
-    if (previousRole === null) throw new Error("MembershipRegistry: member not found");
+    if (previousRole === null) throw new MembershipRefusal("member-not-found");
     if (request.role !== "admin") this.protectLastAdmin(request.workspaceId, previousRole);
     this.updateRole.run({
       workspaceId: request.workspaceId,
@@ -200,7 +224,7 @@ export class MembershipRegistry {
 
   private protectLastAdmin(workspaceId: string, previousRole: MembershipRole | null): void {
     if (previousRole === "admin" && this.countAdmins.get({ workspaceId })?.count === 1) {
-      throw new Error("MembershipRegistry: final workspace admin must remain");
+      throw new MembershipRefusal("last-admin");
     }
   }
 }

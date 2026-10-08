@@ -8,6 +8,7 @@ import type { Extensions } from "@tiptap/core";
 import type { Schema } from "@tiptap/pm/model";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
+import { seedNewTableCells } from "@uberblick/schema";
 import { BlockIds } from "./block-ids.js";
 import { CaretMenuKeys } from "./caret-menu.js";
 import { Collaboration } from "./collaboration.js";
@@ -53,6 +54,13 @@ export interface CreateEditorOptions {
 }
 
 export function createUberblickEditor(options: CreateEditorOptions): Editor {
+  // TableKit constructs empty paragraphs without text children. Insert their
+  // shared text before observers/transport publish the creating transaction,
+  // so replicas' first keystrokes target one existing CRDT type.
+  const ydoc = options.fragment.doc;
+  const seedCells = (transaction: Y.Transaction): void => {
+    if (options.canWrite?.() !== false) seedNewTableCells(transaction);
+  };
   const extensions: Extensions = [
     ...paletteExtensions,
     BlockIds.configure({
@@ -74,8 +82,8 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // bindings refuse everywhere else, so the core keymap still owns those keys
     // in every other block — plus the numbers an ordered item is drawn with.
     ListBlocks,
-    // …and the table block's own two: the class that opens a table's source
-    // under the caret, and the typed and pasted doors a table comes in through.
+    // TableKit supplies cell editing and navigation; the integration limits
+    // cell content and keeps the typed and pasted GFM doors.
     TableBlocks,
     // …and the terminal block's one: the same class, opening a
     // demonstration's transcript under the caret — which is also what stops the
@@ -96,7 +104,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     }),
   ];
 
-  return new Editor({
+  const editor = new Editor({
     element: options.element,
     extensions,
     editable: options.editable ?? true,
@@ -110,4 +118,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     enableContentCheck: true,
     injectCSS: false,
   });
+  ydoc?.on("beforeObserverCalls", seedCells);
+  editor.on("destroy", () => ydoc?.off("beforeObserverCalls", seedCells));
+  return editor;
 }

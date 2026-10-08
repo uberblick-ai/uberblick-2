@@ -52,13 +52,13 @@ test.afterAll(async () => {
 test("a release bundle makes no implicit connection and uses a valid served endpoint", async ({ browser }) => {
   if (hub === undefined) throw new Error("release test hub did not start");
   const endpoint = `ws://127.0.0.1:${hub.port}`;
-  for (const kind of ["missing", "invalid", "valid"] as const) {
+  for (const kind of ["missing", "empty", "invalid", "valid"] as const) {
     const context = await browser.newContext();
     try {
       await context.route("**/uberblick-config.json", async (route) => {
         await route.fulfill({ status: kind === "missing" ? 404 : 200,
           contentType: "application/json", body: JSON.stringify({
-            hubUrl: kind === "invalid" ? "https://not-a-websocket.invalid" : endpoint,
+            hubUrl: kind === "empty" ? "" : kind === "invalid" ? "https://not-a-websocket.invalid" : endpoint,
             workspaces: [WORKSPACE], hubAuthToken: SECRET,
           }) });
       });
@@ -84,4 +84,71 @@ test("a release bundle makes no implicit connection and uses a valid served endp
       await context.close();
     }
   }
+});
+
+
+for (const endpoint of ["ws://localhost:8080/ws", "wss://remote.example/ws"]) {
+  test(`a released page for ${endpoint} guides every route without credentials or documents`, async ({ context, page }, testInfo) => {
+    await context.route("**/uberblick-config.json", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        hubUrl: endpoint, workspaces: [WORKSPACE],
+        // A stale HTTPS document must not restore remote shared-secret access.
+        ...(endpoint.startsWith("wss:") ? { hubAuthToken: SECRET } : {}),
+      }) });
+    });
+    await context.addCookies([{ name: "synthetic-session", value: "not-a-credential", url: appUrl }]);
+    const claimRequests: { url: string; headers: Record<string, string> }[] = [];
+    await context.route("**/auth/claim-state", async (route) => {
+      claimRequests.push({ url: route.request().url(), headers: await route.request().allHeaders() });
+      await route.fulfill({ status: 200, contentType: "application/json",
+        body: JSON.stringify({ unclaimed: true, canClaim: true }) });
+    });
+    const sockets: string[] = [];
+    page.on("websocket", (socket) => sockets.push(socket.url()));
+    for (const path of ["/", `/${WORKSPACE}`, `/${WORKSPACE}/00000000-0000-4000-8000-000000000002`]) {
+      await page.goto(`${appUrl}${path}`);
+      await expect(page.getByRole("heading", { name: "This hub is unclaimed", exact: true })).toBeVisible();
+      const commands = page.getByRole("region", { name: "Hub setup guide" }).locator("li code");
+      await expect(commands).toHaveText([
+        `ub auth login '${appUrl}'`, `ub workspace join '${appUrl}/<workspace-id>'`, "ub open",
+      ]);
+      // Long origins and the placeholder must wrap and remain native
+      // selectable text.
+      expect(await commands.evaluateAll((nodes) => nodes.every((node) => {
+        const style = getComputedStyle(node);
+        return (style.getPropertyValue("user-select") || style.getPropertyValue("-webkit-user-select")) === "text";
+      }))).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await commands.last().scrollIntoViewIfNeeded();
+      await expect(commands.last()).toBeInViewport({ ratio: 1 });
+      await expect(page.getByRole("button", { name: "+ new doc" })).toHaveCount(0);
+      await expect(page.locator('[contenteditable="true"]')).toHaveCount(0);
+      expect(sockets).toEqual([]);
+    }
+    expect(claimRequests).toHaveLength(3);
+    expect(claimRequests.every(({ url, headers }) => url === `${appUrl}/auth/claim-state` &&
+      headers.cookie === undefined && headers.authorization === undefined)).toBe(true);
+    const screenshot = testInfo.outputPath("remote-hub-guide.png");
+    await page.screenshot({ path: screenshot, fullPage: true });
+    await testInfo.attach("remote-hub-guide", { path: screenshot, contentType: "image/png" });
+  });
+}
+
+test("ub open's local page ignores remote claim state and keeps its editor", async ({ context, page }) => {
+  if (hub === undefined) throw new Error("release test hub did not start");
+  let claimReads = 0;
+  await context.route("**/auth/claim-state", async (route) => {
+    claimReads += 1;
+    await route.fulfill({ json: { unclaimed: true, canClaim: true } });
+  });
+  await context.route("**/uberblick-config.json", async (route) => {
+    await route.fulfill({ json: {
+      hubUrl: `ws://127.0.0.1:${hub?.port}`, workspaces: [WORKSPACE], hubAuthToken: SECRET,
+      remoteHubUrl: "wss://remote.example/ws", rebound: false,
+    } });
+  });
+  await page.goto(`${appUrl}/${WORKSPACE}`);
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Hub setup guide" })).toHaveCount(0);
+  expect(claimReads).toBe(0);
 });

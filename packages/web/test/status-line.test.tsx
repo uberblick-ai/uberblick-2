@@ -8,9 +8,8 @@
  * the unit, because the honest unit here is messages and not updates.
  */
 
+import { act, render } from "./react-render.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
 import { StatusLine } from "../src/ui/EditorPane.js";
 import { Popover } from "../src/ui/shadcn/popover.js";
 import { STORE_REFUSED, TOKEN_MISSING } from "../src/ui/status-reading.js";
@@ -58,22 +57,15 @@ function label(
   unsyncedChanges: number,
   patch: Partial<RoomStatus> = {},
 ): string | null {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  act(() =>
-    root.render(
-      <StatusLine
-        connection={stubConnection(unsyncedChanges, patch)}
-        presence={NOBODY}
-      />,
-    ),
+  const view = render(
+    <StatusLine
+      connection={stubConnection(unsyncedChanges, patch)}
+      presence={NOBODY}
+    />,
   );
+  const host = view.container;
   const text = host.querySelector(".ub-pending")?.textContent ?? null;
-  act(() => root.unmount());
-  host.remove();
+
   return text?.replace(/\s+/g, " ").trim() ?? null;
 }
 
@@ -86,7 +78,6 @@ describe("the status line names the unit of its backlog count", () => {
   it("says nothing when everything is acknowledged", () => {
     expect(label(0)).toBeNull();
   });
-
 });
 
 describe("an unwritable document", () => {
@@ -107,22 +98,15 @@ describe("an unwritable document", () => {
 
 /** The whole line, for a room in the given state. */
 function line(patch: Partial<RoomStatus>): string {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  act(() =>
-    root.render(
-      <StatusLine
-        connection={stubConnection(0, patch)}
-        presence={NOBODY}
-      />,
-    ),
+  const view = render(
+    <StatusLine
+      connection={stubConnection(0, patch)}
+      presence={NOBODY}
+    />,
   );
+  const host = view.container;
   const text = host.querySelector(".ub-status")?.textContent ?? "";
-  act(() => root.unmount());
-  host.remove();
+
   return text.replace(/\s+/g, " ").trim();
 }
 
@@ -135,20 +119,14 @@ function updatedReading(
   dateTime: string | null;
   title: string | null;
 } {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  act(() =>
-    root.render(
-      <StatusLine
-        connection={stubConnection(0, patch)}
-        presence={NOBODY}
-        lastUpdated={lastUpdated}
-      />,
-    ),
+  const view = render(
+    <StatusLine
+      connection={stubConnection(0, patch)}
+      presence={NOBODY}
+      lastUpdated={lastUpdated}
+    />,
   );
+  const host = view.container;
   const time = host.querySelector<HTMLTimeElement>(".ub-last-updated time");
   const reading = {
     text: host.querySelector(".ub-last-updated")?.textContent ?? null,
@@ -156,8 +134,7 @@ function updatedReading(
     dateTime: time?.getAttribute("dateTime") ?? null,
     title: time?.getAttribute("title") ?? null,
   };
-  act(() => root.unmount());
-  host.remove();
+
   return reading;
 }
 
@@ -268,20 +245,14 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
     word: string | null;
     badge: string | null;
   } {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
     vi.useFakeTimers();
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() =>
-      root.render(
-        <StatusLine
-          connection={stubConnection(4, status)}
-          presence={NOBODY}
-        />,
-      ),
+    const view = render(
+      <StatusLine
+        connection={stubConnection(4, status)}
+        presence={NOBODY}
+      />,
     );
+    const host = view.container;
     // Past every settle window, so what is on screen is what the reader sees.
     act(() => void vi.advanceTimersByTime(5_000));
     const read = {
@@ -290,8 +261,7 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
         host.querySelector(".ub-pending")?.textContent?.replace(/\s+/g, " ").trim() ??
         null,
     };
-    act(() => root.unmount());
-    host.remove();
+
     return read;
   }
 
@@ -303,25 +273,17 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
   });
 
   it("says synced, with no badge, once the backlog is actually empty", () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
     vi.useFakeTimers();
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() =>
-      root.render(
-        <StatusLine
-          connection={stubConnection(0, { connected: true, synced: true })}
-          presence={NOBODY}
-        />,
-      ),
+    const view = render(
+      <StatusLine
+        connection={stubConnection(0, { connected: true, synced: true })}
+        presence={NOBODY}
+      />,
     );
+    const host = view.container;
     act(() => void vi.advanceTimersByTime(5_000));
     expect(host.querySelector(".ub-status-word")?.textContent).toBe("synced");
     expect(host.querySelector(".ub-pending")).toBeNull();
-    act(() => root.unmount());
-    host.remove();
   });
 });
 
@@ -331,29 +293,23 @@ describe("a directly connected document's sync reading opens its details", () =>
   });
 
   it("is one named button carrying the settled state and hub", () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
     vi.useFakeTimers();
     const endpoint: HubEndpoint = {
       url: "wss://hub.example/ws",
       source: "document",
     };
     const toggle = vi.fn();
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() =>
-      root.render(
-        <Popover onOpenChange={toggle}>
-          <StatusLine
-            connection={stubConnection(0, { connected: true, synced: true })}
-            presence={NOBODY}
-            endpoint={endpoint}
-            syncDetails
-          />
-        </Popover>,
-      ),
+    const view = render(
+      <Popover onOpenChange={toggle}>
+        <StatusLine
+          connection={stubConnection(0, { connected: true, synced: true })}
+          presence={NOBODY}
+          endpoint={endpoint}
+          syncDetails
+        />
+      </Popover>,
     );
+    const host = view.container;
     act(() => void vi.advanceTimersByTime(5_000));
 
     const button = host.querySelector<HTMLButtonElement>(".ub-sync-toggle");
@@ -365,9 +321,6 @@ describe("a directly connected document's sync reading opens its details", () =>
     );
     act(() => button?.click());
     expect(toggle).toHaveBeenCalledOnce();
-
-    act(() => root.unmount());
-    host.remove();
   });
 });
 
@@ -379,33 +332,28 @@ describe("the locally served document's two sync facts", () => {
   function localLine(
     hubAcked: boolean | null,
     patch: Partial<RoomStatus> = {},
-    notSharedReason: "no-hub-credentials" | null = null,
+    notSharedReason: import("../src/shell/document-search.js").NotSharedReason | null = null,
+    endpoint = "wss://remote.example/ws",
   ): { words: string[]; label: string | null; text: string } {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
     vi.useFakeTimers();
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() =>
-      root.render(
-        <Popover>
-          <StatusLine
-            connection={stubConnection(0, {
-              connected: true,
-              synced: true,
-              writable: true,
-              ...patch,
-            })}
-            presence={NOBODY}
-            endpoint={{ url: "wss://remote.example/ws", source: "document" }}
-            hubAcked={hubAcked}
-            notSharedReason={notSharedReason}
-            syncDetails
-          />
-        </Popover>,
-      ),
+    const view = render(
+      <Popover>
+        <StatusLine
+          connection={stubConnection(0, {
+            connected: true,
+            synced: true,
+            writable: true,
+            ...patch,
+          })}
+          presence={NOBODY}
+          endpoint={{ url: endpoint, source: "document" }}
+          hubAcked={hubAcked}
+          notSharedReason={notSharedReason}
+          syncDetails
+        />
+      </Popover>,
     );
+    const host = view.container;
     act(() => void vi.advanceTimersByTime(5_000));
     const visible = host.cloneNode(true) as HTMLElement;
     for (const hidden of visible.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
@@ -416,10 +364,26 @@ describe("the locally served document's two sync facts", () => {
       label: host.querySelector(".ub-sync-toggle")?.getAttribute("aria-label") ?? null,
       text: visible.textContent ?? "",
     };
-    act(() => root.unmount());
-    host.remove();
+
     return answer;
   }
+
+  it("keeps edits saved here while naming device recovery and later clears it", () => {
+    const signIn = localLine(false, {}, "sign-in-required");
+    expect(signIn.words).toEqual(["saved here", "not shared with hub"]);
+    expect(signIn.text).toContain("ub auth login");
+    const noAccess = localLine(false, {}, "no-workspace-access");
+    expect(noAccess.words).toEqual(["saved here", "not shared with hub"]);
+    expect(noAccess.text).toContain("administrator");
+    expect(localLine(true).words).toEqual(["saved here", "synced with hub"]);
+  });
+
+  it("names an explicit local workspace without claiming that its edits reached a hub", () => {
+    const local = localLine(true, {}, null, "local");
+    expect(local.words).toEqual(["saved here"]);
+    expect(local.label).toContain("local (served /uberblick-config.json)");
+    expect(local.text).not.toContain("synced with hub");
+  });
 
   it("distinguishes local durability from upstream acknowledgement", () => {
     expect(localLine(false).words).toEqual([

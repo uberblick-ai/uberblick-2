@@ -23,9 +23,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, renderSettled } from "./react-render.js";
 import type { ReactNode } from "react";
 import * as Y from "yjs";
 import {
@@ -36,6 +34,10 @@ import {
   getBlocksFragment,
   initDoc,
   roomForDoc,
+  setKind,
+  setStatus,
+  tableCellText,
+  tableRows,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -230,8 +232,6 @@ describe("a repair writes once, on one range, and only while it is still there",
   });
 });
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
-
 beforeEach(() => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response("", { status: 404 }),
@@ -239,27 +239,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  const open = mounted;
-  mounted = null;
-  if (open !== null) {
-    act(() => open.root.unmount());
-    open.host.remove();
-  }
   rooms.clear();
   vi.restoreAllMocks();
 });
 
 async function mount(node: ReactNode): Promise<HTMLElement> {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => {
-    root.render(node);
-  });
-  return host;
+  return (await renderSettled(node)).container;
 }
 
 async function openApp(path: string): Promise<HTMLElement> {
@@ -301,6 +286,32 @@ function stageCollidingRows(): { ydoc: Y.Doc; first: Y.XmlText; second: Y.XmlTex
   return { ydoc, first: textAt(ydoc), second };
 }
 
+/** Two table cells with equal conflict offsets, retained as distinct choices. */
+function stageTableConflicts(): { ydoc: Y.Doc; first: Y.XmlText; second: Y.XmlText; untouched: Y.XmlText } {
+  const directory = room(directoryRoom(WORKSPACE)).ydoc;
+  const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
+  initDoc(ydoc, { uuid: UUID, title: "Cell choices" });
+  appendBlock(ydoc, { type: "table", text: "| first suffix | other suffix | untouched |\n| --- | --- | --- |" });
+  const texts = (doc: Y.Doc): Y.XmlText[] => tableRows(getBlocksFragment(doc).get(0) as Y.XmlElement)[0]!.map((cell) => tableCellText(cell)!);
+  const [first, second, untouched] = texts(ydoc) as [Y.XmlText, Y.XmlText, Y.XmlText];
+  first.format(0, 2, { bold: true });
+  second.format(0, 3, { italic: true });
+  untouched.format(0, untouched.length, { strike: true });
+  const peer = new Y.Doc();
+  Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+  const other = texts(peer);
+  first.format(0, 5, { link: { href: HREF } });
+  second.format(0, 5, { link: { href: OTHER_HREF } });
+  other[0]!.format(0, 5, { docLink: { docId: TARGET } });
+  other[1]!.format(0, 5, { docLink: { docId: SECOND_TARGET } });
+  Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer));
+  peer.destroy();
+  upsertDirectoryEntry(directory, { uuid: UUID, title: "Cell choices" });
+  upsertDirectoryEntry(directory, { uuid: TARGET, title: "The hub" });
+  upsertDirectoryEntry(directory, { uuid: SECOND_TARGET, title: "The other hub" });
+  return { ydoc, first, second, untouched };
+}
+
 function repairButtons(host: HTMLElement): HTMLButtonElement[] {
   return [...host.querySelectorAll<HTMLButtonElement>(".ub-link-repair button")];
 }
@@ -322,6 +333,63 @@ function banner(host: HTMLElement): string {
 }
 
 describe("the fallback offers the person the choice, and takes only that write", () => {
+  it("repairs colliding table-cell choices independently, preserving other text and marks", async () => {
+    const { ydoc, first, second, untouched } = stageTableConflicts();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const beforeUntouched = untouched.toDelta();
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+    let writes = 0;
+    ydoc.on("update", () => { writes += 1; });
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    let rows = [...host.querySelectorAll<HTMLLIElement>(".ub-link-repair li")];
+    expect(rows).toHaveLength(2);
+    expect(errors.mock.calls.flat().join(" ")).not.toContain("same key");
+    expect(prose(host)).toBeNull();
+    expect(banner(host)).toContain("conflicting external and document links");
+    expect(writes).toBe(0);
+
+    act(() => rows[0]?.querySelector<HTMLButtonElement>("button")?.click());
+    expect(writes).toBe(1);
+    expect(first.toDelta()).toEqual([
+      { insert: "fi", attributes: { bold: true, docLink: { docId: TARGET } } },
+      { insert: "rst", attributes: { docLink: { docId: TARGET } } },
+      { insert: " suffix" },
+    ]);
+    expect(findLinkConflicts(getBlocksFragment(ydoc))[0]?.text).toBe(second);
+    expect(prose(host)).toBeNull();
+    rows = [...host.querySelectorAll<HTMLLIElement>(".ub-link-repair li")];
+    expect(rows).toHaveLength(1);
+    act(() => rows[0]?.querySelectorAll<HTMLButtonElement>("button")[1]?.click());
+    expect(writes).toBe(2);
+    expect(second.toDelta()).toEqual([
+      { insert: "oth", attributes: { italic: true, link: { href: OTHER_HREF } } },
+      { insert: "er", attributes: { link: { href: OTHER_HREF } } },
+      { insert: " suffix" },
+    ]);
+    expect(untouched.toDelta()).toEqual(beforeUntouched);
+    expect(prose(host)).not.toBeNull();
+    expect(host.querySelector(".ub-link-repair")).toBeNull();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+    expect(getBlocks(peer)).toEqual(getBlocks(ydoc));
+    expect(findForeignBlocks(getBlocksFragment(peer))).toEqual([]);
+    peer.destroy();
+  });
+
+  it.each(["archived", "decided"] as const)("offers no repair for %s table cells and keeps both marks", async (restriction) => {
+    const { ydoc } = stageTableConflicts();
+    if (restriction === "archived") tombstoneDirectoryEntry(room(directoryRoom(WORKSPACE)).ydoc, UUID);
+    else { setKind(ydoc, "decision"); setStatus(ydoc, "decided"); }
+    let writes = 0;
+    ydoc.on("update", () => { writes += 1; });
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    expect(prose(host)).toBeNull();
+    expect(host.querySelector(".ub-link-repair")).toBeNull();
+    expect(findLinkConflicts(getBlocksFragment(ydoc))).toHaveLength(2);
+    expect(banner(host)).toContain(restriction === "archived" ? "restore this document" : "a change to a decided record needs a new record");
+    expect(writes).toBe(0);
+  });
+
   it("keeps colliding repair rows distinct from scan through activation", async () => {
     const { ydoc, first, second } = stageCollidingRows();
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});

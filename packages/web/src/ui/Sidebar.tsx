@@ -30,6 +30,7 @@ import {
 } from "@uberblick/schema";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import type { AwarenessUser } from "../collab/identity.js";
+import type { AccountIdentity } from "../shell/account.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useDirectory, useRoomStatus, useStoredFlag } from "./hooks.js";
 import { rawSyncState } from "./calm.js";
@@ -56,6 +57,11 @@ const GROUP_ACTION_CLASSES = "ub-group-act flex-none border-0 bg-transparent cur
 
 // Both modes share a grid cell; only each mode's middle content scrolls.
 const SIDEBAR_PANE_CLASSES = "ub-sidebar-pane [grid-area:1/1] min-w-0 min-h-0 flex flex-col transition-[transform,opacity] duration-[180ms] ease-[ease] motion-reduce:transition-none motion-reduce:duration-0 [&[inert]]:pointer-events-none [&[inert]_*]:pointer-events-none";
+
+// Native buttons have no preflight reset. Keep their inherited type and focus
+// ring while Tailwind gates hover by the primary input's capability.
+const SIDEBAR_ROW_CLASSES = "flex min-h-8.5 items-center gap-2 rounded-[0.42rem] border border-solid border-transparent bg-transparent px-2 py-1.5 text-left text-sm/[inherit] font-[inherit] text-(--sidebar-row-foreground) cursor-pointer enabled:not-aria-disabled:hover:bg-(--sidebar-accent) enabled:not-aria-disabled:hover:text-sidebar-foreground";
+const SIDEBAR_NAV_CLASSES = `${SIDEBAR_ROW_CLASSES} w-full aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium`;
 
 /** Per-group collapse preference, persisted per browser like the sidebar's own. */
 function groupCollapsedKey(groupId: string): string {
@@ -106,8 +112,9 @@ type SidebarProps = {
   onWorkspaceMenuOpenChange?: (open: boolean) => void;
   /** Go to a workspace. Switching is navigating; see `WorkspaceSwitcher`. */
   onSwitchWorkspace: (segment: string) => void;
-  /** This tab's awareness identity — what the user card is about. */
+  /** This tab's awareness identity, separate from its served hub account. */
   identity: AwarenessUser;
+  account?: AccountIdentity;
   /** Agent sessions in the workspace, for the user menu's readout. */
   agentSessions: number;
   selected: string | null;
@@ -177,6 +184,7 @@ function SidebarContent({
   onWorkspaceMenuOpenChange,
   onSwitchWorkspace,
   identity,
+  account,
   agentSessions,
   selected,
   onSelect,
@@ -225,7 +233,7 @@ function SidebarContent({
     shownMode.current = settingsOpen;
     sidebarRoot.current
       ?.querySelector<HTMLElement>(
-        ".ub-sidebar-pane:not([inert]) [data-swap-focus]",
+        settingsOpen ? ".ub-settings-back" : ".ub-settings-entry",
       )
       ?.focus();
   }, [settingsOpen, sidebarRoot]);
@@ -302,6 +310,7 @@ function SidebarContent({
             <div className="ub-list-head">
               <button
                 type="button"
+                className={`${SIDEBAR_ROW_CLASSES} disabled:text-(--sidebar-muted-foreground) disabled:cursor-default`}
                 onClick={onCreate}
                 disabled={!status.writable}
                 title={
@@ -363,7 +372,7 @@ function SidebarContent({
             ))}
             <button
               type="button"
-              className="ub-group-add"
+              className={`ub-group-add ${SIDEBAR_ROW_CLASSES} self-start mt-[0.35rem] disabled:opacity-50 disabled:cursor-default`}
               onClick={addGroup}
               disabled={ydoc === null}
               title={
@@ -375,34 +384,30 @@ function SidebarContent({
               + group
             </button>
           </SidebarScrollContent>
-          <SidebarFooter className="border-t border-sidebar-border">
-            {workspace !== null && (
-              <button
-                type="button"
-                className="ub-settings-entry"
-                data-swap-focus
-                onClick={() => onOpenSettings("general")}
-              >
-                <GearIcon />
-                Workspace settings
-              </button>
-            )}
-            {!settingsOpen && !collapsed && (
-              <UserMenu identity={identity} agentSessions={agentSessions} />
-            )}
-          </SidebarFooter>
         </nav>
         <SettingsNavigation
           drawer={drawer}
           workspaceLabel={workspace === null ? "workspace" : workspaceLabel(workspace, workspaceNames ?? new Map(), workspaces)}
-          identity={identity}
-          agentSessions={agentSessions}
           active={settingsOpen && !collapsed}
           page={settingsPage}
           onSelect={onOpenSettings}
           onBack={onBackToWorkspace}
         />
       </div>
+      <SidebarFooter className="border-t border-sidebar-border" aria-hidden={collapsed} inert={collapsed}>
+        {workspace !== null && (
+          <button
+            type="button"
+            className={`ub-settings-entry ${SIDEBAR_ROW_CLASSES} w-full`}
+            data-swap-focus
+            onClick={() => onOpenSettings("general")}
+          >
+            <GearIcon />
+            Workspace settings
+          </button>
+        )}
+        <UserMenu identity={identity} account={account} agentSessions={agentSessions} active={!collapsed} />
+      </SidebarFooter>
       </SidebarDragProvider>
     </>
   );
@@ -412,8 +417,6 @@ function SidebarContent({
 function SettingsNavigation({
   drawer,
   workspaceLabel: label,
-  identity,
-  agentSessions,
   active,
   page,
   onSelect,
@@ -421,8 +424,6 @@ function SettingsNavigation({
 }: {
   drawer: boolean;
   workspaceLabel: string;
-  identity: AwarenessUser;
-  agentSessions: number;
   active: boolean;
   page: SettingsPage | null;
   onSelect: (page: SettingsPage) => void;
@@ -457,6 +458,7 @@ function SettingsNavigation({
             <li>
               <button
                 type="button"
+                className={SIDEBAR_NAV_CLASSES}
                 aria-current={page === "general" ? "page" : undefined}
                 onClick={() => onSelect("general")}
               >
@@ -467,6 +469,7 @@ function SettingsNavigation({
             <li>
               <button
                 type="button"
+                className={SIDEBAR_NAV_CLASSES}
                 aria-current={page === "tags" ? "page" : undefined}
                 onClick={() => onSelect("tags")}
               >
@@ -474,12 +477,20 @@ function SettingsNavigation({
                 Tags
               </button>
             </li>
+            <li>
+              <button
+                type="button"
+                className={SIDEBAR_NAV_CLASSES}
+                aria-current={page === "access" ? "page" : undefined}
+                onClick={() => onSelect("access")}
+              >
+                <GearIcon />
+                Access
+              </button>
+            </li>
           </ul>
         </section>
       </SidebarScrollContent>
-      <SidebarFooter className="border-t border-sidebar-border">
-        {active && <UserMenu identity={identity} agentSessions={agentSessions} />}
-      </SidebarFooter>
     </nav>
   );
 }
@@ -516,7 +527,7 @@ function Navigation({
         <li>
           <button
             type="button"
-            className="ub-all-open-entry"
+            className={`ub-all-open-entry ${SIDEBAR_NAV_CLASSES}`}
             aria-current={allOpen ? "page" : undefined}
             onClick={onOpenAll}
           >

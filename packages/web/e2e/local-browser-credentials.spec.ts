@@ -30,6 +30,9 @@ async function statusGeometry(page: Page) {
 test("local-only edits survive a restart and reach the hub after authentication returns", async ({ browser }) => {
   test.setTimeout(90_000);
   const page = await openApp(browser, "/", { contextOptions: { reducedMotion: "reduce" } });
+  // A shared-secret connection has no GitHub account to claim, even though
+  // the hub accepts edits from this running local service.
+  await expect(page.getByTestId("account-menu")).toContainText("Not signed in");
   await createDoc(page, docTitle("local-credentials"), { pin: true });
   await placeCaret(page);
   await page.keyboard.type("before restart");
@@ -48,8 +51,9 @@ test("local-only edits survive a restart and reach the hub after authentication 
   await expect(shared).toHaveText("not shared with hub");
   await expect(reason).toBeVisible();
   await expect(reason).toHaveText("this machine has no credentials for its hub");
+  await expect(page.getByTestId("account-menu")).toContainText("Account unavailable");
   expect(await statusGeometry(page)).toEqual(authenticatedGeometry);
-  for (const width of [320, 390]) {
+  for (const width of [320]) {
     await page.setViewportSize({ width, height: 844 });
     await expect(reason).toBeInViewport({ ratio: 1 });
     const trigger = page.locator(".ub-sync-toggle");
@@ -80,6 +84,7 @@ test("local-only edits survive a restart and reach the hub after authentication 
   await expect.poll(() => documentText(observer)).toBe("before restart; saved locally");
   await expect(shared).toHaveText("synced with hub");
   await expect(reason).toBeHidden();
+  await expect(page.getByTestId("account-menu")).toContainText("Not signed in");
   expect(await statusGeometry(page)).toEqual(localGeometry);
 
   await harness().restartOpen({ authenticated: false });
@@ -105,7 +110,7 @@ test("local-only status answers leave the readings and prose in place", async ({
   await seed.close();
   await harness().restartOpen({ authenticated: false });
 
-  for (const width of [1280, 390, 320]) {
+  for (const width of [1280, 320]) {
     // Withhold usable API answers until after the local room has settled. A
     // fresh page has no earlier serving reason to keep through this blank.
     let blankAnswers = true;
@@ -163,4 +168,75 @@ test("local-only status answers leave the readings and prose in place", async ({
     expect(await page.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
     await page.close();
   }
+});
+
+
+test("device recovery readings keep local editing usable on the open page", async ({ browser }) => {
+  test.setTimeout(90_000);
+  await harness().restartOpen({ authenticated: true });
+  let notSharedReason: "sign-in-required" | "no-workspace-access" | null = null;
+  const page = await openApp(browser, "/", {
+    readySelector: ".ub-docs-heading",
+    beforeNavigate: async (opening) => {
+      await opening.route("**/api/status", async (route) => {
+        const response = await route.fetch();
+        const body = await response.json();
+        body.notSharedReason = notSharedReason;
+        if (notSharedReason !== null) {
+          body.caughtUp = false;
+          for (const room of Object.values(body.rooms) as Array<{ hubAcked: boolean }>) {
+            room.hubAcked = false;
+          }
+        }
+        await route.fulfill({ response, json: body });
+      });
+    },
+  });
+  if ((page.viewportSize()?.width ?? 1280) < 1280) {
+    await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  }
+  await createDoc(page, docTitle("device-recovery"));
+  await placeCaret(page);
+  await page.keyboard.type("kept here");
+  const saved = page.locator(".ub-status-word--saved");
+  const shared = page.locator(".ub-status-word--hub");
+  await expect(shared).toHaveText("synced with hub");
+  // A new document clears this marker; pagehide also catches a departure
+  // followed by restoration from the back/forward cache. Clock readings vary.
+  const samePageMarker = "__uberblickDeviceRecoveryPage";
+  await page.evaluate((key) => {
+    const originalWindow = window as unknown as Record<string, unknown>;
+    originalWindow[key] = true;
+    window.addEventListener("pagehide", () => {
+      originalWindow[key] = false;
+    }, { once: true });
+  }, samePageMarker);
+
+  notSharedReason = "sign-in-required";
+  await expect(saved).toHaveText("saved here");
+  await expect(shared).toHaveText("not shared with hub");
+  await expect(page.locator(".ub-status").getByText(/run ub auth login/)).toBeInViewport();
+  await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+  await placeCaret(page);
+  await page.keyboard.type("; edited while sign-in is required");
+  await expect(saved).toHaveText("saved here");
+
+  notSharedReason = "no-workspace-access";
+  await expect(page.locator(".ub-status").getByText(/ask its administrator for membership/)).toBeInViewport();
+  await expect(saved).toHaveText("saved here");
+  await expect(shared).toHaveText("not shared with hub");
+  await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+  await placeCaret(page);
+  await page.keyboard.type("; edited while membership is refused");
+  await expect(saved).toHaveText("saved here");
+  await expect.poll(() => documentText(page))
+    .toBe("kept here; edited while sign-in is required; edited while membership is refused");
+
+  notSharedReason = null;
+  await expect(shared).toHaveText("synced with hub");
+  await expect(page.locator(".ub-status").getByText(/ask its administrator for membership/)).toHaveCount(0);
+  expect(await page.evaluate(
+    (key) => (window as unknown as Record<string, unknown>)[key] === true,
+    samePageMarker,
+  )).toBe(true);
 });

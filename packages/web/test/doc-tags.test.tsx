@@ -1,9 +1,7 @@
 /** The catalog-backed tag picker in the document identity line (#509). */
 
-import { act } from "react";
+import { act, renderSettled, type RenderResult } from "./react-render.js";
 import type { ReactNode } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import {
@@ -80,7 +78,7 @@ function peerOf(local: Y.Doc): Y.Doc {
   return peer;
 }
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
+let mounted: RenderResult | null = null;
 
 beforeEach(() => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 404 }));
@@ -96,26 +94,15 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  const open = mounted;
   mounted = null;
-  if (open !== null) {
-    act(() => open.root.unmount());
-    open.host.remove();
-  }
   rooms.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 async function mount(node: ReactNode): Promise<HTMLElement> {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => root.render(node));
-  return host;
+  mounted = await renderSettled(node);
+  return mounted.container;
 }
 
 async function openApp(): Promise<HTMLElement> {
@@ -289,8 +276,7 @@ describe("the document tag picker", () => {
     // rather than letting focus fall to the page body.
     expect(document.activeElement).toBe(picker(host));
 
-    act(() => mounted?.root.unmount());
-    mounted?.host.remove();
+    mounted?.unmount();
     mounted = null;
     rooms.clear();
 

@@ -1,7 +1,7 @@
 /**
  * The two halves of a one-time bridge between a workspace and a hub.
  *
- * `ub remote join` is the one command that composes both: it reads the remote
+ * `ub workspace join` is the one command that composes both: it reads the remote
  * as a fresh client, refuses what it cannot verify, and only then attaches this
  * machine's replica to it. Each half is also used alone — `ub doctor`'s hub
  * probe inspects, `ub init`'s starter seed syncs. They live here because they
@@ -58,8 +58,14 @@
 import { createHash } from "node:crypto";
 import {
   directoryRoom,
+  sidebarRoom,
+  settingsRoom,
+  getWorkspaceName,
+  readSidebar,
+  listTagCatalog,
   getAnnotationsMap,
   getBlockInline,
+  findBlockElement,
   getBlocks,
   getMeta,
   listAnnotationRanges,
@@ -69,6 +75,7 @@ import {
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import type { McpConfig } from "./config.js";
+import { usesDeviceLogin } from "./config.js";
 import { Replicas } from "./replica.js";
 import { MirrorStore } from "./store.js";
 import type { HubState } from "./sync.js";
@@ -97,10 +104,21 @@ export function bridgeConfig(
   config: McpConfig,
   overrides: { hubUrl?: string; authSecret?: string | null } = {},
 ): McpConfig {
+  const hubUrl = overrides.hubUrl ?? config.hubUrl;
+  // An endpoint override also changes which authority can admit us. Preserve
+  // an explicit stricter loopback fixture, but never carry a remote login to
+  // a loopback override or a signing secret to a remote override.
+  const authEnv = { ...(config.authEnv ?? config.deviceLogin?.env ?? process.env) };
+  if (hubUrl !== config.hubUrl) delete authEnv.HUB_ADMISSION;
+  const remote = usesDeviceLogin(hubUrl, authEnv);
+  const { deviceLogin, ...rest } = config;
   return {
-    ...config,
-    hubUrl: overrides.hubUrl ?? config.hubUrl,
-    authSecret:
+    ...rest,
+    hubUrl,
+    authEnv,
+    ...(remote ? { deviceLogin: deviceLogin ?? {} }
+      : hubUrl === config.hubUrl && deviceLogin !== undefined ? { deviceLogin } : {}),
+    authSecret: remote ? null :
       overrides.authSecret === undefined ? config.authSecret : overrides.authSecret,
     connectTimeoutMs: BRIDGE_CONNECT_TIMEOUT_MS,
     syncTimeoutMs: BRIDGE_SYNC_TIMEOUT_MS,
@@ -131,6 +149,8 @@ export interface CorpusDoc {
 }
 
 export interface Corpus {
+  /** Settings and sidebar content/history, when explicitly inspected. */
+  workspace?: CorpusDoc[];
   /** Where this reading came from, and whether it can be believed. */
   hub: HubState;
   /** Every directory entry, live and tombstoned alike. */
@@ -193,6 +213,19 @@ function canonical(value: unknown): unknown {
   return out;
 }
 
+/** The table subtree, including cell marks and anchors, without Yjs item ids. */
+function tableContent(element: Y.XmlElement | null): unknown {
+  if (element === null) return null;
+  return {
+    name: element.nodeName,
+    attributes: canonical(element.getAttributes()),
+    children: element.toArray().map((child) => {
+      if (child instanceof Y.XmlElement) return tableContent(child);
+      return canonical(child instanceof Y.XmlText ? child.toDelta() : child.toJSON());
+    }),
+  };
+}
+
 /**
  * A content hash of one document, over everything the schema puts in it.
  *
@@ -221,7 +254,7 @@ function canonical(value: unknown): unknown {
  *
  * `Block.rev` supplies the per-block part because it is already the schema's
  * answer to "has this block's content changed" — type, text and attributes. It
- * deliberately does **not** cover inline marks, so the marks are hashed here
+ * does not cover prose inline marks, so the marks are hashed here
  * beside it rather than assumed; a remote that received the text of every block
  * and none of its formatting, or none of its comment threads, must not be able
  * to pass verification.
@@ -254,6 +287,12 @@ export function docFingerprint(doc: Y.Doc): string {
         start: run.start,
         end: run.end,
       })),
+      ...(block.type === "table" ? {
+        // GFM/rev can lose edge whitespace and unrepresentable marks. Include every cell's stored
+        // characters and delta, including comment anchors, so verification
+        // cannot accept a replica missing cell formatting or anchor deletions.
+        cells: tableContent(findBlockElement(doc, block.id)),
+      } : {}),
     })),
     annotations: Object.keys(annotations)
       .sort()
@@ -358,7 +397,7 @@ function directoryOnly(entry: {
  */
 export async function inspectRemote(
   config: McpConfig,
-  options: { documents?: boolean | "sample"; silent?: boolean } = {},
+  options: { documents?: boolean | "sample"; silent?: boolean; workspace?: boolean } = {},
 ): Promise<Corpus> {
   const sync = new HubSync(config, () => {}, { silent: options.silent === true });
   const opened = new Map<string, { doc: Y.Doc; awareness: Awareness }>();
@@ -413,6 +452,8 @@ export async function inspectRemote(
       };
     }
 
+    const settings = options.workspace ? open(settingsRoom(config.workspaceId)) : null;
+    const sidebar = options.workspace ? open(sidebarRoom(config.workspaceId)) : null;
     const selected = new Set(
       (options.documents === "sample"
         ? [...dead, ...(live[0] === undefined ? [] : [live[0]])]
@@ -456,6 +497,11 @@ export async function inspectRemote(
         stateVector: Y.encodeStateVector(held.doc),
       });
     }
+    if (options.workspace) {
+      for (const room of [settingsRoom(config.workspaceId), sidebarRoom(config.workspaceId)]) {
+        if (!sync.isRoomQuiet(room)) unsettled.push(room);
+      }
+    }
     // Complete: the directory was read in full. An inspected document that did
     // not arrive lands in `missing`, which every caller already refuses on —
     // only the directory read can fail in a way that looks like emptiness.
@@ -464,6 +510,7 @@ export async function inspectRemote(
       entries,
       missing,
       unsettled,
+      ...(settings !== null && sidebar !== null ? { workspace: workspaceSnapshot(settings, sidebar) } : {}),
       complete: true,
     };
   } finally {
@@ -477,6 +524,17 @@ export async function inspectRemote(
 }
 
 /** The corpus a hydrated replica set holds, read out of its documents. */
+function workspaceSnapshot(settings: Y.Doc, sidebar: Y.Doc): CorpusDoc[] {
+  return [
+    { uuid: "_settings", doc: settings, content: { name: getWorkspaceName(settings), tags: listTagCatalog(settings) } },
+    { uuid: "_sidebar", doc: sidebar, content: readSidebar(sidebar) },
+  ].map(({ uuid, doc, content }) => ({
+    uuid, title: uuid, tags: [], deleted: false,
+    fingerprint: createHash("sha256").update(JSON.stringify(canonical(content))).digest("hex"),
+    stateVector: Y.encodeStateVector(doc),
+  }));
+}
+
 function readCorpus(replicas: Replicas): Corpus {
   const all = listDirectory(replicas.directory().doc, { includeDeleted: true });
   const attached = new Map(
@@ -512,7 +570,8 @@ function readCorpus(replicas: Replicas): Corpus {
       stateVector: Y.encodeStateVector(replica.doc),
     });
   }
-  return { hub: replicas.sync.state(), entries, missing, unsettled, complete: true };
+  return { hub: replicas.sync.state(), entries, missing, unsettled, complete: true,
+    workspace: workspaceSnapshot(replicas.settings().doc, replicas.sidebar().doc) };
 }
 
 /**
@@ -522,9 +581,9 @@ function readCorpus(replicas: Replicas): Corpus {
  * This has no direction of its own, because attaching a replica to a hub
  * reconciles the two: a populated mirror against an empty hub uploads, an empty
  * mirror against a populated hub downloads, and two populated sides merge as
- * CRDTs with neither discarded. `ub remote join` relies on all three — the
- * machine that ran `ub remote init` joins the workspace it already holds — so
- * what is being joined is established by the caller, before this is called,
+ * CRDTs with neither discarded. `ub workspace join` can attach an existing
+ * replica; `ub workspace promote` first reserves an empty destination. What is
+ * being reconciled is established by the caller, before this is called,
  * rather than inferred here from which side happens to be empty.
  *
  * Hydration is the two-pass shape the seed import relies on and for the same

@@ -7,16 +7,18 @@ authorization; this file preserves the document and retry-safety mechanics.
 ## Publish a draft requirement
 
 Use the installed MCP server's discovered tool schemas, so this path works from
-a machine with only `ub`, its MCP server, and the shaping skill. Read the
-Editorial contract (`5e0e25d8-c71f-44c3-9bf3-93662712c1fc`) and the active tag
-catalog through MCP, then create one document
+a machine with only `ub`, its MCP server, and the shaping skill. Discover and read
+current requirement-authoring and lifecycle guidance by purpose using the catalog,
+search and current tags under [AGENTS.md](../../AGENTS.md#read-for-the-action).
+If required authoring rules are missing, report that gap and stop publication;
+do not invent a replacement contract. Then create one document
 with `kind: requirement`, `status: draft`, a concise description, applicable
 catalog tags under that live contract, and blocks carrying the confirmed
 problem, intended outcome, success evidence, constraints, trade-offs, and scope
 boundary.
 Preserve the human's language and do not invent missing product meaning. State
-every unresolved human choice in the explicit lifecycle language the live
-editorial document requires of a Product Document.
+every unresolved human choice in the explicit lifecycle language the discovered
+requirement guidance requires.
 
 Re-read the new document and verify that `list_docs` filtered to
 `kind: requirement`, `status: draft` returns its uuid. Then return its title and
@@ -44,8 +46,8 @@ a decision leaves an unresolved objection unresolved and still owed a
 disposition. A decision reference this replica cannot read is a visible
 boundary to surface to the human, never an item to skip.
 
-**Decision logs** (`b7fdc6d7-ce5c-4733-a083-3fc30196f0b3`) owns topic
-resolution. With A decided and open successors B and C, gather B and C and
+Read topic resolution from the live MCP results and discover any governing
+decision-lifecycle guidance by purpose. With A decided and open successors B and C, gather B and C and
 both records' unresolved annotations even though A represents the topic.
 A stays in force until a person approves a successor; a pending recommendation
 does not replace it. After approving B, a person who declines C rejects it
@@ -73,14 +75,13 @@ that explicit disposition:
   with `decided` and `answer: {who, when, where}` recording the person's actual
   confirmed choice and its source. A successor takes effect only through that
   approval, never an agent stance. No `Reconsidering` section is required;
-  **MCP interface contract** (`6e73bb70-e5da-4ee6-98ff-93ec9804856d`) owns the
-  exact call and refusals;
+  use the installed MCP schemas for the exact call and refusals;
 - reject an open proposal, an agent stance, or a side of a decided conflict
   through `set_status` with `status: rejected`, the person's non-empty `reason`
   and `answer: {who, when, where}`. To resolve a conflict, reject only the
   records the person declines, re-reading the topic after each write until the
   chosen answer is in force. If new competing records surface, obtain their
-  disposition before further writes. The MCP interface contract owns the exact
+  disposition before further writes. The installed MCP schemas define the exact
   call and refusals; never infer rejection from approval of another record; or
 - make no write when the human leaves the item unresolved.
 
@@ -95,9 +96,12 @@ block revisions and decision state.
 When the human explicitly declares the requirement planned, set its status to
 `planned` and ask them to group the product outcomes into the intakes they want.
 This is their product grouping, not technical PR decomposition. Before creating
-anything, enumerate open and closed issues with
-`gh api --paginate "repos/uberblick-ai/uberblick-2/issues?state=all&per_page=100"`,
-exclude pull requests, and inspect their bodies locally for an exact requirement
+anything, enumerate open and closed issues by trusted authors (`AGENTS.md`), filtering
+in the command so no other body reaches you:
+`gh api --paginate "repos/uberblick-ai/uberblick-2/issues?state=all&per_page=100"
+--jq '.[] | select(.pull_request == null) | select(.author_association == "OWNER"
+or .author_association == "MEMBER" or .author_association == "COLLABORATOR")
+| {number, body}'`, and inspect those bodies locally for an exact requirement
 uuid in `Implements:` lines; do not depend on GitHub's full-text search index
 for retry safety. Compare the exact outcome grouping the human confirmed. A
 prior line covers a retry only when it names the same outcome block ids; a

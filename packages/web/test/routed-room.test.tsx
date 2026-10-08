@@ -19,9 +19,8 @@
  * `reconnect.test.ts` for the connection behaviour that does need a real socket.
  */
 
-import { describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { act, render } from "./react-render.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import * as Y from "yjs";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
@@ -65,10 +64,11 @@ const { useRoom, useRoomStatus } = await import("../src/ui/hooks.js");
 const IDENTITY = { name: "tester", color: "#888888" };
 
 describe("a room connection is paired with the room it was asked for", () => {
-  it("never reports another room's connection, not even for one render", () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
+  it("never reports another room's connection, not even for one render", () => {
     /** Every (asked for, handed back) pair, one per render. */
     const seen: Array<[string | null, string | null]> = [];
 
@@ -78,34 +78,25 @@ describe("a room connection is paired with the room it was asked for", () => {
       return null;
     }
 
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    act(() => root.render(<Probe room={`${WORKSPACE}/alpha`} />));
+    const view = render(<Probe room={`${WORKSPACE}/alpha`} />);
     expect(seen.at(-1)).toEqual([`${WORKSPACE}/alpha`, `${WORKSPACE}/alpha`]);
 
     // The navigation. Somewhere in here is a render where the state still holds
     // alpha while the caller has already asked for beta.
-    act(() => root.render(<Probe room={`${WORKSPACE}/beta`} />));
+    view.rerender(<Probe room={`${WORKSPACE}/beta`} />);
     expect(seen.at(-1)).toEqual([`${WORKSPACE}/beta`, `${WORKSPACE}/beta`]);
 
     // …and leaving the document entirely.
-    act(() => root.render(<Probe room={null} />));
+    view.rerender(<Probe room={null} />);
     expect(seen.at(-1)).toEqual([null, null]);
 
     const mismatched = seen.filter(([asked, got]) => got !== null && got !== asked);
     expect(mismatched).toEqual([]);
     // The invariant is only meaningful if the middle render actually happened.
     expect(seen.length).toBeGreaterThan(3);
-
-    act(() => root.unmount());
-    host.remove();
   });
 
   it("starts from the current connection and never carries a prior reading", () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
     vi.useFakeTimers();
 
     const connection = (
@@ -143,11 +134,7 @@ describe("a room connection is paired with the room it was asked for", () => {
       return null;
     }
 
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-
-    act(() => root.render(<Probe current={synced} />));
+    const view = render(<Probe current={synced} />);
     expect(seen.at(-1)).toEqual({
       room: `${WORKSPACE}/alpha`,
       raw: "synced",
@@ -156,7 +143,7 @@ describe("a room connection is paired with the room it was asked for", () => {
     act(() => void vi.advanceTimersByTime(300));
     expect(seen.at(-1)?.shown).toBe("synced");
 
-    act(() => root.render(<Probe current={syncing} />));
+    view.rerender(<Probe current={syncing} />);
     const beta = seen.filter(({ room }) => room.endsWith("/beta"));
     expect(beta.length).toBeGreaterThan(0);
     expect(beta.every(({ raw, shown }) => raw === "syncing" && shown === null)).toBe(
@@ -167,15 +154,11 @@ describe("a room connection is paired with the room it was asked for", () => {
     act(() => void vi.advanceTimersByTime(1));
     expect(seen.at(-1)?.shown).toBe("syncing");
 
-    act(() => root.render(<Probe current={replacement} />));
+    view.rerender(<Probe current={replacement} />);
     expect(seen.at(-1)).toEqual({
       room: `${WORKSPACE}/beta`,
       raw: "offline",
       shown: "offline",
     });
-
-    act(() => root.unmount());
-    host.remove();
-    vi.useRealTimers();
   });
 });

@@ -1,12 +1,12 @@
 /**
- * Selection chrome for the prose: inline formatting, external links and the
+ * Selection chrome for prose and single-cell text: inline formatting, external links and the
  * existing comment composer.
  *
- * A selection wholly inside one prose block gets the compact toolbar. Source
+ * A selection wholly inside one prose block or cell gets the compact toolbar. Source
  * blocks and cross-block ranges keep the older Comment-only affordance because
- * the annotation API can clamp them honestly while inline marks cannot. The
- * component is mounted only beside a live editable editor; archived and
- * foreign-content panes never mount it.
+ * the annotation API can clamp them honestly while inline marks cannot.
+ * Cells never offer Comment. Decided records keep Comment outside tables, without formatting or link controls. Archived
+ * and foreign-content panes never mount this component.
  */
 
 import { useEffect, useEffectEvent, useRef, useState } from "react";
@@ -23,8 +23,8 @@ import {
 import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import { endUndoCapture } from "../editor/block-menu.js";
-import { commentTargetOf } from "../editor/selection.js";
-import type { CommentTarget } from "../editor/selection.js";
+import { cellTextTargetOf, commentTargetOf } from "../editor/selection.js";
+import type { CellTextTarget, CommentTarget } from "../editor/selection.js";
 import { CommentForm } from "./CommentForm.js";
 import { blockRefLabel } from "./threads.js";
 import { Button } from "./shadcn/button.js";
@@ -41,18 +41,21 @@ interface MarkReading {
 }
 
 interface Draft {
-  target: CommentTarget;
+  target: CommentTarget | CellTextTarget;
   marks: Record<FlagMark, MarkReading> & { link: MarkReading };
 }
 
 /** The range a target names, as a value two reads can be compared by. */
-function rangeOf(target: CommentTarget): string {
-  return `${target.blockId}:${target.start}:${target.end}`;
+function rangeOf(target: CommentTarget | CellTextTarget): string {
+  return `${target.blockId}:${"cellPos" in target ? target.cellPos : "prose"}:${target.start}:${target.end}`;
 }
 
 /** Read the editor's stored range even while a link or comment field has focus. */
 function selectionRange(editor: Editor): Range | null {
-  const { from, to } = editor.state.selection;
+  const cell = cellTextTargetOf(editor);
+  const { from, to } = cell === null ? editor.state.selection : {
+    from: cell.contentStart + cell.start, to: cell.contentStart + cell.end,
+  };
   try {
     const start = editor.view.domAtPos(from);
     const end = editor.view.domAtPos(to);
@@ -109,7 +112,9 @@ function boundedWrite(editor: Editor, write: () => void): void {
   endUndoCapture(editor.state);
 }
 
-function selectedProseTarget(editor: Editor, ydoc: Y.Doc): CommentTarget | null {
+function formattingTarget(editor: Editor, ydoc: Y.Doc): CommentTarget | CellTextTarget | null {
+  const cell = cellTextTargetOf(editor);
+  if (cell !== null) return cell;
   const target = commentTargetOf(editor, ydoc);
   return target !== null && !target.clamped && isProseBlockType(target.blockType)
     ? target
@@ -117,8 +122,11 @@ function selectedProseTarget(editor: Editor, ydoc: Y.Doc): CommentTarget | null 
 }
 
 function toggleFlag(editor: Editor, ydoc: Y.Doc, name: FlagMark): void {
-  if (selectedProseTarget(editor, ydoc) === null) return;
-  const { from, to } = editor.state.selection;
+  if (!editor.isEditable) return;
+  const target = formattingTarget(editor, ydoc);
+  if (target === null) return;
+  const from = target.contentStart + target.start;
+  const to = target.contentStart + target.end;
   const type = editor.state.schema.marks[name];
   if (type === undefined) return;
   const remove = markReading(editor, name).state === "on";
@@ -137,11 +145,14 @@ function setExternalLink(
   ydoc: Y.Doc,
   href: string,
 ): LinkRefusal | null {
-  if (selectedProseTarget(editor, ydoc) === null || !isExternalHref(href)) {
+  if (!editor.isEditable) return "invalid-url";
+  const target = formattingTarget(editor, ydoc);
+  if (target === null || !isExternalHref(href)) {
     return "invalid-url";
   }
   if (markReading(editor, "docLink").state !== "off") return "document-link";
-  const { from, to } = editor.state.selection;
+  const from = target.contentStart + target.start;
+  const to = target.contentStart + target.end;
   const type = editor.state.schema.marks.link;
   if (type === undefined) return "invalid-url";
   boundedWrite(editor, () => {
@@ -195,6 +206,7 @@ function FormatButton({
 
 export function CommentComposer({
   editor,
+  contentReadOnly = false,
   ydoc,
   author,
   mentions,
@@ -202,6 +214,8 @@ export function CommentComposer({
   onCreated,
 }: {
   editor: Editor;
+  /** Comments remain writable while content is read-only. */
+  contentReadOnly?: boolean;
   ydoc: Y.Doc;
   /** The awareness name this client publishes — the comment's author. */
   author: string;
@@ -218,6 +232,8 @@ export function CommentComposer({
   const [error, setError] = useState<string | null>(null);
   const [touch, setTouch] = useState(false);
   const selectionInput = useRef(false);
+  const navigationInput = useRef(false);
+  const cellNavigation = useRef(false);
   const range = useRef<string | null>(null);
   const dismissed = useRef<string | null>(null);
   const composing = useRef(false);
@@ -230,9 +246,20 @@ export function CommentComposer({
     // component's passive cleanup during a route or fallback transition.
     const editorDom = editor.view.dom;
     const ownerDocument = editorDom.ownerDocument;
+    let previousSelection = editor.state.selection;
     const read = (event?: { transaction: Transaction }): void => {
+      const selectionChanged = !editor.state.selection.eq(previousSelection);
+      previousSelection = editor.state.selection;
+      // A pointer down may just pan a table. Adopt its selection intent only
+      // when the range actually changes, never on a peer edit or scroll.
+      if (event?.transaction.selectionSet && selectionChanged && !event.transaction.docChanged) {
+        cellNavigation.current = navigationInput.current;
+      }
       if (composing.current) return;
-      const target = commentTargetOf(editor, ydoc);
+      const cell = cellTextTargetOf(editor);
+      const target = cell !== null
+        ? (!contentReadOnly && editor.isEditable && !cellNavigation.current ? cell : null)
+        : commentTargetOf(editor, ydoc);
       if (target === null) {
         setDraft(null);
         setMode("toolbar");
@@ -260,7 +287,7 @@ export function CommentComposer({
       }
       if (
         readMode() === "link" &&
-        (target.clamped || !isProseBlockType(target.blockType))
+        (target.clamped || (!isProseBlockType(target.blockType) && !("cellPos" in target)))
       ) {
         setMode("toolbar");
         setHref("");
@@ -308,11 +335,23 @@ export function CommentComposer({
     };
     const pointer = (event: PointerEvent): void => {
       selectionInput.current = event.pointerType === "touch";
+      navigationInput.current = false;
     };
     const keyboard = (event: KeyboardEvent): void => {
+      if (event.key === "Tab") {
+        // TableKit selects the next cell's whole text. That is navigation,
+        // not a request for formatting. Capture before its synchronous handler.
+        navigationInput.current = true;
+        cellNavigation.current = true;
+        if (cellTextTargetOf(editor) !== null) {
+          setDraft(null);
+          setMode("toolbar");
+        }
+      }
       if (/^(Arrow|Home|End|Page)/.test(event.key) ||
           (event.key.toLowerCase() === "a" && (event.metaKey || event.ctrlKey))) {
         selectionInput.current = false;
+        navigationInput.current = false;
       }
     };
     read();
@@ -320,26 +359,32 @@ export function CommentComposer({
     editorDom.addEventListener("compositionstart", startComposition);
     editorDom.addEventListener("compositionend", endComposition);
     editorDom.addEventListener("pointerdown", pointer);
-    editorDom.addEventListener("keydown", keyboard);
+    editorDom.addEventListener("keydown", keyboard, true);
     ownerDocument.addEventListener("keydown", dismiss, true);
     return () => {
       editor.off("transaction", read);
       editorDom.removeEventListener("compositionstart", startComposition);
       editorDom.removeEventListener("compositionend", endComposition);
       editorDom.removeEventListener("pointerdown", pointer);
-      editorDom.removeEventListener("keydown", keyboard);
+      editorDom.removeEventListener("keydown", keyboard, true);
       ownerDocument.removeEventListener("keydown", dismiss, true);
     };
-  }, [editor, ydoc]);
+  }, [editor, ydoc, contentReadOnly]);
 
   const open = draft !== null;
+  const selectedCellStart = draft !== null && "cellPos" in draft.target ? draft.target.contentStart : null;
   // biome-ignore lint/correctness/useExhaustiveDependencies: mode changes the mounted card's shape; measure it again immediately when a field opens or closes.
   useEffect(() => {
     const element = floating.current;
     if (!open || !element) return;
     const boundary = host.current?.closest<HTMLElement>(".ub-pane") ?? undefined;
+    // The selected paragraph is inside the table scrollport. Using it as the
+    // virtual reference context lets Floating UI subscribe to sideways scroll.
+    const contextElement = selectedCellStart === null ? editor.view.dom
+      : editor.view.domAtPos(selectedCellStart).node.parentElement ?? editor.view.dom;
+    const tableWrapper = contextElement.closest<HTMLElement>(".tableWrapper");
     const reference = {
-      contextElement: editor.view.dom,
+      contextElement,
       getBoundingClientRect: (): DOMRect =>
         selectionRange(editor)?.getBoundingClientRect?.() ?? new DOMRect(),
       getClientRects: (): DOMRect[] =>
@@ -366,13 +411,13 @@ export function CommentComposer({
               });
             },
           }),
-          hide({ boundary }),
+          hide({ boundary: tableWrapper ? [tableWrapper, ...(boundary ? [boundary] : [])] : boundary }),
         ],
       });
       if (disposed) return;
-      const focused = element.contains(element.ownerDocument.activeElement);
-      // A focused field stays reachable even if Safari scrolls its selection
-      // out of view as the keyboard opens. Floating UI clips to visualViewport.
+      const focused = selectedCellStart === null && element.contains(element.ownerDocument.activeElement);
+      // A focused prose field stays reachable even if Safari scrolls its selection
+      // out of view as the keyboard opens. Cell fields still respect table clipping.
       const visible = focused || !position.middlewareData.hide?.referenceHidden;
       Object.assign(element.style, {
         left: `${position.x}px`, top: `${position.y}px`,
@@ -396,11 +441,14 @@ export function CommentComposer({
     editor.on("transaction", update);
     const stop = autoUpdate(reference, element, update);
     return () => { disposed = true; editor.off("transaction", update); stop(); };
-  }, [editor, host, open, mode, touch]);
+  }, [editor, host, open, mode, touch, selectedCellStart]);
 
   if (draft === null) return null;
   const { target } = draft;
+  const cell = "cellPos" in target;
+  if (cell && (contentReadOnly || !editor.isEditable)) return null;
   const prose = !target.clamped && isProseBlockType(target.blockType);
+  const formatting = (prose || cell) && !contentReadOnly;
   const blockRef = blockRefLabel(target.blockType, target.blockIndex);
 
   const close = (): void => {
@@ -410,6 +458,7 @@ export function CommentComposer({
   };
 
   const create = (text: string): boolean => {
+    if (cell) return false;
     try {
       const thread = createAnnotation(
         ydoc,
@@ -439,7 +488,7 @@ export function CommentComposer({
       ref={floating}
       data-slot="selection-composer"
       data-input={touch ? "touch" : "fine"}
-      className={`ub-composer fixed top-0 left-0 z-5 flex overflow-auto text-card-foreground shadow-(--shadow-float) ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) border-l-2 border-l-brand bg-card px-[0.6rem] py-2 text-[0.85rem]" : mode === "toolbar" && !prose ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-[calc(var(--radius-sm)+2px)] border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}
+      className={`ub-composer fixed top-0 left-0 z-5 flex overflow-auto text-card-foreground shadow-(--shadow-float) ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) border-l-2 border-l-brand bg-card px-[0.6rem] py-2 text-[0.85rem]" : !formatting ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-[calc(var(--radius-sm)+2px)] border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}
     >
       {mode === "comment" ? (
         <>
@@ -459,7 +508,7 @@ export function CommentComposer({
             onCancel={close}
           />
         </>
-      ) : mode === "link" && prose ? (
+      ) : mode === "link" && formatting ? (
         <form
           className="flex min-w-0 flex-wrap items-center gap-[0.15rem]"
           aria-label="External link"
@@ -511,11 +560,11 @@ export function CommentComposer({
           </Button>
           {error !== null && <span role="alert" className="max-w-44 text-[0.68rem] leading-[1.2] text-destructive">{error}</span>}
         </form>
-      ) : prose ? (
+      ) : formatting ? (
         <div
           className="flex flex-wrap items-center gap-[0.15rem]"
           role="toolbar"
-          aria-label="Text formatting and comment"
+          aria-label={cell ? "Text formatting" : "Text formatting and comment"}
         >
           <FormatButton
             label="Bold"
@@ -560,18 +609,22 @@ export function CommentComposer({
           >
             Link
           </Button>
-          <span className="mx-[0.2rem] h-4 w-px bg-(--border)" aria-hidden="true" />
-          <Button
-            type="button"
-            variant="selection"
-            size="selection"
-            data-selection-tool
-            aria-label="Comment"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={openComment}
-          >
-            Comment
-          </Button>
+          {!cell && (
+            <>
+              <span className="mx-[0.2rem] h-4 w-px bg-(--border)" aria-hidden="true" />
+              <Button
+                type="button"
+                variant="selection"
+                size="selection"
+                data-selection-tool
+                aria-label="Comment"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={openComment}
+              >
+                Comment
+              </Button>
+            </>
+          )}
         </div>
       ) : (
         <Button
@@ -582,7 +635,7 @@ export function CommentComposer({
           onMouseDown={(event) => event.preventDefault()}
           onClick={openComment}
         >
-          Comment on {blockRef}
+          {prose ? "Comment" : `Comment on ${blockRef}`}
         </Button>
       )}
     </div>,

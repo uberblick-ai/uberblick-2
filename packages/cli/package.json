@@ -21,11 +21,12 @@
   "dependencies": {
     "@uberblick/hub": "workspace:*",
     "@uberblick/mcp-server": "workspace:*",
-    "@uberblick/schema": "workspace:*"
+    "@uberblick/schema": "workspace:*",
+    "smol-toml": "1.9.0"
   },
   "devDependencies": {
     "@hocuspocus/provider": "4.6.0",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@types/node": "^26.2.0",
     "yjs": "catalog:",
     "esbuild": "0.28.2",

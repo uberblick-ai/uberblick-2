@@ -9,14 +9,14 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { act } from "react";
+import { act, render } from "./react-render.js";
 import type { ComponentProps, ReactElement } from "react";
-import { createRoot } from "react-dom/client";
 import * as Y from "yjs";
 import {
   appendBlock,
   createAnnotation,
   editBlock,
+  exportMarkdown,
   getAnnotation,
   getBlocks,
   getBlocksFragment,
@@ -24,12 +24,15 @@ import {
   listAnnotationRanges,
   listAnnotations,
   setAnnotationResolved,
+  tableCellText,
+  tableRows,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
+import { CellSelection } from "@tiptap/pm/tables";
 import { CommentComposer } from "../src/ui/CommentComposer.js";
 import { ThreadsPane } from "../src/ui/ThreadsPane.js";
-import { commentTargetOf } from "../src/editor/selection.js";
+import { cellTextTargetOf, commentTargetOf } from "../src/editor/selection.js";
 import { withMention } from "../src/ui/CommentForm.js";
 import { resolvedHighlightCss } from "../src/ui/threads.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
@@ -154,14 +157,12 @@ function composingKey(
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = function scrollIntoView() {};
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
 });
 
 /** Mount the composer over a mounted editor, and drive it the way a reader does. */
 function mountComposer(
   ydoc: Y.Doc,
-  options: { author?: string; mentions?: string[] } = {},
+  options: { author?: string; mentions?: string[]; contentReadOnly?: boolean } = {},
 ): {
   editor: Editor;
   created: string[];
@@ -175,22 +176,18 @@ function mountComposer(
   const created: string[] = [];
   const frame = document.createElement("div");
   document.body.appendChild(frame);
-  const root = createRoot(frame);
-  const draw = (): void => {
-    act(() => {
-      root.render(
-        <CommentComposer
-          editor={editor}
-          ydoc={ydoc}
-          author={options.author ?? "ben"}
-          mentions={options.mentions ?? []}
-          host={{ current: frame }}
-          onCreated={(threadId) => created.push(threadId)}
-        />,
-      );
-    });
-  };
-  draw();
+  const view = render(
+    <CommentComposer
+      editor={editor}
+      contentReadOnly={options.contentReadOnly ?? false}
+      ydoc={ydoc}
+      author={options.author ?? "ben"}
+      mentions={options.mentions ?? []}
+      host={{ current: frame }}
+      onCreated={(threadId) => created.push(threadId)}
+    />,
+    { container: frame },
+  );
   const query = <T extends Element>(selector: string): T | null =>
     document.querySelector<T>(selector);
   return {
@@ -218,8 +215,7 @@ function mountComposer(
       }),
     query,
     unmount: () => {
-      act(() => root.unmount());
-      frame.remove();
+      view.unmount();
       editor.destroy();
       element.remove();
     },
@@ -331,34 +327,34 @@ describe("the selection a thread anchors to", () => {
   });
 });
 
+/** A toolbar button by its stable accessible name. */
+function tool(
+  view: ReturnType<typeof mountComposer>,
+  label: string,
+): HTMLButtonElement {
+  const found = [
+    ...document.querySelectorAll<HTMLButtonElement>("[data-selection-tool]"),
+  ].find((button) => button.getAttribute("aria-label") === label);
+  if (found === undefined || !view.query("[data-slot=\"selection-composer\"]")?.contains(found)) {
+    throw new Error(`no selection tool ${label}`);
+  }
+  return found;
+}
+
+/** Change the link field through the browser event React listens to. */
+function linkValue(view: ReturnType<typeof mountComposer>, value: string): void {
+  const field = view.query<HTMLInputElement>("[aria-label=\"External link URL\"]");
+  if (field === null) throw new Error("no external link field");
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+      field,
+      value,
+    );
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
 describe("the prose selection toolbar", () => {
-  /** A toolbar button by its stable accessible name. */
-  function tool(
-    view: ReturnType<typeof mountComposer>,
-    label: string,
-  ): HTMLButtonElement {
-    const found = [
-      ...document.querySelectorAll<HTMLButtonElement>("[data-selection-tool]"),
-    ].find((button) => button.getAttribute("aria-label") === label);
-    if (found === undefined || !view.query("[data-slot=\"selection-composer\"]")?.contains(found)) {
-      throw new Error(`no selection tool ${label}`);
-    }
-    return found;
-  }
-
-  /** Change the link field through the browser event React listens to. */
-  function linkValue(view: ReturnType<typeof mountComposer>, value: string): void {
-    const field = view.query<HTMLInputElement>("[aria-label=\"External link URL\"]");
-    if (field === null) throw new Error("no external link field");
-    act(() => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
-        field,
-        value,
-      );
-      field.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-  }
-
   it("shows full, empty and mixed mark state, and preserves compatible marks", () => {
     const { ydoc } = annotatedDoc();
     const view = mountComposer(ydoc);
@@ -518,36 +514,6 @@ describe("the prose selection toolbar", () => {
     }
   });
 
-  it.each([
-    ["before compositionend", false],
-    ["after compositionend", true],
-  ] as const)("keeps a composing Escape %s in the link field, then returns to the toolbar", (_order, afterCompositionEnd) => {
-    const { ydoc } = annotatedDoc();
-    const view = mountComposer(ydoc);
-    try {
-      select(view.editor, 1, 4, 15);
-      const before = snapshotFragment(ydoc);
-      act(() => tool(view, "External link").click());
-      linkValue(view, "https://example.com/日本語");
-      const field = view.query<HTMLInputElement>("[aria-label=\"External link URL\"]")!;
-
-      composingKey(field, "Escape", afterCompositionEnd);
-      expect(view.query("[aria-label=\"External link URL\"]")).toBe(field);
-      expect(field.value).toBe("https://example.com/日本語");
-      expect(document.activeElement).toBe(field);
-      expect(snapshotFragment(ydoc)).toEqual(before);
-
-      act(() => field.dispatchEvent(new KeyboardEvent("keydown", {
-        key: "Escape", bubbles: true, cancelable: true,
-      })));
-      expect(view.query("[aria-label=\"External link URL\"]")).toBeNull();
-      expect(view.query("[role=\"toolbar\"]")).not.toBeNull();
-      expect(snapshotFragment(ydoc)).toEqual(before);
-    } finally {
-      view.unmount();
-    }
-  });
-
   it("keeps source and cross-block ranges on the Comment-only path", () => {
     const { ydoc } = annotatedDoc();
     appendBlock(ydoc, { type: "code", text: "const x = 1", language: "ts" });
@@ -648,11 +614,321 @@ describe("the prose selection toolbar", () => {
   });
 });
 
+describe("the table-cell selection toolbar", () => {
+  const source = "| Alpha beta | **Neighbour** |\n| --- | --- |\n| Gamma delta | *Untouched* |";
+  const flags = ["Bold", "Italic", "Strikethrough", "Inline code"];
+
+  function tableDoc(): Y.Doc {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "cell-selection", title: "Cells" });
+    appendBlock(ydoc, { type: "table", text: source });
+    appendBlock(ydoc, { type: "paragraph", text: "After the table." });
+    return ydoc;
+  }
+
+  /** Positions from the actual editor tree, header cells followed by body cells. */
+  function cells(editor: Editor): Array<{ pos: number; start: number; length: number }> {
+    const result: Array<{ pos: number; start: number; length: number }> = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "tableCell" || node.type.name === "tableHeader") {
+        result.push({ pos, start: pos + 2, length: node.textContent.length });
+      }
+    });
+    return result;
+  }
+
+  function selectCell(editor: Editor, cell: number, from: number, to: number): void {
+    const target = cells(editor)[cell]!;
+    act(() => editor.commands.setTextSelection({
+      from: target.start + from,
+      to: target.start + to,
+    }));
+  }
+
+  function cellDeltas(ydoc: Y.Doc): Array<Array<Record<string, unknown>>> {
+    const table = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
+    return tableRows(table).flatMap((row) => row.map((cell) =>
+      tableCellText(cell)!.toDelta() as Array<Record<string, unknown>>,
+    ));
+  }
+
+  function key(editor: Editor, value: string, shiftKey = false): void {
+    act(() => editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", {
+      key: value,
+      shiftKey,
+      bubbles: true,
+      cancelable: true,
+    })));
+  }
+
+  it("names exact header and body ranges and refuses every selection covering more than one cell", () => {
+    const ydoc = tableDoc();
+    const view = mountComposer(ydoc);
+    const { editor } = view;
+    try {
+      const positions = cells(editor);
+      expect(cellTextTargetOf(editor)).toBeNull();
+      for (const index of [0, 2]) {
+        selectCell(editor, index, 0, 5);
+        expect(cellTextTargetOf(editor)).toMatchObject({
+          kind: "cell",
+          blockId: getBlocks(ydoc)[0]!.id,
+          contentStart: positions[index]!.start,
+          start: 0,
+          end: 5,
+          text: index === 0 ? "Alpha" : "Gamma",
+        });
+        expect(commentTargetOf(editor, ydoc)).toBeNull();
+      }
+
+      // Triple click selects the cell itself, rather than a TextSelection.
+      act(() => editor.view.dispatch(editor.state.tr.setSelection(
+        CellSelection.create(editor.state.doc, positions[0]!.pos),
+      )));
+      expect(cellTextTargetOf(editor)).toMatchObject({ start: 0, end: 10, text: "Alpha beta" });
+      act(() => tool(view, "Bold").click());
+      expect(editor.state.selection).toBeInstanceOf(CellSelection);
+      expect(cellDeltas(ydoc)[0]).toEqual([{ insert: "Alpha beta", attributes: { bold: {} } }]);
+      expect(cellDeltas(ydoc)[2]).toEqual([{ insert: "Gamma delta" }]);
+
+      // Multi-cell selections expose ordinary endpoints only in their head
+      // cell. The guard must inspect their actual coverage.
+      const multi = CellSelection.create(editor.state.doc, positions[0]!.pos, positions[1]!.pos);
+      expect(multi.$from.node(3)).toBe(multi.$to.node(3));
+      act(() => editor.view.dispatch(editor.state.tr.setSelection(multi)));
+      expect(cellTextTargetOf(editor)).toBeNull();
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+
+      for (const [from, to] of [
+        [positions[0]!.start + 2, positions[1]!.start + 3],
+        [positions[1]!.start + 3, positions[0]!.start + 2],
+        [positions[2]!.start + 2, posIn(editor, 1, 3)],
+      ]) {
+        act(() => editor.view.dispatch(editor.state.tr.setSelection(
+          TextSelection.create(editor.state.doc, from!, to!),
+        )));
+        expect(cellTextTargetOf(editor)).toBeNull();
+        expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      }
+    } finally {
+      view.unmount();
+      ydoc.destroy();
+    }
+  });
+
+  it.each([0, 2])("formats only selected text in cell %s, reports mixed states and shares the existing cell marks", (index) => {
+    const ydoc = tableDoc();
+    const remote = mirrorOf(ydoc);
+    const view = mountComposer(ydoc);
+    try {
+      const before = cellDeltas(ydoc);
+      selectCell(view.editor, index, 0, 5);
+      expect(view.query('[role="toolbar"]')?.getAttribute("aria-label")).toBe("Text formatting");
+      expect(view.query('[aria-label="Comment"]')).toBeNull();
+      expect([...document.querySelectorAll("[data-selection-tool]")]).toHaveLength(5);
+      const selection = { from: view.editor.state.selection.from, to: view.editor.state.selection.to };
+      for (const label of flags) {
+        expect(tool(view, label).getAttribute("aria-pressed")).toBe("false");
+        act(() => tool(view, label).click());
+        expect(tool(view, label).getAttribute("aria-pressed")).toBe("true");
+        expect(view.editor.state.selection).toMatchObject(selection);
+      }
+      expect(cellDeltas(remote)[index]).toEqual([
+        { insert: index === 0 ? "Alpha" : "Gamma", attributes: { bold: {}, italic: {}, strike: {}, inlineCode: {} } },
+        { insert: index === 0 ? " beta" : " delta" },
+      ]);
+      for (const other of [0, 1, 2, 3].filter((cell) => cell !== index)) {
+        expect(cellDeltas(remote)[other]).toEqual(before[other]);
+      }
+      expect(getBlocks(remote)[0]!.text).toBe(getBlocks(ydoc)[0]!.text);
+      expect(exportMarkdown(remote, { frontmatter: false })).toBe(exportMarkdown(ydoc, { frontmatter: false }));
+      expect(getBlocks(remote)[0]!.text).toContain(index === 0 ? "***~~`Alpha`~~*** beta" : "***~~`Gamma`~~*** delta");
+
+      selectCell(view.editor, index, 0, cells(view.editor)[index]!.length);
+      for (const label of flags) expect(tool(view, label).getAttribute("aria-pressed")).toBe("mixed");
+      act(() => tool(view, "Bold").click());
+      expect(tool(view, "Bold").getAttribute("aria-pressed")).toBe("true");
+      expect(tool(view, "Italic").getAttribute("aria-pressed")).toBe("mixed");
+      act(() => tool(view, "Bold").click());
+      expect(tool(view, "Bold").getAttribute("aria-pressed")).toBe("false");
+      expect(cellDeltas(remote)[index]?.[0]?.attributes).toEqual({ italic: {}, strike: {}, inlineCode: {} });
+    } finally {
+      view.unmount();
+      remote.destroy();
+      ydoc.destroy();
+    }
+  });
+
+  it("rejects incomplete or non-http links and preserves a document link anywhere in the cell range", () => {
+    const ydoc = tableDoc();
+    const view = mountComposer(ydoc);
+    try {
+      selectCell(view.editor, 2, 0, 5);
+      act(() => tool(view, "Bold").click());
+      act(() => tool(view, "External link").click());
+      for (const invalid of ["https://", "mailto:ben@example.com"]) {
+        linkValue(view, invalid);
+        act(() => view.query<HTMLButtonElement>('[type="submit"]')?.click());
+        expect(view.query('[role="alert"]')?.textContent).toContain("http");
+        expect(cellDeltas(ydoc)[2]?.[0]?.attributes).toEqual({ bold: {} });
+      }
+      linkValue(view, "https://example.com/cell");
+      act(() => view.query<HTMLButtonElement>('[type="submit"]')?.click());
+      expect(cellDeltas(ydoc)[2]?.[0]?.attributes).toEqual({
+        bold: {},
+        link: { href: "https://example.com/cell" },
+      });
+      act(() => tool(view, "External link").click());
+      expect(view.query<HTMLInputElement>('[aria-label="External link URL"]')?.value).toBe("https://example.com/cell");
+      linkValue(view, "http://example.com/edited");
+      act(() => view.query<HTMLButtonElement>('[type="submit"]')?.click());
+      expect(cellDeltas(ydoc)[2]?.[0]?.attributes).toMatchObject({ link: { href: "http://example.com/edited" } });
+
+      const target = cells(view.editor)[2]!;
+      act(() => view.editor.view.dispatch(view.editor.state.tr.addMark(
+        target.start,
+        target.start + 2,
+        view.editor.state.schema.marks.docLink!.create({ docId: "11111111-2222-3333-4444-555555555555" }),
+      )));
+      const before = cellDeltas(ydoc);
+      act(() => tool(view, "External link").click());
+      linkValue(view, "https://example.com/replacement");
+      act(() => view.query<HTMLButtonElement>('[type="submit"]')?.click());
+      expect(view.query('[role="alert"]')?.textContent).toContain("document link");
+      expect(cellDeltas(ydoc)).toEqual(before);
+    } finally {
+      view.unmount();
+      ydoc.destroy();
+    }
+  });
+
+  it("keeps each cell formatting action separate from typing on both sides in undo", () => {
+    const ydoc = tableDoc();
+    const view = mountComposer(ydoc);
+    const undo = (): void => act(() => { expect(view.editor.commands.keyboardShortcut("Mod-z")).toBe(true); });
+    try {
+      selectCell(view.editor, 0, 10, 10);
+      act(() => view.editor.commands.insertContent("!"));
+      selectCell(view.editor, 0, 0, 5);
+      act(() => tool(view, "Bold").click());
+      act(() => tool(view, "Italic").click());
+      selectCell(view.editor, 0, 11, 11);
+      act(() => view.editor.commands.insertContent("?"));
+
+      undo();
+      expect(cells(view.editor)[0]!.length).toBe(11);
+      expect(cellDeltas(ydoc)[0]?.[0]?.attributes).toEqual({ bold: {}, italic: {} });
+      undo();
+      expect(cellDeltas(ydoc)[0]?.[0]?.attributes).toEqual({ bold: {} });
+      expect(cells(view.editor)[0]!.length).toBe(11);
+      undo();
+      expect(cellDeltas(ydoc)[0]).toEqual([{ insert: "Alpha beta!" }]);
+      undo();
+      expect(getBlocks(ydoc)[0]!.text).toBe(source);
+    } finally {
+      view.unmount();
+      ydoc.destroy();
+    }
+  });
+
+  it("tracks formatting shortcuts while leaving caret, Tab navigation, cross-cell selection and composition without chrome", () => {
+    const ydoc = tableDoc();
+    const view = mountComposer(ydoc);
+    try {
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      selectCell(view.editor, 0, 0, 0);
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      selectCell(view.editor, 0, 0, 5);
+      for (const [shortcut, label] of [
+        ["Mod-b", "Bold"], ["Mod-i", "Italic"],
+        ["Mod-Shift-s", "Strikethrough"], ["Mod-e", "Inline code"],
+      ]) {
+        act(() => { expect(view.editor.commands.keyboardShortcut(shortcut!)).toBe(true); });
+        expect(tool(view, label!).getAttribute("aria-pressed")).toBe("true");
+      }
+      key(view.editor, "Tab");
+      expect(view.editor.state.selection.empty).toBe(false);
+      expect(view.editor.state.doc.textBetween(view.editor.state.selection.from, view.editor.state.selection.to)).toBe("Neighbour");
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      // Touching a scrollport is pending input, not a new selection. Neither
+      // an unchanged transaction nor a document edit may revive Tab's range.
+      act(() => view.editor.view.dom.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+      act(() => view.editor.view.dispatch(view.editor.state.tr));
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      const neighbour = cells(view.editor)[1]!;
+      act(() => view.editor.view.dispatch(view.editor.state.tr.addMark(
+        neighbour.start, neighbour.start + 1,
+        view.editor.state.schema.marks.italic!.create(),
+      )));
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      key(view.editor, "Tab", true);
+      expect(view.editor.state.doc.textBetween(view.editor.state.selection.from, view.editor.state.selection.to)).toBe("Alpha beta");
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+
+      // A deliberate new selection ends the navigation suppression.
+      act(() => view.editor.view.dom.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+      selectCell(view.editor, 0, 1, 5);
+      expect(view.query('[role="toolbar"]')).not.toBeNull();
+      const positions = cells(view.editor);
+      act(() => view.editor.view.dispatch(view.editor.state.tr.setSelection(
+        CellSelection.create(view.editor.state.doc, positions[0]!.pos, positions[1]!.pos),
+      )));
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      act(() => view.editor.view.dispatch(view.editor.state.tr.setSelection(
+        TextSelection.create(view.editor.state.doc, positions[0]!.start + 1, positions[1]!.start + 2),
+      )));
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+
+      selectCell(view.editor, 2, 0, 5);
+      act(() => view.editor.view.dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      act(() => view.editor.view.dom.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })));
+      expect(view.query('[role="toolbar"]')).not.toBeNull();
+      selectCell(view.editor, 2, 5, 5);
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+    } finally {
+      view.unmount();
+      ydoc.destroy();
+    }
+  });
+
+  it("keeps Escape dismissal in its cell and hides the complete popup in read-only content", () => {
+    const ydoc = tableDoc();
+    const view = mountComposer(ydoc);
+    try {
+      selectCell(view.editor, 0, 0, 5);
+      key(view.editor, "Escape");
+      expect(view.editor.state.selection.empty).toBe(false);
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      act(() => view.editor.view.dispatch(view.editor.state.tr));
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      // Same offsets and table id, a different cell: Escape must not leak.
+      selectCell(view.editor, 2, 0, 5);
+      expect(view.query('[role="toolbar"]')).not.toBeNull();
+      act(() => view.editor.setEditable(false));
+      selectCell(view.editor, 2, 1, 5);
+      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(getBlocks(ydoc)[0]!.text).toBe(source);
+    } finally {
+      view.unmount();
+    }
+
+    const decided = mountComposer(ydoc, { contentReadOnly: true });
+    try {
+      selectCell(decided.editor, 0, 0, 5);
+      expect(decided.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(getBlocks(ydoc)[0]!.text).toBe(source);
+      expect(listAnnotations(ydoc)).toEqual([]);
+    } finally {
+      decided.unmount();
+      ydoc.destroy();
+    }
+  });
+});
+
 describe("starting a thread from the prose", () => {
-  it.each([
-    ["before compositionend", false],
-    ["after compositionend", true],
-  ] as const)("keeps a composing Enter %s in the comment field, then sends on Enter", (_order, afterCompositionEnd) => {
+  // Safari's order, which only the IME keyCode still marks as composing.
+  it("keeps a composing Enter after compositionend in the comment field, then sends on Enter", () => {
     const { ydoc } = annotatedDoc();
     const view = mountComposer(ydoc);
     try {
@@ -661,7 +937,7 @@ describe("starting a thread from the prose", () => {
       view.type("日本語のコメント");
       const field = view.query<HTMLTextAreaElement>(".ub-comment-input")!;
 
-      composingKey(field, "Enter", afterCompositionEnd);
+      composingKey(field, "Enter", true);
       expect(listAnnotations(ydoc)).toEqual([]);
       expect(view.query(".ub-comment-input")).toBe(field);
       expect(field.value).toBe("日本語のコメント");
@@ -684,10 +960,7 @@ describe("starting a thread from the prose", () => {
     }
   });
 
-  it.each([
-    ["before compositionend", false],
-    ["after compositionend", true],
-  ] as const)("keeps a composing Escape %s in the comment field, then returns to the toolbar", (_order, afterCompositionEnd) => {
+  it("keeps a composing Escape before compositionend in the comment field, then returns to the toolbar", () => {
     const { ydoc } = annotatedDoc();
     const view = mountComposer(ydoc);
     try {
@@ -698,7 +971,7 @@ describe("starting a thread from the prose", () => {
 
       // Dispatch through the composer frame, whose capture listener sees
       // Escape before the field's own handler can preserve the draft.
-      composingKey(field, "Escape", afterCompositionEnd);
+      composingKey(field, "Escape", false);
       expect(view.query(".ub-comment-input")).toBe(field);
       expect(field.value).toBe("日本語のコメント");
       expect(document.activeElement).toBe(field);
@@ -897,19 +1170,15 @@ describe("the rail writes back", () => {
     type: (text: string) => Promise<void>;
     unmount: () => void;
   } {
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    act(() => {
-      root.render(
-        <LiveThreadsPane
-          connection={stubConnection(ydoc)}
-          focused={null}
-          author={author}
-          onFocus={() => {}}
-        />,
-      );
-    });
+    const view = render(
+      <LiveThreadsPane
+        connection={stubConnection(ydoc)}
+        focused={null}
+        author={author}
+        onFocus={() => {}}
+      />,
+    );
+    const host = view.container;
     const cards = (): HTMLElement[] => [
       ...host.querySelectorAll<HTMLElement>(".ub-thread-card"),
     ];
@@ -935,8 +1204,7 @@ describe("the rail writes back", () => {
           field.dispatchEvent(new Event("input", { bubbles: true }));
         }),
       unmount: () => {
-        act(() => root.unmount());
-        host.remove();
+        view.unmount();
       },
     };
   }

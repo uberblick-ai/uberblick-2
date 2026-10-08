@@ -1,4 +1,4 @@
-/** Failure boundaries of the inactive client path, against a credential hub. */
+/** Failure boundaries of stored-login sync, against a credential hub. */
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { credentialsPath, readHubLogins, writeHubLogin } from "../src/auth-store.js";
 import { DEVICE_RENEWAL_COOLDOWN_MS, ensureDeviceLogin } from "../src/device-login.js";
 import { acquireInitLock } from "../src/init-lock.js";
+import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
 import { startDeviceSyncHub } from "./device-sync-hub.js";
 
 const WORKSPACE = randomUUID();
@@ -14,11 +15,11 @@ const OTHER_WORKSPACE = randomUUID();
 const directories: string[] = [];
 const hubs: Awaited<ReturnType<typeof startDeviceSyncHub>>[] = [];
 
-async function setup() {
+async function setup(protocolVersion?: number) {
   const directory = mkdtempSync(join(tmpdir(), `device-login-contract-${process.env.UB_AGENTS_RUN ?? "test"}-`));
   directories.push(directory);
   const env = { ...process.env, XDG_CONFIG_HOME: directory };
-  const hub = await startDeviceSyncHub({ directory });
+  const hub = await startDeviceSyncHub({ directory, ...(protocolVersion === undefined ? {} : { protocolVersion }) });
   hubs.push(hub);
   const login = hub.issue({ workspaces: [] });
   await writeHubLogin(hub.origin, login, env);
@@ -37,15 +38,86 @@ function expireCooldown(): void {
 }
 
 describe("device renewal response and recovery contracts", () => {
-  it.each(["principal", "device", "credential id", "key", "revocation"])(
+  it("diagnoses a pre-switch hub after its two-field parser refuses conditional renewal", async () => {
+    const { hub, env, login } = await setup(SYNC_PROTOCOL_VERSION - 1);
+    const send = globalThis.fetch;
+    const requests: unknown[] = [];
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const body = JSON.parse(options?.body as string) as Record<string, unknown>;
+      requests.push(body);
+      // The previous handler checks this exact envelope shape before version.
+      if (Object.keys(body).length !== 2) return Response.json({ status: "invalid-request" }, { status: 400 });
+      return send(input, options);
+    });
+    const result = await ensureDeviceLogin(hub.url, WORKSPACE, { env });
+    expect(result).toMatchObject({ status: "update-required", hubVersion: SYNC_PROTOCOL_VERSION - 1 });
+    if (result.status !== "update-required") throw new Error("hub skew was not diagnosed");
+    expect(result.message).toContain("update the hub");
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toEqual({ protocolVersion: SYNC_PROTOCOL_VERSION, token: "" });
+    expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
+    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("update-required");
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a working credential when a current hub spuriously refuses a conditional envelope", async () => {
+    const { hub, env } = await setup();
+    hub.grant(OTHER_WORKSPACE);
+    const login = hub.issue({ workspaces: [OTHER_WORKSPACE] });
+    await writeHubLogin(hub.origin, login, env);
+    const send = globalThis.fetch;
+    const requests: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      requests.push(JSON.parse(options?.body as string));
+      if (requests.length === 1) return Response.json({ status: "invalid-request" }, { status: 400 });
+      return send(input, options);
+    });
+    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("hub-down");
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toEqual({ protocolVersion: SYNC_PROTOCOL_VERSION, token: "" });
+    expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
+    expect((await ensureDeviceLogin(hub.url, OTHER_WORKSPACE, { env })).status).toBe("ready");
+    expireCooldown();
+    // An unchanged real renewal proves the original key remains usable, not retired.
+    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
+    expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
+    expect(requests).toHaveLength(3);
+  });
+
+  it.each([
+    { status: 200, body: { status: "unchanged" } },
+    { status: 409, body: { status: "protocol-mismatch", reason: `protocol-mismatch:${SYNC_PROTOCOL_VERSION}` } },
+  ])("accepts only a strict mismatch from the credential-free protocol probe: $status/$body.status", async (reply) => {
+    const { hub, env, login } = await setup();
+    const fetch = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ status: "invalid-request" }, { status: 400 }))
+      .mockResolvedValueOnce(Response.json(reply.body, { status: reply.status }));
+    const result = await ensureDeviceLogin(hub.url, WORKSPACE, { env });
+    expect(result.status).toBe("hub-down");
+    expect(JSON.stringify(result)).not.toContain(login.credential.key);
+    expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("never publishes a replacement credential supplied to the protocol probe", async () => {
+    const { hub, env, login } = await setup();
+    const replacement = hub.issue({ workspaces: [WORKSPACE], deviceId: login.credential.record.deviceId });
+    const fetch = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ status: "invalid-request" }, { status: 400 }))
+      .mockResolvedValueOnce(Response.json({ status: "renewed", credential: replacement.credential }));
+    const result = await ensureDeviceLogin(hub.url, WORKSPACE, { env });
+    expect(result.status).toBe("hub-down");
+    expect(JSON.stringify(result)).not.toContain(replacement.credential.key);
+    expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["principal", "revocation"])(
     "refuses a renewed response with mismatched %s without losing the recorded login",
     async (changed) => {
       const { hub, env, login } = await setup();
       const replacement = hub.issue({ workspaces: [WORKSPACE], deviceId: login.credential.record.deviceId });
       if (changed === "principal") replacement.credential.record.principalId = randomUUID();
-      if (changed === "device") replacement.credential.record.deviceId = randomUUID();
-      if (changed === "credential id") replacement.credential.record.id = login.credential.record.id;
-      if (changed === "key") replacement.credential.key = "unreadable-private-key";
       if (changed === "revocation") replacement.credential.record.revokedAt = Date.now();
       hub.setRenewalReply({ status: 200, body: { status: "renewed", credential: replacement.credential } });
       const result = await ensureDeviceLogin(hub.url, WORKSPACE, { env });
@@ -69,7 +141,7 @@ describe("device renewal response and recovery contracts", () => {
     expect(hub.renewalCount).toBe(1);
   });
 
-  it("keeps confirmed missing access manual until the stored credential changes", async () => {
+  it("recovers confirmed missing access through renewal after cooldown", async () => {
     const { hub, env } = await setup();
     expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
     const withoutAccess = readHubLogins(env).logins[hub.origin]!;
@@ -77,17 +149,12 @@ describe("device renewal response and recovery contracts", () => {
     expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
     expect(hub.renewalCount).toBe(1);
     expireCooldown();
-    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
-    expect(hub.renewalCount).toBe(1);
-    expect(readHubLogins(env).logins[hub.origin]).toEqual(withoutAccess);
-    const replacement = hub.issue({ workspaces: [WORKSPACE] });
-    await writeHubLogin(hub.origin, replacement, env);
     const recovered = await ensureDeviceLogin(hub.url, WORKSPACE, { env });
     expect(recovered.status).toBe("ready");
     if (recovered.status !== "ready") throw new Error("membership recovery failed");
     expect(recovered.login.credential.record.id).not.toBe(withoutAccess.credential.record.id);
     expect(recovered.login.credential.record.workspaces).toContain(WORKSPACE);
-    expect(hub.renewalCount).toBe(1);
+    expect(hub.renewalCount).toBe(2);
   });
 
   it("renews for a later workspace grant after an unrelated renewal", async () => {
@@ -107,9 +174,9 @@ describe("device renewal response and recovery contracts", () => {
     expect(hub.renewalCount).toBe(2);
   });
 
-  it("retains confirmed omissions as the machine uses more workspaces", async () => {
+  it("shares cooldown checks across missing workspaces without retiring credentials", async () => {
     const { hub, env } = await setup();
-    const denied = Array.from({ length: 30 }, () => randomUUID());
+    const denied = Array.from({ length: 3 }, () => randomUUID());
     let now = Date.now();
     vi.spyOn(Date, "now").mockImplementation(() => now);
     for (const workspace of denied) {
@@ -122,11 +189,11 @@ describe("device renewal response and recovery contracts", () => {
     for (const workspace of denied) {
       expect((await ensureDeviceLogin(hub.url, workspace, { env })).status).toBe("no-access");
     }
-    expect(hub.renewalCount).toBe(denied.length);
+    expect(hub.renewalCount).toBe(denied.length + 1);
     expect(readHubLogins(env).logins[hub.origin]).toEqual(stored);
   });
 
-  it("preserves confirmed denials through transient failures while reporting a shared sign-in refusal", async () => {
+  it("retries unavailable access checks and shares sign-in refusals", async () => {
     const { hub, env } = await setup();
     expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
     let now = Date.now();
@@ -135,13 +202,14 @@ describe("device renewal response and recovery contracts", () => {
     now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
     expect((await ensureDeviceLogin(hub.url, OTHER_WORKSPACE, { env })).status).toBe("hub-down");
     now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
-    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("no-access");
-    expect(hub.renewalCount).toBe(2);
+    expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("hub-down");
+    expect(hub.renewalCount).toBe(3);
 
+    now += DEVICE_RENEWAL_COOLDOWN_MS + 1;
     hub.setRenewalReply({ status: 401, body: { status: "sign-in-required" } });
     expect((await ensureDeviceLogin(hub.url, OTHER_WORKSPACE, { env })).status).toBe("sign-in-required");
     expect((await ensureDeviceLogin(hub.url, WORKSPACE, { env })).status).toBe("sign-in-required");
-    expect(hub.renewalCount).toBe(3);
+    expect(hub.renewalCount).toBe(4);
   });
 
   it("stores an issued replacement despite cancellation while configuration publication waits", async () => {

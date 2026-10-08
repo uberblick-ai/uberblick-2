@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 import { afterAll } from "vitest";
-import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox } from "./helpers.js";
+import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox, unboundSandbox } from "./helpers.js";
 import { resolveConfig } from "../src/config.js";
 
 afterAll(removeTempDirs);
@@ -36,14 +36,14 @@ function injected(box: ReturnType<typeof sandbox>, extraEnv = {}) {
 
 /** The same three values, as `resolveConfig` — and so `ub mcp serve` — has them. */
 function resolved(box: ReturnType<typeof sandbox>): Record<string, string | null> {
-  const map = resolveConfig({ env: box.env }).env;
+  const map = resolveConfig({ env: box.env, cwd: box.cwd }).env;
   return Object.fromEntries(KEYS.map((key) => [key, map[key] ?? null]));
 }
 
 describe("ub env", () => {
   it("hands over exactly what `ub mcp serve` constructs for the MCP server", () => {
     const box = sandbox({
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { signingSecret: SECRET },
     });
 
@@ -58,23 +58,69 @@ describe("ub env", () => {
     });
   });
 
-  it("puts the configured endpoint in front of an ambient one", () => {
-    // The island trap (#376): a checkout that exported an endpoint took every
-    // process born in it — including a task's — off the hub this machine is
-    // bound to. The configured value wins, and with none configured the
-    // ambient one is removed rather than passed on.
-    const bound = sandbox({
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+  it("withholds a legacy signing secret from remote children and preserves it on disk", () => {
+    const box = sandbox({
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: "wss://hub.invalid/ws" },
       credentials: { signingSecret: SECRET },
     });
-    expect(injected(bound, { HUB_URL: "ws://ambient.invalid:1" }).HUB_URL).toBe(
-      DEAD_HUB_URL,
-    );
+    expect(injected(box, { HUB_AUTH_TOKEN: SECRET })).toEqual({
+      WORKSPACE_ID: WORKSPACE, HUB_URL: "wss://hub.invalid/ws", HUB_AUTH_TOKEN: null,
+    });
+  });
 
-    const unbound = sandbox({ userConfig: { workspace: WORKSPACE } });
-    expect(injected(unbound, { HUB_URL: "ws://ambient.invalid:1" }).HUB_URL).toBe(
-      null,
-    );
+  it.each([
+    { WORKSPACE_ID: "aaaaaaaa-1111-4111-8111-111111111111" },
+    { HUB_URL: "ws://ambient.invalid:1" },
+  ])("refuses a legacy selection before starting the child: %o", (legacy) => {
+    const box = sandbox({
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      credentials: { signingSecret: SECRET },
+    });
+    const run = runUb(["env", "--", process.execPath, "-e", "process.stdout.write('child ran')"], box, legacy);
+    expect(run.status).not.toBe(0);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("Legacy WORKSPACE_ID / HUB_URL");
+    expect(run.stderr).toContain("UB_WORKSPACE_ID (add UB_HUB_URL until this machine has its record)");
+    expect(run.output).not.toContain(SECRET);
+  });
+
+  it("accepts a complete new pair even when legacy selection variables are inherited", () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const selected = "aaaaaaaa-1111-4111-8111-111111111111";
+    expect(injected(box, {
+      WORKSPACE_ID: WORKSPACE,
+      HUB_URL: "wss://legacy.example.test/ws",
+      UB_WORKSPACE_ID: selected,
+      UB_HUB_URL: "https://explicit.example.test",
+    })).toEqual({ WORKSPACE_ID: selected, HUB_URL: "wss://explicit.example.test/ws", HUB_AUTH_TOKEN: null });
+  });
+
+  it("passes a complete environment override as one binding", () => {
+    const box = sandbox({
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: "https://project.example.test" },
+      credentials: { signingSecret: SECRET },
+    });
+    const selected = "aaaaaaaa-1111-4111-8111-111111111111";
+    expect(injected(box, { UB_WORKSPACE_ID: selected, UB_HUB_URL: "local" }))
+      .toEqual({ WORKSPACE_ID: selected, HUB_URL: null, HUB_AUTH_TOKEN: SECRET });
+    expect(injected(box, { UB_WORKSPACE_ID: selected, UB_HUB_URL: "https://override.example.test" }))
+      .toEqual({ WORKSPACE_ID: selected, HUB_URL: "wss://override.example.test/ws", HUB_AUTH_TOKEN: null });
+  });
+
+  it("refuses an incomplete override before running its child", () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    for (const extraEnv of [{ UB_WORKSPACE_ID: WORKSPACE }, { UB_HUB_URL: "local" }]) {
+      const run = runUb(["env", "--", process.execPath, "-e", "process.stdout.write('child ran')"], box, extraEnv);
+      expect(run.status).not.toBe(0);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("UB_WORKSPACE_ID");
+      expect(run.stderr).toContain("UB_HUB_URL");
+    }
+  });
+
+  it("runs a non-workspace child without selecting the machine's old default", () => {
+    const box = unboundSandbox({ userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    expect(injected(box)).toEqual({ WORKSPACE_ID: null, HUB_URL: null, HUB_AUTH_TOKEN: null });
   });
 
   it("has no form that prints the environment", () => {
@@ -82,7 +128,7 @@ describe("ub env", () => {
     // usage error, and none of them puts the signing secret on a stream — a
     // secret on stdout is a secret in a shell history and a CI log.
     const box = sandbox({
-      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { signingSecret: SECRET },
     });
 
@@ -114,7 +160,7 @@ describe("ub env", () => {
   });
 
   it("becomes the command: its exit status, and 127 for one that is not there", () => {
-    const box = sandbox({ userConfig: { workspace: WORKSPACE } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
 
     const failed = runUb(["env", "--", process.execPath, "-e", "process.exit(3)"], box);
     expect(failed.status).toBe(3);

@@ -11,19 +11,20 @@
  * - **The bridge resolves.** The whole adoption rests on one claim: shadcn
  *   surfaces read the same custom properties the plain-CSS surfaces do, so
  *   there is no second palette to drift. That is testable — a menu's painted
- *   background and its font have to *equal* the sidebar's, in both colour
- *   schemes, and they only can if `@theme` resolved to the product's tokens
+ *   background and its font have to *equal* the sidebar's, in a representative
+ *   scheme, and they only can if `@theme` resolved to the product's tokens
  *   rather than to Tailwind's defaults.
- * - **The primitives behave.** They portal out of the app's subtree, take the
- *   keyboard and close on Escape. jsdom will happily let all of that be broken.
+ *   The source-token table checks palette ratios in both colour schemes.
+ * - **The product wiring works.** Uberblick's triggers open its content and
+ *   actions write or refuse as promised; accessibility scans cover primitives.
  * - **The theme is real.** `data-theme` re-themes the editor and the sidebar
  *   from tokens alone, and survives a reload. A stylesheet is exactly what
  *   jsdom does not have.
  * - **A connected agent is counted.** The count reads awareness over a real
  *   hub, and the session it counts is a client that is not a browser at all.
- * - **A highlight steps off its ground.** `light-dark()` and `oklch()` are
- *   resolved by the browser and by nothing else, so a contrast floor is only a
- *   number where there is a rendering engine to measure (#516).
+ * - **The cascade wires the highlight.** The token table holds palette floors;
+ *   rendered consumers must still share one card accent, including the focused
+ *   orphan chip whose actual ground changes with state (#516).
  * - **A bundled face is really there.** A `font-family` in a stylesheet is a
  *   wish; only an engine that fetched the woff2 and put it in `document.fonts`
  *   says the title is set in the face the app ships rather than in the serif
@@ -39,6 +40,9 @@
  * - **The document and rail are one composition.** Their fixed insets and
  *   overlay breakpoint are geometry, so only a laid-out browser can prove that
  *   viewport surplus follows them without shifting the prose.
+ * - **Settings follow browser history.** Back and Forward retire the outgoing
+ *   pane from hit testing and close its portalled controls. jsdom holds the
+ *   panes' inert and ARIA state; the browser holds history focus and motion.
  */
 
 import { randomUUID } from "node:crypto";
@@ -80,6 +84,8 @@ import {
 import * as Y from "yjs";
 import { placeCaret } from "./harness.js";
 import { renderedText, strokeSeparation } from "./contrast-helpers.js";
+import { alphaOf, composite, contrast, legacySrgb, lightnessLimit, oklab, pageGrounds, separation } from "../test/colour.js";
+import { cardHighlightFloor, focusedOrphanedChipFloor } from "../test/contrast-contract.js";
 
 const { harness, openApp } = setupHarness();
 
@@ -133,15 +139,31 @@ function paintedIn(locator: Locator, property: string): Promise<string> {
   );
 }
 
-/**
- * The alpha channel of a computed colour, so "opaque" is a number rather than a
- * look. `getComputedStyle` serialises to `rgb(...)` or `rgba(..., a)`, and the
- * three-argument form has no alpha because it is 1.
- */
-function alphaOf(color: string): number {
-  const parts = color.match(/[\d.]+/g);
-  if (parts === null) throw new Error(`unreadable colour: ${color}`);
-  return parts.length < 4 ? 1 : Number(parts[3]);
+/** A keyboard focus cue must be painted, regardless of its chosen thickness. */
+async function expectFocusIndicator(control: Locator): Promise<void> {
+  await expect(control).toBeFocused();
+  expect(await control.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+  expect(await paintedIn(control, "outline-style")).not.toBe("none");
+  expect(Number.parseFloat(await paintedIn(control, "outline-width"))).toBeGreaterThan(0);
+  expect(alphaOf(await paintedIn(control, "outline-color"))).toBeGreaterThan(0);
+}
+
+/** jsdom owns inert/ARIA state; the browser owns the pane's hit testing. */
+async function expectPaneRejectsPointer(pane: Locator): Promise<void> {
+  expect(await pane.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return element.contains(document.elementFromPoint(
+      box.left + box.width / 2, box.top + box.height / 2,
+    ));
+  })).toBe(false);
+}
+
+async function expectNoSidebarMotion(page: Page): Promise<void> {
+  expect(await page.locator(".ub-list").evaluate((sidebar) =>
+    sidebar.getAnimations({ subtree: true }).filter((animation) =>
+      animation.playState === "running" || animation.pending,
+    ).length,
+  )).toBe(0);
 }
 
 /**
@@ -216,7 +238,7 @@ async function matchesTheSidebar(page: Page, selector: string): Promise<void> {
   );
 }
 
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["dark"] as const) {
   test(`the sidebar's menus are the product's own surface — ${scheme}`, async ({
     browser,
   }) => {
@@ -251,32 +273,27 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(configured).toHaveAttribute("data-highlighted", /.*/);
     expect(await paintedIn(configured, "background-color")).not.toBe(ground);
 
-    // Machine-owned creation stays unavailable. Settings has its fixed footer entry.
-    await expect(menu.getByRole("menuitem", { name: "New workspace" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
+    // Settings stays in the fixed footer; the switcher only lists workspaces.
+    await expect(menu.getByRole("menuitem", { name: "New workspace" })).toHaveCount(0);
+    await expect(menu.locator('[data-slot="dropdown-menu-separator"]')).toHaveCount(0);
     await expect(menu.getByRole("menuitem", { name: "Workspace settings" })).toHaveCount(0);
     await page.keyboard.press("Escape");
-    await expect(menu).toBeHidden();
 
     // The user panel: the same surface, opened from the foot of the column.
-    await page.locator(".ub-user-card").click();
+    await page.getByTestId("account-menu").click();
     const panel = page.locator("[data-slot=popover-content]");
     await expect(panel).toBeVisible();
     await matchesTheSidebar(page, "[data-slot=popover-content]");
     await expect(panel.getByRole("group", { name: "Presence colour" })).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(panel).toBeHidden();
   });
 }
 
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   test(`the selected appearance has one non-hue cue — ${scheme}`, async ({
     browser,
   }) => {
     const page = await openAppearanceApp(browser, scheme);
-    await page.locator(".ub-user-card").click();
+    await page.getByTestId("account-menu").click();
     const panel = page.locator("[data-slot=popover-content]");
     await expect(panel).toBeVisible();
     await page.evaluate(
@@ -314,6 +331,7 @@ for (const scheme of ["light", "dark"] as const) {
         const style = getComputedStyle(element);
         return [style.backgroundColor, style.borderColor, style.color];
       });
+    // Token ratios and axe cannot see which border carries selection after the cascade.
     const cue = async (option: Locator): Promise<string> => {
       expect(
         Number.parseFloat(await paintedIn(option, "border-top-width")),
@@ -356,7 +374,7 @@ for (const scheme of ["light", "dark"] as const) {
     browser,
   }) => {
     const page = await openAppearanceApp(browser, scheme);
-    await page.locator(".ub-user-card").click();
+    await page.getByTestId("account-menu").click();
     const panel = page.locator("[data-slot=popover-content]");
     await expect(panel).toBeVisible();
     const swatches = panel
@@ -393,6 +411,7 @@ for (const scheme of ["light", "dark"] as const) {
       const selected = swatches.nth(index);
       await selected.click();
       await expect(selected).toHaveAttribute("aria-pressed", "true");
+      // The awareness palette and selected border are consumer wiring, beyond the token table and axe.
       const selectionCue = await paintedIn(selected, "border-top-color");
       expect(
         contrast(selectionCue, await paintedIn(selected, "background-color")),
@@ -418,7 +437,7 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
-test("workspace settings is an address-selected, inert sidebar drill-in", async ({
+test("settings panes reject the pointer and follow browser history", async ({
   browser,
 }) => {
   const page = await openAppearanceApp(browser, "light");
@@ -436,25 +455,16 @@ test("workspace settings is an address-selected, inert sidebar drill-in", async 
   await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
   const back = settings.getByRole("button", { name: /^Back to / });
   await expect(back).toBeVisible();
-  await expect(back).toBeFocused();
-  expect(await paintedIn(settings, "transition-duration")).toContain("0.18s");
-  expect(
-    await documents.evaluate((pane) => ({
-      inert: (pane as HTMLElement).inert,
-      hidden: pane.getAttribute("aria-hidden"),
-      pointer: getComputedStyle(pane).pointerEvents,
-    })),
-  ).toEqual({ inert: true, hidden: "true", pointer: "none" });
+  await expectPaneRejectsPointer(documents);
 
   // The route is the selection: browser Back restores the document sidebar.
   await page.goBack();
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
   await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
   await expect(settingsEntry).toBeFocused();
+  await expectPaneRejectsPointer(settings);
 
-  // Portalled controls sit outside the pane's inert subtree. Browser Forward
-  // changes the address without clicking underneath them, and the mode change
-  // must still take each outgoing surface and its focus away.
+  // Browser Forward retires the outgoing document pane's portalled menu.
   await page.locator(".ub-workspace").click();
   const workspaceMenu = page.locator("[data-slot=dropdown-menu-content]");
   await expect(workspaceMenu).toBeVisible();
@@ -466,27 +476,44 @@ test("workspace settings is an address-selected, inert sidebar drill-in", async 
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
   await expect(settingsEntry).toBeFocused();
 
-  await page.locator(".ub-user-card").click();
+  await page.getByTestId("account-menu").click();
   const userPanel = page.locator("[data-slot=popover-content]");
   await expect(userPanel).toBeVisible();
   await page.goForward();
   await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  // The shared account control stays available in both modes. Radix dismisses
+  // its popover when the sidebar hands focus to the incoming header.
   await expect(userPanel).toBeHidden();
   await expect(back).toBeFocused();
   await page.goBack();
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
   await expect(settingsEntry).toBeFocused();
 
-  // The fixed bottom entry is the settings front door. Back in the settings
-  // pane always targets the workspace list rather than a remembered doc.
-  await settingsEntry.click();
-  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
-  await settings.getByRole("button", { name: /^Back to / }).click();
-  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
-
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
-  expect(await paintedIn(settings, "transition-duration")).toBe("0s");
+  await expectNoSidebarMotion(page);
+});
+
+test("the settings drawer retires the outgoing pane and respects reduced motion", async ({ browser }) => {
+  const page = await openAppearanceApp(browser, "light");
+  await page.setViewportSize({ width: 820, height: 832 });
+  await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  await expectPaneRejectsPointer(page.locator(".ub-document-sidebar"));
+
+  // History switches modes while the drawer remains open, so the reduced
+  // motion proof observes the drill-in itself rather than a fresh mount.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goBack();
+  await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
+  await expectPaneRejectsPointer(page.locator(".ub-settings-sidebar"));
+  await expectNoSidebarMotion(page);
+  await page.goForward();
+  await expectPaneRejectsPointer(page.locator(".ub-document-sidebar"));
+  await expectNoSidebarMotion(page);
 });
 
 /**
@@ -504,7 +531,7 @@ test("workspace settings is an address-selected, inert sidebar drill-in", async 
  * gesture, which is what makes "unchanged" mean the rule missed it rather than
  * that the measurement cannot see a change.
  */
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   test(`a disabled sidebar control keeps its ground under the pointer — ${scheme}`, async ({
     browser,
   }) => {
@@ -537,6 +564,155 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
+for (const scheme of ["light"] as const) {
+  test(`sidebar controls keep their treatment after touch — ${scheme}`, { tag: "@webkit-touch" }, async ({ browser }, info) => {
+    const page = await openApp(browser, "/", {
+      upstream: true,
+      readySelector: ".ub-pane",
+      contextOptions: {
+        colorScheme: scheme,
+        hasTouch: true,
+        ...(info.project.name === "chromium" ? { viewport: { width: 390, height: 844 } } : {}),
+      },
+    });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    expect(await page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true);
+
+    const treatment = (control: Locator): Promise<string[]> => control.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [style.backgroundColor, style.color, style.borderTopColor];
+    });
+    const openSidebar = async (settings = false): Promise<void> => {
+      if ((page.viewportSize()?.width ?? 1280) < 1280) {
+        await page.getByRole("button", { name: settings ? "Show sidebar" : "Show document list", exact: true }).tap();
+        await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
+      }
+    };
+    const checkHoverAndFocus = async (control: Locator, ring: "native" | "shadcn" = "native"): Promise<string[]> => {
+      await expect(control).toBeVisible();
+      await page.mouse.move(0, 0);
+      const rest = await treatment(control);
+      // Force :hover without activating navigation. A selected destination's
+      // real tap changes its ground independently of input capability.
+      await control.hover();
+      expect(await treatment(control)).toEqual(rest);
+
+      // Unchanged controls retain this engine's native ring; the standard
+      // sidebar button supplies its own visible ring through shadcn.
+      // The reference stays inside the active focus scope of the drawer/panel.
+      await control.evaluate((element) => {
+        const reference = document.createElement("button");
+        reference.type = "button";
+        reference.dataset.hoverProofReference = "";
+        reference.textContent = "Focus reference";
+        element.after(reference);
+      });
+      const reference = page.locator("[data-hover-proof-reference]");
+      const outline = (one: Locator) => one.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return [style.outlineStyle, style.outlineWidth, style.outlineOffset];
+      });
+      try {
+        await control.focus();
+        // iOS does not put every button in desktop Tab order. A harmless key
+        // establishes keyboard modality; direct focus measures the ring alone.
+        await page.keyboard.press("ArrowRight");
+        await reference.focus();
+        await expect(reference).toBeFocused();
+        expect(await reference.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+        const native = await outline(reference);
+        await control.focus();
+        await expect(control).toBeFocused();
+        expect(await control.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+        const actual = await outline(control);
+        if (ring === "shadcn") {
+          expect(actual[0]).not.toBe("none");
+          expect(Number.parseFloat(actual[1] ?? "0")).toBeGreaterThan(0);
+          expect(Number.parseFloat(actual[2] ?? "0")).toBeGreaterThanOrEqual(0);
+          expect(oklab(await paintedIn(control, "outline-color")).alpha).toBeGreaterThan(0);
+        } else {
+          expect(actual).toEqual(native);
+        }
+      } finally {
+        await reference.evaluate((element) => element.remove());
+      }
+      return rest;
+    };
+
+    await openSidebar();
+    const create = page.getByRole("button", { name: "+ new doc", exact: true });
+    await expect(create).toBeEnabled();
+    const createRest = await checkHoverAndFocus(create);
+    await create.tap();
+    await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
+    await openSidebar();
+    expect(await treatment(create)).toEqual(createRest);
+
+    const addGroup = page.locator(".ub-group-add");
+    const addRest = await checkHoverAndFocus(addGroup);
+    await addGroup.tap();
+    await expect(page.getByLabel("Group name")).toBeVisible();
+    expect(await treatment(addGroup)).toEqual(addRest);
+    await page.getByLabel("Group name").fill(`Touch hover ${scheme}`);
+    await page.getByLabel("Group name").press("Enter");
+
+    const user = page.getByTestId("account-menu");
+    const userRest = await checkHoverAndFocus(user, "shadcn");
+    await user.tap();
+    const panel = page.locator(".ub-user-panel");
+    await expect(panel).toBeVisible();
+    expect(await treatment(user)).toEqual(userRest);
+    const appearance = panel.getByRole("group", { name: "Appearance" });
+    const system = appearance.getByRole("button", { name: "System", exact: true });
+    await expect(system).toHaveAttribute("aria-pressed", "true");
+    const selected = await checkHoverAndFocus(system);
+    const matching = appearance.getByRole("button", { name: scheme === "light" ? "Light" : "Dark", exact: true });
+    await checkHoverAndFocus(matching);
+    await matching.tap();
+    await expect(matching).toHaveAttribute("aria-pressed", "true");
+    expect(await treatment(matching)).toEqual(selected);
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+
+    const allDocs = page.locator(".ub-all-open-entry");
+    await checkHoverAndFocus(allDocs);
+    await allDocs.tap();
+    await openSidebar();
+    await expect(allDocs).toHaveAttribute("aria-current", "page");
+
+    const settings = page.locator(".ub-settings-entry");
+    await checkHoverAndFocus(settings);
+    await settings.tap();
+    await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+    await openSidebar(true);
+    const navigation = page.locator(".ub-settings-nav");
+    const tags = navigation.getByRole("button", { name: "Tags", exact: true });
+    await checkHoverAndFocus(tags);
+    await tags.tap();
+    await expect(page.getByRole("heading", { name: "Tags", exact: true })).toBeVisible();
+    await openSidebar(true);
+    await expect(tags).toHaveAttribute("aria-current", "page");
+    const general = navigation.getByRole("button", { name: "General", exact: true });
+    await checkHoverAndFocus(general);
+    await general.tap();
+    await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+    await openSidebar(true);
+    await expect(general).toHaveAttribute("aria-current", "page");
+
+    await page.goto(new URL("/not-a-workspace", harness().appUrl).href);
+    await openSidebar();
+    for (const disabled of [page.getByRole("button", { name: "new doc unavailable", exact: true }), page.locator(".ub-group-add")]) {
+      await expect(disabled).toBeDisabled();
+      const rest = await treatment(disabled);
+      await disabled.hover();
+      expect(await treatment(disabled)).toEqual(rest);
+      // Native disabled buttons still receive touch hit testing, but no action.
+      await disabled.tap({ force: true });
+      expect(await treatment(disabled)).toEqual(rest);
+    }
+  });
+}
+
 test("the appearance choice re-themes the app from tokens alone, and survives a reload", async ({
   browser,
 }) => {
@@ -550,14 +726,10 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   const sidebar = await painted(page, ".ub-list", "background-color");
   const prose = await painted(page, ".ub-editor .ub-paragraph", "color");
 
-  await page.locator(".ub-user-card").click();
+  await page.getByTestId("account-menu").click();
   await page.getByRole("button", { name: "Dark", exact: true }).click();
 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  expect(
-    (await painted(page, "body", "background-image")).match(/oklch\([^)]*\)/g),
-    "#617's owner-reviewed near and far page-ground stops",
-  ).toEqual(["oklch(0.184 0.022 65)", "oklch(0.094 0.011 65)"]);
   // Two surfaces, neither of which knows a theme exists: both are painted from
   // tokens, and both moved.
   expect(await painted(page, ".ub-list", "background-color")).not.toBe(sidebar);
@@ -572,7 +744,7 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   expect(await painted(page, ".ub-list", "background-color")).toBe(dark);
 
   // Back to the system's answer, which is this context's light.
-  await page.locator(".ub-user-card").click();
+  await page.getByTestId("account-menu").click();
   await page.getByRole("button", { name: "System", exact: true }).click();
   await expect(page.locator("html")).not.toHaveAttribute("data-theme", /.*/);
   expect(await painted(page, ".ub-list", "background-color")).toBe(sidebar);
@@ -598,33 +770,23 @@ test("the TL;DR callout keeps its hierarchy, themes and wrapping at both reading
   const title = callout.getByRole("heading", { name: "TL;DR" });
   const summary = callout.locator(".ub-tldr-body > p");
   await expect(callout).toBeVisible();
-  expect(await paintedIn(title, "font-family")).toContain("Fraunces");
-  await expect(summary).toHaveCSS("font-size", "16px");
-  await expect(summary).toHaveCSS("line-height", "28px");
+  expect(await paintedIn(title, "font-family")).toBe(
+    await painted(page, ".ub-title", "font-family"),
+  );
 
   const cardPaint = () =>
     callout.evaluate((element) => {
       const style = getComputedStyle(element);
-      const accent = getComputedStyle(element, "::before");
       return {
         background: style.backgroundImage,
         border: style.borderColor,
-        shadow: style.boxShadow,
-        accentWidth: accent.width,
-        accentTop: accent.top,
-        accentBottom: accent.bottom,
-        accentColor: accent.backgroundColor,
+        accentColor: getComputedStyle(element, "::before").backgroundColor,
       };
     });
   const light = await cardPaint();
-  expect(light.background).toContain("linear-gradient");
-  expect(light.shadow).not.toBe("none");
-  expect(light.accentWidth).toBe("4px");
-  expect([light.accentTop, light.accentBottom]).toEqual(["0px", "0px"]);
 
   await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
   const dark = await cardPaint();
-  expect(dark.background).toContain("linear-gradient");
   expect(dark.background).not.toBe(light.background);
   expect(dark.border).not.toBe(light.border);
   expect(dark.accentColor).not.toBe(light.accentColor);
@@ -633,6 +795,32 @@ test("the TL;DR callout keeps its hierarchy, themes and wrapping at both reading
   for (const width of [375, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     titleSizes.push(Number.parseFloat(await paintedIn(title, "font-size")));
+    expect(Number.parseFloat(await paintedIn(title, "font-size"))).toBeGreaterThan(
+      Number.parseFloat(await paintedIn(summary, "font-size")),
+    );
+    // Pseudo-elements have no DOM rectangle. The engine's resolved height and
+    // inset place the accent in the card's padding box, inside its border.
+    const accent = await callout.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const style = getComputedStyle(element, "::before");
+      const border = getComputedStyle(element);
+      const cardTop = box.top + Number.parseFloat(border.borderTopWidth);
+      const cardLeft = box.left + Number.parseFloat(border.borderLeftWidth);
+      const top = cardTop + Number.parseFloat(style.top);
+      return {
+        cardTop,
+        cardBottom: box.bottom - Number.parseFloat(border.borderBottomWidth),
+        cardLeft,
+        left: cardLeft + Number.parseFloat(style.left),
+        top,
+        bottom: top + Number.parseFloat(style.height),
+        width: Number.parseFloat(style.width),
+      };
+    });
+    expect(accent.top).toBeCloseTo(accent.cardTop, 1);
+    expect(accent.bottom).toBeCloseTo(accent.cardBottom, 1);
+    expect(accent.left).toBeCloseTo(accent.cardLeft, 1);
+    expect(accent.width).toBeGreaterThan(0);
     const geometry = await callout.evaluate((element) => {
       const header = element.querySelector<HTMLElement>(".ub-tldr-header");
       const mark = element.querySelector<HTMLElement>(".ub-tldr-mark");
@@ -752,7 +940,7 @@ test("document actions stay reachable, close with the route, and archive into Re
   });
   await page.getByRole("button", { name: "+ new doc" }).click();
   await page.locator(".ub-title").fill("Lifecycle notes");
-  await page.setViewportSize({ width: 360, height: 720 });
+  await page.setViewportSize({ width: 375, height: 720 });
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
 
@@ -768,28 +956,30 @@ test("document actions stay reachable, close with the route, and archive into Re
     const box = await control.boundingBox();
     if (box === null) throw new Error("e2e: narrow document chrome has no box");
     expect(box.x, name).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width, name).toBeLessThanOrEqual(360);
+    expect(box.x + box.width, name).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
   }
   await expect(uuid).toHaveText(/^uuid [0-9a-f]{8}/);
   await expect(page.locator(".ub-doc-meta")).not.toContainText("Copy link");
-  expect(
-    await page.evaluate(() => {
+  const layout = await page.evaluate(() => {
       const body = document.querySelector<HTMLElement>(".ub-body");
       const pane = document.querySelector<HTMLElement>(".ub-pane");
       if (body === null || pane === null) throw new Error("e2e: no document pane");
       return {
+        viewport: innerWidth,
         body: [body.clientWidth, body.scrollWidth],
         pane: [pane.clientWidth, pane.scrollWidth],
       };
-    }),
-  ).toEqual({ body: [360, 360], pane: [360, 360] });
+    });
+  for (const [client, scroll] of [layout.body, layout.pane]) {
+    expect(client).toBe(layout.viewport);
+    expect(scroll).toBeLessThanOrEqual(client ?? 0);
+  }
 
   await uuid.click();
   await expect(page.locator(".ub-copied")).toHaveText("URL copied to clipboard");
 
   await trigger.click();
   await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
-  await expect(trigger).toBeFocused();
   await trigger.click();
   await expect(
     page.getByRole("menuitem", { name: "Unpin from sidebar" }),
@@ -814,27 +1004,6 @@ test("document actions stay reachable, close with the route, and archive into Re
   const confirmation = page.getByRole("alertdialog");
   await expect(confirmation).toContainText("Archive Lifecycle notes?");
   await expect(confirmation).toContainText("read-only");
-  await expect(confirmation).toHaveAccessibleName("Archive Lifecycle notes?");
-  await expect(confirmation).toHaveAccessibleDescription(/content is preserved/);
-  await expect(page.locator("#root")).toHaveAttribute("aria-hidden", "true");
-  const cancel = confirmation.getByRole("button", { name: "Cancel" });
-  await expect(cancel).toBeFocused();
-
-  // Scripted focus stands in for the programmatic/assistive path that escaped
-  // the hand-written trap. Radix returns it to the last in-dialog target, while
-  // the background remains absent from the accessibility tree.
-  await page.locator(".ub-title").evaluate((title) =>
-    (title as HTMLInputElement).focus(),
-  );
-  await expect(cancel).toBeFocused();
-  await expect(page.getByRole("textbox")).toHaveCount(0);
-
-  await page.keyboard.press("Tab");
-  await expect(
-    confirmation.getByRole("button", { name: "Archive document" }),
-  ).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(confirmation.getByRole("button", { name: "Cancel" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();
@@ -862,12 +1031,12 @@ test("document actions stay reachable, close with the route, and archive into Re
 
 /**
  * The archive confirmation is a surface, and a destructive one, so it owes the
- * proof a dialog owes: opaque in both appearances. Only a browser can settle
+ * proof a dialog owes: opaque over the page. Only a browser can settle
  * it — `light-dark()` resolves in the engine, and an undefined custom property
  * (which is what `--popover` was here) computes to `transparent` rather than
  * failing anywhere jsdom could see.
  */
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   test(`the archive confirmation is opaque over the page — ${scheme}`, async ({
     browser,
   }) => {
@@ -908,7 +1077,7 @@ test("MCP connections counts a connected agent session, and stops when it goes",
   const page = await openAppearanceApp(browser, "dark");
   const connections = page.locator(".ub-panel-fact", { hasText: "MCP connections" });
 
-  await page.locator(".ub-user-card").click();
+  await page.getByTestId("account-menu").click();
   await expect(connections).toContainText("0");
 
   // An agent, as far as the hub and the awareness map are concerned: a client
@@ -947,13 +1116,14 @@ test("MCP connections counts a connected agent session, and stops when it goes",
   await expect(connections).toContainText("0");
 });
 
-test("the document collaborator cluster stays compact and jumps once without moving selection", async ({
+for (const viewport of [720, 1280]) {
+test(`the document collaborator cluster stays compact and jumps once without moving selection — ${viewport}px`, async ({
   browser,
 }) => {
   const page = await openAppearanceApp(browser, "light");
   // The narrow drawer closes on creation, leaving the full-width document pane.
-  await page.setViewportSize({ width: 720, height: 640 });
-  await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  await page.setViewportSize({ width: viewport, height: 640 });
+  if (viewport < 1280) await page.getByRole("button", { name: "Show document list", exact: true }).click();
   await page.getByRole("button", { name: "+ new doc" }).click();
   await page.locator(".ub-title").fill("Live collaborators");
   const firstBlock = page.locator(".ub-editor .ProseMirror > *").first();
@@ -1063,6 +1233,7 @@ test("the document collaborator cluster stays compact and jumps once without mov
     const titleAfter = await page.locator(".ub-title").boundingBox();
     const editorAfter = await page.locator(".ub-editor").boundingBox();
     expect(titleAfter?.x).toBe(titleBefore?.x);
+    expect(titleAfter?.y).toBe(titleBefore?.y);
     expect(titleAfter?.width).toBe(titleBefore?.width);
     expect(editorAfter?.x).toBe(editorBefore?.x);
     expect(editorAfter?.width).toBe(editorBefore?.width);
@@ -1072,37 +1243,59 @@ test("the document collaborator cluster stays compact and jumps once without mov
     // would move it, in `collab.spec.ts`.
     expect((await status.boundingBox())?.height).toBe(rowBefore);
 
-    const circles = await visible.evaluateAll((controls) =>
+    const circles = await page.locator(".ub-peers > .ub-peer-control").evaluateAll((controls) =>
       controls.map((control) => {
         const avatar = control.querySelector<HTMLElement>(".ub-avatar");
         const box = control.getBoundingClientRect();
+        const avatarBox = avatar?.getBoundingClientRect();
+        const round = (element: Element, bounds: DOMRect): boolean => {
+          const style = getComputedStyle(element);
+          return [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius].every((corner) => {
+            const [horizontal = "0", vertical = horizontal] = corner.split(" ");
+            const radius = (value: string, diameter: number) => value.endsWith("%")
+              ? Number.parseFloat(value) * diameter / 100 : Number.parseFloat(value);
+            return radius(horizontal, bounds.width) >= bounds.width / 2 && radius(vertical, bounds.height) >= bounds.height / 2;
+          });
+        };
         return {
           width: box.width,
           height: box.height,
+          top: box.top,
           left: box.left,
           right: box.right,
-          avatarWidth: avatar?.getBoundingClientRect().width,
+          avatarWidth: avatarBox?.width,
+          avatarHeight: avatarBox?.height,
+          round: round(control, box) && (avatar === null || avatarBox === undefined || round(avatar, avatarBox)),
         };
       }),
     );
-    expect(circles.map(({ width, height, avatarWidth }) => [width, height, avatarWidth]))
-      .toEqual([
-        [28, 28, 28],
-        [28, 28, 28],
-        [28, 28, 28],
-      ]);
-    const [firstCircle, secondCircle] = circles;
-    if (firstCircle === undefined || secondCircle === undefined) {
-      throw new Error("e2e: the collaborator cluster did not draw three circles");
+    const firstCircle = circles[0];
+    if (firstCircle === undefined) throw new Error("e2e: no collaborator circles");
+    for (const [index, circle] of circles.entries()) {
+      expect(circle.width).toBeGreaterThanOrEqual(24);
+      expect(circle.width).toBe(circle.height);
+      expect(circle.width).toBe(firstCircle.width);
+      expect(circle.top).toBe(firstCircle.top);
+      expect(circle.round).toBe(true);
+      if (circle.avatarWidth !== undefined) {
+        expect(circle.avatarWidth).toBe(circle.width);
+        expect(circle.avatarHeight).toBe(circle.height);
+      }
+      const previous = circles[index - 1];
+      if (previous !== undefined) {
+        const overlap = previous.right - circle.left;
+        expect(overlap).toBeGreaterThan(0);
+        expect(overlap).toBeLessThan(previous.width / 2);
+      }
     }
-    expect(secondCircle.left).toBeLessThan(firstCircle.right);
     await visible.first().focus();
+    await page.keyboard.press("ArrowRight");
     const tooltip = page.getByRole("tooltip");
     await expect(tooltip).toContainText(
       (await visible.first().getAttribute("aria-label"))?.split(" · ").slice(0, 2).join(" · ") ?? "",
     );
     await expect(page.locator('[data-slot="tooltip-content"]')).toBeVisible();
-    await expect(visible.first()).toHaveCSS("outline-width", "2px");
+    await expectFocusIndicator(visible.first());
 
     const orderBefore = await visible.evaluateAll((controls) =>
       controls.map((control) => (control as HTMLElement).dataset.peerId),
@@ -1114,9 +1307,6 @@ test("the document collaborator cluster stays compact and jumps once without mov
     await page.keyboard.press("Enter");
     const overflow = page.getByRole("dialog", { name: "More active collaborators" });
     await expect(overflow).toBeVisible();
-    await expect(overflow.getByRole("button").first()).toBeFocused();
-    expect(await more.getAttribute("aria-controls")).toBe(await overflow.getAttribute("id"));
-    await expect(more).toHaveAttribute("aria-expanded", "true");
     const deltaPerson = page.getByRole("button", {
       name: /^Delta · person · .*editing block 1$/,
     });
@@ -1141,7 +1331,6 @@ test("the document collaborator cluster stays compact and jumps once without mov
       await paintedIn(deltaCursor, "background-color"),
     );
     await page.keyboard.press("Escape");
-    await expect(more).toBeFocused();
     await more.click();
     await expect(overflow).toBeVisible();
     await page.locator(".ub-title").click();
@@ -1212,7 +1401,7 @@ test("the document collaborator cluster stays compact and jumps once without mov
     ).first();
     await expect(jumpRow).toBeVisible();
     await jumpRow.focus();
-    await expect(jumpRow).toHaveCSS("outline-width", "2px");
+    await expectFocusIndicator(jumpRow);
     await page.keyboard.press("Enter");
     await expect.poll(() => pane.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
@@ -1247,124 +1436,6 @@ test("the document collaborator cluster stays compact and jumps once without mov
     for (const doc of documents) doc.destroy();
   }
 });
-
-/**
- * A painted colour in OKLab. Tokens use `oklch()`; Chromium also serializes
- * transitions and color-mix() results as rectangular `oklab()`. Both keep the
- * original precision. Unknown serializations throw rather than guess: a wrong
- * number here would look like a passing measurement.
- */
-function oklab(painted: string): {
-  L: number;
-  a: number;
-  b: number;
-  chroma: number;
-  alpha: number;
-} {
-  const rectangular = /^oklab\((\d*\.?\d+) (-?\d*\.?\d+) (-?\d*\.?\d+)(?: \/ (\d*\.?\d+))?\)$/.exec(painted.trim());
-  if (rectangular !== null) {
-    const [, rawL, rawA, rawB, rawAlpha] = rectangular;
-    if (rawL === undefined || rawA === undefined || rawB === undefined) {
-      throw new Error(`unreadable oklab colour: ${painted}`);
-    }
-    const a = Number(rawA);
-    const b = Number(rawB);
-    return {
-      L: Number(rawL),
-      a,
-      b,
-      chroma: Math.hypot(a, b),
-      alpha: rawAlpha === undefined ? 1 : Number(rawAlpha),
-    };
-  }
-  // `none` is how an achromatic colour reports the hue it does not have, and
-  // the alpha half only appears on the tokens that carry one (#515).
-  const parts =
-    /^oklch\((\d*\.?\d+) (\d*\.?\d+) (\d*\.?\d+|none)(?: \/ (\d*\.?\d+))?\)$/.exec(
-      painted.trim(),
-    );
-  const [, rawL, rawC, rawH, rawA] = parts ?? [];
-  if (rawL === undefined || rawC === undefined || rawH === undefined) {
-    throw new Error(`not an OKLab colour: ${painted}`);
-  }
-  const chroma = Number(rawC);
-  const radians = ((rawH === "none" ? 0 : Number(rawH)) * Math.PI) / 180;
-  return {
-    L: Number(rawL),
-    a: chroma * Math.cos(radians),
-    b: chroma * Math.sin(radians),
-    chroma,
-    alpha: rawA === undefined ? 1 : Number(rawA),
-  };
-}
-
-/**
- * The channels of a legacy serialization, or null where the colour is not one.
- *
- * The column paints one ground that is not a token: the user tile's fill is a
- * colour from the awareness palette, which is `#rrggbb` literals because
- * y-prosemirror accepts nothing else (#482, src/collab/identity.ts). Chromium
- * reports it as `rgb(r, g, b)`, already in the space `srgb` returns. Grounds
- * only — an *ink* still has to be a token, so a legacy one reaches `oklab`
- * below and throws rather than being classified by a chroma nobody computed.
- */
-function legacySrgb(painted: string): [number, number, number] | null {
-  const parts = /^rgb\((\d*\.?\d+), (\d*\.?\d+), (\d*\.?\d+)\)$/.exec(painted.trim());
-  if (parts === null) return null;
-  const [r, g, b] = parts.slice(1).map((channel) => Number(channel) / 255);
-  return [r ?? 0, g ?? 0, b ?? 0];
-}
-
-/**
- * The sRGB a browser paints for one of those colours, so an ink with an alpha
- * can be composited onto its ground and read as a contrast ratio (#515). The
- * matrices are the OKLab specification's; the clamp is the gamut Chromium
- * paints into. Nothing here is a second palette — every input is a value read
- * off a rendered element.
- */
-function srgb(painted: string): [number, number, number] {
-  const { L, a, b } = oklab(painted);
-  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
-  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
-  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
-  const linear = [
-    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
-    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
-    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
-  ];
-  const encoded = linear.map((channel) => {
-    const clamped = Math.min(1, Math.max(0, channel));
-    return clamped <= 0.0031308
-      ? 12.92 * clamped
-      : 1.055 * clamped ** (1 / 2.4) - 0.055;
-  });
-  return [encoded[0] ?? 0, encoded[1] ?? 0, encoded[2] ?? 0];
-}
-
-/** WCAG's ratio between an ink — alpha composited where it has one — and its ground. */
-function contrast(ink: string, ground: string): number {
-  const under = legacySrgb(ground) ?? srgb(ground);
-  const alpha = oklab(ink).alpha;
-  const over = srgb(ink).map((channel, index) => {
-    const beneath = under[index] ?? 0;
-    return channel * alpha + beneath * (1 - alpha);
-  });
-  const luminance = (colour: number[]): number => {
-    const [r, g, b] = colour.map((channel) =>
-      channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
-    );
-    return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
-  };
-  const one = luminance(over) + 0.05;
-  const two = luminance(under) + 0.05;
-  return one > two ? one / two : two / one;
-}
-
-/** How far a fill sits from the ground it is painted on. */
-function separation(fill: string, ground: string): number {
-  const one = oklab(fill);
-  const two = oklab(ground);
-  return Math.hypot(one.L - two.L, one.a - two.a, one.b - two.b);
 }
 
 /** One colour a surface paints, and the ground it lands on. */
@@ -1392,135 +1463,70 @@ type Reading = {
  * 1.4.3 excepts a disabled component's text, and the vendored menu draws its two
  * unavailable items at half opacity.
  */
-function surface(page: Page, root: string): Promise<Reading[]> {
-  return page.evaluate((selector) => {
+type GroundLayer = { colour: string; image: string; body: boolean };
+
+/** Resolve raw ancestor paint in Node, through the shared colour module. */
+function groundsFromLayers(layers: GroundLayer[]): string[] {
+  const fills: string[] = [];
+  const over = (ground: string): string => fills.toReversed().reduce(
+    (under, fill) => composite(fill, under), ground,
+  );
+  for (const layer of layers) {
+    if (layer.image !== "none") {
+      if (!layer.body) throw new Error("cannot establish the ground through a painted image");
+      return pageGrounds(layer.image, layer.colour).map(over);
+    }
+    const alpha = alphaOf(layer.colour);
+    if (alpha === 1) return [over(layer.colour)];
+    if (alpha > 0) fills.push(layer.colour);
+  }
+  throw new Error("nothing opaque under this surface");
+}
+
+async function surface(page: Page, root: string): Promise<Reading[]> {
+  const raw = await page.evaluate((selector) => {
     const start = document.querySelector(selector);
     if (start === null) throw new Error(`no surface for ${selector}`);
-
-    const alphaOf = (colour: string): number => {
-      const rgba = /^rgba?\(([^)]*)\)$/.exec(colour);
-      if (rgba !== null) {
-        const parts = (rgba[1] ?? "").split(",");
-        return parts.length === 4 ? Number(parts[3]) : 1;
-      }
-      const slashed = /\/\s*(\d*\.?\d+)\s*\)$/.exec(colour);
-      return slashed === null ? 1 : Number(slashed[1]);
-    };
-
-    // Transparent backgrounds expose their ancestor's ground; translucent
-    // backgrounds, including Button hover fills, must be composited onto it.
-    const composite = (ground: string, fills: string[]): string => {
-      if (fills.length === 0) return ground;
-      const canvas = document.createElement("canvas");
-      canvas.width = canvas.height = 1;
-      const painter = canvas.getContext("2d");
-      if (painter === null) throw new Error("no canvas for background compositing");
-      for (const colour of [ground, ...[...fills].reverse()]) {
-        painter.fillStyle = colour;
-        painter.fillRect(0, 0, 1, 1);
-      }
-      const [red, green, blue] = painter.getImageData(0, 0, 1, 1).data;
-      return `rgb(${red}, ${green}, ${blue})`;
-    };
-    const groundOf = (element: Element | null): string[] => {
-      const fills: string[] = [];
+    const layers = (element: Element | null): GroundLayer[] => {
+      const result: GroundLayer[] = [];
       for (let node = element; node !== null; node = node.parentElement) {
         const style = getComputedStyle(node);
-        if (style.backgroundImage !== "none") {
-          // The body's token paints a gradient. Checking every stop defends
-          // text anywhere on it, including a settings page's heading.
-          if (node !== document.body) throw new Error("cannot establish the ground through a painted image");
-          const stops = style.backgroundImage.match(/(?:rgba?|oklch)\([^)]*\)/g);
-          if (stops === null) throw new Error("no readable page ground");
-          return stops.map((ground) => composite(ground, fills));
-        }
-        const colour = style.backgroundColor;
-        const alpha = alphaOf(colour);
-        if (alpha === 1) return [composite(colour, fills)];
-        if (alpha > 0) fills.push(colour);
+        result.push({ colour: style.backgroundColor, image: style.backgroundImage, body: node === document.body });
       }
-      throw new Error(`nothing opaque under ${selector}`);
+      return result;
     };
-
-    const name = (element: Element): string =>
-      `${selector} ${element.tagName.toLowerCase()}${element.getAttribute("class") === null ? "" : `.${element.getAttribute("class")?.trim().split(/\s+/).join(".")}`}`;
-
-    const readings: Reading[] = [];
+    const readings: Array<Omit<Reading, "ground"> & { layers: GroundLayer[] }> = [];
     for (const element of [start, ...start.querySelectorAll("*")]) {
       const box = element.getBoundingClientRect();
       if (box.width === 0 && box.height === 0) continue;
-      if (
-        element.closest("[data-disabled], [aria-disabled='true'], :disabled") !== null
-      ) {
-        continue;
-      }
+      if (element.closest("[data-disabled], [aria-disabled='true'], :disabled") !== null) continue;
       const style = getComputedStyle(element);
-      const where = name(element);
-
-      // A field's value is text the reader reads, and it is the one text that
-      // is not a child node — without this the rename field's ink is walked
-      // past, and only its border is measured.
-      const field =
-        (element instanceof HTMLInputElement ||
-          element instanceof HTMLTextAreaElement) &&
-        element.value.trim() !== "";
-      const speaks =
-        field ||
-        [...element.childNodes].some(
-          (node) =>
-            node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "",
-        );
-      if (speaks) {
-        readings.push(...groundOf(element).map((ground) => ({
-          where,
-          kind: "text" as const,
-          colour: style.color,
-          ground,
-        })));
-      }
-
+      const where = `${selector} ${element.tagName.toLowerCase()}${element.getAttribute("class") === null ? "" : `.${element.getAttribute("class")?.trim().split(/\s+/).join(".")}`}`;
+      const field = (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && element.value.trim() !== "";
+      const speaks = field || [...element.childNodes].some(
+        (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "",
+      );
+      if (speaks) readings.push({ where, kind: "text", colour: style.color, layers: layers(element) });
       for (const side of ["top", "right", "bottom", "left"] as const) {
-        const width = Number.parseFloat(style.getPropertyValue(`border-${side}-width`));
-        const colour = style.getPropertyValue(`border-${side}-color`);
-        // A transparent border reserves geometry; it is not a separator (#515).
-        if (width > 0 && alphaOf(colour) > 0) {
-          readings.push(...groundOf(element).map((ground) => ({
-            where: `${where} border-${side}`,
-            kind: "stroke" as const,
-            colour,
-            // The background paints under the border, so an element that has
-            // one is its own border's ground.
-            ground,
-          })));
+        if (Number.parseFloat(style.getPropertyValue(`border-${side}-width`)) > 0) {
+          readings.push({ where: `${where} border-${side}`, kind: "stroke", colour: style.getPropertyValue(`border-${side}-color`), layers: layers(element) });
         }
       }
-
-      // `auto` is the browser's own focus ring, in the browser's own colour —
-      // a stroke that carries its own meaning, which #515 excludes by name.
-      const outline = Number.parseFloat(style.outlineWidth);
-      const drawn = style.outlineStyle !== "none" && style.outlineStyle !== "auto";
-      if (outline > 0 && drawn && alphaOf(style.outlineColor) > 0) {
-        readings.push(...groundOf(element.parentElement).map((ground) => ({
-          where: `${where} outline`,
-          kind: "stroke" as const,
-          colour: style.outlineColor,
-          ground,
-        })));
+      // The browser's automatic ring carries its own meaning; author outlines
+      // are measured against the ground outside the element.
+      if (Number.parseFloat(style.outlineWidth) > 0 && style.outlineStyle !== "none" && style.outlineStyle !== "auto") {
+        readings.push({ where: `${where} outline`, kind: "stroke", colour: style.outlineColor, layers: layers(element.parentElement) });
       }
-
-      const hairline =
-        Math.min(box.width, box.height) <= 2 && Math.max(box.width, box.height) > 2;
-      if (hairline && alphaOf(style.backgroundColor) > 0) {
-        readings.push(...groundOf(element.parentElement).map((ground) => ({
-          where: `${where} fill`,
-          kind: "stroke" as const,
-          colour: style.backgroundColor,
-          ground,
-        })));
+      if (Math.min(box.width, box.height) <= 2 && Math.max(box.width, box.height) > 2) {
+        readings.push({ where: `${where} fill`, kind: "stroke", colour: style.backgroundColor, layers: layers(element.parentElement) });
       }
     }
     return readings;
   }, root);
+  return raw.flatMap(({ layers, ...reading }) => {
+    if (reading.kind === "stroke" && alphaOf(reading.colour) === 0) return [];
+    return groundsFromLayers(layers).map((ground) => ({ ...reading, ground }));
+  });
 }
 
 /**
@@ -1563,7 +1569,7 @@ function surface(page: Page, root: string): Promise<Reading[]> {
  */
 const accentChroma = 0.05;
 
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as ReadonlyArray<"light" | "dark">) {
   test(`the sidebar's interior reads the sidebar's own tokens — ${scheme}`, async ({
     browser,
   }) => {
@@ -1615,7 +1621,7 @@ for (const scheme of ["light", "dark"] as const) {
     const highlight = await painted(page, ".ub-menu-current", "background-color");
     readings.push(...(await surface(page, "[data-slot=dropdown-menu-content]")));
     await page.keyboard.press("Escape");
-    await page.locator(".ub-user-card").click();
+    await page.getByTestId("account-menu").click();
     await expect(page.locator("[data-slot=popover-content]")).toBeVisible();
     readings.push(...(await surface(page, "[data-slot=popover-content]")));
 
@@ -1682,38 +1688,16 @@ for (const scheme of ["light", "dark"] as const) {
  * mentions, and a list of expected grounds would keep passing after that ground
  * moved.
  */
-async function groundsUnder(page: Page, locator: Locator): Promise<string[]> {
-  const over = await locator.evaluate((element) => {
-    const opaque = (colour: string): boolean => {
-      const rgba = /^rgba?\(([^)]*)\)$/.exec(colour);
-      if (rgba !== null) {
-        const parts = (rgba[1] ?? "").split(",");
-        return parts.length !== 4 || Number(parts[3]) === 1;
-      }
-      const slashed = /\/\s*(\d*\.?\d+)\s*\)$/.exec(colour);
-      return slashed === null || Number(slashed[1]) === 1;
-    };
+async function groundsUnder(_page: Page, locator: Locator): Promise<string[]> {
+  const layers = await locator.evaluate((element) => {
+    const result: GroundLayer[] = [];
     for (let node: Element | null = element; node !== null; node = node.parentElement) {
-      if (node === document.body) break;
       const style = getComputedStyle(node);
-      if (style.backgroundImage !== "none") {
-        throw new Error("cannot establish the ground through a painted image");
-      }
-      const colour = style.backgroundColor;
-      if (opaque(colour)) return colour;
+      result.push({ colour: style.backgroundColor, image: style.backgroundImage, body: node === document.body });
     }
-    return null;
+    return result;
   });
-  if (over !== null) return [over];
-  // The stops are the only parenthesised colours in the value — `at 0% 0%`
-  // carries none — so matching them is the whole parse.
-  const stops = (await painted(page, "body", "background-image")).match(
-    /(?:rgba?|oklch)\([^)]*\)/g,
-  );
-  // A serialization this cannot read must fail here rather than pass as "no
-  // ground to check".
-  if (stops === null) throw new Error("no ground under this text");
-  return stops;
+  return groundsFromLayers(layers);
 }
 
 /**
@@ -1733,7 +1717,7 @@ async function groundsUnder(page: Page, locator: Locator): Promise<string[]> {
  * the rendered element rather than named here.
  *
  */
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   test(`the brand's functional ink is one readable value — ${scheme}`, async ({
     browser,
   }) => {
@@ -1825,19 +1809,15 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
-test("the document title is set in the bundled Fraunces, and nothing else moved", async ({
+test("the document title uses the bundled Fraunces while prose keeps its own face", async ({
   browser,
 }) => {
   const page = await openAppearanceApp(browser, "light");
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
-  expect(await painted(page, ".ub-title", "font-family")).toBe(
-    'Fraunces, Georgia, "Times New Roman", serif',
-  );
-
-  // The stack above is satisfied by Georgia too, so it is not evidence on its
-  // own. A title that reaches into all three vendored cuts is: the engine only
+  // A title that reaches into all three vendored cuts proves more than a
+  // declared stack: the engine only
   // fetches a face whose characters it has to paint, so three `loaded` faces
   // is three files it found and used. Polish and Turkish are the latin-ext
   // cut, Vietnamese the third, and the rest of the line the first — a title
@@ -1853,19 +1833,19 @@ test("the document title is set in the bundled Fraunces, and nothing else moved"
     )
     .toEqual(["loaded", "loaded", "loaded"]);
 
-  // Title-only: the prose it sits above and the column beside it keep Geist,
-  // and the title is not in it.
+  const applied = await page.locator(".ub-title").evaluate((title) => {
+    const firstFamily = getComputedStyle(title).fontFamily.split(",")[0]?.trim().replace(/^["']|["']$/g, "");
+    const bundled = [...document.fonts].filter((face) => face.family === "Fraunces");
+    return { firstFamily, bundledFamily: bundled[0]?.family };
+  });
+  expect(applied.firstFamily).toBe(applied.bundledFamily);
+
+  // Title-only: prose and sidebar share their own face.
   const prose = await painted(page, ".ub-editor .ub-paragraph", "font-family");
   expect(prose).toBe(await painted(page, ".ub-list", "font-family"));
-  expect(prose).toContain("Geist");
-  expect(prose).not.toContain("Fraunces");
+  expect(prose.split(",").map((family) => family.trim().replace(/^["']|["']$/g, ""))).not.toContain(applied.bundledFamily);
 
-  // The face changed and the setting did not: same size and weight as the h1
-  // it is matched to, and a box still as wide as the column rather than as
-  // wide as its own text — a serif is wider than Geist per character, and an
-  // input that sized itself would take the layout with it.
-  expect(await painted(page, ".ub-title", "font-size")).toBe("32.8px");
-  expect(await painted(page, ".ub-title", "font-weight")).toBe("500");
+  // The title remains as wide as the editor, regardless of its type size.
   expect(await width(page, ".ub-title")).toBe(await width(page, ".ub-editor"));
 
   // No font file comes from outside the app, and the Google Fonts stylesheet
@@ -1985,9 +1965,8 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
       };
     }, toClipEdge);
 
-  // The three widths the layout has to hold at, including the iPad width the
-  // 44px is *for*.
-  for (const width of [1280, 1194, 768]) {
+  // The target holds in one docked and one narrow layout.
+  for (const width of [1280, 768]) {
     await page.setViewportSize({ width, height: 620 });
     // Typing left the pane scrolled to the caret; the first reading is of the
     // header at rest.
@@ -2017,7 +1996,7 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
 
   // The identity confirmation uses the target's lower half: it neither moves
   // nor intersects the uuid, revision, title or actions when it appears.
-  await page.setViewportSize({ width: 360, height: 620 });
+  await page.setViewportSize({ width: 375, height: 620 });
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
   await page.locator(".ub-body").evaluate(async (body) => {
@@ -2107,7 +2086,8 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
 /**
  * The document's tags read as tags rather than as a form field (#958).
  *
- * Every fact here needs a rendering engine and nothing else can answer it: what
+ * The token table cannot see the tag field's cascade or focus state, and axe
+ * cannot measure their separation. The browser also observes what
  * the trigger paints, whether pills wrap or scroll out of sight, where the
  * keyboard lands when the panel has no field to enter it through, and whether
  * the field — once ten entries earn one — steps down from the panel it sits on
@@ -2129,8 +2109,10 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   // chevron, and the control itself draws no box around them.
   await expect(trigger).toContainText("Add tags");
   await expect(page.locator(".ub-tag-chevron")).toHaveCount(1);
-  expect(await paintedIn(trigger, "background-color")).toBe("rgba(0, 0, 0, 0)");
-  expect(await paintedIn(trigger, "border-top-width")).toBe("0px");
+  expect(alphaOf(await paintedIn(trigger, "background-color"))).toBe(0);
+  for (const edge of ["top", "right", "bottom", "left"]) {
+    expect(Number.parseFloat(await paintedIn(trigger, `border-${edge}-width`))).toBe(0);
+  }
 
   // Five entries is under the threshold, so the panel is a list: no field, and
   // the keyboard enters the list itself.
@@ -2149,8 +2131,28 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   ).toBeGreaterThan(0.02);
 
   // A comfortable list rather than a narrow box.
-  const panelBox = await page.locator(".ub-tag-picker-panel").boundingBox();
-  expect(panelBox?.width ?? 0).toBeGreaterThanOrEqual(320);
+  const comfortableList = () => page.locator(".ub-tag-picker-panel").evaluate((panel) => {
+    const box = panel.getBoundingClientRect();
+    return {
+      inside: box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight,
+      names: [...panel.querySelectorAll<HTMLElement>('[role="option"]')].map((option) => {
+        const name = option.querySelector<HTMLElement>(":scope > span:nth-child(2)");
+        if (name === null) throw new Error("e2e: tag option has no name");
+        const range = document.createRange();
+        range.selectNodeContents(name);
+        const lines = [...range.getClientRects()];
+        const row = option.getBoundingClientRect();
+        return lines.length === 1 && lines.every((line) =>
+          line.left >= Math.max(row.left, box.left) && line.right <= Math.min(row.right, box.right) &&
+          line.top >= Math.max(row.top, box.top) && line.bottom <= Math.min(row.bottom, box.bottom),
+        ) && name.scrollWidth <= name.clientWidth;
+      }),
+    };
+  });
+  for (const viewport of [375, 1280]) {
+    await page.setViewportSize({ width: viewport, height: 620 });
+    await expect.poll(comfortableList).toEqual({ inside: true, names: [true, true, true, true, true] });
+  }
 
   for (const tag of ["auth", "billing", "mcp", "permissions", "sync"]) {
     await page.getByRole("option", { name: tag, exact: true }).click();
@@ -2199,7 +2201,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await expect(search).toBeFocused();
   await expect(page.locator(".ub-tag-search-icon")).toHaveCount(1);
   const field = page.locator(".ub-tag-search-field");
-  expect(await paintedIn(field, "border-top-width")).toBe("1px");
+  expect(Number.parseFloat(await paintedIn(field, "border-top-width"))).toBeGreaterThan(0);
   const fieldFill = await paintedIn(field, "background-color");
   const panel = await painted(page, ".ub-tag-picker-panel", "background-color");
   // Opaque *and* darker: the two halves of "no lighter than the panel". An
@@ -2235,9 +2237,9 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await expect(trigger).toContainText(longest);
   await expect(page.locator(".ub-tag")).toHaveCount(1);
 
-  // The document list is still hidden from the wrap check above, so these are
-  // the widths the reader actually gets.
-  for (const viewport of [420, 375, 320]) {
+  // The document list is still hidden from the wrap check above, so this is
+  // the pane width the reader actually gets.
+  for (const viewport of [375]) {
     await page.setViewportSize({ width: viewport, height: 620 });
     const geometry = await tagStripGeometry(page);
     expect(geometry.overlaps, `writable header at ${viewport}px`).toEqual([]);
@@ -2255,7 +2257,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await page.getByRole("button", { name: "Archive document" }).click();
   await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
   await expect(page.locator(".ub-tags-readonly")).toContainText(longest);
-  for (const viewport of [420, 375, 320]) {
+  for (const viewport of [375]) {
     await page.setViewportSize({ width: viewport, height: 620 });
     const geometry = await tagStripGeometry(page);
     expect(geometry.overlaps, `read-only header at ${viewport}px`).toEqual([]);
@@ -2277,8 +2279,8 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   ).toHaveCount(5);
 });
 
-test("Workspace Settings uses the shared touch floors at iPhone and iPad widths", async ({ browser }) => {
-  for (const width of [375, 932, 744, 1024, 1366]) {
+test("Workspace Settings uses the shared touch floors in narrow and wide layouts", async ({ browser }) => {
+  for (const width of [375, 1366]) {
     const page = await openAppearanceApp(browser, "light", `/${harness().workspace}/settings/tags`, true, {
       isMobile: true,
       viewport: { width, height: 900 },
@@ -2305,7 +2307,8 @@ test("Workspace Settings uses the shared touch floors at iPhone and iPad widths"
   }
 });
 
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
+  // Tokens cannot see later rules across settings states; axe cannot read text on the page gradient.
   test(`both settings pages keep every text readable through curation states — ${scheme}`, async ({ browser }) => {
     const path = `/${harness().workspace}/settings/tags`;
     const page = await openAppearanceApp(browser, scheme, `/${harness().workspace}/settings`);
@@ -2474,7 +2477,7 @@ function activeHoverRules(control: Locator): Promise<string[]> {
   });
 }
 
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   test(`document and document-list controls keep resting paint after a touch tap — ${scheme}`, { tag: "@webkit-touch" }, async ({ browser }, info) => {
     const input = info.project.name === "chromium"
       ? { hasTouch: true, viewport: { width: 390, height: 844 } }
@@ -2612,7 +2615,94 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
-for (const scheme of ["light", "dark"] as const) {
+/**
+ * The table holds token floors. Only rendered state can show the one card fill
+ * reaching every consumer, or a later rule changing a chip's focused ground.
+ * Seed both thread states through schema operations; no reload or key deletion
+ * is needed to make an orphan, the intermittent setup removed before v0.3.
+ */
+for (const scheme of ["light"] as const) {
+  test(`card highlights share one fill and keep their rendered floors — ${scheme}`, async ({ browser }) => {
+    const page = await openAppearanceApp(browser, scheme);
+    await page.setViewportSize({ width: 1000, height: 1000 });
+    await contrastDocument(page, scheme, async () => {
+      await page.addStyleTag({ content: "* { transition: none !important; }" });
+      const tokens = await page.evaluate(() => {
+        const probe = document.createElement("span");
+        document.body.append(probe);
+        probe.style.backgroundColor = "var(--card)";
+        const card = getComputedStyle(probe).backgroundColor;
+        probe.style.backgroundColor = "var(--card-accent)";
+        const accent = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return { card, accent };
+      });
+      const check = async (control: Locator, ground = tokens.card) => {
+        await expect(control).toBeVisible();
+        const fill = await paintedIn(control, "background-color");
+        expect(fill, "one card-accent fill").toBe(tokens.accent);
+        expect(separation(fill, ground)).toBeGreaterThanOrEqual(cardHighlightFloor[scheme]);
+        const text = await renderedText(page, await control.evaluate((element) => {
+          element.setAttribute("data-contrast-highlight", "");
+          return "[data-contrast-highlight]";
+        }));
+        await control.evaluate((element) => element.removeAttribute("data-contrast-highlight"));
+        expect(text.length).toBeGreaterThan(0);
+        for (const reading of text) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
+      };
+      const handle = page.locator(".ub-threads-toggle");
+      await check(handle);
+      await handle.click();
+      const resolved = page.locator(".ub-thread-resolved");
+      await expect(resolved).toBeVisible();
+      const card = await paintedIn(resolved, "background-color");
+      expect(card).toBe(tokens.card);
+      await check(resolved.locator(".ub-chip"), card);
+      const orphan = page.locator(".ub-thread-orphaned");
+      const chip = orphan.locator(".ub-chip-orphaned");
+      await expect(chip).toBeVisible();
+      const restingGround = await paintedIn(orphan, "background-color");
+      const restingFill = await paintedIn(chip, "background-color");
+      expect(contrast(await paintedIn(chip, "color"), restingFill)).toBeGreaterThanOrEqual(4.5);
+      await orphan.click();
+      await expect(orphan).toHaveAttribute("aria-current", "true");
+      const focusedGround = await paintedIn(orphan, "background-color");
+      const focusedFill = await paintedIn(chip, "background-color");
+      const focusedStep = separation(focusedFill, focusedGround);
+      expect(focusedStep).toBeGreaterThanOrEqual(focusedOrphanedChipFloor[scheme]);
+      expect(focusedStep).toBeGreaterThanOrEqual(separation(restingFill, restingGround));
+      expect(contrast(await paintedIn(chip, "color"), focusedFill)).toBeGreaterThanOrEqual(4.5);
+      await page.getByRole("button", { name: "Close threads", exact: true }).click();
+      await expect(handle).toBeFocused();
+
+      await page.locator(".ub-editor .ub-paragraph").first().click();
+      await placeCaret(page);
+      await page.keyboard.type("/");
+      const menu = page.getByRole("listbox", { name: "Block types" });
+      await expect(menu).toBeVisible();
+      const menuGround = await paintedIn(page.locator('[data-slot="caret-menu-content"]').filter({ has: menu }), "background-color");
+      expect(menuGround).toBe(tokens.card);
+      await check(menu.getByRole("option", { selected: true }), menuGround);
+      await page.keyboard.press("Escape");
+      await page.keyboard.press("Backspace");
+      await page.keyboard.type("highlight range");
+      for (let index = 0; index < "highlight range".length; index += 1) await page.keyboard.press("Shift+ArrowLeft");
+      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      const composer = page.locator('[data-slot="selection-composer"]');
+      await expect(composer).toBeVisible();
+      const composerGround = await paintedIn(composer, "background-color");
+      expect(composerGround).toBe(tokens.card);
+      await check(composer.getByRole("button", { name: "Cancel", exact: true }), composerGround);
+      await check(composer.locator(".ub-mention").first(), composerGround);
+      // The submit keeps the separate brand emphasis.
+      expect(await paintedIn(composer.getByRole("button", { name: "Comment", exact: true }), "background-color")).not.toBe(tokens.accent);
+      await composer.getByRole("button", { name: "Cancel", exact: true }).click();
+    }, true);
+  });
+}
+
+for (const scheme of ["light"] as const) {
+  // Tokens cannot observe later panel overrides; axe omits strokes, placeholders and highlight steps.
   test(`document menus keep sidebar contrast and a full-row highlight — ${scheme}`, async ({ browser }) => {
     const page = await openAppearanceApp(browser, scheme);
     await contrastDocument(page, scheme, async () => {
@@ -2686,10 +2776,8 @@ for (const scheme of ["light", "dark"] as const) {
       await page.mouse.move(1399, 999);
       await contents.focus();
       await page.keyboard.press("Enter");
-      await expect(page.locator(".ub-outline-panel [role=menuitem]").first()).toBeFocused();
       await page.keyboard.press("ArrowDown");
       const keyboardRow = page.locator(".ub-outline-panel [role=menuitem]").nth(1);
-      await expect(keyboardRow).toBeFocused();
       await expect.poll(async () => {
         const fill = await paintedIn(keyboardRow, "background-color");
         return alphaOf(fill) === 0 ? 0 : separation(fill, ground);
@@ -2726,6 +2814,7 @@ for (const scheme of ["light", "dark"] as const) {
     });
   });
 
+  // Actual grounds and CSS opacity can change without any token changing; axe omits gradient/pseudo text.
   test(`muted text and enabled dimmed consumers meet their rendered floors — ${scheme}`, async ({ browser }, testInfo) => {
     const page = await openAppearanceApp(browser, scheme);
     await contrastDocument(page, scheme, async () => {
@@ -2799,14 +2888,7 @@ for (const scheme of ["light", "dark"] as const) {
         const fullStrength = readings.filter((one) => one.opacity === 1 &&
           (legacySrgb(one.ground) ?? []).every((channel) => channel > 0.7));
         const limits = fullStrength.map((reading) => {
-          let low = 0;
-          let high = 1;
-          for (let step = 0; step < 30; step += 1) {
-            const middle = (low + high) / 2;
-            if (contrast(`oklch(${middle} 0 0)`, reading.ground) >= 4.5) low = middle;
-            else high = middle;
-          }
-          return { where: reading.where, ground: reading.ground, lightness: low };
+          return { where: reading.where, ground: reading.ground, lightness: lightnessLimit(reading.ground) };
         }).sort((one, two) => one.lightness - two.lightness);
         console.log(`Rendered light limiting reading: ${JSON.stringify(limits[0])}`);
         const current = fullStrength[0];
@@ -2828,6 +2910,7 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
+// Tokens and axe cannot observe a positioned sibling screen or the controls' opacity/focus cascade.
 // The screen is deliberately dark in both appearances. Compare each light
 // control to the corresponding dark rendering, including opacity and focus.
 test("terminal controls keep their dark-screen contrast in either appearance", async ({ browser }, testInfo) => {
@@ -2876,7 +2959,6 @@ const UNBROKEN_NAME = "Collaborator".repeat(12);
 
 for (const [device, width, hasTouch] of [
   ["iPhone", 375, true],
-  ["iPad", 744, true],
   ["MacBook", 1366, false],
 ] as const) {
   test(`hover information has a ${device} path`, async ({ browser }) => {

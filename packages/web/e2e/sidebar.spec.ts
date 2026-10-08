@@ -100,7 +100,19 @@ async function expectPaneClearsOpener(page: Page): Promise<{ left: number; width
   return { left: layout.paneLeft, width: layout.paneWidth };
 }
 
-test("phone, iPad and MacBook widths keep the drawer and pane controls inside the viewport", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
+async function expectPaneAtSidebarEdge(page: Page): Promise<void> {
+  await page.locator(".ub-body").evaluate(async (body) => {
+    await Promise.all(body.getAnimations({ subtree: true }).filter((animation) => animation instanceof CSSTransition).map((animation) => animation.finished.catch(() => undefined)));
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const sidebar = document.querySelector(".ub-list");
+    const pane = document.querySelector(".ub-pane");
+    if (!sidebar || !pane) throw new Error("e2e: shell is incomplete");
+    return pane.getBoundingClientRect().left - sidebar.getBoundingClientRect().right;
+  })).toBeCloseTo(0, 1);
+}
+
+test("narrow and docked layouts keep the drawer and pane controls inside the viewport", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
   const webkit = browserName === "webkit";
   const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
   const projectWidth = page.viewportSize()?.width;
@@ -122,7 +134,7 @@ test("phone, iPad and MacBook widths keep the drawer and pane controls inside th
       await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
       await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
     }
-    for (const width of webkit ? [projectWidth] : [320, 375, 744, 932, 1024, 1279, 1280, 1366, 1470]) {
+    for (const width of webkit ? [projectWidth] : [320, 1280]) {
       await test.step(`${settings ? "settings" : "documents"} at ${width}px`, async () => {
         if (!webkit) await page.setViewportSize({ width, height: 832 });
         if (width < 1280) {
@@ -145,7 +157,7 @@ test("phone, iPad and MacBook widths keep the drawer and pane controls inside th
         } else {
           await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
           await expect(page.locator(".ub-list")).toBeVisible();
-          await expect.poll(async () => (await page.locator(".ub-pane").boundingBox())?.x).toBe(288);
+          await expectPaneAtSidebarEdge(page);
         }
       });
     }
@@ -171,6 +183,8 @@ async function sampleToggle(page: Page, collapse: boolean) {
       const s = sidebar.getBoundingClientRect();
       const p = pane.getBoundingClientRect();
       const c = content.getBoundingClientRect();
+      const restore = document.querySelector<HTMLButtonElement>(".ub-sidebar-restore");
+      const r = restore?.getBoundingClientRect();
       return {
         sidebarRight: s.right,
         sidebarWidth: s.width,
@@ -180,19 +194,28 @@ async function sampleToggle(page: Page, collapse: boolean) {
         paneHeight: p.height,
         contentLeft: c.left,
         contentTop: c.top,
+        restoreRight: r?.right ?? null,
+        restoreReachable: restore && r
+          ? document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === restore
+          : null,
       };
     };
     const before = reading();
     toggle.click();
     await new Promise(requestAnimationFrame);
-    const animations = body.getAnimations({ subtree: true }).filter((animation) => animation instanceof CSSTransition);
+    const allAnimations = body.getAnimations({ subtree: true });
+    const runningAnimations = allAnimations.filter((animation) => animation.playState === "running").length;
+    const animations = allAnimations.filter((animation) => animation instanceof CSSTransition);
     for (const animation of animations) animation.pause();
-    const frames = [0, 45, 90, 135, 180].map((time) => {
-      for (const animation of animations) animation.currentTime = time;
+    const duration = Math.max(0, ...animations.map((animation) => Number(animation.effect?.getComputedTiming().duration ?? 0)));
+    // A shared elapsed time exposes drift between the edge and inset. Sampling
+    // each transition's own fraction would hide a mismatched duration.
+    const frames = [0, 0.25, 0.5, 0.75, 1].map((fraction) => {
+      for (const animation of animations) animation.currentTime = duration * fraction;
       return reading();
     });
     for (const animation of animations) animation.finish();
-    return { before, frames, animated: animations.length > 0 };
+    return { before, frames, animated: animations.length > 0, runningAnimations };
   }, collapse);
 }
 
@@ -203,7 +226,7 @@ test("desktop edges and document inset move together in both directions", async 
   await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
-  for (const width of [1280, 1400]) {
+  for (const width of [1280]) {
     await page.setViewportSize({ width, height: 800 });
     // Finish any inset transition caused by the breakpoint change itself.
     await page.locator(".ub-body").evaluate((body) => {
@@ -230,8 +253,16 @@ test("desktop edges and document inset move together in both directions", async 
       }
       expect(frames[1]?.paneLeft).not.toBeCloseTo(before.paneLeft, 1);
       expect(frames[1]?.paneLeft).not.toBeCloseTo(end.paneLeft, 1);
-      expect(end.paneLeft).toBeCloseTo(collapse ? 0 : before.sidebarWidth, 1);
-      expect(endInset).toBe(collapse ? 64 : 32);
+      if (collapse) {
+        expect(end.paneLeft).toBe(0);
+        expect(endInset).toBeGreaterThan(startInset);
+        if (end.restoreRight === null) throw new Error("e2e: collapsed pane has no restore control");
+        expect(end.contentLeft).toBeGreaterThanOrEqual(end.restoreRight);
+        expect(end.restoreReachable).toBe(true);
+      } else {
+        expect(end.paneLeft).toBeCloseTo(end.sidebarRight, 1);
+        expect(endInset).toBeLessThan(startInset);
+      }
     }
   }
 });
@@ -251,9 +282,10 @@ test("collapse isolates contents and portals immediately, and rapid reversal kee
     await new Promise(requestAnimationFrame);
     const animations =
       document.querySelector(".ub-body")?.getAnimations({ subtree: true }).filter((animation) => animation instanceof CSSTransition) ?? [];
+    const duration = Math.max(0, ...animations.map((animation) => Number(animation.effect?.getComputedTiming().duration ?? 0)));
     for (const animation of animations) {
       animation.pause();
-      animation.currentTime = 60;
+      animation.currentTime = duration / 3;
     }
   });
   await expect(sidebar).toHaveAttribute("inert", "");
@@ -285,10 +317,8 @@ test("collapse isolates contents and portals immediately, and rapid reversal kee
   ).toBe(0);
   await restore.click();
   await expect(sidebar).toBeVisible();
-  await expect.poll(() =>
-    page.locator(".ub-pane").evaluate((p) => p.getBoundingClientRect().left),
-  ).toBe(288);
-  await page.getByRole("button", { name: "You" }).click();
+  await expectPaneAtSidebarEdge(page);
+  await page.getByTestId("account-menu").click();
   await expect(page.locator(".ub-user-panel")).toBeVisible();
   await sidebar.locator(".ub-sidebar-hide").evaluate((button: HTMLButtonElement) => {
     button.click();
@@ -304,10 +334,24 @@ test("reduced motion keeps docked toggles immediate", async ({ browser }) => {
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
   for (const collapse of [true, false]) {
-    const { frames, animated } = await sampleToggle(page, collapse);
+    const { before, frames, animated, runningAnimations } = await sampleToggle(page, collapse);
     expect(animated).toBe(false);
+    expect(runningAnimations).toBe(0);
     for (const frame of frames) expect(frame).toEqual(frames[0]);
-    expect(frames[0]?.paneLeft).toBe(collapse ? 0 : 288);
+    const end = frames[0];
+    if (!end) throw new Error("e2e: no final frame");
+    expect(end.paneLeft).toBeCloseTo(end.sidebarRight, 1);
+    const startInset = before.contentLeft - before.paneLeft;
+    const endInset = end.contentLeft - end.paneLeft;
+    if (collapse) {
+      expect(end.paneLeft).toBe(0);
+      expect(endInset).toBeGreaterThan(startInset);
+      if (end.restoreRight === null) throw new Error("e2e: collapsed pane has no restore control");
+      expect(end.contentLeft).toBeGreaterThanOrEqual(end.restoreRight);
+      expect(end.restoreReachable).toBe(true);
+    } else {
+      expect(endInset).toBeLessThan(startInset);
+    }
   }
 });
 

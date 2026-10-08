@@ -1,37 +1,45 @@
+// @vitest-environment node
 /**
- * The bundle carries no secret — proved against a bundle, not against a config.
+ * What a build emits — proved against a bundle, not against a config.
  *
- * The signing secret used to be a `define`, so it was in every built asset;
- * since #426 it is served at runtime instead. That is the single change that
- * lets the image be published, and nothing else in the suite would notice it
- * being undone: `mise run test` builds nothing, and re-adding one line to
- * `vite.config.ts` would put the secret back with every other test still green.
+ * The bundle carries no secret. The signing secret used to be a `define`, so
+ * it was in every built asset; since #426 it is served at runtime instead.
+ * That is the single change that lets the image be published, and nothing else
+ * in the suite would notice it being undone: `mise run test` builds nothing,
+ * and re-adding one line to `vite.config.ts` would put the secret back with
+ * every other test still green.
  *
- * So this test performs the build. One build of the real app, with a sentinel
- * secret in the environment exactly where `mise run build-web` and the
- * Dockerfile put the real one, and the output is searched for it — Docker and
- * `ub open` both invoke the same `pnpm --filter @uberblick/web build`, so there
- * is one bundle to defend, not two. Its negative control re-injects the define
- * through the same `build()` API and asserts the search finds *that*: a scan
- * that cannot fail proves nothing.
+ * So this file performs the build. One build of the real app, with a sentinel
+ * secret in the environment where `mise run build-web` and `ub open` build,
+ * and the output is searched for it. The release payload also uses Vite's
+ * build pipeline, so the guard covers its assets too. The negative control
+ * re-injects the define through the same `build()` API and asserts the search
+ * finds *that*: a scan that cannot fail proves nothing.
  *
  * Not a generic entropy detector. It looks for one known string and one known
  * identifier, which is what makes its verdict trustworthy rather than
  * suggestive. `vite` is a devDependency, so this is honest under
  * `--network none`.
  *
- * That one build is also where the protocol stamp is checked (#452). It is the
- * only real build in any suite, and a stamp asserted against a fixture would
- * prove nothing about what Vite emits — which is the whole claim `ub open`
- * rests its refusal on.
+ * That one build is also where the protocol stamp is checked (#452) and where
+ * the font licenses are found beside the faces they cover. A stamp asserted
+ * against a fixture would prove nothing about what Vite emits — which is the
+ * whole claim `ub open` rests its refusal on.
+ *
+ * The release build is the other configuration: `UBERBLICK_RELEASE_WEB=1`
+ * compiles in no deployment value at all, so it is built on its own, as a
+ * library of the one module that reads them.
+ *
+ * Node rather than jsdom: nothing here renders.
  */
 
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "vite";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -54,6 +62,22 @@ const SENTINEL = "uberblick-bundle-scan-sentinel-1f4c9a";
  */
 const DEFINE = `__HUB_AUTH${"_TOKEN__"}`;
 
+/**
+ * Every vendored face and the OFL text that has to travel with it. Geist ships
+ * as two files under one license; Fraunces is its own (#536). The OFL requires
+ * its text to accompany the font software wherever the font is distributed —
+ * a built `dist/` included — and `public/` is how it gets there. A face added
+ * without its license, or a license deleted from under a face, is the
+ * regression this defends.
+ */
+const bundledFonts = [
+  { woff2: "Geist-Variable.woff2", license: "LICENSE-Geist.txt" },
+  { woff2: "GeistMono-Variable.woff2", license: "LICENSE-Geist.txt" },
+  { woff2: "Fraunces-Variable-latin.woff2", license: "LICENSE-Fraunces.txt" },
+  { woff2: "Fraunces-Variable-latin-ext.woff2", license: "LICENSE-Fraunces.txt" },
+  { woff2: "Fraunces-Variable-vietnamese.woff2", license: "LICENSE-Fraunces.txt" },
+];
+
 const temporary: string[] = [];
 
 function scratch(): string {
@@ -62,7 +86,7 @@ function scratch(): string {
   return dir;
 }
 
-afterEach(() => {
+afterAll(() => {
   for (const dir of temporary.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -104,9 +128,11 @@ async function withSecretInEnvironment(run: () => Promise<void>): Promise<void> 
 }
 
 describe("the built web bundle", () => {
-  it("carries neither the secret in the build environment nor the define that used to inject it", async () => {
-    const outDir = scratch();
+  /** The one build of the real app every claim below reads. */
+  let outDir = "";
 
+  beforeAll(async () => {
+    outDir = scratch();
     await withSecretInEnvironment(async () => {
       await build({
         configFile: join(webRoot, "vite.config.ts"),
@@ -115,17 +141,31 @@ describe("the built web bundle", () => {
         build: { outDir, emptyOutDir: true },
       });
     });
+  }, 300_000);
 
+  it("carries neither the secret in the build environment nor the define that used to inject it", () => {
     // A build that emitted nothing would pass a scan trivially.
     expect(filesUnder(outDir).length).toBeGreaterThan(1);
     expect(leaks(outDir)).toEqual([]);
+  });
 
-    // And it stamps the protocol it speaks, which is what `ub open` refuses a
-    // stale bundle on. The value is the one the client itself compiles in.
+  it("stamps the protocol it speaks, which is what `ub open` refuses a stale bundle on", () => {
+    // The value is the one the client itself compiles in.
     expect(JSON.parse(readFileSync(join(outDir, "uberblick-build.json"), "utf8"))).toEqual({
       syncProtocolVersion: SYNC_PROTOCOL_VERSION,
     });
-  }, 300_000);
+  });
+
+  it("ships the OFL text beside every vendored face", () => {
+    const vendored = readdirSync(resolve(webRoot, "src/assets/fonts"));
+    expect(vendored.filter((f) => f.endsWith(".woff2")).sort()).toEqual(
+      bundledFonts.map((face) => face.woff2).sort(),
+    );
+
+    for (const { license } of bundledFonts) {
+      expect(readFileSync(join(outDir, license), "utf8")).toContain("SIL OPEN FONT LICENSE");
+    }
+  });
 
   it("would fail if a build put the define back", async () => {
     // The negative control. The real bundle no longer *mentions* the define, so
@@ -134,7 +174,7 @@ describe("the built web bundle", () => {
     // `build()` API, same scan.
     const fixture = scratch();
     writeFileSync(join(fixture, "main.js"), `console.log(${DEFINE});\n`, "utf8");
-    const outDir = join(fixture, "dist");
+    const fixtureOut = join(fixture, "dist");
 
     await build({
       configFile: false,
@@ -142,13 +182,69 @@ describe("the built web bundle", () => {
       logLevel: "error",
       define: { [DEFINE]: JSON.stringify(SENTINEL) },
       build: {
-        outDir,
+        outDir: fixtureOut,
         emptyOutDir: true,
         minify: false,
         rollupOptions: { input: join(fixture, "main.js") },
       },
     });
 
-    expect(leaks(outDir)).not.toEqual([]);
+    expect(leaks(fixtureOut)).not.toEqual([]);
   }, 120_000);
 });
+
+/** A released bundle gets every deployment value from its served document. */
+it("a release build has no endpoint or workspace fallback, and takes every deployment value from its served document", async () => {
+  const scratchRoot = process.env.UB_AGENTS_SCRATCH ?? tmpdir();
+  const run = process.env.UB_AGENTS_RUN ?? basename(dirname(scratchRoot));
+  const releaseDir = mkdtempSync(join(scratchRoot, `release-config-${run}-`));
+  const before = { ...process.env };
+  try {
+    process.env.UBERBLICK_RELEASE_WEB = "1";
+    process.env.HUB_URL = "wss://release-build-sentinel.invalid/ws";
+    process.env.WORKSPACE_ID = "release-build-workspace-sentinel";
+    process.env.WORKSPACES = "release-build-workspaces-sentinel";
+    writeFileSync(join(releaseDir, "entry.ts"), `export { readClientConfig } from ${JSON.stringify(join(webRoot, "src/config.ts"))};\n`);
+    const outDir = join(releaseDir, "dist");
+    await build({
+      configFile: join(webRoot, "vite.config.ts"), root: webRoot, logLevel: "error",
+      build: { outDir, emptyOutDir: true, minify: false,
+        lib: { entry: join(releaseDir, "entry.ts"), formats: ["es"], fileName: () => "config.mjs" } },
+    });
+    const output = readdirSync(outDir).filter((name) => name.endsWith(".mjs"))
+      .map((name) => readFileSync(join(outDir, name), "utf8")).join("\n");
+    expect(output).not.toContain("release-build-sentinel");
+    expect(output).not.toContain("release-build-workspace");
+    expect(output).not.toContain("ws://localhost:1234");
+    // Execute the emitted module with Node, outside Vitest's source transforms.
+    const executed = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      import { readClientConfig } from ${JSON.stringify(pathToFileURL(join(outDir, "config.mjs")).href)};
+      const missing = await readClientConfig(async () => new Response("missing", { status: 404 }));
+      const runtime = await readClientConfig(async () => new Response(JSON.stringify({
+        hubUrl: "wss://runtime.tailnet.ts.net/ws",
+        workspaces: ["00000000-0000-4000-8000-000000000001"],
+        hubAuthToken: "synthetic-runtime-token",
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      const invalid = await readClientConfig(async () => new Response(JSON.stringify({
+        hubUrl: "https://not-a-websocket.invalid/", workspaces: ["not-a-workspace"],
+        hubAuthToken: "synthetic-runtime-token",
+      }), { status: 200 }));
+      console.log(JSON.stringify({ missing, invalid, runtime }));
+    `], { encoding: "utf8", timeout: 10_000 });
+    expect(executed.status, executed.stderr).toBe(0);
+    const { missing, invalid, runtime } = JSON.parse(executed.stdout);
+    expect(missing.hubUrl).toBe("");
+    expect(missing.workspaces).toEqual([]);
+    expect(invalid.hubUrl).toBe("");
+    expect(invalid.workspaces).toEqual([]);
+    expect(runtime.hubUrl).toBe("wss://runtime.tailnet.ts.net/ws");
+    expect(runtime.hubUrlSource).toBe("document");
+    expect(runtime.hubAuthToken).toBe("");
+    expect(runtime.workspaces).toEqual(["00000000-0000-4000-8000-000000000001"]);
+    expect(runtime.workspacesSource).toBe("document");
+  } finally {
+    for (const key of Object.keys(process.env)) if (!(key in before)) delete process.env[key];
+    Object.assign(process.env, before);
+    rmSync(releaseDir, { recursive: true, force: true });
+  }
+}, 120_000);

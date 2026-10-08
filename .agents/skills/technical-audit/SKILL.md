@@ -55,13 +55,12 @@ full and follow it. A baseline is a deep architectural review, not one shallow
 check per lane. Incremental mode does not load that reference unless changed
 code invalidates the previous architecture map.
 
-Use live Uberblick MCP tools to list and read product documents relevant to the
-changed code and rotating lane. Every run reads Editorial contract
-(`5e0e25d8-c71f-44c3-9bf3-93662712c1fc`), Information types and sources of
-truth (`04e2b0aa-8dd5-4356-842e-554c1affe24f`), and Architecture
-(`d2d28f20-7c9a-4547-b65b-0fdf75a41dff`) plus current documents governing the
-sampled surface. Resolve titles, tags, and approximate `updatedAt` values from
-`list_docs`; UUID, never title, is identity.
+Discover live architecture, source-authority and corpus-authoring guidance by
+purpose, plus documents governing the sampled surface, using
+[AGENTS.md's discovery route](../../../AGENTS.md#read-for-the-action). Read relevant
+matches; do not assume a legacy page or tag exists. Local protocols govern workflow.
+Resolve titles, current tags and approximate `updatedAt` values from the catalog;
+use the discovered UUID as identity, never a title match.
 
 If MCP cannot provide required context, report the exact attempted operation
 and mark corpus alignment `incomplete`. Technical checks may continue, but do
@@ -95,11 +94,13 @@ Do not demand one-to-one documentation for internal mechanics. Report only a
 gap that could mislead a user or agent, hide an invariant, cause a wrong product
 choice, or make recovery materially harder.
 
-Check the mechanical half of Editorial contract on the documents the run reads
+Check discovered corpus-authoring rules on the documents the run reads
 and report it as lane-1 evidence: an undescribed document, an h1 block that
 repeats the title, a heading past h3, a paragraph far past the contract's
 length rule, a raw uuid typed as prose instead of a docLink, a dangling
 document link, or PR, issue and date citations in a non-decision document.
+If required editorial thresholds cannot be discovered, report that part as
+incomplete rather than invent thresholds or declare compliance.
 Attribute a provenance finding to the merge that appended it where history
 makes that derivable, because it measures whether that change's docs pass
 rewrote or appended.

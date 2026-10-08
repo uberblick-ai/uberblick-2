@@ -1,8 +1,7 @@
 /** The editor reads mention names, while its parent reads caret locations. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, render, type RenderResult } from "./react-render.js";
+import type { ReactElement } from "react";
 import * as Y from "yjs";
 import {
   applyAwarenessUpdate,
@@ -33,19 +32,14 @@ const selectThread = (): void => {};
 
 const docs: Y.Doc[] = [];
 const awarenesses: Awareness[] = [];
-let mounted: { root: Root; host: HTMLElement } | null = null;
+let mounted: RenderResult | null = null;
 
 beforeEach(() => {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   Element.prototype.scrollIntoView = function scrollIntoView() {};
 });
 
 afterEach(() => {
-  if (mounted !== null) {
-    act(() => mounted!.root.unmount());
-    mounted.host.remove();
-    mounted = null;
-  }
+  mounted = null;
   for (const awareness of awarenesses.splice(0)) awareness.destroy();
   for (const ydoc of docs.splice(0)) ydoc.destroy();
   vi.restoreAllMocks();
@@ -98,13 +92,9 @@ function cursorAt(connection: RoomConnection, block: number, offset = 0) {
   return { anchor: position, head: position };
 }
 
-function mount(element: Parameters<Root["render"]>[0]): HTMLElement {
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  act(() => root.render(element));
-  return host;
+function mount(element: ReactElement): HTMLElement {
+  mounted = render(element);
+  return mounted.container;
 }
 
 describe("the bound editor's awareness reading", () => {
@@ -184,13 +174,13 @@ describe("the bound editor's awareness reading", () => {
     mount(<Probe connection={first.connection} />);
     expect(seen.at(-1)).toEqual(["Before"]);
     const before = seen.length;
-    act(() => mounted!.root.render(<Probe connection={replacement.connection} />));
+    mounted!.rerender(<Probe connection={replacement.connection} />);
     expect(seen[before]).toEqual([]);
     expect(seen.at(-1)).toEqual(["After"]);
     const settled = seen.length;
     act(() => publish(first.awareness, peer, { user: { name: "Old source", color: "#345678" } }));
     expect(seen).toHaveLength(settled);
-    act(() => mounted!.root.render(<Probe connection={null} />));
+    mounted!.rerender(<Probe connection={null} />);
     expect(seen.at(-1)).toEqual([]);
   });
 });

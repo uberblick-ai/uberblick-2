@@ -1,7 +1,6 @@
-/** Credential and membership admission stay unwired until the client cutover. */
+/** Loopback admission retains the local shared-secret security model. */
 
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
@@ -138,17 +137,16 @@ beforeAll(async () => {
   });
 
   // This is the shared authenticator installed by ub open. It needs only its
-  // local secret and served workspace, without a registry or credential.
+  // local workspace key, without a registry or credential.
   localServer = new Server<HubContext>({
     port: 0,
     address: "127.0.0.1",
     quiet: true,
     stopOnSignals: false,
     onAuthenticate: await createRoomAuthenticator({
-      authSecret: TEST_SECRET,
+      workspaceKeys: new Map([[WORKSPACE, TEST_SECRET]]),
       protocolVersion: SYNC_PROTOCOL_VERSION,
       log: silentLogger,
-      servedWorkspace: WORKSPACE,
     }),
   });
   await localServer.listen();
@@ -182,7 +180,7 @@ function connect(
   return client;
 }
 
-describe("current admission is unchanged", () => {
+describe("loopback admission is unchanged", () => {
   it("claiming a fresh hub changes no live admission decisions", async () => {
     let now = 1000;
     const fresh = await createHub({ authSecret: TEST_SECRET, databasePath: tempDatabasePath(), address: "127.0.0.1", port: 0,
@@ -246,15 +244,4 @@ describe("current admission is unchanged", () => {
     const client = connect(localServer.address.port, WORKSPACE, issuedToken);
     await expect(client.denied).resolves.toBe("invalid-token");
   });
-});
-
-describe("no live credential or membership admission switch", () => {
-  it.each(["server.ts", "config.ts", "main.ts", "local-browser-server.ts"])(
-    "%s does not import credential admission",
-    (file) => {
-      const source = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8");
-      expect(source).not.toMatch(/(?:from\s+|import\s*\(?\s*)["']\.\/credential-admission(?:\.[^"']*)?["']/);
-      expect(source).not.toMatch(/(?:test-device-sync|device-sync-hub)/);
-    },
-  );
 });

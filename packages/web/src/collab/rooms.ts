@@ -89,10 +89,10 @@ let redialAfterDrop = false;
  * three at once — a fixed 5s window had every tab redialling in the same
  * millisecond, wave after wave, for as long as the hub kept doing it.
  *
- * The maximum stays at the 5s this used to be, because
- * `packages/web/test/reconnect.test.ts` derives its deadlines from it: a
- * suppressed close waits out at most one window before the trailing drop, and
- * lengthening that would invalidate the derivation rather than the test.
+ * The maximum stays at the 5s this used to be: a suppressed close waits out at
+ * most one window before the trailing drop. `packages/web/test/reconnect.test.ts`
+ * narrows the band through {@link setForcedDropCooldownForTesting} rather than
+ * waiting it out.
  */
 export const FORCED_DROP_COOLDOWN = { minMs: 2_500, maxMs: 5_000 } as const;
 
@@ -101,9 +101,26 @@ export const FORCED_DROP_COOLDOWN = { minMs: 2_500, maxMs: 5_000 } as const;
  * {@link FORCED_DROP_COOLDOWN}. The source is a parameter rather than a bare
  * `Math.random` so a test can state the band's ends instead of sampling it.
  */
-export function forcedDropCooldownMs(random: () => number = Math.random): number {
-  const { minMs, maxMs } = FORCED_DROP_COOLDOWN;
+export function forcedDropCooldownMs(
+  random: () => number = Math.random,
+  band: ForcedDropBand = FORCED_DROP_COOLDOWN,
+): number {
+  const { minMs, maxMs } = band;
   return Math.round(minMs + (maxMs - minMs) * random());
+}
+
+type ForcedDropBand = { readonly minMs: number; readonly maxMs: number };
+
+/** The band {@link dropSocket} draws from: {@link FORCED_DROP_COOLDOWN} in the app. */
+let forcedDropBand: ForcedDropBand = FORCED_DROP_COOLDOWN;
+
+/**
+ * Test seam: narrow the forced-drop band for this module instance, so a test
+ * of the deferral need not wait out seconds of real cooldown. Nothing in the
+ * app calls it.
+ */
+export function setForcedDropCooldownForTesting(band: ForcedDropBand): void {
+  forcedDropBand = band;
 }
 
 /**
@@ -241,36 +258,38 @@ function dropSocket(): void {
 
   cancelPendingDrop();
   lastForcedDrop = Date.now();
-  forcedDropWindowMs = forcedDropCooldownMs();
+  forcedDropWindowMs = forcedDropCooldownMs(Math.random, forcedDropBand);
   redialAfterDrop = true;
   current.disconnect();
 }
 
 /**
- * The signing key, imported once for the life of the page.
+ * Signing keys, each imported once for the life of the page.
  *
- * Once, not per connect: it is derived from the secret the *first* usable
- * document supplied, so a secret rotated under a tab that already has one keeps
+ * Once, not per connect: each belongs to one key in the usable served
+ * document, so a secret rotated under a tab that already has one keeps
  * minting with the old one until the page is reloaded. Stated rather than
- * solved — a rotation is a redeploy, and a redeploy is a reload (REMOTE.md).
+ * solved — replacing a loopback browser key needs a page reload.
  */
-let signingKey: Promise<CryptoKey> | null = null;
+const signingKeys = new Map<string, Promise<CryptoKey>>();
 
 /**
  * Set while the served document has supplied no secret to mint with.
  *
- * Page-wide, like {@link protocolMismatch} and for the same reason: there is
- * one configuration document for the page, so this is never one room's problem.
- * Unlike that one it is not terminal — {@link hubToken} re-reads the document
+ * Per workspace: an unavailable key must not disable another served workspace
+ * whose settings room happens to be open for the switcher. It is not terminal
+ * — {@link hubToken} re-reads the document
  * before every connect attempt, and the flag clears the moment one arrives.
  */
-let tokenMissing = false;
+const missingWorkspaceKeys = new Set<string>();
 
-/** Tell every open room whether a secret is missing. See {@link tokenMissing}. */
-function setTokenMissing(missing: boolean): void {
-  if (tokenMissing === missing) return;
-  tokenMissing = missing;
+/** Tell this workspace's open rooms whether their signing key is missing. */
+function setTokenMissing(workspace: string, missing: boolean): void {
+  if (missingWorkspaceKeys.has(workspace) === missing) return;
+  if (missing) missingWorkspaceKeys.add(workspace);
+  else missingWorkspaceKeys.delete(workspace);
   for (const entry of entries.values()) {
+    if (parseRoom(entry.connection.room).workspaceId !== workspace) continue;
     const status = entry.connection.status;
     status.tokenMissing = missing;
     if (missing) {
@@ -288,7 +307,11 @@ async function signedAuthMessage(
   workspace: string,
   subject: string,
 ): Promise<string> {
-  signingKey ??= importRootSecret(secret);
+  let signingKey = signingKeys.get(secret);
+  if (signingKey === undefined) {
+    signingKey = importRootSecret(secret);
+    signingKeys.set(secret, signingKey);
+  }
   return wrapToken(
     await mintToken(await signingKey, {
       typ: "room",
@@ -309,7 +332,7 @@ export async function mintHubAuthMessage(
   subject: string,
 ): Promise<string> {
   await resolveClientConfig();
-  const secret = hubAuthToken();
+  const secret = hubAuthToken(workspace);
   if (secret === "") {
     throw new Error(
       `uberblick web: ${HUB_CONFIG_PATH} carries no hubAuthToken, so this client cannot authenticate`,
@@ -334,9 +357,10 @@ export async function mintHubAuthMessage(
  * nothing — the resolved answer is memoised and this returns immediately.
  */
 async function hubToken(room: string, identity: AwarenessUser): Promise<string> {
-  await resolveClientConfig();
-  const secret = hubAuthToken();
-  setTokenMissing(secret === "");
+  const config = await resolveClientConfig();
+  const workspace = parseRoom(room).workspaceId;
+  const secret = hubAuthToken(workspace);
+  setTokenMissing(workspace, secret === "");
   if (secret === "") {
     // Ask for a fresh socket, because nothing else would. A token that cannot
     // be minted leaves the provider unauthenticated on a socket that is open
@@ -345,7 +369,11 @@ async function hubToken(room: string, identity: AwarenessUser): Promise<string> 
     // measured at ~60s end to end, which is a tab dead for a minute after its
     // deployment came up. The window in {@link dropSocket} bounds this to one
     // attempt every few seconds, and each attempt re-reads the document.
-    dropSocket();
+    // A missing document needs a fresh connection attempt to re-read it.
+    // An exact local map with another valid key is already settled: dropping
+    // its shared socket would interrupt healthy workspaces over this refusal.
+    if (config.servedWorkspaces === undefined ||
+      Object.values(config.servedWorkspaces).every((entry) => entry.browserKey === "")) dropSocket();
     throw new Error(
       `uberblick web: ${HUB_CONFIG_PATH} carries no hubAuthToken, so this client cannot authenticate`,
     );
@@ -353,7 +381,7 @@ async function hubToken(room: string, identity: AwarenessUser): Promise<string> 
   // The ceiling is inside signedAuthMessage. Hocuspocus calls this before every
   // connect, so each reconnect mints a fresh token rather than replaying an
   // expired one.
-  return await signedAuthMessage(secret, parseRoom(room).workspaceId, identity.name);
+  return await signedAuthMessage(secret, workspace, identity.name);
 }
 
 export interface RoomStatus {
@@ -464,6 +492,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // envelope this hub will not read. The room still opens and the status line
   // says why it is not syncing.
   const storeRefused = storeRefusedRooms.has(room);
+  const tokenMissing = missingWorkspaceKeys.has(parseRoom(room).workspaceId);
   if (protocolMismatch === null && !storeRefused) {
     provider.attach();
   }

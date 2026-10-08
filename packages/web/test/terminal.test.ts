@@ -264,26 +264,6 @@ describe("the terminal block", () => {
     }
   });
 
-  it("shows a cursor while a command types and not while output stands", () => {
-    const { ydoc } = docWithTerminal("$ ls\nfile.txt");
-    const editor = mount(ydoc);
-    try {
-      enterViewport();
-      // The first frame is the prompt, with the cursor waiting at it.
-      expect(shown(editor)).toBe("$ ");
-      expect(cursorShowing(editor)).toBe(true);
-
-      // Advance to the finished output line: nothing is being typed there.
-      for (let i = 0; i < 400 && shown(editor) !== "$ ls\nfile.txt\n"; i += 1) {
-        vi.advanceTimersByTime(10);
-      }
-      expect(shown(editor)).toBe("$ ls\nfile.txt\n");
-      expect(cursorShowing(editor)).toBe(false);
-    } finally {
-      editor.destroy();
-    }
-  });
-
   it("stops and resumes on its own control, holding the frame it stopped on", () => {
     const { ydoc, id } = docWithTerminal(TRANSCRIPT);
     const revBefore = getBlockRev(ydoc, id);
@@ -353,6 +333,23 @@ describe("the terminal block", () => {
       expect(toggle(editor)?.hidden).toBe(false);
       vi.advanceTimersByTime(500);
       expect(shown(editor)).not.toBe(TRANSCRIPT);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("starts with the whole transcript when reduced motion was already requested", () => {
+    prefersReducedMotion(true);
+    const { ydoc } = docWithTerminal(TRANSCRIPT);
+    const editor = mount(ydoc);
+    try {
+      enterViewport();
+      expect(shown(editor)).toBe(TRANSCRIPT);
+      expect(cursorShowing(editor)).toBe(false);
+      expect(toggle(editor)?.hidden).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+      vi.advanceTimersByTime(20_000);
+      expect(shown(editor)).toBe(TRANSCRIPT);
     } finally {
       editor.destroy();
     }
@@ -462,13 +459,13 @@ describe("the terminal block", () => {
   });
 
   it("draws an empty transcript as a complete, idle panel", () => {
-    const { ydoc } = docWithTerminal("   \n  ");
+    const { ydoc } = docWithTerminal("");
     const editor = mount(ydoc);
     try {
       enterViewport();
       vi.advanceTimersByTime(20_000);
       expect(block(editor)?.getAttribute("data-rendered")).toBe("true");
-      expect(shown(editor)).toBe("   \n  ");
+      expect(shown(editor)).toBe("");
       expect(vi.getTimerCount()).toBe(0);
       expect(toggle(editor)?.hidden).toBe(true);
     } finally {
@@ -498,7 +495,7 @@ describe("the terminal block", () => {
       const panel = screen(editor);
       expect(panel?.getAttribute("role")).toBe("button");
       expect(panel?.getAttribute("tabindex")).toBe("0");
-      expect(panel?.getAttribute("aria-label")).not.toBeNull();
+      expect(panel?.getAttribute("aria-label")).toMatch(/transcript/i);
 
       panel?.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),

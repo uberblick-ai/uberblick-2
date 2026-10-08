@@ -8,6 +8,7 @@ import type { ReactElement, ReactNode } from "react";
 import {
   getAnnotation,
   getBlocksFragment,
+  getMeta,
   isExternalHref,
   MAX_TLDR_LENGTH,
   parseRoom,
@@ -34,6 +35,7 @@ import { statusReading } from "./status-reading.js";
 import { documentSyncFacts } from "./sync-facts.js";
 import { formatTimestamp, useTimestampClock } from "./timestamps.js";
 import { BlockMenu } from "./BlockMenu.js";
+import { TableControls } from "./TableControls.js";
 import { MentionMenu } from "./MentionMenu.js";
 import {
   useDocMeta,
@@ -50,6 +52,12 @@ import { PopoverTrigger } from "./shadcn/popover.js";
 import { DocMetaLine } from "./DocChrome.js";
 import { threadIdFromActivation, threadIdFromTarget } from "./threads.js";
 import type { SelectThread, ThreadView } from "./threads.js";
+
+/** Read the document itself, including before its React subscription answers. */
+function isDecided(connection: RoomConnection): boolean {
+  const meta = getMeta(connection.ydoc);
+  return meta.kind === "decision" && meta.status === "decided";
+}
 
 /**
  * The pane frame with a message in it instead of a document.
@@ -137,6 +145,7 @@ function TldrCallout({
   tldr,
   editing,
   archived,
+  decided,
   writable,
   onEditingChange,
 }: {
@@ -144,12 +153,13 @@ function TldrCallout({
   tldr: string | null;
   editing: boolean;
   archived: boolean;
+  decided: boolean;
   writable: boolean;
   onEditingChange: (editing: boolean) => void;
 }): ReactElement | null {
   const [draft, setDraft] = useState(tldr ?? "");
   const input = useRef<HTMLTextAreaElement | null>(null);
-  const readOnly = archived || !writable;
+  const readOnly = archived || decided || !writable;
   const value = draft.trim();
   const tooLong = value.length > MAX_TLDR_LENGTH;
   const error = tooLong
@@ -175,7 +185,7 @@ function TldrCallout({
   const write = (next: string | null): void => {
     // `readOnly` describes the committed render; the live connection and the
     // tombstone guard the write itself, as the title field does below.
-    if (archived || !connection.status.writable) return;
+    if (archived || isDecided(connection) || !connection.status.writable) return;
     setTldr(connection.ydoc, next);
     onEditingChange(false);
   };
@@ -226,7 +236,9 @@ function TldrCallout({
                 {value.length} / {MAX_TLDR_LENGTH} characters
               </span>
               {readOnly && (
-                <span>{archived ? "Restore to edit." : "Editing unavailable."}</span>
+                <span>
+                  {archived ? "Restore to edit." : decided ? "A change needs a new record." : "Editing unavailable."}
+                </span>
               )}
             </div>
             {error !== null && (
@@ -331,7 +343,8 @@ export function StatusLine({
   const raw = rawSyncState(status);
   const state = useCalmSyncState(raw, connection);
   const reading = statusReading(status, state ?? raw);
-  const facts = documentSyncFacts(status, state, reading, hubAcked, notSharedReason);
+  const localWorkspace = endpoint?.url === "local";
+  const facts = documentSyncFacts(status, state, reading, hubAcked, notSharedReason, localWorkspace);
   const saveNote =
     !status.writable && reading.detail === null ? (
       <span className="ub-muted ub-not-saved">not saved</span>
@@ -363,7 +376,7 @@ export function StatusLine({
       </span>
     </span>
   );
-  const hubFact = facts.twoFact ? (
+  const hubFact = facts.twoFact && !localWorkspace ? (
     <span className="inline-flex flex-none items-center gap-2">
       {mark(facts.hubTone)}
       <span className="ub-status-word ub-status-word--hub">{facts.hub}</span>
@@ -493,27 +506,26 @@ export function StatusLine({
  */
 function LinkConflictRepair({
   connection,
-  archived,
+  contentReadOnly,
   writable,
   docLinks,
 }: {
   connection: RoomConnection;
-  archived: boolean;
+  contentReadOnly: boolean;
   writable: boolean;
   docLinks: DocLinkContext | null;
 }): ReactElement | null {
   const { conflicts, refresh } = useLinkConflicts(connection);
   const repair = (conflict: LinkConflict, keep: LinkSurvivor): void => {
-    // Guarded here as well as by the absent control below: an archived document
-    // takes no write from this pane, and the rule belongs where the write is.
-    if (archived || !connection.status.writable) return;
+    // Guard the write too: the record may have been decided since rendering.
+    if (contentReadOnly || isDecided(connection) || !connection.status.writable) return;
     repairLinkConflict(conflict, keep);
     // Unconditional: a repair changes the list, and a refusal means live state
     // has already moved on without this render hearing about it yet.
     refresh();
   };
-  // An archived document's one action is Restore — the banner above says so.
-  if (archived || !writable || conflicts.length === 0) return null;
+  // Restoring an archive never permits edits to decided content.
+  if (contentReadOnly || !writable || conflicts.length === 0) return null;
   const name = (docId: string): string => docLinks?.lookup(docId).title ?? docId;
   return (
     <div className="ub-link-repair">
@@ -524,7 +536,7 @@ function LinkConflictRepair({
       <ul>
         {conflicts.map((conflict) => (
           <li
-            key={`${conflict.index}:${conflict.textIndex}:${conflict.start}:${conflict.end}`}
+            key={`${conflict.index}:${conflict.cell?.row ?? "prose"}:${conflict.cell?.column ?? ""}:${conflict.textIndex}:${conflict.start}:${conflict.end}`}
           >
             <q>{conflict.label}</q>
             <button
@@ -565,13 +577,13 @@ function LinkConflictRepair({
 function ForeignFallback({
   connection,
   summary,
-  archived,
+  contentReadOnly,
   writable,
   docLinks,
 }: {
   connection: RoomConnection;
   summary: string;
-  archived: boolean;
+  contentReadOnly: boolean;
   writable: boolean;
   docLinks: DocLinkContext | null;
 }): ReactElement {
@@ -583,7 +595,7 @@ function ForeignFallback({
       </p>
       <LinkConflictRepair
         connection={connection}
-        archived={archived}
+        contentReadOnly={contentReadOnly}
         writable={writable}
         docLinks={docLinks}
       />
@@ -653,13 +665,16 @@ const BoundEditor = memo(function BoundEditor({
   connection,
   author,
   archived,
+  contentReadOnly,
   docLinks,
   onSelectThread,
 }: {
   connection: RoomConnection;
   author: string;
-  /** Read-only, and none of the chrome that writes. */
+  /** Archived documents also withhold comments. */
   archived: boolean;
+  /** Title, decision line and blocks cannot change; comments may stay open. */
+  contentReadOnly: boolean;
   /** See {@link EditorPane}. Must be referentially stable — it binds the editor. */
   docLinks: DocLinkContext | null;
   onSelectThread: SelectThread;
@@ -667,19 +682,21 @@ const BoundEditor = memo(function BoundEditor({
   const host = useRef<HTMLDivElement | null>(null);
   const frame = useRef<HTMLDivElement | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [bindingEpoch, setBindingEpoch] = useState(0);
   const { writable } = useRoomStatus(connection);
   // The only names anyone can mention are the peers publishing awareness right
   // now — there is no registry, and a mention is plain text.
   const peers = usePeers(connection);
   /**
    * The current value, readable from the binding effect without making it a
-   * dependency of it. An archived document must be bound read-only from the
+   * dependency of it. Read-only content must be bound read-only from the
    * start — never editable-then-corrected — while a *change* of the flag must
    * not rebind (see the effect below), and those two are only compatible if the
    * effect can read the flag without re-running when it moves.
    */
-  const readArchived = useEffectEvent(() => archived);
+  const readContentReadOnly = useEffectEvent(() => contentReadOnly);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: The epoch rebinds after the synchronous guard destroys an editor that normalization immediately made bindable again.
   useEffect(() => {
     const element = host.current;
     if (element === null) return;
@@ -691,8 +708,13 @@ const BoundEditor = memo(function BoundEditor({
       element,
       fragment: getBlocksFragment(connection.ydoc),
       awareness: connection.provider.awareness,
-      editable: !readArchived() && connection.status.writable,
+      editable: !readContentReadOnly() && !isDecided(connection) && connection.status.writable,
       canWrite: () => connection.status.writable,
+      canNormalize: () => connection.status.writable && connection.status.synced,
+      onUnbind: () => {
+        setEditor(null);
+        setBindingEpoch((epoch) => epoch + 1);
+      },
       docLinks,
     });
     // A comment highlight is a plain span ProseMirror renders from the `comment`
@@ -799,11 +821,11 @@ const BoundEditor = memo(function BoundEditor({
       setEditor(null);
       binding.destroy();
     };
-  }, [connection, docLinks, onSelectThread]);
+  }, [connection, docLinks, onSelectThread, bindingEpoch]);
 
   /**
    * Read-only is a *setting* on the live editor, never a reason to rebind.
-   * Archiving a document someone is reading has to flip it in place — a rebind
+   * Archiving or deciding a document has to flip it in place — a rebind
    * would throw away their caret and their scroll position, on a change that
    * touched no content at all.
    *
@@ -819,33 +841,36 @@ const BoundEditor = memo(function BoundEditor({
    */
   useLayoutEffect(() => {
     if (editor === null || editor.isDestroyed) return;
-    editor.setEditable(!archived && writable);
+    editor.setEditable(!contentReadOnly && writable);
     if (!archived && writable) {
       // A repair suppressed while the link was gone gets another plugin pass
-      // as soon as the admitted room is writable again.
+      // as soon as the admitted room is writable again. Automatic block-id
+      // maintenance remains independent of decided content permissions.
       editor.view.dispatch(editor.state.tr.setMeta("uberblick:writable", true));
     }
-  }, [editor, archived, writable]);
+  }, [editor, archived, contentReadOnly, writable]);
 
   return (
     <>
-      {editor !== null && !archived && writable && (
+      {editor !== null && !contentReadOnly && writable && (
         <CodeLanguageField
           editor={editor}
-          canWrite={() => connection.status.writable}
+          canWrite={() => !isDecided(connection) && connection.status.writable}
         />
       )}
       {/* The composer and gutter button use this frame; the menus find the
           enclosing pane from it. ProseMirror owns every child of `.ub-editor`. */}
       <div className="ub-editor-frame" ref={frame}>
         <div className="ub-editor" ref={host} />
-        {/* Both are ways of writing to the document, so an archived document
-            offers neither: the insertion menu and the comment composer are
-            gone, not merely inert. */}
-        {editor !== null && !archived && writable && (
+        {/* Decided content offers no editing controls, but discussion stays
+            open. An archive also withholds the comment composer. */}
+        {editor !== null && !contentReadOnly && writable && (
           <BlockMenu editor={editor} host={frame} />
         )}
-        {editor !== null && !archived && writable && (
+        {editor !== null && !contentReadOnly && writable && (
+          <TableControls editor={editor} host={frame} />
+        )}
+        {editor !== null && !contentReadOnly && writable && (
           <MentionMenu
             editor={editor}
             host={frame}
@@ -859,6 +884,7 @@ const BoundEditor = memo(function BoundEditor({
         {editor !== null && !archived && writable && (
           <CommentComposer
             editor={editor}
+            contentReadOnly={contentReadOnly}
             ydoc={connection.ydoc}
             author={author}
             mentions={peers.map((peer) => peer.name)}
@@ -962,7 +988,12 @@ export function EditorPane({
     }
     target.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
-  const meta = useDocMeta(connection);
+  const observedMeta = useDocMeta(connection);
+  // RoutePane admits only hydrated documents. Its child subscription starts
+  // after mounting, so read this exact connection on the first frame too.
+  const meta = observedMeta ?? (connection === null ? null : getMeta(connection.ydoc));
+  const decided = meta?.kind === "decision" && meta.status === "decided";
+  const contentReadOnly = archived || decided;
   const foreign = useForeignBlocks(connection);
   const { writable } = useRoomStatus(connection);
   const openThreads = threads.filter((thread) => !thread.resolved).length;
@@ -1008,6 +1039,7 @@ export function EditorPane({
           meta={meta}
           archived={archived}
           readOnly={!writable}
+          contentReadOnly={decided}
           pinned={pinned}
           onTogglePin={onTogglePin}
           onArchive={onArchive}
@@ -1021,14 +1053,12 @@ export function EditorPane({
           placeholder="Untitled"
           // `readOnly`, not `disabled`: the title is still the document's name
           // and still worth selecting and copying — it just cannot be retyped.
-          readOnly={archived || !writable}
+          readOnly={contentReadOnly || !writable}
           // And the write is guarded as well as the field. `readOnly` is a
-          // statement to the browser about typing; the rule is that an archived
-          // document takes no write from here, and a rule worth having is worth
-          // enforcing where the write happens rather than trusting the one
-          // attribute that happens to sit in front of it today.
+          // statement to the browser about typing; guard the live document too,
+          // because it can become decided before this render hears about it.
           onChange={(event) => {
-            if (archived || !connection.status.writable) return;
+            if (archived || isDecided(connection) || !connection.status.writable) return;
             setTitle(connection.ydoc, event.target.value);
           }}
         />
@@ -1051,6 +1081,7 @@ export function EditorPane({
           tldr={meta?.tldr ?? null}
           editing={editingTldr}
           archived={archived}
+          decided={decided}
           writable={writable}
           onEditingChange={(editing) =>
             setTldrEditorRoom(editing ? connection.room : null)
@@ -1059,8 +1090,8 @@ export function EditorPane({
         {foreign.length > 0 ? (
           <ForeignFallback
             connection={connection}
-            summary={describeForeignBlocks(foreign, { repairable: !archived })}
-            archived={archived}
+            summary={describeForeignBlocks(foreign, { repairable: !archived, decided })}
+            contentReadOnly={contentReadOnly}
             writable={writable}
             docLinks={docLinks}
           />
@@ -1069,6 +1100,7 @@ export function EditorPane({
             connection={connection}
             author={author}
             archived={archived}
+            contentReadOnly={contentReadOnly}
             docLinks={docLinks}
             onSelectThread={onSelectThread}
           />

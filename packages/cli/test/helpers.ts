@@ -13,6 +13,7 @@
  */
 
 import { type SpawnSyncReturns, spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   mkdirSync,
@@ -24,6 +25,14 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inject } from "vitest";
+import { findProjectConfig } from "../src/project-binding.js";
+
+declare module "vitest" {
+  export interface ProvidedContext {
+    boundFixtureRoot: string;
+  }
+}
 
 /** The package root, so a test can spawn `bin/ub.mjs` the way a user would. */
 export const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -55,9 +64,12 @@ export const REPO_ROOT = dirname(dirname(PACKAGE_ROOT));
 
 /** Everything `ub` resolves from the environment, removed before every run. */
 const RESOLVED_VARIABLES = [
+  "UB_WORKSPACE_ID",
+  "UB_HUB_URL",
   "WORKSPACE_ID",
   "HUB_URL",
   "HUB_AUTH_TOKEN",
+  "HUB_ADMISSION",
   "UBERBLICK_DB",
   // `ub status` reports the database a hub started here would open, and
   // `ub open` starts one with it — and inside this checkout mise exports it
@@ -78,12 +90,14 @@ export function removeTempDirs(): void {
 }
 
 export interface SandboxFiles {
+  /** The complete workspace and hub binding in `.uberblick.json`. */
+  projectBinding?: unknown;
   /** `$XDG_CONFIG_HOME/uberblick/config.json`. */
   userConfig?: unknown;
   /** `$XDG_CONFIG_HOME/uberblick/credentials.json`. */
   credentials?: unknown;
   /** Raw text instead of JSON, for the malformed-file cases. */
-  raw?: { userConfig?: string; credentials?: string };
+  raw?: { projectBinding?: string; userConfig?: string; credentials?: string };
   /**
    * Mode to force on credentials.json instead of the 0600 a correct install
    * has — how a test asks for a file `ub` is supposed to refuse.
@@ -118,7 +132,29 @@ function writeText(path: string, text: string): void {
 }
 
 export function sandbox(files: SandboxFiles = {}): Sandbox {
-  const root = mkdtempSync(join(tmpdir(), "uberblick-cli-"));
+  return createSandbox(inject("boundFixtureRoot"), {
+    ...files,
+    projectBinding: files.projectBinding !== undefined
+      ? files.projectBinding
+      : { workspaceId: randomUUID(), hubUrl: null },
+  });
+}
+
+/**
+ * Only for assertions that require no project file or no selected workspace.
+ * These folders are siblings of the suite's bound parent, never below it.
+ * Refuse an unsafe TMPDIR before any command can adopt or rewrite an operator's
+ * file. Moving launcher scratch outside the checkout belongs to ub-agents.
+ */
+export function unboundSandbox(files: SandboxFiles = {}): Sandbox {
+  if (findProjectConfig(tmpdir()) !== null) {
+    throw new Error("Unbound CLI fixtures require TMPDIR with no ancestor .uberblick.json; no command was run.");
+  }
+  return createSandbox(tmpdir(), files);
+}
+
+function createSandbox(parent: string, files: SandboxFiles): Sandbox {
+  const root = mkdtempSync(join(parent, "uberblick-cli-"));
   tempDirs.push(root);
 
   const cwd = join(root, "checkout");
@@ -133,6 +169,8 @@ export function sandbox(files: SandboxFiles = {}): Sandbox {
     writeText(join(cwd, "mise.toml"), "[env]\n");
     writeJson(join(cwd, "package.json"), { name: "uberblick", private: true });
   }
+  if (files.projectBinding !== undefined) writeJson(join(cwd, ".uberblick.json"), files.projectBinding);
+  if (files.raw?.projectBinding !== undefined) writeText(join(cwd, ".uberblick.json"), files.raw.projectBinding);
   if (files.userConfig !== undefined) writeJson(userConfigPath, files.userConfig);
   if (files.credentials !== undefined) writeJson(credentialsPath, files.credentials);
   if (files.raw?.userConfig !== undefined) writeText(userConfigPath, files.raw.userConfig);
@@ -185,21 +223,25 @@ export function sandbox(files: SandboxFiles = {}): Sandbox {
 }
 
 /**
- * Point this sandbox's machine at an endpoint, the way `ub remote join` leaves
- * it.
+ * The ceiling for a suite that starts no hub at all, applied to `box`.
  *
- * The endpoint has one authority — this machine's `config.json` — so a test
- * that needs a run to dial an ephemeral port writes it there. `HUB_URL` in the
- * environment is not a layer and is not read (#385).
+ * With nothing listening, every bounded wait for a hub is a wait for an answer
+ * that cannot come — and `ub init`'s starter seed makes several of them
+ * against `ws://localhost:1234`, each one the full ceiling above. A ceiling
+ * near zero reaches the same honest "no hub" answer at once. Only for suites
+ * where no test starts a hub: a real one on loopback needs the 400 ms.
  */
+export function hubless<T extends Sandbox>(box: T): T {
+  box.env.UB_TEST_MAX_WAIT_MS = "25";
+  return box;
+}
+
+/** Update the endpoint of an explicitly selected project workspace. */
 export function pointAt(box: Sandbox, hubUrl: string): void {
-  const path = join(box.configHome, "uberblick", "config.json");
-  mkdirSync(dirname(path), { recursive: true });
-  let current: Record<string, unknown> = {};
-  try {
-    current = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-  } catch {
-    // Absent, which is the ordinary case for a fresh sandbox.
+  const path = join(box.cwd, ".uberblick.json");
+  const current = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  if (typeof current.workspaceId !== "string") {
+    throw new Error("pointAt requires an explicit project workspace binding");
   }
   writeFileSync(path, `${JSON.stringify({ ...current, hubUrl }, null, 2)}\n`, {
     mode: 0o600,
@@ -247,7 +289,7 @@ export function runUb(
 /**
  * Which `ub` command a run was, for a diagnostic — the subcommand path only.
  *
- * Never the whole argument list: `ub remote join` takes a URL, and the URLs the
+ * Never the whole argument list: `ub workspace join` takes a URL, and the URLs the
  * remote suite feeds it carry passwords and tokens on purpose. A message that
  * echoed argv would print one into CI output the first time a machine was slow,
  * which is the leak those very tests exist to forbid.

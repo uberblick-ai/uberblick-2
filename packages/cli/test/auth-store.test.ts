@@ -23,8 +23,9 @@ import {
 } from "../src/auth-store.js";
 import { credentialsPath, resolveConfig, userConfigPath } from "../src/config.js";
 import { acquireInitLock, initLockPath, tryAcquireInitLock } from "../src/init-lock.js";
+import { readWorkspaceHub } from "../src/workspace-registry.js";
 import * as safeWrite from "@uberblick/hub/safe-write";
-import { PACKAGE_ROOT, SECRET_IN_ENV, SECRET_ON_FILE, removeTempDirs, sandbox, waitUntil, type Sandbox } from "./helpers.js";
+import { PACKAGE_ROOT, SECRET_ON_FILE, removeTempDirs, sandbox, waitUntil, type Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 afterEach(() => vi.restoreAllMocks());
@@ -56,7 +57,7 @@ function login(): StoredHubLogin {
 
 type Mutation = { command: "write"; origin: string; login: StoredHubLogin }
   | { command: "remove"; origin: string }
-  | { command: "remote"; secret: string };
+  | { command: "remote" };
 
 /**
  * Pause independent writers after their real credential read. Without mutual
@@ -115,9 +116,9 @@ process.once("message", async () => {
     if (job.command === "write") await writeHubLogin(job.origin, job.login);
     else if (job.command === "remove") await removeHubLogin(job.origin);
     else {
-      // The persistence phase used by ub remote join, under its real lock.
+      // The persistence phase used by ub workspace join, under its real lock.
       const lock = await acquireInitLock();
-      try { setRemote("wss://new.example.test/ws", { secret: job.secret }); }
+      try { setRemote("wss://new.example.test/ws", { workspace: "5c1f9a72-4d38-4e02-9b6a-7e3f10c85b94" }); }
       finally { lock.release(); }
     }
   } catch (error) {
@@ -189,7 +190,7 @@ describe("hub login store", () => {
   });
 
   it("stores at mode 0600 while keeping the binding, signing secret and unknown fields", async () => {
-    const box = sandbox({
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "wss://hub.example.test/ws" },
       userConfig: { hubUrl: "wss://hub.example.test/ws", workspace: WORKSPACE },
       credentials: { signingSecret: SECRET_ON_FILE, future: { opaque: true } },
     });
@@ -198,7 +199,7 @@ describe("hub login store", () => {
     const before = readFileSync(path, "utf8");
     preflightHubLoginStore(box.env);
     expect(readFileSync(path, "utf8")).toBe(before);
-    expect(await writeHubLogin(HUB, login(), box.env)).toBe(false);
+    expect(await writeHubLogin(HUB, login(), box.env)).toBeNull();
     const stored = JSON.parse(readFileSync(path, "utf8"));
     expect(stored).toEqual({
       signingSecret: SECRET_ON_FILE,
@@ -211,7 +212,7 @@ describe("hub login store", () => {
       path, state: "usable", logins: { [HUB]: login() }, unreadableHubs: [],
     });
     // Issuance and storage do not opt existing commands into credential use.
-    expect(JSON.stringify(resolveConfig({ env: box.env }))).not.toContain(login().credential.key);
+    expect(JSON.stringify(resolveConfig({ env: box.env, cwd: box.cwd }))).not.toContain(login().credential.key);
   });
 
   it("replaces and removes only the selected login, keeping malformed and future entries", async () => {
@@ -227,7 +228,7 @@ describe("hub login store", () => {
     } });
     const next = login();
     next.credential.record.deviceId = "eeeeeeee-5555-4555-8555-555555555555";
-    expect(await writeHubLogin(HUB, next, box.env)).toBe(true);
+    expect(await writeHubLogin(HUB, next, box.env)).toEqual(login());
     expect(readHubLogins(box.env).logins).toEqual({ [HUB]: next, [OTHER_HUB]: other });
     expect(readHubLogins(box.env).unreadableHubs).toEqual(["https://broken.example.test"]);
     expect(await removeHubLogin(HUB, box.env)).toBe(true);
@@ -251,6 +252,25 @@ describe("hub login store", () => {
     });
   });
 
+  it("returns the login replaced after waiting for the writer lock", async () => {
+    const box = sandbox({ credentials: { hubLogins: { [HUB]: login() } } });
+    const latest = login();
+    latest.credential.record.id = "eeeeeeee-5555-4555-8555-555555555555";
+    latest.credential.key = Buffer.alloc(32, 23).toString("base64url");
+    const next = login();
+    next.credential.record.deviceId = "ffffffff-6666-4666-8666-666666666666";
+    const holder = await acquireInitLock(box.env);
+    const writing = writeHubLogin(HUB, next, box.env);
+    try {
+      // Model a renewal finishing its publication while it holds the lock.
+      writeFileSync(credentialsPath(box.env), JSON.stringify({ hubLogins: { [HUB]: latest } }), { mode: 0o600 });
+    } finally {
+      holder.release();
+    }
+    expect(await writing).toEqual(latest);
+    expect(readHubLogins(box.env).logins[HUB]).toEqual(next);
+  });
+
   it("does not restore a login deleted by an independent logout", async () => {
     const box = sandbox({ credentials: {
       signingSecret: SECRET_ON_FILE, future: { opaque: true }, hubLogins: { [HUB]: login() },
@@ -263,19 +283,20 @@ describe("hub login store", () => {
     });
   });
 
-  it("keeps a concurrent remote signing-secret update and unrelated credential fields", async () => {
+  it("keeps the loopback secret and unrelated fields across concurrent remote binding", async () => {
     const box = sandbox({ credentials: {
       signingSecret: SECRET_ON_FILE, future: { opaque: true }, hubLogins: { [OTHER_HUB]: login() },
     } });
     await interleaveWriters(box,
       { command: "write", origin: HUB, login: login() },
-      { command: "remote", secret: SECRET_IN_ENV });
+      { command: "remote" });
     expect(JSON.parse(readFileSync(credentialsPath(box.env), "utf8"))).toEqual({
-      signingSecret: SECRET_IN_ENV, future: { opaque: true },
+      signingSecret: SECRET_ON_FILE, future: { opaque: true },
       hubLogins: { [HUB]: login(), [OTHER_HUB]: login() },
     });
-    expect(JSON.parse(readFileSync(userConfigPath(box.env), "utf8")).hubUrl).toBe("wss://new.example.test/ws");
-    expect(readdirSync(dirname(credentialsPath(box.env)))).toEqual(["config.json", "credentials.json"]);
+    expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).hubUrl).toBe("wss://new.example.test/ws");
+    expect(readdirSync(dirname(credentialsPath(box.env)))).toEqual(["credentials.json", "workspaces.json"]);
+    expect(readWorkspaceHub("5c1f9a72-4d38-4e02-9b6a-7e3f10c85b94", box.env)).toBe("wss://new.example.test/ws");
   });
 
   it("leaves stored bytes and another writer's lock intact when its bounded wait expires", async () => {
@@ -323,6 +344,47 @@ describe("hub login store", () => {
     expect(isHubLogin(extra)).toBe(true);
     await writeHubLogin(HUB, extra, box.env);
     expect(JSON.parse(readFileSync(credentialsPath(box.env), "utf8"))).toEqual({ hubLogins: { [HUB]: value } });
+  });
+
+  it("stores names only for issued workspaces and reads them without rewriting the login", async () => {
+    const box = sandbox();
+    const value = login();
+    const name = 'Synthetic 🧭 "workspace" \\';
+    value.credential.workspaceNames = {
+      [WORKSPACE]: name,
+      "eeeeeeee-5555-4555-8555-555555555555": "Not issued",
+    };
+    await writeHubLogin(HUB, value, box.env);
+    const path = credentialsPath(box.env);
+    const before = readFileSync(path, "utf8");
+    const stored = readHubLogins(box.env).logins[HUB]!;
+    expect(stored.credential.workspaceNames).toEqual({ [WORKSPACE]: name });
+    expect(stored.credential.record.workspaces).toEqual([WORKSPACE]);
+    expect(JSON.parse(before).hubLogins[HUB]).toEqual(stored);
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  it.each([
+    { label: "null", workspaceNames: null }, { label: "array", workspaceNames: [] },
+    { label: "string", workspaceNames: "not a map" },
+    { label: "non-string", workspaceNames: { [WORKSPACE]: 4 } },
+    { label: "empty", workspaceNames: { [WORKSPACE]: "" } },
+    { label: "padded", workspaceNames: { [WORKSPACE]: " C1-free but padded " } },
+    { label: "C1", workspaceNames: { [WORKSPACE]: "synthetic\u009bname" } },
+    { label: "bidi", workspaceNames: { [WORKSPACE]: "synthetic\u202ename" } },
+    { label: "credential key", workspaceNames: { [WORKSPACE]: `synthetic ${login().credential.key}` } },
+  ])("ignores $label names without losing an older credential", async ({ workspaceNames }) => {
+    const original = login();
+    const supplied = { ...original, credential: { ...original.credential, workspaceNames } };
+    expect(isHubLogin(supplied)).toBe(true);
+    const box = sandbox({ credentials: { hubLogins: { [HUB]: supplied } } });
+    const path = credentialsPath(box.env);
+    const before = readFileSync(path, "utf8");
+    expect(readHubLogins(box.env).logins[HUB]).toEqual(original);
+    expect(readFileSync(path, "utf8")).toBe(before);
+    if (!isHubLogin(supplied)) throw new Error("display names must not invalidate a credential");
+    await writeHubLogin(HUB, supplied, box.env);
+    expect(JSON.parse(readFileSync(path, "utf8")).hubLogins[HUB]).toEqual(original);
   });
 
   it.each([0o644, 0o640, 0o606])("refuses mode %o for reads and mutations without repairing it", async (mode) => {

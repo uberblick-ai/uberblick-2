@@ -7,9 +7,27 @@ export interface DocumentSearchStatus {
   readonly rooms: Readonly<Record<string, { readonly hubAcked: boolean }>>;
   /** Why this serving run cannot share local edits, absent on older servers. */
   readonly notSharedReason?: NotSharedReason | null;
+  readonly replicaUnavailable?: ReplicaUnavailable | null;
 }
 
-export type NotSharedReason = "no-hub-credentials";
+export type ReplicaUnavailable = "replica-held" | "replica-quarantined" | "replica-failed";
+
+function isReplicaUnavailable(value: unknown): value is ReplicaUnavailable {
+  return value === "replica-held" || value === "replica-quarantined" || value === "replica-failed";
+}
+
+export type NotSharedReason =
+  | "no-hub-credentials"
+  | "sign-in-required"
+  | "no-workspace-access"
+  | "credential-store"
+  | "renewal-unavailable";
+
+function isNotSharedReason(value: unknown): value is NotSharedReason {
+  return value === "no-hub-credentials" || value === "sign-in-required" ||
+    value === "no-workspace-access" || value === "credential-store" ||
+    value === "renewal-unavailable";
+}
 
 export interface DocumentSearchClient {
   status(signal: AbortSignal): Promise<DocumentSearchStatus>;
@@ -22,9 +40,12 @@ function object(value: unknown): Record<string, unknown> | null {
 }
 
 async function json(response: Response): Promise<Record<string, unknown>> {
-  if (!response.ok) throw new Error(`ub open answered ${response.status}`);
   const body = object(await response.json());
   if (body === null) throw new Error("ub open returned a malformed JSON answer");
+  if (response.status === 503 && body.error === "replica_unavailable" && isReplicaUnavailable(body.reason)) {
+    return { caughtUp: false, rooms: {}, replicaUnavailable: body.reason };
+  }
+  if (!response.ok) throw new Error(`ub open answered ${response.status}`);
   return body;
 }
 
@@ -36,7 +57,7 @@ function searchStatus(body: Record<string, unknown>): DocumentSearchStatus {
     Array.isArray(body.rooms) ||
     (body.notSharedReason !== undefined &&
       body.notSharedReason !== null &&
-      body.notSharedReason !== "no-hub-credentials")
+      !isNotSharedReason(body.notSharedReason))
   ) {
     throw new Error("ub open returned a malformed status answer");
   }
@@ -52,7 +73,8 @@ function searchStatus(body: Record<string, unknown>): DocumentSearchStatus {
     caughtUp: body.caughtUp,
     rooms: parsed,
     notSharedReason:
-      body.notSharedReason === "no-hub-credentials" ? body.notSharedReason : null,
+      isNotSharedReason(body.notSharedReason) ? body.notSharedReason : null,
+    ...(isReplicaUnavailable(body.replicaUnavailable) ? { replicaUnavailable: body.replicaUnavailable } : {}),
   };
 }
 

@@ -4,8 +4,8 @@
  * `docFingerprint` gates every refusal and the whole of verification, so the
  * property worth defending is narrow and total: a replica that received
  * everything fingerprints the same, and a replica missing *anything the schema
- * can hold* does not. `Block.rev` covers type, text and attributes and would
- * pass a replica that received every character and none of the formatting or
+ * can hold* does not. A prose `Block.rev` covers type, text and attributes and
+ * would pass a replica that received every character and none of the formatting or
  * comment threads — which is the state a half-finished sync leaves behind, and
  * what a user would not notice until they opened the document.
  *
@@ -20,6 +20,7 @@ import {
   addComment,
   appendBlock,
   createAnnotation,
+  findBlockElement,
   getBlocks,
   getMeta,
   initDoc,
@@ -33,6 +34,8 @@ import {
   setTags,
   setTldr,
   setTitle,
+  tableCellText,
+  tableRows,
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
@@ -82,6 +85,31 @@ function entry(ydoc: Y.Doc, overrides: Partial<CorpusDoc> = {}): CorpusDoc {
 }
 
 describe("docFingerprint", () => {
+  it("covers table cell text, formatting and anchors while remaining stable after replication", () => {
+    const doc = source();
+    const id = appendBlock(doc, { type: "table", text: "| Header |\n| --- |\n| Cell |" });
+    const copy = replicate(doc);
+    const cells = tableRows(findBlockElement(doc, id)!);
+    const text = tableCellText(cells[1]![0]!)!;
+    expect(docFingerprint(copy)).toBe(docFingerprint(doc));
+    text.insert(text.length, " changed");
+    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc));
+    expect(docFingerprint(copy)).toBe(docFingerprint(doc));
+    const rev = getBlocks(doc).find(block => block.id === id)!.rev;
+    text.format(0, 4, { bold: true, [COMMENT_MARK]: { threadId: "synthetic-cell-anchor" } });
+    const formattedRev = getBlocks(doc).find(block => block.id === id)!.rev;
+    expect(formattedRev).not.toBe(rev);
+    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc));
+    text.format(0, 4, { [COMMENT_MARK]: null });
+    expect(getBlocks(doc).find(block => block.id === id)!.rev).toBe(formattedRev);
+    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc));
+    expect(docFingerprint(copy)).toBe(docFingerprint(doc));
+    doc.destroy();
+    copy.destroy();
+  });
   it("is stable across replication", () => {
     const doc = source();
     expect(docFingerprint(replicate(doc))).toBe(docFingerprint(doc));

@@ -11,6 +11,8 @@
 !scripts/
 !scripts/build-hub-release-payload.mjs
 !compose.release.yml
+!remote.https.yml
+!remote.tailscale.yml
 !remote.env.example
 !remote-settings.sh
 !bin/

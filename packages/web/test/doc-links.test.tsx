@@ -27,8 +27,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { act, renderSettled } from "./react-render.js";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -37,6 +36,8 @@ import {
   getMeta,
   initDoc,
   tombstoneDirectoryEntry,
+  tableCellText,
+  tableRows,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
@@ -46,7 +47,12 @@ import { createDocLinkContext } from "../src/editor/doc-links.js";
 import type { DocLinkContext } from "../src/editor/doc-links.js";
 import { EditorPane } from "../src/ui/EditorPane.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
-import { mountEditor, snapshotFragment, typeText } from "./helpers.js";
+import {
+  mountEditor,
+  pastePlainText,
+  snapshotFragment,
+  typeText,
+} from "./helpers.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const DOC = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
@@ -65,23 +71,6 @@ function emptyDoc(): Y.Doc {
 
 function caretAtStart(editor: Editor): void {
   editor.commands.setTextSelection(1);
-}
-
-/**
- * A plain-text paste, as prosemirror-view performs one: the text replaces the
- * selection in a transaction marked `uiEvent: "paste"`, which is what Tiptap's
- * paste-rule plugin keys on. `view.pasteText` would be the door itself, but it
- * constructs a `ClipboardEvent`, and jsdom has no such class.
- */
-function pastePlainText(editor: Editor, text: string): void {
-  const { state } = editor.view;
-  const { from, to } = state.selection;
-  editor.view.dispatch(
-    state.tr
-      .insertText(text, from, to)
-      .setMeta("paste", true)
-      .setMeta("uiEvent", "paste"),
-  );
 }
 
 /** What ProseMirror's clipboard parser makes of an HTML fragment. */
@@ -149,6 +138,27 @@ describe("making a reference", () => {
     } finally {
       editor.destroy();
     }
+  });
+
+  it("uses the same typed document link and workspace-derived anchor in a table cell", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: DOC, title: "Cell references" });
+    appendBlock(ydoc, { type: "table", text: "|  | other |\n| --- | --- |" });
+    const { directory, context } = directoryWith([{ uuid: TARGET, title: "The hub" }]);
+    const { editor, element } = mountEditor(ydoc, { docLinks: context });
+    try {
+      editor.commands.setTextSelection(4);
+      typeText(editor, `see [the hub](${TARGET.toUpperCase()}) today`);
+      const cell = tableRows(getBlocksFragment(ydoc).get(0) as Y.XmlElement)[0]![0]!;
+      expect(tableCellText(cell)!.toDelta()).toEqual([
+        { insert: "see " },
+        { insert: "the hub", attributes: { docLink: { docId: TARGET } } },
+        { insert: " today" },
+      ]);
+      const anchor = element.querySelector("th a.ub-doclink");
+      expect(anchor?.getAttribute("href")).toBe(`/${WORKSPACE}/${TARGET}`);
+      expect(anchor?.getAttribute("data-doc-link-state")).toBe("resolved");
+    } finally { editor.destroy(); ydoc.destroy(); directory.destroy(); }
   });
 
   /** The external rule is untouched: a URL target is still an external link. */
@@ -427,46 +437,34 @@ describe("an unwritable document room", () => {
       synced: false,
       writable: false,
     });
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
-    try {
-      await act(async () => {
-        root.render(
-          <EditorPane
-            connection={connection}
-            segment={WORKSPACE}
-            presence={[]}
-            author="tester"
-            archived={false}
-            docLinks={null}
-            onRestore={() => {}}
-            onSelectThread={() => {}}
-          />,
-        );
-      });
-      const title = host.querySelector<HTMLInputElement>(".ub-title");
-      expect(title?.readOnly).toBe(true);
-      expect(host.querySelector(".ub-tag-add")).toBeNull();
-      expect(host.querySelector(".ub-editor [contenteditable=true]")).toBeNull();
-      expect(
-        host.querySelector('.ub-editor [role="textbox"]')?.getAttribute("aria-readonly"),
-      ).toBe("true");
-      expect(host.querySelector(".ub-status")?.textContent).toContain("not saved");
+    const { container: host } = await renderSettled(
+      <EditorPane
+        connection={connection}
+        segment={WORKSPACE}
+        presence={[]}
+        author="tester"
+        archived={false}
+        docLinks={null}
+        onRestore={() => {}}
+        onSelectThread={() => {}}
+      />,
+    );
+    const title = host.querySelector<HTMLInputElement>(".ub-title");
+    expect(title?.readOnly).toBe(true);
+    expect(host.querySelector(".ub-tag-add")).toBeNull();
+    expect(host.querySelector(".ub-editor [contenteditable=true]")).toBeNull();
+    expect(
+      host.querySelector('.ub-editor [role="textbox"]')?.getAttribute("aria-readonly"),
+    ).toBe("true");
+    expect(host.querySelector(".ub-status")?.textContent).toContain("not saved");
 
-      const setter = Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,
-        "value",
-      )?.set;
-      setter?.call(title, "Browser only");
-      act(() => title?.dispatchEvent(new Event("input", { bubbles: true })));
-      expect(getMeta(ydoc).title).toBe("References");
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    setter?.call(title, "Browser only");
+    act(() => title?.dispatchEvent(new Event("input", { bubbles: true })));
+    expect(getMeta(ydoc).title).toBe("References");
   });
 });
 
@@ -500,75 +498,75 @@ describe("following a reference", () => {
       { uuid: TARGET, title: "The hub" },
     ]);
     const selected: string[] = [];
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
-    try {
-      await act(async () => {
-        root.render(
-          <EditorPane
-            connection={connectionFor(ydoc)}
-            segment={WORKSPACE}
-            presence={[]}
-            author="tester"
-            archived={false}
-            docLinks={context}
-            onRestore={() => {}}
-            onSelectThread={(threadId) => selected.push(threadId)}
-          />,
-        );
+    const { container: host } = await renderSettled(
+      <EditorPane
+        connection={connectionFor(ydoc)}
+        segment={WORKSPACE}
+        presence={[]}
+        author="tester"
+        archived={false}
+        docLinks={context}
+        onRestore={() => {}}
+        onSelectThread={(threadId) => selected.push(threadId)}
+      />,
+    );
+
+    const anchor = host.querySelector<HTMLAnchorElement>("a.ub-doclink");
+    expect(anchor?.textContent).toBe("the hub");
+
+    const click = (
+      target: Element | null | undefined,
+      init: MouseEventInit = {},
+    ): MouseEvent => {
+      const event = new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        ...init,
       });
+      act(() => {
+        target?.dispatchEvent(event);
+      });
+      return event;
+    };
 
-      const anchor = host.querySelector<HTMLAnchorElement>("a.ub-doclink");
-      expect(anchor?.textContent).toBe("the hub");
+    // ---- the reference owns its own words ----
+    const followed = click(anchor);
+    expect(opened).toEqual([TARGET]);
+    expect(selected).toEqual([]);
+    // The app navigated, so the browser must not: a real anchor would
+    // otherwise reload the whole client on its href.
+    expect(followed.defaultPrevented).toBe(true);
 
-      const click = (
-        target: Element | null | undefined,
-        init: MouseEventInit = {},
-      ): MouseEvent => {
-        const event = new MouseEvent("click", {
-          bubbles: true,
-          cancelable: true,
-          ...init,
-        });
-        act(() => {
-          target?.dispatchEvent(event);
-        });
-        return event;
-      };
+    // ---- a modified click is the browser's ----
+    // Read whether the app left it alone once it has bubbled past the app,
+    // then stand in for the browser: jsdom cannot open a new tab, and logs
+    // "Not implemented: navigation" when a click asks it to.
+    let leftToBrowser: boolean | undefined;
+    window.addEventListener(
+      "click",
+      (event) => {
+        leftToBrowser = !event.defaultPrevented;
+        event.preventDefault();
+      },
+      { once: true },
+    );
+    click(anchor, { metaKey: true });
+    expect(opened).toEqual([TARGET]);
+    expect(leftToBrowser).toBe(true);
 
-      // ---- the reference owns its own words ----
-      const followed = click(anchor);
-      expect(opened).toEqual([TARGET]);
-      expect(selected).toEqual([]);
-      // The app navigated, so the browser must not: a real anchor would
-      // otherwise reload the whole client on its href.
-      expect(followed.defaultPrevented).toBe(true);
+    // ---- and the thread is still reachable from the rest of the highlight ----
+    const highlight = host.querySelector("[data-comment-thread]");
+    expect(highlight).not.toBeNull();
+    click(highlight);
+    expect(selected).toEqual(["t-1"]);
+    expect(opened).toEqual([TARGET]);
 
-      // ---- a modified click is the browser's ----
-      const modified = click(anchor, { metaKey: true });
-      expect(opened).toEqual([TARGET]);
-      expect(modified.defaultPrevented).toBe(false);
-
-      // ---- and the thread is still reachable from the rest of the highlight ----
-      const highlight = host.querySelector("[data-comment-thread]");
-      expect(highlight).not.toBeNull();
-      click(highlight);
-      expect(selected).toEqual(["t-1"]);
-      expect(opened).toEqual([TARGET]);
-
-      // ---- and an archived target is still somewhere you can go ----
-      // Archiving says which document this is, not whether it opens: the read
-      // view is still the destination (#146), so the click keeps navigating.
-      tombstoneDirectoryEntry(directory, TARGET);
-      expect(anchor?.getAttribute("data-doc-link-state")).toBe("archived");
-      expect(click(anchor).defaultPrevented).toBe(true);
-      expect(opened).toEqual([TARGET, TARGET]);
-    } finally {
-      await act(async () => root.unmount());
-      host.remove();
-    }
+    // ---- and an archived target is still somewhere you can go ----
+    // Archiving says which document this is, not whether it opens: the read
+    // view is still the destination (#146), so the click keeps navigating.
+    tombstoneDirectoryEntry(directory, TARGET);
+    expect(anchor?.getAttribute("data-doc-link-state")).toBe("archived");
+    expect(click(anchor).defaultPrevented).toBe(true);
+    expect(opened).toEqual([TARGET, TARGET]);
   });
 });

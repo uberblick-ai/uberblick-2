@@ -19,8 +19,9 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runChild } from "./child.js";
-import { resolveConfig } from "./config.js";
+import { resolveConfig, requireBinding } from "./config.js";
 import { isInstallPayload } from "./installation.js";
+import { rememberWorkspaceBinding } from "./workspace-registry.js";
 
 /**
  * tsx's loader, so the child can run the server's TypeScript source — the same
@@ -53,18 +54,23 @@ export async function serveCommand(
   }
 
   const resolved = resolveConfig();
+  const binding = requireBinding(resolved);
   for (const warning of resolved.warnings) {
     err(`ub: warning: ${warning}\n`);
   }
 
+  let args: string[];
   if (isInstallPayload()) {
     const main = installedMcpServerMain();
     if (!existsSync(main)) {
       err(`ub mcp serve: the installed MCP server is missing at ${main}; reinstall Uberblick\n`);
       return 1;
     }
-    return await runChild(process.execPath, [main], resolved.env);
+    args = [main];
+  } else {
+    args = ["--import", tsxLoader(), mcpServerMain()];
   }
 
-  return await runChild(process.execPath, ["--import", tsxLoader(), mcpServerMain()], resolved.env);
+  await rememberWorkspaceBinding(binding);
+  return await runChild(process.execPath, args, resolved.env);
 }

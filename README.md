@@ -120,23 +120,27 @@ payload, and on demand from the Actions tab.
 
 ### The signing secret
 
-`HUB_AUTH_TOKEN` is the HMAC **secret** hub tokens are signed with, not a token.
-The repository holds no copy of it. Each machine keeps its own in
-`credentials.json`: a machine joined to a hub holds that hub's secret, given to
-it by the hub's operator (`ub remote join --secret-file`). Otherwise
+`HUB_AUTH_TOKEN` is the HMAC **secret** loopback hub tokens are signed with.
+Remote hubs and clients use stored device logins; this secret grants no remote
+access and is never sent to a remote hub.
+
+The repository holds no copy of it. Unless a secret is already supplied,
 `ub init` writes 32 random bytes to `credentials.json` (mode 0600) in this
-  machine's config root — see [Where your files live](#where-your-files-live).
-  That file is the authority, and there is no copy of it anywhere else. It is
-  generated only while this machine has **no hub endpoint stored**: a machine
-  bound to a hub needs *that* hub's secret, so with none visible `ub init`
-  refuses and names the two places it looked rather than writing a random value
-  the hub would reject.
+machine's config root — see [Where your files live](#where-your-files-live).
+It is generated only while this machine has **no hub endpoint stored**: a
+machine bound to a loopback-only hub needs that hub's secret. Deployed Docker
+hubs use the login established by `ub auth login`, including through a proxy
+published on host loopback.
 
 A mise task reaches it the same way an MCP client's server does: every task that
 needs configuration wraps its command in `fnox exec -- ub env -- …`, and
-`ub env -- <command…>` execs the command under exactly the environment `ub`
-resolved. So the precedence a task sees is `ub`'s own, highest first: a
-decryptable fnox secret in the environment, then `credentials.json`. There is
+`ub env -- <command…>` execs the command under the configuration `ub`
+resolved and passes the signing secret only for local admission. A stored
+login or a verified device-authenticated binding selects device credentials
+even for a loopback endpoint. Device
+credentials stay in the credential store, never child environments. So the
+precedence a task sees is `ub`'s own, highest first: an explicitly supplied
+secret in the environment, then `credentials.json`. There is
 deliberately no bare `ub env` — printing that environment would print the
 secret.
 
@@ -168,20 +172,26 @@ mise run fue          # the documented install path, executed on a clean machine
 mise run review <commit>  # immutable Docker review of one commit
 ```
 
-To run the hub and built web client on a remote Tailscale host, follow
-[REMOTE.md](REMOTE.md). The remote deployment uses Docker Compose and Caddy for
-TLS, WebSocket proxying, and SPA fallback.
+To run the released Docker hub on Linux or Docker Desktop on macOS, follow
+[REMOTE.md](REMOTE.md). It defaults to HTTP on host loopback without Tailscale.
+Other computers connect over HTTPS for a public DNS name or, as the recommended
+optional network layer, Tailscale. Caddy serves the app and proxies sync and
+sign-in; the hub requires device credentials on every deployment route.
 
-`mise run e2e` is the only task that drives a browser. It starts its own hub on
-an ephemeral port with a throwaway signing secret and a temp database, and its
-own Vite dev server on an ephemeral port, so it needs no fnox key and cannot
-collide with a running `mise run dev`. It covers exactly what jsdom cannot —
+`mise run e2e` is the only task that drives a browser. It builds one shared app
+bundle per run, including filtered runs, and each harness starts its own hub and
+real `ub open` on ephemeral ports with private state. The compiled fallbacks are
+run-owned too, so it needs no fnox key and cannot collide with a running
+`mise run dev`. Spec files run across two workers; tests in a file stay serial
+and share a harness, except proofs that require fresh state per test. Only
+release-runtime, shared-controls and the compiled-loopback fallback proof build
+their own bundles. It covers exactly what jsdom cannot —
 two live clients converging on one block, a rendered remote cursor, and fresh
 and reloaded browsers receiving only what their server sends. Everything else
 belongs in `mise run test`. Arguments after `--` go to Playwright unchanged; for
 example, `mise run e2e -- --repeat-each=3 outline.spec.ts` runs only that spec
 three times. The full suite runs in Chromium; a tagged device and engine set
-also runs in WebKit at iPhone, iPad and 13-inch MacBook sizes. WebKit requires
+also runs in WebKit at iPhone and 13-inch MacBook sizes. WebKit requires
 host system libraries, which CI installs separately; the task downloads engines
 without installing system packages. A missing library fails the full run.
 `mise run e2e -- --project=chromium` runs Chromium alone. Real-device checks for
@@ -250,24 +260,19 @@ variables in its environment — no `HUB_*`, no `UBERBLICK_*`, no `WORKSPACE_ID`
 because it has no use for them and `ub` is habitually run with a secret
 exported; the pin it does need rides in its argv.
 
-The installed line is always `ub mcp serve`. Which hub and which credential
-apply is resolved by `ub` — a client config that pinned either would be a second
-copy of configuration that already has an owner, and a project config is
-committable, so a secret has no business being in one. The **one** value an
-entry may carry is `WORKSPACE_ID`, and only when `--workspace` asks for it:
+The installed line is always `ub mcp serve`. Each new entry pins the complete
+selected binding as `UB_WORKSPACE_ID` and `UB_HUB_URL`, including `local` for a
+local-only workspace. Credentials stay in the private user store. With no
+selection, installation fails rather than creating an entry that follows an
+unrelated machine default.
 
 ```
-ub mcp install claude --project --workspace research-<uuid>
+ub mcp install claude --project
+ub mcp install claude --project --workspace research-<uuid> --hub https://hub.example.test
 ```
 
-**A project MCP entry is this repository's workspace binding.** That is the
-whole mechanism; there is no per-directory config file of uberblick's own. The
-client already reads a project-scoped MCP config to know what to spawn in this
-working directory, so the pin goes there: `WORKSPACE_ID` is the top precedence
-layer, so every agent session started in this checkout resolves that workspace
-and nothing else has to be told. Without `--workspace` the entry stays unpinned
-and follows this machine's default, which is the right answer for a repository
-that has no workspace of its own.
+Terminal commands and MCP use the same [project binding](#configuration).
+Explicit installer overrides require both `--workspace` and `--hub`.
 
 Re-pinning an entry that already exists is not this command's job any more: an
 entry pinned to another workspace is not the one it would register, so it is
@@ -276,56 +281,62 @@ config or with the vendor's own command. That cuts both ways, which is the
 point — a repository quietly moved to another corpus is exactly what the pin is
 there to prevent.
 
-`.mcp.json` in this checkout is exactly that file, and it is generated rather
-than hand-maintained — it is what `ub mcp install claude --print` emits, and a
-test asserts the committed bytes are that snippet. It is deliberately unpinned:
-this repository works in whatever workspace `ub workspace use` last named.
+This repository's `.mcp.json` and `.codex/config.toml` run `ub mcp serve`
+through mise, and the Codex agent workers in `ub-agents.yaml` receive the same
+entry as runtime overrides. The checkout's `.uberblick.json` selects the
+workspace, and the entries carry no credential.
 
-For a standalone smoke test, `mise run mcp` runs the same server in the
+For a standalone smoke test of checkout source, `mise run mcp` runs it in the
 foreground.
 
 ### A second workspace
 
-Several workspaces coexist on one hub, with separate corpora and no way to see
-across: the room key carries the workspace (`<workspaceId>/<docUuid>`, the
-directory at `<workspaceId>/_directory`), the token claim is scoped to it, and
-the local database is `<uuid>.sqlite`. There is nothing to create and nothing to
-migrate — a workspace is a uuid, and its rooms exist the moment something opens
-one. What it is *not* is tenancy: one shared secret still mints a token for any
-workspace, so this separates corpora, not people — namespacing for one trusted
-user, with real isolation waiting on per-workspace auth (#84).
+Create a separate project workspace without changing the one you already use:
 
-Give a second project its own workspace by pinning it in that checkout's project
-MCP config — committable, and never secrets. That is one command, run in the
-checkout:
-
-```
-ub mcp install claude --project --workspace research-$(uuidgen | tr A-Z a-z)
+```sh
+ub workspace create "Project notes"
+ub open
 ```
 
-That registers `WORKSPACE_ID` on the `uberblick` entry of this directory's
-`.mcp.json` — through `claude mcp add -e`, which is the vendor's own way of
-saying it — and every agent session started here spawns through that entry.
-Nothing else is in it, and nothing else is copied into it.
+Creation needs no hub or login. It generates a fresh UUID, stores the supplied
+name, seeds the same starter documents and sidebar group as `ub init`, and
+selects it in the current directory's `.uberblick.json`. An ancestor project's
+binding, other workspaces, stored logins and existing MCP registrations are
+unchanged. `ub init` remains first-time setup.
 
-To change this *machine's* default instead — what an unpinned entry, `ub status`
-and the mise tasks all resolve to — use `ub workspace use <id>`. It writes your
-`config.json`, and every reader follows it: the tasks run through `ub env`, so
-`mise run web` and the hub pick up the switch with nothing else to keep in step.
-`ub workspace` on its own
-prints the workspace in force and which layer chose it; `ub workspace list`
-shows the workspaces this machine has a database for, so `use` and
-`--workspace` both also take a unique uuid prefix from that list.
+To share that workspace, run `ub workspace promote <hub>`. Promotion reuses the
+stored login or runs GitHub approval when needed. Your account must currently
+be a member or administrator of at least one workspace on the hub; signing in
+alone grants no creation rights.
+The first login on a fresh hub claims its default workspace and qualifies.
+Promotion uploads the same UUID and history, including archived documents,
+name and sidebar, verifies them through a fresh authenticated client, then
+connects the project and prints a complete `ub workspace join` URL.
 
-One agent session can hold **two** workspaces at once: `--label <label>` puts the
-pin on a separately named `uberblick-<label>` entry instead of the primary one,
-so two processes serve two corpora under two tool prefixes.
+Several workspaces coexist on one hub with separate corpora. A deployed hub
+admits a device credential only for a workspace with current membership.
+Selection alone grants no access. Join an existing workspace with
+`ub workspace join <connection-url>`; it requires no prior local workspace.
+
+`ub workspace` prints the current binding and its source. `ub workspace list`
+lists local workspace databases. Selecting another known workspace requires an
+explicit hub, so the selection cannot inherit an unrelated endpoint:
 
 ```
-ub mcp install claude --project --workspace <other-uuid> --label research
+ub workspace use <uuid> --hub https://hub.example.test
+ub workspace use <local-uuid> --hub local
 ```
 
-Either way it is the same server, the same hub and a different corpus.
+A session can use several corpora through separately named MCP entries, on the
+same or different hubs:
+
+```
+ub mcp install claude --project --workspace <first-uuid> --hub https://first.example.test --label product
+ub mcp install claude --project --workspace <second-uuid> --hub https://second.example.test --label research
+```
+
+Each entry carries its own complete binding. Installing an existing name never
+overwrites its configuration; use the vendor's management command to replace it.
 
 The web client takes one more value, `WORKSPACES`: a comma-separated list of the
 workspaces to offer in the topbar switcher, e.g.
@@ -354,15 +365,17 @@ copy through mise:
 
 ```
 ub init            # identity, workspace, signing secret
-ub init <hub-url>  # the same, with the new workspace created on that hub
+ub init <hub-url> --workspace <uuid>  # seed a workspace the stored login permits
 ub update          # update this copy — Homebrew, or a checkout on main
 ub open            # serve the web app and a hub, and open the browser
-ub status          # workspace, hub, connection, pending work, local log, failures
-ub status --json   # full report, including rooms, configuration and storage paths
+ub status          # workspace, hub, stored account, connection, pending work, last sync, local log, failures
+ub status --json   # full report, including account, rooms, configuration and storage paths
 ub workspace       # the workspace in force, and which layer chose it
 ub workspace list  # workspaces this machine has a database for
-ub workspace use   # make a workspace this machine's default
-ub remote          # the endpoint in force, and what sharing it buys
+ub workspace use <id> --hub <url|local>  # select a complete project binding
+ub workspace create "Project notes"
+ub workspace promote http://localhost:8080
+ub workspace join <connection-url>
 ub mcp install     # register uberblick with an MCP client
 ub mcp serve       # the stdio entry point for an MCP client
 ```
@@ -384,48 +397,85 @@ task wraps it in `fnox exec`, which is how a decryptable secret becomes visible
 to it in the first place. Every question `ub init` asks has a flag (`--name`,
 `--color`, `--workspace`, `--yes`), and a non-interactive stdin takes the
 defaults rather than blocking, so it needs no TTY. Given a hub —
-`ub init hub.example.ts.net`, or the `wss://…` endpoint in full — it creates the
-new workspace *on that hub*: it dials and authenticates before writing anything,
+`ub init hub.example.ts.net`, or the `wss://…` endpoint in full — it initializes the
+selected workspace on that hub: it dials and authenticates before writing anything,
 stores the endpoint, and the starter documents are there by the time it returns.
-That needs the hub's signing secret to be here already (`HUB_AUTH_TOKEN`, or
-`credentials.json`), since a secret generated here would be random and the hub
-would refuse it. It only ever fills the endpoint in: the same one again changes
+For a remote hub, run `ub auth login <hub>` first and name a workspace you
+can access with `--workspace <uuid>`; a random new UUID has no membership and
+is refused before anything is written. Loopback hubs retain signing-secret
+authentication. It only ever fills the endpoint in: the same one again changes
 nothing, and a *different* one is refused rather than overwritten, because
-moving a machine between hubs is `ub remote join`. `--mcp` ends by printing what
+moving a machine between hubs is `ub workspace join`. `--mcp` ends by printing what
 `ub mcp install --print` prints — the snippet and the file it goes in — and
 `--no-mcp` says not to mention it. A bootstrap never registers a server with
 somebody's agent on its own, even with a vendor CLI installed: running
 `claude mcp add` is `ub mcp install`, asked for on purpose.
 
-Configuration is JSON and every layer is optional — absent configuration is a
-default, never an error — with one exception: the **workspace** has no default.
-A workspace id is a uuid, optionally decorated for display as `<slug>-<uuid>`
-(the slug is cosmetic; only the uuid names a room, a token claim or the local
-database). Nothing invents one, because a guessed workspace would open a corpus
-nobody chose, so `ub init` is what creates one and `ub status`, `ub mcp serve`
-and the MCP server all refuse to run without it — naming `ub init` when they do.
-Precedence, highest first:
+### Configuration
 
-| Layer | Holds |
-| --- | --- |
-| environment (`WORKSPACE_ID`, `HUB_AUTH_TOKEN`) | wins, so a project MCP entry's `WORKSPACE_ID` pin binds the repository it travels with, and `fnox exec` can supply the secret. **Not the endpoint** |
-| `config.json` | per-user identity (display name, cursor colour), the workspace and the hub endpoint — what `ub init` and `ub remote join` write. Which directory it is in is [the layout](#where-your-files-live) |
-| `credentials.json`, mode 0600, beside it | the hub signing secret. Never printed by any command, and refused outright — not merely warned about — if anyone but its owner can read it |
-| built-in defaults | hub `ws://localhost:1234`. No workspace: there is no default one |
+Workspace selection is explicit and atomic: workspace ID plus hub URL. Terminal
+commands, `ub open`, `ub env` and `ub mcp serve` use one resolver:
 
-**The endpoint has one authority.** `HUB_URL` in the environment is not a layer:
-it is not read, and it is not passed on to anything `ub` spawns. Two ambient
-sources for an endpoint is what silently redirected a machine bound to a remote
-hub at a local one while its writes reported `synced` (#376) — so the value in
-`config.json` is the answer, and two commands write it: `ub init <hub-url>`
-fills it in on a machine that has none, and `ub remote join` is how it changes.
-Neither is a file to edit by hand.
+1. Both `UB_WORKSPACE_ID` and `UB_HUB_URL` in the environment override the whole
+   project binding. A missing, blank or invalid half is an error; values are never
+   borrowed from another layer. Set `UB_HUB_URL=local` for local-only use. These
+   variables work with mise, direnv and per-entry MCP environments.
+2. Otherwise, search from the current directory up to the filesystem root for
+   the nearest `.uberblick.json`. An invalid nearest file fails; it never falls
+   through to a parent. A file in a common ancestor intentionally covers its
+   descendants, including a file placed in your home directory. To give a
+   repository its own selection beneath an ancestor binding, create a closer
+   `.uberblick.json` there explicitly; selection commands update the nearest file.
+3. Without either, `ub status` reports **No workspace selected** without opening
+   a database. Workspace-dependent commands refuse until a binding is chosen.
+   `ub env -- <command>` can still run non-workspace commands, with no workspace
+   or hub selection exported.
 
-There is no per-directory config file either: a repository that needs its own
-workspace pins `WORKSPACE_ID` in the project MCP entry the client already reads,
-which arrives as the environment. Nothing committable carries an endpoint or a
-credential, and a checkout is not a configuration layer — its tasks *consume*
-this machine's configuration through `ub env` rather than keeping a copy.
+```json
+{
+  "workspaceId": "11111111-1111-4111-8111-111111111111",
+  "hubUrl": "https://hub.example.test"
+}
+```
+
+Use JSON `null` for local operation on this computer. This may connect to the
+embedded loopback development hub when its local signing secret is available;
+it does not configure an external upstream. Without that secret, sync is disabled.
+The JSON status keeps the internal transport endpoint separate from the selected
+binding. The string `"local"` in a project file is rejected; use JSON null.
+A hub address is normalized to its sync
+endpoint; a workspace ID can have a display slug, but only its UUID identifies
+data. The file contains no credentials and may be committed when its selection
+is appropriate for everyone using the project. `ub status` shows the workspace,
+hub and selection source. `ub init`, `ub workspace join` and `ub workspace use`
+update the nearest project file, or create one in the current directory.
+
+**Migration:** legacy `WORKSPACE_ID` / `HUB_URL` inputs and workspace/endpoint
+fields in the user's `config.json` no longer select a workspace. Legacy environment
+selectors without a complete new pair are refused, even when a project file
+exists, so an old named MCP pin cannot silently open another corpus. Existing
+credentials, identity and document databases remain untouched. Add an explicit
+project file with the existing workspace and hub, or set both new environment
+variables. Existing MCP entries must be updated to include both variables;
+installation reports conflicting entries without overwriting them.
+Plain `ub init` refuses an unbound project with legacy machine selection rather
+than creating a different workspace. Explicitly select the intended pair first.
+Before removing old settings, run `ub workspace use <workspace-id> --hub <hub-url|local>`
+once. It preserves the old endpoint's device-admission mode in private,
+endpoint-keyed metadata, including when the new project uses a different hub.
+After giving existing projects their bindings, finish migration by removing only
+the obsolete `workspace` and `hubUrl` keys from
+`$XDG_CONFIG_HOME/uberblick/config.json` (normally
+`~/.config/uberblick/config.json`). Keep other fields, `credentials.json`, project
+files and databases. New unbound directories can then use `ub init` to create a
+fresh workspace, including starter documents; existing project bindings remain.
+Temporary environment overrides are never implicitly saved by setup commands.
+
+The private `credentials.json` remains owner-only and holds local development
+signing secrets plus separate device logins keyed by hub origin. No credential
+belongs in a project file or MCP entry. `HUB_AUTH_TOKEN` still overrides the
+stored local development signing secret; remote sync resolves its saved login
+from the private store.
 
 One further variable is a test seam, not a configuration layer:
 `UB_TEST_MAX_WAIT_MS` caps four deadlines `ub` spends probing something
@@ -436,8 +486,7 @@ floor: unset or unusable it changes nothing, and it cannot lengthen any
 default. Being ordinary environment it reaches everything `ub` spawns,
 children included — the reason it is a variable and not an option. Those four
 are not every remote deadline `ub` owns, and no value of this variable
-shortens the others: `ub remote init`, for one, budgets a deployment's first
-answer at 90 s and gives each of its two HTTP probes 10 s.
+shortens unrelated deadlines such as GitHub approval and lock waits.
 `packages/cli/src/budget.ts`'s header is the account of which deadlines this
 variable may cap and which it must not.
 
@@ -471,104 +520,67 @@ opens a packaged install's database.
 
 ### Going remote: local first, then a hub, then a second computer
 
-The normal journey is local first and remote later, and `ub remote` is the part
-that keeps a corpus from being left behind when the endpoint changes. Documents
-a browser created live only in the local hub until an MCP session pulls them
-down, so an endpoint changed without them strands them.
+A published Docker hub runs on Linux or Docker Desktop on macOS, including
+Apple Silicon through `linux/amd64` emulation. Follow [REMOTE.md](REMOTE.md) to
+start a release on host loopback and claim its default workspace before wider
+exposure. The operator updates the release deliberately while retaining its
+volumes. Existing checkout hosts can
+[switch to a release](REMOTE.md#switch-an-existing-checkout-host-to-a-release).
 
-**On the remote host** — a Linux box in your tailnet — one command from your own
-machine stands the hub and the web client up:
-`ub remote init <ssh-target>`, which [REMOTE.md](REMOTE.md) describes in full. It
-clones `main` onto the host and builds from it; **the host never updates
-itself** — `ub remote update <ssh-target>` deploys `origin/main` onto it when you
-mean to, and a change to wire semantics must update the clients in the same
-sitting. It ends by printing this machine's endpoint and the join URL, and
-persists the endpoint here.
+From the project directory:
 
-**On every computer**, including this one, one command binds a machine to the
-workspace, whatever is on it already:
-
-```
-ub remote join wss://<host>.ts.net/ws/<workspace id> \
-  --secret-file ~/uberblick-remote-secret
+```sh
+ub workspace create "Project notes"
+ub workspace promote http://localhost:8080
+ub open
 ```
 
-That URL is what `ub remote init` prints: the endpoint with the workspace id as
-its **last path segment**. Two journeys, two verbs, and that is the whole of the
-command surface — a *new* workspace is `ub init [hub-url]`, which seeds starter
-documents and, given the hub's address, creates that workspace on it in the same
-command; a workspace that already exists somewhere is `ub remote join` (which
-seeds nothing). There is no operator suite beside them: nothing that
-repoints the clients without moving anything. The id has to travel,
-because a workspace id is a uuid and `ub init` generates a *new* one: a machine
-that invented its own would join the remote hub and find nothing of yours on it,
-the rooms being keyed by a different id. Carrying it in the URL is what makes it
-one paste instead of two.
+Promotion includes login when needed and connection after verification; there
+is no separate join on this machine. The authenticated account must currently
+be a member or administrator of at least one workspace on the hub. It becomes
+the promoted workspace's first and only member, as administrator. The reservation
+itself leaves the default workspace, its claim state and other memberships
+unchanged. On a fresh hub, the sign-in requested by promotion can claim the
+default workspace through the normal first-login flow.
 
-`join` binds this machine to the workspace the URL names **regardless of local
-state** — no prior `ub init` is needed, and one that has run is not in the way.
-It hydrates the full remote directory and every live and archived document room
-into that workspace's replica. A fresh client then verifies the full directory,
-every archived room, and one sampled live room before the endpoint and binding
-are persisted. A replica this machine already holds for that id is attached
-rather than replaced: the two reconcile as CRDTs — what the local log holds goes
-up, what the hub holds comes down, and nothing on either side is discarded —
-which is how the machine that ran `ub remote init` joins its own populated
-workspace. An unreachable or auth-rejecting remote leaves your configuration
-exactly as it was, and a URL missing its workspace id, or carrying something
-that is not one, is refused before anything is written, with the expected form
-in the message.
+Promotion refuses a workspace already bound to a hub and any destination UUID
+with existing documents or memberships. The only exception is its own recorded
+attempt. If interrupted, rerun the same command on the same machine: its saved
+attempt and the hub's atomic grant receipt allow it to resume. The local
+workspace stays usable and the project binding stays local until a fresh client
+has verified every document, including archived content, plus settings and
+sidebar history. Close other clients while promoting so edits do not outpace
+the verified snapshot. Verification is a fresh read of acknowledged hub state,
+not a guarantee that the hub has flushed all documents to disk.
 
-A workspace on this machine under a *different* id stays. It is never merged
-into the joined one and never moved: `ub workspace list` shows both, and
-`ub workspace use <id>` switches back. The endpoint is machine-wide,
-though, so after a join that workspace syncs with the remote hub too, under its
-own rooms.
+On another computer, use the full connection URL promotion printed:
 
-Inside a clone, `mise trust && mise run setup -- --yes` first and then the join
-gives you `mise run web` against the remote hub: the tasks run through
-`ub env`, so they follow the workspace and the endpoint the join persisted with
-nothing written into the checkout.
+```sh
+ub auth login https://hub.example.com
+ub workspace join wss://hub.example.com/ws/<workspace-id>
+ub open
+```
 
-The secret that reached the remote replaces whatever this machine had, in
-`credentials.json` at mode 0600, and the command says it is doing so. That is
-the whole point on a second machine: a locally generated secret is *random*, and
-the remote verifies with the first machine's.
+For other computers, configure HTTPS as described in the
+[route table](REMOTE.md#choose-how-clients-reach-the-hub); Tailscale is optional.
+Join hydrates and verifies the existing workspace. It seeds nothing and keeps
+other local workspaces separate. Existing replicas of the same UUID reconcile
+as CRDTs. Join verifies the full directory, every archived document and one live
+sample before binding; promotion verifies all live documents as well.
 
-**What "persisted" covers.** The endpoint — and, after a `join`, the workspace
-binding with it — goes into your `config.json`, which is the only place `ub`,
-`ub mcp serve`, the MCP server it spawns and every checkout task running under
-`ub env` resolve them from. Nothing outranks it, so a report naming the endpoint
-is naming the one in force. A *workspace* can still be outranked, by
-`WORKSPACE_ID` in the environment — a project MCP entry's pin — and `join` says
-so when it is.
+Both commands persist a complete binding in `.uberblick.json`. Existing MCP
+registrations retain their pinned workspace and hub; install a new named entry
+for the new selection. A complete environment binding still takes precedence.
+For a GitHub-enabled hub behind a loopback proxy, private user configuration
+remembers device admission per endpoint, including after logout. The project
+binding and MCP entries contain only the workspace and hub selection.
+Local-only browser and MCP use need no promotion or GitHub login.
 
-A deployed web client does not read any of these: it resolves its endpoint — and
-its workspaces — at runtime from the served `/uberblick-config.json`.
-
-Archived documents travel with their content. Their tombstones replicate too,
-so they stay archived until restored on the destination.
-
-The remote's signing secret comes from `--secret-file <path>` (a file only you
-can read, mode 0600 — a `credentials.json` works, or the bare secret) or from a
-masked prompt when the configured one is refused and there is a terminal to ask.
-The prompt shows one `*` per character entered, without displaying the secret.
-Never as an argument: a command line is in every `ps` listing and every shell
-history. Neither the secret nor a token signed with it is printed by any of
-these commands.
-
-`ub remote` with no remote configured says
-so and exits 0; with one, it prints the endpoint and states the boundary you
-actually get: the host serves the shared signing secret to the web app, so
-reaching the app is the same as holding the credential, and the deployment is
-supported only on a private network until accounts land (#84). There is no
-`invite` command (#92) for that reason.
-
-`ub mcp serve` resolves that configuration and runs the MCP server with it, so
-the server keeps its environment-only contract — no flags, no config file — and
-a client's spawn line never has to change again when internals move. This
-checkout's `.mcp.json` is the one place that still names a spawn of its own,
-for the reasons given above, and `ub mcp install claude --print` emits it.
+Stored device credentials stay private. `ub open` serves the local replica with
+a separate loopback browser key; it never gives the browser an upstream key.
+MCP and `ub open` renew the saved login and recover after later login or grants.
+Revocation stops sharing while downloaded documents remain locally usable.
+Neither promotion nor join sends a signing secret to a deployed hub.
 
 ## The first-user proof
 
@@ -718,13 +730,13 @@ package owns the instance. Check with `mise exec -- pnpm why yjs`.
 ## Secrets
 
 Encrypted secrets would live in `fnox.toml`, age-encrypted; it holds none today,
-and the hub signing secret lives only in each machine's `credentials.json`. The
+and the loopback signing secret lives in each machine's `credentials.json`. The
 private key is expected at `~/.config/fnox/age.txt` and never in the repo. Only real
 secrets go there: plaintext local defaults such as `HUB_DB_PATH` live in
 `mise.toml`'s `[env]` block. `HUB_URL` deliberately does not — that block is
 ambient for everything in a checkout, so its `ws://localhost:1234` default lives
 in the clients' code instead, and the endpoint a machine actually dials comes
-from its own `config.json` through `ub env`.
+from its explicit project/environment binding through `ub env`.
 
 Contributors without the age key are not blocked. The task wrappers pass
 `fnox exec --if-missing warn` explicitly, so a secret fnox cannot decrypt logs a
@@ -733,12 +745,14 @@ of aborting. See
 "The signing secret" above for the whole precedence chain. `mise run lint`,
 `mise run test` and `mise run typecheck` don't shell through fnox at all.
 
-`HUB_AUTH_TOKEN` is the HMAC secret hub tokens are signed with, and `ub init`
-generates one when the machine has none. The hub refuses to start without it —
-a hub that cannot verify a token would accept anything.
-The MCP server treats it as optional and runs local-only without it: its update
-log is the authoritative replica, so no secret means no sync, not no service
-(`sync_status` reports `hub.status: "disabled"`). `WORKSPACE_ID` it does
+`HUB_AUTH_TOKEN` is the HMAC secret loopback hub tokens are signed with, and
+`ub init` generates one when the machine has none. A loopback-only hub requires
+it. Remote hubs require GitHub sign-in configuration and admit only device
+credentials with membership, including the Docker proxy's host-loopback
+route. The MCP server
+keeps its local replica usable when its remote login is absent or refused,
+reports the needed action, and resumes sharing after login with access. A
+local-admission binding without a secret reports `hub.status: "disabled"`. `WORKSPACE_ID` it does
 require — with none set it exits non-zero, naming `ub init` — and it reads
 `UBERBLICK_DB` (default `<uuid>.sqlite` in the data root — see [Where your files
 live](#where-your-files-live) — keyed by the bare uuid so both spellings of a

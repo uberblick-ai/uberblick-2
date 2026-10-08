@@ -26,9 +26,8 @@
  * the prose" claim is checked in the browser (`e2e/block-menu.spec.ts`).
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { describe, expect, it, vi } from "vitest";
+import { act, render } from "./react-render.js";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -48,11 +47,7 @@ import {
 import type { SlashTrigger } from "../src/editor/block-menu.js";
 import { BlockMenu } from "../src/ui/BlockMenu.js";
 import { mountEditor } from "./helpers.js";
-
-beforeEach(() => {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-});
+import { onTestCleanup } from "./test-cleanup.js";
 
 interface Mounted {
   editor: Editor;
@@ -81,22 +76,20 @@ interface Mounted {
 function mountMenu(ydoc: Y.Doc, initiallyFocused = false): Mounted {
   const { editor, element } = mountEditor(ydoc);
   const frame = document.createElement("div");
+  onTestCleanup(() => frame.remove());
   document.body.appendChild(frame);
   frame.appendChild(element);
   const container = document.createElement("div");
   frame.appendChild(container);
-  const root = createRoot(container);
-  act(() => {
-    if (initiallyFocused) editor.view.focus();
-    root.render(<BlockMenu editor={editor} host={{ current: frame }} />);
-  });
+  if (initiallyFocused) act(() => editor.view.focus());
+  const view = render(<BlockMenu editor={editor} host={{ current: frame }} />, { container });
 
   const query = <T extends Element>(selector: string): T | null =>
     document.body.querySelector<T>(selector);
   let menuMounted = true;
   const unmountMenu = (): void => {
     if (!menuMounted) return;
-    act(() => root.unmount());
+    view.unmount();
     menuMounted = false;
   };
   return {
@@ -288,7 +281,7 @@ describe("the slash trigger", () => {
 });
 
 describe("the slash menu", () => {
-  it("identifies the highlighted option from the prose until the menu closes", () => {
+  it("identifies the highlighted option, wrapping at both ends, until the menu closes", () => {
     const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
     const { editor, query, press, unmount } = mountMenu(ydoc);
     try {
@@ -303,6 +296,17 @@ describe("the slash menu", () => {
       expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(
         options[0]?.id,
       );
+      // Up from the first wraps to the last; Down from the last wraps back.
+      press("ArrowUp");
+      expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(
+        options.at(-1)?.id,
+      );
+      expect(options.at(-1)?.getAttribute("aria-selected")).toBe("true");
+      press("ArrowDown");
+      expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(
+        options[0]?.id,
+      );
+      expect(options[0]?.getAttribute("aria-selected")).toBe("true");
 
       press("ArrowDown");
       expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(
@@ -323,6 +327,17 @@ describe("the slash menu", () => {
       press("Escape");
       expect(editor.view.dom.hasAttribute("aria-activedescendant")).toBe(false);
       expect(editor.view.dom.hasAttribute("aria-controls")).toBe(false);
+
+      // Reopen the same query after a non-first selection: the previous menu's
+      // position must not become this menu's initial selection.
+      act(() => {
+        editor.commands.setContent("");
+      });
+      caret(editor, 0, 0);
+      type(editor, "/");
+      const first = query<HTMLElement>('[role="option"]');
+      expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(first?.id);
+      expect(first?.getAttribute("aria-selected")).toBe("true");
     } finally {
       unmount();
     }
@@ -998,6 +1013,15 @@ describe("the gutter menu", () => {
       expect(mounted.editor.view.dom.hasAttribute("aria-activedescendant")).toBe(
         false,
       );
+
+      // Filtering replaces the list and resets the pointer's remembered index.
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, "he");
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const filteredFirst = mounted.query<HTMLElement>('[role="option"]');
+      expect(field.getAttribute("aria-activedescendant")).toBe(filteredFirst?.id);
+      expect(filteredFirst?.getAttribute("aria-selected")).toBe("true");
 
       act(() => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, "nope");

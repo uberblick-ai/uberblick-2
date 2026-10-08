@@ -12,723 +12,103 @@
  * The bundle is a fixture rather than a real `vite build`: `UBERBLICK_WEB_DIST`
  * is the seam `ub open` reads, and what these tests are about is what gets
  * served, not what Vite emits.
+ *
+ * The criteria that need a live upstream hub are in `open-remote.test.ts`, the
+ * ones about the hub and ports this command owns in `open-ports.test.ts`, and
+ * the fixtures all three share in `open-fixtures.ts`.
  */
 
-import type { ChildProcess } from "node:child_process";
-import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer as createHttpServer, request as httpRequest } from "node:http";
-import { createServer } from "node:net";
-import type { Server, Socket } from "node:net";
-import { join, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
-import { HocuspocusProvider } from "@hocuspocus/provider";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { Hub, TokenClaims, TokenScope } from "@uberblick/hub";
-import {
-  MAX_TOKEN_LIFETIME_SECONDS,
-  createHub,
-  importRootSecret,
-  mintToken,
-  silentLogger,
-} from "@uberblick/hub";
-import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/hub/protocol";
-import {
-  createMcpServer,
-  resolveMcpConfig,
-} from "@uberblick/mcp-server";
-import {
-  directoryRoom,
-  editBlock,
-  getBlocks,
-  getDirectoryEntry,
-  roomForDoc,
-} from "@uberblick/schema";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/hub";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import * as Y from "yjs";
 import { localBrowserKey } from "../src/browser-key.js";
 import { acquireInitLock } from "../src/init-lock.js";
-import type { Io } from "../src/io.js";
-import type { Stop } from "../src/open.js";
-import { bundlePlan, ensureBundle, whoHoldsPort } from "../src/open.js";
-import { probeHub, probePort } from "../src/probes.js";
-import type { Sandbox } from "./helpers.js";
+import { bundlePlan, ensureBundle } from "../src/open.js";
+import { probePort } from "../src/probes.js";
+import { readWorkspaceHub, rememberWorkspaceBinding } from "../src/workspace-registry.js";
+import { pointAt, runUbAsync, sandbox, unboundSandbox, sleep, waitUntil } from "./helpers.js";
 import {
-  UB_BIN,
-  WAIT_TIMEOUT_MS,
-  pointAt,
-  removeTempDirs,
-  runUbAsync,
-  sandbox,
-  sleep,
-  waitUntil,
-} from "./helpers.js";
+  BANNER,
+  BUILD_STAMP,
+  FIRST_REMOTE,
+  REBOUND_SECRET,
+  REBOUND_WORKSPACE,
+  REPO_ROOT,
+  SECOND_REMOTE,
+  SECRET,
+  WORKSPACE,
+  anotherRunBuilding,
+  authMessage,
+  bearer,
+  browserRecorder,
+  calm,
+  cleanUp,
+  configDir,
+  configured,
+  fakeMise,
+  fakeTool,
+  fixtureBundle,
+  forgedAuthMessage,
+  freePort,
+  get,
+  getWithHost,
+  open,
+  openFails,
+  rebind,
+  servingDocumentOf,
+  stamp,
+  stderrIo,
+  stoppable,
+  writeBinding,
+  writeCredentials,
+} from "./open-fixtures.js";
 
-const WORKSPACE = "b4d1f0a7-3c62-4e91-8f05-7ad2c9e61b38";
-const SECRET = "open-test-signing-secret-9d31fa";
-
-/** What a `ub remote join` mid-run leaves behind, for the #449 tests. */
-const REBOUND_WORKSPACE = "c7e2b105-9a48-4d6f-b3e1-5f0c8a71d264";
-const REBOUND_SECRET = "open-test-rotated-secret-4b7c21";
-const FIRST_REMOTE = "wss://first.example.ts.net/ws";
-const SECOND_REMOTE = "wss://second.example.ts.net/ws";
-
-const hubs: Hub[] = [];
-const listeners: { server: Server; sockets: Socket[] }[] = [];
-const children: ChildProcess[] = [];
-/** {@link anotherRunBuilding} holders, so no build outlives the test that made it. */
-const holders: (() => Promise<void>)[] = [];
-
-afterEach(async () => {
-  for (const child of children.splice(0)) {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
-  }
-  for (const hub of hubs.splice(0)) {
-    await hub.stop().catch(() => {});
-  }
-  for (const { server, sockets } of listeners.splice(0)) {
-    for (const socket of sockets) socket.destroy();
-    await new Promise<void>((done) => server.close(() => done()));
-  }
-  // Idempotent, so a test that finished its own holder pays nothing, and one
-  // that failed first still leaves no build running and no lock behind.
-  for (const finish of holders.splice(0)) {
-    await finish().catch(() => {});
-  }
-  removeTempDirs();
-});
-
-// --- fixtures ----------------------------------------------------------------
-
-/** A port nothing is listening on: bound, read back, and released. */
-async function freePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("could not reserve a port");
-  }
-  await new Promise<void>((done) => server.close(() => done()));
-  return address.port;
-}
-
-/**
- * A second connection to a store a live `ub open` process is serving.
- *
- * That process writes while these tests provoke it, so a connection with
- * SQLite's default zero busy timeout throws `database is locked` on a loaded
- * host instead of waiting the write out — an intermittent false red on the
- * whole review gate (#901). The wait matches the store's own
- * `BUSY_TIMEOUT_MS` (`packages/mcp-server/src/store.ts`).
- */
-function openStore(databasePath: string): DatabaseSync {
-  const database = new DatabaseSync(databasePath);
-  database.exec("PRAGMA busy_timeout = 5000");
-  return database;
-}
-
-/**
- * A process holding a port and answering nothing — the unidentified case.
- *
- * It never answers at all, so the probe's verdict does not depend on beating a
- * deadline: no ceiling makes this holder identifiable.
- */
-async function silentListener(port: number): Promise<void> {
-  const sockets: Socket[] = [];
-  const server = createServer((socket) => sockets.push(socket));
-  await new Promise<void>((done) => server.listen(port, "127.0.0.1", done));
-  listeners.push({ server, sockets });
-}
-
-/** A process holding a port and giving one complete HTTP answer to everything. */
-async function answeringListener(
-  port: number,
-  status: number,
-  body: string,
-): Promise<void> {
-  const sockets: Socket[] = [];
-  const server = createHttpServer((_request, response) => {
-    response.writeHead(status);
-    response.end(body);
-  });
-  server.on("connection", (socket) => sockets.push(socket));
-  await new Promise<void>((done) => server.listen(port, "127.0.0.1", done));
-  listeners.push({ server, sockets });
-}
-
-async function startHub(box: Sandbox, port = 0): Promise<Hub> {
-  const hub = await createHub({
-    authSecret: SECRET,
-    port,
-    databasePath: join(box.cwd, "existing-hub.sqlite"),
-    log: silentLogger,
-    debounce: 20,
-    maxDebounce: 200,
-    shutdownTimeoutMs: 5_000,
-  });
-  hubs.push(hub);
-  return hub;
-}
-
-/** What the web build stamps the protocol it speaks into; `ub open` reads it. */
-const BUILD_STAMP = "uberblick-build.json";
-
-/** Give a fixture bundle the stamp of a build — `version`, or none at all. */
-function stamp(dir: string, version: number | null): void {
-  if (version === null) {
-    rmSync(join(dir, BUILD_STAMP), { force: true });
-    return;
-  }
-  writeFileSync(join(dir, BUILD_STAMP), JSON.stringify({ syncProtocolVersion: version }), "utf8");
-}
-
-/**
- * A bundle the way `ub open` finds one: a directory with an index.html in it —
- * and, since #452, a stamp saying it speaks the protocol this command does.
- * Everything below serves rather than refuses because of that one line.
- */
-function fixtureBundle(box: Sandbox): string {
-  const dir = join(box.cwd, "bundle");
-  mkdirSync(join(dir, "assets"), { recursive: true });
-  writeFileSync(
-    join(dir, "index.html"),
-    "<!doctype html><title>uberblick</title><div id=root></div>\n",
-    "utf8",
-  );
-  writeFileSync(join(dir, "assets", "app.js"), "export const marker = 42;\n", "utf8");
-  stamp(dir, SYNC_PROTOCOL_VERSION);
-  return dir;
-}
-
-/** This checkout, which is where `ub open` runs `mise run build-web` (#475). */
-const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..", "..", "..");
-
-interface FakeTool {
-  /** The directory to put on PATH; every fake tool of one sandbox shares it. */
-  path: string;
-  /** One `<cwd> <args>` line per invocation. */
-  calls: () => string[];
-  /** What `HUB_AUTH_TOKEN` was for each invocation — `<unset>` when it was not. */
-  tokens: () => string[];
-}
-
-/**
- * A build command on PATH that records how it was called and behaves as it is
- * told: `FAKE_SLEEP` seconds of work, `FAKE_HOLD` a file to keep building until
- * somebody removes, `FAKE_STAMP_VERSION` stamped into `FAKE_STAMP_DIR`,
- * `FAKE_EXIT_CODE` to exit with, `FAKE_KILL_SELF` to die of a signal nobody here
- * sent. A real `mise run build-web` or `pnpm … build` here
- * would be a Vite build of the repository's own bundle — minutes, and a
- * checkout mutated by a test.
- *
- * `FAKE_BUSY_DIR` is the overlap sentinel: a directory only one build can hold,
- * created before the work and removed after it, so a second build running at
- * the same time exits 9 instead of quietly succeeding.
- */
-function fakeTool(box: Sandbox, command: string): FakeTool {
-  const bin = join(box.cwd, "fake-bin");
-  mkdirSync(bin, { recursive: true });
-  const record = join(box.cwd, `${command}-calls.txt`);
-  const tokens = join(box.cwd, `${command}-tokens.txt`);
-  writeFileSync(
-    join(bin, command),
-    "#!/bin/sh\n" +
-      // The tests point PATH at this directory alone, to prove the build
-      // command is found there; the fixture still needs `mkdir` and `sleep`.
-      'PATH="$PATH:/bin:/usr/bin"\n' +
-      `printf '%s %s\\n' "$PWD" "$*" >> ${record}\n` +
-      `printf '%s\\n' "\${HUB_AUTH_TOKEN-<unset>}" >> ${tokens}\n` +
-      'if [ -n "$FAKE_KILL_SELF" ]; then kill -TERM $$; fi\n' +
-      'if [ -n "$FAKE_BUSY_DIR" ]; then mkdir "$FAKE_BUSY_DIR" || exit 9; fi\n' +
-      'if [ -n "$FAKE_HOLD" ]; then while [ -e "$FAKE_HOLD" ]; do sleep 0.05; done; fi\n' +
-      'if [ -n "$FAKE_SLEEP" ]; then sleep "$FAKE_SLEEP"; fi\n' +
-      'if [ -n "$FAKE_BUSY_DIR" ]; then rmdir "$FAKE_BUSY_DIR"; fi\n' +
-      'if [ -n "$FAKE_STAMP_VERSION" ]; then\n' +
-      '  mkdir -p "$FAKE_STAMP_DIR"\n' +
-      '  printf \'{"syncProtocolVersion":%s}\' "$FAKE_STAMP_VERSION" \\\n' +
-      '    > "$FAKE_STAMP_DIR/uberblick-build.json"\n' +
-      "fi\n" +
-      'if [ -z "$FAKE_EXIT_CODE" ]; then FAKE_EXIT_CODE=0; fi\n' +
-      'exit "$FAKE_EXIT_CODE"\n',
-    "utf8",
-  );
-  chmodSync(join(bin, command), 0o755);
-  const lines = (file: string): string[] =>
-    existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
-  return { path: bin, calls: () => lines(record), tokens: () => lines(tokens) };
-}
-
-const fakeMise = (box: Sandbox): FakeTool => fakeTool(box, "mise");
-
-/** A {@link Stop} that never fires: the paths where no signal is involved. */
-function calm(): Stop {
-  return { interrupted: () => false, signalled: new Promise<void>(() => {}) };
-}
-
-/** A {@link Stop} the test decides the moment of, standing in for Ctrl-C. */
-function stoppable(): Stop & { stop: () => void } {
-  let seen = false;
-  let wake!: () => void;
-  const signalled = new Promise<void>((done) => {
-    wake = done;
-  });
-  return {
-    interrupted: () => seen,
-    signalled,
-    stop: () => {
-      seen = true;
-      wake();
-    },
-  };
-}
-
-/**
- * Another `ub open` really building `dir`: it holds the build lock from the
- * moment this resolves until `finish()` lets its build end, and leaves the
- * bundle `leaves` stamps, or nothing at all.
- *
- * Contention rather than a reconstructed lock path. A test that spells the file
- * name out asserts on the hash that produces it, so it fails changes that keep
- * exclusion and moves nothing — and it would still pass the mistake this lock
- * has already made once, of keying itself on something other than the output.
- * Two real runs over one directory can only agree by excluding each other.
- */
-async function anotherRunBuilding(
-  dir: string,
-  leaves?: number,
-): Promise<{ finish: () => Promise<void> }> {
-  const box = sandbox();
-  const tool = fakeMise(box);
-  const hold = join(box.cwd, "still-building");
-  writeFileSync(hold, "", "utf8");
-  const run = ensureBundle(
-    { action: "serve", dir, ours: true, installed: false },
-    {
-      ...box.env,
-      PATH: tool.path,
-      FAKE_HOLD: hold,
-      ...(leaves === undefined
-        ? {}
-        : { FAKE_STAMP_DIR: dir, FAKE_STAMP_VERSION: String(leaves) }),
-    },
-    stderrIo(),
-    calm(),
-  );
-  const finish = async (): Promise<void> => {
-    rmSync(hold, { force: true });
-    await run;
-  };
-  holders.push(finish);
-  await waitUntil(`another run to start building ${dir}`, () => tool.calls().length === 1);
-  return { finish };
-}
-
-/**
- * An {@link Io} that collects stderr and refuses stdout: which stream a bundle
- * message lands on is the CLI contract's, not a detail.
- */
-function stderrIo(): Io & { text: () => string } {
-  let text = "";
-  return {
-    out: () => {
-      throw new Error("a bundle message went to stdout, which carries the URL");
-    },
-    err: (chunk) => {
-      text += chunk;
-    },
-    text: () => text,
-  };
-}
-
-/** A `BROWSER` command that records the URL it was handed instead of opening it. */
-function browserRecorder(box: Sandbox): { command: string; opened: string } {
-  const opened = join(box.cwd, "opened.txt");
-  const command = join(box.cwd, "record-browser.sh");
-  writeFileSync(command, `#!/bin/sh\nprintf '%s\\n' "$1" >> ${opened}\n`, "utf8");
-  chmodSync(command, 0o755);
-  return { command, opened };
-}
-
-/** Whether a real client can open the workspace's directory room on `hubUrl`. */
-async function hubAnswers(box: Sandbox, hubUrl: string): Promise<boolean> {
-  const config = resolveMcpConfig({
-    ...box.env,
-    WORKSPACE_ID: WORKSPACE,
-    HUB_AUTH_TOKEN: SECRET,
-    UBERBLICK_DB: join(box.cwd, `probe-${Math.random().toString(36).slice(2)}.sqlite`),
-  });
-  return (await probeHub(config, hubUrl)) === "connected";
-}
-
-// --- the running command -----------------------------------------------------
-
-interface Running {
-  url: string;
-  stdout: () => string;
-  stderr: () => string;
-  /** The command's own terminal outcome, without sending it a signal. */
-  wait: () => Promise<{ status: number | null; signal: string | null }>;
-  /** SIGINT, then the exit status — what Ctrl-C in a terminal does. */
-  interrupt: () => Promise<{ status: number | null; signal: string | null }>;
-}
-
-const BANNER = /uberblick is at (http:\/\/\S+)/;
-
-/**
- * Start `ub open` and resolve once it is actually serving.
- *
- * The banner is the readiness signal, and it is printed after both ports are
- * bound — so a test that has this handle can make a request without polling.
- */
-async function open(
-  box: Sandbox,
-  args: string[],
-  extraEnv: NodeJS.ProcessEnv = {},
-): Promise<Running> {
-  const child = spawn(process.execPath, [UB_BIN, "open", ...args], {
-    cwd: box.cwd,
-    env: { ...box.env, ...extraEnv },
-  });
-  children.push(child);
-
-  let stdout = "";
-  let stderr = "";
-  child.stdout.on("data", (chunk: Buffer) => {
-    stdout += chunk.toString("utf8");
-  });
-  child.stderr.on("data", (chunk: Buffer) => {
-    stderr += chunk.toString("utf8");
-  });
-  const exited = new Promise<{ status: number | null; signal: string | null }>(
-    (done) => {
-      child.on("close", (status, signal) => done({ status, signal }));
-    },
-  );
-  let over = false;
-  void exited.then(() => {
-    over = true;
-  });
-
-  try {
-    await waitUntil("`ub open` to print its banner", () => {
-      if (over) throw new Error("ub open exited before it served");
-      return BANNER.test(stdout);
-    });
-  } catch (reason) {
-    child.kill("SIGKILL");
-    const said = reason instanceof Error ? reason.message : String(reason);
-    throw new Error(`${said}:\n${stdout}${stderr}`);
-  }
-
-  const url = BANNER.exec(stdout)?.[1];
-  if (url === undefined) throw new Error(`ub open named no URL:\n${stdout}`);
-  return {
-    url,
-    stdout: () => stdout,
-    stderr: () => stderr,
-    wait: () => exited,
-    interrupt: async () => {
-      child.kill("SIGINT");
-      await waitUntil("`ub open` to exit after Ctrl-C", () => over);
-      return await exited;
-    },
-  };
-}
-
-/**
- * Start `ub open` and interrupt it the moment `when` says so.
- *
- * Deliberately does not wait for the banner: the window this exists to test is
- * the one *before* there is one — after the hub has bound its socket and before
- * the command is fully up — and waiting on the hub's own port is what makes
- * hitting that window repeatable rather than a matter of timing.
- */
-async function interruptWhen(
-  box: Sandbox,
-  args: string[],
-  extraEnv: NodeJS.ProcessEnv,
-  when: () => Promise<void>,
-): Promise<{ status: number | null; signal: string | null; output: string }> {
-  const child = spawn(process.execPath, [UB_BIN, "open", ...args], {
-    cwd: box.cwd,
-    env: { ...box.env, ...extraEnv },
-  });
-  children.push(child);
-  let output = "";
-  child.stdout.on("data", (chunk: Buffer) => {
-    output += chunk.toString("utf8");
-  });
-  child.stderr.on("data", (chunk: Buffer) => {
-    output += chunk.toString("utf8");
-  });
-  const exited = new Promise<{
-    status: number | null;
-    signal: string | null;
-    output: string;
-  }>((done) => {
-    child.on("close", (status, signal) => done({ status, signal, output }));
-  });
-  let over = false;
-  void exited.then(() => {
-    over = true;
-  });
-
-  await when();
-  child.kill("SIGINT");
-  await waitUntil(
-    "`ub open` to exit after an interrupt while it was still coming up",
-    () => over,
-  );
-  return await exited;
-}
-
-/** Resolve once something is listening on `port` — here, the hub `ub open` started. */
-async function untilBound(port: number): Promise<void> {
-  await waitUntil(
-    `the hub \`ub open\` starts to bind port ${port}`,
-    async () => (await probePort("127.0.0.1", port)).state !== "free",
-  );
-}
-
-/** Run `ub open` expecting it to refuse, and hand back what it said. */
-async function openFails(
-  box: Sandbox,
-  args: string[],
-  extraEnv: NodeJS.ProcessEnv = {},
-): Promise<{ status: number | null; output: string }> {
-  const run = await runUbAsync(["open", ...args], box, extraEnv, WAIT_TIMEOUT_MS);
-  return { status: run.status, output: run.output };
-}
-
-/**
- * A sandbox that can start a hub: a workspace, a signing secret, a fixture
- * bundle, a hub database of its own, and no browser.
- */
-function configured(): {
-  box: Sandbox;
-  env: NodeJS.ProcessEnv;
-  bundle: string;
-} {
-  const box = sandbox({
-    userConfig: { workspace: WORKSPACE },
-    credentials: { signingSecret: SECRET },
-  });
-  const bundle = fixtureBundle(box);
-  return {
-    box,
-    bundle,
-    env: {
-      UBERBLICK_WEB_DIST: bundle,
-      // Never the repository's own packages/hub/data/hub.sqlite.
-      HUB_DB_PATH: join(box.cwd, "started-hub.sqlite"),
-      BROWSER: "none",
-    },
-  };
-}
-
-async function get(url: string): Promise<Response> {
-  return await fetch(url, { cache: "no-store" });
-}
-
-async function getWithHost(
-  url: string,
-  host: string | null,
-  authorization?: string,
-): Promise<{ status: number; headers: NodeJS.Dict<string | string[]>; body: string }> {
-  return await new Promise((resolve, reject) => {
-    const request = httpRequest(
-      url,
-      {
-        method: "GET",
-        ...(host === null ? { setHost: false } : {}),
-        headers: {
-          ...(host === null ? {} : { host }),
-          ...(authorization === undefined ? {} : bearer(authorization)),
-        },
-      },
-      (response) => {
-        const chunks: Buffer[] = [];
-        response.on("data", (chunk: Buffer) => chunks.push(chunk));
-        response.on("end", () => {
-          resolve({
-            status: response.statusCode ?? 0,
-            headers: response.headers,
-            body: Buffer.concat(chunks).toString("utf8"),
-          });
-        });
-      },
-    );
-    request.on("error", reject);
-    request.end();
-  });
-}
-
-/** This machine's config directory — the one the sandbox points XDG at. */
-function configDir(box: Sandbox): string {
-  return join(box.configHome, "uberblick");
-}
-
-/**
- * Rebind this machine, the way `ub remote join` or `ub workspace use` leaves it:
- * a different endpoint, workspace and signing secret, across both files.
- */
-function rebind(
-  box: Sandbox,
-  binding: { hubUrl: string; workspace: string; signingSecret: string },
-): void {
-  const dir = configDir(box);
-  mkdirSync(dir, { recursive: true });
-  writeCredentials(box, binding.signingSecret);
-  writeBinding(box, binding.hubUrl, binding.workspace);
-}
-
-function writeCredentials(box: Sandbox, signingSecret: string): void {
-  const dir = configDir(box);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(
-    join(dir, "credentials.json"),
-    `${JSON.stringify({ signingSecret }, null, 2)}\n`,
-    "utf8",
-  );
-  chmodSync(join(dir, "credentials.json"), 0o600);
-}
-
-function writeBinding(box: Sandbox, hubUrl: string, workspace: string): void {
-  const dir = configDir(box);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(
-    join(dir, "config.json"),
-    `${JSON.stringify({ workspace, hubUrl }, null, 2)}\n`,
-    "utf8",
-  );
-}
-
-function servingDocumentOf(
-  appUrl: string,
-  remoteHubUrl: string,
-  workspace: string,
-  secret: string,
-  rebound = false,
-): string {
-  const hubUrl = appUrl.replace(/^http:/, "ws:").replace(/\/$/, "");
-  return JSON.stringify({
-    hubUrl,
-    workspaces: [workspace],
-    hubAuthToken: secret,
-    remoteHubUrl,
-    ...(rebound ? { rebound: true } : {}),
-  });
-}
-
-async function authMessage(
-  key: string,
-  scope: TokenScope = "read-only",
-  options: {
-    secret?: string;
-    workspace?: string;
-    protocolVersion?: number;
-  } = {},
-): Promise<string> {
-  const token = await mintToken(
-    await importRootSecret(options.secret ?? key),
-    {
-      typ: "room",
-      sub: "open-api-test",
-      workspace: options.workspace ?? WORKSPACE,
-      scope,
-      kid: null,
-      lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-    },
-  );
-  return wrapToken(token, options.protocolVersion ?? SYNC_PROTOCOL_VERSION);
-}
-
-async function forgedAuthMessage(key: string, claims: TokenClaims): Promise<string> {
-  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
-  const signature = await crypto.subtle.sign(
-    "HMAC",
-    await importRootSecret(key),
-    new TextEncoder().encode(payload),
-  );
-  return wrapToken(`${payload}.${Buffer.from(signature).toString("base64url")}`);
-}
-
-function bearer(auth: string): Record<string, string> {
-  return { authorization: `Bearer ${auth}` };
-}
-
-// --- the criteria ------------------------------------------------------------
+afterEach(cleanUp);
 
 describe("ub open", () => {
-  it("starts a hub, serves the bundle, and opens the browser at the served URL", async () => {
-    const { box, env } = configured();
-    const hubPort = await freePort();
-    const webPort = await freePort();
-    const hubUrl = `ws://127.0.0.1:${hubPort}`;
-    const browser = browserRecorder(box);
-    pointAt(box, hubUrl);
-
-    const app = await open(box, ["--port", String(webPort)], {
-      ...env,
-      BROWSER: browser.command,
-    });
-
-    expect(app.url).toBe(`http://127.0.0.1:${webPort}/`);
-    const configuration = await (await get(`${app.url}uberblick-config.json`)).text();
-    expect(configuration).not.toContain(SECRET);
-    expect(JSON.parse(configuration).hubAuthToken).toBe(localBrowserKey(WORKSPACE, box.env));
-    expect(app.stdout() + app.stderr()).not.toContain(localBrowserKey(WORKSPACE, box.env));
-    expect(await (await get(app.url)).text()).toContain("<title>uberblick</title>");
-    expect(await (await get(`${app.url}assets/app.js`)).text()).toContain("marker");
-
-    // The hub it started is one a real client can open the workspace's
-    // directory room on — which is what the document list hydrates from.
-    expect(await hubAnswers(box, hubUrl)).toBe(true);
-    expect(app.stdout()).toContain("started here");
-
-    // The browser was handed the address that is actually being served. `ub
-    // open` spawns that command and carries on without awaiting it, so the
-    // recording lands whenever the machine gets to it: wait for the recording
-    // rather than for a duration, or load fails this case instead of delaying
-    // it (#531). The recorder appends, and `>>` creates the file before
-    // `printf` fills it — so a finished line, not an existing file, is the
-    // recording.
-    const recording = (): string =>
-      existsSync(browser.opened) ? readFileSync(browser.opened, "utf8") : "";
-    await waitUntil(
-      "the `BROWSER` command to record the URL it was handed",
-      () => recording().endsWith("\n"),
-    );
-    expect(recording().trim()).toBe(app.url);
-
-    expect((await app.interrupt()).status).toBe(0);
+  it.each([
+    { source: "project", hubUrl: null },
+    { source: "project", hubUrl: FIRST_REMOTE },
+    { source: "environment", hubUrl: null },
+    { source: "environment", hubUrl: FIRST_REMOTE },
+  ])("remembers a first $source binding with hub $hubUrl after serving", async ({ source, hubUrl }) => {
+    const box = source === "project"
+      ? sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl } })
+      : unboundSandbox();
+    const env = {
+      UBERBLICK_WEB_DIST: fixtureBundle(box), BROWSER: "none",
+      ...(source === "environment" ? {
+        UB_WORKSPACE_ID: `browser-${WORKSPACE}`, UB_HUB_URL: hubUrl ?? "local",
+      } : {}),
+    };
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
+    const app = await open(box, ["--port", String(await freePort())], env);
+    try {
+      expect((await get(app.url)).status).toBe(200);
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(hubUrl);
+    } finally { expect((await app.interrupt()).status).toBe(0); }
   });
 
-  it("uses a hub that is already answering, and Ctrl-C leaves it running", async () => {
+  it("preserves a different recorded hub while serving the project's binding", async () => {
     const { box, env } = configured();
-    const hub = await startHub(box);
-    const hubUrl = `ws://127.0.0.1:${hub.port}`;
-    const webPort = await freePort();
-    pointAt(box, hubUrl);
+    pointAt(box, FIRST_REMOTE);
+    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: null }, box.env);
+    const app = await open(box, ["--port", String(await freePort())], env);
+    try {
+      const document = await (await get(`${app.url}uberblick-config.json`)).json() as { remoteHubUrl: string };
+      expect(document.remoteHubUrl).toBe(FIRST_REMOTE);
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBeNull();
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
 
-    const app = await open(box, ["--port", String(webPort)], env);
-
-    // Nothing was started: a bind of the occupied port would have failed with
-    // EADDRINUSE and taken the command down before it ever served.
-    expect(app.stdout()).toContain("already running — left alone");
-    expect(app.stderr()).not.toContain("EADDRINUSE");
-    expect(await (await get(`${app.url}uberblick-config.json`)).json()).toMatchObject({
-      hubUrl: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
-      remoteHubUrl: hubUrl,
-    });
-
-    expect((await app.interrupt()).status).toBe(0);
-    // The hub this command did not start is the hub it did not stop.
-    expect(await hubAnswers(box, hubUrl)).toBe(true);
+  it("records nothing when a complete binding cannot serve its bundle", async () => {
+    const { box, env, bundle } = configured();
+    stamp(bundle, SYNC_PROTOCOL_VERSION + 1);
+    const refused = await openFails(box, ["--port", String(await freePort())], env);
+    expect(refused.status).toBe(1);
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
   });
 
   it("serves the local browser endpoint and names the configured upstream", async () => {
@@ -750,498 +130,6 @@ describe("ub open", () => {
     expect(app.stdout()).toContain("remote — nothing started here");
 
     expect((await app.interrupt()).status).toBe(0);
-  });
-
-  it.each(["hub-down", "no-credentials"])("bridges durable browser and MCP edits through the shared store (%s)", async (mode) => {
-    const { box, env } = configured();
-    pointAt(box, FIRST_REMOTE);
-    if (mode === "no-credentials") {
-      rmSync(join(configDir(box), "credentials.json"));
-    }
-    const webPort = await freePort();
-    let app = await open(box, ["--port", String(webPort)], env);
-
-    const instance = createMcpServer(
-      resolveMcpConfig({
-        ...box.env,
-        ...env,
-        WORKSPACE_ID: WORKSPACE,
-        HUB_URL: FIRST_REMOTE,
-        ...(mode === "hub-down" ? { HUB_AUTH_TOKEN: SECRET } : {}),
-      }),
-    );
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: "ub-open-store-test", version: "0.0.0" });
-    const doc = new Y.Doc();
-    const directory = new Y.Doc();
-    let provider: HocuspocusProvider | null = null;
-    let directoryProvider: HocuspocusProvider | null = null;
-    try {
-      await Promise.all([
-        instance.connect(serverTransport),
-        client.connect(clientTransport),
-      ]);
-      const call = async <T>(name: string, args: Record<string, unknown>): Promise<T> => {
-        const result = await client.callTool({ name, arguments: args });
-        const content = result.content as { text?: string }[];
-        return JSON.parse(content[0]?.text ?? "null") as T;
-      };
-      const created = await call<{ uuid: string }>("create_doc", {
-        title: "Browser durability boundary",
-        description: "A document shared by ub open and an MCP session.",
-        blocks: [{ type: "paragraph", text: "before" }],
-      });
-
-      provider = new HocuspocusProvider({
-        url: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
-        name: roomForDoc(WORKSPACE, created.uuid),
-        document: doc,
-        token: wrapToken(
-          await mintToken(await importRootSecret(localBrowserKey(WORKSPACE, box.env)), {
-            typ: "room",
-            sub: "open-test-browser",
-            workspace: WORKSPACE,
-            scope: "read-write",
-            kid: null,
-            lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-          }),
-        ),
-        ...{
-          WebSocketPolyfill: class extends WebSocket {
-            constructor(url: string | URL) {
-              super(url, { headers: { Origin: app.url.slice(0, -1) } } as unknown as string[]);
-            }
-          },
-        },
-      });
-      await waitUntil("the browser room to hydrate from the store", () =>
-        provider?.isSynced === true,
-      );
-      directoryProvider = new HocuspocusProvider({
-        url: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
-        name: directoryRoom(WORKSPACE),
-        document: directory,
-        token: wrapToken(
-          await mintToken(await importRootSecret(localBrowserKey(WORKSPACE, box.env)), {
-            typ: "room",
-            sub: "open-test-directory",
-            workspace: WORKSPACE,
-            scope: "read-write",
-            kid: null,
-            lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-          }),
-        ),
-        ...{
-          WebSocketPolyfill: class extends WebSocket {
-            constructor(url: string | URL) {
-              super(url, { headers: { Origin: app.url.slice(0, -1) } } as unknown as string[]);
-            }
-          },
-        },
-      });
-      await waitUntil("the browser directory to hydrate from the store", () =>
-        directoryProvider?.isSynced === true,
-      );
-      const block = getBlocks(doc)[0];
-      if (block === undefined) throw new Error("the store-hydrated document has no block");
-      expect(block.text).toBe("before");
-
-      editBlock(doc, block.id, "before", "durable before acknowledgement", {
-        rev: block.rev,
-      });
-      await waitUntil("the local server to acknowledge the browser edit", () =>
-        provider?.hasUnsyncedChanges === false,
-      );
-
-      const read = await call<{ blocks: { text: string }[] }>("get_doc", {
-        uuid: created.uuid,
-      });
-      expect(read.blocks[0]?.text).toBe("durable before acknowledgement");
-      const auth = await authMessage(localBrowserKey(WORKSPACE, box.env));
-      const readStatus = async () => await (await fetch(`${app.url}api/status`, {
-        headers: bearer(auth),
-      })).json() as { caughtUp: boolean; notSharedReason: string | null;
-        rooms: Record<string, { hubAcked: boolean }> };
-      expect(await readStatus()).toMatchObject({
-        caughtUp: false,
-        notSharedReason: mode === "no-credentials" ? "no-hub-credentials" : null,
-        rooms: { [roomForDoc(WORKSPACE, created.uuid)]: { hubAcked: false } },
-      });
-      const stored = openStore(instance.store.databasePath);
-      try {
-        expect(stored.prepare("SELECT COUNT(*) AS count FROM pending_rooms").get()?.count)
-          .toBeGreaterThan(0);
-      } finally { stored.close(); }
-
-
-      const current = await call<{
-        blocks: { id: string; text: string; rev: string }[];
-      }>("get_doc", { uuid: created.uuid });
-      const initialBlock = current.blocks[0];
-      if (initialBlock === undefined) throw new Error("the MCP replica has no block");
-      let currentBlock: { id: string; text: string; rev: string } = initialBlock;
-      const liveLatencies: number[] = [];
-      for (let index = 0; index < 20; index += 1) {
-        const newText = `agent edit arrived live ${index}`;
-        const startedAt = performance.now();
-        const edited: { block: { id: string; text: string; rev: string } } = await call<{
-          block: { id: string; text: string; rev: string };
-        }>("edit_block", {
-          uuid: created.uuid,
-          block_id: currentBlock.id,
-          old_text: currentBlock.text,
-          new_text: newText,
-          rev: currentBlock.rev,
-        });
-        await waitUntil("the MCP edit to reach the live browser room", () =>
-          getBlocks(doc)[0]?.text === newText,
-        );
-        liveLatencies.push(performance.now() - startedAt);
-        currentBlock = edited.block;
-      }
-      const p95 = [...liveLatencies].sort((a, b) => a - b)[18];
-      expect(p95, JSON.stringify(liveLatencies)).toBeLessThan(250);
-
-      const creationLatencies: number[] = [];
-      for (let index = 0; index < 20; index += 1) {
-        const title = `Created by the agent ${index}`;
-        const startedAt = performance.now();
-        const added = await call<{ uuid: string }>("create_doc", {
-          title,
-          description: "A document whose directory entry arrives live.",
-        });
-        await waitUntil("the MCP-created document to reach the browser directory", () =>
-          getDirectoryEntry(directory, added.uuid)?.title === title,
-        );
-        creationLatencies.push(performance.now() - startedAt);
-      }
-      const creationP95 = [...creationLatencies].sort((a, b) => a - b)[18];
-      expect(creationP95, JSON.stringify(creationLatencies)).toBeLessThan(250);
-      if (mode === "no-credentials") {
-        const key = localBrowserKey(WORKSPACE, box.env);
-        const hub = await startHub(box);
-        const hubUrl = `ws://127.0.0.1:${hub.port}`;
-        writeCredentials(box, SECRET);
-        expect(await (await get(`${app.url}uberblick-config.json`)).json())
-          .toMatchObject({ hubAuthToken: key, rebound: true });
-        pointAt(box, hubUrl);
-        expect((await app.interrupt()).status).toBe(0);
-        app = await open(box, ["--port", String(webPort)], env);
-        expect(localBrowserKey(WORKSPACE, box.env)).toBe(key);
-        await waitUntil("pending local-only edits to reach and be acknowledged by the hub", async () => {
-          const status = await readStatus();
-          return status.caughtUp && status.rooms[roomForDoc(WORKSPACE, created.uuid)]?.hubAcked === true;
-        });
-        const remoteDoc = new Y.Doc();
-        const remote = new HocuspocusProvider({
-          url: hubUrl, name: roomForDoc(WORKSPACE, created.uuid), document: remoteDoc,
-          token: await authMessage(SECRET),
-        });
-        try {
-          await waitUntil("a fresh hub peer to read the same pending document", () => remote.isSynced);
-          expect(getBlocks(remoteDoc)[0]?.text).toBe(currentBlock.text);
-          expect(instance.store.pendingRooms()).toEqual([]);
-        } finally { remote.destroy(); remoteDoc.destroy(); }
-
-        // The still-open local providers keep their original key after losing hub auth too.
-        rmSync(join(configDir(box), "credentials.json"));
-        expect(await (await get(`${app.url}uberblick-config.json`)).json())
-          .toMatchObject({ hubAuthToken: key, rebound: true });
-        expect((await app.interrupt()).status).toBe(0);
-        app = await open(box, ["--port", String(webPort)], env);
-        await waitUntil("the same browser room to resume local-only after restart", () =>
-          provider?.isSynced === true,
-        );
-        expect(await readStatus()).toMatchObject({
-          notSharedReason: "no-hub-credentials", caughtUp: false,
-          rooms: { [roomForDoc(WORKSPACE, created.uuid)]: { hubAcked: false } },
-        });
-      }
-
-    } finally {
-      provider?.destroy();
-      directoryProvider?.destroy();
-      doc.destroy();
-      directory.destroy();
-      await client.close().catch(() => {});
-      await instance.close().catch(() => {});
-      expect((await app.interrupt()).status).toBe(0);
-    }
-  });
-
-  it("relays presence across reconnect and lets a served tab expire upstream", async () => {
-    const { box, env } = configured();
-    const hub = await startHub(box);
-    const hubUrl = `ws://127.0.0.1:${hub.port}`;
-    pointAt(box, hubUrl);
-    const app = await open(box, ["--port", String(await freePort())], env);
-    const room = roomForDoc(WORKSPACE, "671ed55d-36de-42a9-bd85-701eff199942");
-    const token = wrapToken(
-      await mintToken(await importRootSecret(SECRET), {
-        typ: "room",
-        sub: "open-presence-test",
-        workspace: WORKSPACE,
-        scope: "read-write",
-        kid: null,
-        lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-      }),
-    );
-    const browserDoc = new Y.Doc();
-    const agentDoc = new Y.Doc();
-    const browser = new HocuspocusProvider({
-      url: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
-      name: room,
-      document: browserDoc,
-      token: await authMessage(localBrowserKey(WORKSPACE, box.env), "read-write"),
-      ...{
-        WebSocketPolyfill: class extends WebSocket {
-          constructor(url: string | URL) {
-            super(url, {
-              headers: { Origin: app.url.slice(0, -1) },
-            } as unknown as string[]);
-          }
-        },
-      },
-    });
-    const agent = new HocuspocusProvider({
-      url: hubUrl,
-      name: room,
-      document: agentDoc,
-      token,
-    });
-
-    try {
-      await waitUntil("both presence peers to sync", () =>
-        [browser, agent].every((provider) => provider.isSynced),
-      );
-      browser.setAwarenessField("client", "web");
-      browser.setAwarenessField("user", {
-        name: "browser tab",
-        color: "#112233",
-      });
-      agent.setAwarenessField("client", "agent");
-      agent.setAwarenessField("user", {
-        name: "coding agent",
-        color: "#abcdef",
-      });
-      agent.setAwarenessField("cursor", {
-        blockId: "block-1",
-        anchor: 1,
-        head: 1,
-      });
-
-      const browserId = browser.awareness?.clientID;
-      const agentId = agent.awareness?.clientID;
-      if (browserId === undefined || agentId === undefined) {
-        throw new Error("the presence peers have no awareness");
-      }
-      await waitUntil("presence to cross the local/upstream seam", () =>
-        browser.awareness?.getStates().has(agentId) === true &&
-        agent.awareness?.getStates().has(browserId) === true,
-      );
-      expect(browser.awareness?.getStates().get(agentId)).toMatchObject({
-        client: "agent",
-        cursor: { blockId: "block-1", anchor: 1, head: 1 },
-      });
-      expect(agent.awareness?.getStates().get(browserId)).toMatchObject({
-        client: "web",
-        user: { name: "browser tab", color: "#112233" },
-      });
-
-      await hub.stop();
-      await waitUntil("the disconnected agent to leave the served browser", () =>
-        browser.awareness?.getStates().has(agentId) === false,
-      );
-      expect(browser.awareness?.getStates().has(browserId)).toBe(true);
-
-      await startHub(box, hub.port);
-      // These ordinary awareness updates stand in for each peer's periodic
-      // renewal. Neither document nor provider is recreated across the loss.
-      browser.setAwarenessField("renewal", 1);
-      agent.setAwarenessField("renewal", 1);
-      await waitUntil("presence to return after the upstream reconnects", () =>
-        browser.awareness?.getStates().has(agentId) === true &&
-        agent.awareness?.getStates().has(browserId) === true,
-      );
-
-      browser.destroy();
-      await sleep(1_000);
-      expect(agent.awareness?.getStates().has(browserId)).toBe(true);
-    } finally {
-      browser.destroy();
-      agent.destroy();
-      browserDoc.destroy();
-      agentDoc.destroy();
-      expect((await app.interrupt()).status).toBe(0);
-    }
-  });
-
-  it("searches the shared store while the hub is unreachable and discloses its cap", async () => {
-    const { box, env } = configured();
-    pointAt(box, FIRST_REMOTE);
-    const app = await open(box, ["--port", String(await freePort())], env);
-    const instance = createMcpServer(
-      resolveMcpConfig({
-        ...box.env,
-        ...env,
-        WORKSPACE_ID: WORKSPACE,
-        HUB_URL: FIRST_REMOTE,
-        HUB_AUTH_TOKEN: SECRET,
-      }),
-    );
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: "ub-open-search-test", version: "0.0.0" });
-    try {
-      await Promise.all([
-        instance.connect(serverTransport),
-        client.connect(clientTransport),
-      ]);
-      const result = await client.callTool({
-        name: "create_doc",
-        arguments: {
-          title: "Offline badger",
-          description: "A document written by another local process.",
-          blocks: [{ type: "paragraph", text: "orchard telemetry" }],
-        },
-      });
-      const content = result.content as { text?: string }[];
-      const created = JSON.parse(content[0]?.text ?? "null") as { uuid: string };
-      const auth = await authMessage(localBrowserKey(WORKSPACE, box.env));
-
-      const found = await fetch(`${app.url}api/search?q=offline+badg*`, {
-        headers: bearer(auth),
-      });
-      expect(found.status).toBe(200);
-      expect(found.headers.get("cache-control")).toBe("no-store");
-      expect(found.headers.get("access-control-allow-origin")).toBeNull();
-      expect(await found.json()).toEqual({
-        hits: [{ uuid: created.uuid }],
-        limit: 100,
-        capped: false,
-      });
-
-      for (let index = 0; index <= 100; index += 1) {
-        instance.store.indexDoc(
-          {
-            uuid: `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
-            title: `Capacity ${index}`,
-            description: "",
-            tags: [],
-            links: [],
-            body: "capacityneedle",
-          },
-          1,
-        );
-      }
-      const capped = await fetch(`${app.url}api/search?q=capacityneedle`, {
-        headers: bearer(auth),
-      });
-      const cappedBody = (await capped.json()) as {
-        hits: { uuid: string }[];
-        limit: number;
-        capped: boolean;
-      };
-      expect(cappedBody).toMatchObject({
-        limit: 100,
-        capped: true,
-      });
-      expect(cappedBody.hits).toHaveLength(100);
-      expect(cappedBody.hits.every((hit) => Object.keys(hit).join() === "uuid"))
-        .toBe(true);
-
-      const empty = await fetch(`${app.url}api/search?q=%F0%9F%8C%BF`, {
-        headers: bearer(auth),
-      });
-      expect(empty.status).toBe(200);
-      expect(await empty.json()).toEqual({ hits: [], limit: 100, capped: false });
-
-      const missing = await fetch(`${app.url}api/search`, {
-        headers: bearer(auth),
-      });
-      expect(missing.status).toBe(400);
-      expect(missing.headers.get("cache-control")).toBe("no-store");
-    } finally {
-      await client.close().catch(() => {});
-      await instance.close().catch(() => {});
-      expect((await app.interrupt()).status).toBe(0);
-    }
-  });
-
-  it("reports loaded rooms and the full replica's upstream acknowledgement", async () => {
-    const { box, env } = configured();
-    const hubPort = await freePort();
-    const hub = await startHub(box, hubPort);
-    const hubUrl = `ws://127.0.0.1:${hubPort}`;
-    pointAt(box, hubUrl);
-    const app = await open(box, ["--port", String(await freePort())], env);
-    const room = directoryRoom(WORKSPACE);
-    const doc = new Y.Doc();
-    const provider = new HocuspocusProvider({
-      url: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
-      name: room,
-      document: doc,
-      token: await authMessage(localBrowserKey(WORKSPACE, box.env)),
-      ...{
-        WebSocketPolyfill: class extends WebSocket {
-          constructor(url: string | URL) {
-            super(url, {
-              headers: { Origin: app.url.slice(0, -1) },
-            } as unknown as string[]);
-          }
-        },
-      },
-    });
-    const auth = await authMessage(localBrowserKey(WORKSPACE, box.env));
-    const readStatus = async (): Promise<{
-      response: Response;
-      body: { caughtUp: boolean; rooms: Record<string, { hubAcked: boolean }> };
-    }> => {
-      const response = await fetch(`${app.url}api/status`, {
-        headers: bearer(auth),
-      });
-      return {
-        response,
-        body: (await response.json()) as {
-          caughtUp: boolean;
-          rooms: Record<string, { hubAcked: boolean }>;
-        },
-      };
-    };
-
-    try {
-      await waitUntil("the browser directory to load locally", () =>
-        provider.isSynced,
-      );
-      await waitUntil("the serving replica to be caught up", async () => {
-        const { body } = await readStatus();
-        return body.caughtUp && body.rooms[room]?.hubAcked === true;
-      });
-      const current = await readStatus();
-      expect(current.response.status).toBe(200);
-      expect(current.response.headers.get("cache-control")).toBe("no-store");
-      expect(current.response.headers.get("access-control-allow-origin")).toBeNull();
-      expect(current.body).toEqual({
-        notSharedReason: null,
-        caughtUp: true,
-        rooms: { [room]: { hubAcked: true } },
-      });
-
-      await hub.stop();
-      await waitUntil("the status reading to notice the lost hub", async () => {
-        const { body } = await readStatus();
-        return !body.caughtUp && body.rooms[room]?.hubAcked === false;
-      });
-
-      await startHub(box, hubPort);
-      await waitUntil("the serving replica to catch up after reconnect", async () => {
-        const { body } = await readStatus();
-        return body.caughtUp && body.rooms[room]?.hubAcked === true;
-      });
-    } finally {
-      provider.destroy();
-      doc.destroy();
-      expect((await app.interrupt()).status).toBe(0);
-    }
   });
 
   it("admits API requests exactly through the served workspace token boundary", async () => {
@@ -1333,7 +221,7 @@ describe("ub open", () => {
       servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, localBrowserKey(WORKSPACE, box.env)),
     );
 
-    // `ub remote join` completes while this `ub open` keeps running.
+    // `ub workspace join` completes while this `ub open` keeps running.
     rebind(box, {
       hubUrl: SECOND_REMOTE,
       workspace: REBOUND_WORKSPACE,
@@ -1355,6 +243,8 @@ describe("ub open", () => {
         SECOND_REMOTE,
         REBOUND_WORKSPACE,
         localBrowserKey(REBOUND_WORKSPACE, box.env),
+        false,
+        { [WORKSPACE]: { browserKey: localBrowserKey(WORKSPACE, box.env), remoteHubUrl: FIRST_REMOTE } },
       ),
     );
     expect((await restarted.interrupt()).status).toBe(0);
@@ -1436,11 +326,12 @@ describe("ub open", () => {
     pointAt(box, FIRST_REMOTE);
     const webPort = await freePort();
     // The pin a repository puts in its project MCP entry. It outranks this
-    // machine's default, and re-resolving must not quietly demote it — nor
+    // project's file, and re-resolving must not quietly demote it — nor
     // promote the file-sourced secret beside it into a pin of its own.
     const app = await open(box, ["--port", String(webPort)], {
       ...env,
-      WORKSPACE_ID: REBOUND_WORKSPACE,
+      UB_WORKSPACE_ID: REBOUND_WORKSPACE,
+      UB_HUB_URL: FIRST_REMOTE,
     });
     const url = `${app.url}uberblick-config.json`;
 
@@ -1448,126 +339,19 @@ describe("ub open", () => {
       servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env)),
     );
 
-    // The files change underneath, naming a different workspace. The pin still
-    // wins; changes in the endpoint and secret mark this process stale, while
-    // the engine continues with its coherent startup snapshot.
+    // The complete environment pair stays selected even when both file values
+    // change. A legacy signing secret also cannot rebind a remote device login,
+    // so this unrelated file edit does not mark the browser stale.
     rebind(box, {
       hubUrl: SECOND_REMOTE,
       workspace: WORKSPACE,
       signingSecret: REBOUND_SECRET,
     });
     expect(await (await get(url)).text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env), true),
+      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env)),
     );
 
     expect((await app.interrupt()).status).toBe(0);
-  });
-
-  it("releases both ports on Ctrl-C, so a second `ub open` succeeds at once", async () => {
-    const { box, env } = configured();
-    const hubPort = await freePort();
-    const webPort = await freePort();
-    const hubUrl = `ws://127.0.0.1:${hubPort}`;
-    pointAt(box, hubUrl);
-
-    const first = await open(box, ["--port", String(webPort)], env);
-    expect(first.stdout()).toContain("started here");
-    // A request first, so a keep-alive connection is open when the signal
-    // arrives: `close()` alone waits for it, and the port would still be held.
-    expect((await get(first.url)).status).toBe(200);
-    expect((await first.interrupt()).status).toBe(0);
-
-    expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
-    expect((await probePort("127.0.0.1", hubPort)).state).toBe("free");
-
-    const second = await open(box, ["--port", String(webPort)], env);
-    expect(second.url).toBe(`http://127.0.0.1:${webPort}/`);
-    expect((await second.interrupt()).status).toBe(0);
-  });
-
-  it("exits and releases the serving role when its replica refresh loop stops", async () => {
-    const { box, env } = configured();
-    const upstream = await startHub(box);
-    pointAt(box, `ws://127.0.0.1:${upstream.port}`);
-    const webPort = await freePort();
-    const app = await open(box, ["--port", String(webPort)], env);
-
-    const databasePath = resolveMcpConfig({
-      ...box.env,
-      ...env,
-      WORKSPACE_ID: WORKSPACE,
-    }).databasePath;
-    const database = openStore(databasePath);
-    database.exec("DROP TABLE snapshots");
-    database.close();
-
-    const stopped = await app.wait();
-    expect(stopped).toEqual({ status: 1, signal: null });
-    expect(app.stderr()).toContain("local replica refresh failed");
-    expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
-
-    // The same store and port can be served again immediately: the failed
-    // process released its serving-role lock as part of the non-zero exit.
-    const restarted = await open(box, ["--port", String(webPort)], env);
-    expect((await restarted.interrupt()).status).toBe(0);
-  });
-
-  it("exits and releases the serving role when its replica is quarantined", async () => {
-    const { box, env } = configured();
-    const upstream = await startHub(box);
-    const hubUrl = `ws://127.0.0.1:${upstream.port}`;
-    pointAt(box, hubUrl);
-    const webPort = await freePort();
-    const app = await open(box, ["--port", String(webPort)], env);
-    const room = directoryRoom(WORKSPACE);
-    const remoteDoc = new Y.Doc();
-    const remote = new HocuspocusProvider({
-      url: hubUrl,
-      name: room,
-      document: remoteDoc,
-      token: await authMessage(SECRET, "read-write"),
-    });
-
-    try {
-      await waitUntil("the upstream peer to sync", () => remote.isSynced);
-      const databasePath = resolveMcpConfig({
-        ...box.env,
-        ...env,
-        WORKSPACE_ID: WORKSPACE,
-      }).databasePath;
-      const database = openStore(databasePath);
-      database.exec(`
-        CREATE TRIGGER refuse_updates
-        BEFORE INSERT ON updates
-        BEGIN
-          SELECT RAISE(FAIL, 'simulated append refusal');
-        END
-      `);
-      database.close();
-
-      // A remote update is already in this engine replica when its observer
-      // reaches the refused append, which is the quarantine boundary.
-      remoteDoc.getMap("quarantine-probe").set("changed", true);
-      const stopped = await app.wait();
-      expect(stopped).toEqual({ status: 1, signal: null });
-      const terminalLines = app
-        .stderr()
-        .split("\n")
-        .filter((line) => line.startsWith("ub open: local replica quarantined"));
-      expect(terminalLines).toHaveLength(1);
-      expect(terminalLines[0]).toContain(room);
-      expect(terminalLines[0]).toContain("simulated append refusal");
-      expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
-
-      const repaired = openStore(databasePath);
-      repaired.exec("DROP TRIGGER refuse_updates");
-      repaired.close();
-      const restarted = await open(box, ["--port", String(webPort)], env);
-      expect((await restarted.interrupt()).status).toBe(0);
-    } finally {
-      remote.destroy();
-      remoteDoc.destroy();
-    }
   });
 
   it("serves the configuration document uncached, ahead of the SPA fallback", async () => {
@@ -2111,197 +895,54 @@ describe("ub open", () => {
     expect((await app.interrupt()).status).toBe(0);
   });
 
-  it.each([undefined, SECRET])("serves no key when unbound (configured secret: %s)", async (signingSecret) => {
-    const box = sandbox(signingSecret === undefined ? {} : { credentials: { signingSecret } });
-    const hubUrl = signingSecret === undefined ? "ws://localhost:1234" : `ws://127.0.0.1:${await freePort()}`;
-    if (signingSecret !== undefined) pointAt(box, hubUrl);
+  it("refuses to serve without a binding, even with a signing secret configured", async () => {
+    const box = unboundSandbox({
+      userConfig: { workspace: WORKSPACE, hubUrl: FIRST_REMOTE },
+      credentials: { signingSecret: SECRET },
+    });
     const bundle = fixtureBundle(box);
     const webPort = await freePort();
-
-    const app = await open(box, ["--port", String(webPort)], {
+    const refused = await openFails(box, ["--port", String(webPort)], {
       UBERBLICK_WEB_DIST: bundle,
       BROWSER: "none",
       HUB_DB_PATH: join(box.cwd, "unbound-hub.sqlite"),
     });
 
-    // No `ub init`, so no workspace and no signing secret: the app is served
-    // against the built-in endpoint, the switcher is offered nothing, and the
-    // reason no hub was started is said out loud rather than left to look like
-    // an offline one.
-    expect(await (await get(`${app.url}uberblick-config.json`)).text()).toBe(
-      JSON.stringify({ hubUrl, workspaces: [], hubAuthToken: "" }),
-    );
-    if (signingSecret === undefined) expect(app.stdout()).toContain("no signing secret");
-    expect(app.stdout()).toContain("ub init");
-    expect(app.stdout() + app.stderr()).not.toContain(SECRET);
+    expect(refused.status).not.toBe(0);
+    expect(refused.output).toContain("No workspace selected");
+    expect(refused.output).not.toContain("uberblick is at");
+    expect(refused.output).not.toContain(SECRET);
     expect(existsSync(join(configDir(box), "browser-keys"))).toBe(false);
-
-    const refusedConfig = await getWithHost(
-      `${app.url}uberblick-config.json`,
-      `localhost:${webPort}`,
-    );
-    const refusedApi = await getWithHost(
-      `${app.url}api/status`,
-      `foreign.example:${webPort}`,
-    );
-    for (const response of [refusedConfig, refusedApi]) {
-      expect(response.status).toBe(421);
-      expect(response.headers["cache-control"]).toBe("no-store");
-      expect(response.body).toBe("misdirected request\n");
-    }
-
-    const unboundApi = await get(`${app.url}api/search?q=unchanged`);
-    expect(unboundApi.status).toBe(200);
-    expect(unboundApi.headers.get("cache-control")).toBe("no-cache");
-    expect(await unboundApi.text()).toContain("<title>uberblick</title>");
-
-    expect((await app.interrupt()).status).toBe(0);
-  });
-
-  it("names a taken port and refuses a second serving replica for the store", async () => {
-    const { box, env } = configured();
-    const foreignPort = await freePort();
-    await answeringListener(foreignPort, 200, '{"not":"the config document"}');
-    pointAt(box, "wss://hub.example.ts.net/ws");
-
-    const foreign = await openFails(box, ["--port", String(foreignPort)], env);
-    expect(foreign.status).toBe(1);
-    expect(foreign.output).toContain(`port ${foreignPort}`);
-    expect(foreign.output).toContain("another process");
-
-    // A holder that never answers is nobody in particular, and the refusal for
-    // it must not send the user to stop what may be their own `ub open` (#600).
-    const silentPort = await freePort();
-    await silentListener(silentPort);
-    const silent = await openFails(box, ["--port", String(silentPort)], env);
-    expect(silent.status).toBe(1);
-    expect(silent.output).toContain(`port ${silentPort}`);
-    expect(silent.output).toContain("--port");
-    expect(silent.output).not.toContain("another process");
-    expect(silent.output).not.toContain("`ub open`");
-    expect(silent.output).not.toMatch(/stop/);
-
-    const webPort = await freePort();
-    const app = await open(box, ["--port", String(webPort)], env);
-    const secondPort = await freePort();
-    const second = await openFails(box, ["--port", String(secondPort)], env);
-    expect(second.status).toBe(1);
-    expect(second.output).toContain("`ub open`");
-    expect(second.output).toContain(WORKSPACE);
-    expect(second.output).toContain(".sqlite");
-    expect(second.output).toContain("process");
-    expect((await probePort("127.0.0.1", secondPort)).state).toBe("free");
-
-    expect((await app.interrupt()).status).toBe(0);
-  });
-
-  it("identifies the port's holder from what it answers, not from the deadline", async () => {
-    // Three holders, three behaviours, no race: each verdict follows from what
-    // the holder does, so no ceiling on the probe's budget can change one.
-    const servingPort = await freePort();
-    await answeringListener(servingPort, 200, '{"hubUrl":"ws://127.0.0.1:1234"}');
-    expect(await whoHoldsPort(servingPort)).toBe("ub-open");
-
-    // A complete answer that is not the configuration document is the
-    // definitive stranger — including a refusal, and a body that is not JSON.
-    const refusingPort = await freePort();
-    await answeringListener(refusingPort, 404, "no such thing");
-    expect(await whoHoldsPort(refusingPort)).toBe("foreign");
-    const gibberishPort = await freePort();
-    await answeringListener(gibberishPort, 200, "<html>hello</html>");
-    expect(await whoHoldsPort(gibberishPort)).toBe("foreign");
-
-    const silentPort = await freePort();
-    await silentListener(silentPort);
-    expect(await whoHoldsPort(silentPort)).toBe("unidentified");
-  });
-
-  it("never binds a hub off loopback, whatever the endpoint says", async () => {
-    const { box, env } = configured();
-    const port = await freePort();
-
-    // 0.0.0.0 is an address to *listen* on, and a hub bound there is on every
-    // interface — offering the whole network a hub whose only credential is one
-    // shared signing secret.
-    pointAt(box, `ws://0.0.0.0:${port}`);
-    const refused = await openFails(box, ["--port", String(await freePort())], env);
-    expect(refused.status).toBe(1);
-    expect(refused.output).toContain("binds loopback only");
-    expect(refused.output).toContain("0.0.0.0");
-    // Exposing a hub deliberately is the remote deployment's job, and that is
-    // what the refusal points at — no contributor task stands in for it.
-    expect(refused.output).toContain("REMOTE.md");
-    expect(refused.output).not.toMatch(/mise/);
-    // Refused means refused: nothing was left listening there.
-    expect((await probePort("0.0.0.0", port)).state).toBe("free");
-
-    // And a *name* that merely looks like loopback is not one: where
-    // `127.attacker.example` resolves is somebody else's decision, so a prefix
-    // test on the string would bind the shared-secret hub wherever they say.
-    pointAt(box, `ws://127.attacker.example:${port}`);
-    const named = await openFails(box, ["--port", String(await freePort())], env);
-    expect(named.status).toBe(1);
-    expect(named.output).toContain("binds loopback only");
-    expect(named.output).toContain("127.attacker.example");
-  });
-
-  it("starts a hub only for an endpoint the hub it starts could answer", async () => {
-    const { box, env } = configured();
-    const port = await freePort();
-    const webPort = await freePort();
-
-    // A hub started here speaks plain ws on loopback. Announcing one at an
-    // endpoint it does not answer would be a hub nothing can reach.
-    pointAt(box, `wss://127.0.0.1:${port}`);
-    const tls = await openFails(box, ["--port", String(webPort)], env);
-    expect(tls.status).toBe(1);
-    expect(tls.output).toContain("plain ws://");
-
-    pointAt(box, "ws://127.0.0.1");
-    const noPort = await openFails(box, ["--port", String(webPort)], env);
-    expect(noPort.status).toBe(1);
-    expect(noPort.output).toContain("names no port to bind");
-
-    pointAt(box, "ws://127.0.0.1:0");
-    const ephemeral = await openFails(box, ["--port", String(webPort)], env);
-    expect(ephemeral.status).toBe(1);
-    expect(ephemeral.output).toContain("names no port to bind");
-  });
-
-  it("an interrupt while it is still coming up stops the hub it started", async () => {
-    const { box, env } = configured();
-    const hubPort = await freePort();
-    const webPort = await freePort();
-
-    // Interrupted the instant the hub has bound its socket — before the web
-    // server is up, and so before there is any banner.
-    pointAt(box, `ws://127.0.0.1:${hubPort}`);
-    const run = await interruptWhen(
-      box,
-      ["--port", String(webPort)],
-      env,
-      () => untilBound(hubPort),
-    );
-
-    // Exit 0, not death by signal: with the handlers installed only once
-    // everything is up, Node's default SIGINT kills the process right here —
-    // taking the hub down without the flush its durability contract is made of.
-    expect(run.signal).toBeNull();
-    expect(run.status).toBe(0);
-    expect(run.output).not.toContain("uberblick is at");
     expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
-    expect((await probePort("127.0.0.1", hubPort)).state).toBe("free");
+    expect(existsSync(join(box.cwd, "unbound-hub.sqlite"))).toBe(false);
   });
 
-  it("refuses when the hub's endpoint is held by something that is not a hub", async () => {
+  it.each(["0.0.0.0", "127.attacker.example"])("serves locally without starting a hub at remote endpoint %s", async host => {
     const { box, env } = configured();
-    const hubPort = await freePort();
-    await silentListener(hubPort);
-
-    pointAt(box, `ws://127.0.0.1:${hubPort}`);
-    const refused = await openFails(box, ["--port", String(await freePort())], env);
-    expect(refused.status).toBe(1);
-    expect(refused.output).toContain("held by something else");
-    expect(refused.output).toContain(`ws://127.0.0.1:${hubPort}`);
+    const port = await freePort();
+    const endpoint = `ws://${host}:${port}`;
+    pointAt(box, endpoint);
+    const app = await open(box, ["--port", String(await freePort())], env);
+    try {
+      expect(app.stdout()).toContain("remote — nothing started here");
+      expect((await probePort("127.0.0.1", port)).state).toBe("free");
+      const document = await (await get(`${app.url}uberblick-config.json`)).json() as { hubUrl: string; remoteHubUrl: string };
+      expect(document).toMatchObject({ remoteHubUrl: endpoint });
+      expect(document.hubUrl).toMatch(/^ws:\/\/127\.0\.0\.1:/);
+    } finally { expect((await app.interrupt()).status).toBe(0); }
   });
+});
+
+it("opens a newly created local workspace in the browser without login or promotion", async () => {
+  const box = unboundSandbox();
+  const created = await runUbAsync(["workspace", "create", "Local browser"], box);
+  expect(created.status, created.output).toBe(0);
+  const running = await open(box, ["--port", String(await freePort())], {
+    UBERBLICK_WEB_DIST: fixtureBundle(box),
+    HUB_DB_PATH: join(box.cwd, "local-browser.sqlite"), BROWSER: "none",
+  });
+  expect((await get(running.url)).status).toBe(200);
+  expect(running.stdout() + running.stderr()).not.toMatch(/sign.in required|approve in a browser/i);
+  expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).hubUrl).toBeNull();
+  expect((await running.interrupt()).status).toBe(0);
 });

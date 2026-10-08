@@ -16,6 +16,10 @@ import { dirname, join } from "node:path";
 import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { writeHubLogin, removeHubLogin } from "@uberblick/hub/auth-store";
+import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
+import { resolveConfig } from "../src/config.js";
+import { readWorkspaceHub, rememberWorkspaceBindings } from "../src/workspace-registry.js";
 import {
   bridgeConfig,
   inspectRemote,
@@ -24,7 +28,7 @@ import {
 import type { Corpus } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Sandbox } from "./helpers.js";
-import { removeTempDirs, runUbAsync, sandbox, waitUntil } from "./helpers.js";
+import { removeTempDirs, runUbAsync, sandbox, unboundSandbox, waitUntil } from "./helpers.js";
 
 const SECRET = "test-signing-secret-for-ub-init";
 const OTHER_SECRET = "the-secret-that-hub-was-actually-deployed-with";
@@ -43,11 +47,11 @@ afterEach(async () => {
 });
 
 async function startHub(
-  options: { authSecret?: string; protocolVersion?: number } = {},
+  options: { authSecret?: string; protocolVersion?: number; port?: number } = {},
 ): Promise<Hub> {
   const hub = await createHub({
     authSecret: options.authSecret ?? SECRET,
-    port: 0,
+    port: options.port ?? 0,
     ...(options.protocolVersion === undefined
       ? {}
       : { protocolVersion: options.protocolVersion }),
@@ -66,7 +70,7 @@ function url(hub: Hub): string {
 }
 
 function configPath(box: Sandbox): string {
-  return join(box.configHome, "uberblick", "config.json");
+  return join(box.cwd, ".uberblick.json");
 }
 
 function credentialsPath(box: Sandbox): string {
@@ -100,9 +104,37 @@ async function onHub(
 }
 
 describe("ub init <hub-url>", () => {
-  it("creates the workspace on that hub, corpus and all, before it returns", async () => {
+  it("retains verified Docker device admission after logout", async () => {
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const remote = await startDeviceSyncHub({ directory: box.cwd });
+    try {
+      remote.grant(WORKSPACE);
+      await writeHubLogin(remote.origin, remote.issue({ workspaces: [WORKSPACE] }), box.env);
+      const run = await runUbAsync(["init", remote.url, "--workspace", WORKSPACE, "--yes"], box);
+      expect(run.status, run.output).toBe(0);
+      await removeHubLogin(remote.origin, box.env);
+      const selected = resolveConfig({ env: box.env, cwd: box.cwd });
+      expect(selected.env.HUB_ADMISSION).toBe("device");
+      expect(selected.env.HUB_AUTH_TOKEN).toBeUndefined();
+    } finally { await remote.close(); }
+  });
+
+  it("persists an explicit complete choice without borrowing a differing environment binding", async () => {
     const hub = await startHub();
     const box = sandbox();
+    const run = await runUbAsync(["init", url(hub), "--workspace", WORKSPACE, "--yes"], box, {
+      HUB_AUTH_TOKEN: SECRET,
+      UB_WORKSPACE_ID: "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64",
+      UB_HUB_URL: "local",
+    });
+    expect(run.status, run.output).toBe(0);
+    expect(config(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: url(hub) });
+    expect(run.stderr).toContain("takes precedence");
+  });
+
+  it("creates the workspace on that hub, corpus and all, before it returns", async () => {
+    const hub = await startHub();
+    const box = unboundSandbox();
 
     const run = await runUbAsync(["init", url(hub), "--yes"], box, {
       HUB_AUTH_TOKEN: SECRET,
@@ -113,8 +145,9 @@ describe("ub init <hub-url>", () => {
     // stored exactly as typed.
     expect(config(box).hubUrl).toBe(url(hub));
     expect(run.stdout).toContain(url(hub));
-    const workspace = config(box).workspace;
+    const workspace = config(box).workspaceId;
     expect(typeof workspace).toBe("string");
+    expect(readWorkspaceHub(workspace as string, box.env)).toBe(url(hub));
 
     // The whole point of doing it in this run: the starter documents are on the
     // hub, not sitting in the local log waiting for a client to be started.
@@ -151,6 +184,31 @@ describe("ub init <hub-url>", () => {
     expect(existsSync(credentialsPath(box))).toBe(false);
   });
 
+  it.each([false, true])("records a completed local attach for id-only selection (prior record: %s)", async (recorded) => {
+    const hub = await startHub();
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    if (recorded) rememberWorkspaceBindings([{ workspaceId: WORKSPACE, hubUrl: null }], box.env);
+
+    const attached = await runUbAsync(["init", url(hub), "--yes"], box, { HUB_AUTH_TOKEN: SECRET });
+    expect(attached.status, attached.output).toBe(0);
+    expect(config(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: url(hub) });
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(url(hub));
+
+    const other = await runUbAsync(["workspace", "create", "Other"], box);
+    expect(other.status, other.output).toBe(0);
+    const switchBack = other.stdout.match(/Switch back: ub (workspace use \S+)/)?.[1];
+    expect(switchBack).toBe(`workspace use ${WORKSPACE}`);
+    const selected = await runUbAsync(switchBack!.split(" "), box);
+    expect(selected.status, selected.output).toBe(0);
+    expect(config(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: url(hub) });
+
+    const override = await runUbAsync(["status", "--json"], { ...box, cwd: unboundSandbox().cwd }, {
+      UB_WORKSPACE_ID: WORKSPACE,
+    });
+    expect(override.status, override.output).toBe(0);
+    expect(JSON.parse(override.stdout).hubUrl).toBe(url(hub));
+  });
+
   it("decides on the endpoint under the lock, not on what it read before it", async () => {
     // Two runs can both find no binding, both pass their probe, and then
     // serialize on the init lock. The second must not overwrite the endpoint the
@@ -159,7 +217,7 @@ describe("ub init <hub-url>", () => {
     // interleave is a fact rather than a hope.
     const hub = await startHub();
     const first = "ws://127.0.0.1:2";
-    const box = sandbox();
+    const box = unboundSandbox();
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
@@ -178,7 +236,7 @@ describe("ub init <hub-url>", () => {
     // What the run that got there first left behind.
     writeFileSync(
       configPath(box),
-      `${JSON.stringify({ workspace: WORKSPACE, hubUrl: first }, null, 2)}\n`,
+      `${JSON.stringify({ workspaceId: WORKSPACE, hubUrl: first }, null, 2)}\n`,
     );
     rmSync(lock);
 
@@ -188,7 +246,7 @@ describe("ub init <hub-url>", () => {
     expect(run.stderr).toContain("Nothing was written");
     // One endpoint, and it is the one that got there first.
     expect(config(box).hubUrl).toBe(first);
-    expect(config(box).workspace).toBe(WORKSPACE);
+    expect(config(box).workspaceId).toBe(WORKSPACE);
   });
 
   it("applies the bound-machine rules to an endpoint that arrived under the lock", async () => {
@@ -198,7 +256,7 @@ describe("ub init <hub-url>", () => {
     // written for a hub that has its own, arrived at by a race. The winner's
     // credential is not visible to this process, which is the case that has to
     // refuse rather than invent one.
-    const box = sandbox();
+    const box = unboundSandbox();
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
@@ -210,7 +268,7 @@ describe("ub init <hub-url>", () => {
     await waitUntil("`ub init` to say it is waiting for the lock", () => waiting);
     writeFileSync(
       configPath(box),
-      `${JSON.stringify({ workspace: WORKSPACE, hubUrl: CLOSED }, null, 2)}\n`,
+      `${JSON.stringify({ workspaceId: WORKSPACE, hubUrl: CLOSED }, null, 2)}\n`,
     );
     rmSync(lock);
 
@@ -228,7 +286,7 @@ describe("ub init <hub-url>", () => {
     // The accepted exception to "no argument is what it always was": a machine
     // with an endpoint needs that hub's secret, and `ub init` says so instead of
     // writing a random one every later run would send and every hub reject.
-    const box = sandbox({ userConfig: { workspace: WORKSPACE, hubUrl: CLOSED } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: CLOSED }, userConfig: { workspace: WORKSPACE, hubUrl: CLOSED } });
 
     const run = await runUbAsync(["init", "--yes"], box);
 
@@ -243,7 +301,7 @@ describe("ub init <hub-url>", () => {
     // has changed by the time the write phase runs, the run would seed with a
     // secret no hub has answered for — so it refuses instead.
     const hub = await startHub();
-    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const box = unboundSandbox({ credentials: { signingSecret: SECRET } });
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
@@ -277,7 +335,7 @@ describe("ub init <hub-url>", () => {
     // The environment and the file must not disagree about the credential a
     // bound machine sends: whichever this run preferred, the other is what some
     // other reader on this machine would use.
-    const box = sandbox({ credentials: { signingSecret: OTHER_SECRET } });
+    const box = unboundSandbox({ credentials: { signingSecret: OTHER_SECRET } });
 
     const run = await runUbAsync(["init", CLOSED, "--yes"], box, {
       HUB_AUTH_TOKEN: SECRET,
@@ -303,7 +361,7 @@ describe("ub init <hub-url>", () => {
     // The file `ub init` would repair and keep. Read as absent, its value would
     // slip past the conflict check and then win the seed — the run would
     // authenticate with the environment's secret and write with this one.
-    const box = sandbox({
+    const box = unboundSandbox({
       credentials: { signingSecret: OTHER_SECRET },
       credentialsMode: 0o644,
     });
@@ -320,14 +378,16 @@ describe("ub init <hub-url>", () => {
     expect(run.output).not.toContain(OTHER_SECRET);
   });
 
-  it("exits non-zero when the starter documents do not reach the hub", async () => {
+  it.each(["fresh", "bound", "recorded"])("exits non-zero when the starter documents do not reach the hub (%s)", async (initial) => {
     // The promise a hub argument adds is that the hub *holds* the workspace when
     // this returns, so an unacknowledged seed is a failure and not a warning.
     // The hub goes away between the probe and the seed, which the lock makes an
     // exact moment rather than a race.
     const hub = await startHub();
     const endpoint = url(hub);
-    const box = sandbox();
+    const box = initial === "fresh" ? unboundSandbox() :
+      sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    if (initial === "recorded") rememberWorkspaceBindings([{ workspaceId: WORKSPACE, hubUrl: null }], box.env);
     const lock = join(box.configHome, "uberblick", ".init.lock");
     mkdirSync(dirname(lock), { recursive: true });
     writeFileSync(lock, "999999\n");
@@ -351,16 +411,32 @@ describe("ub init <hub-url>", () => {
     const run = await running;
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain("did not reach");
-    expect(run.stderr).toContain("ub open");
-    // Local state stands: this machine is configured, and the documents are in
-    // its update log — there is nothing to repair, only to get up.
-    expect(run.stdout).toContain("uberblick initialised");
-    expect(config(box).hubUrl).toBe(endpoint);
-    expect(typeof config(box).workspace).toBe("string");
+    if (initial === "fresh") {
+      // The fresh UUID was claimed early for concurrent winner adoption.
+      expect(run.stderr).toContain("ub open");
+      expect(run.stdout).toContain("uberblick initialised");
+      expect(config(box).hubUrl).toBe(endpoint);
+      expect(typeof config(box).workspaceId).toBe("string");
+      expect(readWorkspaceHub(config(box).workspaceId as string, box.env)).toBeUndefined();
+    } else {
+      expect(run.stdout).not.toContain("uberblick initialised");
+      expect(run.stderr).toContain("binding and workspace records were not replaced");
+      expect(run.stderr).not.toContain("This machine is configured");
+      expect(config(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: null });
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(initial === "recorded" ? null : undefined);
+
+      // Retrying the advised command must finish the attachment, including
+      // updating a prior local record, without guessing from a mismatched pair.
+      await startHub({ port: hub.port });
+      const retried = await runUbAsync(["init", endpoint, "--yes"], box, { HUB_AUTH_TOKEN: SECRET });
+      expect(retried.status, retried.output).toBe(0);
+      expect(config(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: endpoint });
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(endpoint);
+    }
   });
 
   it("refuses a second endpoint, naming the verb that moves a machine", async () => {
-    const box = sandbox({
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "ws://127.0.0.1:2" },
       userConfig: { workspace: WORKSPACE, hubUrl: "ws://127.0.0.1:2" },
     });
     const before = readFileSync(configPath(box), "utf8");
@@ -371,7 +447,7 @@ describe("ub init <hub-url>", () => {
 
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain("ws://127.0.0.1:2");
-    expect(run.stderr).toContain(`ub remote join ${CLOSED}/${WORKSPACE}`);
+    expect(run.stderr).toContain(`ub workspace join ${CLOSED}/${WORKSPACE}`);
     // Refused on what is on disk, before anything is dialled.
     expect(run.stderr).not.toContain("did not answer");
     expect(readFileSync(configPath(box), "utf8")).toBe(before);
@@ -379,7 +455,7 @@ describe("ub init <hub-url>", () => {
   });
 
   it("refuses an endpoint that does not answer, before anything exists", async () => {
-    const box = sandbox();
+    const box = unboundSandbox();
 
     const run = await runUbAsync(["init", CLOSED, "--yes"], box, {
       HUB_AUTH_TOKEN: SECRET,
@@ -394,7 +470,7 @@ describe("ub init <hub-url>", () => {
 
   it("refuses a hub that rejects the secret this machine holds", async () => {
     const hub = await startHub({ authSecret: OTHER_SECRET });
-    const box = sandbox();
+    const box = unboundSandbox();
 
     const run = await runUbAsync(["init", url(hub), "--yes"], box, {
       HUB_AUTH_TOKEN: SECRET,
@@ -408,7 +484,7 @@ describe("ub init <hub-url>", () => {
 
   it("refuses a hub speaking another sync protocol, in that hub's terms", async () => {
     const hub = await startHub({ protocolVersion: SYNC_PROTOCOL_VERSION + 1 });
-    const box = sandbox();
+    const box = unboundSandbox();
 
     const run = await runUbAsync(["init", url(hub), "--yes"], box, {
       HUB_AUTH_TOKEN: SECRET,
@@ -423,7 +499,7 @@ describe("ub init <hub-url>", () => {
   });
 
   it("refuses before dialling when no secret is here to authenticate with", async () => {
-    const box = sandbox();
+    const box = unboundSandbox();
 
     const run = await runUbAsync(["init", CLOSED, "--yes"], box);
 
@@ -439,7 +515,7 @@ describe("ub init <hub-url>", () => {
     // The promise is about the endpoint in force, not about which run stored
     // it: a retry on a bound machine whose hub is down must not report a hub
     // holding a corpus it has never seen.
-    const box = sandbox({
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: CLOSED },
       userConfig: { workspace: WORKSPACE, hubUrl: CLOSED },
       credentials: { signingSecret: SECRET },
     });
@@ -448,21 +524,22 @@ describe("ub init <hub-url>", () => {
 
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain("did not reach");
-    expect(run.stderr).toContain("ub open");
-    expect(run.stdout).toContain("uberblick initialised");
+    expect(run.stderr).toContain("binding and workspace records were not replaced");
+    expect(run.stdout).not.toContain("uberblick initialised");
     expect(config(box).hubUrl).toBe(CLOSED);
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
   });
 
-  it("agrees with `ub remote join` about the endpoint that is stored", async () => {
+  it("agrees with `ub workspace join` about the endpoint that is stored", async () => {
     // The two verbs write the same file, so a spelling one accepts and the
     // other rewrites would make `ub init` refuse the hub this machine is
     // already joined to. Same string in, same string stored, and the second
     // command has nothing left to do.
     const hub = await startHub();
-    const box = sandbox();
+    const box = unboundSandbox();
 
     const joined = await runUbAsync(
-      ["remote", "join", `${url(hub)}/${WORKSPACE}`],
+      ["workspace", "join", `${url(hub)}/${WORKSPACE}`],
       box,
       { HUB_AUTH_TOKEN: SECRET },
     );
@@ -476,12 +553,12 @@ describe("ub init <hub-url>", () => {
 
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).toContain("already set up");
-    expect(config(box).workspace).toBe(WORKSPACE);
+    expect(config(box).workspaceId).toBe(WORKSPACE);
     expect(readFileSync(configPath(box), "utf8")).toBe(settled);
   });
 
   it("refuses something that is not an endpoint at all, echoing none of it", async () => {
-    const box = sandbox();
+    const box = unboundSandbox();
 
     const run = await runUbAsync(["init", "not a hub", "--yes"], box, {
       HUB_AUTH_TOKEN: SECRET,

@@ -61,7 +61,7 @@ async function rig(authSecret: string) {
   const databasePath = tempDatabasePath();
   const config = resolveRemoteHubConfig({ HUB_AUTH_TOKEN: authSecret, HUB_DB_PATH: databasePath, PORT: "0" });
   expect(config.github?.clientId).toBe(SHARED_GITHUB_CLIENT_ID);
-  const hub = await createHub({ ...config, github: { ...config.github!, fetch: github.fetch, now: () => github.time },
+  const hub = await createHub({ ...config, github: { ...config.github!, fetch: github.fetch, now: () => github.time, setupPollMs: 5 },
     log: silentLogger }, { operatorSetup: true });
   hubs.push(hub);
   return { hub, github, databasePath };

@@ -5,10 +5,71 @@ correction to verify. `delivery-policy.md`'s "Reviews owed" table decides which
 reviews a change owes; ub-agents runs them at the head under review, and
 `integration.md` beside this file owns the gates' mechanics.
 
-Every review is critical: try to falsify the implementation with focused
-failure-path or mutation probes, and hunt specifically for overtesting and
-overengineering per this repo's principles (KISS/YAGNI, least code wins, tests
-defend contracts and invariants rather than implementation trivia).
+This is an adversarial implementation challenge, not a gate replay. Try to
+falsify the change: trace important failure paths and boundary conditions,
+challenge assumptions in the issue and PR record against the code and product
+intent, and use focused probes or mutations where inspection alone cannot
+settle the risk. Hunt explicitly for overengineering and overtesting. Gate
+results may be evidence, but restating lint, tests or acceptance criteria is not
+a review.
+Follow KISS/YAGNI: tests defend contracts and invariants rather than implementation trivia.
+
+## Reviewer assignment and task
+
+Read [the reviewer entry](../roles/reviewer.md) and shared core first when
+assigned a review. Given a pull request and its exact head, the latest handoff
+sets the scope: finding ids to verify — from an implementer revision or an
+integrator requesting a missing second round — mean a corrections review;
+otherwise the review is full.
+
+Reproducible findings against that head, in the [Findings](#findings)
+format: what is wrong, where, why it matters, what evidence would settle it,
+and a proposed P1/P2/P3 severity grounded in the concrete supported-usage
+consequence. Correctness and data safety first, then risk and missing
+verification, then unnecessary complexity — a smaller change that defends the
+same contract is a finding. No findings is itself a verdict and is stated as one.
+
+Check the PR's mechanism and evidence under
+[library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices),
+including live web UI criteria and owner-confirmed exceptions where required.
+
+Product intent is read, not inferred from the issue text: read the corpus the
+issue's Pointers cite wherever the change touches its product meaning, under
+[AGENTS.md's read rules](../../AGENTS.md#read-for-the-action). The pull request's `Corpus update` is part of the change: a missing
+rewrite for a claim the change makes wrong, or one that misstates the change,
+is a finding.
+
+A corrections review asks a narrower question: for each finding id the
+revision lists, does the corrected head resolve it, or is the implementer's
+evidence a sufficient answer? Record each as `resolved`, `explanation
+accepted`, or `unresolved — <why>`, examining the delta first and the wider
+diff only where a correction's risk reaches it. It approves or escalates under
+the protocol's Rounds rule; there is no third round.
+
+Read the earlier verdicts and corrections records on the PR before reporting.
+A settled finding stays settled unless this head changed the affected behavior
+or the review has new reproducible evidence that materially changes its
+consequence. In that case, reopen the existing finding id and state the new
+evidence; do not file the same observation under a new id or re-argue severity
+from preference alone.
+
+Review exactly the head you were given. If the pull request's head moves while
+you review, stop with `defer`: a review of another head satisfies nothing.
+
+## Reviewer outcomes and handoff
+
+- `approve` — a full review with no findings or only P3s; a corrections review
+  that resolves every listed P1 and P2 and introduces none.
+- `changes` — a full review finds a P1 or P2.
+- `needs-human` — a corrections review leaves a P1 or P2 unresolved or finds
+  a new one; follow [human-decisions.md](human-decisions.md).
+- `defer` — the head moved during review, or no live document covering the
+  judgment could be read (AGENTS.md).
+
+Post the verdict once as a review on the assigned head:
+`gh pr review <N> --comment --body-file <file>`, which records that commit.
+It opens with `Verdict: <no findings | P1 <n>, P2 <n>, P3 <n>>` or the corrections
+resolutions, then the findings; the summary links it.
 
 ## Findings
 
@@ -50,8 +111,7 @@ ledger is kept:
 When an optional Copilot review has posted findings, one revision answers
 whatever both reviews have posted. Copilot's remarks carry no finding ids:
 they are corrected or answered in their own threads, and any still open at
-integration are the integrator's to answer. Its absence or pending status is
-not a reason to wait; the delivery policy governs optional review requests.
+integration are the integrator's to answer.
 
 ## Settling a finding
 
@@ -92,7 +152,7 @@ An issue gets one review pass (`issue-preparation.md`).
 
 ## Completion
 
-The integrator checks the record rather than the code again: every P1 and P2 id
-has a correction or an accepted answer, and a second round ran where this
-protocol requires one. A P3 left untouched is accepted debt. Merge requires
+The integrator checks the record rather than the code again: the reviews the
+diff owes ran, every P1 and P2 id has a correction or an accepted answer, and a
+second round ran where this protocol requires one. A P3 left untouched is accepted debt. Merge requires
 `delivery-policy.md`'s gates and no open P1 or P2.

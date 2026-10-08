@@ -8,11 +8,12 @@
  * documentation and against what each vendor's CLI actually writes.
  *
  * **Nothing here writes a config file.** `ub mcp install` either runs the
- * vendor's own CLI or prints a snippet for somebody to paste, so the only
- * question this module asks of an existing file is {@link presence}: is our
- * entry there, and is it the one we would register. `JSON.parse` and a scan for
- * every TOML spelling of the key we own are enough for that — a file nothing
- * splices needs no byte-preserving splicer.
+ * vendor's own CLI or prints a snippet for somebody to paste. Install asks
+ * {@link presence} whether our entry is there and matches what it would register.
+ * Doctor reads only the binding variables through {@link doctorEntry}, using
+ * JSON or TOML parsing and shared entry validation. Install's TOML presence
+ * comparison stays separate. No config is edited, so no byte-preserving
+ * splicer is needed.
  *
  * **Nothing echoes a value back.** {@link presence} answers with one of four
  * words and never with anything it read. A config file is exactly where
@@ -24,6 +25,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { parse as parseToml } from "smol-toml";
 
 /** The name uberblick registers itself under, in every client. */
 export const SERVER_NAME = "uberblick";
@@ -44,26 +46,13 @@ export interface Entry {
   command: string;
   args: string[];
   /**
-   * Environment pinned into the entry, absent for the unpinned one.
-   *
-   * The only value that ever goes here is `WORKSPACE_ID`, and only when
-   * `--workspace` said so: which workspace a project's entry serves is the one
-   * thing a client config can say that `ub` cannot work out for itself. No
-   * endpoint, no credential, ever.
+   * A complete, non-secret binding: UB_WORKSPACE_ID and UB_HUB_URL.
+   * The hub may be "local". Credentials are resolved privately at spawn time.
    */
   env?: Record<string, string>;
 }
 
-/**
- * The line every client is pointed at.
- *
- * No arguments and no environment: which workspace, which hub and which
- * credential apply is resolved by `ub` itself, from the layers `config.ts`
- * documents. A client config that pinned the hub or the credential would be a
- * second, stale copy of configuration that already has an owner. `WORKSPACE_ID`
- * is the exception `--workspace` writes — see `install.ts`. This one never
- * carries configuration.
- */
+/** The stable spawn line; `install` adds its complete selected binding. */
 export const DEFAULT_ENTRY: Entry = {
   name: SERVER_NAME,
   command: "ub",
@@ -148,8 +137,8 @@ export type Presence =
 /**
  * Whether `file` already registers `entry`, and whether it is ours.
  *
- * The whole read side of `ub mcp install`, and of `ub doctor`'s MCP check. A
- * file that is not there is `absent`; a file that is there and will not open or
+ * The whole read side of `ub mcp install`. A file that is not there is
+ * `absent`; a file that is there and will not open or
  * will not parse is `unusable`, which is a different answer for a different
  * reason: the caller may not treat a file it cannot read as an empty one.
  */
@@ -176,6 +165,95 @@ export function presence(file: TargetFile, entry: Entry): Presence {
   }
   if (registered === undefined) return "absent";
   return jsonMatches(registered, entry) ? "ours" : "foreign";
+}
+
+/** Doctor judges a workspace pin, never an entry's command or other values. */
+export type DoctorEntry =
+  | { status: "absent" | "unusable" }
+  | { status: "entry"; env: NodeJS.ProcessEnv };
+
+const PIN_KEYS = new Set(["UB_WORKSPACE_ID", "UB_HUB_URL", "WORKSPACE_ID", "HUB_URL"]);
+
+/** No parser message or non-binding environment value leaves this read. */
+function doctorRead(file: TargetFile): string | DoctorEntry {
+  try {
+    return readFileSync(file.path, "utf8");
+  } catch (error) {
+    return {
+      status: (error as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "unusable",
+    };
+  }
+}
+
+function doctorJson(text: string): Record<string, unknown> | null {
+  try {
+    const doc: unknown = JSON.parse(text);
+    return isObject(doc) ? doc : null;
+  } catch {
+    return null;
+  }
+}
+
+/** TOML date/time scalars are JS objects, but cannot be server or env tables. */
+function doctorTable(value: unknown): value is Record<string, unknown> {
+  return isObject(value) && !(value instanceof Date);
+}
+
+function doctorJsonEntry(doc: unknown): DoctorEntry {
+  if (!isObject(doc)) return { status: "unusable" };
+  if (doc.mcpServers === undefined) return { status: "absent" };
+  if (!doctorTable(doc.mcpServers)) return { status: "unusable" };
+  if (!Object.hasOwn(doc.mcpServers, SERVER_NAME)) return { status: "absent" };
+  const held = doc.mcpServers[SERVER_NAME];
+  if (!doctorTable(held)) return { status: "unusable" };
+  if (held.env === undefined) return { status: "entry", env: {} };
+  if (!doctorTable(held.env)) return { status: "unusable" };
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(held.env)) {
+    if (!PIN_KEYS.has(key)) continue;
+    if (typeof value !== "string") return { status: "unusable" };
+    env[key] = value;
+  }
+  return { status: "entry", env };
+}
+
+/** The project/user entry doctor can inspect without judging its command. */
+export function doctorEntry(file: TargetFile): DoctorEntry {
+  const text = doctorRead(file);
+  if (typeof text !== "string") return text;
+  return file.format === "json" ? doctorJsonEntry(doctorJson(text)) : doctorTomlEntry(text);
+}
+
+/** Claude's local and user scopes share one file, so read its bytes once. */
+export function claudeDoctorEntries(
+  file: TargetFile,
+  projectKey: string,
+): { local: DoctorEntry; user: DoctorEntry } {
+  const text = doctorRead(file);
+  if (typeof text !== "string") return { local: text, user: text };
+  const doc = doctorJson(text);
+  if (doc === null) return { local: { status: "unusable" }, user: { status: "unusable" } };
+  let local: DoctorEntry = { status: "absent" };
+  if (doc.projects !== undefined) {
+    local = !isObject(doc.projects)
+      ? { status: "unusable" }
+      : Object.hasOwn(doc.projects, projectKey)
+        ? doctorJsonEntry(doc.projects[projectKey])
+        : { status: "absent" };
+  }
+  return { local, user: doctorJsonEntry(doc) };
+}
+
+/** Parse Codex's config once, then apply the same entry/pin rules as JSON. */
+function doctorTomlEntry(text: string): DoctorEntry {
+  try {
+    // Valid unrelated 64-bit integers must not make a config unreadable.
+    const doc = parseToml(text, { integersAsBigInt: "asNeeded" });
+    return doctorJsonEntry({ mcpServers: doc.mcp_servers });
+  } catch {
+    // Parser errors quote source lines that may contain credentials.
+    return { status: "unusable" };
+  }
 }
 
 /**
@@ -328,7 +406,7 @@ function tomlBlock(entry: Entry): string {
   const pinned = Object.entries(entry.env ?? {});
   // The table name and any pinned variable are bare keys by construction — the
   // names are `uberblick` and `uberblick-<label>`, and the only variable is
-  // `WORKSPACE_ID` — so neither needs quoting here.
+  // `UB_HUB_URL` and `UB_WORKSPACE_ID` — so none needs quoting here.
   return (
     `[mcp_servers.${entry.name}]\n` +
     `command = ${tomlString(entry.command)}\n` +

@@ -24,15 +24,9 @@ async function bundle(entry, output) {
 
 async function main() {
 	const [output, version, sourceCommit, protocolVersion, hubImage, webImage] = process.argv.slice(2);
-	if (!output) throw new Error("usage: build-hub-release-payload <output> [version commit protocol hub-image web-image]");
-	const destination = resolve(output);
-	mkdirSync(destination, { recursive: true });
-	await Promise.all([
-		bundle("packages/hub/src/main.ts", join(destination, "hub.mjs")),
-		bundle("packages/hub/src/admin-setup-command.ts", join(destination, "hub-admin-setup.mjs")),
-	]);
-	// The checkout hub uses the same setup entrypoint without building a release.
-	if (version === undefined) return;
+	if (!output || process.argv.slice(2).length !== 6) {
+		throw new Error("usage: build-hub-release-payload <output> <version> <commit> <protocol> <hub-image> <web-image>");
+	}
 	if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version) ||
 		!/^[a-f0-9]{40}$/.test(sourceCommit ?? "")) {
 		throw new Error("release version and full source commit are required");
@@ -48,9 +42,15 @@ async function main() {
 			throw new Error("release image references must name this version under ghcr.io/uberblick-ai");
 		}
 	}
+	const destination = resolve(output);
+	mkdirSync(destination, { recursive: true });
+	await Promise.all([
+		bundle("packages/hub/src/main.ts", join(destination, "hub.mjs")),
+		bundle("packages/hub/src/admin-setup-command.ts", join(destination, "hub-admin-setup.mjs")),
+	]);
 	const release = join(destination, "release");
 	mkdirSync(release);
-	for (const file of ["remote.env.example", "remote-settings.sh", "REMOTE.md", "RELEASING.md"]) {
+	for (const file of ["remote.env.example", "remote-settings.sh", "remote.https.yml", "remote.tailscale.yml", "REMOTE.md", "RELEASING.md"]) {
 		cpSync(join(root, file), join(release, file));
 	}
 	mkdirSync(join(release, "bin"));
@@ -65,7 +65,7 @@ async function main() {
 	}, null, 2)}\n`);
 	const environment = { ...process.env, UBERBLICK_RELEASE_WEB: "1" };
 	for (const key of ["HUB_URL", "HUB_AUTH_TOKEN", "WORKSPACE_ID", "WORKSPACES",
-		"WEB_HUB_URL", "WEB_WORKSPACES", "TAILSCALE_HOST", "TAILSCALE_IP"]) delete environment[key];
+		"WEB_HUB_URL", "WEB_WORKSPACES", "WEB_HOST", "HTTPS_BIND_IP", "LOOPBACK_PORT", "TAILSCALE_HOST", "TAILSCALE_IP"]) delete environment[key];
 	const result = spawnSync("pnpm", ["--filter", "@uberblick/web", "exec", "vite", "build",
 		"--outDir", join(destination, "web"), "--emptyOutDir"], {
 		cwd: root, env: environment, stdio: "inherit",

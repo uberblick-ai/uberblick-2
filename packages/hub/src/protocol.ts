@@ -28,7 +28,8 @@ import { MAX_TOKEN_LENGTH } from "./token.js";
  * a bump nobody needed costs a hand update of every machine, and one that was
  * needed and skipped costs the silent divergence this replaces.
  */
-export const SYNC_PROTOCOL_VERSION = 1;
+// Structured table cells are incompatible with the shipped protocol-2 clients.
+export const SYNC_PROTOCOL_VERSION = 3;
 
 /** Room for the JSON around the token — `{"protocolVersion":1,"token":""}` is 32 characters. */
 const ENVELOPE_ALLOWANCE = 128;
@@ -157,7 +158,7 @@ export function protocolSkew(hubVersion: number, ourVersion: number): string {
 
 /**
  * What every surface says when the hub refuses a token — MCP's `hub.reason`,
- * the web status line, `ub status`, `ub remote` and `ub doctor`.
+ * the web status line, `ub status`, `ub workspace join` and `ub doctor`.
  *
  * Composed locally and shared so the surfaces cannot drift, and never the hub's
  * own words: the thing being rejected is a token we just sent, so an endpoint

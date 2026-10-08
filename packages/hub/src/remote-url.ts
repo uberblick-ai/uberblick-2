@@ -1,4 +1,12 @@
 import { parseWorkspaceId } from "@uberblick/schema";
+import { isLoopbackHost } from "./loopback.js";
+export { isLoopbackHost } from "./loopback.js";
+
+/** Wildcards and unrecognized host spellings always require device login. */
+export function isLoopbackEndpoint(endpoint: string): boolean {
+  try { return isLoopbackHost(new URL(endpoint).hostname); }
+  catch { return false; }
+}
 
 /** A value carrying its own scheme, as opposed to a bare host. */
 const SCHEME = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
@@ -69,15 +77,15 @@ function readRemoteUrl(value: string): RemoteUrl {
   if (url.username !== "" || url.password !== "") {
     throw new Error(
       "an endpoint must not carry a username or password. The hub is " +
-        "authenticated with a signing secret sent in the connection's auth " +
-        "message, never in the URL — pass it with --secret-file instead",
+        "authenticated in the connection's auth message, never in the URL — " +
+        "run `ub auth login` for a remote hub",
     );
   }
   if (url.search !== "") {
     throw new Error(
       "an endpoint must not carry a query string. Nothing reads one, and a " +
-        "token put there would be persisted and printed — pass a credential " +
-        "with --secret-file instead",
+        "token put there would be persisted and printed — run `ub auth login` " +
+        "for a remote hub instead",
     );
   }
   if (url.hash !== "") {
@@ -122,7 +130,7 @@ export function normalizeRemoteUrl(value: string): string {
  * The two things a join URL carries: where the hub is, and which workspace.
  *
  * The form is an endpoint with the workspace id as its **last path segment** —
- * `wss://hub.example.ts.net/ws/<workspace-id>` — and `ub remote init` prints
+ * `wss://hub.example.ts.net/ws/<workspace-id>` — and `ub workspace promote` prints
  * exactly that. One string is the whole of what a second machine has to be
  * told, which is the point: an id copied separately is an id copied wrongly,
  * and a machine that invents its own joins a hub and finds nothing of yours on
@@ -137,7 +145,7 @@ export function normalizeRemoteUrl(value: string): string {
  * host or an `https://` address gets the deployed path here too, since the id
  * is removed *before* the endpoint is built rather than after.
  *
- * Neither refusal echoes the URL back. `ub remote init` prints this string and
+ * Neither refusal echoes the URL back. `ub workspace promote` prints this string and
  * people paste it about, so the actionable half is the *form*, and repeating a
  * value somebody may have put a secret into is how it reaches a terminal log.
  */
@@ -159,7 +167,7 @@ export function parseJoinTarget(value: string): {
     throw new Error(
       "that URL names no workspace. A join URL is the endpoint with the " +
         "workspace id as its last path segment and nothing after it, like " +
-        "wss://hub.example.ts.net/ws/<workspace-id> — `ub remote init` prints " +
+        "wss://hub.example.ts.net/ws/<workspace-id> — `ub workspace promote` prints " +
         "it, and `ub status` on the first machine names the id",
     );
   }
@@ -169,7 +177,7 @@ export function parseJoinTarget(value: string): {
     throw new Error(
       "the last path segment of that URL is not a workspace id: it must be a " +
         "uuid, or <slug>-<uuid>. A join URL looks like " +
-        "wss://hub.example.ts.net/ws/<workspace-id> — `ub remote init` prints it",
+        "wss://hub.example.ts.net/ws/<workspace-id> — `ub workspace promote` prints it",
     );
   }
   // Everything the id's segment leaves behind. An endpoint somebody typed in

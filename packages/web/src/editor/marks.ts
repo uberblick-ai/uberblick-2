@@ -43,12 +43,14 @@
  * name is its Yjs key, so the schema package uses the same name — see
  * `INLINE_MARKS` there.
  *
- * Input rules take `(?:^|\s)` before the opening delimiter rather than
- * `[^delimiter]`: `markInputRule` deletes from the start of the match up to the
- * captured text, skipping leading *whitespace* only, so a non-space prefix in the
- * pattern is eaten along with the delimiter. Underscore forms (`__b__`, `_i_`)
- * are here because people type them: markdown export always writes asterisks,
- * while the markdown *reader* understands both — a `_` delimits under
+ * Input and paste rules open at the start of text, after whitespace or after
+ * `(`, `[`, `{`, `"` or `'`. Paste rules see only the pasted text, so its start
+ * counts as a boundary even when pasted into a word. Lookbehind keeps that
+ * prefix outside the match: `markInputRule` and `markPasteRule` delete from the
+ * match's start to the captured text, skipping only leading whitespace, so a
+ * punctuation prefix inside the match would be eaten with the delimiter.
+ * Underscore forms (`__b__`, `_i_`) work when typed or pasted: export writes
+ * asterisks, while the markdown *reader* understands both — a `_` delimits under
  * CommonMark's flanking rules, which is what keeps `snake_case` a word.
  */
 
@@ -59,6 +61,8 @@ import {
   markPasteRule,
   mergeAttributes,
 } from "@tiptap/core";
+import type { PasteRuleFinder } from "@tiptap/core";
+import type { MarkType } from "@tiptap/pm/model";
 import {
   COMMENT_MARK,
   INLINE_MARKS,
@@ -73,18 +77,69 @@ import {
  */
 export const PROSE_MARKS: string = [...INLINE_MARKS, COMMENT_MARK].join(" ");
 
-const BOLD_INPUT = /(?:^|\s)(\*\*(?!\s+\*\*)([^*]+)\*\*)$/;
-const BOLD_UNDERSCORE_INPUT = /(?:^|\s)(__(?!\s+__)([^_]+)__)$/;
-const BOLD_PASTE = /(?:^|\s)(\*\*(?!\s+\*\*)([^*]+)\*\*)/g;
-const ITALIC_INPUT = /(?:^|\s)(\*(?!\s+\*)([^*]+)\*)$/;
-const ITALIC_UNDERSCORE_INPUT = /(?:^|\s)(_(?!\s+_)([^_]+)_)$/;
-const ITALIC_PASTE = /(?:^|\s)(\*(?!\s+\*)([^*]+)\*)/g;
-const STRIKE_INPUT = /(?:^|\s)(~~(?!\s+~~)([^~]+)~~)$/;
-const STRIKE_PASTE = /(?:^|\s)(~~(?!\s+~~)([^~]+)~~)/g;
-const CODE_INPUT = /(?:^|\s)(`([^`]+)`)$/;
-const CODE_PASTE = /(?:^|\s)(`([^`]+)`)/g;
+const BOLD_INPUT = /(?<=^|[\s([{"'])(\*\*(?!\s+\*\*)([^*]+)\*\*)$/;
+const BOLD_UNDERSCORE_INPUT = /(?<=^|[\s([{"'])(__(?!\s+__)([^_]+)__)$/;
+const BOLD_PASTE = /(?<=^|[\s([{"'])(\*\*(?!\s+\*\*)([^*]+)\*\*)/g;
+const BOLD_UNDERSCORE_PASTE = /(?<=^|[\s([{"'])(__(?!\s+__)([^_]+)__)/g;
+const ITALIC_INPUT = /(?<=^|[\s([{"'])(\*(?!\s+\*)([^*]+)\*)$/;
+const ITALIC_UNDERSCORE_INPUT = /(?<=^|[\s([{"'])(_(?!\s+_)([^_]+)_)$/;
+const ITALIC_PASTE = /(?<=^|[\s([{"'])(\*(?!\s+\*)([^*]+)\*)/g;
+const ITALIC_UNDERSCORE_PASTE = /(?<=^|[\s([{"'])(_(?!\s+_)([^_]+)_)/g;
+const STRIKE_INPUT = /(?<=^|[\s([{"'])(~~(?!\s+~~)([^~]+)~~)$/;
+const STRIKE_PASTE = /(?<=^|[\s([{"'])(~~(?!\s+~~)([^~]+)~~)/g;
+const CODE_INPUT = /(?<=^|[\s([{"'])(`([^`]+)`)$/;
+const CODE_PASTE = /(?<=^|[\s([{"'])(`([^`]+)`)/g;
 const LINK_INPUT = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/;
 const LINK_PASTE = /https?:\/\/[^\s<>"]+/g;
+
+/**
+ * Formatting paste rules run before inline code. Filter delimiters inside its
+ * raw backtick spans, retaining valid matches in the same paste and allowing
+ * an outer mark around a whole code span. Returning null from a rule handler
+ * would discard that rule's entire transaction, including valid matches.
+ */
+function outsideCode(pattern: RegExp): PasteRuleFinder {
+  return (text) => {
+    const codeSpans = [...text.matchAll(CODE_PASTE)];
+    return [...text.matchAll(pattern)]
+      .filter((match) => {
+        const matchEnd = match.index + match[0].length;
+        return !codeSpans.some((code) => {
+          const codeEnd = code.index + code[0].length;
+          return (
+            (code.index <= match.index && match.index < codeEnd) ||
+            (code.index < matchEnd && matchEnd <= codeEnd)
+          );
+        });
+      })
+      .map((match) => ({
+        index: match.index,
+        text: match[0],
+        // These patterns all capture the marked content last.
+        replaceWith: match[2] ?? "",
+      }));
+  };
+}
+
+function formattingPasteRule(find: RegExp, type: MarkType) {
+  const rule = markPasteRule({ find: outsideCode(find), type });
+  const handler = rule.handler;
+  rule.handler = (props) => {
+    const { state, range } = props;
+    const doc = state.tr.doc;
+    // Tiptap revisits rules after the code rule removes backticks. Skip only
+    // delimiters covered by a code mark; an outer mark may contain code.
+    if (
+      [range.from, range.to - 1].some((pos) =>
+        doc.nodeAt(pos)?.marks.some((mark) => mark.type.spec.code),
+      )
+    ) {
+      return;
+    }
+    return handler(props);
+  };
+  return rule;
+}
 
 export const Bold = Mark.create({
   name: "bold",
@@ -107,7 +162,10 @@ export const Bold = Mark.create({
     ];
   },
   addPasteRules() {
-    return [markPasteRule({ find: BOLD_PASTE, type: this.type })];
+    return [
+      formattingPasteRule(BOLD_PASTE, this.type),
+      formattingPasteRule(BOLD_UNDERSCORE_PASTE, this.type),
+    ];
   },
 });
 
@@ -132,7 +190,10 @@ export const Italic = Mark.create({
     ];
   },
   addPasteRules() {
-    return [markPasteRule({ find: ITALIC_PASTE, type: this.type })];
+    return [
+      formattingPasteRule(ITALIC_PASTE, this.type),
+      formattingPasteRule(ITALIC_UNDERSCORE_PASTE, this.type),
+    ];
   },
 });
 
@@ -153,7 +214,7 @@ export const Strike = Mark.create({
     return [markInputRule({ find: STRIKE_INPUT, type: this.type })];
   },
   addPasteRules() {
-    return [markPasteRule({ find: STRIKE_PASTE, type: this.type })];
+    return [formattingPasteRule(STRIKE_PASTE, this.type)];
   },
 });
 

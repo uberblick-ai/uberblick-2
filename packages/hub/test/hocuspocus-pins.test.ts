@@ -65,49 +65,6 @@ function manifests(): string[] {
 }
 
 describe("@hocuspocus/* is pinned to an exact version", () => {
-  it("names no range in any package.json", () => {
-    const ranged: string[] = [];
-
-    for (const path of manifests()) {
-      const manifest = JSON.parse(read(path)) as Record<
-        string,
-        Record<string, string> | undefined
-      >;
-      for (const field of [
-        "dependencies",
-        "devDependencies",
-        "peerDependencies",
-        "optionalDependencies",
-      ]) {
-        for (const [name, specifier] of Object.entries(manifest[field] ?? {})) {
-          if (!name.startsWith("@hocuspocus/")) continue;
-          if (specifier !== PINNED) {
-            ranged.push(`${path}: "${name}": "${specifier}"`);
-          }
-        }
-      }
-    }
-
-    expect(
-      ranged,
-      `@hocuspocus/* is pinned to exactly ${PINNED} by decision (#394): the ` +
-        "hub reads library internals, so a bump is a reviewed act. Pin the " +
-        "specifier and re-characterize the seams before changing the version.",
-    ).toEqual([]);
-  });
-
-  it("pins @hocuspocus/common, which no manifest names, in the workspace overrides", () => {
-    const overrides = read("pnpm-workspace.yaml");
-
-    expect(
-      overrides,
-      "@hocuspocus/common is a transitive dependency of both server and " +
-        `provider, each asking for a range. Override it to ${PINNED}.`,
-    ).toMatch(
-      new RegExp(`^\\s*['"]?@hocuspocus/common['"]?:\\s*${PINNED}\\s*$`, "m"),
-    );
-  });
-
   it("pins the server patch to the exact version and both runtime builds", () => {
     const workspace = read("pnpm-workspace.yaml");
     const lock = read("pnpm-lock.yaml");
@@ -138,16 +95,42 @@ describe("@hocuspocus/* is pinned to an exact version", () => {
     expect(added).not.toContain("Object.keys(this.hookPayloads)");
   });
 
-  it("copies the patch into the hub image before its frozen install", () => {
-    const dockerfile = read("Dockerfile");
-    const patchCopy = dockerfile.indexOf("COPY patches patches");
-    const frozenInstall = dockerfile.indexOf("pnpm install --frozen-lockfile");
+  it("names no range in any manifest, override or lockfile entry", () => {
+    const ranged: string[] = [];
 
-    expect(patchCopy).toBeGreaterThan(-1);
-    expect(patchCopy).toBeLessThan(frozenInstall);
-  });
+    for (const path of manifests()) {
+      const manifest = JSON.parse(read(path)) as Record<
+        string,
+        Record<string, string> | undefined
+      >;
+      for (const field of [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+      ]) {
+        for (const [name, specifier] of Object.entries(manifest[field] ?? {})) {
+          if (!name.startsWith("@hocuspocus/")) continue;
+          if (specifier !== PINNED) {
+            ranged.push(`${path}: "${name}": "${specifier}"`);
+          }
+        }
+      }
+    }
 
-  it("resolves to exactly that version everywhere in the lockfile", () => {
+    expect(
+      ranged,
+      `@hocuspocus/* is pinned to exactly ${PINNED} by decision (#394): the ` +
+        "hub reads library internals, so a bump is a reviewed act. Pin the " +
+        "specifier and re-characterize the seams before changing the version.",
+    ).toEqual([]);
+
+    // @hocuspocus/common is a transitive dependency of both server and
+    // provider, each asking for a range: the workspace override pins it.
+    expect(read("pnpm-workspace.yaml")).toMatch(
+      new RegExp(`^\\s*['"]?@hocuspocus/common['"]?:\\s*${PINNED}\\s*$`, "m"),
+    );
+
     const lock = read("pnpm-lock.yaml");
 
     // Every `specifier:` a workspace importer states for a Hocuspocus package.
@@ -201,9 +184,9 @@ describe("@hocuspocus/* is pinned to an exact version", () => {
  * `@hocuspocus/server` ships the same `ClientConnection` twice — an ESM bundle
  * and a CJS bundle — and the patch has to edit both by hand, because the
  * package ships no build. Everything in this repository loads the ESM one
- * (every workspace package is `"type": "module"`, and the hub image runs `tsx`
- * on TypeScript sources), so the CJS copy is shipped, never exercised, and a
- * defect in it is invisible to the suites, to CI and to the Docker review.
+ * (every workspace package is `"type": "module"`, and the release hub runs the
+ * esbuild bundle `/app/hub.mjs`), so the CJS copy is shipped, never exercised,
+ * and a defect in it is invisible to the suites, to CI and to the Docker review.
  *
  * These probes close that gap for the one rule the patch adds: a document is
  * opened by its Auth message, and any other first frame for a document is

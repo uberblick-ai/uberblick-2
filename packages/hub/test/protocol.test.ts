@@ -18,6 +18,8 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { appendBlock, editBlock, findBlockElement, getBlock, tableCellText, tableRows } from "@uberblick/schema";
+import * as Y from "yjs";
 import type { HubLogRecord } from "../src/log.js";
 import type { Hub } from "../src/server.js";
 import {
@@ -115,13 +117,67 @@ async function maximalToken(): Promise<string> {
 }
 
 describe("the version exchange", () => {
+  it("refuses the shipped protocol-2 table writer before sync or acknowledgement", async () => {
+    const room = testRoom();
+    const current = createClient({ port: hub.port, room, token: await token() });
+    clients.push(current);
+    await current.synced;
+    const before = "| Task | Status |\n| --- | --- |\n| Write | done |";
+    const id = appendBlock(current.doc, { type: "table", text: before });
+    const status = tableCellText(tableRows(findBlockElement(current.doc, id)!)[1]![1]!)!;
+    status.format(0, status.length, { bold: {} });
+    await waitUntil("the structured table to be acknowledged", () => !current.provider.hasUnsyncedChanges);
+    const tableState = Y.encodeStateVector(current.doc);
+
+    const oldDoc = new Y.Doc();
+    try {
+      Y.applyUpdate(oldDoc, Y.encodeStateAsUpdate(current.doc));
+      // v0.2.9 (d1b8fbf) reads a structured table as empty and inserts a
+      // first-child text on edit. Queue that incompatible write before connect.
+      const oldTable = findBlockElement(oldDoc, id)!;
+      const lostWrite = "| Task | Status |\n| --- | --- |\n| Write | done |\n| Ship | todo |";
+      oldTable.insert(0, [new Y.XmlText(lostWrite)]);
+      const old = createClient({ port: hub.port, room, token: await token(), doc: oldDoc,
+        protocolVersion: 2, reconnectDelayMs: 60_000 });
+      clients.push(old);
+      await expect(old.denied).resolves.toBe(protocolMismatchReason());
+      await expect(old.synced).rejects.toThrow(protocolMismatchReason());
+      expect(old.provider.isAuthenticated).toBe(false);
+      expect(old.provider.synced).toBe(false);
+      expect(old.provider.hasUnsyncedChanges).toBe(true);
+      clients.splice(clients.indexOf(old), 1);
+      old.destroy();
+
+      // A fresh matching client reads the hub, rather than our local writer.
+      // Its handshake is also a barrier after the incompatible write's refusal.
+      const updated = createClient({ port: hub.port, room, token: await token() });
+      clients.push(updated);
+      await updated.synced;
+      expect(Y.encodeStateVector(updated.doc)).toEqual(tableState);
+      expect(findBlockElement(updated.doc, id)!.firstChild).toBeInstanceOf(Y.XmlElement);
+      const formatted = getBlock(updated.doc, id)!.text;
+      expect(formatted).toBe(before.replace("done", "**done**"));
+      const after = formatted.replace("**done**", "**done (blocked)**");
+      editBlock(updated.doc, id, formatted, after);
+      await waitUntil("the matching table edit to arrive", () => getBlock(current.doc, id)!.text === after);
+      await waitUntil("the matching table edit to be acknowledged", () => !updated.provider.hasUnsyncedChanges);
+      expect(tableCellText(tableRows(findBlockElement(current.doc, id)!)[1]![1]!)).toBe(status);
+      expect(status.toDelta()).toEqual([{ insert: "done (blocked)", attributes: { bold: {} } }]);
+      expect(getBlock(updated.doc, id)!.text).toBe(after);
+    } finally {
+      oldDoc.destroy();
+    }
+  });
+
   it("refuses another version, and a bare token, with the same exact reason", async () => {
     const newer = client(await token("read-write"), SYNC_PROTOCOL_VERSION + 1);
+    const older = client(await token("read-write"), SYNC_PROTOCOL_VERSION - 1);
     // What every client that has not been updated looks like on the flag day.
     const bare = client(await token("read-write"), null);
 
     const reason = protocolMismatchReason(SYNC_PROTOCOL_VERSION);
     await expect(newer.denied).resolves.toBe(reason);
+    await expect(older.denied).resolves.toBe(reason);
     await expect(bare.denied).resolves.toBe(reason);
   });
 });

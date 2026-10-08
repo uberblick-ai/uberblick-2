@@ -239,7 +239,7 @@ describe("credential admission on a composed server", () => {
     const rig = await startServer();
     const nonMember = issue(rig.registry, "outsider-device", [WORKSPACE], "outsider");
     const refused = connect({ port: rig.port, room: testRoom(), token: await credentialToken(nonMember, WORKSPACE, { sub: "admin" }) });
-    expect(await waitFor("missing membership to refuse admission", refused.denied)).toBe("invalid-token");
+    expect(await waitFor("missing membership to refuse admission", refused.denied)).toBe("device-credential-refused");
     expect(refused.authenticated).not.toHaveBeenCalled();
     expect(rig.logs.at(-1)).toMatchObject({ cause: "missing-membership" });
     rig.memberships.grant({ workspaceId: WORKSPACE, principalId: "outsider", role: "member" });
@@ -247,7 +247,7 @@ describe("credential admission on a composed server", () => {
     await waitFor("a new hub grant to admit the issued workspace", admitted.synced);
     rig.memberships.grant({ workspaceId: OTHER_WORKSPACE, principalId: "outsider", role: "admin" });
     const outsideLimit = connect({ port: rig.port, room: testRoom(OTHER_WORKSPACE), token: await credentialToken(nonMember, OTHER_WORKSPACE) });
-    expect(await waitFor("membership alone to remain insufficient", outsideLimit.denied)).toBe("invalid-token");
+    expect(await waitFor("membership alone to remain insufficient", outsideLimit.denied)).toBe("device-credential-refused");
     expect(rig.logs.at(-1)).toMatchObject({ cause: "workspace-not-authorized" });
   });
 
@@ -335,7 +335,7 @@ describe("credential admission on a composed server", () => {
     ];
     for (const vector of vectors) {
       const client = connect({ port: rig.port, room: vector.room, token: vector.token });
-      expect(await waitFor("a generic credential refusal", client.denied)).toBe("invalid-token");
+      expect(await waitFor("a generic credential refusal", client.denied)).toBe("device-credential-refused");
       expect(rig.logs.at(-1)).toMatchObject({ cause: vector.cause });
     }
     const logText = JSON.stringify(rig.logs);
@@ -345,16 +345,26 @@ describe("credential admission on a composed server", () => {
     expect(logText).not.toContain("client-asserted-person-and-device");
   });
 
-  it("keeps protocol skew distinct from the generic credential refusal", async () => {
+  // 0.2.9 shipped protocol 2; keep it fixed so another independent bump
+  // cannot collapse the table cutover into an already shipped version.
+  it.each([2, SYNC_PROTOCOL_VERSION + 1])("refuses protocol %s before credential room writes", async (protocolVersion) => {
     const rig = await startServer();
     const laptop = issue(rig.registry, "laptop");
+    const room = testRoom();
+    const document = new Y.Doc();
+    document.getText(TEXT_KEY).insert(0, "queued before admission");
     const client = connect({
       port: rig.port,
-      room: testRoom(),
+      room,
       token: await credentialToken(laptop),
-      protocolVersion: SYNC_PROTOCOL_VERSION + 1,
+      protocolVersion,
+      document,
     });
     expect(await waitFor("the protocol refusal", client.denied)).toBe(`protocol-mismatch:${SYNC_PROTOCOL_VERSION}`);
+    expect(client.authenticated).not.toHaveBeenCalled();
+    expect(client.provider.synced).toBe(false);
+    expect(client.provider.hasUnsyncedChanges).toBe(true);
+    expect(rig.hocuspocus.documents.has(room)).toBe(false);
     expect(rig.logs.at(-1)).toMatchObject({ cause: "protocol-mismatch" });
   });
 
@@ -367,7 +377,7 @@ describe("credential admission on a composed server", () => {
       lifetimeSeconds: 60,
     });
     const client = connect({ port: rig.port, room: testRoom(), token: proof });
-    expect(await waitFor("the operation-bound proof to open no room", client.denied)).toBe("invalid-token");
+    expect(await waitFor("the operation-bound proof to open no room", client.denied)).toBe("device-credential-refused");
     expect(client.authenticated).not.toHaveBeenCalled();
     expect(rig.registry.get(laptop.record.id)).toEqual(laptop.record);
   });
@@ -396,8 +406,8 @@ describe("credential admission on a composed server", () => {
     expect(rig.registry.get(inventedId)).toBeNull();
     const restored = connect({ port: rig.port, room: testRoom(), token: await credentialToken(laptop) });
     const widened = connect({ port: rig.port, room: testRoom(OTHER_WORKSPACE), token: await credentialToken(phone, OTHER_WORKSPACE) });
-    expect(await waitFor("the attempted restoration to remain refused", restored.denied)).toBe("invalid-token");
-    expect(await waitFor("the attempted widening to remain refused", widened.denied)).toBe("invalid-token");
+    expect(await waitFor("the attempted restoration to remain refused", restored.denied)).toBe("device-credential-refused");
+    expect(await waitFor("the attempted widening to remain refused", widened.denied)).toBe("device-credential-refused");
   });
 
   it("cannot create, promote or restore memberships by syncing membership-shaped content or claiming an admin identity", async () => {
@@ -423,12 +433,12 @@ describe("credential admission on a composed server", () => {
     expect(() => rig.memberships.requireAdmin(WORKSPACE, "observer")).toThrow();
     for (const credential of [removed, outsider]) {
       const refused = connect({ port: rig.port, room: testRoom(), token: await credentialToken(credential, WORKSPACE, { sub: "admin" }) });
-      expect(await waitFor("forged grants to remain refused", refused.denied)).toBe("invalid-token");
+      expect(await waitFor("forged grants to remain refused", refused.denied)).toBe("device-credential-refused");
       expect(rig.logs.at(-1)).toMatchObject({ cause: "missing-membership" });
     }
   });
 
-  it.each(["revocation", "membership removal", "replacement"] as const)("reads authority after verification's final await so %s during verification wins", async (accessEnd) => {
+  it.each(["revocation", "membership removal"] as const)("reads authority after verification's final await so %s during verification wins", async (accessEnd) => {
     const rig = await startServer();
     const held = gate();
     const verified = gate();
@@ -448,7 +458,7 @@ describe("credential admission on a composed server", () => {
       await waitFor("signature verification to finish before admission resumes", verified.opened);
       await endAccess(rig, accessEnd, laptop);
       held.open();
-      expect(await waitFor("the authenticating device to be refused", sender.denied)).toBe("invalid-token");
+      expect(await waitFor("the authenticating device to be refused", sender.denied)).toBe("device-credential-refused");
       expect(sender.authenticated).not.toHaveBeenCalled();
       expect(rig.logs.at(-1)).toMatchObject({ cause: accessEndCause(accessEnd) });
       const peer = issue(rig.registry, "peer", [WORKSPACE], "observer");
@@ -462,7 +472,8 @@ describe("credential admission on a composed server", () => {
     }
   });
 
-  it.each(["revocation", "replacement"] as const)("%s closes every room under one credential while another device on the same socket keeps writing", async (accessEnd) => {
+  it("replacement closes every room under one credential while another device on the same socket keeps writing", async () => {
+    const accessEnd = "replacement";
     const rig = await startServer();
     const laptop = issue(rig.registry, "laptop", [WORKSPACE, OTHER_WORKSPACE]);
     const phone = issue(rig.registry, "phone");
@@ -489,17 +500,21 @@ describe("credential admission on a composed server", () => {
     await waitUntil("the unaffected device's write to land and be acknowledged", () =>
       rig.hocuspocus.documents.get(rooms[2]!)?.getText(TEXT_KEY).toString() === "still authorized" && !otherDevice.provider.hasUnsyncedChanges);
     const refused = connect({ port: rig.port, room: testRoom(), token: await credentialToken(laptop) });
-    expect(await waitFor("new admission after access ends to fail", refused.denied)).toBe("invalid-token");
+    expect(await waitFor("new admission after access ends to fail", refused.denied)).toBe("device-credential-refused");
     expect(rig.logs.at(-1)).toMatchObject({ cause: accessEndCause(accessEnd) });
   });
 
-  describe.each(["revocation", "membership removal", "replacement"] as const)("%s fences", (accessEnd) => {
+  // Every access end converges on the same latch (`closeWhere`) and the same
+  // per-frame check, so the frame variants run under revocation; membership
+  // removal arrives through its own subscription and keeps one variant.
+  describe("ended access fences", () => {
     it.each([
-      ["a live update", messageYjsUpdate, false],
-      ["a reconnect diff", messageYjsSyncStep2, false],
-      ["a detached connection's live update", messageYjsUpdate, true],
-      ["a detached connection's reconnect diff", messageYjsSyncStep2, true],
-    ] as const)("fences %s already past the admission check and the burst queued behind it", async (_label, type, detachBeforeAccessEnd) => {
+      ["revocation", "a live update", messageYjsUpdate, false],
+      ["revocation", "a reconnect diff", messageYjsSyncStep2, false],
+      ["revocation", "a detached connection's live update", messageYjsUpdate, true],
+      ["revocation", "a detached connection's reconnect diff", messageYjsSyncStep2, true],
+      ["membership removal", "a live update", messageYjsUpdate, false],
+    ] as const)("%s fences %s already past the admission check and the burst queued behind it", async (accessEnd, _label, type, detachBeforeAccessEnd) => {
       const held = gate();
       const entered = gate();
       const completed = gate();
@@ -582,6 +597,7 @@ describe("credential admission on a composed server", () => {
     });
 
     it.each(["authentication", "document loading"] as const)("refuses queued writes when access ends during %s", async (phase) => {
+      const accessEnd = "revocation";
       const held = gate();
       const entered = gate();
       const room = testRoom();
@@ -660,7 +676,7 @@ describe("credential admission on a composed server", () => {
       rig.hocuspocus.documents.get(firstRoom)?.getText(TEXT_KEY).toString() === "retained document + peer writes" && !observer.provider.hasUnsyncedChanges);
     for (const credential of [laptop, phone]) {
       const refused = connect({ port: rig.port, room: firstRoom, token: await credentialToken(credential) });
-      expect(await waitFor("all removed devices to be refused", refused.denied)).toBe("invalid-token");
+      expect(await waitFor("all removed devices to be refused", refused.denied)).toBe("device-credential-refused");
       expect(refused.authenticated).not.toHaveBeenCalled();
       expect(rig.logs.at(-1)).toMatchObject({ cause: "missing-membership" });
     }

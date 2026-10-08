@@ -345,8 +345,8 @@ describe("agent awareness", () => {
     });
 
     it("publishes on a read, keeps it alive, then withdraws the key", async () => {
-      // 900 ms so the arithmetic below has room on a loaded machine.
-      const ttl = 900;
+      // 500 ms leaves each touch 150 ms of slack inside the TTL on a loaded machine.
+      const ttl = 500;
       const { rig, uuid } = await secondServerOver(ttl);
 
       await rig.ok("get_doc", { uuid });
