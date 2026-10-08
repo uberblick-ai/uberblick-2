@@ -115,7 +115,10 @@ function gutterTop(
   const lineHeight = Number.parseFloat(dom.ownerDocument.defaultView?.getComputedStyle(dom).lineHeight ?? "");
   const firstLine = Number.isFinite(lineHeight) ? lineHeight : rect.height;
   const size = touch ? TOUCH_BUTTON_SIZE : FINE_BUTTON_SIZE;
-  const top = rect.top - base.top + Math.max(0, (firstLine - size) / 2);
+  // Table column controls straddle the top border. Place the block button
+  // below that target so both full hit areas remain separate, also on touch.
+  const table = dom.querySelector("table");
+  const top = rect.top - base.top + (table === null ? Math.max(0, (firstLine - size) / 2) : size / 2);
   return Number.isFinite(top) ? top : 0;
 }
 

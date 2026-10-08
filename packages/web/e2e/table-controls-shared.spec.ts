@@ -114,7 +114,7 @@ test("a row menu keeps its original row through a collaborator edit and insertio
     await page.goto(new URL(`/${ws()}/${fixture.uuid}`, harness().appUrl).href);
     const table = page.locator(".ub-table");
     await expect(table.locator("tr")).toHaveCount(3);
-    await table.hover();
+    await table.locator("tr").last().hover();
     await page.getByRole("button", { name: "Row 3 actions", exact: true }).click();
     const remove = page.getByRole("menuitem", { name: "Delete row", exact: true });
     await expect(remove).toBeVisible();
@@ -174,7 +174,7 @@ test("deciding a record closes its table menu and removes structural controls", 
     const table = page.locator(".ub-table");
     await expect(table.locator("tr")).toHaveCount(3);
     await expect(page.locator(".ub-editor .ProseMirror")).toHaveAttribute("contenteditable", "true");
-    await table.hover();
+    await table.locator("tr").nth(1).hover();
     await page.getByRole("button", { name: "Row 2 actions", exact: true }).click();
     await expect(page.getByRole("menuitem", { name: "Delete row", exact: true })).toBeVisible();
     setStatus(fixture.doc, "decided");

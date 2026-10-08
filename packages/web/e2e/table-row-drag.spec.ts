@@ -156,7 +156,7 @@ test("mouse pickup leaves every row readable and drops only at a body gap", { ta
   try {
     const table = await openTable(page, fixture.uuid);
     const identity = await table.getAttribute("id");
-    await table.hover();
+    await table.locator("tr").nth(1).hover();
     const handleBox = await box(handle(page, 1));
     await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
     await page.mouse.down();
@@ -277,7 +277,7 @@ test("the header cannot be picked up and drops above it are rejected", async ({ 
   const fixture = await publishTable();
   try {
     const table = await openTable(page, fixture.uuid);
-    await table.hover();
+    await table.locator("tr").first().hover();
     const bounds = await box(handle(page, 0));
     await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
     await page.mouse.down();
@@ -458,7 +458,9 @@ test("touch tap exposes Move entries and reopens the moved caret row", { tag: "@
   try {
     const table = await openTable(page, fixture.uuid);
     await table.locator("tr").nth(1).locator("td").first().tap();
-    await expect(page.getByRole("button", { name: /^Row \d+ actions$/ })).toHaveCount(1);
+    await expect.poll(() => page.getByRole("button", { name: /^Row \d+ actions$/ }).evaluateAll((elements) => elements
+      .filter((element) => getComputedStyle(element).opacity !== "0")
+      .map((element) => element.getAttribute("aria-label")))).toEqual(["Row 2 actions"]);
     const bounds = await box(handle(page, 1));
     expect(bounds.width + 0.001).toBeGreaterThanOrEqual(44);
     expect(bounds.height + 0.001).toBeGreaterThanOrEqual(44);
@@ -486,6 +488,7 @@ test("native touch holds pick up rows and swallow release clicks, including canc
       // ProseMirror groups mouse downs within 500 ms and 10 px into double and
       // triple clicks. A fast round would make this tap a triple click, which
       // selects the paragraph without focusing the editor.
+      // Keep these taps near the cell's left edge, away from border controls.
       await cell.tap({ position: { x: 8 + round * 16, y: (await box(cell)).height / 2 } });
       await page.keyboard.press(keys.lineEnd);
       const offset = await cell.evaluate(() => document.getSelection()?.anchorOffset);
