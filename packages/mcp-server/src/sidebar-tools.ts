@@ -44,7 +44,7 @@ import type { ToolMode } from "./inputs.js";
 import type { Replica, Replicas } from "./replica.js";
 
 /**
- * What the tools need from `tools.ts`, so neither module imports the other.
+ * What the tools need from the shared tool context and JSON responder.
  *
  * The failure half is not in here: `guarded`, `ToolError` and the description
  * text all come from ./failures.ts, which both modules import. One contract in

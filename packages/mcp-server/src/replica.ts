@@ -350,7 +350,7 @@ export class Replicas {
    * the directory, so publishing on attach made one agent show up as a peer in
    * every document at once. Attachment is therefore silent, and this is the one
    * thing that speaks — called from the document-room access boundary in
-   * `tools.ts`, so a tool answering from the derived index or the directory
+   * `tools/context.ts`, so a tool answering from the derived index or the directory
    * stub never announces anything.
    *
    * Withdrawal removes the presence keys rather than dropping the whole state,

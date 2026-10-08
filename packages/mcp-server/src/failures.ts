@@ -47,7 +47,7 @@
  *
  * Nothing here promises a rollback, and nothing here reconciles: a call that
  * touched several rooms reports what is durable and names the call that
- * finishes the job. See ./tools.ts (`create_doc`'s `RECOVERY`) for the
+ * finishes the job. See ./tools/create-doc.ts (`create_doc`'s `RECOVERY`) for the
  * room-by-room wording.
  */
 
