@@ -1,8 +1,9 @@
 # Uberblick user guide
 
 Start with the [README](README.md) to install Uberblick and open your first local
-workspace. This guide covers the shipped CLI and its local files; each command's
-`--help` gives its options.
+workspace. This reference follows current repository code, which can be ahead
+of the latest Homebrew release. Use `ub <command> --help` for the options in your
+installed version.
 
 ## Updating
 
