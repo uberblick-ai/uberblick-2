@@ -88,12 +88,17 @@ async function gap(table: Locator, boundary: number): Promise<{ x: number; y: nu
 
 async function startMouse(page: Page, table: Locator, row = 1): Promise<void> {
   await table.locator("tr").nth(row).hover();
-  const bounds = await box(handle(page, row));
+  const source = handle(page, row);
+  // The overlay follows the table as fonts and scrolling settle. Wait for
+  // the handle's stable, hit-tested position before issuing a raw press.
+  await source.hover();
+  const bounds = await box(source);
   const x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
   await expect(page.getByRole("menu")).toHaveCount(0);
   await page.mouse.move(x - 8, y);
+  await expect(indicator(page)).toHaveCount(1);
   const destination = await gap(table, row + 1);
   await page.mouse.move(destination.x, destination.y);
   await expect(indicator(page)).toHaveCount(1);
@@ -390,6 +395,11 @@ test("pane edge scrolling reaches the gap after a tall table's last row", async 
     await page.mouse.up();
     await expect(bodyNames(table)).toHaveText([...names.slice(1), names[0] ?? ""]);
     await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(editor(page)).toBeFocused();
+    await expect.poll(() => table.locator("tr").last().evaluate((element) => {
+      const anchor = document.getSelection()?.anchorNode;
+      return anchor !== null && anchor !== undefined && element.contains(anchor);
+    })).toBe(true);
 
     // The opposite edge must also reach the first permitted body gap.
     await startMouse(page, table, 35);

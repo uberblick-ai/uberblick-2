@@ -1,5 +1,5 @@
 /** A row handle shares a pointer gesture with its standard Radix menu. */
-import { useLayoutEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import type { MouseEvent, ReactElement } from "react";
 import { useDraggable } from "@dnd-kit/react";
 import { PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
@@ -26,6 +26,12 @@ export function TableRowHandle({ target, index, rowKey, middle, size, open, clic
   const draggable = useDraggable({
     id: rowKey, disabled: index === 0, data: { target },
   });
+  // Geometry refreshes must not detach the sensor while a press is pending.
+  const dragRef = draggable.ref;
+  const attach = useCallback((element: HTMLButtonElement | null): void => {
+    button.current = element;
+    dragRef(element);
+  }, [dragRef]);
   useLayoutEffect(() => {
     const handle = button.current;
     if (handle === null) return;
@@ -38,7 +44,7 @@ export function TableRowHandle({ target, index, rowKey, middle, size, open, clic
   }, []);
   return (
     <DropdownMenuTrigger asChild>
-      <button ref={(element) => { button.current = element; draggable.ref(element); }}
+      <button ref={attach}
         type="button" className="ub-table-control ub-table-row-handle"
         style={{ right: 0, top: middle - size / 2, width: size, height: size }}
         aria-label={`Row ${index + 1} actions`} aria-keyshortcuts="Control+Alt+R Shift+F10"

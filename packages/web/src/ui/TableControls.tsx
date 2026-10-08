@@ -297,11 +297,10 @@ function TableControlSurface({ tableId, editor, host }: {
     return () => dom.removeEventListener("contextmenu", context);
   }, [editor, setTarget, tableId]);
 
-  if (geometry === null) return null;
-  const size = geometry.touch ? 44 : 24;
+  const size = geometry?.touch ? 44 : 24;
   const openRow = menu === null ? null : resolveTableRow(editor, menu)?.rowIndex;
   const act = (row: number, column: number, action: TableAction, fromMenu = false): void => {
-    const target = fromMenu ? menu : geometry.rows[row]?.target;
+    const target = fromMenu ? menu : geometry?.rows[row]?.target;
     if (target === null || target === undefined) return;
     acted.current = actOnTable(editor, target, column, action);
     setTarget(null);
@@ -322,6 +321,8 @@ function TableControlSurface({ tableId, editor, host }: {
     setGap(current === null || frame === null ? null : rowGap(current, frame.getBoundingClientRect(), point));
   };
   const button = "ub-table-control";
+  // Keep the manager alive while controls hide, so pickup listeners are ready
+  // and a drop can finish its renderer transition before restoring the caret.
   return (
     <DragDropProvider sensors={tableRowSensors}
       plugins={(defaults) => defaults.filter((plugin) => plugin !== Feedback && plugin !== Accessibility)}
@@ -367,18 +368,18 @@ function TableControlSurface({ tableId, editor, host }: {
           const win = editor.view.dom.ownerDocument.defaultView;
           const restore = (): void => {
             if (editor.isDestroyed) return;
+            const live = resolveTableRow(editor, target);
+            if (live === null) return;
             // The React renderer completes dropping asynchronously. Waiting
             // for idle avoids restoring a range while its guard is still live.
             if (!manager.dragOperation.status.idle) { win?.requestAnimationFrame(restore); return; }
-            const live = resolveTableRow(editor, target);
-            if (live === null) return;
             editor.commands.setTextSelection(live.rowPos + 3);
             editor.view.focus();
           };
           win?.requestAnimationFrame(restore);
         }
       }}>
-    <div ref={controls} className="ub-table-controls" data-table-id={geometry.tableId} data-touch={geometry.touch}
+    {geometry !== null && <div ref={controls} className="ub-table-controls" data-table-id={geometry.tableId} data-touch={geometry.touch}
       style={{ left: geometry.left, top: geometry.top, width: geometry.width, height: geometry.height }}>
       {gap !== null && <div className="ub-table-row-drop" data-gap={gap}
         style={{ top: geometry.rows[gap - 1]?.bottom, width: geometry.viewportWidth }} />}
@@ -454,7 +455,7 @@ function TableControlSurface({ tableId, editor, host }: {
           </DropdownMenuContent>
         </DropdownMenu>
       ))}
-    </div>
+    </div>}
     </DragDropProvider>
   );
 }
