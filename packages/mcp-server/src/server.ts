@@ -128,7 +128,9 @@ export function createMcpServer(
       if (closing !== null) return closing;
       closed = true;
       work.stop();
-      closing = (async () => {
+      // Assign the shared promise before transport onclose callbacks can
+      // reenter close(). Admission has already stopped synchronously.
+      closing = Promise.resolve().then(async () => {
         await server.close().catch((error: unknown) => {
           log.warn("closing the MCP server failed", error);
         });
@@ -138,7 +140,7 @@ export function createMcpServer(
         replicas.destroy();
         await replicas.sync.waitForDeviceWork();
         store.close();
-      })();
+      });
       return closing;
     },
   };
