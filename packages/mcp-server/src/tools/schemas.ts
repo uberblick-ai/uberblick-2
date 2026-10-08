@@ -91,7 +91,7 @@ const INLINE_RUNS =
   "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: " +
   "`[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) " +
   "and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the " +
-  "run texts joined together are the block's text. Code, mermaid and terminal hold source text and ignore it; " +
+  "run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; " +
   "tables also ignore it and take exactly one GFM table through `text`.\n\n" +
   "A `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", " +
   "marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this " +

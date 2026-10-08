@@ -769,6 +769,7 @@ test("the TL;DR callout keeps its hierarchy, themes and wrapping at both reading
   const callout = page.locator(".ub-tldr");
   const title = callout.getByRole("heading", { name: "TL;DR" });
   const summary = callout.locator(".ub-tldr-body > p");
+  const inlineEdit = summary.getByRole("button", { name: "Edit TL;DR", exact: true });
   await expect(callout).toBeVisible();
   expect(await paintedIn(title, "font-family")).toBe(
     await painted(page, ".ub-title", "font-family"),
@@ -794,6 +795,14 @@ test("the TL;DR callout keeps its hierarchy, themes and wrapping at both reading
   const titleSizes: number[] = [];
   for (const width of [375, 1280]) {
     await page.setViewportSize({ width, height: 900 });
+    // The native edit trigger must paint and wrap like the existing prose,
+    // without the browser's default button background, border or padding.
+    for (const property of ["font-family", "font-size", "line-height", "color"]) {
+      expect(await paintedIn(inlineEdit, property)).toBe(await paintedIn(summary, property));
+    }
+    expect(await paintedIn(inlineEdit, "background-color")).toBe("rgba(0, 0, 0, 0)");
+    expect(await paintedIn(inlineEdit, "border-width")).toBe("0px");
+    expect(await paintedIn(inlineEdit, "padding")).toBe("0px");
     titleSizes.push(Number.parseFloat(await paintedIn(title, "font-size")));
     expect(Number.parseFloat(await paintedIn(title, "font-size"))).toBeGreaterThan(
       Number.parseFloat(await paintedIn(summary, "font-size")),

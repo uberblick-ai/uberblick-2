@@ -11,7 +11,7 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
-import { placeCaret } from "./harness.js";
+import { keys, placeCaret } from "./harness.js";
 
 const { harness, openApp } = setupHarness();
 const layoutWidths = [375, 390, 430, 744, 932, 1279, 1280, 1440];
@@ -243,7 +243,7 @@ for (const upstream of [true, false]) {
       // paragraph selection, so move to the document start before using it.
       if (browserName === "chromium") {
         await editor(page).focus();
-        await page.keyboard.press("Control+Home");
+        await page.keyboard.press(keys.documentStart);
       }
       await placeCaret(page);
       // Real whitespace update, without another rendered prose line.

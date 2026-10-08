@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { failureContract, guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import { collectSyncStatus } from "../status.js";
 import type { ToolContext } from "./context.js";
 import { SYNCED_MEANS } from "./descriptions.js";
@@ -46,6 +47,7 @@ export function registerSyncStatus(server: McpServer, context: ToolContext): voi
         "`persistence` is null unless an update failed to reach the log, in which case every other tool refuses " +
         "to serve until the server is restarted." +
         failureContract("sync_status"),
+      outputSchema: outputSchemas.sync_status,
       inputSchema: strictInput({}),
     },
     // The same snapshot `ub status` prints — see ../status.ts. Diagnostics must

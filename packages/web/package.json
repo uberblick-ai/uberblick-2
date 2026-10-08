@@ -29,6 +29,7 @@
     "@tiptap/pm": "^3.30.5",
     "@uberblick/hub": "workspace:*",
     "@uberblick/schema": "workspace:*",
+    "chart.js": "4.5.1",
     "lowlight": "^3.3.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

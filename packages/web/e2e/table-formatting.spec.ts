@@ -3,7 +3,7 @@
 import { expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { createDoc, docTitle, setupHarness } from "./app-helpers.js";
-import { placeCaret } from "./harness.js";
+import { keys, placeCaret } from "./harness.js";
 
 const { harness, trackContext } = setupHarness();
 
@@ -216,13 +216,13 @@ test("Tab selection is navigation, triple click selects one cell, and cross-cell
     await expect(toolbar(page)).toBeVisible();
 
     await selectCell(first, "Alpha words suffix".length, "Alpha words suffix".length);
-    await page.keyboard.press("Shift+Home");
+    await page.keyboard.press(`Shift+${keys.lineStart}`);
     await expect.poll(() => page.evaluate(() => document.getSelection()?.toString())).toBe("Alpha words suffix");
     await expect(toolbar(page)).toBeVisible();
     await page.keyboard.press("ArrowLeft");
     await expect(popup(page)).toHaveCount(0);
     await selectCell(first, 0, 0);
-    await page.keyboard.press("Shift+End");
+    await page.keyboard.press(`Shift+${keys.lineEnd}`);
     await expect.poll(() => page.evaluate(() => document.getSelection()?.toString())).toBe("Alpha words suffix");
     await expect(toolbar(page)).toBeVisible();
     await page.keyboard.press("ArrowRight");

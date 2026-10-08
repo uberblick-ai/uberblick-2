@@ -2,12 +2,12 @@
  * The document page's human-facing TL;DR (#534).
  *
  * This pins the browser-owned write boundary: the callout is absent when the
- * value is absent, the document-actions entry opens the editor, validation uses
- * schema's shared limit, and both remote metadata changes and a live archive
- * are obeyed without remounting the pane.
+ * value is absent, inline and document-actions editing share the same form,
+ * unsaved drafts never write, validation uses schema's shared limit, and live
+ * read-only changes are obeyed without remounting the pane.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import { act, renderSettled, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
@@ -37,17 +37,28 @@ const LIVE: RoomStatus = {
   tokenMissing: false,
 };
 
-function connectionFor(ydoc: Y.Doc): RoomConnection {
-  return {
+type TestConnection = RoomConnection & {
+  setWritable(writable: boolean): void;
+};
+
+function connectionFor(ydoc: Y.Doc, writable: boolean): TestConnection {
+  const listeners = new Set<(status: RoomStatus) => void>();
+  const connection = {
     room: `${WORKSPACE}/${UUID}`,
     ydoc,
     provider: { awareness: null },
-    status: LIVE,
+    status: { ...LIVE, writable },
     onStatusChange: (listener: (status: RoomStatus) => void) => {
-      listener(LIVE);
-      return () => {};
+      listeners.add(listener);
+      listener(connection.status);
+      return () => { listeners.delete(listener); };
     },
-  } as unknown as RoomConnection;
+    setWritable(next: boolean) {
+      connection.status = { ...connection.status, writable: next };
+      for (const listener of listeners) listener(connection.status);
+    },
+  } as unknown as TestConnection;
+  return connection;
 }
 
 function documentWith(tldr: string | null): Y.Doc {
@@ -69,8 +80,9 @@ function peerOf(local: Y.Doc): Y.Doc {
 async function mountPane(
   ydoc: Y.Doc,
   archived = false,
-): Promise<{ host: HTMLElement; view: RenderResult; connection: RoomConnection }> {
-  const connection = connectionFor(ydoc);
+  writable = true,
+): Promise<{ host: HTMLElement; view: RenderResult; connection: TestConnection }> {
+  const connection = connectionFor(ydoc, writable);
   const view = await renderSettled(
     <EditorPane
       connection={connection}
@@ -111,6 +123,19 @@ function field(host: HTMLElement): HTMLTextAreaElement | null {
   return within(host).queryByRole<HTMLTextAreaElement>("textbox", {
     name: /Write one or two plain-English sentences/,
   });
+}
+
+async function openInline(host: HTMLElement): Promise<void> {
+  act(() => within(host).getByRole("button", { name: "Edit TL;DR" }).click());
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+function press(field: HTMLTextAreaElement | null, key: string, init: KeyboardEventInit = {}): void {
+  field?.dispatchEvent(new KeyboardEvent("keydown", {
+    key, bubbles: true, cancelable: true, ...init,
+  }));
 }
 
 describe("the document TL;DR", () => {
@@ -158,11 +183,143 @@ describe("the document TL;DR", () => {
       "A short summary for a person.",
     );
 
-    act(() => openActions(host));
-    act(() => menuItem("Edit TL;DR")?.click());
+    await openInline(host);
     act(() => within(host).getByRole("button", { name: "Clear" }).click());
     expect(getMeta(ydoc).tldr).toBeNull();
     expect(within(host).queryByRole("region", { name: "TL;DR" })).toBeNull();
+  });
+
+  it("focuses an inline edit and shares Enter saves with another client", async () => {
+    const ydoc = documentWith("The first summary.");
+    const peer = peerOf(ydoc);
+    const { host } = await mountPane(ydoc);
+
+    await openInline(host);
+    expect(document.activeElement).toBe(field(host));
+    expect(field(host)?.value).toBe("The first summary.");
+    expect(within(host).getByText(`18 / ${MAX_TLDR_LENGTH} characters`)).toBeDefined();
+    act(() => typeInto(field(host), "Changed in place."));
+    act(() => press(field(host), "Enter"));
+    expect(getMeta(ydoc).tldr).toBe("Changed in place.");
+    expect(getMeta(peer).tldr).toBe("Changed in place.");
+    expect(field(host)).toBeNull();
+    expect(within(host).getByRole("button", { name: "Edit TL;DR" }).textContent).toBe("Changed in place.");
+    peer.destroy();
+  });
+
+  it("closes unchanged blur and cancellation without writes, but keeps a changed draft open", async () => {
+    const ydoc = documentWith("The first summary.");
+    const peer = peerOf(ydoc);
+    const { host } = await mountPane(ydoc);
+    const updates = vi.fn();
+    ydoc.on("update", updates);
+
+    await openInline(host);
+    const clear = within(host).getByRole("button", { name: "Clear" });
+    act(() => clear.focus());
+    expect(field(host)).not.toBeNull();
+    act(() => clear.blur());
+    expect(field(host)).toBeNull();
+    expect(updates).not.toHaveBeenCalled();
+
+    await openInline(host);
+    act(() => typeInto(field(host), "A draft that has not been saved."));
+    act(() => field(host)?.blur());
+    expect(field(host)?.value).toBe("A draft that has not been saved.");
+    expect(getMeta(ydoc).tldr).toBe("The first summary.");
+    expect(updates).not.toHaveBeenCalled();
+    act(() => press(field(host), "Escape"));
+    expect(field(host)).toBeNull();
+    expect(updates).not.toHaveBeenCalled();
+
+    await openInline(host);
+    expect(field(host)?.value).toBe("The first summary.");
+    act(() => typeInto(field(host), "Another uncommitted draft."));
+    act(() => within(host).getByRole("button", { name: "Cancel" }).click());
+    expect(field(host)).toBeNull();
+    expect(getMeta(ydoc).tldr).toBe("The first summary.");
+    expect(updates).not.toHaveBeenCalled();
+
+    await openInline(host);
+    act(() => setTldr(peer, "Changed by another client."));
+    expect(field(host)?.value).toBe("The first summary.");
+    updates.mockClear();
+    act(() => field(host)?.blur());
+    expect(field(host)).toBeNull();
+    expect(getMeta(ydoc).tldr).toBe("Changed by another client.");
+    expect(updates).not.toHaveBeenCalled();
+    peer.destroy();
+  });
+
+  it("keeps composition, Shift+Enter and overlong Enter from saving", async () => {
+    const ydoc = documentWith("The first summary.");
+    const { host } = await mountPane(ydoc);
+    const updates = vi.fn();
+    ydoc.on("update", updates);
+    await openInline(host);
+    act(() => typeInto(field(host), "A composed draft."));
+    act(() => press(field(host), "Enter", { isComposing: true }));
+    act(() => press(field(host), "Enter", { keyCode: 229 }));
+    act(() => press(field(host), "Escape", { isComposing: true }));
+    act(() => press(field(host), "Escape", { keyCode: 229 }));
+    act(() => press(field(host), "Enter", { shiftKey: true }));
+    expect(field(host)?.value).toBe("A composed draft.");
+    expect(updates).not.toHaveBeenCalled();
+
+    const overlong = "x".repeat(MAX_TLDR_LENGTH + 1);
+    act(() => typeInto(field(host), overlong));
+    act(() => press(field(host), "Enter"));
+    expect(field(host)?.value).toBe(overlong);
+    expect(within(host).getByText(`${MAX_TLDR_LENGTH + 1} / ${MAX_TLDR_LENGTH} characters`)).toBeDefined();
+    expect(within(host).getByRole("alert").textContent).toBe(`A TL;DR is at most ${MAX_TLDR_LENGTH} characters.`);
+    expect(getMeta(ydoc).tldr).toBe("The first summary.");
+    expect(updates).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { state: "archived", archived: true, writable: true },
+    { state: "unwritable", archived: false, writable: false },
+  ])("keeps an initially $state TL;DR read-only", async ({ archived, writable }) => {
+    const ydoc = documentWith("The first summary.");
+    const { host } = await mountPane(ydoc, archived, writable);
+    const updates = vi.fn();
+    ydoc.on("update", updates);
+    const text = within(host).getByText("The first summary.");
+    act(() => text.click());
+    expect(within(host).queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
+    expect(field(host)).toBeNull();
+    expect(updates).not.toHaveBeenCalled();
+  });
+
+  it("guards unwritable saves and activation before the rendered status catches up", async () => {
+    const ydoc = documentWith("The first summary.");
+    const { host, connection } = await mountPane(ydoc);
+    await openInline(host);
+    act(() => typeInto(field(host), "An unsaved draft."));
+    const updates = vi.fn();
+    ydoc.on("update", updates);
+    // This deliberately withholds the subscription notification: the committed
+    // field and controls still look writable while the connection refuses it.
+    connection.status = { ...connection.status, writable: false };
+    expect(field(host)?.readOnly).toBe(false);
+    act(() => press(field(host), "Enter"));
+    act(() => within(host).getByRole<HTMLFormElement>("form", { name: "Edit TL;DR" }).requestSubmit());
+    act(() => within(host).getByRole("button", { name: "Clear" }).click());
+    expect(getMeta(ydoc).tldr).toBe("The first summary.");
+    expect(updates).not.toHaveBeenCalled();
+
+    act(() => connection.setWritable(false));
+    expect(field(host)?.readOnly).toBe(true);
+    expect(within(host).getByRole<HTMLButtonElement>("button", { name: "Save" }).disabled).toBe(true);
+    expect(within(host).getByRole<HTMLButtonElement>("button", { name: "Clear" }).disabled).toBe(true);
+    act(() => within(host).getByRole("button", { name: "Cancel" }).click());
+    expect(within(host).queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
+
+    act(() => connection.setWritable(true));
+    connection.status = { ...connection.status, writable: false };
+    act(() => within(host).getByRole("button", { name: "Edit TL;DR" }).click());
+    expect(field(host)).toBeNull();
+    expect(updates).not.toHaveBeenCalled();
   });
 
   it("follows a remote value and guards an edit when the document is archived", async () => {
@@ -175,8 +332,7 @@ describe("the document TL;DR", () => {
       "Changed by another client.",
     );
 
-    act(() => openActions(host));
-    act(() => menuItem("Edit TL;DR")?.click());
+    await openInline(host);
     view.rerender(
       <EditorPane
         connection={connection}

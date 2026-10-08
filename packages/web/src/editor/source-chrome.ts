@@ -246,6 +246,22 @@ export const terminalChrome: SourceBlockChrome = {
   sync: (node, root) => mirrorAttribute(root, "id", node.attrs.id),
 };
 
+/** Chart output is derived chrome; the mapping alone is editable content. */
+export const chartChrome: SourceBlockChrome = {
+  root: () => {
+    const div = document.createElement("div");
+    div.className = "ub-chart";
+    div.setAttribute("data-block-type", "chart");
+    return div;
+  },
+  content: () => {
+    const pre = document.createElement("pre");
+    pre.className = "ub-chart-source";
+    return pre;
+  },
+  sync: (node, root) => mirrorAttribute(root, "id", node.attrs.id),
+};
+
 /* ------------------------------------------------- the block under the caret */
 
 /**

@@ -3,6 +3,7 @@ import { getBlockRev, setInlineLink } from "@uberblick/schema";
 import { z } from "zod";
 import { guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import {
   ARCHIVED_IS_READ_ONLY,
@@ -29,7 +30,7 @@ export function registerLinkRange(server: McpServer, context: ToolContext): void
         "`currentText` and `currentRev` to re-measure against. Indices are clamped to the text and swapped if " +
         "reversed; a range that clamps to nothing is refused.\n\n" +
         "A range that is already a reference is RETARGETED. A range that is already an external link is refused — " +
-        "one range cannot be both — and so is a code, mermaid, table or terminal block, which holds source text. " +
+        "one range cannot be both — and so is a code, mermaid, table, terminal or chart block, which holds source text. " +
         "The answer carries the target's current `title` for information; the label in the document is the text " +
         "you linked, and it does not follow a later rename.\n\n" +
         "The target must be a document this replica's directory knows, or the call refuses with " +
@@ -42,6 +43,7 @@ export function registerLinkRange(server: McpServer, context: ToolContext): void
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         toolContract("link_range"),
+      outputSchema: outputSchemas.link_range,
       inputSchema: strictInput({
         uuid: uuidArg,
         block_id: z.string().min(1),

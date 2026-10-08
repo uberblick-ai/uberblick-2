@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { setDescription } from "@uberblick/schema";
 import { guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import {
   ARCHIVED_IS_READ_ONLY,
@@ -34,6 +35,7 @@ export function registerSetDescription(server: McpServer, context: ToolContext):
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         toolContract("set_description"),
+      outputSchema: outputSchemas.set_description,
       inputSchema: strictInput({ uuid: uuidArg, description: descriptionArg }),
     },
     guarded("set_description", async ({ uuid, description }) => {

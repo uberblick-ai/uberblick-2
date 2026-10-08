@@ -3,6 +3,7 @@ import { canonicalJson, compareCodePoints, readDocData } from "@uberblick/schema
 import { z } from "zod";
 import { failureContract, guarded, ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import { json } from "./helpers.js";
 import { uuidArg } from "./schemas.js";
@@ -33,6 +34,7 @@ export function registerGetData(server: McpServer, context: ToolContext): void {
       "Merged invalidity is observed through the shared reader without dropping, repairing or writing values. " +
       "Archived and decided documents remain readable; access to their room is unchanged." +
       failureContract("get_data"),
+    outputSchema: outputSchemas.get_data,
     inputSchema: strictInput({
       uuid: uuidArg,
       collection: z.string().optional().describe("Collection name; omit for the area summary."),

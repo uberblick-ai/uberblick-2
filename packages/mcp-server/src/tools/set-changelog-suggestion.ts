@@ -3,6 +3,7 @@ import { MAX_DESCRIPTION_LENGTH, setChangelogSuggestion } from "@uberblick/schem
 import { z } from "zod";
 import { guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import { ARCHIVED_IS_READ_ONLY, SYNCED_IS_ACKNOWLEDGED } from "./descriptions.js";
 import { json } from "./helpers.js";
@@ -66,6 +67,7 @@ export function registerSetChangelogSuggestion(server: McpServer, context: ToolC
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         toolContract("set_changelog_suggestion"),
+      outputSchema: outputSchemas.set_changelog_suggestion,
       inputSchema: strictInput({
         uuid: uuidArg,
         suggestion: changelogSuggestionArg,

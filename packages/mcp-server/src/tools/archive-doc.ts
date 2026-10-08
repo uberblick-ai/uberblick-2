@@ -6,6 +6,7 @@ import {
 } from "@uberblick/schema";
 import { guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import {
   ARCHIVE_IS_LAST_WRITE_WINS,
@@ -84,6 +85,7 @@ export function registerArchiveDoc(server: McpServer, context: ToolContext): voi
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         toolContract("archive_doc"),
+      outputSchema: outputSchemas.archive_doc,
       inputSchema: strictInput({ uuid: uuidArg }),
     },
     guarded("archive_doc", async ({ uuid }) => {

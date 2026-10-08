@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { failureContract, guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import { json } from "./helpers.js";
 import { uuidArg } from "./schemas.js";
@@ -20,6 +21,7 @@ export function registerBacklinks(server: McpServer, context: ToolContext): void
         "Each one carries its `description` — null where it has none — so a citing document can be judged without " +
         "opening it." +
         failureContract("backlinks"),
+      outputSchema: outputSchemas.backlinks,
       inputSchema: strictInput({ uuid: uuidArg }),
     },
     guarded("backlinks", async ({ uuid }) => {
