@@ -323,7 +323,8 @@ admits a device credential only for a workspace with current membership.
 Selection alone grants no access. Join an existing workspace with
 `ub workspace join <connection-url>`; it requires no prior local workspace.
 
-`ub workspace` prints the current binding and its source. `ub workspace list`
+`ub workspace` prints its help. `ub workspace status` shows the selected workspace,
+its source, replica storage and sync state. `ub workspace list`
 lists local workspace databases. Selecting another known workspace requires an
 explicit hub, so the selection cannot inherit an unrelated endpoint:
 

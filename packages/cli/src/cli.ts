@@ -114,12 +114,11 @@ export async function runCli(
     }
     // Only the subcommand slot asks for help here: `ub mcp bogus --help` is an
     // unknown command, the same as `ub bogus --help` is below.
-    if (subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
+    if (subcommand === undefined || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
       io.out(MCP_HELP);
       return 0;
     }
-    const named = subcommand === undefined ? " nothing" : ` ${JSON.stringify(subcommand)}`;
-    io.err(`ub mcp: expected "install" or "serve", got${named}\n\n${MCP_HELP}`);
+    io.err(`ub mcp: expected "install" or "serve", got ${JSON.stringify(subcommand)}\n\n${MCP_HELP}`);
     return 2;
   }
 
