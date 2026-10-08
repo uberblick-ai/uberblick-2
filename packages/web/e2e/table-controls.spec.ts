@@ -304,6 +304,13 @@ test("caret and pointer reveal their own rows while hidden controls pass input t
   await caretIn(editor(page).locator(":scope > p").first(), info);
   await page.mouse.move(0, 0);
   await expect(controls(page)).toHaveCount(0);
+  // A hidden table can move before the next single pointer event reaches it.
+  await page.keyboard.press("Enter");
+  await page.keyboard.insertText("Moves the table");
+  await table.locator("tr").last().locator("td").first().hover();
+  await revealedRows(table, [3]);
+  await page.mouse.move(0, 0);
+  await expect(controls(page)).toHaveCount(0);
 });
 
 for (const colorScheme of ["light", "dark"] as const) {
