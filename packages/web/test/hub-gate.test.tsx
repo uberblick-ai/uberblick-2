@@ -12,6 +12,7 @@
  */
 
 import { afterEach, expect, it, vi } from "vitest";
+import { within } from "@testing-library/react";
 import { act, renderSettled } from "./react-render.js";
 import * as Y from "yjs";
 import { directoryRoom } from "@uberblick/schema";
@@ -26,6 +27,10 @@ const { App, ReboundNotice } = await import("../src/ui/App.js");
  * no-workspace state and acquire nothing, which is a different claim.
  */
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
+
+function reboundNotice(container: HTMLElement): HTMLElement | null {
+  return within(container).queryByText(/to pick up the change\./);
+}
 
 /** Enough of a connection for the panes that render against the directory. */
 function fakeHandle(room: string): unknown {
@@ -66,20 +71,21 @@ it("shows the restart state only for a rebound local-serving document", async ()
 
   const view = await renderSettled(<ReboundNotice serving={serving} />);
   const container = view.container;
-  expect(container.querySelector(".ub-rebound-notice")).toBeNull();
+  expect(reboundNotice(container)).toBeNull();
 
   await act(async () => {
     view.rerender(<ReboundNotice serving={null} />);
   });
-  expect(container.querySelector(".ub-rebound-notice")).toBeNull();
+  expect(reboundNotice(container)).toBeNull();
 
   await act(async () => {
     view.rerender(<ReboundNotice serving={{ ...serving, rebound: true }} />);
   });
-  const notice = container.querySelector(".ub-rebound-notice");
+  const notice = within(container).getByRole("status");
+  expect(reboundNotice(container)).toBe(notice);
   expect(notice?.textContent).toContain(WORKSPACE);
   expect(notice?.textContent).toContain("wss://remote.example/ws");
-  expect(notice?.querySelector("button")).toBeNull();
+  expect(within(notice).queryByRole("button", { hidden: true })).toBeNull();
 
 });
 
@@ -94,7 +100,7 @@ it("holds the first connect until the endpoint resolves, without holding the ren
   const { container } = await renderSettled(<App />);
 
   // The shell is up — the read gates the connect, not the render.
-  expect(container.querySelector(".ub-app")).not.toBeNull();
+  expect(within(container).queryByRole("main")).not.toBeNull();
   expect(acquireRoom).not.toHaveBeenCalled();
 
   await act(async () => {
@@ -137,19 +143,19 @@ it("keeps the rebound notice visible across routes without replacing the page", 
     );
   });
 
-  const notice = container.querySelector(".ub-rebound-notice");
+  const notice = reboundNotice(container);
   expect(notice?.getAttribute("role")).toBe("status");
   expect(notice?.textContent).toContain(`workspace ${WORKSPACE}`);
-  expect(container.querySelector(".ub-docs-heading")?.textContent).toBe("Documents");
+  expect(within(container).getByRole("heading", { name: "Documents" }).textContent).toBe("Documents");
 
   await act(async () => {
     window.history.pushState(null, "", `/${WORKSPACE}/not-a-document`);
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
-  expect(container.querySelector(".ub-notice")?.textContent).toContain(
+  expect(within(container).getByText(/Not a document link/).textContent).toContain(
     "Not a document link",
   );
-  expect(container.querySelector(".ub-rebound-notice")?.textContent).toContain(
+  expect(reboundNotice(container)?.textContent).toContain(
     "Restart ub open",
   );
 

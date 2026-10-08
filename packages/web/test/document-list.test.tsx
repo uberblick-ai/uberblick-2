@@ -23,6 +23,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { within } from "@testing-library/react";
 import { act, renderSettled, type RenderResult } from "./react-render.js";
 import type { ReactNode } from "react";
 import * as Y from "yjs";
@@ -151,17 +152,36 @@ function sidebarDoc(): Y.Doc {
   return room(sidebarRoom(WORKSPACE)).ydoc;
 }
 
-/** The titles the list shows, top to bottom. */
-function rowTitles(host: HTMLElement): string[] {
-  return [...host.querySelectorAll(".ub-docs-title")].map(
-    (node) => node.textContent ?? "",
+function documentTable(host: HTMLElement): HTMLElement {
+  return within(host).getByRole("table", { hidden: true });
+}
+
+function openButtons(host: HTMLElement): HTMLButtonElement[] {
+  // Inventories include every mounted row, as the original DOM queries did.
+  return within(documentTable(host)).queryAllByRole("rowheader", { hidden: true }).map(
+    (header) => within(header).getByRole<HTMLButtonElement>("button", { hidden: true }),
   );
+}
+
+/** The title is the first child; the button's full name also carries metadata. */
+function rowTitles(host: HTMLElement): string[] {
+  return openButtons(host).map((button) => button.firstChild?.textContent ?? "");
 }
 
 /** The uuid each row opens, which is what a row is when two share a title. */
 function rowUuids(host: HTMLElement): string[] {
-  return [...host.querySelectorAll(".ub-docs-open")].map(
+  return openButtons(host).map(
     (node) => node.getAttribute("title") ?? "",
+  );
+}
+
+function lifecycleBadges(host: HTMLElement): HTMLElement[] {
+  return within(documentTable(host)).queryAllByText(/^(?:Product|Decision)(?: · .+)?$/);
+}
+
+function pinUnavailable(host: HTMLElement): HTMLElement | null {
+  return within(host).queryByText(
+    "Pin changes unavailable while the sidebar is not ready to write.",
   );
 }
 
@@ -176,9 +196,9 @@ function typeInto(input: HTMLInputElement, value: string): void {
 }
 
 function filter(host: HTMLElement): HTMLInputElement {
-  const field = host.querySelector<HTMLInputElement>(".ub-docs-search");
-  if (field === null) throw new Error("the filter field is missing");
-  return field;
+  return within(host).getByRole<HTMLInputElement>("searchbox", {
+    name: "Filter this list by title",
+  });
 }
 
 /**
@@ -258,13 +278,17 @@ describe("the shared timestamp rule", () => {
           onTogglePin={null}
         />,
       );
+      const row = within(documentTable(host)).getByRole("row", { name: /^Overview / });
+      // The time element and its machine value are the timestamp contract.
+      const stamp = within(row).getByRole("time", { hidden: true });
+      expect(stamp.tagName).toBe("TIME");
       const changed = (): string | undefined =>
-        host.querySelector(".ub-docs-row time")?.textContent ?? undefined;
+        stamp.textContent ?? undefined;
       expect(changed()).toBe("just now");
-      expect(host.querySelector(".ub-docs-row time")?.getAttribute("dateTime")).toBe(
+      expect(stamp.getAttribute("dateTime")).toBe(
         new Date(NOW).toISOString(),
       );
-      expect(host.querySelector(".ub-docs-row time")?.getAttribute("title")).toBe(
+      expect(stamp.getAttribute("title")).toBe(
         new Intl.DateTimeFormat(undefined, {
           dateStyle: "medium",
           timeStyle: "short",
@@ -379,24 +403,18 @@ describe("the order", () => {
 describe("choosing the order", () => {
   /** The order option that is on, read the way the screen shows it. */
   function activeOrder(host: HTMLElement): string | undefined {
-    const button = host.querySelector<HTMLElement>("th[aria-sort] .ub-docs-sort");
+    const column = within(documentTable(host)).getAllByRole("columnheader", { hidden: true })
+      .find((header) => header.hasAttribute("aria-sort"));
+    const button = column === undefined ? undefined : within(column).getByRole("button", { hidden: true });
     return button?.firstChild?.textContent ?? undefined;
   }
 
   function chooseOrder(host: HTMLElement, label: string): HTMLButtonElement {
-    const option = [...host.querySelectorAll<HTMLButtonElement>(".ub-docs-sort")].find(
-      (button) => button.firstChild?.textContent === label,
-    );
-    if (option === undefined) throw new Error(`no order option "${label}"`);
-    return option;
+    return within(documentTable(host)).getByRole<HTMLButtonElement>("button", { name: label });
   }
 
   function heading(host: HTMLElement, label: string): HTMLTableCellElement {
-    const cell = [...host.querySelectorAll<HTMLTableCellElement>("thead th")].find(
-      (candidate) => candidate.querySelector("button")?.firstChild?.textContent === label,
-    );
-    if (cell === undefined) throw new Error(`no heading "${label}"`);
-    return cell;
+    return within(documentTable(host)).getByRole<HTMLTableCellElement>("columnheader", { name: label });
   }
 
   async function seeded(): Promise<{ host: HTMLElement; peer: Y.Doc }> {
@@ -411,37 +429,42 @@ describe("choosing the order", () => {
 
   it("is one sorted table and toggles either column without a second chooser", async () => {
     const { host } = await seeded();
-    const table = host.querySelector("table.ub-docs-table");
+    const table = documentTable(host);
     expect(table).not.toBeNull();
-    expect(table?.querySelectorAll("thead th")).toHaveLength(3);
-    expect(table?.querySelectorAll('tbody th[scope="row"]')).toHaveLength(3);
-    expect(host.querySelector(".ub-docs-order")).toBeNull();
+    expect(table.tagName).toBe("TABLE");
+    // The semantic queries still verify the original native table structure.
+    expect(table.querySelectorAll("thead th")).toHaveLength(3);
+    expect(table.querySelectorAll('tbody th[scope="row"]')).toHaveLength(3);
+    expect(within(table).getAllByRole("columnheader", { hidden: true })).toHaveLength(3);
+    expect(within(table).getAllByRole("rowheader", { hidden: true })).toHaveLength(3);
+    expect(within(host).queryByRole("group", { name: "Order", hidden: true })).toBeNull();
 
     const title = heading(host, "Title");
     const changed = heading(host, "Last changed");
     expect(rowTitles(host)).toEqual(["Zebra", "Alpha", "Middle"]);
     expect(activeOrder(host)).toBe("Last changed");
     expect(changed.getAttribute("aria-sort")).toBe("descending");
-    expect(changed.querySelector(".ub-docs-sort-arrow")?.textContent).toBe("↓");
+    expect(within(changed).getByText("↓").textContent).toBe("↓");
     expect(title.hasAttribute("aria-sort")).toBe(false);
-    expect(host.querySelectorAll("th[aria-sort]")).toHaveLength(1);
+    expect(within(table).getAllByRole("columnheader", { hidden: true }).filter((header) => header.hasAttribute("aria-sort"))).toHaveLength(1);
 
     await act(async () => chooseOrder(host, "Title").click());
     expect(rowTitles(host)).toEqual(["Alpha", "Middle", "Zebra"]);
     expect(activeOrder(host)).toBe("Title");
     expect(title.getAttribute("aria-sort")).toBe("ascending");
-    expect(title.querySelector(".ub-docs-sort-arrow")?.textContent).toBe("↑");
+    expect(within(title).getByText("↑").textContent).toBe("↑");
     expect(changed.hasAttribute("aria-sort")).toBe(false);
 
     // The unstamped row still says "no answer" rather than reading as a date.
-    const middle = [...host.querySelectorAll(".ub-docs-row")][1];
-    expect(middle?.querySelectorAll("time")).toHaveLength(0);
+    const middle = within(table).getByRole("row", { name: /^Middle / });
+    expect(within(table).getAllByRole("time", { hidden: true })).toHaveLength(2);
+    expect(within(middle).queryAllByRole("time", { hidden: true })).toHaveLength(0);
     expect(middle?.textContent).toContain("—");
 
     await act(async () => chooseOrder(host, "Title").click());
     expect(rowTitles(host)).toEqual(["Zebra", "Middle", "Alpha"]);
     expect(title.getAttribute("aria-sort")).toBe("descending");
-    expect(title.querySelector(".ub-docs-sort-arrow")?.textContent).toBe("↓");
+    expect(within(title).getByText("↓").textContent).toBe("↓");
 
     await act(async () => chooseOrder(host, "Last changed").click());
     expect(rowTitles(host)).toEqual(["Zebra", "Alpha", "Middle"]);
@@ -451,7 +474,7 @@ describe("choosing the order", () => {
     await act(async () => chooseOrder(host, "Last changed").click());
     expect(rowTitles(host)).toEqual(["Alpha", "Zebra", "Middle"]);
     expect(changed.getAttribute("aria-sort")).toBe("ascending");
-    expect(changed.querySelector(".ub-docs-sort-arrow")?.textContent).toBe("↑");
+    expect(within(changed).getByText("↑").textContent).toBe("↑");
   });
 
   it("keeps the chosen order when the directory changes", async () => {
@@ -564,10 +587,10 @@ describe("the list", () => {
     pinDoc(sidebarPeer, reading, ONE);
 
     const host = await openApp(`/${WORKSPACE}`);
-    const row = host.querySelector(".ub-docs-row");
-    expect(row?.querySelector(".ub-docs-title")?.textContent).toBe("Overview");
-    expect(row?.querySelector(".ub-docs-group")?.textContent).toBe("Reading");
-    expect(row?.querySelector("time")?.getAttribute("dateTime")).toBe(
+    const row = within(documentTable(host)).getByRole("row", { name: /^OverviewReading / });
+    expect(within(row).getByText("Overview").textContent).toBe("Overview");
+    expect(within(row).getByText("Reading").textContent).toBe("Reading");
+    expect(within(row).getByRole("time", { hidden: true }).getAttribute("dateTime")).toBe(
       "2026-01-03T00:00:00.000Z",
     );
     // The stub still caches both — this is what one screen renders.
@@ -583,8 +606,9 @@ describe("the list", () => {
     const later = createGroup(sidebarPeer, "Later");
 
     const host = await openApp(`/${WORKSPACE}`);
+    const button = within(documentTable(host)).getByRole("button", { name: "Overview" });
     const group = (): string | null =>
-      host.querySelector(".ub-docs-group")?.textContent ?? null;
+      within(button).queryByText("Later")?.textContent ?? null;
     expect(group()).toBeNull();
 
     await act(async () => {
@@ -631,13 +655,14 @@ describe("the list", () => {
 
     const host = await openApp(allPath(WORKSPACE));
     expect(rowTitles(host)).toEqual(["Stamped", "Unstamped", "Zskewed"]);
-    const rows = [...host.querySelectorAll(".ub-docs-row")];
-    expect(rows[0]?.querySelector("time")?.getAttribute("dateTime")).toBe(
+    const rows = within(documentTable(host)).getAllByRole("row", { hidden: true }).slice(1);
+    expect(within(rows[0]!).getByRole("time", { hidden: true }).getAttribute("dateTime")).toBe(
       "2026-01-03T00:00:00.000Z",
     );
-    expect(rows[1]?.querySelectorAll("time")).toHaveLength(0);
+    expect(within(rows[0]!).getAllByRole("time", { hidden: true })).toHaveLength(1);
+    expect(within(rows[1]!).queryAllByRole("time", { hidden: true })).toHaveLength(0);
     expect(rows[1]?.textContent).toContain("—");
-    expect(rows[2]?.querySelectorAll("time")).toHaveLength(0);
+    expect(within(rows[2]!).queryAllByRole("time", { hidden: true })).toHaveLength(0);
     expect(rows[2]?.textContent).toContain("—");
   });
 });
@@ -676,13 +701,12 @@ describe("the filter", () => {
     });
 
     const host = await openApp(`/${WORKSPACE}`);
-    const mode = (name: string): HTMLButtonElement | undefined =>
-      [...host.querySelectorAll<HTMLButtonElement>(".ub-docs-mode")].find(
-        (button) => button.textContent === name,
-      );
+    const mode = (name: string): HTMLButtonElement =>
+      within(within(host).getByRole("group", { name: "Document type" }))
+        .getByRole<HTMLButtonElement>("button", { name });
     expect(mode("Working")?.getAttribute("aria-pressed")).toBe("true");
     expect(rowTitles(host)).toEqual(["Foreign shape", "Working note"]);
-    expect(host.querySelectorAll(".ub-lifecycle-badge")).toHaveLength(0);
+    expect(lifecycleBadges(host)).toHaveLength(0);
     expect([...rooms.keys()].sort()).toEqual(
       [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
     );
@@ -690,13 +714,13 @@ describe("the filter", () => {
     await act(async () => mode("Product")?.click());
     expect(rowTitles(host)).toEqual(["Roadmap", "Status drift"]);
     expect(
-      [...host.querySelectorAll(".ub-lifecycle-badge")].map(
+      lifecycleBadges(host).map(
         (badge) => badge.textContent,
       ),
     ).toEqual(["Product · planned", "Product"]);
     await act(async () => mode("Decisions")?.click());
     expect(rowTitles(host)).toEqual(["Cache choice"]);
-    expect(host.querySelector(".ub-lifecycle-badge")?.textContent).toBe(
+    expect(lifecycleBadges(host)[0]?.textContent).toBe(
       "Decision · open",
     );
   });
@@ -736,7 +760,7 @@ describe("the filter", () => {
     await act(async () => typeInto(field, "r"));
     expect(rowTitles(host)).toEqual(["Overview", "Roadmap"]);
     await act(async () =>
-      host.querySelector<HTMLButtonElement>(".ub-docs-open")?.click(),
+      within(documentTable(host)).getByRole("button", { name: "Overview" }).click(),
     );
     expect(selected).toHaveBeenCalledWith(ONE);
 
@@ -758,7 +782,7 @@ describe("the filter", () => {
 
     const host = await openApp(`/${WORKSPACE}/${ONE}`);
     await act(async () =>
-      host.querySelector<HTMLButtonElement>(".ub-all-open-entry")?.click(),
+      within(host).getByRole("button", { name: "All docs" }).click(),
     );
     await act(async () => typeInto(filter(host), "bodyonly"));
     expect(rowTitles(host)).toEqual([]);
@@ -780,13 +804,16 @@ describe("the filter", () => {
     // Both rows read "Untitled" on screen — one because that is its title, one
     // because the list draws the word in italics where a title is absent.
     expect(rowTitles(host)).toEqual(["Untitled", "Untitled"]);
-    expect(host.querySelectorAll(".ub-docs-title em")).toHaveLength(1);
+    // Italic emphasis distinguishes the fallback label from a stored title.
+    const fallbacks = (): HTMLElement[] =>
+      within(documentTable(host)).queryAllByRole("emphasis", { hidden: true });
+    expect(fallbacks()).toHaveLength(1);
 
     await act(async () => typeInto(filter(host), "untitled"));
     // The fallback is this list's word for *no title*, not a title to match
     // against, so only the document actually called "Untitled" survives.
     expect(rowUuids(host)).toEqual([TWO]);
-    expect(host.querySelector(".ub-docs-title em")).toBeNull();
+    expect(fallbacks()).toHaveLength(0);
   });
 
   it("narrows inside the chosen tab, and re-applies the text to the next tab", async () => {
@@ -808,10 +835,9 @@ describe("the filter", () => {
         onTogglePin={null}
       />,
     );
-    const mode = (name: string): HTMLButtonElement | undefined =>
-      [...host.querySelectorAll<HTMLButtonElement>(".ub-docs-mode")].find(
-        (button) => button.textContent === name,
-      );
+    const mode = (name: string): HTMLButtonElement =>
+      within(within(host).getByRole("group", { name: "Document type" }))
+        .getByRole<HTMLButtonElement>("button", { name });
 
     await act(async () => typeInto(filter(host), "search"));
     // The requirement matches the text too, and still does not appear here.
@@ -893,16 +919,16 @@ describe("an empty list", () => {
     // Nothing heard yet is not an answer: a workspace full of documents would
     // otherwise be told it has none.
     const waiting = await open(false, []);
-    expect(waiting.querySelector("table.ub-docs-table")).not.toBeNull();
-    expect(waiting.querySelector(".ub-docs-pin-unavailable")).toBeNull();
-    expect(waiting.querySelector(".ub-docs-empty")?.textContent).toContain(
+    expect(documentTable(waiting)).not.toBeNull();
+    expect(pinUnavailable(waiting)).toBeNull();
+    expect(within(waiting).getByText(/has not synced/).textContent).toContain(
       "has not synced",
     );
     unmount();
 
     const synced = await open(true, []);
-    expect(synced.querySelector(".ub-docs-pin-unavailable")).toBeNull();
-    expect(synced.querySelector(".ub-docs-empty")?.textContent).toBe(
+    expect(pinUnavailable(synced)).toBeNull();
+    expect(within(synced).getByText("No documents in this workspace yet.").textContent).toBe(
       "No documents in this workspace yet.",
     );
   });
@@ -913,14 +939,14 @@ describe("an empty list", () => {
     // asserting the corpus holds no such title.
     const waiting = await open(false, [entry({ uuid: ONE, title: "Overview" })]);
     await act(async () => typeInto(filter(waiting), "nothing"));
-    expect(waiting.querySelector(".ub-docs-empty")?.textContent).toBe(
+    expect(within(waiting).getByText("No working documents synced so far have a matching title.").textContent).toBe(
       "No working documents synced so far have a matching title.",
     );
     unmount();
 
     const synced = await open(true, [entry({ uuid: ONE, title: "Overview" })]);
     await act(async () => typeInto(filter(synced), "nothing"));
-    expect(synced.querySelector(".ub-docs-empty")?.textContent).toBe(
+    expect(within(synced).getByText("No working documents have a matching title.").textContent).toBe(
       "No working documents have a matching title.",
     );
     // Neither reading is a failed or a pending search: nothing is in flight,
@@ -944,8 +970,10 @@ describe("the sidebar entry", () => {
 
     // Nothing pinned: the sidebar says so, and the entry is still there.
     const host = await openApp(`/${WORKSPACE}`);
-    expect(host.querySelector(".ub-list .ub-group")).toBeNull();
-    const open = host.querySelector<HTMLButtonElement>(".ub-all-open-entry");
+    const sidebar = within(host).getByRole("complementary", { name: "Sidebar" });
+    const groups = (): HTMLElement[] => within(sidebar).queryAllByRole("button", { name: /^Rename group / });
+    expect(groups()).toHaveLength(0);
+    const open = within(sidebar).getByRole<HTMLButtonElement>("button", { name: "All docs" });
     expect(open?.textContent).toContain("All docs");
     // Both workspace addresses render the same listing, so the entry is the
     // current page at either one — not only at the address it navigates to.
@@ -955,15 +983,15 @@ describe("the sidebar entry", () => {
     expect(window.location.pathname).toBe(`/${WORKSPACE}/all`);
     expect(rowTitles(host)).toEqual(["Overview"]);
     expect(
-      host.querySelector(".ub-all-open-entry")?.getAttribute("aria-current"),
+      within(sidebar).getByRole("button", { name: "All docs" }).getAttribute("aria-current"),
     ).toBe("page");
 
     // And with a pin in the sidebar it is exactly where it was: the entry is
     // not part of the curation below it (#483).
-    const pin = host.querySelector<HTMLButtonElement>(".ub-docs-pin");
+    const pin = within(documentTable(host)).getByRole<HTMLButtonElement>("button", { name: "Pin Overview to the sidebar" });
     await act(async () => pin?.click());
-    expect(host.querySelectorAll(".ub-list .ub-group")).toHaveLength(1);
-    expect(host.querySelector(".ub-all-open-entry")?.textContent).toContain(
+    expect(groups()).toHaveLength(1);
+    expect(within(sidebar).getByRole("button", { name: "All docs" }).textContent).toContain(
       "All docs",
     );
     expect(rowTitles(host)).toEqual(["Overview"]);
@@ -975,16 +1003,17 @@ describe("the sidebar entry", () => {
     const sidebarPeer = peerOf(sidebarDoc());
 
     const host = await openApp(allPath(WORKSPACE));
-    expect(host.querySelector(".ub-docs-pin-unavailable")).toBeNull();
-    const pin = (): HTMLButtonElement | null =>
-      host.querySelector<HTMLButtonElement>(".ub-docs-pin");
+    expect(pinUnavailable(host)).toBeNull();
+    const pin = (): HTMLButtonElement =>
+      within(documentTable(host)).getByRole<HTMLButtonElement>("button", { name: /^(?:Pin|Unpin) Overview (?:to|from) the sidebar$/ });
     expect(pin()?.getAttribute("aria-pressed")).toBe("false");
 
     await act(async () => pin()?.click());
     expect(readSidebar(sidebarPeer).map((group) => group.docs)).toEqual([[ONE]]);
     expect(pin()?.getAttribute("aria-pressed")).toBe("true");
     // The pin is what puts the group in the row: one write, both readings.
-    expect(host.querySelector(".ub-docs-group")?.textContent).toBe("Pinned");
+    const overview = within(documentTable(host)).getByRole("button", { name: "OverviewPinned" });
+    expect(within(overview).getByText("Pinned").textContent).toBe("Pinned");
 
     // The same control both ways, and the document is what remembers.
     await act(async () => pin()?.click());
@@ -1009,8 +1038,10 @@ describe("the sidebar entry", () => {
     });
 
     const host = await openApp(allPath(WORKSPACE));
-    const reason = host.querySelector(".ub-docs-pin-unavailable");
-    const pin = host.querySelector<HTMLButtonElement>(".ub-docs-pin");
+    const reason = pinUnavailable(host);
+    const pin = within(documentTable(host)).getByRole<HTMLButtonElement>("button", {
+      name: "Pin Overview to the sidebar unavailable while sidebar is not ready to write",
+    });
     expect(reason?.textContent).toContain(
       "Pin changes unavailable while the sidebar is not ready to write.",
     );
@@ -1033,15 +1064,15 @@ describe("opening a document", () => {
 
     const host = await openApp(`/${WORKSPACE}`);
     await act(async () =>
-      host.querySelector<HTMLButtonElement>(".ub-docs-open")?.click(),
+      within(documentTable(host)).getByRole("button", { name: "Overview" }).click(),
     );
     expect(window.location.pathname).toBe(`/${WORKSPACE}/${ONE}`);
 
     // A reload: the app goes, the address stays, and the document opens.
     unmount();
     const again = await openApp(`/${WORKSPACE}/${ONE}`);
-    expect(again.querySelector(".ub-docs-table")).toBeNull();
-    expect(again.querySelector<HTMLInputElement>(".ub-title")?.value).toBe(
+    expect(within(again).queryByRole("table", { hidden: true })).toBeNull();
+    expect(within(again).getByPlaceholderText<HTMLInputElement>("Untitled").value).toBe(
       "Overview",
     );
   });

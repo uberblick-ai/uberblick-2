@@ -17,6 +17,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { within } from "@testing-library/react";
 import { act, renderSettled } from "./react-render.js";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { DocumentList } from "../src/shell/DocumentList.js";
@@ -69,11 +70,12 @@ async function listAnswer(query: string): Promise<string[]> {
       onTogglePin={null}
     />,
   );
-  const field = host.querySelector<HTMLInputElement>(".ub-docs-search");
-  if (field === null) throw new Error("the filter field is missing");
+  const field = within(host).getByRole<HTMLInputElement>("searchbox", {
+    name: "Filter this list by title",
+  });
   await act(async () => typeInto(field, query));
-  return [...host.querySelectorAll(".ub-docs-title")]
-    .map((node) => node.textContent ?? "")
+  return within(within(host).getByRole("table", { hidden: true })).queryAllByRole("rowheader", { hidden: true })
+    .map((header) => within(header).getByRole("button", { hidden: true }).textContent ?? "")
     .sort();
 }
 

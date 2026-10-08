@@ -24,6 +24,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, within } from "@testing-library/react";
 import { act, render } from "./react-render.js";
 import * as Y from "yjs";
 import {
@@ -90,11 +91,6 @@ function mount(element: ReactElement): View {
   };
 }
 
-/** Both surfaces portal themselves to <body>, so they are read from there. */
-function panel(selector: string): HTMLElement[] {
-  return [...document.querySelectorAll<HTMLElement>(selector)];
-}
-
 function click(element: Element | null | undefined): void {
   act(() => (element as HTMLElement | null | undefined)?.click());
 }
@@ -114,7 +110,7 @@ describe("the workspace switcher renders configuration", () => {
   /** Open from the keyboard: Radix opens on Enter, and jsdom has key events. */
   function open(view: View): void {
     act(() => {
-      const trigger = view.host.querySelector<HTMLButtonElement>(".ub-workspace");
+      const trigger = within(view.host).getByRole("button", { name: /^(Uberblick|no workspace)$/ });
       trigger?.focus();
       trigger?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
@@ -139,23 +135,25 @@ describe("the workspace switcher renders configuration", () => {
 
   it("names the workspace accessibly without a document-count subtitle", () => {
     const view = mount(switcher());
-    const trigger = view.host.querySelector(".ub-workspace");
+    const trigger = within(view.host).getByRole("button", { name: "Uberblick" });
     expect(trigger?.textContent).toContain("Uberblick");
     // The native button gets its accessible name from the visible name. No
     // overriding label may replace that name with the old generic "Workspace".
     expect(trigger?.tagName).toBe("BUTTON");
     expect(trigger?.hasAttribute("aria-label")).toBe(false);
     expect(trigger?.hasAttribute("aria-labelledby")).toBe(false);
-    expect(trigger?.querySelector(".ub-workspace-count")).toBeNull();
+    expect(within(trigger).queryByText(/\d+ docs?/)).toBeNull();
     expect(trigger?.textContent).not.toMatch(/\d+ docs?/);
 
     open(view);
-    const current = panel("[data-slot=dropdown-menu-item][aria-current=true]")[0];
-    expect(current?.querySelector(".ub-menu-text")?.textContent).toBe("Uberblick");
+    const menu = screen.getByRole("menu");
+    const current = within(menu).getByRole("menuitem", { name: "Uberblick", current: true });
+    expect(within(current).getByText("Uberblick").textContent).toBe("Uberblick");
+    // The check is intentionally decorative, so it has no accessible handle.
     expect(current?.querySelector(".ub-workspace-current")?.textContent).toBe("✓");
     expect(current?.querySelector(".ub-workspace-current")?.getAttribute("aria-hidden"))
       .toBe("true");
-    expect(panel("[data-slot=dropdown-menu-content]")[0]?.textContent).not.toMatch(/\d+ docs?/);
+    expect(menu.textContent).not.toMatch(/\d+ docs?/);
     view.unmount();
   });
 
@@ -164,29 +162,32 @@ describe("the workspace switcher renders configuration", () => {
     const bare: Workspace = { uuid: WORKSPACE.uuid, segment: WORKSPACE.uuid };
     for (const workspace of [WORKSPACE, bare]) {
       const view = mount(switcher(workspace));
-      const trigger = view.host.querySelector(".ub-workspace");
+      const trigger = within(view.host).getByRole("button", { name: "Uberblick" });
+      // Marker and caret are the two intentionally hidden decorations.
       const marker = trigger?.querySelector(".ub-workspace-marker");
       expect(marker?.getAttribute("aria-hidden")).toBe("true");
       expect(marker?.textContent).toBe("");
-      expect(trigger?.querySelector(".ub-workspace-tile")).toBeNull();
+      expect(trigger.querySelectorAll('[aria-hidden="true"]')).toHaveLength(2);
+      expect(trigger.textContent).toBe("Uberblick▾");
       // The name truncates, so its whole value is available on the title.
-      expect(trigger?.querySelector(".ub-workspace-name")?.getAttribute("title")).toBe(
+      expect(within(trigger).getByText("Uberblick").getAttribute("title")).toBe(
         "Uberblick",
       );
       view.unmount();
     }
 
     const none = mount(switcher(null));
-    const trigger = none.host.querySelector(".ub-workspace");
-    expect(trigger?.querySelector(".ub-workspace-marker")).toBe(null);
-    expect(trigger?.querySelector(".ub-workspace-count")).toBe(null);
-    expect(trigger?.querySelector(".ub-workspace-name")?.textContent).toBe("no workspace");
-    expect(trigger?.querySelector(".ub-workspace-name")?.hasAttribute("title")).toBe(false);
+    const trigger = within(none.host).getByRole("button", { name: "no workspace" });
+    // The same marker selector was proved present for both routed spellings.
+    expect(trigger.querySelector(".ub-workspace-marker")).toBe(null);
+    expect(within(trigger).queryByText(/\d+ docs?/)).toBe(null);
+    expect(within(trigger).getByText("no workspace").textContent).toBe("no workspace");
+    expect(within(trigger).getByText("no workspace").hasAttribute("title")).toBe(false);
     expect(trigger?.querySelector(".ub-workspace-caret")).not.toBe(null);
     expect(trigger?.querySelector(".ub-workspace-caret")?.getAttribute("aria-hidden"))
       .toBe("true");
     open(none);
-    expect(panel("[data-slot=dropdown-menu-item][aria-current=true]")).toHaveLength(0);
+    expect(within(screen.getByRole("menu")).queryAllByRole("menuitem", { current: true, hidden: true })).toHaveLength(0);
     none.unmount();
   });
 
@@ -194,33 +195,31 @@ describe("the workspace switcher renders configuration", () => {
     const onOpenChange = vi.fn();
     const view = mount(switcher(WORKSPACE, true, onOpenChange));
     open(view);
-    expect(panel("[data-slot=dropdown-menu-content]")).toHaveLength(1);
+    // These assertions prove unmounting, including any inaccessible remnants.
+    expect(screen.getAllByRole("menu", { hidden: true })).toHaveLength(1);
     expect(onOpenChange).toHaveBeenLastCalledWith(true);
 
     view.render(switcher(WORKSPACE, false, onOpenChange));
-    expect(panel("[data-slot=dropdown-menu-content]")).toHaveLength(0);
+    expect(screen.queryAllByRole("menu", { hidden: true })).toHaveLength(0);
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
 
     // Returning to the document pane must not revive the old open state.
     view.render(switcher(WORKSPACE, true, onOpenChange));
-    expect(panel("[data-slot=dropdown-menu-content]")).toHaveLength(0);
+    expect(screen.queryAllByRole("menu", { hidden: true })).toHaveLength(0);
     view.unmount();
   });
 
   it("offers only workspaces, with no creation placeholder or settings action", () => {
     const view = mount(switcher());
     open(view);
-    const disabled = panel("[data-slot=dropdown-menu-item][data-disabled]").map(
-      (item) => item.textContent,
-    );
+    const menu = within(screen.getByRole("menu"));
+    const disabled = menu.getAllByRole("menuitem", { hidden: true }).filter((item) => item.getAttribute("aria-disabled") === "true").map((item) => item.textContent);
     expect(disabled).toEqual([]);
-    expect(panel("[data-slot=dropdown-menu-separator]")).toHaveLength(0);
-    expect(panel("[data-slot=dropdown-menu-item]").map((item) => item.textContent))
+    expect(menu.queryAllByRole("separator", { hidden: true })).toHaveLength(0);
+    expect(menu.getAllByRole("menuitem", { hidden: true }).map((item) => item.textContent))
       .toEqual(["Uberblick✓"]);
-    const settings = panel("[data-slot=dropdown-menu-item]").find(
-      (item) => item.textContent === "Workspace settings",
-    );
-    expect(settings).toBeUndefined();
+    const settings = menu.queryByText("Workspace settings");
+    expect(settings).toBeNull();
     view.unmount();
   });
 });
@@ -228,43 +227,41 @@ describe("the workspace switcher renders configuration", () => {
 describe("the account footer keeps this client's presence preferences separate", () => {
   /** The standard identity button opens its preferences panel. */
   function open(view: View): void {
-    click(view.host.querySelector('[data-testid="account-menu"]'));
+    click(within(view.host).getByRole("button", { name: /; preferences$/ }));
   }
 
   function menu(agentSessions = 0, account: AccountIdentity = { state: "signed-in", handle: "hub-person" }): ReactElement {
     return <UserMenu identity={IDENTITY} account={account} agentSessions={agentSessions} />;
   }
 
-  function swatch(name: string): HTMLButtonElement | undefined {
-    return panel(`.ub-swatch[aria-label="${name}"]`)[0] as HTMLButtonElement;
+  function swatch(name: string): HTMLButtonElement {
+    return within(screen.getByRole("group", { name: "Presence colour" })).getByRole("button", { name });
   }
 
   function chosenSwatch(): string | null {
-    return panel('.ub-swatch[aria-pressed="true"]')[0]?.getAttribute("aria-label") ?? null;
+    return within(screen.getByRole("group", { name: "Presence colour" })).getByRole("button", { pressed: true }).getAttribute("aria-label");
   }
 
-  function appearanceOption(label: string): HTMLButtonElement | undefined {
-    return panel(".ub-appearance-option").find(
-      (option) => option.textContent === label,
-    ) as HTMLButtonElement | undefined;
+  function appearanceOption(label: string): HTMLButtonElement {
+    return within(screen.getByRole("group", { name: "Appearance" })).getByRole("button", { name: label });
   }
 
   it("shows the account in the standard button and keeps Account settings inert", () => {
     const view = mount(menu());
-    const trigger = view.host.querySelector('[data-testid="account-menu"]');
+    const trigger = within(view.host).getByRole("button", { name: "@hub-person; preferences" });
     expect(trigger?.textContent).toContain("@hub-person");
     expect(trigger?.textContent).not.toContain(IDENTITY.name);
     expect(trigger?.getAttribute("data-sidebar")).toBe("menu-button");
     expect(trigger?.closest('[data-slot="sidebar-menu-item"]')?.parentElement?.getAttribute("data-slot"))
       .toBe("sidebar-menu");
-    const placeholder = view.host.querySelector("p");
+    const placeholder = within(view.host).getByText("Account settings");
     expect(placeholder?.textContent).toBe("Account settings");
     expect(placeholder?.closest("button, a, [role=button], [role=link]")).toBeNull();
     expect(placeholder?.hasAttribute("tabindex")).toBe(false);
     click(placeholder);
-    expect(panel(".ub-user-panel")).toHaveLength(0);
+    expect(screen.queryAllByRole("dialog", { hidden: true })).toHaveLength(0);
     open(view);
-    expect(panel(".ub-user-heading")[0]?.textContent).toBe(`Presence name: ${IDENTITY.name}`);
+    expect(within(screen.getByRole("dialog")).getByText(`Presence name: ${IDENTITY.name}`).textContent).toBe(`Presence name: ${IDENTITY.name}`);
     // The tab's dealt colour is the blue one, and nothing was chosen yet.
     expect(chosenSwatch()).toBe("blue");
     view.unmount();
@@ -275,7 +272,7 @@ describe("the account footer keeps this client's presence preferences separate",
     [{ state: "unavailable" }, "Account unavailable"],
   ] as const)("shows the unverified account state without a presence name", (account, label) => {
     const view = mount(menu(0, account));
-    expect(view.host.querySelector('[data-testid="account-menu"]')?.textContent).toContain(label);
+    expect(within(view.host).getByRole("button", { name: `${label}; preferences` }).textContent).toContain(label);
     expect(view.host.textContent).not.toContain(IDENTITY.name);
     view.unmount();
   });
@@ -283,11 +280,12 @@ describe("the account footer keeps this client's presence preferences separate",
   it("retires the portalled panel when the sidebar becomes inactive", () => {
     const view = mount(menu());
     open(view);
-    expect(panel(".ub-user-panel")).toHaveLength(1);
+    // A retired panel must unmount rather than remain hidden in the portal.
+    expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
     view.render(<UserMenu identity={IDENTITY} agentSessions={0} active={false} />);
-    expect(panel(".ub-user-panel")).toHaveLength(0);
+    expect(screen.queryAllByRole("dialog", { hidden: true })).toHaveLength(0);
     view.render(menu());
-    expect(panel(".ub-user-panel")).toHaveLength(0);
+    expect(screen.queryAllByRole("dialog", { hidden: true })).toHaveLength(0);
     view.unmount();
   });
 
@@ -298,7 +296,7 @@ describe("the account footer keeps this client's presence preferences separate",
 
     expect(getSetting("presenceColor")).toBe("#0c853d");
     expect(chosenSwatch()).toBe("green");
-    expect(view.host.querySelector('[data-testid="account-menu"]')?.textContent).toContain("@hub-person");
+    expect(within(view.host).getByRole("button", { name: "@hub-person; preferences" }).textContent).toContain("@hub-person");
     view.unmount();
 
     // The reload: a new tab, dealt a different colour, reading the same storage.
@@ -307,7 +305,7 @@ describe("the account footer keeps this client's presence preferences separate",
     );
     open(reloaded);
     expect(chosenSwatch()).toBe("green");
-    expect(panel(".ub-user-heading")[0]?.textContent).toBe("Presence name: adjacent heron");
+    expect(within(screen.getByRole("dialog")).getByText("Presence name: adjacent heron").textContent).toBe("Presence name: adjacent heron");
     reloaded.unmount();
   });
 
@@ -342,18 +340,20 @@ describe("the account footer keeps this client's presence preferences separate",
     const view = mount(menu());
     open(view);
     await act(async () => {});
-    expect(panel(".ub-panel-fact dt").map((row) => row.textContent)).toEqual([
+    const panel = within(screen.getByRole("dialog"));
+    expect(panel.getAllByRole("term", { hidden: true }).map((row) => row.textContent)).toEqual([
       "MCP connections",
     ]);
-    expect(panel(".ub-panel-fact dd")[0]?.textContent).toBe("0");
+    expect(panel.getAllByRole("definition", { hidden: true })[0]?.textContent).toBe("0");
     view.unmount();
   });
 
   it("reports the agent sessions it is given", () => {
     const view = mount(menu(2));
     open(view);
-    const facts = panel(".ub-panel-fact");
-    const connections = facts[facts.length - 1];
+    // Definition-list rows have no role of their own; begin at the visible term.
+    const terms = within(screen.getByRole("dialog")).getAllByRole("term", { hidden: true });
+    const connections = terms[terms.length - 1]?.parentElement;
     expect(connections?.textContent).toBe("MCP connections2");
     view.unmount();
   });
@@ -395,7 +395,7 @@ describe("an agent session is one that says it is an agent", () => {
     awareness.setLocalStateField("client", WEB_CLIENT);
     const view = mount(<Count connection={connection} />);
     const counted = (): string | undefined =>
-      view.host.querySelector(".ub-count")?.textContent ?? undefined;
+      view.host.textContent ?? undefined;
     expect(counted()).toBe("0");
 
     // An MCP replica publishes a user and the agent marker beside it

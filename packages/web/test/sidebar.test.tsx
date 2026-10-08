@@ -17,6 +17,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, within } from "@testing-library/react";
 import { act, renderSettled, type RenderResult } from "./react-render.js";
 import type { ReactNode } from "react";
 import * as Y from "yjs";
@@ -174,13 +175,34 @@ function stored(doc: Y.Doc): Array<[string, string[]]> {
   return readSidebar(doc).map((group: SidebarGroup) => [group.name, group.docs]);
 }
 
+function documentsPane(host: HTMLElement): HTMLElement {
+  // Label queries keep finding this mounted navigation while aria-hidden.
+  return within(host).getByLabelText("Documents");
+}
+
+function sidebarControls(host: HTMLElement) {
+  return within(documentsPane(host));
+}
+
+function groupToggles(host: HTMLElement): HTMLButtonElement[] {
+  // Enumerate every mounted disclosure in DOM order, including empty names
+  // and controls hidden by a modal. aria-expanded without aria-haspopup is
+  // the group disclosure contract; accessible names are empty while hidden.
+  return sidebarControls(host).queryAllByRole<HTMLButtonElement>("button", { hidden: true })
+    .filter((button) => button.hasAttribute("aria-expanded") && !button.hasAttribute("aria-haspopup"));
+}
+
 function sections(host: HTMLElement): HTMLElement[] {
-  return [...host.querySelectorAll<HTMLElement>(".ub-list .ub-group")];
+  // A group wrapper has no accessible name of its own. Keep the structural
+  // ancestor check, anchored by its accessible disclosure or rename field.
+  const controls = [...groupToggles(host), ...sidebarControls(host).queryAllByLabelText("Group name")];
+  return controls.map((control) => control.closest("section") as HTMLElement)
+    .sort((first, second) => first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
 }
 
 /** The group names on screen, top to bottom. */
 function groupNames(host: HTMLElement): string[] {
-  return [...host.querySelectorAll(".ub-group-label")].map(
+  return groupToggles(host).map(
     (node) => node.textContent ?? "",
   );
 }
@@ -188,7 +210,10 @@ function groupNames(host: HTMLElement): string[] {
 /** The document rows of the `index`-th group, top to bottom. */
 function rows(host: HTMLElement, index: number): HTMLButtonElement[] {
   const section = sections(host)[index];
-  return [...(section?.querySelectorAll<HTMLButtonElement>(".ub-group-body li > button:first-child") ?? [])];
+  // Enumerate every mounted row, including an empty title or one hidden when
+  // the document menu opens. Order/current-row proofs inspect mounted nodes.
+  const list = section === undefined ? null : within(section).queryByRole("list", { hidden: true });
+  return list === null ? [] : within(list).queryAllByRole<HTMLButtonElement>("button", { hidden: true });
 }
 
 function rowTitles(host: HTMLElement, index: number): string[] {
@@ -201,11 +226,21 @@ function rowTooltips(host: HTMLElement, index: number): Array<string | null> {
 }
 
 function groupToggle(host: HTMLElement, index: number): HTMLButtonElement | null {
-  return sections(host)[index]?.querySelector<HTMLButtonElement>(".ub-group-toggle") ?? null;
+  return groupToggles(host)[index] ?? null;
+}
+
+function expectNoExtraGroupChrome(host: HTMLElement): void {
+  for (const toggle of groupToggles(host)) {
+    // Heading siblings are controls, with no separate count or drag marker.
+    // Decorations inside the disclosure may change without affecting this.
+    const head = toggle.parentElement as HTMLElement;
+    expect(head.children).toHaveLength(within(head).queryAllByRole("button", { hidden: true }).length);
+    expect(toggle.closest("section")?.children).toHaveLength(2);
+  }
 }
 
 function actionsTrigger(host: HTMLElement): HTMLButtonElement | null {
-  return host.querySelector<HTMLButtonElement>(".ub-actions-trigger");
+  return within(host).queryByRole<HTMLButtonElement>("button", { name: "Document actions" });
 }
 
 function openActions(host: HTMLElement): void {
@@ -219,32 +254,34 @@ function openActions(host: HTMLElement): void {
 }
 
 function documentAction(label: string): HTMLElement | undefined {
-  return [
-    ...document.querySelectorAll<HTMLElement>("[data-slot=dropdown-menu-item]"),
-  ].find((item) => item.textContent === label);
+  return screen.queryByRole("menuitem", { name: label }) ?? undefined;
 }
 
 function press(element: Element | null, key: string): void {
   element?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
 }
 
-/** The landmarks the sidebar column is made of, in the order they are drawn. */
-const LANDMARKS = ["ub-list-head", "ub-nav", "ub-empty", "ub-group"];
-
 function columnOrder(host: HTMLElement): string[] {
-  const list = host.querySelector('.ub-document-sidebar [data-slot="sidebar-content"]');
-  return [...(list?.children ?? [])].flatMap((child) =>
-    LANDMARKS.filter((mark) => child.classList.contains(mark)),
-  );
+  const controls = sidebarControls(host);
+  const head = controls.getByRole("button", { name: "+ new doc" }).parentElement;
+  const navigation = controls.getByText("Navigation").closest("section");
+  const empty = controls.queryByText(/Nothing pinned yet/);
+  const groups = sections(host);
+  // These unnamed layout wrappers have no roles; compare their identities to
+  // accessible descendants so a restyle cannot erase an order assertion.
+  return [...(head?.parentElement?.children ?? [])].flatMap((child) => {
+    if (child === head) return ["creation"];
+    if (child === navigation) return ["navigation"];
+    if (child === empty) return ["empty"];
+    return groups.includes(child as HTMLElement) ? ["group"] : [];
+  });
 }
 
 /** The navigation rows, top to bottom. */
 function navRows(host: HTMLElement): HTMLButtonElement[] {
-  return [
-    ...host.querySelectorAll<HTMLButtonElement>(
-      ".ub-document-sidebar .ub-nav li button",
-    ),
-  ];
+  const navigation = sidebarControls(host).getByText("Navigation").closest("section") as HTMLElement;
+  // Ordering covers every mounted row, even if its name or visibility regresses.
+  return within(navigation).getAllByRole<HTMLButtonElement>("button", { hidden: true });
 }
 
 describe("the sidebar is the _sidebar document", () => {
@@ -269,6 +306,7 @@ describe("the sidebar is the _sidebar document", () => {
     // even while the sidebar room cannot accept reordering writes.
     expect(current).toBeInstanceOf(HTMLButtonElement);
     expect(current?.textContent).toBe("Overview");
+    expect(other?.textContent).toBe("Editing");
     expect(current?.getAttribute("aria-current")).toBe("page");
     expect(other?.getAttribute("aria-current")).toBeNull();
     expect(toggle).toBeInstanceOf(HTMLButtonElement);
@@ -281,7 +319,15 @@ describe("the sidebar is the _sidebar document", () => {
       expect(button?.hasAttribute("aria-grabbed")).toBe(false);
       expect(button?.hasAttribute("aria-disabled")).toBe(false);
     }
-    expect(host.querySelectorAll('.ub-drag-handle, [aria-label^="Move document"], [aria-label^="Move group"]')).toHaveLength(0);
+    // Move controls have names; the inventories below also rule out decorative
+    // handles without relying on a styling marker that could be renamed.
+    expect(sidebarControls(host).queryAllByLabelText(/^Move (document|group)/)).toHaveLength(0);
+    expectNoExtraGroupChrome(host);
+    for (const row of [current, other]) {
+      // The navigation button is the whole row, with no separate handle.
+      // Its exact text above also rules out a grip added inside the button.
+      expect(row?.parentElement?.children).toHaveLength(1);
+    }
 
     act(() => toggle?.click());
     expect(toggle?.getAttribute("aria-expanded")).toBe("false");
@@ -309,7 +355,8 @@ describe("the sidebar is the _sidebar document", () => {
     expect(groupNames(host)).toEqual(["Reading", "Later"]);
     expect(rowTitles(host, 0)).toEqual(["Overview", "Editing"]);
     expect(rowTitles(host, 1)).toEqual(["Sync"]);
-    expect(host.querySelectorAll(".ub-group-count")).toHaveLength(0);
+    // The heading inventory rules out separate count badges even after restyling.
+    expectNoExtraGroupChrome(host);
 
     // ---- within a group: "Editing" to the top ----
     act(() => moveDoc(peer, TWO, reading, 0));
@@ -381,9 +428,9 @@ describe("the sidebar is the _sidebar document", () => {
     // A deep link to a document nobody ever pinned: it opens, and the sidebar
     // says so by staying empty rather than by inventing an entry for it.
     const host = await openApp(`/${WORKSPACE}/${THREE}`);
-    expect(host.querySelector(".ub-title")).toHaveProperty("value", "Sync");
+    expect(within(host).getByPlaceholderText("Untitled")).toHaveProperty("value", "Sync");
     expect(sections(host)).toHaveLength(0);
-    expect(host.querySelector(".ub-empty")?.textContent).toContain("Nothing pinned yet");
+    expect(sidebarControls(host).getByText(/Nothing pinned yet/).textContent).toContain("Nothing pinned yet");
 
     // The keyboard path: a real control in the tab order, no pointer anywhere.
     const trigger = actionsTrigger(host);
@@ -404,7 +451,9 @@ describe("the sidebar is the _sidebar document", () => {
     // open, not every row in the column.
     expect(rows(host, 0)[0]?.getAttribute("aria-current")).toBe("page");
     expect(
-      host.querySelector(".ub-all-open-entry")?.getAttribute("aria-current"),
+      // The still-open menu hides the shell; visible text identifies the
+      // mounted navigation button even while its role/name is suppressed.
+      sidebarControls(host).getByText("All docs").getAttribute("aria-current"),
     ).toBeNull();
 
     // And the same control is the way back out.
@@ -414,7 +463,7 @@ describe("the sidebar is the _sidebar document", () => {
     openActions(host);
     expect(documentAction("Pin to sidebar")).not.toBeUndefined();
     // Unpinned is not deleted: the document is still open and still editable.
-    expect(host.querySelector(".ub-title")).toHaveProperty("value", "Sync");
+    expect(within(host).getByPlaceholderText("Untitled")).toHaveProperty("value", "Sync");
   });
 
   it("makes, renames and deletes groups in place", async () => {
@@ -422,14 +471,15 @@ describe("the sidebar is the _sidebar document", () => {
     const peer = peerOf(sidebarDoc());
     const host = await openApp(`/${WORKSPACE}`);
 
-    act(() => host.querySelector<HTMLButtonElement>(".ub-group-add")?.click());
+    act(() => sidebarControls(host).getByRole("button", { name: "+ group" }).click());
     // Straight into its own name: the placeholder is not a decision.
-    const field = host.querySelector<HTMLInputElement>(".ub-group-rename");
+    const field = sidebarControls(host).getByRole<HTMLInputElement>("textbox", { name: "Group name" });
     expect(field).not.toBeNull();
     expect(document.activeElement).toBe(field);
     // Replacing the sortable heading with a field must not make its section
     // an inherited disabled/pressed control containing editable descendants.
-    for (const element of [field, field?.closest(".ub-group")]) {
+    // The unnamed section is the sortable wrapper whose inherited state matters.
+    for (const element of [field, field.closest("section")]) {
       expect(element?.hasAttribute("aria-disabled")).toBe(false);
       expect(element?.hasAttribute("aria-pressed")).toBe(false);
       expect(element?.hasAttribute("aria-grabbed")).toBe(false);
@@ -461,8 +511,8 @@ describe("the sidebar is the _sidebar document", () => {
 
     // Escape takes back the group the field itself made: cancelling is not a
     // decision to keep a group called "New group".
-    act(() => host.querySelector<HTMLButtonElement>(".ub-group-add")?.click());
-    act(() => press(host.querySelector(".ub-group-rename"), "Escape"));
+    act(() => sidebarControls(host).getByRole("button", { name: "+ group" }).click());
+    act(() => press(sidebarControls(host).getByRole("textbox", { name: "Group name" }), "Escape"));
     expect(stored(peer)).toEqual([
       ["Reading", []],
       ["Elsewhere", []],
@@ -470,10 +520,10 @@ describe("the sidebar is the _sidebar document", () => {
 
     // Deleting takes the group and its pins — never the documents, which the
     // sidebar only ever held the uuids of.
-    const remove = host.querySelector<HTMLButtonElement>('[aria-label="Delete group Reading"]');
+    const remove = sidebarControls(host).getByRole<HTMLButtonElement>("button", { name: "Delete group Reading" });
     act(() => remove?.click());
     expect(groupNames(host)).toEqual(["Reading", "Elsewhere"]);
-    act(() => document.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-action"]')?.click());
+    act(() => within(screen.getByRole("alertdialog", { name: "Delete group Reading?" })).getByRole("button", { name: "Delete group" }).click());
     expect(groupNames(host)).toEqual(["Elsewhere"]);
     expect(stored(peer)).toEqual([["Elsewhere", []]]);
   });
@@ -487,14 +537,14 @@ describe("the sidebar is the _sidebar document", () => {
     const host = await openApp(`/${WORKSPACE}`);
     const writes = vi.fn();
     sidebar.on("update", writes);
-    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Delete group Reading"]')?.click());
-    const dialog = document.querySelector<HTMLElement>('[role="alertdialog"]');
+    act(() => sidebarControls(host).getByRole("button", { name: "Delete group Reading" }).click());
+    const dialog = screen.getByRole("alertdialog", { name: "Delete group Reading?" });
     expect(dialog?.textContent).toContain("Delete group Reading?");
     expect(writes).not.toHaveBeenCalled();
     await act(async () => {
-      dialog?.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-cancel"]')?.click();
+      within(dialog).getByRole("button", { name: "Cancel" }).click();
     });
-    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(screen.queryByRole("alertdialog", { name: "Delete group Reading?" })).toBeNull();
     expect(writes).not.toHaveBeenCalled();
     expect(stored(peer)).toEqual(before);
   });
@@ -515,9 +565,9 @@ describe("the sidebar is the _sidebar document", () => {
     const peer = peerOf(sidebar);
     const host = await openApp(`/${WORKSPACE}`);
     const before = [directory, ...documents].map((doc) => Y.encodeStateAsUpdate(doc));
-    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Delete group Reading"]')?.click());
+    act(() => sidebarControls(host).getByRole("button", { name: "Delete group Reading" }).click());
     expect(stored(peer)).toEqual([["Reading", [ONE, TWO]], ["Elsewhere", [THREE]]]);
-    act(() => document.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-action"]')?.click());
+    act(() => within(screen.getByRole("alertdialog", { name: "Delete group Reading?" })).getByRole("button", { name: "Delete group" }).click());
     expect(stored(peer)).toEqual([["Elsewhere", [THREE]]]);
     expect([directory, ...documents].map((doc) => Y.encodeStateAsUpdate(doc))).toEqual(before);
   });
@@ -531,20 +581,20 @@ describe("the sidebar is the _sidebar document", () => {
     const peer = peerOf(sidebar.ydoc);
     const before = stored(peer);
     const host = await openApp(`/${WORKSPACE}`);
-    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Delete group Reading"]')?.click());
+    act(() => sidebarControls(host).getByRole("button", { name: "Delete group Reading" }).click());
     const writes = vi.fn();
     sidebar.ydoc.on("update", writes);
     act(() => {
       sidebar.status = { ...LIVE, writable: false };
     });
-    act(() => document.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-action"]')?.click());
-    const dialog = document.querySelector<HTMLElement>('[role="alertdialog"]');
+    act(() => within(screen.getByRole("alertdialog", { name: "Delete group Reading?" })).getByRole("button", { name: "Delete group" }).click());
+    const dialog = screen.getByRole("alertdialog", { name: "Delete group Reading?" });
     expect(dialog?.textContent).toContain("Delete unavailable");
     expect(dialog?.textContent).toContain("Nothing has been deleted");
     expect(stored(peer)).toEqual(before);
     expect(writes).not.toHaveBeenCalled();
-    act(() => dialog?.querySelector<HTMLButtonElement>('[data-slot="alert-dialog-cancel"]')?.click());
-    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    act(() => within(dialog).getByRole("button", { name: "Cancel" }).click());
+    expect(screen.queryByRole("alertdialog", { name: "Delete group Reading?" })).toBeNull();
     expect(writes).not.toHaveBeenCalled();
   });
 
@@ -555,14 +605,16 @@ describe("the sidebar is the _sidebar document", () => {
     pinDoc(sidebar, reading, ONE);
 
     const host = await openApp(`/${WORKSPACE}`);
+    // This unnamed animation boundary remains mounted while its list is inert.
     const body = (): HTMLElement | null =>
-      host.querySelector<HTMLElement>(".ub-group-body");
+      sections(host)[0]?.querySelector<HTMLElement>(".ub-group-body") ?? null;
     expect(groupToggle(host, 0)?.getAttribute("aria-expanded")).toBe("true");
     expect(body()?.dataset.collapsed).toBe("false");
 
     act(() => groupToggle(host, 0)?.click());
     expect(groupToggle(host, 0)?.getAttribute("aria-expanded")).toBe("false");
-    expect(host.querySelectorAll(".ub-group-count")).toHaveLength(0);
+    expect(groupToggle(host, 0)?.textContent).toBe("Reading");
+    expectNoExtraGroupChrome(host);
     // Still in the DOM — the transition is a CSS animation (#110) — and inert,
     // so a collapsed group is out of the tab order all the same.
     expect(body()?.dataset.collapsed).toBe("true");
@@ -598,7 +650,7 @@ describe("the sidebar is the _sidebar document", () => {
     // The title the stub still carries, marked — never the eight characters of
     // uuid this used to fall back to (#287).
     expect(rowTitles(host, 0)).toEqual(["Overview \u00b7 archived", "Editing"]);
-    expect(host.querySelector(".ub-list")?.textContent ?? "").not.toContain(
+    expect(within(host).getByLabelText("Sidebar").textContent ?? "").not.toContain(
       ONE.slice(0, 8),
     );
     // The pin is untouched. Archiving unpins now (#957), but this archive came
@@ -645,8 +697,8 @@ describe("the sidebar is the _sidebar document", () => {
 });
 
 describe("workspace settings is a route-driven sidebar mode", () => {
-  function pane(host: HTMLElement, selector: string): HTMLElement {
-    return host.querySelector<HTMLElement>(selector) as HTMLElement;
+  function pane(host: HTMLElement, label: string): HTMLElement {
+    return within(host).getByLabelText(label);
   }
 
   function expectDead(offscreen: HTMLElement): void {
@@ -655,7 +707,12 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     // The controls, draggable rows and drop targets remain mounted for the CSS
     // transition, but every one is beneath the inert boundary for its whole
     // duration — transform and opacity are never the interaction boundary.
-    const reachable = offscreen.querySelectorAll("button, input");
+    // Hidden roles intentionally enumerate every mounted control, without a
+    // name filter: aria-hidden suppresses accessible names on this boundary.
+    const reachable = [
+      ...within(offscreen).queryAllByRole("button", { hidden: true }),
+      ...within(offscreen).queryAllByRole("textbox", { hidden: true }),
+    ];
     expect(reachable.length).toBeGreaterThan(0);
     for (const node of reachable) expect(node.closest("[inert]")).toBe(offscreen);
   }
@@ -670,57 +727,55 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     const sidebar = sidebarDoc();
     pinDoc(sidebar, createGroup(sidebar, "Reading"), ONE);
     const host = await openApp(`/${WORKSPACE}`);
-    const documents = pane(host, ".ub-document-sidebar");
-    const settings = pane(host, ".ub-settings-sidebar");
-    const settingsEntry = host.querySelector<HTMLButtonElement>(
-      ".ub-settings-entry",
-    );
+    const documents = pane(host, "Documents");
+    const settings = pane(host, "Workspace settings");
+    const settingsEntry = within(host).getByRole<HTMLButtonElement>("button", { name: "Workspace settings" });
 
     expectLive(documents);
     expectDead(settings);
-    expect(host.querySelectorAll('[data-testid="account-menu"]')).toHaveLength(1);
-    const accountControl = host.querySelector('[data-testid="account-menu"]');
-    expect(accountControl?.closest(".ub-sidebar-pane")).toBeNull();
+    // Label queries count the mounted account controls, including hidden ones.
+    expect(within(host).queryAllByLabelText(/; preferences$/)).toHaveLength(1);
+    const accountControl = within(host).getByLabelText(/; preferences$/);
+    expect(documents.contains(accountControl)).toBe(false);
+    expect(settings.contains(accountControl)).toBe(false);
 
     settingsEntry?.focus();
     act(() => settingsEntry?.click());
     expect(window.location.pathname).toBe(`/${WORKSPACE}/settings`);
     // This assertion runs in the same task as the route change, while the
     // 180ms CSS transition is still in flight.
-    expect(host.querySelector(".ub-list")?.getAttribute("data-mode")).toBe(
+    expect(within(host).getByLabelText("Sidebar").getAttribute("data-mode")).toBe(
       "settings",
     );
     expectDead(documents);
     expectLive(settings);
-    expect(host.querySelectorAll('[data-testid="account-menu"]')).toHaveLength(1);
-    expect(host.querySelector('[data-testid="account-menu"]')).toBe(accountControl);
+    expect(within(host).queryAllByLabelText(/; preferences$/)).toHaveLength(1);
+    expect(within(host).getByLabelText(/; preferences$/)).toBe(accountControl);
     expect(document.activeElement).toBe(
-      settings.querySelector(".ub-settings-back"),
+      within(settings).getByRole("button", { name: `Back to Unnamed workspace · ${WORKSPACE.slice(0, 8)}` }),
     );
     expect(settings.textContent).toContain(`Back to Unnamed workspace · ${WORKSPACE.slice(0, 8)}`);
-    expect(settings.querySelector(".ub-nav-label")?.textContent).toBe(
+    expect(within(settings).getByText("Workspace settings").textContent).toBe(
       "Workspace settings",
     );
-    expect(settings.querySelector('[aria-current="page"]')?.textContent).toContain(
+    expect(within(settings).getByRole("button", { name: /./, current: "page" }).textContent).toContain(
       "General",
     );
-    expect(host.querySelector("#ub-settings-title")?.textContent).toBe("General");
+    expect(within(host).getByRole("heading", { name: "General" }).textContent).toBe("General");
     expect(
-      host.querySelector(".ub-sidebar-toggle")?.getAttribute("aria-label"),
+      within(host).getByRole("button", { name: "Hide sidebar" }).getAttribute("aria-label"),
     ).toBe("Hide sidebar");
 
-    const tags = [
-      ...settings.querySelectorAll<HTMLButtonElement>(".ub-settings-nav button"),
-    ].find((button) => button.textContent?.includes("Tags"));
+    const tags = within(settings).getByRole<HTMLButtonElement>("button", { name: "Tags" });
     act(() => tags?.click());
     expect(window.location.pathname).toBe(`/${WORKSPACE}/settings/tags`);
-    expect(settings.querySelector('[aria-current="page"]')?.textContent).toContain(
+    expect(within(settings).getByRole("button", { name: /./, current: "page" }).textContent).toContain(
       "Tags",
     );
-    expect(host.querySelector("#ub-settings-title")?.textContent).toBe("Tags");
+    expect(within(host).getByRole("heading", { name: "Tags" }).textContent).toBe("Tags");
     expect(rooms.has(settingsRoom(WORKSPACE))).toBe(true);
 
-    act(() => settings.querySelector<HTMLButtonElement>(".ub-settings-back")?.click());
+    act(() => within(settings).getByRole("button", { name: `Back to Unnamed workspace · ${WORKSPACE.slice(0, 8)}` }).click());
     expect(window.location.pathname).toBe(`/${WORKSPACE}`);
     expectDead(settings);
     expectLive(documents);
@@ -730,27 +785,27 @@ describe("workspace settings is a route-driven sidebar mode", () => {
   it("opens a pasted settings address directly", async () => {
     seedDirectory();
     const host = await openApp(`/${WORKSPACE}/settings`);
-    expect(host.querySelector(".ub-list")?.getAttribute("data-mode")).toBe(
+    expect(within(host).getByLabelText("Sidebar").getAttribute("data-mode")).toBe(
       "settings",
     );
-    expect(host.querySelector("#ub-settings-title")?.textContent).toBe("General");
-    expect(host.querySelector(".ub-document-sidebar")?.hasAttribute("inert")).toBe(
+    expect(within(host).getByRole("heading", { name: "General" }).textContent).toBe("General");
+    expect(documentsPane(host).hasAttribute("inert")).toBe(
       true,
     );
   });
 
   it("opens the pasted Tags settings address directly", async () => {
     const host = await openApp(`/${WORKSPACE}/settings/tags`);
-    expect(host.querySelector("#ub-settings-title")?.textContent).toBe("Tags");
+    expect(within(host).getByRole("heading", { name: "Tags" }).textContent).toBe("Tags");
     expect(
-      host.querySelector(".ub-settings-sidebar [aria-current=page]")?.textContent,
+      within(pane(host, "Workspace settings")).getByRole("button", { name: /./, current: "page" }).textContent,
     ).toContain("Tags");
     expect(rooms.has(settingsRoom(WORKSPACE))).toBe(true);
   });
 
   it("offers no settings destination when the address names no workspace", async () => {
     const host = await openApp("/not-a-workspace");
-    expect(host.querySelector(".ub-settings-entry")).toBeNull();
+    expect(within(host).queryByRole("button", { name: "Workspace settings" })).toBeNull();
   });
 });
 
@@ -768,9 +823,9 @@ describe("the sidebar's fixed navigation", () => {
     // Nothing pinned yet: the section is already there, above the line that
     // says so — an empty sidebar still opens with somewhere to go.
     expect(columnOrder(host)).toEqual([
-      "ub-list-head",
-      "ub-nav",
-      "ub-empty",
+      "creation",
+      "navigation",
+      "empty",
     ]);
     expect(navRows(host).map((row) => row.textContent)).toEqual([
       "All docs",
@@ -785,17 +840,22 @@ describe("the sidebar's fixed navigation", () => {
       pinDoc(sidebar, createGroup(sidebar, "Reading"), ONE);
     });
     expect(columnOrder(host)).toEqual([
-      "ub-list-head",
-      "ub-nav",
-      "ub-group",
+      "creation",
+      "navigation",
+      "group",
     ]);
-    expect(host.querySelector('[data-slot="sidebar-footer"] .ub-all-open-entry')).toBeNull();
-    expect(host.querySelector('[data-slot="sidebar-footer"] .ub-settings-entry')).not.toBeNull();
-    expect(host.querySelector('[data-slot="sidebar-footer"] [data-testid="account-menu"]')).not.toBeNull();
+    // The footer is an unnamed layout wrapper. Its structural marker sets the
+    // original absence scope; the named control and non-null check prove it exists.
+    const footer = within(host).getByRole("button", { name: "Workspace settings" }).closest('[data-slot="sidebar-footer"]') as HTMLElement;
+    expect(footer).not.toBeNull();
+    expect(within(footer).queryByRole("button", { name: "All docs" })).toBeNull();
+    expect(within(footer).getByRole("button", { name: "Workspace settings" })).not.toBeNull();
+    expect(within(footer).getByLabelText(/; preferences$/)).not.toBeNull();
 
     // Chrome, not curation: nothing in it can be dragged, and no drag of any
     // kind can land in it.
-    const nav = host.querySelector(".ub-nav");
+    const nav = sidebarControls(host).getByText("Navigation").closest("section");
+    // Native draggable attributes are the interaction contract under test.
     expect(nav?.querySelectorAll("[draggable]")).toHaveLength(0);
   });
 
@@ -829,7 +889,7 @@ describe("the sidebar's fixed navigation", () => {
     }
 
     expect(window.location.pathname).toBe(`/${WORKSPACE}/${THREE}`);
-    expect(host.querySelector(".ub-title")).toHaveProperty("value", "Sync");
+    expect(within(host).getByPlaceholderText("Untitled")).toHaveProperty("value", "Sync");
   });
 });
 
@@ -860,7 +920,9 @@ describe("the sidebar's directory line reads a refusal", () => {
       ...status,
     };
     const host = await openApp(`/${WORKSPACE}`);
-    return host.querySelector(".ub-list-head .ub-muted")?.textContent ?? "";
+    // The status shares an unnamed creation wrapper, anchored by its button.
+    const head = sidebarControls(host).getByRole("button", { name: "new doc unavailable" }).parentElement as HTMLElement;
+    return within(head).getByText(/^(update required|no hub token|not authorized|edit refused|directory synced|syncing…|offline)$/).textContent ?? "";
   }
 
   it("names which refusal it is, rather than calling a refused page busy", async () => {
@@ -896,7 +958,7 @@ describe("pinning waits for the current sidebar state", () => {
     const host = await openApp(`/${WORKSPACE}`);
     const writes = vi.fn();
     sidebar.ydoc.on("update", () => writes());
-    const pin = host.querySelector<HTMLButtonElement>(".ub-docs-pin");
+    const pin = within(host).getAllByRole<HTMLButtonElement>("button", { name: /^Pin .+ to the sidebar unavailable while sidebar is not ready to write$/ })[0];
 
     expect(pin?.disabled).toBe(true);
     expect(pin?.getAttribute("aria-label")).toContain(
@@ -907,7 +969,7 @@ describe("pinning waits for the current sidebar state", () => {
     expect(writes).not.toHaveBeenCalled();
     expect(stored(sidebar.ydoc)).toEqual([]);
     // Group creation retains its admission-only gate.
-    expect(host.querySelector<HTMLButtonElement>(".ub-group-add")?.disabled).toBe(false);
+    expect(sidebarControls(host).getByRole<HTMLButtonElement>("button", { name: "+ group" }).disabled).toBe(false);
   });
 
   it("disables the open document's pin before sync", async () => {
@@ -946,7 +1008,7 @@ describe("pinning waits for the current sidebar state", () => {
       const host = await openApp(`/${WORKSPACE}${surface === "document" ? `/${ONE}` : ""}`);
       if (surface === "document") openActions(host);
       const pin = surface === "list"
-        ? host.querySelector<HTMLButtonElement>(".ub-docs-pin")
+        ? within(host).getAllByRole<HTMLButtonElement>("button", { name: /^Pin .+ to the sidebar$/ })[0]
         : documentAction(pinned ? "Unpin from sidebar" : "Pin to sidebar");
       expect(pin).toBeTruthy();
       expect(pin?.getAttribute("aria-disabled")).not.toBe("true");
@@ -972,22 +1034,20 @@ describe("unwritable workspace rooms", () => {
     const host = await openApp(`/${WORKSPACE}`);
     const before = rooms.size;
 
-    const create = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent?.includes("new doc"),
-    );
+    const create = sidebarControls(host).getByRole<HTMLButtonElement>("button", { name: "new doc unavailable" });
     expect(create?.disabled).toBe(true);
     expect(create?.title).toContain("directory is read-only");
     expect(create?.textContent).toContain("unavailable");
-    const listPin = host.querySelector<HTMLButtonElement>(".ub-docs-pin");
+    const listPin = within(host).getAllByRole<HTMLButtonElement>("button", { name: /^Pin .+ to the sidebar unavailable while sidebar is not ready to write$/ })[0];
     expect(listPin?.disabled).toBe(true);
     expect(listPin?.getAttribute("aria-label")).toContain(
       "unavailable while sidebar is not ready to write",
     );
-    expect(host.querySelector(".ub-sidebar-unwritable")?.textContent).toContain(
+    expect(sidebarControls(host).getByText(/Sidebar changes unavailable/).textContent).toContain(
       "Sidebar changes unavailable",
     );
-    expect(host.querySelectorAll(".ub-group-act")).toHaveLength(0);
-    expect(host.querySelector<HTMLButtonElement>(".ub-group-add")?.disabled).toBe(
+    expect(sidebarControls(host).queryAllByLabelText(/^(Rename|Delete) group /)).toHaveLength(0);
+    expect(sidebarControls(host).getByRole<HTMLButtonElement>("button", { name: "+ group" }).disabled).toBe(
       true,
     );
 
