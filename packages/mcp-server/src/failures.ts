@@ -51,7 +51,6 @@
  * room-by-room wording.
  */
 
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   AnnotationCellError,
   AnnotationRangeError,
@@ -68,7 +67,6 @@ import {
   TableMappingRequiredError,
 } from "@uberblick/schema";
 import { log } from "./log.js";
-import { outputSchemas } from "./outputs.js";
 import { PersistenceError } from "./replica.js";
 
 /**
@@ -505,11 +503,13 @@ export function failureContract(tool: string): string {
     : `\n\n${FAILURE_FLOOR}`;
 }
 
-function failure(payload: Record<string, unknown>): CallToolResult {
-  return {
-    isError: true,
-    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
-  };
+export interface ToolFailure {
+  isError: true;
+  payload: Record<string, unknown>;
+}
+
+function failure(payload: Record<string, unknown>): ToolFailure {
+  return { isError: true, payload };
 }
 
 /**
@@ -522,7 +522,7 @@ function failure(payload: Record<string, unknown>): CallToolResult {
 function stamped(
   tool: string,
   payload: Record<string, unknown> & { error: string },
-): CallToolResult {
+): ToolFailure {
   const recovery = RECOVERIES[payload.error];
   if (recovery === undefined) {
     return failure(payload);
@@ -543,7 +543,7 @@ function stamped(
  * Block comparison errors come back with `currentText` and `currentRev`, so a
  * caller can re-diff and retry without another round trip.
  */
-export function toFailure(tool: string, error: unknown): CallToolResult {
+export function toFailure(tool: string, error: unknown): ToolFailure {
   if (error instanceof DataError) {
     return stamped(tool, {
       error: error.code,
@@ -669,33 +669,4 @@ export function toFailure(tool: string, error: unknown): CallToolResult {
   // is safe to say.
   log.error("tool call failed", error);
   return stamped(tool, { error: "internal_error", message: INTERNAL_ERROR_MESSAGE });
-}
-
-/**
- * Validate successful answers inside the failure boundary. The SDK's own
- * output check runs later and produces a plain-text error without logging;
- * a server-produced mismatch must instead use our text-only internal_error.
- *
- * The tool's own name is what tells the contract whether this call could have
- * written anything — the single fact a failure payload cannot work out for
- * itself, since the same `doc_not_found` is a read's dead end and a write's.
- */
-export function guarded<Args>(
-  tool: keyof typeof outputSchemas,
-  handler: (args: Args) => Promise<CallToolResult>,
-): (args: Args) => Promise<CallToolResult> {
-  return async (args: Args) => {
-    try {
-      const result = await handler(args);
-      if (!result.isError) {
-        const parsed = outputSchemas[tool].safeParse(result.structuredContent);
-        if (!parsed.success) {
-          throw new Error(`Output validation failed for ${tool}: ${parsed.error.message}`);
-        }
-      }
-      return result;
-    } catch (error) {
-      return toFailure(tool, error);
-    }
-  };
 }

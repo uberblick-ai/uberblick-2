@@ -23,11 +23,10 @@
  * "stored by the hub" either, which is why `SYNCED_MEANS` in ./tools/descriptions.ts says so in the
  * tool descriptions rather than leaving the word to be read generously.
  *
- * Every handler is wrapped by `guarded` from ./failures.ts, which owns the
- * other half of that honesty: what a call answers with when it fails. The
- * failure floor — the `error` code, the `message`, what happened to the write
- * and how to recover — is stamped there rather than restated at each throw
- * site, so the tool modules' throw sites carry only what they know on top of it.
+ * Every registration calls its operation through ./tool-adapter.ts, which
+ * validates the payload and serializes the MCP answer. ./failures.ts stamps
+ * the failure floor — the error, message, write state and recovery — so throw
+ * sites carry only what they know on top of it.
  *
  * All document reads and writes go through `@uberblick/schema`. That is not
  * politeness: the web editor destroys content outside its palette, and the
@@ -37,34 +36,33 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { GuidanceBriefing } from "./guidance.js";
 import type { Replicas } from "./replica.js";
-import { registerSidebarTools } from "./sidebar-tools.js";
+import { registerSidebarTools } from "./registrations/sidebar-tools.js";
 import { createToolContext } from "./tools/context.js";
-import { json } from "./tools/helpers.js";
-import { registerListTags } from "./tools/list-tags.js";
-import { registerCreateDoc } from "./tools/create-doc.js";
-import { registerGetDoc } from "./tools/get-doc.js";
-import { registerGetData } from "./tools/get-data.js";
-import { registerUpdateData } from "./tools/update-data.js";
-import { registerListDocs } from "./tools/list-docs.js";
-import { registerSearch } from "./tools/search.js";
-import { registerBacklinks } from "./tools/backlinks.js";
-import { registerFindDecisions } from "./tools/find-decisions.js";
-import { registerEditBlock } from "./tools/edit-block.js";
-import { registerInsertBlock } from "./tools/insert-block.js";
-import { registerDeleteBlock } from "./tools/delete-block.js";
-import { registerSetTags } from "./tools/set-tags.js";
-import { registerSetLinks } from "./tools/set-links.js";
-import { registerSetTitle } from "./tools/set-title.js";
-import { registerSetDescription } from "./tools/set-description.js";
-import { registerSetTldr } from "./tools/set-tldr.js";
-import { registerSetStatus } from "./tools/set-status.js";
-import { registerSetChangelogSuggestion } from "./tools/set-changelog-suggestion.js";
-import { registerArchiveDoc } from "./tools/archive-doc.js";
-import { registerRestoreDoc } from "./tools/restore-doc.js";
-import { registerAnnotate } from "./tools/annotate.js";
-import { registerLinkRange } from "./tools/link-range.js";
-import { registerExportMarkdown } from "./tools/export-markdown.js";
-import { registerSyncStatus } from "./tools/sync-status.js";
+import { registerListTags } from "./registrations/list-tags.js";
+import { registerCreateDoc } from "./registrations/create-doc.js";
+import { registerGetDoc } from "./registrations/get-doc.js";
+import { registerGetData } from "./registrations/get-data.js";
+import { registerUpdateData } from "./registrations/update-data.js";
+import { registerListDocs } from "./registrations/list-docs.js";
+import { registerSearch } from "./registrations/search.js";
+import { registerBacklinks } from "./registrations/backlinks.js";
+import { registerFindDecisions } from "./registrations/find-decisions.js";
+import { registerEditBlock } from "./registrations/edit-block.js";
+import { registerInsertBlock } from "./registrations/insert-block.js";
+import { registerDeleteBlock } from "./registrations/delete-block.js";
+import { registerSetTags } from "./registrations/set-tags.js";
+import { registerSetLinks } from "./registrations/set-links.js";
+import { registerSetTitle } from "./registrations/set-title.js";
+import { registerSetDescription } from "./registrations/set-description.js";
+import { registerSetTldr } from "./registrations/set-tldr.js";
+import { registerSetStatus } from "./registrations/set-status.js";
+import { registerSetChangelogSuggestion } from "./registrations/set-changelog-suggestion.js";
+import { registerArchiveDoc } from "./registrations/archive-doc.js";
+import { registerRestoreDoc } from "./registrations/restore-doc.js";
+import { registerAnnotate } from "./registrations/annotate.js";
+import { registerLinkRange } from "./registrations/link-range.js";
+import { registerExportMarkdown } from "./registrations/export-markdown.js";
+import { registerSyncStatus } from "./registrations/sync-status.js";
 
 export function registerTools(
   server: McpServer,
@@ -99,9 +97,5 @@ export function registerTools(
   registerExportMarkdown(server, context);
   registerSyncStatus(server, context);
 
-  registerSidebarTools(server, replicas, {
-    requireStub: context.requireStub,
-    durability: context.durability,
-    json,
-  });
+  registerSidebarTools(server, context);
 }
