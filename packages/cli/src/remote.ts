@@ -1,12 +1,14 @@
-/** Verified workspace joining and promotion share the same bridge checks. */
+/** Verified workspace fetching and promotion share the same bridge checks. */
 
-import { parseArgs } from "node:util";
-import { basename } from "node:path";
+import { Console } from "node:console";
+import { Writable } from "node:stream";
+import { readDeviceLogin } from "@uberblick/hub/device-login";
 import {
   compareCorpus,
   inspectRemote,
   isIdentical,
-  liveDocs,
+  defaultDatabasePath,
+  readWorkspaceName,
   syncWorkspace,
   usesDeviceLogin,
 } from "@uberblick/mcp-server";
@@ -17,20 +19,18 @@ import type {
   McpConfig,
 } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
-import { parseJoinTarget } from "@uberblick/hub/remote-url";
 export { normalizeRemoteUrl, parseJoinTarget } from "@uberblick/hub/remote-url";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import {
-  readCredentials,
   resolveConfig,
   writeHubAdmission,
 } from "./config.js";
 import { resolveProjectBinding, validateProjectBinding, writeProjectBinding } from "./project-binding.js";
-import { takeHelp } from "./help.js";
-import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
 import { type Io, shellArgument } from "./io.js";
+import { displayWorkspaceHub, useBindingLines, useField } from "./workspace-use-output.js";
 import { ORIGIN_LABELS } from "./status.js";
+import { readWorkspaceHub, workspaceRegistryPath } from "./workspace-registry.js";
 
 export interface RemotePersistence {
   /** Files written, for the report. */
@@ -49,6 +49,8 @@ export function setRemote(
   const workspaceId = options.workspace ?? current.binding?.workspaceId;
   if (workspaceId === undefined) throw new Error("a workspace is required before binding a remote hub");
   const binding = validateProjectBinding({ workspaceId, hubUrl: url }, "project binding");
+  const previousHub = readWorkspaceHub(workspaceId, env);
+  const registersPrevious = current.binding !== null && readWorkspaceHub(current.binding.workspaceId, env) === undefined;
   // Failure to remember device admission must never leave the project pointing
   // at a Docker hub that could later fall back to this computer's local secret.
   const admission = writeHubAdmission(url, options.deviceAdmission === true, env);
@@ -57,7 +59,7 @@ export function setRemote(
     record: "join",
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
   });
-  return { written: [...admission.written, path], warnings: admission.warnings };
+  return { written: [...admission.written, ...(previousHub === binding.hubUrl && !registersPrevious ? [] : [workspaceRegistryPath(env)]), path], warnings: admission.warnings };
 }
 
 function plural(count: number, noun: string): string {
@@ -78,6 +80,9 @@ function hubProblem(url: string, hub: HubState): string {
   if (hub.status === "disabled") {
     return `no signing secret is configured, so ${url} cannot be authenticated to`;
   }
+  if (hub.status === "quarantined") {
+    return `${url} stopped syncing because this replica is not durable: ${hub.reason}`;
+  }
   return `${url} did not answer`;
 }
 
@@ -87,7 +92,7 @@ function hubProblem(url: string, hub: HubState): string {
  *
  * `ub init <hub-url>` asks this before it writes a line of configuration, so
  * that a machine is never bound to an endpoint that would refuse it — and asks
- * it through {@link corpusProblem}, the same verdict `join` uses, so that
+ * it through {@link corpusProblem}, the same verdict `use <link>` uses, so that
  * nothing answered, a refused credential, a protocol skew and a hub that
  * accepts the socket without ever serving its directory are worded once for
  * both verbs.
@@ -114,7 +119,6 @@ function remoteConfig(bridge: Bridge): McpConfig {
 async function openRemote(bridge: Bridge): Promise<Corpus> {
   const first = await inspectRemote(remoteConfig(bridge), { silent: true });
   if (first.hub.status !== "hub-down" && first.hub.status !== "connecting") return first;
-  bridge.io.err("ub workspace join: initial connection did not finish; retrying once…\n");
   return await inspectRemote(remoteConfig(bridge), { silent: true });
 }
 
@@ -127,100 +131,6 @@ function listDocs(docs: readonly { uuid: string; title: string }[], limit = 10):
     text += `  … and ${docs.length - limit} more\n`;
   }
   return text;
-}
-
-/** The verified join result, without configuration or verification internals. */
-function report(
-  verb: string,
-  target: string,
-  corpus: Corpus,
-  persistence: RemotePersistence,
-  /** What this verb has to say about the documents, if anything. */
-  note = "",
-): string {
-  const live = liveDocs(corpus);
-  const tombstones = corpus.entries.length - live.length;
-  let text =
-    `${verb} ${plural(corpus.entries.length, "document")} — directory verified on ` +
-    `${target}\n\n`;
-  text += listDocs(live);
-  if (tombstones > 0) {
-    text +=
-      `\n${plural(tombstones, "archived document")} moved and verified. ` +
-      "They stay archived until restored.\n";
-  }
-  text += note;
-  for (const path of persistence.written) {
-    if (basename(path) === ".uberblick.json") text += `\nBinding written: ${path}\n`;
-  }
-  text +=
-    "\nVerification does not establish hub disk durability or convergence of other clients.\n";
-  return text;
-}
-
-/** Exported so `join`'s help can be checked against its parser. */
-export const WORKSPACE_JOIN_OPTIONS = {} as const;
-
-export const WORKSPACE_JOIN_HELP = `usage: ub workspace join <url-with-workspace-id>
-
-Bind this project to a workspace that already lives on a remote hub, whatever is
-here already: the remote's documents are hydrated into that workspace's local
-replica, and the endpoint and the binding are stored. Remote hubs use this
-machine’s stored login from \`ub auth login <hub>\`. No \`ub init\` is needed first.
-
-It never merges two workspaces and it never seeds. A workspace already on this
-machine under a different id keeps its documents and its \`ub workspace list\`
-entry. Switch back with \`ub workspace use <id>\`; the join
-report prints the previous complete binding. A replica this machine
-already holds for *this* id is attached, not replaced: it and the remote
-reconcile as CRDTs, so neither side loses anything.
-
-Verification means the hub acknowledged the writes, then a fresh client read
-the full directory back and compared every document's directory entry. Every
-archived document's content is read back, plus one live document's content when
-the workspace has any. It does not establish that the hub flushed the writes to
-disk or that other clients have converged. When moving the same workspace from
-another hub, later writes to that old hub are outside the verified snapshot;
-close other clients before relying on it.
-
-operands:
-  <url-with-workspace-id>
-                        the endpoint with the workspace id as its last path
-                        segment, like wss://hub.example.ts.net/ws/<workspace-id>.
-                        \`ub workspace promote\` prints it, and \`ub status\` on the
-                        machine that has the workspace names the id. ws:// or
-                        wss:// is stored as given; a bare host and an https://
-                        address is read as the deployed wss://<host>/ws;
-                        http:// is read as ws://<host>/ws. A URL without an id is refused before
-                        anything is written
-
-options:
-  -h, --help            show this help
-
-Sign in with \`ub auth login <hub>\` before joining a remote workspace.
-A loopback-only development hub keeps its local signing-secret admission.`;
-
-interface JoinFlags {
-  /** The endpoint, with the workspace id taken off it. */
-  endpoint: string;
-  /** The workspace id, as typed. */
-  workspace: string;
-}
-
-function parseJoinFlags(argv: string[]): JoinFlags {
-  const { positionals } = parseArgs({
-    args: argv,
-    // The surface `WORKSPACE_JOIN_HELP` is checked against: a flag added here and
-    // not to the help fails in `help.test.ts` rather than in somebody's
-    // terminal.
-    options: WORKSPACE_JOIN_OPTIONS,
-    allowPositionals: true,
-  });
-  const [url, ...rest] = positionals;
-  if (url === undefined || rest.length > 0) {
-    throw new Error("expected exactly one <url-with-workspace-id>");
-  }
-  return parseJoinTarget(url);
 }
 
 function warn(io: Io, warnings: readonly string[]): void {
@@ -273,7 +183,7 @@ export function corpusProblem(url: string, corpus: Corpus): string | null {
 }
 
 /**
- * The verification `join` ends with: what a fresh client finds there, compared
+ * The verification `use <link>` ends with: what a fresh client finds there, compared
  * with what this machine holds, in both directions.
  *
  * Both directions, because "the far side has everything we have" is only half
@@ -323,198 +233,158 @@ export async function verify(
   return { corpus, problem: null };
 }
 
-// --- ub workspace join --------------------------------------------------------
+// --- ub workspace use <link> ------------------------------------------------
 
 /**
- * Bind this machine to the workspace the URL names, and hydrate it.
- *
- * Regardless of what is here already — that is the whole shape of the command.
- * See the module note: the id in the URL settles which workspace this is about,
- * so there is nothing to compare, nothing to merge, and nothing to seed.
+ * The CLI runs one command at a time. Give its bounded bridge a quiet console,
+ * including lib0/Yjs messages, then restore the caller's console on every exit.
+ * Diagnostics come from the returned Corpus and thrown errors instead.
  */
-export async function joinCommand(argv: string[], io: Io): Promise<number> {
-  // First statement, before the URL is even looked at: `ub workspace join <url>
-  // -h` is somebody asking what the form is, and answering it by refusing the
-  // form they got wrong would be the joke this help exists to stop.
-  if (takeHelp(argv, io, WORKSPACE_JOIN_HELP)) return 0;
-
-  let flags: JoinFlags;
-  try {
-    flags = parseJoinFlags(argv);
-  } catch (error) {
-    io.err(
-      `ub workspace join: ${error instanceof Error ? error.message : String(error)}\n\n` +
-        "usage: ub workspace join <url-with-workspace-id>\n",
-    );
-    return 2;
+async function quietLibraries<T>(action: () => Promise<T>): Promise<T> {
+  const original = globalThis.console;
+  const discard = new Writable({ write(_chunk, _encoding, done) { done(); } });
+  globalThis.console = new Console({ stdout: discard, stderr: discard });
+  try { return await action(); }
+  finally {
+    globalThis.console = original;
+    discard.end();
   }
+}
 
+export interface WorkspaceUseOptions {
+  verbose: boolean;
+  json: boolean;
+}
+
+/** Fetch the named replica using the same reconciliation and verification as before. */
+export async function useRemoteWorkspace(
+  flags: { endpoint: string; workspace: string },
+  command: string,
+  io: Io,
+  options: WorkspaceUseOptions,
+): Promise<number> {
   const resolved = resolveConfig();
-  warn(io, resolved.warnings);
-  // The workspace the URL names, not the one in force. A machine with no
-  // configuration at all has none — and one that does have a workspace is not
-  // what this command was asked about. Everything downstream follows from the
-  // id: the rooms opened on the remote, and the `<uuid>.sqlite` replica this
-  // hydrates into, which is a different file from any workspace already here.
-  const bridgeEnv: NodeJS.ProcessEnv = {
-    ...resolved.env,
-    WORKSPACE_ID: flags.workspace,
-    HUB_URL: flags.endpoint,
-    UB_HUB_URL: flags.endpoint,
-  };
-  if (flags.endpoint !== resolved.env.HUB_URL) delete bridgeEnv.HUB_ADMISSION;
-  // Resolution withheld the local secret while bound to a remote endpoint.
-  // Choosing a loopback target recovers that existing authority without
-  // copying it into the configuration or credential store.
-  if (!usesDeviceLogin(flags.endpoint, bridgeEnv)) {
-    const stored = readCredentials();
-    const secret = process.env.HUB_AUTH_TOKEN?.trim() ||
-      (stored.exposed ? null : stored.signingSecret);
-    if (secret !== null) bridgeEnv.HUB_AUTH_TOKEN = secret;
-  } else {
-    delete bridgeEnv.HUB_AUTH_TOKEN;
-  }
-  // An unknown loopback deployment with no local authority is still a device
-  // client; no signing secret is needed to join a released hub.
+  // Resolve the target's admission, rather than inheriting the current project's
+  // mode. In particular, a recorded Docker endpoint must never use a local secret.
+  const target = resolveConfig({ env: { ...process.env, UB_WORKSPACE_ID: flags.workspace, UB_HUB_URL: flags.endpoint } });
+  warn(io, [...new Set([...resolved.warnings, ...target.warnings])]);
+  const bridgeEnv = target.env;
+  // Loopback development with its existing local secret remains exempt.
   if (bridgeEnv.HUB_AUTH_TOKEN === undefined) bridgeEnv.HUB_ADMISSION = "device";
+  if (usesDeviceLogin(flags.endpoint, bridgeEnv)) {
+    const login = readDeviceLogin(flags.endpoint, flags.workspace, bridgeEnv);
+    if (login.status === "sign-in-required") {
+      io.err(
+        `error: you are not signed in to ${login.origin}\n` +
+        "nothing was fetched; the project binding is unchanged\n" +
+        "sign in first, then run use again:\n" +
+        `  ub auth login ${shellArgument(login.origin)}\n  ${command}\n`,
+      );
+      return 1;
+    }
+    if (login.status !== "ready") {
+      io.err(`ub workspace use: ${login.message}\nNothing was fetched; the project binding is unchanged.\nRun again: ${command}\n`);
+      return 1;
+    }
+  }
   let base: McpConfig;
-  try {
-    base = resolveMcpConfig(bridgeEnv);
-  } catch (error) {
-    io.err(`ub workspace join: ${error instanceof Error ? error.message : String(error)}\n`);
+  try { base = resolveMcpConfig(bridgeEnv); }
+  catch (error) {
+    io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\nRun again: ${command}\n`);
     return 2;
   }
-
-  const bridge: Bridge = {
-    base,
-    env: bridgeEnv,
-    target: flags.endpoint,
-    io,
+  const bridge: Bridge = { base, env: bridgeEnv, target: flags.endpoint, io: { out() {}, err() {} } };
+  let progress = false;
+  let bindingWritten = false;
+  const finishProgress = () => {
+    if (!progress) return;
+    progress = false;
+    if (process.stderr.isTTY) io.err("\r\x1b[2K");
   };
-
-  // Read as a fresh client, which writes nothing on either side — so every
-  // refusal below leaves both this machine and the remote exactly as they were.
-  // Document rooms are not opened here: this machine's replica may hold and
-  // upload content the remote lacks. The strict reading after reconciliation
-  // decides whether either side could actually produce every room.
-  const remote = await openRemote(bridge);
-  const remoteProblem = corpusProblem(bridge.target, remote);
-  if (remoteProblem !== null) {
-    io.err(
-      `ub workspace join: ${remoteProblem}Nothing was written to the workspace or binding.\n`,
-    );
+  const fail = (problem: string, detail: string): number => {
+    finishProgress();
+    io.err(`ub workspace use: ${problem.trim()}\n${detail}\nRun again: ${command}\n`);
     return 1;
-  }
-
-  io.err(
-    `ub workspace: hydrating ${plural(remote.entries.length, "document")} from ${bridge.target}…\n`,
-  );
-  const joined = await syncWorkspace(remoteConfig(bridge));
-  const joinProblem = corpusProblem(bridge.target, joined);
-  if (joinProblem !== null) {
-    const contentMissing =
-      joined.hub.status === "connected" &&
-      joined.complete &&
-      joined.unsettled.length === 0 &&
-      joined.missing.length > 0;
-    let recovery =
-      `Rerun this command on this machine once ${bridge.target} can finish the sync.`;
-    if (contentMissing) {
-      const source = resolved.binding;
-      recovery = source !== null && parseWorkspaceId(source.workspaceId).uuid === parseWorkspaceId(flags.workspace).uuid &&
-          source.hubUrl !== null && source.hubUrl !== bridge.target
-        ? `Rerun \`ub workspace join ${source.hubUrl}/${flags.workspace}\` against this workspace's previous hub, or retry from another replica that still holds the content.`
-        : "Retry from another replica that still holds the content.";
-    }
-    io.err(
-      `ub workspace join: ${joinProblem}This machine's configuration is ` +
-        `unchanged — no endpoint and no workspace were persisted. ${recovery} ` +
-        "What did arrive is in the local update log already.\n",
-    );
-    return 1;
-  }
-
-  const takenAt = new Date().toISOString();
-  const checked = await verify(bridge, joined.entries);
-  if (checked.problem !== null) {
-    io.err(
-      `ub workspace join: ${checked.problem}This machine's configuration is ` +
-        "unchanged — no endpoint and no workspace were persisted. Rerun this " +
-        "once the hub is reachable.\n",
-    );
-    return 1;
-  }
-
-  // The workspace this machine was on before, if any. Named in the report
-  // because it does not go away and is not merged — a person who has just been
-  // switched out of a workspace holding their documents is owed the sentence
-  // that says where those documents are and how to get back to them.
-  let previous: ReturnType<typeof resolveProjectBinding>["binding"] = null;
-  // Serialize project binding writes with init and workspace selection.
-  let lock: InitLock;
+  };
+  io.err(`ub workspace: fetching ${displayWorkspaceHub(flags.endpoint)}…${process.stderr.isTTY ? "" : "\n"}`);
+  progress = true;
   try {
-    lock = await acquireInitLock();
-  } catch (error) {
-    io.err(`ub workspace join: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 1;
-  }
-
-  let persistence: RemotePersistence;
-  try {
-    previous = resolveProjectBinding({ env: {} }).binding;
-    persistence = setRemote(bridge.target, {
-      workspace: flags.workspace,
-      deviceAdmission: bridge.base.deviceLogin !== undefined || usesDeviceLogin(bridge.target, bridge.env),
+    const fetched = await quietLibraries(async () => {
+      // A fresh directory read writes neither replica nor remote documents.
+      const remote = await openRemote(bridge);
+      const remoteProblem = corpusProblem(bridge.target, remote);
+      if (remoteProblem !== null) return { problem: remoteProblem, detail: "Nothing was written to the workspace or binding." };
+      const joined = await syncWorkspace(remoteConfig(bridge));
+      const joinProblem = corpusProblem(bridge.target, joined);
+      if (joinProblem !== null) {
+        const contentMissing = joined.hub.status === "connected" && joined.complete &&
+          joined.unsettled.length === 0 && joined.missing.length > 0;
+        let recovery = `Retry once ${bridge.target} can finish the sync.`;
+        if (contentMissing) {
+          const source = resolved.binding;
+          recovery = source !== null && parseWorkspaceId(source.workspaceId).uuid === parseWorkspaceId(flags.workspace).uuid &&
+              source.hubUrl !== null && source.hubUrl !== bridge.target
+            ? `Rerun \`ub workspace use ${shellArgument(`${source.hubUrl}/${flags.workspace}`)}\` against this workspace's previous hub, or retry from another replica that still holds the content.`
+            : "Retry from another replica that still holds the content.";
+        }
+        return { problem: joinProblem, detail: "This machine's configuration is unchanged — no endpoint and no workspace were persisted. " +
+          recovery + " What did arrive is in the local update log already." };
+      }
+      const takenAt = new Date().toISOString();
+      const checked = await verify(bridge, joined.entries);
+      if (checked.problem !== null) return { problem: checked.problem,
+        detail: "This machine's configuration is unchanged — no endpoint and no workspace were persisted. Retry once the hub can finish verification." };
+      return { corpus: joined, takenAt };
     });
-  } catch (error) {
-    io.err(`ub workspace join: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 1;
-  } finally {
-    lock.release();
-  }
-  warn(io, persistence.warnings);
-
-  let note = "";
-  if (checked.corpus.entries.length === 0) {
-    note += "\nThis workspace is empty.\n";
-  }
-  note += `\nworkspace     ${flags.workspace}\n`;
-  if (previous !== null && (parseWorkspaceId(previous.workspaceId).uuid !== parseWorkspaceId(flags.workspace).uuid || previous.hubUrl !== flags.endpoint)) {
-    note += `\nPrevious workspace: ${previous.workspaceId} at ${previous.hubUrl ?? "local-only"}.\n`;
-    if (parseWorkspaceId(previous.workspaceId).uuid !== parseWorkspaceId(flags.workspace).uuid) {
-      note +=
-        "The previous workspace and its documents remain unchanged. " +
-        "`ub workspace list` shows local replicas.\n" +
-        `Switch back: ub workspace use ${previous.workspaceId}\n`;
-    } else if (previous.hubUrl !== null) {
-      note += `Switch back: ub workspace join ${shellArgument(`${previous.hubUrl}/${previous.workspaceId}`)}\n`;
-    } else {
-      // The registry now records the joined endpoint for this same UUID.
-      // A local environment override is the existing route back to local use.
-      note += `Switch back for this session: UB_WORKSPACE_ID=${previous.workspaceId} UB_HUB_URL=local ub open\n`;
+    if (fetched.problem !== undefined) return fail(fetched.problem, fetched.detail);
+    finishProgress();
+    const binding = { workspaceId: flags.workspace, hubUrl: flags.endpoint };
+    const lock = await acquireInitLock();
+    let previous: ReturnType<typeof resolveProjectBinding>["binding"];
+    let persistence: RemotePersistence;
+    let text: string;
+    try {
+      previous = resolveProjectBinding({ env: {} }).binding;
+      persistence = setRemote(bridge.target, {
+        workspace: flags.workspace,
+        deviceAdmission: bridge.base.deviceLogin !== undefined || usesDeviceLogin(bridge.target, bridge.env),
+      });
+      bindingWritten = true;
+      const name = readWorkspaceName(defaultDatabasePath(flags.workspace), flags.workspace) ?? flags.workspace;
+      const archived = fetched.corpus.entries.filter(doc => doc.deleted).length;
+      text = useField("fetched", `${name} from ${displayWorkspaceHub(flags.endpoint)}: ${plural(fetched.corpus.entries.length, "document")}, ${archived} archived`);
+      text += useBindingLines(binding, previous, persistence.written[persistence.written.length - 1] ?? "");
+      text += "open it with: ub open\n";
+    } finally { lock.release(); }
+    warn(io, persistence.warnings);
+    const source = resolved.binding;
+    if (source !== null && parseWorkspaceId(source.workspaceId).uuid === parseWorkspaceId(flags.workspace).uuid &&
+        source.hubUrl !== null && source.hubUrl !== bridge.target) {
+      io.err(`ub: warning: The verified snapshot was taken at ${fetched.takenAt}; later writes to the previous hub are not included. Close other clients before relying on it.\n`);
     }
-  }
-  const source = resolved.binding;
-  if (source !== null && parseWorkspaceId(source.workspaceId).uuid === parseWorkspaceId(flags.workspace).uuid &&
-      source.hubUrl !== null && source.hubUrl !== bridge.target) {
-    note +=
-      `\nThe verified snapshot was taken at ${takenAt}; later writes to the previous hub are not included. ` +
-      "Close other clients before relying on it.\n";
-  }
-  io.out(report("joined", bridge.target, checked.corpus, persistence, note));
-
-  // An environment binding can still override the project file. Report both
-  // fields so the next status cannot silently point at a different destination.
-  const after = resolveConfig();
-  const inForce = after.env.WORKSPACE_ID?.trim();
-  if (inForce !== flags.workspace || after.binding?.hubUrl !== flags.endpoint) {
-    io.err(
-      `ub: warning: ${ORIGIN_LABELS[after.origins.workspace]} sets ${
-        inForce ?? "no workspace"
-      } at ${after.binding?.hubUrl ?? "local-only"}, which takes precedence over the binding just written — that is the ` +
-        "workspace in force here, whatever this joined.\n",
-    );
-  }
-
-  return 0;
+    if (options.json) {
+      io.out(`${JSON.stringify({ binding, previous, documents: fetched.corpus.entries }, null, 2)}\n`);
+    } else {
+      if (options.verbose) {
+        text += "\nDocuments fetched (including archived):\n" +
+          fetched.corpus.entries.map(doc => `  ${doc.uuid}  ${doc.title}${doc.deleted ? " (archived)" : ""}\n`).join("");
+        text += "\nVerified: the hub acknowledged the writes; a fresh client read the full directory and compared every entry, every archived document's content and one live document's content when present.\n" +
+          "Verification does not establish hub disk durability or convergence of other clients.\n" +
+          "\nConfiguration files written:\n" + persistence.written.map(path => `  ${path}\n`).join("");
+      }
+      io.out(text);
+    }
+    const after = resolveConfig();
+    const inForce = after.env.WORKSPACE_ID?.trim();
+    if (inForce !== flags.workspace || after.binding?.hubUrl !== flags.endpoint) {
+      io.err(
+        `ub: warning: ${ORIGIN_LABELS[after.origins.workspace]} sets ${inForce ?? "no workspace"} at ${after.binding?.hubUrl ?? "local-only"}, which takes precedence over the binding just written — that is the workspace in force here.\n`,
+      );
+    }
+    return 0;
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error), bindingWritten
+      ? "The verified project binding was written, but reporting its result failed."
+      : "The project binding is unchanged; no new workspace hub record was persisted. What arrived may already be in the local update log.");
+  } finally { finishProgress(); }
 }

@@ -316,20 +316,22 @@ alone grants no creation rights.
 The first login on a fresh hub claims its default workspace and qualifies.
 Promotion uploads the same UUID and history, including archived documents,
 name and sidebar, verifies them through a fresh authenticated client, then
-connects the project and prints a complete `ub workspace join` URL.
+connects the project and prints a complete `ub workspace use` link.
 
 Several workspaces coexist on one hub with separate corpora. A deployed hub
 admits a device credential only for a workspace with current membership.
-Selection alone grants no access. Join an existing workspace with
-`ub workspace join <connection-url>`; it requires no prior local workspace.
+Selection alone grants no access. Use an existing workspace with
+`ub workspace use <link>` after signing in to its hub; it requires no prior
+local workspace and never starts a sign-in itself.
 
 `ub workspace` prints the current binding and its source. `ub workspace list`
-lists local workspace databases. Selecting another known workspace requires an
-explicit hub, so the selection cannot inherit an unrelated endpoint:
+lists local workspace databases. Select a recorded replica with its id or a
+unique prefix; its hub comes from this machine's record. A link fetches and
+verifies the workspace before recording its hub and binding the project:
 
 ```
-ub workspace use <uuid> --hub https://hub.example.test
-ub workspace use <local-uuid> --hub local
+ub workspace use <id-or-prefix>
+ub workspace use https://hub.example.test/<workspace-id>
 ```
 
 A session can use several corpora through separately named MCP entries, on the
@@ -377,10 +379,10 @@ ub status          # workspace, hub, stored account, connection, pending work, l
 ub status --json   # full report, including account, rooms, configuration and storage paths
 ub workspace       # the workspace in force, and which layer chose it
 ub workspace list  # workspaces this machine has a database for
-ub workspace use <id> --hub <url|local>  # select a complete project binding
+ub workspace use <id-or-prefix>  # select a replica with its recorded hub
 ub workspace create "Project notes"
 ub workspace promote http://localhost:8080
-ub workspace join <connection-url>
+ub workspace use <link>  # fetch, verify and bind a shared workspace; sign in first
 ub mcp install     # register uberblick with an MCP client
 ub mcp serve       # the stdio entry point for an MCP client
 ```
@@ -410,7 +412,7 @@ can access with `--workspace <uuid>`; a random new UUID has no membership and
 is refused before anything is written. Loopback hubs retain signing-secret
 authentication. It only ever fills the endpoint in: the same one again changes
 nothing, and a *different* one is refused rather than overwritten, because
-moving a machine between hubs is `ub workspace join`. `--mcp` ends by printing what
+moving a project between hubs is `ub workspace use <link>`. `--mcp` ends by printing what
 `ub mcp install --print` prints — the snippet and the file it goes in — and
 `--no-mcp` says not to mention it. A bootstrap never registers a server with
 somebody's agent on its own, even with a vendor CLI installed: running
@@ -452,7 +454,7 @@ A hub address is normalized to its sync
 endpoint; a workspace ID can have a display slug, but only its UUID identifies
 data. The file contains no credentials and may be committed when its selection
 is appropriate for everyone using the project. `ub status` shows the workspace,
-hub and selection source. `ub init`, `ub workspace join` and `ub workspace use`
+hub and selection source. `ub init` and `ub workspace use`
 update the nearest project file, or create one in the current directory.
 
 **Migration:** legacy `WORKSPACE_ID` / `HUB_URL` inputs and workspace/endpoint
@@ -541,7 +543,7 @@ ub open
 ```
 
 Promotion includes login when needed and connection after verification; there
-is no separate join on this machine. The authenticated account must currently
+is no separate use command on this machine. The authenticated account must currently
 be a member or administrator of at least one workspace on the hub. It becomes
 the promoted workspace's first and only member, as administrator. The reservation
 itself leaves the default workspace, its claim state and other memberships
@@ -562,16 +564,22 @@ On another computer, use the full connection URL promotion printed:
 
 ```sh
 ub auth login https://hub.example.com
-ub workspace join wss://hub.example.com/ws/<workspace-id>
+ub workspace use wss://hub.example.com/ws/<workspace-id>
 ub open
 ```
 
 For other computers, configure HTTPS as described in the
 [route table](REMOTE.md#choose-how-clients-reach-the-hub); Tailscale is optional.
-Join hydrates and verifies the existing workspace. It seeds nothing and keeps
+Using a link fetches and verifies the existing workspace. It seeds nothing and keeps
 other local workspaces separate. Existing replicas of the same UUID reconcile
-as CRDTs. Join verifies the full directory, every archived document and one live
+as CRDTs. Use verifies the full directory, every archived document and one live
 sample before binding; promotion verifies all live documents as well.
+
+The link form reports `fetched`, `using`, and `wrote`, followed by the previous
+selection and a switch-back command when the binding changed, then
+`open it with: ub open`. The id form starts with `using` and omits the open hint.
+`--verbose` adds the document list, verification details and config paths;
+`--json` prints only the binding, previous binding and fetched documents on stdout.
 
 Both commands persist a complete binding in `.uberblick.json`. Existing MCP
 registrations retain their pinned workspace and hub; install a new named entry
@@ -585,7 +593,7 @@ Stored device credentials stay private. `ub open` serves the local replica with
 a separate loopback browser key; it never gives the browser an upstream key.
 MCP and `ub open` renew the saved login and recover after later login or grants.
 Revocation stops sharing while downloaded documents remain locally usable.
-Neither promotion nor join sends a signing secret to a deployed hub.
+Neither promotion nor using a link sends a signing secret to a deployed hub.
 
 ## The first-user proof
 

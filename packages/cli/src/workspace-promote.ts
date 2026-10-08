@@ -38,7 +38,7 @@ Upload the same workspace UUID and history, including archived documents, name
 and sidebar. Bind this project only after a fresh client verifies the upload.
 After failure or interruption, rerun this command to resume the same attempt.
 Close other clients while promoting. A workspace already bound to a hub cannot
-be promoted. No host setup or separate join is needed.
+be promoted. No host setup or separate use command is needed.
 
 options:
   -h, --help        show this help
@@ -194,7 +194,7 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
         writeProjectBinding(binding, { path, record: "promote" });
       } finally { bindingLock.release(); }
       io.out(`Promoted workspace ${selected.workspaceId} to ${endpoint}.\nProject connected; ${uploaded.entries.length} documents verified, including archived documents.\n` +
-        `Join on another machine: ub workspace join ${endpoint.replace(/\/$/, "")}/${selected.workspaceId}\n`);
+        `Use on another machine: ub workspace use ${endpoint.replace(/\/$/, "")}/${selected.workspaceId}\n`);
       reportWorkspacePins(binding, io);
       return 0;
     } finally { lock.release(); }

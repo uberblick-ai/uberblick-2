@@ -35,7 +35,7 @@ import {
 export const WORKSPACE = "b4d1f0a7-3c62-4e91-8f05-7ad2c9e61b38";
 export const SECRET = "open-test-signing-secret-9d31fa";
 
-/** What a `ub workspace join` mid-run leaves behind, for the #449 tests. */
+/** What a `ub workspace use` mid-run leaves behind, for the #449 tests. */
 export const REBOUND_WORKSPACE = "c7e2b105-9a48-4d6f-b3e1-5f0c8a71d264";
 export const REBOUND_SECRET = "open-test-rotated-secret-4b7c21";
 export const FIRST_REMOTE = "wss://first.example.ts.net/ws";
@@ -397,7 +397,7 @@ export function configDir(box: Sandbox): string {
 }
 
 /**
- * Rebind this project, the way `ub workspace join` or `ub workspace use` leaves it:
+ * Rebind this project, the way `ub workspace use` leaves it:
  * a different endpoint, workspace and signing secret, across both files.
  */
 export function rebind(

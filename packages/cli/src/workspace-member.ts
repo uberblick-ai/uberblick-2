@@ -221,7 +221,7 @@ export async function workspaceMemberCommand(argv: string[], io: Io): Promise<nu
       const added = member(result.member);
       if (added.githubAccountId !== account.githubAccountId) throw new MemberRefusal("hub returned a different account after the grant; check the member list");
       if (result.status === "already-member") already(added, io);
-      else io.out(`added ${describe(added)} as ${added.role}\nAccess is discovered on sign-in or credential renewal; select the workspace explicitly with \`ub workspace join ${origin}/${workspaceId}\` or \`ub workspace use\`.\n`);
+      else io.out(`added ${describe(added)} as ${added.role}\nAccess is discovered on sign-in or credential renewal; select the workspace explicitly with \`ub workspace use ${origin}/${workspaceId}\`.\n`);
       return 0;
     }
     const target = positionals[0] ?? "";

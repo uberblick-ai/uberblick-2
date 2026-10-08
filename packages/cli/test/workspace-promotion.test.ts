@@ -210,7 +210,7 @@ describe("workspace creation and promotion", () => {
     const result = await runUbAsync(["workspace", "promote", endpoint], box,
       { UB_WORKSPACE_ID: selected(box).workspaceId, UB_HUB_URL: "local" });
     expect(result.status, result.output).toBe(0);
-    expect(result.stdout).toContain(`ub workspace join ${endpoint}/${selected(box).workspaceId}`);
+    expect(result.stdout).toContain(`ub workspace use ${endpoint}/${selected(box).workspaceId}`);
     expect(result.output).not.toContain("waiting for approval…");
     expect(result.output).not.toContain(login.credential.key);
     expect(selected(box)).toEqual({ workspaceId: selected(box).workspaceId, hubUrl: endpoint });
@@ -232,7 +232,7 @@ describe("workspace creation and promotion", () => {
     const freshCredential = hub.credentials!.issue({ principalId: login.identity.id, deviceId: randomUUID(), workspaces: [selected(box).workspaceId] });
     await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity: login.identity,
       credential: { record: freshCredential.record, key: Buffer.from(freshCredential.keyBytes).toString("base64url") } }, other.env);
-    const joined = await runUbAsync(["workspace", "join", `${endpoint}/${selected(box).workspaceId}`], other);
+    const joined = await runUbAsync(["workspace", "use", `${endpoint}/${selected(box).workspaceId}`], other);
     expect(joined.status, joined.output).toBe(0);
     expect(selected(other).workspaceId).toBe(selected(box).workspaceId);
     const hydrated = await syncWorkspace(offline(other));
@@ -342,7 +342,7 @@ it.each(["missing", "revoked"])("runs GitHub approval with a %s login without lo
   expect(result.stdout).toContain("claimed    default workspace (");
   expect(result.stdout).not.toContain("Use it here:");
   expect(result.stdout).not.toContain("Project binding unchanged");
-  expect(result.stdout).toContain(`Join on another machine: ub workspace join ${endpoint}/${selected(box).workspaceId}\n`);
+  expect(result.stdout).toContain(`Use on another machine: ub workspace use ${endpoint}/${selected(box).workspaceId}\n`);
   expect(result.output).not.toContain("fixture-private");
   expect(approvals).toBe(1);
   const rows = accessRows(hub);
