@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { undo } from "y-prosemirror";
-import { appendBlock, deleteBlock, editBlock, getBlocks, initDoc } from "@uberblick/schema";
+import { appendBlock, createAnnotation, deleteBlock, editBlock, getBlocks, initDoc, listAnnotations, resolveAnnotationRange } from "@uberblick/schema";
 import { actOnTable, resolveTableRow, tableRowTarget } from "../src/editor/table-controls.js";
 import type { TableAction, TableRowTarget } from "../src/editor/table-controls.js";
 import { mountEditor } from "./helpers.js";
@@ -41,6 +41,35 @@ function cells(editor: ReturnType<typeof mountEditor>["editor"]): string[][] {
 }
 
 describe("table structural controls", () => {
+  it("moves a cell thread with its duplicate-text cell through insertions and orphans it when its row is deleted", () => {
+    const f = fixture("| Same | Same |\n| --- | --- |\n| Same | Same |\n| Same | Same |");
+    try {
+      const thread = createAnnotation(f.a, f.id, 1, 3, "Reader", "Keep this cell", { row: 1, column: 1 });
+      const target = targetOf(f.editor, f.id, 1);
+      const anchoredAt = (row: number, column: number): void => {
+        Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
+        for (const doc of [f.a, f.b]) {
+          expect(resolveAnnotationRange(doc, thread.id)).toEqual({ row, column, start: 1, end: 3, collapsed: false });
+        }
+        const highlight = f.editor.view.dom.querySelector(`[data-comment-thread="${thread.id}"]`)!;
+        expect(highlight.textContent).toBe("am");
+        expect(highlight.closest("tr")).toBe(f.editor.view.dom.querySelectorAll("tr")[row]);
+        expect(highlight.closest("td, th")).toBe(highlight.closest("tr")!.children[column]);
+      };
+      expect(actOnTable(f.editor, target, 1, "row-before")).toBe(true);
+      anchoredAt(2, 1);
+      expect(actOnTable(f.editor, target, 1, "column-before")).toBe(true);
+      anchoredAt(2, 2);
+      expect(actOnTable(f.editor, target, 2, "row-delete")).toBe(true);
+      Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
+      for (const doc of [f.a, f.b]) {
+        expect(resolveAnnotationRange(doc, thread.id)).toBeNull();
+        expect(listAnnotations(doc).map((annotation) => annotation.id)).toContain(thread.id);
+      }
+      expect(f.editor.view.dom.querySelector(`[data-comment-thread="${thread.id}"]`)).toBeNull();
+    } finally { f.close(); }
+  });
+
   it.each([
     ["column-before", 0], ["column-after", 0], ["column-before", 1], ["column-after", 1],
   ] as const)("inserts %s at column %i in a header-only table as an undoable shared edit", (action, column) => {
