@@ -397,6 +397,8 @@ test("pane edge scrolling reaches the gap after a tall table's last row", async 
     await page.mouse.move(tableBox.x + tableBox.width / 2, paneBox.y + 8, { steps: 12 });
     await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeLessThan(bottomScroll - 80);
     await expect.poll(async () => (await box(table.locator("tr").first())).y).toBeGreaterThan(paneBox.y + 1);
+    // Measure the header gap after edge scrolling stops moving its position.
+    await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBe(0);
     await overGap(page, table, 1);
     await page.mouse.up();
     await expect(bodyNames(table)).toHaveText(names);
