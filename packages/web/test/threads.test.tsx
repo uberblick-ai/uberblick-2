@@ -521,6 +521,36 @@ describe("the rail renders its cards", () => {
     view.unmount();
   });
 
+  it.each([false, true])("waits for a newly selected card to arrive before revealing it (keyboard: %s)", (viaKeyboard) => {
+    const scrolled: Element[] = [];
+    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
+      scrolled.push(this);
+    };
+    const { ydoc, blocks } = annotatedDoc();
+    createAnnotation(ydoc, blocks[1]!, 4, 15, "ben", "Existing card");
+    const previousThreads = threadsFromDoc(ydoc);
+    const thread = createAnnotation(ydoc, blocks[1]!, 20, 25, "ben", "New card");
+    const connection = stubConnection(ydoc);
+    const focused = focusThread(null, thread.id, { viaKeyboard });
+    const tree = (threads: ThreadView[]): ReactElement => <ThreadsPane
+      connection={connection} threads={threads} focused={focused} author="ben" onFocus={() => {}}
+    />;
+    const view = render(tree(previousThreads));
+    try {
+      // Selection arrives before the observer's thread list; the old rail
+      // still renders, but the requested card cannot be scrolled or focused.
+      expect(scrolled).toEqual([]);
+      view.rerender(tree(threadsFromDoc(ydoc)));
+      const card = view.container.querySelector(`#${CSS.escape(threadCardId(thread.id))}`);
+      expect(card).not.toBeNull();
+      expect(scrolled).toEqual([card]);
+      if (viaKeyboard) expect(document.activeElement).toBe(card!.querySelector("button"));
+      addComment(ydoc, thread.id, "Reader", "Later reply");
+      view.rerender(tree(threadsFromDoc(ydoc)));
+      expect(scrolled).toEqual([card]);
+    } finally { view.unmount(); ydoc.destroy(); }
+  });
+
   it("chips an orphaned thread and keeps its text", () => {
     const { ydoc, blocks } = annotatedDoc();
     const paragraph = blocks[1]!;

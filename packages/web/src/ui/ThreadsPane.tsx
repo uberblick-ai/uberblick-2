@@ -279,7 +279,10 @@ export function ThreadsPane({
     if (
       focused === null ||
       focused === handledSelection.current ||
-      (narrow && !open)
+      (narrow && !open) ||
+      // Creation selects its thread before the coalesced document observer
+      // supplies its card. Retain that request until the card can receive it.
+      !threads.some((thread) => thread.id === focused.id)
     ) return;
     // The first committed frame still has the collapsed card to focus. Reveal
     // it, then let this effect's second pass scroll and focus the expanded card.
@@ -291,7 +294,7 @@ export function ThreadsPane({
     handledSelection.current = focused;
     scrollThreadCardIntoView(focused.id);
     if (focused.viaKeyboard) focusThreadCard(focused.id);
-  }, [focused, expanded, narrow, open]);
+  }, [focused, expanded, narrow, open, threads]);
 
   // A pending reply outlives the conversation it belonged to unless it is let
   // go: hiding the form while a thread reads as resolved is not the same as
