@@ -49,16 +49,16 @@ normally; the implementer builds alongside it under
 [scheduling semantics](workflow.md#scheduling-semantics). Invent no dependency,
 scan no further and leave the other issue unedited.
 
-A prerequisite another change supplies, in this or another repository, is a
-native blocker, never a `needs-human` stop. GitHub accepts only issues as
+A prerequisite may live in another repository. GitHub accepts only issues as
 blockers, in any repository, and ub-agents waits on open blockers from other
-repositories. Link a blocker issue named in the issue input or readable through
-the launcher: get its id with `gh api repos/OWNER/REPO/issues/M --jq .id`, link it
-with `gh api repos/uberblick-ai/uberblick-2/issues/N/dependencies/blocked_by -F
-issue_id=BLOCKER_ID`, and finish preparation normally. Create no issues and edit
-no pull requests outside this repository. When the prerequisite is only a pull
-request with no issue, or the link is refused, stop with `needs-human` and ask a
-maintainer to link a blocker issue, naming the prerequisite.
+repositories. When the issue input names a blocker issue, or one is readable
+through the launcher, link it on the assigned issue with
+`gh issue edit <assigned issue> --add-blocked-by <blocker issue URL>` under
+[native relationships](../../.github/ISSUE_SPEC.md#relationships) and finish
+preparation normally. Edit no other issue or pull request. When the
+prerequisite is only a pull request with no issue, or the link is refused, stop
+with `needs-human` and ask a maintainer to link a blocker issue, naming the
+prerequisite.
 
 Keep investigation proportional. On resumption or relevant main changes, refresh
 only affected evidence, corpus sources and governing instructions; expand discovery
