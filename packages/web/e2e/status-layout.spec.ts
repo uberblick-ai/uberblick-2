@@ -21,6 +21,13 @@ const directReadings = [
 ];
 const localReadings = ["", "saved here", "saving here…", "offline"];
 const hubReadings = ["", "synced with hub", "not synced with hub", "not shared with hub"];
+const hubReasons = [
+  "this machine has no credentials for its hub",
+  "sign-in required — run ub auth login for this hub on this machine",
+  "no access to this workspace — ask its administrator for membership; this machine will retry with its existing login",
+  "this machine cannot read its login — run ub auth status and follow its credential-store recovery",
+  "this hub cannot renew the login — ask its operator to configure sign-in",
+];
 const additionalReadings = [
   { word: "offline", saved: "not saved", detail: null, pending: null },
   { word: "offline", saved: "not saved", detail: null, pending: "1 sync message unacked" },
@@ -60,7 +67,7 @@ async function statusGeometry(page: Page) {
     const peerCluster = status.querySelector(".ub-peers");
     const cluster = peerCluster === null ? null : box(peerCluster);
     const updated = box(find(".ub-last-updated"));
-    const notes = [...status.querySelectorAll(".ub-not-saved, .ub-pending, [data-status-layout-detail]")].map((note) => ({ text: note.textContent, rect: box(note) }));
+    const notes = [...status.querySelectorAll(".ub-not-saved, .ub-pending, .ub-status-reason, [data-status-layout-detail]")].map((note) => ({ text: note.textContent, rect: box(note) }));
     const facts = [...status.querySelectorAll(".ub-status-word")].map((word) => {
       const range = document.createRange();
       range.selectNodeContents(word);
@@ -128,8 +135,14 @@ async function statusGeometry(page: Page) {
 async function checkReadings(page: Page, upstream: boolean) {
   const primary = page.locator(".ub-status-word").first();
   const hub = page.locator(".ub-status-word--hub");
+  const reason = page.locator(".ub-status-reason");
   const original = await primary.textContent();
   const originalHub = upstream ? null : await hub.textContent();
+  const originalReason = upstream ? null : await reason.evaluate((node) => ({
+    text: node.textContent,
+    className: node.className,
+    ariaHidden: node.getAttribute("aria-hidden"),
+  }));
   const positions: Array<{ status: Awaited<ReturnType<typeof statusGeometry>>["status"]; prose: Awaited<ReturnType<typeof statusGeometry>>["prose"] }> = [];
   try {
     for (const reading of upstream ? directReadings : localReadings) {
@@ -138,17 +151,36 @@ async function checkReadings(page: Page, upstream: boolean) {
         if (!upstream) {
           await hub.evaluate((word, text) => { word.textContent = text; }, hubReading);
         }
-        const geometry = await statusGeometry(page);
-        const label = `${page.viewportSize()?.width}px: ${reading} / ${hubReading}`;
-        expect(geometry.scrollWidth, label).toBe(geometry.clientWidth);
-        expect(geometry.problems, label).toEqual([]);
-        positions.push({ status: geometry.status, prose: geometry.prose });
+        for (const hubReason of hubReading === "not shared with hub" ? hubReasons : [null]) {
+          if (originalReason !== null) {
+            // Reuse the production reason line, including its reserved invisible
+            // reading when no cause is shown; only replace its rendered ink.
+            await reason.evaluate((node, fixture) => {
+              node.textContent = fixture.detail ?? fixture.reserved;
+              node.classList.toggle("invisible", fixture.detail === null);
+              node.setAttribute("aria-hidden", String(fixture.detail === null));
+            }, { detail: hubReason, reserved: originalReason.text });
+          }
+          const geometry = await statusGeometry(page);
+          const label = `${page.viewportSize()?.width}px: ${reading} / ${hubReading} / ${hubReason ?? ""}`;
+          expect(geometry.scrollWidth, label).toBe(geometry.clientWidth);
+          expect(geometry.problems, label).toEqual([]);
+          positions.push({ status: geometry.status, prose: geometry.prose });
+        }
       }
     }
   } finally {
     await primary.evaluate((word, text) => { word.textContent = text; }, original);
     if (!upstream) {
       await hub.evaluate((word, text) => { word.textContent = text; }, originalHub);
+    }
+    if (originalReason !== null) {
+      await reason.evaluate((node, saved) => {
+        node.textContent = saved.text;
+        node.className = saved.className;
+        if (saved.ariaHidden === null) node.removeAttribute("aria-hidden");
+        else node.setAttribute("aria-hidden", saved.ariaHidden);
+      }, originalReason);
     }
   }
   return positions;

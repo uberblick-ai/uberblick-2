@@ -213,7 +213,15 @@ test("the shell, sidebar, document pane and long Contents stay within the visibl
     await page.keyboard.press("Enter");
     await expect(editor(page).locator(":scope > p")).toHaveCount(1);
   }
-  await page.getByRole("button", { name: "Contents 60", exact: true }).click();
+  const trigger = page.getByRole("button", { name: "Contents 60", exact: true });
+  const pane = page.locator(".ub-document-pane");
+  await pane.evaluate((element) => { element.scrollTop = 0; });
+  const inset = await trigger.boundingBox();
+  expect(inset).not.toBeNull();
+  await pane.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await expect.poll(async () => (await trigger.boundingBox())?.y).toBeCloseTo(inset?.y ?? 0, 1);
+  await trigger.click();
   const contents = page.locator(".ub-outline-panel");
   await expectInsideViewport(contents);
   expect(await contents.locator("ul").evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true);
