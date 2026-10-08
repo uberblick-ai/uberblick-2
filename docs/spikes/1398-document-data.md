@@ -1,6 +1,6 @@
 # In-document data and live charts
 
-This is the review-only feasibility report for [#1398](https://github.com/uberblick-ai/uberblick-2/issues/1398), under the supervised route approved there. It proposes no production change. The draft PR must remain a draft, receive no workflow labels and never merge. The independent implementation review and owner's verdict remain outstanding. [#1397](https://github.com/uberblick-ai/uberblick-2/issues/1397) stays open.
+This is the review-only feasibility report for [#1398](https://github.com/uberblick-ai/uberblick-2/issues/1398), under its owner-approved route. It proposes no production change. [PR #1403](https://github.com/uberblick-ai/uberblick-2/pull/1403) must remain draft, retain `needs-review` and the owner's `needs-human` stop, and never enter integration or merge. The owner superseded the original ban on workflow labels. Independent Claude review at `6374e7f57d2da35f181469c69c6c32f5a87c8220` found [R1-F1](https://github.com/uberblick-ai/uberblick-2/pull/1403#pullrequestreview-5456867763); different-model corrections review at the revised head and the owner's verdict remain required. [#1397](https://github.com/uberblick-ai/uberblick-2/issues/1397) stays open. Final closure of this unmerged PR will require explicitly closing #1398 after the verdict; nothing closes now.
 
 ## Question and plain-language finding
 
@@ -8,7 +8,9 @@ Can several small structured collections live beside prose in one existing Yjs d
 
 Yes, within the tested bounds. A separate writer updated an existing document over the real local hub protocol, and a chart in an already-open browser tab redrew from Yjs observers. It needed no reload, view polling or manual rerender. The browser wrote nothing back into the document. This was a prototype page connected directly to the hub, not the production editor or the normal `ub open` serving-replica path.
 
-Recommend **keyed JSON records with versioned collection descriptors** as the next production candidate to plan, with explicit identity/order and invalid-version handling. At 1,500 records a one-record correction sent 481 bytes, versus 756,130 bytes for a whole-data envelope. Before the 500-update compaction point, the measured local log held about 1.05 MB versus 377.8 MB. Keyed initial state was slightly bigger, and the hub still stored/encoded the whole document. The simpler envelope gives stronger schema/data coherence when competing writes occur; that benefit is real, and keyed records need an explicit coherence contract.
+Recommend **keyed JSON records with versioned collection descriptors for append-dominated or change-aware producers**, with explicit identity/order and invalid-version handling. A small correction sends far less data, but corrections spread across many keys leave CRDT history which ordinary SQLite compaction cannot remove. Rewriting every record daily is a different workload: the fixed-record sensitivity grows keyed state from 0.81 MB to 4.63 MB in one year, while envelopes stay near 0.76 MB. The original same-record-only benchmark missed this cost. The one-year histories below separate new live records from historical overhead and make the recommendation conditional on producer behavior and resource budgets.
+
+Envelope shapes remain useful for frequent broad refreshes, small infrequent datasets and simpler schema/data coherence. Their full-value writes can create much larger transfer and local-log costs even when the final snapshot stays small. The hub still encodes/stores the full state for every shape. This report recommends planning candidates, rather than selecting one unconditional representation for all uses.
 
 The browser evidence also exposes unfinished work: the keyed prototype rebuilt/cloned all collections on every change, taking longer to project than the envelope even though transport/apply was much cheaper. Storage representation does not by itself make views incremental. No production representation, dependency, API, limits or migration policy is selected by this report.
 
@@ -22,7 +24,7 @@ All candidates use one optional `spikeData` Y.Map root alongside the unchanged `
 | Collection envelopes | One JSON value per named collection holds schema version, schema and ordered records; stable ids live in rows. | Each collection remains internally coherent; concurrent changes can leave different collections at different revisions. No cross-collection invariant is implied. | Replaces the affected collection. |
 | Keyed records | Collection descriptors and records occupy separate keys; ids are stable and globally namespaced; rows carry ordinal, with id as tie-breaker. | Schema and record keys have independent conflict winners. Versioning and validation must detect incompatible rows after a merge. | Replaces the affected JSON record; adding a collection/schema still requires a descriptor. |
 
-The generator uses three collections, `summaries`, `issues` and `endpoints`, with nested JSON values. The keyed representation is an id-addressed ordered record collection, not a way to preserve every possible arbitrary JSON shape without an API contract. A future production schema must define whether collections are ordered records, objects or arrays and preserve that distinction. Reordering, deletion, renamed collections, duplicate ids, producer-owned versus human-owned fields and migration are deliberately not implemented here.
+The generator uses three collections, `summaries`, `issues` and `endpoints`, with nested JSON values. The keyed representation is an id-addressed ordered record collection, not a way to preserve every possible arbitrary JSON shape without an API contract. A future production schema must define whether collections are ordered records, objects or arrays and preserve that distinction. Production reordering, deletion, renamed collections, duplicate-id handling, field ownership guards and migration are not implemented here. The annual API fixture preserves human dispositions as separate records by excluding them from producer writes; this is a workload assumption, not a delivered ownership policy.
 
 One local Yjs transaction batches observers and applies synchronously at that replica. It does **not** make distinct map keys one conflict unit between concurrent replicas. The retained convergence probe demonstrates schema v1 plus row-a versus schema v2 plus row-b: the replicas converge, but one winning schema coexists with both rows. Native conflict winners do not promise wall-clock last-write order. This is within the owner's accepted competing-write loss; it is still a schema-validity problem that readers must detect.
 
@@ -31,6 +33,10 @@ Schema evolution for the document envelope replaces schema and rows together. A 
 ## Grounding and boundaries
 
 Code and local instructions were read at base `dfc21fe4991967090e43e8473af3ae71d2c1a184`, fetched from `origin/main`. Measurements use that implementation, preserved as this report branch's parent. At publication, `origin/main` had advanced to `10a8f775dbd7e324a80ee4ffa0dc0ba909493ba8` with MCP tool extraction; results are not claimed against that later code. A merge-tree check was clean. The prepared contract is current. The [earlier spike](704-daemon-authority.md) informed the separation of verdict, method, evidence and limits; no archive tag is created.
+
+The correction pass fetched `origin/main` at `72fe6f249ee2b47a8dc8e1abdd43b9800352c383` and continued the report/prototype at `6374e7f57d2da35f181469c69c6c32f5a87c8220`. The launcher's current control instructions and owner correction route govern this run; the retained prototype still measures its original code base. Inspection found storage/schema/hub/view code unchanged, with only a comment change in `replica.ts` and MCP registrations moved from `tools.ts` into `tools/` on main. Historical code links below remain pinned to the measured base. Live corpus catalog, decisions, searches and all seven pointed documents were read again for the correction; no dataset/chart/library-selection commitment was found.
+
+Final validation refreshed main to `8e413177931d4937475978e092ed554c3947189f`; the intervening CLI onboarding/output changes do not alter the storage, schema or hub algorithms measured here. The correction's publication record names the exact evidence revision and check results. If that revision is on the assigned correction branch while PR #1403 still has its old head, it awaits restoration of the required PR stop before protected advancement; branch evidence alone is not the corrections-review verdict.
 
 Live corpus discovery on 2026-10-08 used the registered `.mcp.json` stdio route (`mise exec -- ub mcp serve`), its discovered tool schemas, `get_sidebar`, `list_tags`, `list_docs`, `list_docs(kind: decision)` and purpose searches. Searches for `chart*`, `dataset*`, `librar*`, `Yjs` and `CRDT` found no governing dataset, chart or chart-library policy. Relevant documents were read live:
 
@@ -97,7 +103,7 @@ Exact bytes, without compression, from the three-operation series. This microben
 
 Keyed records cost about 7.1% more initial state for short values, but turn a standard correction into 481 B independently of record count here. They replace a whole record, not a field: the long-value correction still sends its 4,096-character note. Long notes move 1,500 records from roughly 0.8 MB to roughly 6.9 MB. Row counts alone describe capacity poorly. No long-value hub/browser delivery was tested; those sizes are local encoding/apply/storage measurements.
 
-Local `Y.applyUpdate` times in milliseconds (five warmups, 30 samples). Full distributions and initial/append p95 values are in [results.json](1398/results.json).
+Local `Y.applyUpdate` times in milliseconds (five warmups, 30 samples). Median, p95, minimum, maximum and sample counts, including initial/append p95 values, are retained in [results.json](1398/results.json); individual timing samples were not retained for this original run.
 
 | Rows / notes | Shape | Initial median | Append median | Correction median / p95 |
 | --- | --- | ---: | ---: | ---: |
@@ -116,7 +122,7 @@ Local `Y.applyUpdate` times in milliseconds (five warmups, 30 samples). Full dis
 
 The bigger note case is only slightly slower to apply locally than the short-note case. Fixed field/item counts and repeated simple strings may explain part of that result; no profiling established the cause. It is not a promise about distinct strings, memory, serialization, validation or transport.
 
-Actual storage history for 1,500 short-note records. "Before compaction" is initial write +499 corrections =500 log rows; compaction is invoked by the driver at that exact point. BLOB figures are logical stored payloads, not SQLite file allocation.
+Original same-record storage history for 1,500 short-note records. Every correction targets the same key, so this table cannot characterize distinct-key deleted-marker accumulation. The one-year histories below address that limitation. "Before compaction" is initial write +499 corrections =500 log rows; compaction is invoked by the driver at that exact point. BLOB figures are logical stored payloads, not SQLite file allocation.
 
 | Measure | Document envelope | Collection envelopes | Keyed records |
 | --- | ---: | ---: | ---: |
@@ -134,9 +140,116 @@ Actual storage history for 1,500 short-note records. "Before compaction" is init
 | Local append median / p95 ms | 1.063 / 5.739 | 0.394 / 3.969 | 0.066 / 0.154 |
 | Hub encode + store median / p95 ms | 4.995 / 5.256 | 5.057 / 5.513 | 5.241 / 6.115 |
 
-Append/store distributions use 497 samples after discarding the first five operations. Initial +10-correction histories for every other size/long-value case, and all checkpoints, are in the raw JSON. Both local recovery and hub snapshot recovery matched the expected final dataset for every case. The hub has one current snapshot row, never a growing update log. Keyed deltas do not eliminate full-state hub encoding/storage; its store times remain similar here. Compaction deletes logical rows but does not shrink SQLite's allocated file without vacuum. A production retention policy must account for that distinction.
+Append/store summary statistics use 497 samples after discarding the first five operations; individual samples were not retained. Initial +10-correction histories for every other size/long-value case, and all checkpoints, are in the raw JSON. Both local recovery and hub snapshot recovery matched the expected final dataset for every case. The hub has one current snapshot row, never a growing update log. Keyed deltas do not eliminate full-state hub encoding/storage; its store times remain similar here. Compaction deletes logical rows but preserves Yjs history in the encoded snapshot and does not shrink SQLite's allocated file without vacuum. A production retention policy must account for these separate costs.
 
 The [convergence probe](1398/results.json) verifies equal final replicas with schema v2 and both schema-v1 row-a and schema-v2 row-b. The comparison single-envelope probe converges on one coherent v2 envelope and loses row-a. It demonstrates coherence versus write-loss tradeoffs, not a concurrency guarantee beyond the owner's accepted eventual consistency.
+
+## Reproducing the review finding
+
+The retained [verification harness](1398/reviewer-verification.mjs) and [raw samples](1398/reviewer-verification.json) provide a fresh author-run reproduction of R1-F1's mechanism; this does not replace independent corrections review. They use the original generator: 1,500 fixed short-value records, Yjs V1/default garbage collection, client id 1398, one transaction per simulated day for 365 days. Each selected record's `value` increases by one. The 10% schedule selects collection ordinal `i % 10 == day % 10`; the full schedule selects every record. Each envelope replaces the corresponding value once per day, rather than once per record. These are sensitivity controls, not realistic observed producer workloads or the basis for annual capacity limits.
+
+| Daily selected fraction | Shape | Day 0 state B | Day 30 state B | Day 365 state B | Fresh equivalent at day 365 B | Cold apply median at day 365 ms |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 10% | Document envelope | 755,650 | 755,705 | 755,872 | 755,859 | 11.32 |
+| 10% | Collection envelopes | 755,697 | 756,197 | 762,356 | 755,906 | 11.26 |
+| 10% | Keyed records | 809,665 | 836,598 | 1,176,634 | 809,874 | 48.59 |
+| 100% | Document envelope | 755,650 | 755,869 | 755,872 | 755,859 | 10.52 |
+| 100% | Collection envelopes | 755,697 | 756,361 | 762,356 | 755,906 | 11.87 |
+| 100% | Keyed records | 809,665 | 1,108,384 | 4,625,884 | 809,874 | 466.93 |
+
+The full-refresh byte trajectory matches the reviewer's independent result exactly. The 10% result differs slightly because the selected-key schedule is explicitly rotating by collection ordinal; it confirms the same growth mechanism without aiming at the reviewer's number. Cold apply timings were measured anew on Linux and are not expected to match another host. Each checkpoint retained seven fresh-receiver apply samples after one warmup, with complete logical equality asserted outside the timer. The fresh comparison writes the identical live projection into a new Y.Doc; it separates CRDT historical overhead from changing live values. It is an analytical baseline, not a supported reclamation procedure.
+
+Replacing an existing keyed JSON value removes its old content but can retain a deleted Yjs struct. Interleaving overwrites across distinct keys prevents many adjacent deleted structs from merging; repeatedly overwriting only one key masks this cost. In the 100% case the keyed history adds about 7.0 bytes per overwritten record on average (3,816,010 B above the fresh equivalent / 547,500 overwrites). This is an estimate from measured totals, not a constant per-key guarantee: ordering, clock widths, keys, client count and garbage collection affect the encoding. Collection envelopes also retain some history when their three keys are interleaved. SQLite log compaction and hub snapshot replacement re-encode this same Y.Doc and cannot turn it into the fresh baseline.
+
+Reproduce the verification independently from the repository root:
+
+```sh
+timeout 180s mise exec -- node docs/spikes/1398/reviewer-verification.mjs
+```
+
+The correction measurements use Linux 7.0.0-30-generic x64, AMD EPYC-Genoa (8 logical CPUs, about 15.24 GiB RAM), Node 26.7.0, pinned Yjs 13.6.32 and the original measured product code. The one-year results and browser results record their complete versions and environment separately. The host is shared and not CPU-isolated; timing samples describe these runs only.
+
+## One-year workloads and measurement method
+
+The [temporal harness](1398/temporal.ts) and [measurement index](1398/temporal-results.json) compare deterministic **assumptions about producers**, not collected delivery/telemetry/evaluation observations. Each scheduled batch is one local Yjs transaction. Simulated days 1–365 cover 2026-01-01 through 2026-12-31, executed sequentially without daily waits. All three shapes receive identical logical events, ids, schema and values. A code-health pair changes only whether unchanged producer rows are rewritten. Checkpoint hashes must match across shapes and between that pair; local snapshot/log and hub recovery must reproduce the expected final data.
+
+The three generic collection names are reused for this throwaway experiment: `summaries` holds daily/run summaries; `issues` holds delivery observations, evaluation groups or API findings/dispositions; `endpoints` holds current code-package detail or endpoint-day rows. This reuses measurement adapters and imposes no production collection vocabulary.
+
+| Parent use | Scheduled writes and corrections | Live records, start → year end | Touched fraction and unchanged behavior |
+| --- | --- | ---: | --- |
+| Delivery | Daily one summary and six issue observations in two writes; every seventh day a separate correction of five rotating historical observations. | 0 → 2,555 (365 summaries +2,190 observations) | Five existing rows per weekly correction, divided by the then-current observation count; ordinary appends add seven rows/day. Known diffs only; no full refresh. |
+| Code health, change-aware | Start with 60 current package rows. Daily summary append and recomputation of all 60 packages; exactly six values change. Weekly separate correction of two historical summaries. | 60 → 425 (60 current package rows +365 summaries) | Package refresh changes 6/60 (10%), offers all 60 to the adapter and skips 54 identical rows; as a fraction of all live rows it decreases to 6/425. |
+| Code health, rewrite-all | Same summaries, changes, corrections and final values as the previous row; a naive package-snapshot producer writes all 60 package rows every day. | 60 → 425 | Same 10% logical package change, but 100% package rewrite and no unchanged-row skip. Historical summaries are preserved. This is the plausible full-refresh producer case. |
+| Model evaluation | Every 14 days append one compact run summary and five aggregate groups. Seven days later correct that run summary and one group. | 0 → 156 (26 runs +130 groups) | Each later correction changes two existing rows; the fraction is 2/current live count. There are 26 append batches and 25 corrections; the final run falls too late for its correction inside the year. No raw examples/predictions or full refresh. |
+| API health | Daily append ten endpoint-day rows, then an overview and producer finding. Weekly correct seven of the trailing 70 endpoint rows plus one historical overview and one producer finding; separately append one human disposition. | 0 → 4,432 (3,650 endpoints +365 overviews +365 producer findings +52 human dispositions) | Weekly correction offers nine known changed rows from an 84-record recomputation scope (70 endpoints +7 overviews +7 findings). It does not measure comparison/skipping of the other 75. Producer writes never include human dispositions; exact preservation is asserted. |
+
+The raw per-write records state live count before/after, producer scope, proposed/changed/rewritten record counts, touched fractions, unchanged skipping, ids, record JSON byte sizes, update bytes and storage phase times. “Rewritten records” describes rows offered by the producer adapter; an envelope physically retransmits all rows in its replaced value, including unchanged ones. Exact measured payload bytes capture that difference. Separate correction writes make cadences and costs visible. The code-health refresh actually compares all 60 candidates. Schema content/version never changes; separate keyed descriptor keys are initialized once, while envelopes necessarily reserialize schema JSON within the replaced value. A change-aware no-op emits no update; collection envelopes replace only affected collections.
+
+Records retain the original 25 required fields and nested values. Temporal rows copy the original template at ordinal modulo 1,000, then set the actual monotonic id/ordinal, UTC day, synthetic source/title/note. Historical corrections replace `value` and `score`. Delivery, code and API use short notes containing source and ordinal. Evaluation run notes are exactly 2,048 ASCII characters and group notes 256 characters; raw 10,000-example source material stays external. Checkpoints retain actual minimum/median/maximum UTF-8 record sizes and note lengths, so a record-count comparison does not conceal long values. The original every-row 4,096-character case remains separate.
+
+At days 0, 30, 90, 180 and 365, the harness encodes both the historical Y.Doc and a new Y.Doc populated once with **precisely identical current live data**. The difference includes historical struct/delete/clock metadata and small live-encoding differences; it is not old JSON retained verbatim. The increase in the fresh baseline describes legitimate live-data growth, while historical-minus-fresh describes the additional state cost at that day. This is a diagnostic baseline, not an implemented migration or reclamation mechanism.
+
+All per-write and cumulative Yjs V1 payload bytes are measured exactly, without compression, transport framing or reconnect/state-vector traffic. Actual private `MirrorStore` and `HubDatabase` APIs persist each update and one hub full-state snapshot. The driver directly compacts at 500 logged rows and retains before/after BLOB sizes, remaining log/snapshot, peak log, SQLite/WAL allocation and cold recovery assertions. This exercises the existing store operation, not the production replica scheduler, indexes or hub debounce. Hub snapshot-byte sums are measured logical BLOB lengths submitted to upserts; they are **not** physical disk bytes written or network traffic. Local snapshot sums likewise describe logical BLOB writes. No vacuum or history reset occurs.
+
+Node cold apply and full detached projection/summary-series construction retain ten raw samples after three warmups, with setup/destroy excluded. Per-write mutation/encoding timing begins **after** changed-record comparison and detached-data preparation; it is not full producer-call latency. Local append and hub encode/store are separate brackets. The extra 30-round distinct-key controls compare 10% change-aware, 10% logical change with every-row rewrite, and every-value change; those bounded controls are not extrapolated to a producer year.
+
+From `packages/mcp-server`, reproduce the annual histories and private day-365 history/fresh browser inputs:
+
+```sh
+timeout 1200s mise exec -- node --import tsx ../../docs/spikes/1398/temporal.ts /ABSOLUTE/PRIVATE/SCRATCH
+```
+
+Raw per-write JSONL files are linked by each case's `writesFile` in the measurement index. The disposable SQLite databases are removed after each case. Browser binaries are exported only into the supplied private scratch and can be recreated by this command; the report/raw results do not depend on keeping them.
+
+## One-year measured results
+
+MB here means 1,000,000 bytes. Counts include the initial schema write: delivery and both code-health modes have 783 writes, evaluation 52, API 835. These are the measured synthetic schedules above.
+
+| Workload / shape | Cumulative updates MB | Per-write median / p95 B | Year-end state MB | Identical fresh state MB | History above fresh B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Delivery / Document | 535.141 | 681,416 / 1,297,826 | 1.365 | 1.365 | 13 |
+| Delivery / Collection | 280.802 | 169,781 / 1,067,710 | 1.369 | 1.365 | 4,271 |
+| Delivery / Keyed | 1.600 | 2,737 / 3,446 | 1.455 | 1.453 | 1,935 |
+| Code health, skip unchanged / Document | 100.991 | 128,976 / 213,890 | 0.223 | 0.223 | 13 |
+| Code health, skip unchanged / Collection | 51.748 | 32,470 / 172,014 | 0.228 | 0.223 | 4,277 |
+| Code health, skip unchanged / Keyed | 1.461 | 1,056 / 3,200 | 0.253 | 0.239 | 14,530 |
+| Code health, rewrite all / Document | 100.991 | 128,976 / 213,890 | 0.223 | 0.223 | 13 |
+| Code health, rewrite all / Collection | 51.748 | 32,470 / 172,014 | 0.228 | 0.223 | 4,277 |
+| Code health, rewrite all / Keyed | 11.886 | 1,056 / 31,811 | 0.378 | 0.239 | 138,767 |
+| Evaluation / Document | 4.363 | 83,888 / 158,461 | 0.165 | 0.165 | 10 |
+| Evaluation / Collection | 4.306 | 82,759 / 157,332 | 0.165 | 0.165 | 517 |
+| Evaluation / Keyed | 0.253 | 6,350 / 6,448 | 0.170 | 0.170 | 377 |
+| API / Document | 974.398 | 1,165,645 / 2,217,259 | 2.327 | 2.327 | 13 |
+| API / Collection | 493.109 | 330,517 / 1,772,208 | 2.334 | 2.327 | 7,386 |
+| API / Keyed | 2.745 | 3,329 / 5,646 | 2.494 | 2.490 | 4,004 |
+
+The keyed append-dominated delivery/API cases have very small historical overhead compared with legitimate live-data growth. Code-health broad rewriting is different: the same 425 live rows produce 138,767 B of history instead of 14,530 B, and about eight times the keyed transfer. Its final historical state is about 58% above its fresh baseline. This changes the original recommendation's unconditional “modest overhead” claim. Envelopes retain small history here but can send hundreds of MB over a year even though their final state is only a few MB. Evaluation is small and infrequent enough that its simpler envelope remains a plausible choice despite higher measured transfer.
+
+At year end, short-value record JSON sizes (min / median / max B) are delivery 550 /611 /616, code 559 /591 /602, API 563 /599 /606. Evaluation is 785 /810 /2,605 B because its run notes are longer. Actual note-length sets and day-by-day changed fractions are retained in the raw evidence.
+
+| Workload / shape | Peak uncompacted log MB | Year-end local snapshot + remaining log MB (log rows) | Cold full-state apply, historical / fresh ms |
+| --- | ---: | ---: | ---: |
+| Delivery / Document | 316.719 | 0.872 + 316.719 (283) | 17.67 / 18.17 |
+| Delivery / Collection | 166.174 | 0.874 + 166.174 (283) | 19.32 / 18.14 |
+| Delivery / Keyed | 1.021 | 0.929 + 0.579 (283) | 20.80 / 22.34 |
+| Code health, skip unchanged / Document | 53.585 | 0.155 + 53.585 (283) | 6.13 / 3.01 |
+| Code health, skip unchanged / Collection | 27.813 | 0.158 + 27.813 (283) | 3.26 / 2.95 |
+| Code health, skip unchanged / Keyed | 0.945 | 0.175 + 0.516 (283) | 3.91 / 3.28 |
+| Code health, rewrite all / Document | 53.585 | 0.155 + 53.585 (283) | 3.01 / 3.07 |
+| Code health, rewrite all / Collection | 27.813 | 0.158 + 27.813 (283) | 3.52 / 3.59 |
+| Code health, rewrite all / Keyed | 7.595 | 0.250 + 4.291 (283) | 14.85 / 5.06 |
+| Evaluation / Document | 4.363 | 0.000 + 4.363 (52) | 1.25 / 1.13 |
+| Evaluation / Collection | 4.306 | 0.000 + 4.306 (52) | 1.92 / 1.16 |
+| Evaluation / Keyed | 0.253 | 0.000 + 0.253 (52) | 1.52 / 1.21 |
+| API / Document | 624.402 | 1.395 + 624.402 (335) | 31.45 / 32.17 |
+| API / Collection | 315.482 | 1.399 + 315.482 (335) | 31.84 / 32.11 |
+| API / Keyed | 1.645 | 1.495 + 1.100 (335) | 38.29 / 38.29 |
+
+The hub's actual year-end BLOB equals the historical full-state bytes in the first table for every case. The local snapshot is older than year end; recovery also needs the remaining log. That is why a small final state can coexist with a large local tail. The 500-row threshold limits row count, rather than bytes: 335 remaining API envelope updates occupy 624.4 MB. Actual snapshot/log queries and recovery assertions passed for every shape.
+
+For API, measured cumulative hub BLOB submissions are 974.4 MB document-envelope, 977.5 MB collection-envelope and 1,044.2 MB keyed, despite only 2.745 MB of keyed update traffic. This is full-state encoding/upsert work after every harness write; production debounce may combine nearby writes, so these sums do not predict production disk traffic. At year end the actual allocated local SQLite files are recorded separately from BLOB sums in the index; deleting log rows does not imply file shrinkage. Node timing differences for small/near-identical states are noisy (some historical samples are faster than fresh); ten samples are insufficient for causal claims about small differences or stable tails.
+
+The retained 30-round controls independently separate logical change from offered rewrite. With 1,500 fixed rows and only 10% changed each round, keyed change-aware state is 826,547 B (26,888 B above fresh); rewriting all rows gives 1,098,169 B (298,510 B above the **same** fresh projection). Actual transfers are 3.064 MB versus 23.424 MB. These controls replace both value and score and use a contiguous rotating cursor; they are distinct from the 365-day value-only reviewer reproduction. They explain the write-pattern sensitivity without pretending that every parent producer changes every key every day.
 
 ## Browser evidence and timing
 
@@ -190,6 +303,36 @@ mise exec -- node --import tsx ../../docs/spikes/1398/browser.ts /ABSOLUTE/PRIVA
 
 The driver starts/stops its own private hub, writer, Vite server and Chromium, bounds their lifetime, removes private database/profile/cache state and rewrites only its retained evidence files. It resolves no workspace binding, copies no credentials and gives the child no ambient credentials. Only its owned scratch location is supplied for child temporary storage. Chart.js remains outside repository production dependencies.
 
+## Browser impact of year-end state
+
+The extra [browser harness](1398/temporal-browser.ts) and [raw browser samples](1398/temporal-browser-results.json) apply the annual historical and identical fresh states in Chromium. This is a cold-document/render **microbenchmark**, with warmed JavaScript modules and prefetched binaries. It measures no additional hub delivery, production editor, MCP tool or normal `ub open` path. The original already-open-tab transport/redraw proof above remains the evidence for that criterion.
+
+Five workloads × three shapes × historical/fresh states produce 30 cases. Each retains seven samples after one warmup, alternating historical/fresh sample order. Every sample uses a new empty Y.Doc, one deep observer that queues projection/drawing, the existing full-area `readData`, and a new Chart.js line chart on a fixed 940×430 canvas, DPR 1, animation/responsiveness disabled and at most 12 x-axis ticks. Fetching, startup, exact reference comparisons and hashing are outside timing. All complete projections match across shapes and history/fresh states; Node uses deep equality and the browser canonical SHA-256. Every sample has one remote update, one observer render and zero local document writes. Vite and Chromium stop after the probe.
+
+Median historical browser **apply / full projection** milliseconds:
+
+| Year-end workload | Document envelope | Collection envelopes | Keyed records |
+| --- | ---: | ---: | ---: |
+| Delivery, 2,555 records | 49.5 /9.6 | 51.5 /8.7 | 52.3 /17.1 |
+| Code health, skip unchanged, 425 | 8.6 /2.0 | 9.0 /1.6 | 10.0 /2.3 |
+| Code health, rewrite all, 425 | 8.4 /1.5 | 8.8 /1.4 | 14.7 /2.5 |
+| Evaluation, 156 | 7.1 /1.0 | 3.7 /0.7 | 4.0 /1.1 |
+| API, 4,432 | 95.6 /17.5 | 89.9 /14.9 | 102.3 /27.1 |
+
+Historical-state chart construction medians range from 1.2–2.7 ms (1.2–3.5 ms across all historical/fresh cases). Each chart displays only the summaries: 365 points for delivery/code/API, 26 for evaluation. All other records are still decoded and projected. For keyed code health, rewrite-all historical/fresh apply is 14.7 /9.1 ms, while change-aware is 10.0 /8.9 ms. Other historical/fresh differences sometimes reverse direction; seven samples cannot establish stable tail latency or causal speedups. The result shows why full state and full projection matter even for a small displayed series. Incremental live rendering is still unimplemented; this probe recreates the chart and does not time a later correction in a year-old open tab. Frame callbacks remain paint-opportunity proxies.
+
+This run uses the correction's Linux host, Node 26.7.0, Chromium 151.0.7922.34, Playwright 1.62.1, Vite 8.2.2, Yjs 13.6.32 and private Chart.js 4.5.1. Raw median/min/max and all seven timing samples are retained. Browser timestamps are quantized; CPU/host isolation, mobile clients and memory pressure remain unproven.
+
+Install dependencies privately, then run from `packages/web` after the temporal harness:
+
+```sh
+mise exec -- npm install --prefix /ABSOLUTE/PRIVATE/CHART-DEPS --no-audit --no-fund --save-exact chart.js@4.5.1
+mise exec -- env PLAYWRIGHT_BROWSERS_PATH=/ABSOLUTE/PRIVATE/CHROMIUM pnpm --filter @uberblick/web exec playwright install chromium
+timeout 240s mise exec -- node --import tsx ../../docs/spikes/1398/temporal-browser.ts /ABSOLUTE/PRIVATE/SCRATCH/temporal-browser-f6532a96c0274c069626c2452994d451 /ABSOLUTE/PRIVATE/CHART-DEPS /ABSOLUTE/PRIVATE/CHROMIUM /ABSOLUTE/PRIVATE/SCRATCH
+```
+
+The browser-input directory is emitted by `temporal.ts`; its suffix is retained here for reproducibility. The browser driver serves only its allowlisted private synthetic binaries on loopback, without hub credentials or project binding, and keeps browser profiles/cache in private scratch. None of these binaries needs to survive the run.
+
 ## Production assessment
 
 **Validation.** The [retained converter probe](1398/compatibility.ts) and [results](1398/compatibility-results.json) confirm that installed Zod 4.4.3 accepts invalid `uniqueItems`, `contains` and `minProperties` examples. Required fields, `minimum` and `additionalProperties: false` reject the tested invalid values; `if/then` throws. Passing a schema straight to `fromJSONSchema` would therefore advertise rules which are not enforced.
@@ -204,22 +347,22 @@ Recommended production contract: a versioned, closed `dataset-schema/v1` vocabul
 
 **Export, search and approval.** None automatically covers a new data root. [Markdown](https://github.com/uberblick-ai/uberblick-2/blob/dfc21fe4991967090e43e8473af3ae71d2c1a184/packages/schema/src/markdown.ts#L763) exports known content; [search indexing](https://github.com/uberblick-ai/uberblick-2/blob/dfc21fe4991967090e43e8473af3ae71d2c1a184/packages/mcp-server/src/replica.ts#L753) extracts known metadata/blocks. The probe confirms a data-only update leaves the [approval fingerprint](https://github.com/uberblick-ai/uberblick-2/blob/dfc21fe4991967090e43e8473af3ae71d2c1a184/packages/schema/src/approval.ts#L17) unchanged. Future preparation must choose export fidelity (machine-readable data/schema plus readable chart fallback), useful bounded search fields, and whether/how approved data and chart mappings join the fingerprint. A working dashboard need not be a formal decided record.
 
-**Resources.** Whole-room state still loads and syncs even when the chart displays one field or raw data is collapsed. No dataset/document/update ceiling was found in the inspected application write paths. The [100 pending-room cap and pre-auth defaults of 5 MiB/1,000 messages](https://github.com/uberblick-ai/uberblick-2/blob/dfc21fe4991967090e43e8473af3ae71d2c1a184/packages/hub/src/config.ts#L36) protect admission, not dataset capacity. Future limits should cover encoded data/update bytes, collection/record counts, long values/nesting, schema complexity, retained history, displayed points/cells/series and update cadence. They must also account for SQLite log growth before compaction and full-room hub snapshot encoding. Measure a realistic retention/partition workload before setting owner-visible limits; 3,000 tested records is not an adopted ceiling. Keep raw examples external and store summaries where possible, as the parent's evaluation and API-health examples require.
+**Resources.** Whole-room state still loads and syncs even when the chart displays one field or raw data is collapsed. No dataset/document/update ceiling was found in the inspected application write paths. The [100 pending-room cap and pre-auth defaults of 5 MiB/1,000 messages](https://github.com/uberblick-ai/uberblick-2/blob/dfc21fe4991967090e43e8473af3ae71d2c1a184/packages/hub/src/config.ts#L36) protect admission, not dataset capacity. Budgets must cover both growing live data and Yjs historical overhead, encoded update/state bytes, long values/nesting, schema complexity, displayed points/cells/series and cadence. The one-year API case reaches 4,432 live records, including 3,650 endpoint-days; a row ceiling based only on the original 3,000-record fixture would reject the intended use. Collapsing fields or filtering a chart does not reduce the synced full state. Keyed distinct-key corrections can accumulate deleted structs; ordinary local snapshot/log compaction and replacement of the hub's one row preserve those structures. Envelope writes reduce that state history but increase transfer and pre-compaction logs. SQLite allocated file sizes are another cost and need not shrink after log deletion. Fresh-equivalent encodings in this report are diagnostic comparisons, not a delivered reset. Retention/partition or a separately assessed generation replacement may be useful after a budget is exceeded; no reclamation architecture is mandated by this spike. Keep raw examples external and store summaries where possible.
 
 ## Recommendation and remaining decisions
 
-Plan the first production candidate around **keyed JSON records plus versioned collection descriptors**, then remeasure the actual validated schema/API and view implementation. It fits the owner's several-collection, effectively-one-writer workload and desirable partial updates. The measured correction/log savings are material at every tested size, while initial-state overhead is modest. Native competing-write loss remains accepted; no CAS or distributed coordinator is proposed.
+Plan **keyed JSON records plus versioned collection descriptors** first for the tested append-dominated delivery/API histories and producers which skip unchanged records, then remeasure the validated API and actual view implementation. This is a recommendation conditional on write pattern, with explicit live-state/history and cold-load budgets. Low update payloads do not guarantee bounded full state. Initial overhead is about 7% for short values; the history cost can become much larger under repeated broad overwrites. Native competing-write loss remains accepted; no CAS or distributed coordinator is proposed.
 
-The strongest case for the **single document envelope** is simpler schema/data coherence, flexible arbitrary nested JSON, easy whole-candidate validation, and fewer identity/migration rules. It remains a defensible fallback if production mostly replaces complete datasets infrequently or cannot justify keyed migration semantics. Its correction and pre-compaction log costs here are the strongest argument against it. **Collection envelopes** retain per-collection coherence and reduce payloads by roughly a factor of three in this balanced fixture, but remain proportional to collection size and accumulate substantial logs. They are a useful middle option, not the best measured fit for frequent record corrections.
+The strongest case for the **single document envelope** is simpler schema/data coherence, flexible nested JSON, easy whole-candidate validation and fewer identity/migration rules. It is defensible for small, infrequent evaluation datasets or frequent nearly complete replacement, if its transfer/log cost fits the budget. **Collection envelopes** provide that coherence per collection and avoid resending unrelated collections. They are a useful candidate for a broad-refresh collection alongside append-only history, though updates remain proportional to the affected collection. For a producer which naively rewrites every row, first compare change-aware input normalization with envelopes; do not assume keyed savings from the one-record table apply to that workload. The paired code-health histories measure identical final data under both behaviors.
 
 Before preparing #1397 implementation, settle these questions:
 
 1. Which collection shapes and stable-id/order operations does the MCP contract support, and how are human dispositions protected from producer refreshes?
-2. How do schema versions/migrations make keyed merged reads detect incompatible data, including mixed versions after offline competing writes? Whole-collection generations are an option to investigate, not a commitment made here.
+2. How do schema versions/migrations make keyed merged reads detect incompatible data, including mixed versions after offline competing writes? If historical overhead later exceeds its budget, compare retention/partition or a replaceable collection generation, including full rewrite, old-generation competing-write loss and compatibility costs. No reclamation protocol was tested or selected here.
 3. Which standard chart/table library and supported configuration vocabulary serve all four parent examples? Chart.js demonstrates a line only; its prototype use selects no production dependency. How are missing fields, invalid mappings and unavailable versions shown?
 4. How does a read-only subscription project only the affected collection/keys, coalesce bursts, dispose safely and cap rendered points/series? Remeasure on the actual editor and normal `ub open` path, including reconnect/offline cases and lower-powered machines.
 5. How do data edits join lifecycle/access guards, old-client fallbacks, export/search and approval fingerprints without weakening existing guarantees?
-6. What byte/value/schema/view/update limits and history partition/retention policy follow from realistic delivery, evaluation and multiyear endpoint summaries, rather than an arbitrary record ceiling?
+6. Which producer cadences, changed-record fractions and unchanged skipping does the production contract support, and what byte/value/schema/view/update budgets follow from these one-year measurements on intended clients? Plan longer endpoint retention/partition deliberately; multiyear behavior remains unproven. Decide broad-refresh representation from transfer, state history and cold-load costs together.
 
 These are planning questions for the owner and later preparation, not authorization to implement the parent, edit the corpus or create decided records now.
 

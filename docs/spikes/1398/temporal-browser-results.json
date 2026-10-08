@@ -1,0 +1,3790 @@
+{
+  "method": {
+    "kind": "Browser microbenchmark only; no hub, transport, MCP tool, editor or ub open path.",
+    "histories": "365-day deterministic final historical/full-state binaries and freshly encoded identical live data produced by temporal.ts; comparison isolates history effects at the same live-record count.",
+    "samples": "One discarded warmup for each state, then seven retained samples. Every sample creates an empty Y.Doc and a new Chart.js line chart; JavaScript engine/modules stay warm. Historical/fresh sample order alternates per repetition.",
+    "inputs": "One historical/fresh binary pair is fetched/cached before timing, then dropped before the next pair. Browser context/page startup, fetching, reference comparison and SHA-256 hashing are outside timing.",
+    "browserApply": "performance.now around synchronous Y.applyUpdate on an empty Y.Doc, with one read-only observer that queues a microtask. This includes synchronous observer scheduling and update callbacks, but excludes projection and chart work.",
+    "projection": "Existing readData full projection of all three collections, including clones/scans/sort; plus arrays of summary days and values for the chart. No changed-key incremental projection.",
+    "chartDraw": "New Chart.js line instance on fixed 940 x 430 canvas, DPR 1, animation/responsive disabled, no point markers; summaries collection only, with at most 12 x ticks. All collections remain in the document/projection.",
+    "observer": "Cold-load update triggers one deep observer and one queued chart render. The fixture observer only projects and draws; detached readData values expose no Yjs mutation handles. Assertions require zero local updates. This is not a production capability-enforcement test.",
+    "nextFrame": "requestAnimationFrame after synchronous drawing is a paint opportunity proxy, not GPU presentation or user-visible completion.",
+    "equality": "Canonical SHA-256 of full detached projection; sorted object keys, retained array/record order. Compare browser against Node reference and all variants' historical/fresh live data. Exact Node deep equality also checked.",
+    "precision": "Non-isolated Chromium performance.now may quantize around 0.1 ms; tiny operations may read zero. Seven samples support only median/min/max, not stable tail-latency claims."
+  },
+  "environment": {
+    "platform": "linux",
+    "release": "7.0.0-30-generic",
+    "arch": "x64",
+    "cpu": "AMD EPYC-Genoa Processor",
+    "logicalCpus": 8,
+    "memoryBytes": 16365862912
+  },
+  "versions": {
+    "node": "26.7.0",
+    "chromium": "151.0.7922.34",
+    "playwright": "1.62.1",
+    "vite": "8.2.2",
+    "yjs": "13.6.32",
+    "chartjs": "4.5.1"
+  },
+  "samples": 7,
+  "warmups": 1,
+  "cases": [
+    {
+      "workload": "delivery",
+      "variant": "document-envelope",
+      "state": "history",
+      "encodedBytes": 1365149,
+      "encodedSha256": "702c73648ed7b405f390dd01b39ba267ca20e01a4c3670df000b26fcb87bb135",
+      "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+      "summaryRecords": 365,
+      "totalRecords": 2555,
+      "summary": {
+        "browserApplyMs": {
+          "median": 49.5,
+          "min": 47.299999713897705,
+          "max": 55.700000286102295
+        },
+        "projectionMs": {
+          "median": 9.599999904632568,
+          "min": 9.300000190734863,
+          "max": 16.09999990463257
+        },
+        "chartDrawMs": {
+          "median": 2.6999998092651367,
+          "min": 1.9000000953674316,
+          "max": 7.400000095367432
+        },
+        "nextAnimationFrameMs": {
+          "median": 3.8000001907348633,
+          "min": 3.6999998092651367,
+          "max": 9.399999618530273
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 55.69999980926514,
+          "projectionMs": 16.09999990463257,
+          "chartDrawMs": 7.400000095367432,
+          "nextAnimationFrameMs": 9.399999618530273,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 49.5,
+          "projectionMs": 11.700000286102295,
+          "chartDrawMs": 2.6999998092651367,
+          "nextAnimationFrameMs": 3.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 55.700000286102295,
+          "projectionMs": 9.599999904632568,
+          "chartDrawMs": 2.799999713897705,
+          "nextAnimationFrameMs": 3.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 52.59999990463257,
+          "projectionMs": 9.599999904632568,
+          "chartDrawMs": 2.5,
+          "nextAnimationFrameMs": 3.6999998092651367,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 47.299999713897705,
+          "projectionMs": 10.400000095367432,
+          "chartDrawMs": 3,
+          "nextAnimationFrameMs": 4.400000095367432,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 47.59999990463257,
+          "projectionMs": 9.300000190734863,
+          "chartDrawMs": 1.9000000953674316,
+          "nextAnimationFrameMs": 3.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 48.40000009536743,
+          "projectionMs": 9.5,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 3.700000286102295,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "delivery",
+      "variant": "document-envelope",
+      "state": "fresh",
+      "encodedBytes": 1365136,
+      "encodedSha256": "2459e24af6267bba363dac058da7353a37d8d6d2daf53d74647298bebb8b89ec",
+      "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+      "summaryRecords": 365,
+      "totalRecords": 2555,
+      "summary": {
+        "browserApplyMs": {
+          "median": 59.90000009536743,
+          "min": 47,
+          "max": 69.19999980926514
+        },
+        "projectionMs": {
+          "median": 9.300000190734863,
+          "min": 8.399999618530273,
+          "max": 18.09999990463257
+        },
+        "chartDrawMs": {
+          "median": 2.6999998092651367,
+          "min": 2,
+          "max": 6.900000095367432
+        },
+        "nextAnimationFrameMs": {
+          "median": 3.9000000953674316,
+          "min": 3.799999713897705,
+          "max": 4.100000381469727
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 60.5,
+          "projectionMs": 8.5,
+          "chartDrawMs": 4.300000190734863,
+          "nextAnimationFrameMs": 3.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 55.80000019073486,
+          "projectionMs": 8.399999618530273,
+          "chartDrawMs": 3.200000286102295,
+          "nextAnimationFrameMs": 3.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 59.90000009536743,
+          "projectionMs": 8.900000095367432,
+          "chartDrawMs": 2.5999999046325684,
+          "nextAnimationFrameMs": 3.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 61.5,
+          "projectionMs": 18.09999990463257,
+          "chartDrawMs": 6.900000095367432,
+          "nextAnimationFrameMs": 4.099999904632568,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 69.19999980926514,
+          "projectionMs": 9.5,
+          "chartDrawMs": 2.200000286102295,
+          "nextAnimationFrameMs": 3.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 47,
+          "projectionMs": 9.600000381469727,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 3.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 50.799999713897705,
+          "projectionMs": 9.300000190734863,
+          "chartDrawMs": 2.6999998092651367,
+          "nextAnimationFrameMs": 4.100000381469727,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "delivery",
+      "variant": "collection-envelopes",
+      "state": "history",
+      "encodedBytes": 1369454,
+      "encodedSha256": "c7ccbbf20c16d3361fdc74e879ce2d07fceb8399a8ee7b70ca8721d8a10d8d77",
+      "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+      "summaryRecords": 365,
+      "totalRecords": 2555,
+      "summary": {
+        "browserApplyMs": {
+          "median": 51.5,
+          "min": 47.799999713897705,
+          "max": 55.09999990463257
+        },
+        "projectionMs": {
+          "median": 8.700000286102295,
+          "min": 8.099999904632568,
+          "max": 11.5
+        },
+        "chartDrawMs": {
+          "median": 2,
+          "min": 1.9000000953674316,
+          "max": 2.6999998092651367
+        },
+        "nextAnimationFrameMs": {
+          "median": 3.9000000953674316,
+          "min": 3.799999713897705,
+          "max": 4.300000190734863
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 51.5,
+          "projectionMs": 9.5,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 3.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 50,
+          "projectionMs": 8.5,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 3.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 52.90000009536743,
+          "projectionMs": 8.099999904632568,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 3.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 47.799999713897705,
+          "projectionMs": 8.700000286102295,
+          "chartDrawMs": 2.0999999046325684,
+          "nextAnimationFrameMs": 3.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 55.09999990463257,
+          "projectionMs": 8.400000095367432,
+          "chartDrawMs": 2.6999998092651367,
+          "nextAnimationFrameMs": 3.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 49.19999980926514,
+          "projectionMs": 9.400000095367432,
+          "chartDrawMs": 2.0999999046325684,
+          "nextAnimationFrameMs": 4.300000190734863,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 51.59999990463257,
+          "projectionMs": 11.5,
+          "chartDrawMs": 1.9000000953674316,
+          "nextAnimationFrameMs": 3.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "delivery",
+      "variant": "collection-envelopes",
+      "state": "fresh",
+      "encodedBytes": 1365183,
+      "encodedSha256": "0e5bbd8617912830191d3347b9fe5f56d63bcb5d3c348b621309261bd1183216",
+      "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+      "summaryRecords": 365,
+      "totalRecords": 2555,
+      "summary": {
+        "browserApplyMs": {
+          "median": 49.19999980926514,
+          "min": 46.700000286102295,
+          "max": 50.60000038146973
+        },
+        "projectionMs": {
+          "median": 9.099999904632568,
+          "min": 8.5,
+          "max": 10
+        },
+        "chartDrawMs": {
+          "median": 2.0999999046325684,
+          "min": 1.9000000953674316,
+          "max": 2.200000286102295
+        },
+        "nextAnimationFrameMs": {
+          "median": 3.8000001907348633,
+          "min": 3.700000286102295,
+          "max": 4
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 46.700000286102295,
+          "projectionMs": 8.699999809265137,
+          "chartDrawMs": 2.0999999046325684,
+          "nextAnimationFrameMs": 3.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 50.200000286102295,
+          "projectionMs": 9.599999904632568,
+          "chartDrawMs": 2.1999998092651367,
+          "nextAnimationFrameMs": 3.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 50.60000038146973,
+          "projectionMs": 8.5,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 3.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 47.80000019073486,
+          "projectionMs": 9.099999904632568,
+          "chartDrawMs": 2.0999999046325684,
+          "nextAnimationFrameMs": 3.700000286102295,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 50.59999990463257,
+          "projectionMs": 10,
+          "chartDrawMs": 1.9000000953674316,
+          "nextAnimationFrameMs": 3.8999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 49,
+          "projectionMs": 8.900000095367432,
+          "chartDrawMs": 2.200000286102295,
+          "nextAnimationFrameMs": 3.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 49.19999980926514,
+          "projectionMs": 9.400000095367432,
+          "chartDrawMs": 1.9000000953674316,
+          "nextAnimationFrameMs": 4,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "delivery",
+      "variant": "keyed-records",
+      "state": "history",
+      "encodedBytes": 1455052,
+      "encodedSha256": "9fdb71183e0de10679f5b2443c06dbc052ce306207109f690601dfca1ffa348c",
+      "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+      "summaryRecords": 365,
+      "totalRecords": 2555,
+      "summary": {
+        "browserApplyMs": {
+          "median": 52.30000019073486,
+          "min": 51.5,
+          "max": 54.19999980926514
+        },
+        "projectionMs": {
+          "median": 17.09999990463257,
+          "min": 14.599999904632568,
+          "max": 23.100000381469727
+        },
+        "chartDrawMs": {
+          "median": 1.9000000953674316,
+          "min": 1.9000000953674316,
+          "max": 2.6999998092651367
+        },
+        "nextAnimationFrameMs": {
+          "median": 3.799999713897705,
+          "min": 3.6999998092651367,
+          "max": 3.9000000953674316
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 54.19999980926514,
+          "projectionMs": 15,
+          "chartDrawMs": 2.6999998092651367,
+          "nextAnimationFrameMs": 3.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 51.90000009536743,
+          "projectionMs": 18.09999990463257,
+          "chartDrawMs": 1.9000000953674316,
+          "nextAnimationFrameMs": 3.6999998092651367,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 52.299999713897705,
+          "projectionMs": 17.09999990463257,
+          "chartDrawMs": 1.9000000953674316,
+          "nextAnimationFrameMs": 3.700000286102295,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 53.09999990463257,
+          "projectionMs": 17.800000190734863,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 3.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 54.19999980926514,
+          "projectionMs": 23.100000381469727,
+          "chartDrawMs": 2.5,
+          "nextAnimationFrameMs": 3.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 51.5,
+          "projectionMs": 15.599999904632568,
+          "chartDrawMs": 1.9000000953674316,
+          "nextAnimationFrameMs": 3.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 52.30000019073486,
+          "projectionMs": 14.599999904632568,
+          "chartDrawMs": 1.9000000953674316,
+          "nextAnimationFrameMs": 3.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "delivery",
+      "variant": "keyed-records",
+      "state": "fresh",
+      "encodedBytes": 1453117,
+      "encodedSha256": "941158b57e253180de202ec80b20f8f32872d51524e4546807cbee9bdb237091",
+      "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+      "summaryRecords": 365,
+      "totalRecords": 2555,
+      "summary": {
+        "browserApplyMs": {
+          "median": 51.700000286102295,
+          "min": 50.5,
+          "max": 55.40000009536743
+        },
+        "projectionMs": {
+          "median": 16.800000190734863,
+          "min": 15.599999904632568,
+          "max": 20.5
+        },
+        "chartDrawMs": {
+          "median": 3.5,
+          "min": 1.8000001907348633,
+          "max": 4.199999809265137
+        },
+        "nextAnimationFrameMs": {
+          "median": 3.9000000953674316,
+          "min": 3.6999998092651367,
+          "max": 9.300000190734863
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 51.700000286102295,
+          "projectionMs": 18.299999713897705,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 3.700000286102295,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 52.299999713897705,
+          "projectionMs": 20.5,
+          "chartDrawMs": 1.8000001907348633,
+          "nextAnimationFrameMs": 3.6999998092651367,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 50.5,
+          "projectionMs": 18.09999990463257,
+          "chartDrawMs": 4.199999809265137,
+          "nextAnimationFrameMs": 9.300000190734863,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 51.69999980926514,
+          "projectionMs": 16.800000190734863,
+          "chartDrawMs": 3.5,
+          "nextAnimationFrameMs": 3.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 52.299999713897705,
+          "projectionMs": 16.40000009536743,
+          "chartDrawMs": 3.5999999046325684,
+          "nextAnimationFrameMs": 3.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 51.5,
+          "projectionMs": 15.599999904632568,
+          "chartDrawMs": 4,
+          "nextAnimationFrameMs": 3.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 55.40000009536743,
+          "projectionMs": 16.700000286102295,
+          "chartDrawMs": 2.1999998092651367,
+          "nextAnimationFrameMs": 4.5,
+          "summaryRecords": 365,
+          "totalRecords": 2555,
+          "fingerprint": "4bba2d248bb0943c8dc6487087702e940796dd39fb02889fc8dfa4f2fec6e7e7",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "code-health-change-aware",
+      "variant": "document-envelope",
+      "state": "history",
+      "encodedBytes": 223227,
+      "encodedSha256": "31bdf85b1ffb263ea660b490872c9473d2c79e19a5aa65bb8c46b5ab612b3345",
+      "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+      "summaryRecords": 365,
+      "totalRecords": 425,
+      "summary": {
+        "browserApplyMs": {
+          "median": 8.599999904632568,
+          "min": 8.400000095367432,
+          "max": 24.59999990463257
+        },
+        "projectionMs": {
+          "median": 2,
+          "min": 1.4000000953674316,
+          "max": 3.700000286102295
+        },
+        "chartDrawMs": {
+          "median": 2.0999999046325684,
+          "min": 1.6999998092651367,
+          "max": 3.6999998092651367
+        },
+        "nextAnimationFrameMs": {
+          "median": 2.5999999046325684,
+          "min": 2.4000000953674316,
+          "max": 4.699999809265137
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 8.599999904632568,
+          "projectionMs": 2,
+          "chartDrawMs": 2.3000001907348633,
+          "nextAnimationFrameMs": 2.8999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.400000095367432,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.799999713897705,
+          "nextAnimationFrameMs": 2.5,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 24.59999990463257,
+          "projectionMs": 3.700000286102295,
+          "chartDrawMs": 3.6999998092651367,
+          "nextAnimationFrameMs": 4.699999809265137,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 12.599999904632568,
+          "projectionMs": 2.5999999046325684,
+          "chartDrawMs": 2.3000001907348633,
+          "nextAnimationFrameMs": 2.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 11.200000286102295,
+          "projectionMs": 2,
+          "chartDrawMs": 2.0999999046325684,
+          "nextAnimationFrameMs": 2.5999999046325684,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.5,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.400000095367432,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "code-health-change-aware",
+      "variant": "document-envelope",
+      "state": "fresh",
+      "encodedBytes": 223214,
+      "encodedSha256": "227766a4fe9f3c6272b0f700e7f9d4b19e23d6d70fff79f52baa3f07907c96c6",
+      "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+      "summaryRecords": 365,
+      "totalRecords": 425,
+      "summary": {
+        "browserApplyMs": {
+          "median": 8.599999904632568,
+          "min": 8.200000286102295,
+          "max": 13.5
+        },
+        "projectionMs": {
+          "median": 1.4000000953674316,
+          "min": 1.299999713897705,
+          "max": 2.5
+        },
+        "chartDrawMs": {
+          "median": 1.8000001907348633,
+          "min": 1.6999998092651367,
+          "max": 2.700000286102295
+        },
+        "nextAnimationFrameMs": {
+          "median": 2.4000000953674316,
+          "min": 2.1999998092651367,
+          "max": 2.9000000953674316
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 8.5,
+          "projectionMs": 1.299999713897705,
+          "chartDrawMs": 1.700000286102295,
+          "nextAnimationFrameMs": 2.299999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.200000286102295,
+          "projectionMs": 1.3000001907348633,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.599999904632568,
+          "projectionMs": 1.5,
+          "chartDrawMs": 1.8000001907348633,
+          "nextAnimationFrameMs": 2.1999998092651367,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.699999809265137,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.8000001907348633,
+          "nextAnimationFrameMs": 2.8999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 13.5,
+          "projectionMs": 2.5,
+          "chartDrawMs": 2.700000286102295,
+          "nextAnimationFrameMs": 2.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.5,
+          "projectionMs": 1.3000001907348633,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 11.799999713897705,
+          "projectionMs": 2.200000286102295,
+          "chartDrawMs": 2.299999713897705,
+          "nextAnimationFrameMs": 2.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "code-health-change-aware",
+      "variant": "collection-envelopes",
+      "state": "history",
+      "encodedBytes": 227538,
+      "encodedSha256": "e87e45751cfc6e9b6e947a3566279ba706e5293bf48e2cc17538d0ccb1316208",
+      "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+      "summaryRecords": 365,
+      "totalRecords": 425,
+      "summary": {
+        "browserApplyMs": {
+          "median": 9,
+          "min": 8.099999904632568,
+          "max": 18.300000190734863
+        },
+        "projectionMs": {
+          "median": 1.5999999046325684,
+          "min": 1.4000000953674316,
+          "max": 1.700000286102295
+        },
+        "chartDrawMs": {
+          "median": 1.700000286102295,
+          "min": 1.6999998092651367,
+          "max": 2.200000286102295
+        },
+        "nextAnimationFrameMs": {
+          "median": 2.5,
+          "min": 2.299999713897705,
+          "max": 2.700000286102295
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 8.099999904632568,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.700000286102295,
+          "nextAnimationFrameMs": 2.299999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.299999713897705,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.700000286102295,
+          "nextAnimationFrameMs": 2.5,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.5,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.799999713897705,
+          "nextAnimationFrameMs": 2.5999999046325684,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 18.300000190734863,
+          "projectionMs": 1.5999999046325684,
+          "chartDrawMs": 1.799999713897705,
+          "nextAnimationFrameMs": 2.700000286102295,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 10.599999904632568,
+          "projectionMs": 1.5999999046325684,
+          "chartDrawMs": 1.700000286102295,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 9.199999809265137,
+          "projectionMs": 1.700000286102295,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.5,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 9,
+          "projectionMs": 1.5999999046325684,
+          "chartDrawMs": 2.200000286102295,
+          "nextAnimationFrameMs": 2.3999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "code-health-change-aware",
+      "variant": "collection-envelopes",
+      "state": "fresh",
+      "encodedBytes": 223261,
+      "encodedSha256": "ec69595669a5cb5ae81ef2d501e5e5c92b1bf717c24cb873225352b55aea3ea8",
+      "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+      "summaryRecords": 365,
+      "totalRecords": 425,
+      "summary": {
+        "browserApplyMs": {
+          "median": 10.199999809265137,
+          "min": 8.099999904632568,
+          "max": 23
+        },
+        "projectionMs": {
+          "median": 2.1999998092651367,
+          "min": 1.4000000953674316,
+          "max": 3.5
+        },
+        "chartDrawMs": {
+          "median": 2.1000003814697266,
+          "min": 1.6999998092651367,
+          "max": 4
+        },
+        "nextAnimationFrameMs": {
+          "median": 2.5,
+          "min": 2.299999713897705,
+          "max": 6.800000190734863
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 8.099999904632568,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.3000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 10.199999809265137,
+          "projectionMs": 1.9000000953674316,
+          "chartDrawMs": 1.8000001907348633,
+          "nextAnimationFrameMs": 2.299999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 9.700000286102295,
+          "projectionMs": 2.1999998092651367,
+          "chartDrawMs": 2.3000001907348633,
+          "nextAnimationFrameMs": 2.5,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 17.59999990463257,
+          "projectionMs": 3.5,
+          "chartDrawMs": 3.8000001907348633,
+          "nextAnimationFrameMs": 5.900000095367432,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 23,
+          "projectionMs": 3.4000000953674316,
+          "chartDrawMs": 4,
+          "nextAnimationFrameMs": 6.800000190734863,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 20.59999990463257,
+          "projectionMs": 3.0999999046325684,
+          "chartDrawMs": 1.9000000953674316,
+          "nextAnimationFrameMs": 2.6999998092651367,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 10.099999904632568,
+          "projectionMs": 1.5,
+          "chartDrawMs": 2.1000003814697266,
+          "nextAnimationFrameMs": 2.5,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "code-health-change-aware",
+      "variant": "keyed-records",
+      "state": "history",
+      "encodedBytes": 253486,
+      "encodedSha256": "b1da30cba398d30b19bf772b5f2da69615bcd739b17b60f1c164b7ae10322ab3",
+      "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+      "summaryRecords": 365,
+      "totalRecords": 425,
+      "summary": {
+        "browserApplyMs": {
+          "median": 10,
+          "min": 9.399999618530273,
+          "max": 11.699999809265137
+        },
+        "projectionMs": {
+          "median": 2.3000001907348633,
+          "min": 2.1999998092651367,
+          "max": 2.8000001907348633
+        },
+        "chartDrawMs": {
+          "median": 1.799999713897705,
+          "min": 1.6999998092651367,
+          "max": 1.9000000953674316
+        },
+        "nextAnimationFrameMs": {
+          "median": 2.3000001907348633,
+          "min": 2.299999713897705,
+          "max": 2.5
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 9.599999904632568,
+          "projectionMs": 2.3000001907348633,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 10,
+          "projectionMs": 2.3000001907348633,
+          "chartDrawMs": 1.799999713897705,
+          "nextAnimationFrameMs": 2.3000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 9.399999618530273,
+          "projectionMs": 2.1999998092651367,
+          "chartDrawMs": 1.8000001907348633,
+          "nextAnimationFrameMs": 2.299999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 11.699999809265137,
+          "projectionMs": 2.8000001907348633,
+          "chartDrawMs": 1.9000000953674316,
+          "nextAnimationFrameMs": 2.5,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 10,
+          "projectionMs": 2.200000286102295,
+          "chartDrawMs": 1.799999713897705,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 10.900000095367432,
+          "projectionMs": 2.5999999046325684,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.3000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 9.800000190734863,
+          "projectionMs": 2.5999999046325684,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.3000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "code-health-change-aware",
+      "variant": "keyed-records",
+      "state": "fresh",
+      "encodedBytes": 238956,
+      "encodedSha256": "2b8501109853638afad1cb606bf2b16657b491914a2565dc1ce5fa05fb0a88aa",
+      "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+      "summaryRecords": 365,
+      "totalRecords": 425,
+      "summary": {
+        "browserApplyMs": {
+          "median": 8.900000095367432,
+          "min": 8.699999809265137,
+          "max": 11
+        },
+        "projectionMs": {
+          "median": 2.3000001907348633,
+          "min": 2.1999998092651367,
+          "max": 3.5
+        },
+        "chartDrawMs": {
+          "median": 1.6999998092651367,
+          "min": 1.6000003814697266,
+          "max": 2.5
+        },
+        "nextAnimationFrameMs": {
+          "median": 2.4000000953674316,
+          "min": 2.3999996185302734,
+          "max": 2.5
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 10,
+          "projectionMs": 2.3000001907348633,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.700000286102295,
+          "projectionMs": 2.299999713897705,
+          "chartDrawMs": 1.6000003814697266,
+          "nextAnimationFrameMs": 2.3999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.699999809265137,
+          "projectionMs": 2.3000001907348633,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 11,
+          "projectionMs": 3.5,
+          "chartDrawMs": 2.5,
+          "nextAnimationFrameMs": 2.5,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.900000095367432,
+          "projectionMs": 2.1999998092651367,
+          "chartDrawMs": 1.8000001907348633,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 9.5,
+          "projectionMs": 2.700000286102295,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.900000095367432,
+          "projectionMs": 2.5999999046325684,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "code-health-rewrite-all",
+      "variant": "document-envelope",
+      "state": "history",
+      "encodedBytes": 223227,
+      "encodedSha256": "31bdf85b1ffb263ea660b490872c9473d2c79e19a5aa65bb8c46b5ab612b3345",
+      "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+      "summaryRecords": 365,
+      "totalRecords": 425,
+      "summary": {
+        "browserApplyMs": {
+          "median": 8.400000095367432,
+          "min": 8.099999904632568,
+          "max": 21.90000009536743
+        },
+        "projectionMs": {
+          "median": 1.5,
+          "min": 1.4000000953674316,
+          "max": 3.3999996185302734
+        },
+        "chartDrawMs": {
+          "median": 1.6999998092651367,
+          "min": 1.4000000953674316,
+          "max": 2.6999998092651367
+        },
+        "nextAnimationFrameMs": {
+          "median": 2.5,
+          "min": 2.299999713897705,
+          "max": 3.200000286102295
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 8.099999904632568,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.4000000953674316,
+          "nextAnimationFrameMs": 2.299999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.699999809265137,
+          "projectionMs": 1.5,
+          "chartDrawMs": 1.8000001907348633,
+          "nextAnimationFrameMs": 2.3999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 9.699999809265137,
+          "projectionMs": 1.8000001907348633,
+          "chartDrawMs": 2.6999998092651367,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.300000190734863,
+          "projectionMs": 1.5,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 2.5,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.400000095367432,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.5999999046325684,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.099999904632568,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 2.700000286102295,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 21.90000009536743,
+          "projectionMs": 3.3999996185302734,
+          "chartDrawMs": 1.9000000953674316,
+          "nextAnimationFrameMs": 3.200000286102295,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "code-health-rewrite-all",
+      "variant": "document-envelope",
+      "state": "fresh",
+      "encodedBytes": 223214,
+      "encodedSha256": "227766a4fe9f3c6272b0f700e7f9d4b19e23d6d70fff79f52baa3f07907c96c6",
+      "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+      "summaryRecords": 365,
+      "totalRecords": 425,
+      "summary": {
+        "browserApplyMs": {
+          "median": 8.699999809265137,
+          "min": 8.099999904632568,
+          "max": 24.399999618530273
+        },
+        "projectionMs": {
+          "median": 1.5999999046325684,
+          "min": 1.4000000953674316,
+          "max": 3.4000000953674316
+        },
+        "chartDrawMs": {
+          "median": 1.8000001907348633,
+          "min": 1.5,
+          "max": 3.8000001907348633
+        },
+        "nextAnimationFrameMs": {
+          "median": 2.3000001907348633,
+          "min": 2.299999713897705,
+          "max": 4.699999809265137
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 8.099999904632568,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.5,
+          "nextAnimationFrameMs": 2.3000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.699999809265137,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.5,
+          "nextAnimationFrameMs": 2.3000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 24.399999618530273,
+          "projectionMs": 3.4000000953674316,
+          "chartDrawMs": 3.8000001907348633,
+          "nextAnimationFrameMs": 4.699999809265137,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.5,
+          "projectionMs": 1.799999713897705,
+          "chartDrawMs": 1.8000001907348633,
+          "nextAnimationFrameMs": 2.299999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 12.199999809265137,
+          "projectionMs": 1.5999999046325684,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 2.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 11.299999713897705,
+          "projectionMs": 1.5999999046325684,
+          "chartDrawMs": 1.8000001907348633,
+          "nextAnimationFrameMs": 2.3000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.199999809265137,
+          "projectionMs": 2.1000003814697266,
+          "chartDrawMs": 1.8999996185302734,
+          "nextAnimationFrameMs": 3.200000286102295,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "code-health-rewrite-all",
+      "variant": "collection-envelopes",
+      "state": "history",
+      "encodedBytes": 227538,
+      "encodedSha256": "e87e45751cfc6e9b6e947a3566279ba706e5293bf48e2cc17538d0ccb1316208",
+      "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+      "summaryRecords": 365,
+      "totalRecords": 425,
+      "summary": {
+        "browserApplyMs": {
+          "median": 8.799999713897705,
+          "min": 8.5,
+          "max": 25.5
+        },
+        "projectionMs": {
+          "median": 1.4000000953674316,
+          "min": 1.3000001907348633,
+          "max": 3.9000000953674316
+        },
+        "chartDrawMs": {
+          "median": 1.6999998092651367,
+          "min": 1.5999999046325684,
+          "max": 3.799999713897705
+        },
+        "nextAnimationFrameMs": {
+          "median": 2.4000000953674316,
+          "min": 2.200000286102295,
+          "max": 5
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 22.199999809265137,
+          "projectionMs": 3.9000000953674316,
+          "chartDrawMs": 3.5,
+          "nextAnimationFrameMs": 4.699999809265137,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 9.900000095367432,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 2.3999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.699999809265137,
+          "projectionMs": 1.3000001907348633,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.200000286102295,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.5,
+          "projectionMs": 1.3999996185302734,
+          "chartDrawMs": 1.6000003814697266,
+          "nextAnimationFrameMs": 2.3999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.799999713897705,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 25.5,
+          "projectionMs": 3.5,
+          "chartDrawMs": 3.799999713897705,
+          "nextAnimationFrameMs": 5,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.699999809265137,
+          "projectionMs": 1.6000003814697266,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 2.5,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "code-health-rewrite-all",
+      "variant": "collection-envelopes",
+      "state": "fresh",
+      "encodedBytes": 223261,
+      "encodedSha256": "ec69595669a5cb5ae81ef2d501e5e5c92b1bf717c24cb873225352b55aea3ea8",
+      "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+      "summaryRecords": 365,
+      "totalRecords": 425,
+      "summary": {
+        "browserApplyMs": {
+          "median": 8.400000095367432,
+          "min": 8.199999809265137,
+          "max": 16.5
+        },
+        "projectionMs": {
+          "median": 1.4000000953674316,
+          "min": 1.299999713897705,
+          "max": 2.6999998092651367
+        },
+        "chartDrawMs": {
+          "median": 1.5999999046325684,
+          "min": 1.5,
+          "max": 1.8000001907348633
+        },
+        "nextAnimationFrameMs": {
+          "median": 2.4000000953674316,
+          "min": 2.3000001907348633,
+          "max": 2.9000000953674316
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 16.5,
+          "projectionMs": 2.6999998092651367,
+          "chartDrawMs": 1.700000286102295,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.5,
+          "projectionMs": 1.3000001907348633,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 2.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.200000286102295,
+          "projectionMs": 1.299999713897705,
+          "chartDrawMs": 1.5,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.400000095367432,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 2.3000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.5,
+          "projectionMs": 1.3999996185302734,
+          "chartDrawMs": 1.6000003814697266,
+          "nextAnimationFrameMs": 2.3999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.199999809265137,
+          "projectionMs": 1.5,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.300000190734863,
+          "projectionMs": 1.5,
+          "chartDrawMs": 1.8000001907348633,
+          "nextAnimationFrameMs": 2.3999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "code-health-rewrite-all",
+      "variant": "keyed-records",
+      "state": "history",
+      "encodedBytes": 377723,
+      "encodedSha256": "58eff0c932bfbf1b62d10f64355f91a4136a5c78c70a9bb4b5eb213284a98908",
+      "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+      "summaryRecords": 365,
+      "totalRecords": 425,
+      "summary": {
+        "browserApplyMs": {
+          "median": 14.699999809265137,
+          "min": 13.599999904632568,
+          "max": 17.59999990463257
+        },
+        "projectionMs": {
+          "median": 2.5,
+          "min": 2.0999999046325684,
+          "max": 2.799999713897705
+        },
+        "chartDrawMs": {
+          "median": 1.5999999046325684,
+          "min": 1.5999999046325684,
+          "max": 2.0999999046325684
+        },
+        "nextAnimationFrameMs": {
+          "median": 2.3999996185302734,
+          "min": 2.299999713897705,
+          "max": 3.0999999046325684
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 14.899999618530273,
+          "projectionMs": 2.4000000953674316,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 2.3000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 17.59999990463257,
+          "projectionMs": 2.799999713897705,
+          "chartDrawMs": 1.6000003814697266,
+          "nextAnimationFrameMs": 2.3999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 13.800000190734863,
+          "projectionMs": 2.5,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 2.3000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 16.600000381469727,
+          "projectionMs": 2.0999999046325684,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 2.5,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 14.699999809265137,
+          "projectionMs": 2.4000000953674316,
+          "chartDrawMs": 2.0999999046325684,
+          "nextAnimationFrameMs": 3.0999999046325684,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 13.599999904632568,
+          "projectionMs": 2.5,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 13.700000286102295,
+          "projectionMs": 2.5,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 2.299999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "code-health-rewrite-all",
+      "variant": "keyed-records",
+      "state": "fresh",
+      "encodedBytes": 238956,
+      "encodedSha256": "2b8501109853638afad1cb606bf2b16657b491914a2565dc1ce5fa05fb0a88aa",
+      "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+      "summaryRecords": 365,
+      "totalRecords": 425,
+      "summary": {
+        "browserApplyMs": {
+          "median": 9.099999904632568,
+          "min": 8.699999809265137,
+          "max": 25.700000286102295
+        },
+        "projectionMs": {
+          "median": 2.3000001907348633,
+          "min": 2.1999998092651367,
+          "max": 5.199999809265137
+        },
+        "chartDrawMs": {
+          "median": 1.799999713897705,
+          "min": 1.5,
+          "max": 3.5
+        },
+        "nextAnimationFrameMs": {
+          "median": 2.4000000953674316,
+          "min": 2.299999713897705,
+          "max": 4.899999618530273
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 8.900000095367432,
+          "projectionMs": 2.200000286102295,
+          "chartDrawMs": 1.799999713897705,
+          "nextAnimationFrameMs": 2.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.799999713897705,
+          "projectionMs": 2.200000286102295,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 2.299999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.699999809265137,
+          "projectionMs": 2.3000001907348633,
+          "chartDrawMs": 1.5,
+          "nextAnimationFrameMs": 2.5,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 25.700000286102295,
+          "projectionMs": 4.699999809265137,
+          "chartDrawMs": 3.5,
+          "nextAnimationFrameMs": 3.4000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 11,
+          "projectionMs": 2.1999998092651367,
+          "chartDrawMs": 1.8000001907348633,
+          "nextAnimationFrameMs": 2.3000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 9.099999904632568,
+          "projectionMs": 2.5,
+          "chartDrawMs": 1.700000286102295,
+          "nextAnimationFrameMs": 2.3999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 21.200000286102295,
+          "projectionMs": 5.199999809265137,
+          "chartDrawMs": 3.1000003814697266,
+          "nextAnimationFrameMs": 4.899999618530273,
+          "summaryRecords": 365,
+          "totalRecords": 425,
+          "fingerprint": "107a43d5647d88211d5dc66b243c9111cd51fa6c85645ed59530995e507cce51",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "model-evaluation",
+      "variant": "document-envelope",
+      "state": "history",
+      "encodedBytes": 164702,
+      "encodedSha256": "0cf6f1ec16a39b7e24c46d19604265e97a2d9f9a5b6e5ba4fd9339bf35dcbf35",
+      "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+      "summaryRecords": 26,
+      "totalRecords": 156,
+      "summary": {
+        "browserApplyMs": {
+          "median": 7.099999904632568,
+          "min": 3.5,
+          "max": 9.599999904632568
+        },
+        "projectionMs": {
+          "median": 1,
+          "min": 0.5999999046325684,
+          "max": 2
+        },
+        "chartDrawMs": {
+          "median": 2.4000000953674316,
+          "min": 1.1999998092651367,
+          "max": 3.1999998092651367
+        },
+        "nextAnimationFrameMs": {
+          "median": 1.4000000953674316,
+          "min": 0.5999999046325684,
+          "max": 8.200000286102295
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 3.5,
+          "projectionMs": 0.5999999046325684,
+          "chartDrawMs": 1.1999998092651367,
+          "nextAnimationFrameMs": 8.200000286102295,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.700000286102295,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 2.6999998092651367,
+          "nextAnimationFrameMs": 1.4000000953674316,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 7.099999904632568,
+          "projectionMs": 1,
+          "chartDrawMs": 2.4000000953674316,
+          "nextAnimationFrameMs": 0.5999999046325684,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 9.599999904632568,
+          "projectionMs": 2,
+          "chartDrawMs": 3.1999998092651367,
+          "nextAnimationFrameMs": 0.9000000953674316,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.899999618530273,
+          "projectionMs": 1.4000000953674316,
+          "chartDrawMs": 2.8000001907348633,
+          "nextAnimationFrameMs": 0.6999998092651367,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.5999999046325684,
+          "projectionMs": 0.7000002861022949,
+          "chartDrawMs": 1.299999713897705,
+          "nextAnimationFrameMs": 1.5,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.6999998092651367,
+          "projectionMs": 0.5999999046325684,
+          "chartDrawMs": 1.299999713897705,
+          "nextAnimationFrameMs": 7.700000286102295,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "model-evaluation",
+      "variant": "document-envelope",
+      "state": "fresh",
+      "encodedBytes": 164692,
+      "encodedSha256": "838e4af933295b8410a492dea2037b53f5c52137c1fd85b40526a3f6142bb9c6",
+      "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+      "summaryRecords": 26,
+      "totalRecords": 156,
+      "summary": {
+        "browserApplyMs": {
+          "median": 6.899999618530273,
+          "min": 3.5,
+          "max": 8.799999713897705
+        },
+        "projectionMs": {
+          "median": 1.1000003814697266,
+          "min": 0.5,
+          "max": 1.3000001907348633
+        },
+        "chartDrawMs": {
+          "median": 1.6999998092651367,
+          "min": 1.0999999046325684,
+          "max": 2.8000001907348633
+        },
+        "nextAnimationFrameMs": {
+          "median": 0.5999999046325684,
+          "min": 0.40000009536743164,
+          "max": 6.5
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 8.799999713897705,
+          "projectionMs": 1.3000001907348633,
+          "chartDrawMs": 2.8000001907348633,
+          "nextAnimationFrameMs": 0.8999996185302734,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.600000381469727,
+          "projectionMs": 1.299999713897705,
+          "chartDrawMs": 2.700000286102295,
+          "nextAnimationFrameMs": 0.5999999046325684,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 7.299999713897705,
+          "projectionMs": 1.1000003814697266,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 0.40000009536743164,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.5,
+          "projectionMs": 0.7000002861022949,
+          "chartDrawMs": 1.0999999046325684,
+          "nextAnimationFrameMs": 1.9000000953674316,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 6.899999618530273,
+          "projectionMs": 1.200000286102295,
+          "chartDrawMs": 2.1999998092651367,
+          "nextAnimationFrameMs": 0.5,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.700000286102295,
+          "projectionMs": 0.5,
+          "chartDrawMs": 1.299999713897705,
+          "nextAnimationFrameMs": 0.40000009536743164,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 4.5,
+          "projectionMs": 0.6000003814697266,
+          "chartDrawMs": 1.3999996185302734,
+          "nextAnimationFrameMs": 6.5,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "model-evaluation",
+      "variant": "collection-envelopes",
+      "state": "history",
+      "encodedBytes": 165256,
+      "encodedSha256": "9b0854e7e91dd37923f637ca0f48d0ecd4a927d1fb90b5d4a8d5c0b6e0aa1a00",
+      "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+      "summaryRecords": 26,
+      "totalRecords": 156,
+      "summary": {
+        "browserApplyMs": {
+          "median": 3.700000286102295,
+          "min": 3.3000001907348633,
+          "max": 8.799999713897705
+        },
+        "projectionMs": {
+          "median": 0.7000002861022949,
+          "min": 0.5,
+          "max": 1.6000003814697266
+        },
+        "chartDrawMs": {
+          "median": 1.4000000953674316,
+          "min": 1.200000286102295,
+          "max": 3.200000286102295
+        },
+        "nextAnimationFrameMs": {
+          "median": 5,
+          "min": 0.5,
+          "max": 8.300000190734863
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 5.5,
+          "projectionMs": 0.8999996185302734,
+          "chartDrawMs": 1.700000286102295,
+          "nextAnimationFrameMs": 0.5,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.6999998092651367,
+          "projectionMs": 0.5,
+          "chartDrawMs": 1.200000286102295,
+          "nextAnimationFrameMs": 5,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.3000001907348633,
+          "projectionMs": 0.5999999046325684,
+          "chartDrawMs": 1.200000286102295,
+          "nextAnimationFrameMs": 8.299999713897705,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.699999809265137,
+          "projectionMs": 1.6000003814697266,
+          "chartDrawMs": 2.8999996185302734,
+          "nextAnimationFrameMs": 0.7000002861022949,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 8.799999713897705,
+          "projectionMs": 1.3999996185302734,
+          "chartDrawMs": 3.200000286102295,
+          "nextAnimationFrameMs": 0.5999999046325684,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.5999999046325684,
+          "projectionMs": 0.7000002861022949,
+          "chartDrawMs": 1.299999713897705,
+          "nextAnimationFrameMs": 8.300000190734863,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.700000286102295,
+          "projectionMs": 0.5999999046325684,
+          "chartDrawMs": 1.4000000953674316,
+          "nextAnimationFrameMs": 7.599999904632568,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "model-evaluation",
+      "variant": "collection-envelopes",
+      "state": "fresh",
+      "encodedBytes": 164739,
+      "encodedSha256": "6f08eece29669df42a70b2b2ad394c04f15b5289cca947f3b06e00c82a30558d",
+      "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+      "summaryRecords": 26,
+      "totalRecords": 156,
+      "summary": {
+        "browserApplyMs": {
+          "median": 4.5,
+          "min": 3.3999996185302734,
+          "max": 9
+        },
+        "projectionMs": {
+          "median": 0.7000002861022949,
+          "min": 0.5,
+          "max": 1.3999996185302734
+        },
+        "chartDrawMs": {
+          "median": 1.5,
+          "min": 1.299999713897705,
+          "max": 2.9000000953674316
+        },
+        "nextAnimationFrameMs": {
+          "median": 1.5,
+          "min": 0.3000001907348633,
+          "max": 8
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 6,
+          "projectionMs": 1.0999999046325684,
+          "chartDrawMs": 2.0999999046325684,
+          "nextAnimationFrameMs": 0.6999998092651367,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.3999996185302734,
+          "projectionMs": 0.6000003814697266,
+          "chartDrawMs": 1.299999713897705,
+          "nextAnimationFrameMs": 0.3000001907348633,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.5,
+          "projectionMs": 0.5,
+          "chartDrawMs": 1.3999996185302734,
+          "nextAnimationFrameMs": 8,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 9,
+          "projectionMs": 1.3999996185302734,
+          "chartDrawMs": 2.9000000953674316,
+          "nextAnimationFrameMs": 1.5,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 6.900000095367432,
+          "projectionMs": 1.3999996185302734,
+          "chartDrawMs": 2.200000286102295,
+          "nextAnimationFrameMs": 0.6999998092651367,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.5,
+          "projectionMs": 0.6000003814697266,
+          "chartDrawMs": 1.299999713897705,
+          "nextAnimationFrameMs": 1.9000000953674316,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 4.5,
+          "projectionMs": 0.7000002861022949,
+          "chartDrawMs": 1.5,
+          "nextAnimationFrameMs": 4.099999904632568,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "model-evaluation",
+      "variant": "keyed-records",
+      "state": "history",
+      "encodedBytes": 170468,
+      "encodedSha256": "9bc8564f24e11cc75d66ef085e59b6eca28375df498f8905799b1bb8b14c72ca",
+      "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+      "summaryRecords": 26,
+      "totalRecords": 156,
+      "summary": {
+        "browserApplyMs": {
+          "median": 4,
+          "min": 3.5999999046325684,
+          "max": 9.700000286102295
+        },
+        "projectionMs": {
+          "median": 1.0999999046325684,
+          "min": 1,
+          "max": 2.5999999046325684
+        },
+        "chartDrawMs": {
+          "median": 1.200000286102295,
+          "min": 1.1000003814697266,
+          "max": 2.9000000953674316
+        },
+        "nextAnimationFrameMs": {
+          "median": 7.5,
+          "min": 0.20000028610229492,
+          "max": 9.299999713897705
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 8.199999809265137,
+          "projectionMs": 2,
+          "chartDrawMs": 2.0999999046325684,
+          "nextAnimationFrameMs": 0.20000028610229492,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 4,
+          "projectionMs": 1,
+          "chartDrawMs": 1.200000286102295,
+          "nextAnimationFrameMs": 7.5,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.9000000953674316,
+          "projectionMs": 1,
+          "chartDrawMs": 1.200000286102295,
+          "nextAnimationFrameMs": 9.299999713897705,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.5999999046325684,
+          "projectionMs": 1,
+          "chartDrawMs": 1.1999998092651367,
+          "nextAnimationFrameMs": 7.800000190734863,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.5999999046325684,
+          "projectionMs": 1.0999999046325684,
+          "chartDrawMs": 1.1000003814697266,
+          "nextAnimationFrameMs": 7.899999618530273,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 9.700000286102295,
+          "projectionMs": 2.5999999046325684,
+          "chartDrawMs": 2.9000000953674316,
+          "nextAnimationFrameMs": 0.6999998092651367,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 7.699999809265137,
+          "projectionMs": 2,
+          "chartDrawMs": 2.1999998092651367,
+          "nextAnimationFrameMs": 0.5999999046325684,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "model-evaluation",
+      "variant": "keyed-records",
+      "state": "fresh",
+      "encodedBytes": 170091,
+      "encodedSha256": "96aa30f283038dc5cc1db7c69c74bdbca5947303061f7cbebaa35163b3905a38",
+      "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+      "summaryRecords": 26,
+      "totalRecords": 156,
+      "summary": {
+        "browserApplyMs": {
+          "median": 3.9000000953674316,
+          "min": 3.700000286102295,
+          "max": 9.799999713897705
+        },
+        "projectionMs": {
+          "median": 1,
+          "min": 0.7999997138977051,
+          "max": 2.5999999046325684
+        },
+        "chartDrawMs": {
+          "median": 1.200000286102295,
+          "min": 1.0999999046325684,
+          "max": 2.8000001907348633
+        },
+        "nextAnimationFrameMs": {
+          "median": 3.3000001907348633,
+          "min": 0.40000009536743164,
+          "max": 7.599999904632568
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 3.9000000953674316,
+          "projectionMs": 1,
+          "chartDrawMs": 1.0999999046325684,
+          "nextAnimationFrameMs": 3.3000001907348633,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.700000286102295,
+          "projectionMs": 1,
+          "chartDrawMs": 1.299999713897705,
+          "nextAnimationFrameMs": 7.599999904632568,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.8999996185302734,
+          "projectionMs": 0.8000001907348633,
+          "chartDrawMs": 1.8000001907348633,
+          "nextAnimationFrameMs": 2.3999996185302734,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 3.8000001907348633,
+          "projectionMs": 0.7999997138977051,
+          "chartDrawMs": 1.200000286102295,
+          "nextAnimationFrameMs": 7.5,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 4,
+          "projectionMs": 1.1999998092651367,
+          "chartDrawMs": 1.200000286102295,
+          "nextAnimationFrameMs": 7.099999904632568,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 9.799999713897705,
+          "projectionMs": 2.5999999046325684,
+          "chartDrawMs": 2.8000001907348633,
+          "nextAnimationFrameMs": 0.6999998092651367,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 4,
+          "projectionMs": 1.0999999046325684,
+          "chartDrawMs": 1.1999998092651367,
+          "nextAnimationFrameMs": 0.40000009536743164,
+          "summaryRecords": 26,
+          "totalRecords": 156,
+          "fingerprint": "4eeaecfb842df79e6b9a18b8b53b302d7d0a937c2e679ed2b7e70fcc19eeb3eb",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "api-health",
+      "variant": "document-envelope",
+      "state": "history",
+      "encodedBytes": 2327022,
+      "encodedSha256": "e6251536a96f50d09377434669ac6e13ed4a4d2e313b297c834381b7469cbd99",
+      "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+      "summaryRecords": 365,
+      "totalRecords": 4432,
+      "summary": {
+        "browserApplyMs": {
+          "median": 95.59999990463257,
+          "min": 86.59999990463257,
+          "max": 131
+        },
+        "projectionMs": {
+          "median": 17.5,
+          "min": 15.600000381469727,
+          "max": 23.40000009536743
+        },
+        "chartDrawMs": {
+          "median": 2,
+          "min": 1.5,
+          "max": 3.6000003814697266
+        },
+        "nextAnimationFrameMs": {
+          "median": 1.8999996185302734,
+          "min": 1.799999713897705,
+          "max": 2.5999999046325684
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 87.80000019073486,
+          "projectionMs": 17.09999990463257,
+          "chartDrawMs": 1.700000286102295,
+          "nextAnimationFrameMs": 1.8999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 105.5,
+          "projectionMs": 23.40000009536743,
+          "chartDrawMs": 2.4000000953674316,
+          "nextAnimationFrameMs": 2.299999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 131,
+          "projectionMs": 17.5,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 1.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 95.59999990463257,
+          "projectionMs": 15.600000381469727,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 1.8999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 86.59999990463257,
+          "projectionMs": 17.40000009536743,
+          "chartDrawMs": 1.5,
+          "nextAnimationFrameMs": 1.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 97.69999980926514,
+          "projectionMs": 20.59999990463257,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 1.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 92.90000009536743,
+          "projectionMs": 21.799999713897705,
+          "chartDrawMs": 3.6000003814697266,
+          "nextAnimationFrameMs": 2.5999999046325684,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "api-health",
+      "variant": "document-envelope",
+      "state": "fresh",
+      "encodedBytes": 2327009,
+      "encodedSha256": "e02b4abb4da638264e67f469333ccd2f849819c91b346d2d4b19df46b0e66a48",
+      "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+      "summaryRecords": 365,
+      "totalRecords": 4432,
+      "summary": {
+        "browserApplyMs": {
+          "median": 102.30000019073486,
+          "min": 83.7999997138977,
+          "max": 128.19999980926514
+        },
+        "projectionMs": {
+          "median": 17.700000286102295,
+          "min": 15.800000190734863,
+          "max": 23
+        },
+        "chartDrawMs": {
+          "median": 1.8999996185302734,
+          "min": 1.5999999046325684,
+          "max": 3.8999996185302734
+        },
+        "nextAnimationFrameMs": {
+          "median": 1.9000000953674316,
+          "min": 1.700000286102295,
+          "max": 2
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 128.19999980926514,
+          "projectionMs": 17.600000381469727,
+          "chartDrawMs": 2.1999998092651367,
+          "nextAnimationFrameMs": 1.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 102.5,
+          "projectionMs": 23,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 1.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 83.7999997138977,
+          "projectionMs": 17.700000286102295,
+          "chartDrawMs": 3.8999996185302734,
+          "nextAnimationFrameMs": 1.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 85.09999990463257,
+          "projectionMs": 16.300000190734863,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 1.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 112.09999990463257,
+          "projectionMs": 22.59999990463257,
+          "chartDrawMs": 1.700000286102295,
+          "nextAnimationFrameMs": 2,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 100.5,
+          "projectionMs": 18.799999713897705,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 1.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 102.30000019073486,
+          "projectionMs": 15.800000190734863,
+          "chartDrawMs": 1.8999996185302734,
+          "nextAnimationFrameMs": 1.700000286102295,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "api-health",
+      "variant": "collection-envelopes",
+      "state": "history",
+      "encodedBytes": 2334442,
+      "encodedSha256": "2d9d75a1eb234d86957cc89927ce65b1bc65415f3220a37bc963fdab2969ff81",
+      "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+      "summaryRecords": 365,
+      "totalRecords": 4432,
+      "summary": {
+        "browserApplyMs": {
+          "median": 89.90000009536743,
+          "min": 84,
+          "max": 102.69999980926514
+        },
+        "projectionMs": {
+          "median": 14.900000095367432,
+          "min": 14.199999809265137,
+          "max": 18.5
+        },
+        "chartDrawMs": {
+          "median": 1.6999998092651367,
+          "min": 1.5,
+          "max": 2.1000003814697266
+        },
+        "nextAnimationFrameMs": {
+          "median": 1.799999713897705,
+          "min": 1.6999998092651367,
+          "max": 1.8000001907348633
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 85.30000019073486,
+          "projectionMs": 14.800000190734863,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 1.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 90.7999997138977,
+          "projectionMs": 14.900000095367432,
+          "chartDrawMs": 1.5,
+          "nextAnimationFrameMs": 1.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 102.69999980926514,
+          "projectionMs": 14.900000095367432,
+          "chartDrawMs": 1.9000000953674316,
+          "nextAnimationFrameMs": 1.799999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 97.59999990463257,
+          "projectionMs": 14.199999809265137,
+          "chartDrawMs": 2.1000003814697266,
+          "nextAnimationFrameMs": 1.6999998092651367,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 88.19999980926514,
+          "projectionMs": 18.5,
+          "chartDrawMs": 1.700000286102295,
+          "nextAnimationFrameMs": 1.6999998092651367,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 89.90000009536743,
+          "projectionMs": 16,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 1.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 84,
+          "projectionMs": 14.300000190734863,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 1.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "api-health",
+      "variant": "collection-envelopes",
+      "state": "fresh",
+      "encodedBytes": 2327056,
+      "encodedSha256": "0dfea5a519ac790f1bf034e517b4fae233e94fbfd8c2a3f1d294d8feaa86a629",
+      "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+      "summaryRecords": 365,
+      "totalRecords": 4432,
+      "summary": {
+        "browserApplyMs": {
+          "median": 91.40000009536743,
+          "min": 84.09999990463257,
+          "max": 116.5
+        },
+        "projectionMs": {
+          "median": 16.699999809265137,
+          "min": 14.5,
+          "max": 21.699999809265137
+        },
+        "chartDrawMs": {
+          "median": 2.0999999046325684,
+          "min": 1.5999999046325684,
+          "max": 2.4000000953674316
+        },
+        "nextAnimationFrameMs": {
+          "median": 1.8000001907348633,
+          "min": 1.6999998092651367,
+          "max": 1.9000000953674316
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 102.7000002861023,
+          "projectionMs": 18.40000009536743,
+          "chartDrawMs": 2.0999999046325684,
+          "nextAnimationFrameMs": 1.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 91.40000009536743,
+          "projectionMs": 16.699999809265137,
+          "chartDrawMs": 1.6000003814697266,
+          "nextAnimationFrameMs": 1.6999998092651367,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 91.09999990463257,
+          "projectionMs": 16.699999809265137,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 1.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 90.69999980926514,
+          "projectionMs": 15.599999904632568,
+          "chartDrawMs": 2.0999999046325684,
+          "nextAnimationFrameMs": 1.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 84.09999990463257,
+          "projectionMs": 14.5,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 1.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 96.40000009536743,
+          "projectionMs": 15.800000190734863,
+          "chartDrawMs": 2.299999713897705,
+          "nextAnimationFrameMs": 1.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 116.5,
+          "projectionMs": 21.699999809265137,
+          "chartDrawMs": 2.4000000953674316,
+          "nextAnimationFrameMs": 1.6999998092651367,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "api-health",
+      "variant": "keyed-records",
+      "state": "history",
+      "encodedBytes": 2493761,
+      "encodedSha256": "fe76dc87a53a16df88c007eb9abe200335efa78aebcf02d4f8f8631974217153",
+      "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+      "summaryRecords": 365,
+      "totalRecords": 4432,
+      "summary": {
+        "browserApplyMs": {
+          "median": 102.30000019073486,
+          "min": 92.09999990463257,
+          "max": 119.90000009536743
+        },
+        "projectionMs": {
+          "median": 27.09999990463257,
+          "min": 26,
+          "max": 29.799999713897705
+        },
+        "chartDrawMs": {
+          "median": 1.6999998092651367,
+          "min": 1.5,
+          "max": 2.1000003814697266
+        },
+        "nextAnimationFrameMs": {
+          "median": 1.8999996185302734,
+          "min": 1.8000001907348633,
+          "max": 1.9000000953674316
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 102.30000019073486,
+          "projectionMs": 29.699999809265137,
+          "chartDrawMs": 1.5,
+          "nextAnimationFrameMs": 1.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 92.09999990463257,
+          "projectionMs": 26,
+          "chartDrawMs": 1.5999999046325684,
+          "nextAnimationFrameMs": 1.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 116.09999990463257,
+          "projectionMs": 26.300000190734863,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 1.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 92.89999961853027,
+          "projectionMs": 26.200000286102295,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 1.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 119.90000009536743,
+          "projectionMs": 29.799999713897705,
+          "chartDrawMs": 2.1000003814697266,
+          "nextAnimationFrameMs": 1.8999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 92.80000019073486,
+          "projectionMs": 27.09999990463257,
+          "chartDrawMs": 1.9000000953674316,
+          "nextAnimationFrameMs": 1.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 105.09999990463257,
+          "projectionMs": 28.40000009536743,
+          "chartDrawMs": 1.700000286102295,
+          "nextAnimationFrameMs": 1.8999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    },
+    {
+      "workload": "api-health",
+      "variant": "keyed-records",
+      "state": "fresh",
+      "encodedBytes": 2489757,
+      "encodedSha256": "2895e199784564aa1c7986985b65b765eb39c511e226718d7824c3dd346fe1e1",
+      "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+      "summaryRecords": 365,
+      "totalRecords": 4432,
+      "summary": {
+        "browserApplyMs": {
+          "median": 96.09999990463257,
+          "min": 92.89999961853027,
+          "max": 117.40000009536743
+        },
+        "projectionMs": {
+          "median": 26.699999809265137,
+          "min": 25.300000190734863,
+          "max": 58.5
+        },
+        "chartDrawMs": {
+          "median": 2,
+          "min": 1.6000003814697266,
+          "max": 3.799999713897705
+        },
+        "nextAnimationFrameMs": {
+          "median": 1.9000000953674316,
+          "min": 1.8000001907348633,
+          "max": 2.299999713897705
+        }
+      },
+      "rawSamples": [
+        {
+          "browserApplyMs": 93.69999980926514,
+          "projectionMs": 26.199999809265137,
+          "chartDrawMs": 1.6000003814697266,
+          "nextAnimationFrameMs": 1.8999996185302734,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 108.90000009536743,
+          "projectionMs": 27,
+          "chartDrawMs": 2,
+          "nextAnimationFrameMs": 1.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 104.09999990463257,
+          "projectionMs": 25.300000190734863,
+          "chartDrawMs": 2.5,
+          "nextAnimationFrameMs": 2.299999713897705,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 96.09999990463257,
+          "projectionMs": 26.699999809265137,
+          "chartDrawMs": 1.6999998092651367,
+          "nextAnimationFrameMs": 1.8000001907348633,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 94,
+          "projectionMs": 25.699999809265137,
+          "chartDrawMs": 1.700000286102295,
+          "nextAnimationFrameMs": 1.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 92.89999961853027,
+          "projectionMs": 38.69999980926514,
+          "chartDrawMs": 2.5,
+          "nextAnimationFrameMs": 2,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        },
+        {
+          "browserApplyMs": 117.40000009536743,
+          "projectionMs": 58.5,
+          "chartDrawMs": 3.799999713897705,
+          "nextAnimationFrameMs": 1.9000000953674316,
+          "summaryRecords": 365,
+          "totalRecords": 4432,
+          "fingerprint": "68d9c82c1e66a6c0038eacd4c7477a34a799f893533805acfe4ccd15a2a78029",
+          "localUpdates": 0,
+          "remoteUpdates": 1,
+          "observerCalls": 1,
+          "chartRenders": 1
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "pageErrors": 0,
+    "allProjectionsEqualToReferences": true,
+    "allLocalUpdatesZero": true
+  }
+}

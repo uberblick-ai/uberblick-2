@@ -1,0 +1,302 @@
+{
+  "method": "Independent verification, 1500 fixed records; daily value increment in all rows or rotating one of ten residue classes of collection ordinal; one transaction/day; exact logical data asserted; 1 warmup+7 fresh apply samples. Synthetic sensitivity only; not a producer history.",
+  "node": "v26.7.0",
+  "environment": {
+    "platform": "linux",
+    "release": "7.0.0-30-generic",
+    "arch": "x64",
+    "cpu": "AMD EPYC-Genoa Processor",
+    "logicalCpus": 8,
+    "memoryBytes": 16365862912
+  },
+  "output": [
+    {
+      "fraction": 0.1,
+      "variant": "document-envelope",
+      "milestones": [
+        {
+          "day": 0,
+          "stateBytes": 755650,
+          "freshEquivalentBytes": 755650,
+          "coldApplySamplesMs": [
+            18.941418,
+            16.47978900000001,
+            12.185024999999996,
+            12.404214999999994,
+            13.971989000000008,
+            13.747359999999958,
+            13.666348000000028
+          ]
+        },
+        {
+          "day": 30,
+          "stateBytes": 755705,
+          "freshEquivalentBytes": 755695,
+          "coldApplySamplesMs": [
+            11.003023999999982,
+            13.860100000000102,
+            10.537440999999944,
+            15.502344999999991,
+            11.925875000000019,
+            14.296888999999965,
+            10.720207999999957
+          ]
+        },
+        {
+          "day": 365,
+          "stateBytes": 755872,
+          "freshEquivalentBytes": 755859,
+          "coldApplySamplesMs": [
+            15.469065000000228,
+            11.173529999999573,
+            11.31935999999996,
+            11.183676999999989,
+            11.183856999999989,
+            11.3577379999997,
+            11.743359999999939
+          ]
+        }
+      ]
+    },
+    {
+      "fraction": 0.1,
+      "variant": "collection-envelopes",
+      "milestones": [
+        {
+          "day": 0,
+          "stateBytes": 755697,
+          "freshEquivalentBytes": 755697,
+          "coldApplySamplesMs": [
+            11.436157999999978,
+            18.46238600000015,
+            10.579967000000124,
+            10.777613000000201,
+            11.192940999999792,
+            11.474253999999746,
+            11.28474899999992
+          ]
+        },
+        {
+          "day": 30,
+          "stateBytes": 756197,
+          "freshEquivalentBytes": 755742,
+          "coldApplySamplesMs": [
+            15.86521300000004,
+            11.701125999999931,
+            30.77475400000003,
+            14.827218999999786,
+            16.43080400000008,
+            10.829862999999932,
+            14.770743000000039
+          ]
+        },
+        {
+          "day": 365,
+          "stateBytes": 762356,
+          "freshEquivalentBytes": 755906,
+          "coldApplySamplesMs": [
+            11.259029999999257,
+            15.104575000000295,
+            13.049286999999822,
+            15.186878999999863,
+            11.025528000000122,
+            11.018457000000126,
+            10.829921999999897
+          ]
+        }
+      ]
+    },
+    {
+      "fraction": 0.1,
+      "variant": "keyed-records",
+      "milestones": [
+        {
+          "day": 0,
+          "stateBytes": 809665,
+          "freshEquivalentBytes": 809665,
+          "coldApplySamplesMs": [
+            12.097854000000552,
+            12.151104999999916,
+            13.983776999999463,
+            11.86851900000056,
+            12.494421999999759,
+            14.04145299999982,
+            12.18112099999962
+          ]
+        },
+        {
+          "day": 30,
+          "stateBytes": 836598,
+          "freshEquivalentBytes": 809710,
+          "coldApplySamplesMs": [
+            14.438412000000426,
+            17.9914660000004,
+            17.264822000000095,
+            14.680266000000302,
+            13.421149000000696,
+            18.407564999999522,
+            17.822523999999248
+          ]
+        },
+        {
+          "day": 365,
+          "stateBytes": 1176634,
+          "freshEquivalentBytes": 809874,
+          "coldApplySamplesMs": [
+            83.17206799999985,
+            37.05864500000007,
+            46.009775999999874,
+            46.473855999999614,
+            48.585447999999815,
+            51.63163000000077,
+            57.59150300000056
+          ]
+        }
+      ]
+    },
+    {
+      "fraction": 1,
+      "variant": "document-envelope",
+      "milestones": [
+        {
+          "day": 0,
+          "stateBytes": 755650,
+          "freshEquivalentBytes": 755650,
+          "coldApplySamplesMs": [
+            10.947680999999648,
+            16.691295999999966,
+            10.574798999999985,
+            15.012407000000167,
+            10.668700000000172,
+            15.492339999999786,
+            10.56094800000028
+          ]
+        },
+        {
+          "day": 30,
+          "stateBytes": 755869,
+          "freshEquivalentBytes": 755859,
+          "coldApplySamplesMs": [
+            15.835947999999917,
+            11.344820000000254,
+            17.637674000000516,
+            12.219789000000674,
+            14.047411999999895,
+            10.46569400000044,
+            11.881397999999535
+          ]
+        },
+        {
+          "day": 365,
+          "stateBytes": 755872,
+          "freshEquivalentBytes": 755859,
+          "coldApplySamplesMs": [
+            10.535890000000109,
+            10.384492000000137,
+            10.587647999999717,
+            10.516781999999694,
+            10.417120000000068,
+            10.459704999999303,
+            10.55223500000011
+          ]
+        }
+      ]
+    },
+    {
+      "fraction": 1,
+      "variant": "collection-envelopes",
+      "milestones": [
+        {
+          "day": 0,
+          "stateBytes": 755697,
+          "freshEquivalentBytes": 755697,
+          "coldApplySamplesMs": [
+            10.506095000000641,
+            25.070075000001452,
+            10.447846999999456,
+            12.858100000001286,
+            10.443030000000363,
+            27.96780199999921,
+            23.45170799999869
+          ]
+        },
+        {
+          "day": 30,
+          "stateBytes": 756361,
+          "freshEquivalentBytes": 755906,
+          "coldApplySamplesMs": [
+            13.43532100000084,
+            10.77987800000119,
+            13.763043999999354,
+            10.763442999999825,
+            13.59386799999993,
+            12.303533999998763,
+            13.181255999999848
+          ]
+        },
+        {
+          "day": 365,
+          "stateBytes": 762356,
+          "freshEquivalentBytes": 755906,
+          "coldApplySamplesMs": [
+            13.998317999999927,
+            11.214222000000518,
+            11.038846999999805,
+            11.04988400000002,
+            11.86503300000004,
+            14.67180499999995,
+            14.266191999999137
+          ]
+        }
+      ]
+    },
+    {
+      "fraction": 1,
+      "variant": "keyed-records",
+      "milestones": [
+        {
+          "day": 0,
+          "stateBytes": 809665,
+          "freshEquivalentBytes": 809665,
+          "coldApplySamplesMs": [
+            32.667177000001175,
+            13.656041999998706,
+            11.611802000001262,
+            14.40990899999997,
+            12.599790000000212,
+            12.014438000000155,
+            12.85287099999914
+          ]
+        },
+        {
+          "day": 30,
+          "stateBytes": 1108384,
+          "freshEquivalentBytes": 809874,
+          "coldApplySamplesMs": [
+            29.112347999998747,
+            57.327244000000064,
+            41.64117199999964,
+            30.02410299999974,
+            27.504844999999477,
+            34.44946300000083,
+            32.52245799999946
+          ]
+        },
+        {
+          "day": 365,
+          "stateBytes": 4625884,
+          "freshEquivalentBytes": 809874,
+          "coldApplySamplesMs": [
+            524.3838780000005,
+            466.929983,
+            339.84808300000077,
+            470.06144200000017,
+            632.6017449999999,
+            367.31494199999906,
+            350.9724810000007
+          ]
+        }
+      ]
+    }
+  ]
+}
