@@ -3,7 +3,7 @@
 # A machine that has never seen this repository, so the first-user experience
 # can be executed rather than reasoned about.
 #
-# What is installed here is exactly what README "Getting it running" calls the
+# What is installed here is exactly what CONTRIBUTING.md "Contributor setup" calls the
 # prerequisites — git and mise, and the `curl`/`ca-certificates` that fetching
 # mise itself needs. No Node, no pnpm, no fnox, no age key, no secrets, nothing
 # from this repository. Everything else has to come from the documented install
@@ -36,7 +36,7 @@ ENV PATH=/home/fue/.local/bin:$PATH
 RUN curl --fail --silent --show-error --location https://mise.run | sh \
     && mise --version
 
-# "Copy the source in" stands in for the README's `git clone`: this proves the
+# "Copy the source in" stands in for a contributor's fresh clone: this proves the
 # working tree in front of you, which is the tree whose install path is being
 # changed. Dockerfile.fue.dockerignore decides what counts as a clean checkout:
 # nothing a local run creates — no databases, no `.env`, no local mise config —
@@ -44,11 +44,11 @@ RUN curl --fail --silent --show-error --location https://mise.run | sh \
 WORKDIR /home/fue/uberblick
 COPY --chown=fue:fue . .
 
-# The documented install path, verbatim from README "Getting it running" and
-# the live *Install and run* document, unattended. This is the line under test.
+# The documented install path, from CONTRIBUTING.md "Contributor setup" and
+# .agents/development.md, unattended. This is the line under test.
 RUN mise trust && mise run setup -- --yes
 
 # Deliberately the only thing the assertion container does. `mise exec` is what
-# the README tells anyone without an activated shell to use, and it is what puts
+# CONTRIBUTING.md tells anyone without an activated shell to use, and it puts
 # `ub` on PATH here.
 CMD ["mise", "exec", "--", "node", "scripts/fue-assert.mjs"]

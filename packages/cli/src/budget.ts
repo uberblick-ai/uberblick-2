@@ -12,7 +12,7 @@
  * or unusable value changes nothing, and a value longer than a product default
  * cannot lengthen it. So no default in this package moves, and a run without the
  * variable is byte-for-byte the run it always was. The variable is documented
- * surface, not an internal-only seam: README's "The `ub` command line" section
+ * surface, not an internal-only seam: CONTRIBUTING.md's "Test deadlines" section
  * names it and this contract.
  *
  * **Which deadlines it may cap, and which it must not.** What it caps are five

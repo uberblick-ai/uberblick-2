@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a problem with Uberblick
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For vulnerabilities, use [private vulnerability reporting](https://github.com/uberblick-ai/uberblick-2/security/advisories/new).
+        Do not include credentials or private document content.
+  - type: textarea
+    id: version
+    attributes:
+      label: Uberblick version
+      description: Paste the output of ub --version.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Operating system, version and CPU architecture.
+      placeholder: macOS 26, Apple Silicon; or Ubuntu 24.04, x86_64
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include the commands or actions needed to see the problem.
+    validations:
+      required: true

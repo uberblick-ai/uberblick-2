@@ -7,7 +7,7 @@
  * whatever tree they happen to be standing in — is the surprise this command
  * exists to avoid.
  *
- * Homebrew runs the two commands README documents, and nothing else. This
+ * Homebrew runs the two commands USER_GUIDE.md documents, and nothing else. This
  * command does not re-prove that Homebrew replaces the installed version;
  * `.github/workflows/homebrew-formula.yml` owns that. A source checkout is
  * refused without running any commands or changing any files: contributors
@@ -23,7 +23,7 @@ import { takeHelp } from "./help.js";
 import { isInstallPayload } from "./installation.js";
 import type { Io } from "./io.js";
 
-/** The tap README documents, and the only one this command upgrades from. */
+/** The tap USER_GUIDE.md documents, and the only one this command upgrades from. */
 const FORMULA = "uberblick-ai/tap/uberblick";
 
 /** The two a terminal or a supervisor sends; see {@link processHost}'s `run`. */

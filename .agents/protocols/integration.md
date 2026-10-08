@@ -22,7 +22,8 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   than checking the branch out, never treat tests from a mutable shared
   checkout as evidence, and pass no secrets, host mounts, privileged mode or
   container socket to the build or to the container, which runs without
-  network. README's "Review isolation" section states the full boundary. Keep
+  network. [CONTRIBUTING.md's Review isolation](../../CONTRIBUTING.md#review-isolation)
+  section states the full boundary. Keep
   the SHA-tagged image for the failure-path probes the policy requires at
   stateful boundaries, then remove it when the PR is settled.
 - Local CI also runs browser e2e at the head, unless only documentation or
