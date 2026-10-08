@@ -229,7 +229,8 @@ body {
 
 /* The rebound notice occupies its own row above every route, keeping the
    panes visible and operable. */
-.ub-rebound-notice {
+.ub-rebound-notice,
+.ub-replica-unavailable {
   flex: none;
   margin: 0;
   padding: 0.55rem 0.75rem;

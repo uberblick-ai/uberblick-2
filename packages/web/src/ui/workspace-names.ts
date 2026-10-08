@@ -23,20 +23,22 @@ export function useWorkspaceName(connection: RoomConnection | null): string | nu
   return reading?.connection === connection ? reading.name : getWorkspaceName(connection.ydoc);
 }
 
-/** Only the open menu needs other workspaces' small settings rooms. */
+/** Local menus use replica snapshots; direct hubs read settings only while open. */
 export function useWorkspaceNames(
   workspaces: readonly Workspace[],
   currentUuid: string | null,
   connection: RoomConnection | null,
   identity: AwarenessUser,
   menuOpen: boolean,
+  recordedNames: ReadonlyMap<string, string | null> | null = null,
 ): ReadonlyMap<string, string | null> {
   const currentName = useWorkspaceName(connection);
   const status = useRoomStatus(connection);
   const [otherNames, setOtherNames] = useState<ReadonlyMap<string, string | null>>(new Map());
+  const localMenu = recordedNames !== null;
   const otherUuids = workspaces.filter((workspace) => workspace.uuid !== currentUuid).map((workspace) => workspace.uuid).join(",");
   useEffect(() => {
-    if (!menuOpen || otherUuids === "") return;
+    if (localMenu || !menuOpen || otherUuids === "") return;
     const stops = otherUuids.split(",").map((uuid) => {
       const handle = acquireRoom(settingsRoom(uuid), identity, { presence: false });
       const room = handle.connection;
@@ -57,10 +59,17 @@ export function useWorkspaceNames(
       };
     });
     return () => { for (const stop of stops) stop(); };
-  }, [menuOpen, otherUuids, identity]);
-  const names = new Map(otherNames);
+  }, [localMenu, menuOpen, otherUuids, identity]);
+  const currentReceived = currentUuid !== null && connection?.room === settingsRoom(currentUuid) && status.hasReceivedServerState;
+  useEffect(() => {
+    if (!localMenu || !currentReceived || currentUuid === null) return;
+    setOtherNames(previous => previous.has(currentUuid) && previous.get(currentUuid) === currentName
+      ? previous : new Map(previous).set(currentUuid, currentName));
+  }, [localMenu, currentReceived, currentUuid, currentName]);
+  const names = new Map(recordedNames ?? []);
+  for (const [uuid, name] of otherNames) names.set(uuid, name);
   if (currentUuid !== null) {
-    names.set(currentUuid, connection?.room === settingsRoom(currentUuid) && status.hasReceivedServerState ? currentName : null);
+    names.set(currentUuid, currentReceived ? currentName : localMenu ? names.get(currentUuid) ?? null : null);
   }
   return names;
 }

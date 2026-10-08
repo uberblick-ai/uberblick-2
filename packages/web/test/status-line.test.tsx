@@ -333,6 +333,7 @@ describe("the locally served document's two sync facts", () => {
     hubAcked: boolean | null,
     patch: Partial<RoomStatus> = {},
     notSharedReason: import("../src/shell/document-search.js").NotSharedReason | null = null,
+    endpoint = "wss://remote.example/ws",
   ): { words: string[]; label: string | null; text: string } {
     vi.useFakeTimers();
     const view = render(
@@ -345,7 +346,7 @@ describe("the locally served document's two sync facts", () => {
             ...patch,
           })}
           presence={NOBODY}
-          endpoint={{ url: "wss://remote.example/ws", source: "document" }}
+          endpoint={{ url: endpoint, source: "document" }}
           hubAcked={hubAcked}
           notSharedReason={notSharedReason}
           syncDetails
@@ -375,6 +376,13 @@ describe("the locally served document's two sync facts", () => {
     expect(noAccess.words).toEqual(["saved here", "not shared with hub"]);
     expect(noAccess.text).toContain("administrator");
     expect(localLine(true).words).toEqual(["saved here", "synced with hub"]);
+  });
+
+  it("names an explicit local workspace without claiming that its edits reached a hub", () => {
+    const local = localLine(true, {}, null, "local");
+    expect(local.words).toEqual(["saved here"]);
+    expect(local.label).toContain("local (served /uberblick-config.json)");
+    expect(local.text).not.toContain("synced with hub");
   });
 
   it("distinguishes local durability from upstream acknowledgement", () => {

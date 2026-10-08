@@ -26,9 +26,9 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -37,6 +37,7 @@ import { expect } from "@playwright/test";
 import type { Browser, BrowserContext, BrowserContextOptions, Page } from "@playwright/test";
 import { createHub, silentLogger } from "@uberblick/hub";
 import type { Hub, HubConfig } from "@uberblick/hub";
+import { getBlocks } from "@uberblick/schema";
 import { buildAppBundle, sharedAppBundle } from "./bundle.js";
 
 /**
@@ -109,11 +110,12 @@ async function startOpen(
   runDir: string,
   bundleDir: string,
   fixedPort?: number,
+  projectDir = runDir,
 ): Promise<{ child: ChildProcessWithoutNullStreams; appUrl: string }> {
   for (let attempt = 1; attempt <= OPEN_ATTEMPTS; attempt += 1) {
     const port = fixedPort ?? await freePort();
     const child = spawn(process.execPath, [UB, "open", "--no-browser", "--port", String(port)], {
-      cwd: runDir,
+      cwd: projectDir,
       env: openEnvironment(runDir, bundleDir),
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -183,12 +185,20 @@ export interface Harness {
   readonly workspaceUuid: string;
   /** The other workspace on the switcher's menu. Empty until something writes. */
   readonly secondWorkspace: string;
+  /** Present when the fixture records a second replica on its own hub. */
+  readonly secondHubUrl?: string;
+  /** Inspect public document content received by one of the fixture hubs. */
+  hubText(room: string, secondary?: boolean): string | null;
+  /** Verify browser navigation left the project's startup binding untouched. */
+  projectBinding(): { workspaceId: string; hubUrl: string };
   /** Start the upstream hub again — same port, same database. */
   startHub(): Promise<void>;
   /** Flush and stop upstream, leaving `ub open` and the browser alone. */
   stopHub(): Promise<void>;
   /** Restart local serving on the same address after changing hub credentials. */
   restartOpen(options: { authenticated: boolean }): Promise<void>;
+  /** Serve the second project on another port using the same machine's replicas. */
+  startSecondOpen(): Promise<{ appUrl: string; stop(): Promise<void> }>;
   /** Change this computer's login while the same local serving process runs. */
   setStoredLogin(authenticated: boolean): void;
   /** Rebind project configuration without replacing the served workspace. */
@@ -310,6 +320,8 @@ export async function startHarness(options: {
   accessRole?: "admin" | "member";
   /** Only the deep-link proof of a compiled loopback fallback needs this. */
   compiledFallback?: boolean;
+  /** Offer a real on-machine replica backed by a separate authenticated hub. */
+  multiWorkspace?: boolean;
 } = {}): Promise<Harness> {
   const shared = sharedAppBundle();
   const runDir = mkdtempSync(join(tmpdir(), `uberblick-e2e-${process.env.UB_AGENTS_RUN ?? "local"}-`));
@@ -320,7 +332,8 @@ export async function startHarness(options: {
   const workspace = `uberblick-${workspaceUuid}`;
   // Nothing creates the second workspace: its rooms begin existing when the
   // switcher proof opens them, which is the real light-multi-workspace model.
-  const secondWorkspace = `research-${randomUUID()}`;
+  let secondWorkspace = `research-${randomUUID()}`;
+  const accessRole = options.accessRole ?? (options.multiWorkspace === true ? "admin" : undefined);
   const config: HubConfig = {
     authSecret: SECRET,
     port: 0,
@@ -331,7 +344,7 @@ export async function startHarness(options: {
     debounce: 200,
     maxDebounce: 1_000,
     shutdownTimeoutMs: 5_000,
-    ...(options.accessRole === undefined ? {} : {
+    ...(accessRole === undefined ? {} : {
       github: { clientId: "Iv1.0123456789abcdef", fetch: async (input: Parameters<typeof fetch>[0]) => {
         const url = String(input);
         if (url.endsWith("/users/missing-user")) return Response.json({}, { status: 404 });
@@ -345,14 +358,17 @@ export async function startHarness(options: {
   };
 
   let hub: Hub | null = null;
+  let secondHub: Hub | null = null;
   let open: ChildProcessWithoutNullStreams | null = null;
+  let secondOpen: ChildProcessWithoutNullStreams | null = null;
+  let secondProject: string | null = null;
 
   // One failure boundary for the whole bootstrap, the temp directory included:
   // a harness that did not finish starting must leave nothing behind — no
   // listening socket, no stray database — and must surface its own error rather
   // than a cleanup error on top of it.
   try {
-    hub = await createHub(config, options.accessRole === undefined ? {} : { deviceCredentials: true });
+    hub = await createHub(config, accessRole === undefined ? {} : { deviceCredentials: true });
     // Every later start reuses the port the first one was given, so the served
     // HUB_URL keeps pointing at the hub across a restart.
     const port = hub.port;
@@ -368,13 +384,13 @@ export async function startHarness(options: {
     const credentials = join(configDir, "credentials.json");
     let storedCredentials: unknown = { signingSecret: SECRET };
     let access: Harness["access"];
-    if (options.accessRole !== undefined) {
+    if (accessRole !== undefined) {
       const { principals, memberships, credentials: registry } = hub;
       if (principals === undefined || memberships === undefined || registry === undefined) {
         throw new Error("Access browser fixture needs GitHub registries");
       }
       const principal = principals.identify("1234", "browser-person");
-      memberships.grant({ workspaceId: workspaceUuid, principalId: principal.id, role: options.accessRole });
+      memberships.grant({ workspaceId: workspaceUuid, principalId: principal.id, role: accessRole });
       const foreign = principals.identify("5678", "other-admin");
       memberships.grant({ workspaceId: workspaceUuid, principalId: foreign.id, role: "admin" });
       const issue = (principalId: string) => registry.issue({ principalId, deviceId: randomUUID(), workspaces: [workspaceUuid] });
@@ -386,6 +402,38 @@ export async function startHarness(options: {
         identity: principal, credential: { record, key: Buffer.from(current.keyBytes).toString("base64url") },
       } } };
       access = { otherDeviceId: other.record.deviceId, foreignDeviceId: foreignDevice.record.deviceId };
+    }
+    let secondHubUrl: string | undefined;
+    if (options.multiWorkspace === true) {
+      // Use the real CLI to create a healthy on-machine replica before serving.
+      // Its separate project leaves the startup project's binding untouched.
+      const project = join(runDir, "second-project");
+      secondProject = project;
+      mkdirSync(project);
+      const created = spawnSync(process.execPath, [UB, "workspace", "create", "Second workspace"], {
+        cwd: project, env: openEnvironment(runDir, bundleDir), encoding: "utf8", timeout: OPEN_READY_MS,
+      });
+      if (created.status !== 0) throw new Error(`e2e: second replica creation failed\n${created.stderr}`);
+      const binding = JSON.parse(readFileSync(join(project, ".uberblick.json"), "utf8")) as { workspaceId: string };
+      secondWorkspace = binding.workspaceId;
+      secondHub = await createHub({ ...config, databasePath: join(runDir, "second-hub.sqlite") }, { deviceCredentials: true });
+      secondHubUrl = `ws://127.0.0.1:${secondHub.port}`;
+      writeFileSync(join(project, ".uberblick.json"),
+        `${JSON.stringify({ workspaceId: secondWorkspace, hubUrl: secondHubUrl }, null, 2)}\n`, { mode: 0o600 });
+      const { principals, memberships, credentials: registry } = secondHub;
+      if (principals === undefined || memberships === undefined || registry === undefined) throw new Error("Second hub needs device registries");
+      const principal = principals.identify("4321", "second-person");
+      memberships.grant({ workspaceId: secondWorkspace, principalId: principal.id, role: "admin" });
+      const issued = registry.issue({ principalId: principal.id, deviceId: randomUUID(), workspaces: [secondWorkspace] });
+      const { replacedAt: _replaced, ...record } = issued.record;
+      const logins = storedCredentials as { hubLogins: Record<string, unknown> };
+      logins.hubLogins[`http://127.0.0.1:${secondHub.port}`] = {
+        identity: principal, credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") },
+      };
+      // This fixture represents a replica already fetched from that hub.
+      writeFileSync(join(configDir, "workspaces.json"), `${JSON.stringify({
+        [workspaceUuid]: hubUrl, [secondWorkspace]: secondHubUrl,
+      }, null, 2)}\n`, { mode: 0o600 });
     }
     writeFileSync(credentials, `${JSON.stringify(storedCredentials, null, 2)}\n`, {
       mode: 0o600,
@@ -423,9 +471,17 @@ export async function startHarness(options: {
       workspace,
       workspaceUuid,
       secondWorkspace,
+      ...(secondHubUrl === undefined ? {} : { secondHubUrl }),
+      hubText(room, secondary = false) {
+        const document = (secondary ? secondHub : hub)?.hocuspocus.documents.get(room);
+        return document === undefined ? null : getBlocks(document).map((block) => block.text).join("\n");
+      },
+      projectBinding() {
+        return JSON.parse(readFileSync(join(runDir, ".uberblick.json"), "utf8")) as { workspaceId: string; hubUrl: string };
+      },
       async startHub() {
         if (hub !== null) return;
-        hub = await createHub({ ...config, port }, options.accessRole === undefined ? {} : { deviceCredentials: true });
+        hub = await createHub({ ...config, port }, accessRole === undefined ? {} : { deviceCredentials: true });
       },
       stopHub,
       setStoredLogin,
@@ -441,6 +497,19 @@ export async function startHarness(options: {
         const restarted = await startOpen(runDir, bundleDir, Number(new URL(appUrl).port));
         open = restarted.child;
       },
+      async startSecondOpen() {
+        if (secondProject === null) throw new Error("e2e: the fixture has no second project");
+        if (secondOpen !== null) throw new Error("e2e: the second project is already serving");
+        const serving = await startOpen(runDir, bundleDir, undefined, secondProject);
+        secondOpen = serving.child;
+        return {
+          appUrl: serving.appUrl,
+          async stop() {
+            if (secondOpen === serving.child) secondOpen = null;
+            await stopChild(serving.child);
+          },
+        };
+      },
       async stop() {
         // Every step is best-effort and the temp directory goes last, in a
         // `finally`: a hub or serving process that fails to shut down cleanly must
@@ -449,7 +518,12 @@ export async function startHarness(options: {
           const child = open;
           open = null;
           if (child !== null) await stopChild(child).catch(() => {});
+          const secondChild = secondOpen;
+          secondOpen = null;
+          if (secondChild !== null) await stopChild(secondChild).catch(() => {});
           await stopHub().catch(() => {});
+          await secondHub?.stop().catch(() => {});
+          secondHub = null;
         } finally {
           rmSync(runDir, { recursive: true, force: true });
         }
@@ -457,7 +531,9 @@ export async function startHarness(options: {
     };
   } catch (error) {
     if (open !== null) await stopChild(open).catch(() => {});
+    if (secondOpen !== null) await stopChild(secondOpen).catch(() => {});
     await hub?.stop().catch(() => {});
+    await secondHub?.stop().catch(() => {});
     rmSync(runDir, { recursive: true, force: true });
     throw error;
   }

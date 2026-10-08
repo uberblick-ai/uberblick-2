@@ -15,6 +15,7 @@ import {
   removeAwarenessStates,
 } from "y-protocols/awareness";
 import * as Y from "yjs";
+import { parseRoom } from "@uberblick/schema";
 import {
   bridgeAwareness,
   createLocalBrowserServer,
@@ -31,6 +32,7 @@ import {
   TEXT_KEY,
   WORKSPACE,
   createClient,
+  forgeToken,
   removeTempDatabases,
   startHub,
   token as hubToken,
@@ -39,6 +41,11 @@ import {
 } from "./helpers.js";
 
 const TEST_BROWSER_KEY = "independent-local-browser-test-key";
+const OTHER_BROWSER_KEY = "other-independent-local-browser-test-key";
+const BROWSER_KEYS = new Map([
+  [WORKSPACE, TEST_BROWSER_KEY],
+  [OTHER_WORKSPACE, OTHER_BROWSER_KEY],
+]);
 
 const servers: LocalBrowserServer[] = [];
 const hubs: Hub[] = [];
@@ -62,9 +69,9 @@ afterEach(async () => {
 
 function browserToken(
   scope: "read-write" | "read-only" = "read-write",
-  options: { workspace?: string } = {},
+  options: { workspace?: string; secret?: string } = {},
 ): Promise<string> {
-  return hubToken(scope, { ...options, secret: TEST_BROWSER_KEY });
+  return hubToken(scope, { secret: TEST_BROWSER_KEY, ...options });
 }
 
 async function freePort(): Promise<number> {
@@ -98,7 +105,10 @@ function updateWithText(text: string): Uint8Array {
   }
 }
 
-async function fixture() {
+async function fixture(options: {
+  workspaces?: ReadonlyMap<string, string>;
+  prepareRoom?: (room: string) => Promise<void>;
+} = {}) {
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
   const updates = new Map<string, Uint8Array[]>();
@@ -120,8 +130,8 @@ async function fixture() {
   };
   const server = await createLocalBrowserServer({
     port,
-    workspaceId: WORKSPACE,
-    browserKey: TEST_BROWSER_KEY,
+    workspaces: options.workspaces ?? new Map([[WORKSPACE, TEST_BROWSER_KEY]]),
+    ...(options.prepareRoom === undefined ? {} : { prepareRoom: options.prepareRoom }),
     expectedOrigin: origin,
     log: (record) => logs.push(record),
     readRoom: (room, afterSeq) => {
@@ -158,7 +168,10 @@ async function fixture() {
     const client = createClient({
       port,
       room,
-      token: await browserToken(scope),
+      token: await browserToken(scope, {
+        workspace: parseRoom(room).workspaceId,
+        secret: options.workspaces?.get(parseRoom(room).workspaceId) ?? TEST_BROWSER_KEY,
+      }),
       origin,
       reconnectDelayMs: 60_000,
     });
@@ -200,7 +213,176 @@ async function fixture() {
   };
 }
 
+function sharedSocket(box: { port: number; origin: string }) {
+  const socket = new HocuspocusProviderWebsocket({
+    url: `ws://127.0.0.1:${box.port}`,
+    autoConnect: false,
+    delay: 60_000,
+    minDelay: 60_000,
+    WebSocketPolyfill: class extends WebSocket {
+      constructor(url: string | URL) {
+        super(url, { headers: { Origin: box.origin } } as unknown as string[]);
+      }
+    },
+  });
+  websockets.push(socket);
+  return socket;
+}
+
+function sharedClient(socket: HocuspocusProviderWebsocket, room: string, token: string) {
+  const doc = new Y.Doc();
+  const provider = new HocuspocusProvider({
+    websocketProvider: socket,
+    name: room,
+    token: wrapToken(token, SYNC_PROTOCOL_VERSION),
+    document: doc,
+  });
+  providers.push(provider);
+  const synced = new Promise<void>((resolve) => provider.on("synced", resolve));
+  const denied = new Promise<string>((resolve) => {
+    provider.on("authenticationFailed", ({ reason }: { reason: string }) => resolve(reason));
+  });
+  provider.attach();
+  return { provider, text: doc.getText(TEXT_KEY), synced, denied };
+}
+
 describe("the ub open browser server", () => {
+  it("serves several workspaces on one socket with keys scoped to each store", async () => {
+    const prepared: string[] = [];
+    const box = await fixture({
+      workspaces: BROWSER_KEYS,
+      prepareRoom: async (room) => { prepared.push(room); },
+    });
+    const firstRoom = `${WORKSPACE}/${randomUUID()}`;
+    const otherRoom = `${OTHER_WORKSPACE}/${randomUUID()}`;
+    box.storeUpdate(firstRoom, updateWithText("first replica"));
+    box.storeUpdate(otherRoom, updateWithText("other replica"));
+    const socket = sharedSocket(box);
+    const first = sharedClient(socket, firstRoom, await browserToken());
+    const other = sharedClient(socket, otherRoom, await browserToken("read-write", {
+      workspace: OTHER_WORKSPACE,
+      secret: OTHER_BROWSER_KEY,
+    }));
+    await socket.connect();
+    await Promise.all([first.synced, other.synced]);
+    expect(first.text.toString()).toBe("first replica");
+    expect(other.text.toString()).toBe("other replica");
+    first.text.insert(first.text.length, " edited");
+    other.text.insert(other.text.length, " edited");
+    await waitUntil("each workspace's edit to reach its own store", () =>
+      textFrom(box.updates.get(firstRoom) ?? []) === "first replica edited" &&
+      textFrom(box.updates.get(otherRoom) ?? []) === "other replica edited",
+    );
+    const firstReads = box.readsFor(firstRoom);
+    const otherReads = box.readsFor(otherRoom);
+    box.failReadsFor(firstRoom, Object.assign(new Error("database is locked"), { errcode: 5 }));
+    box.server.refresh(WORKSPACE);
+    expect(box.readsFor(firstRoom)).toHaveLength(firstReads.length + 1);
+    expect(box.readsFor(otherRoom)).toEqual(otherReads);
+    box.recoverReadsFor(firstRoom);
+    await waitUntil("a scoped replay to retry its own workspace", () =>
+      box.readsFor(firstRoom).length > firstReads.length + 1,
+    );
+    expect(box.readsFor(otherRoom)).toEqual(otherReads);
+
+    const unservedWorkspace = randomUUID();
+    const now = Math.floor(Date.now() / 1000);
+    const attacks = [
+      {
+        room: `${OTHER_WORKSPACE}/${randomUUID()}`,
+        token: await browserToken("read-write", { workspace: OTHER_WORKSPACE }),
+        reason: "invalid-token",
+      },
+      {
+        room: `${WORKSPACE}/${randomUUID()}`,
+        token: await browserToken("read-write", { secret: OTHER_BROWSER_KEY }),
+        reason: "invalid-token",
+      },
+      {
+        room: `${WORKSPACE}/${randomUUID()}`,
+        token: await browserToken("read-write", { workspace: OTHER_WORKSPACE }),
+        reason: "workspace-mismatch",
+      },
+      {
+        room: `${unservedWorkspace}/${randomUUID()}`,
+        token: await browserToken("read-write", { workspace: unservedWorkspace }),
+        reason: "workspace-mismatch",
+      },
+      {
+        room: `${WORKSPACE}/${randomUUID()}`,
+        token: await forgeToken({
+          typ: "room", sub: "forged", workspace: WORKSPACE,
+          scope: "admin", kid: null, iat: now, exp: now + 60,
+        }, TEST_BROWSER_KEY),
+        reason: "invalid-token",
+      },
+    ];
+    for (const attack of attacks) {
+      const refused = sharedClient(socket, attack.room, attack.token);
+      await expect(refused.denied).resolves.toBe(attack.reason);
+      expect(box.readsFor(attack.room)).toEqual([]);
+      expect(prepared).not.toContain(attack.room);
+      refused.provider.destroy();
+    }
+    first.text.insert(first.text.length, " after refusals");
+    await waitUntil("the shared socket to remain writable after denials", () =>
+      textFrom(box.updates.get(firstRoom) ?? []) === "first replica edited after refusals",
+    );
+  });
+
+  it("contains failed replica preparation, loading and refresh to their rooms", async () => {
+    const failedRoom = `${OTHER_WORKSPACE}/${randomUUID()}`;
+    let otherUnavailable = false;
+    const box = await fixture({
+      workspaces: BROWSER_KEYS,
+      prepareRoom: async (room) => {
+        if (room === failedRoom || (otherUnavailable && parseRoom(room).workspaceId === OTHER_WORKSPACE)) {
+          throw new Error("replica held by another server");
+        }
+      },
+    });
+    const socket = sharedSocket(box);
+    const healthyRoom = `${WORKSPACE}/${randomUUID()}`;
+    const healthy = sharedClient(socket, healthyRoom, await browserToken());
+    const otherToken = await browserToken("read-write", {
+      workspace: OTHER_WORKSPACE, secret: OTHER_BROWSER_KEY,
+    });
+    const failed = sharedClient(socket, failedRoom, otherToken);
+    await socket.connect();
+    await Promise.all([healthy.synced, expect(failed.denied).resolves.toBe(STORE_REFUSED_REASON)]);
+    expect(box.readsFor(failedRoom)).toEqual([]);
+    failed.provider.destroy();
+
+    const loadFailedRoom = `${OTHER_WORKSPACE}/${randomUUID()}`;
+    box.failReadsFor(loadFailedRoom, new Error("replica quarantined"));
+    const loadFailed = sharedClient(socket, loadFailedRoom, otherToken);
+    await expect(loadFailed.denied).resolves.toBe(STORE_REFUSED_REASON);
+    loadFailed.provider.destroy();
+
+    const loadedRoom = `${OTHER_WORKSPACE}/${randomUUID()}`;
+    const loaded = sharedClient(socket, loadedRoom, otherToken);
+    await loaded.synced;
+    otherUnavailable = true;
+    const lateTab = await box.connect(loadedRoom);
+    await expect(lateTab.denied).resolves.toBe(STORE_REFUSED_REASON);
+    const closed = new Promise<string>((resolve) => {
+      loaded.provider.on("close", ({ event }: { event: CloseEvent }) => resolve(event.reason));
+    });
+    box.failReadsFor(loadedRoom, new Error("replica failed after admission"));
+    const loadedReads = box.readsFor(loadedRoom);
+    box.server.refresh(WORKSPACE);
+    expect(box.readsFor(loadedRoom)).toEqual(loadedReads);
+    box.server.refresh(OTHER_WORKSPACE);
+    await expect(closed).resolves.toBe(STORE_REFUSED_REASON);
+    loaded.provider.destroy();
+
+    healthy.text.insert(0, "unrelated replica survived");
+    await waitUntil("the healthy workspace on the same socket to remain writable", () =>
+      textFrom(box.updates.get(healthyRoom) ?? []) === "unrelated replica survived",
+    );
+    expect(await (await fetch(`http://127.0.0.1:${box.port}/`)).text()).toBe("still serving\n");
+  });
+
   it("admits its independent browser key and refuses hub and device keys", async () => {
     const box = await fixture();
     const room = `${WORKSPACE}/${randomUUID()}`;

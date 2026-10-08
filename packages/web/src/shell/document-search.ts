@@ -7,6 +7,13 @@ export interface DocumentSearchStatus {
   readonly rooms: Readonly<Record<string, { readonly hubAcked: boolean }>>;
   /** Why this serving run cannot share local edits, absent on older servers. */
   readonly notSharedReason?: NotSharedReason | null;
+  readonly replicaUnavailable?: ReplicaUnavailable | null;
+}
+
+export type ReplicaUnavailable = "replica-held" | "replica-quarantined" | "replica-failed";
+
+function isReplicaUnavailable(value: unknown): value is ReplicaUnavailable {
+  return value === "replica-held" || value === "replica-quarantined" || value === "replica-failed";
 }
 
 export type NotSharedReason =
@@ -33,9 +40,12 @@ function object(value: unknown): Record<string, unknown> | null {
 }
 
 async function json(response: Response): Promise<Record<string, unknown>> {
-  if (!response.ok) throw new Error(`ub open answered ${response.status}`);
   const body = object(await response.json());
   if (body === null) throw new Error("ub open returned a malformed JSON answer");
+  if (response.status === 503 && body.error === "replica_unavailable" && isReplicaUnavailable(body.reason)) {
+    return { caughtUp: false, rooms: {}, replicaUnavailable: body.reason };
+  }
+  if (!response.ok) throw new Error(`ub open answered ${response.status}`);
   return body;
 }
 
@@ -64,6 +74,7 @@ function searchStatus(body: Record<string, unknown>): DocumentSearchStatus {
     rooms: parsed,
     notSharedReason:
       isNotSharedReason(body.notSharedReason) ? body.notSharedReason : null,
+    ...(isReplicaUnavailable(body.replicaUnavailable) ? { replicaUnavailable: body.replicaUnavailable } : {}),
   };
 }
 

@@ -137,17 +137,16 @@ beforeAll(async () => {
   });
 
   // This is the shared authenticator installed by ub open. It needs only its
-  // local secret and served workspace, without a registry or credential.
+  // local workspace key, without a registry or credential.
   localServer = new Server<HubContext>({
     port: 0,
     address: "127.0.0.1",
     quiet: true,
     stopOnSignals: false,
     onAuthenticate: await createRoomAuthenticator({
-      authSecret: TEST_SECRET,
+      workspaceKeys: new Map([[WORKSPACE, TEST_SECRET]]),
       protocolVersion: SYNC_PROTOCOL_VERSION,
       log: silentLogger,
-      servedWorkspace: WORKSPACE,
     }),
   });
   await localServer.listen();

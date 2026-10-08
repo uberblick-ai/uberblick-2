@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   DocumentSearchClient,
   NotSharedReason,
+  ReplicaUnavailable,
 } from "../shell/document-search.js";
 import { useCalmSyncState } from "./calm.js";
 
@@ -24,11 +25,13 @@ interface RoomAnswer {
   room: string;
   hubAcked: boolean | null;
   notSharedReason: NotSharedReason | null;
+  replicaUnavailable: ReplicaUnavailable | null;
 }
 
 export interface ServingRoomStatus {
   hubAcked: boolean | null;
   notSharedReason: NotSharedReason | null;
+  replicaUnavailable: ReplicaUnavailable | null;
 }
 
 /**
@@ -94,6 +97,7 @@ export function useServingRoomStatus(
           room,
           hubAcked: status.rooms[room]?.hubAcked ?? null,
           notSharedReason: status.notSharedReason ?? null,
+          replicaUnavailable: status.replicaUnavailable ?? null,
         });
       } catch {
         if (!active) return;
@@ -102,6 +106,7 @@ export function useServingRoomStatus(
           room,
           hubAcked: null,
           notSharedReason: previous?.client === client ? previous.notSharedReason : null,
+          replicaUnavailable: previous?.client === client ? previous.replicaUnavailable : null,
         }));
       } finally {
         if (timeout !== undefined) clearTimeout(timeout);
@@ -124,5 +129,6 @@ export function useServingRoomStatus(
   return {
     hubAcked: current === null || calm === null ? null : calm === "synced",
     notSharedReason: answer?.client === client ? answer.notSharedReason : null,
+    replicaUnavailable: answer?.client === client ? answer.replicaUnavailable : null,
   };
 }

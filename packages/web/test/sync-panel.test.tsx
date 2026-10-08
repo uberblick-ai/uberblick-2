@@ -413,6 +413,13 @@ describe("the sync panel renders the state this client holds", () => {
     }
   });
 
+  it("names a local workspace and omits an upstream state it cannot claim", () => {
+    vi.useFakeTimers();
+    const { host } = mount(fixture(), { url: "local", source: "document" }, true);
+    expect(facts(host)).toMatchObject({ Hub: "local", State: "saved here" });
+    expect(facts(host)["Hub state"]).toBeUndefined();
+  });
+
   it("suppresses the upstream fact when the local room is not writable", () => {
     vi.useFakeTimers();
     const { host } = mount(

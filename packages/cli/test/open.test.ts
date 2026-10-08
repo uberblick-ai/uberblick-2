@@ -243,6 +243,8 @@ describe("ub open", () => {
         SECOND_REMOTE,
         REBOUND_WORKSPACE,
         localBrowserKey(REBOUND_WORKSPACE, box.env),
+        false,
+        { [WORKSPACE]: { browserKey: localBrowserKey(WORKSPACE, box.env), remoteHubUrl: FIRST_REMOTE } },
       ),
     );
     expect((await restarted.interrupt()).status).toBe(0);
