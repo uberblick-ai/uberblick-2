@@ -18,3 +18,12 @@ en-US locale and twofold CPU throttling; the PR records the measured values and
 the host class. Unit suites defend value semantics, non-destructive invalid
 merges, zero renderer writes, frame coalescing, observer release and old-client
 preservation.
+
+Run `mise run e2e -- chart.spec.ts --project=chromium` to regenerate the
+screenshots and timing JSON attachments. The shared gate records timings and
+asserts complete data availability, successive live redraws and zero renderer
+writes; host-dependent wall-clock timings do not fail it. To enforce the
+recorded budgets on a benchmark host, run
+`env UB_CHART_TIMING_BUDGETS=1 mise run e2e -- chart.spec.ts --project=chromium --workers=1`.
+That opt-in requires representative first draw within 500 ms and median redraw
+within 250 ms, plus bounded first draw, median and every redraw within 1,000 ms.

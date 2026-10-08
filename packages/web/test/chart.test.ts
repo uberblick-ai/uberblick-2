@@ -4,7 +4,7 @@ import {
   appendBlock, applyDocData, createAnnotation, editBlock, getBlocks, getBlocksFragment,
   initDoc, readDocData,
 } from "@uberblick/schema";
-import { mountEditor } from "./helpers.js";
+import { mountEditor, typeText } from "./helpers.js";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
 
 const charts = vi.hoisted(() => ({ instances: [] as Array<{ data: unknown; options: unknown; updates: number; destroyed: boolean }> }));
@@ -53,6 +53,37 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("the chart's derived lifecycle", () => {
+  it("keeps source and annotation chrome current without redrawing charts for caret moves or unrelated typing", () => {
+    const { doc, directory, id } = fixture();
+    appendBlock(doc, { type: "chart", text: mapping });
+    const { editor } = mountEditor(doc);
+    flush();
+    expect(charts.instances).toHaveLength(2);
+    const chart = editor.view.dom.querySelector(".ub-chart") as HTMLElement;
+    for (const character of "abcdefghijklmnopqrst") {
+      editor.commands.setTextSelection(1);
+      typeText(editor, character);
+      flush();
+    }
+    const source = chart.querySelector(".ub-chart-open") as HTMLButtonElement;
+    source.click();
+    flush();
+    expect(chart.classList.contains("ub-chart-editing")).toBe(true);
+    editor.commands.setTextSelection(1);
+    flush();
+    expect(chart.classList.contains("ub-chart-editing")).toBe(false);
+    createAnnotation(doc, id, 0, 5, "reader", "Mapping note");
+    flush();
+    expect(chart.getAttribute("data-annotated")).toBe("true");
+    expect(charts.instances.every(instance => instance.updates === 0)).toBe(true);
+    expect(frames.size).toBe(0);
+    editBlock(doc, id, mapping, mapping.replace("Delivery", "Shipped"));
+    flush();
+    expect(charts.instances.map(instance => instance.updates)).toEqual([1, 0]);
+    expect(chart.querySelector(".ub-chart-description")?.textContent).toContain("Shipped: 3 issues");
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
   it("renders current and arriving data in an unwritable editor without a local write", () => {
     const { doc, directory } = fixture();
     const peer = new Y.Doc();

@@ -202,7 +202,6 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     openButton.addEventListener("mousedown", event => event.preventDefault());
     openButton.addEventListener("click", open);
     screen.addEventListener("mousedown", open);
-    editor.on("selectionUpdate", schedule);
     const syncChrome = (): void => {
       chartChrome.sync(current, dom);
       let annotated = false;
@@ -218,7 +217,9 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         if (updated.textContent !== current.textContent) dirty = true;
         current = updated;
         syncChrome();
-        schedule();
+        // Source visibility follows ProseMirror decorations. Caret moves and
+        // annotation changes do not alter the chart's data or appearance.
+        if (dirty) schedule();
         return true;
       },
       stopEvent: event => event.target instanceof Node &&
@@ -231,7 +232,6 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         releaseChart();
         theme.disconnect();
         appearance?.removeEventListener("change", schedule);
-        editor.off("selectionUpdate", schedule);
         openButton.removeEventListener("click", open);
         screen.removeEventListener("mousedown", open);
         copy.destroy();
