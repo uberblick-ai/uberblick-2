@@ -136,7 +136,7 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
       if (local.missing.length > 0) throw new Error("local workspace has missing document content; restore it before promotion");
       let current = readDeviceLogin(endpoint, workspaceId);
       if (current.status === "sign-in-required") {
-        if (await authCommand(["login", endpoint], io) !== 0) return 1;
+        if (await authCommand(["login", endpoint], io, { loginNextAction: false }) !== 0) return 1;
         current = readDeviceLogin(endpoint, workspaceId);
       }
       if (current.status !== "ready") throw new Error(current.message);
@@ -154,7 +154,7 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
           throw new Error(renewed.message);
         }
         if (result === "sign-in-required") {
-          if (await authCommand(["login", endpoint], io) !== 0) return 1;
+          if (await authCommand(["login", endpoint], io, { loginNextAction: false }) !== 0) return 1;
           current = readDeviceLogin(endpoint, workspaceId);
           if (current.status !== "ready") throw new Error(current.message);
           result = await reserve(origin, workspaceId, attemptId, current.login, interrupted.signal);

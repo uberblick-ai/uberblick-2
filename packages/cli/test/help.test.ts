@@ -308,6 +308,14 @@ describe("every human-facing command path", () => {
     expect(WORKSPACE_USE_HELP).toMatch(/<slug>-<uuid>.*prefix/s);
   });
 
+  it("explains join's verification scope and its limits in help", () => {
+    const help = WORKSPACE_JOIN_HELP.replace(/\s+/g, " ");
+    expect(help).toContain("hub acknowledged the writes, then a fresh client read the full directory back");
+    expect(help).toContain("compared every document's directory entry");
+    expect(help).toContain("Every archived document's content is read back, plus one live document's content");
+    expect(help).toContain("does not establish that the hub flushed the writes to disk or that other clients have converged");
+  });
+
   it("uses the same semantic operand name at every help level and in usage errors", async () => {
     expect(MCP_HELP).toContain("install [client]");
     expect(INSTALL_HELP).toMatch(/usage: ub mcp install \[client\]/);

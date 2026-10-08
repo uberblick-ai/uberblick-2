@@ -1,6 +1,7 @@
 /** Verified workspace joining and promotion share the same bridge checks. */
 
 import { parseArgs } from "node:util";
+import { basename } from "node:path";
 import {
   compareCorpus,
   inspectRemote,
@@ -28,13 +29,8 @@ import { resolveProjectBinding, validateProjectBinding, writeProjectBinding } fr
 import { takeHelp } from "./help.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
-import type { Io } from "./io.js";
+import { type Io, shellArgument } from "./io.js";
 import { ORIGIN_LABELS } from "./status.js";
-
-const SHARING_BOUNDARY =
-  "Remote sharing requires this machine's stored login and current workspace membership.\n" +
-  "Run `ub auth login <hub>`, then `ub open` to edit in a browser on this computer.\n" +
-  "A browser opened directly at the remote host cannot sign in or read documents yet.\n";
 
 export interface RemotePersistence {
   /** Files written, for the report. */
@@ -133,14 +129,12 @@ function listDocs(docs: readonly { uuid: string; title: string }[], limit = 10):
   return text;
 }
 
-/** The report both bridges end with. */
+/** The verified join result, without configuration or verification internals. */
 function report(
   verb: string,
   target: string,
   corpus: Corpus,
   persistence: RemotePersistence,
-  /** When the snapshot this verified was taken. See the note it prints. */
-  takenAt: string,
   /** What this verb has to say about the documents, if anything. */
   note = "",
 ): string {
@@ -156,23 +150,11 @@ function report(
       "They stay archived until restored.\n";
   }
   text += note;
-  text += "\nconfiguration\n";
   for (const path of persistence.written) {
-    text += `  ${path}\n`;
+    if (basename(path) === ".uberblick.json") text += `\nBinding written: ${path}\n`;
   }
   text +=
-    "\n`ub`, `ub mcp serve` and the MCP server it spawns read this endpoint from\n" +
-    ".uberblick.json. A deployed web client reads its own from the served\n" +
-    "/uberblick-config.json.\n";
-  text +=
-    "\nVerified here means the hub acknowledged the writes. A fresh client read the\n" +
-    "full directory back and compared every document's directory entry. Every\n" +
-    "archived document's content was read back, plus one live document's content\n" +
-    "when the workspace has any. This does not mean the hub flushed them to disk.\n" +
-    `The snapshot this verified was taken at ${takenAt}; anything written to the\n` +
-    "old hub after that is not part of it, so close the other clients before\n" +
-    "relying on this.\n";
-  text += `\n${SHARING_BOUNDARY}`;
+    "\nVerification does not establish hub disk durability or convergence of other clients.\n";
   return text;
 }
 
@@ -192,6 +174,14 @@ entry. Switch back with \`ub workspace use <id>\`; the join
 report prints the previous complete binding. A replica this machine
 already holds for *this* id is attached, not replaced: it and the remote
 reconcile as CRDTs, so neither side loses anything.
+
+Verification means the hub acknowledged the writes, then a fresh client read
+the full directory back and compared every document's directory entry. Every
+archived document's content is read back, plus one live document's content when
+the workspace has any. It does not establish that the hub flushed the writes to
+disk or that other clients have converged. When moving the same workspace from
+another hub, later writes to that old hub are outside the verified snapshot;
+close other clients before relying on it.
 
 operands:
   <url-with-workspace-id>
@@ -486,23 +476,32 @@ export async function joinCommand(argv: string[], io: Io): Promise<number> {
 
   let note = "";
   if (checked.corpus.entries.length === 0) {
-    note +=
-      "\nThat workspace holds nothing yet. If you expected documents, check the " +
-      "workspace id\nin the URL against `ub status` on the machine that has " +
-      "them.\n";
+    note += "\nThis workspace is empty.\n";
   }
   note += `\nworkspace     ${flags.workspace}\n`;
   if (previous !== null && (parseWorkspaceId(previous.workspaceId).uuid !== parseWorkspaceId(flags.workspace).uuid || previous.hubUrl !== flags.endpoint)) {
-    // What this machine holds for the old workspace, rather than "its
-    // documents": all this knows is that something configured it, which is not
-    // evidence of a replica.
-    note +=
-      `\n${previous.workspaceId} was not merged into this one and nothing of it was moved. ` +
-      "The previous workspace and its documents remain unchanged. " +
-      "`ub workspace list` shows local replicas.\n" +
-      `Switch back: ub workspace use ${previous.workspaceId}\n`;
+    note += `\nPrevious workspace: ${previous.workspaceId} at ${previous.hubUrl ?? "local-only"}.\n`;
+    if (parseWorkspaceId(previous.workspaceId).uuid !== parseWorkspaceId(flags.workspace).uuid) {
+      note +=
+        "The previous workspace and its documents remain unchanged. " +
+        "`ub workspace list` shows local replicas.\n" +
+        `Switch back: ub workspace use ${previous.workspaceId}\n`;
+    } else if (previous.hubUrl !== null) {
+      note += `Switch back: ub workspace join ${shellArgument(`${previous.hubUrl}/${previous.workspaceId}`)}\n`;
+    } else {
+      // The registry now records the joined endpoint for this same UUID.
+      // A local environment override is the existing route back to local use.
+      note += `Switch back for this session: UB_WORKSPACE_ID=${previous.workspaceId} UB_HUB_URL=local ub open\n`;
+    }
   }
-  io.out(report("joined", bridge.target, checked.corpus, persistence, takenAt, note));
+  const source = resolved.binding;
+  if (source !== null && parseWorkspaceId(source.workspaceId).uuid === parseWorkspaceId(flags.workspace).uuid &&
+      source.hubUrl !== null && source.hubUrl !== bridge.target) {
+    note +=
+      `\nThe verified snapshot was taken at ${takenAt}; later writes to the previous hub are not included. ` +
+      "Close other clients before relying on it.\n";
+  }
+  io.out(report("joined", bridge.target, checked.corpus, persistence, note));
 
   // An environment binding can still override the project file. Report both
   // fields so the next status cannot silently point at a different destination.

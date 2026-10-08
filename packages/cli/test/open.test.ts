@@ -138,7 +138,12 @@ describe("ub open", () => {
     expect(await document.text()).toBe(
       servingDocumentOf(app.url, remote, WORKSPACE, localBrowserKey(WORKSPACE, box.env)),
     );
-    expect(app.stdout()).toContain("remote — nothing started here");
+    expect(app.stdout()).toBe(
+      `uberblick is at ${app.url}\n\n` +
+      `  hub        ${remote} (remote — nothing started here)\n` +
+      `  workspace  ${WORKSPACE}\n\n` +
+      "Ctrl-C to stop.\n",
+    );
 
     expect((await app.interrupt()).status).toBe(0);
   });

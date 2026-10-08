@@ -1422,8 +1422,7 @@ export async function openCommand(
   const url = servedUrl.href;
   let banner = `uberblick is at ${url}\n\n`;
   banner += `  hub        ${hubNote}\n`;
-  banner += `  workspace  ${workspace ?? "none configured — run `ub init`"}\n`;
-  banner += `  bundle     ${plan.dir}\n\n`;
+  banner += `  workspace  ${workspace ?? "none configured — run `ub init`"}\n\n`;
   banner += "Ctrl-C to stop.\n";
   io.out(banner);
 

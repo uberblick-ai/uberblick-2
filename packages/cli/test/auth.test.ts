@@ -1,6 +1,6 @@
 /** Remote sign-in contracts across the real CLI, HTTP hub and owner-only store. */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync,
   statSync, writeFileSync,
@@ -10,6 +10,7 @@ import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { authenticationOrigin } from "../src/auth.js";
 import { resolveConfig } from "../src/config.js";
+import { parseJoinTarget } from "../src/remote.js";
 import {
   DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox, sleep, UB_BIN, unboundSandbox, waitUntil,
   type Run,
@@ -34,6 +35,8 @@ describe("ub auth local selection and command surface", () => {
       expect(help.stdout).toContain(`ub ${args.join(" ")}`);
       expect(help.stderr).toBe("");
       if (args[1] === "login") {
+        expect(help.stdout).toContain("Login never changes the project binding.");
+        expect(help.stdout).toContain("Signing in grants no workspace membership");
         expect(help.stdout).toMatch(/revok.*replac|replac.*revok/i);
         expect(help.stdout.replace(/\s+/g, " ")).toMatch(/approve only a code you just started/i);
         expect(help.stdout.replace(/\s+/g, " ")).toMatch(/first.*account.*approv.*claim.*default workspace.*admin/i);
@@ -284,7 +287,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(stored.credential.record.workspaces).toHaveLength(1);
     expect(workspace).toMatch(/^[0-9a-f-]{36}$/);
     expect(workspace).not.toBe(WORKSPACE);
-    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes its admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${workspace}), you are admin\navailable workspaces:\n  ${workspace} | Default workspace\n`);
+    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes its admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${workspace}), you are admin\navailable workspaces:\n  ${workspace} | Default workspace\nUse it here: ub workspace join ${remote.origin.replace("http:", "ws:")}/ws/${workspace}\n`);
     expect(login.stderr).toBe("");
     expect(readFileSync(configPath(box))).toEqual(binding);
     expect(remote.requests[0]).toMatchObject({ path: "/auth/claim-state", method: "GET", body: {} });
@@ -292,9 +295,83 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(again.status, again.stderr).toBe(0);
     expect(again.stdout).not.toContain("this hub is unclaimed");
     expect(again.stdout).not.toContain("claimed    ");
+    expect(again.stdout).not.toContain("Use it here:");
+    expect(login.stdout).not.toContain("ub open");
     expect(savedLogin(box, remote.origin).credential.record.workspaces).toEqual([workspace]);
     expect(readFileSync(configPath(box))).toEqual(binding);
     assertPublicOnly(login, remote, stored.credential.key);
+  });
+
+  it.each([
+    { name: "unbound project", source: "unbound", workspace: WORKSPACE, sameHub: true, next: true },
+    { name: "matching project", source: "project", workspace: WORKSPACE, sameHub: true, next: false },
+    { name: "matching slug-decorated project", source: "project", workspace: `test-${WORKSPACE}`, sameHub: true, next: false },
+    { name: "different project workspace", source: "project", workspace: OTHER_WORKSPACE, sameHub: true, next: true },
+    { name: "different project hub", source: "project", workspace: WORKSPACE, sameHub: false, next: true },
+    { name: "matching environment", source: "environment", workspace: WORKSPACE, sameHub: true, next: false },
+    { name: "overriding environment workspace", source: "environment", workspace: OTHER_WORKSPACE, sameHub: true, next: true },
+    { name: "overriding environment hub", source: "environment", workspace: WORKSPACE, sameHub: false, next: true },
+  ])("prints the claim command only when needed for a $name", async ({ source, workspace, sameHub, next }) => {
+    const remote = await rig([WORKSPACE]);
+    remote.controls.transform = (path, status, result) => path === "/auth/github/collect" && result.status === "complete"
+      ? { status, result: { ...result, claimedWorkspaceId: WORKSPACE } } : { status, result };
+    const endpoint = `${remote.origin.replace("http:", "ws:")}/custom//ws`;
+    const binding = { workspaceId: workspace, hubUrl: sameHub ? remote.origin : OTHER_HUB };
+    const box = source === "unbound" ? unboundSandbox() : sandbox({ projectBinding: source === "project" ? binding
+      : { workspaceId: OTHER_WORKSPACE, hubUrl: OTHER_HUB } });
+    const path = join(box.cwd, ".uberblick.json");
+    const before = existsSync(path) ? readFileSync(path) : null;
+    const login = await runUbAsync(["auth", "login", endpoint], box, source === "environment"
+      ? { UB_WORKSPACE_ID: workspace, UB_HUB_URL: binding.hubUrl } : {});
+    expect(login.status, login.stderr).toBe(0);
+    expect(login.stdout).toContain(`claimed    default workspace (${WORKSPACE}), you are admin\n`);
+    const action = login.stdout.match(/^Use it here: ub workspace join (.+)$/m);
+    expect(action !== null).toBe(next);
+    if (action !== null) expect(parseJoinTarget(action[1]!)).toEqual({ endpoint, workspace: WORKSPACE });
+    expect(login.stdout).not.toContain("ub open");
+    expect(existsSync(path) ? readFileSync(path) : null).toEqual(before);
+  });
+
+  it("prints a claimed-workspace command that writes the login's custom endpoint when run", async () => {
+    const remote = await rig([], true, true, true);
+    const endpoint = `ws://127.0.0.1:${remote.hub.port}/custom//ws`;
+    const box = unboundSandbox();
+    const login = await runUbAsync(["auth", "login", endpoint], box);
+    expect(login.status, login.stderr).toBe(0);
+    const link = login.stdout.match(/^Use it here: ub workspace join (.+)$/m)?.[1];
+    expect(link).toBeDefined();
+    const workspace = savedLogin(box, authenticationOrigin(endpoint)).credential.record.workspaces[0];
+    expect(parseJoinTarget(link!)).toEqual({ endpoint, workspace });
+    expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
+    const joined = await runUbAsync(["workspace", "join", link!], box);
+    expect(joined.status, joined.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8"))).toEqual({ workspaceId: workspace, hubUrl: endpoint });
+  });
+
+  it("uses the bound endpoint for an implicit login's claim command", async () => {
+    const remote = await rig([WORKSPACE]);
+    remote.controls.transform = (path, status, result) => path === "/auth/github/collect" && result.status === "complete"
+      ? { status, result: { ...result, claimedWorkspaceId: WORKSPACE } } : { status, result };
+    const endpoint = `${remote.origin.replace("http:", "ws:")}/proxy/ws`;
+    const box = sandbox({ projectBinding: { workspaceId: OTHER_WORKSPACE, hubUrl: endpoint } });
+    const login = await runUbAsync(["auth", "login"], box);
+    expect(login.status, login.stderr).toBe(0);
+    expect(login.stdout).toContain(`Use it here: ub workspace join ${endpoint}/${WORKSPACE}\n`);
+  });
+
+  it("keeps shell-sensitive endpoint paths in one literal operand when the claim command is pasted", async () => {
+    const remote = await rig([WORKSPACE]);
+    remote.controls.transform = (path, status, result) => path === "/auth/github/collect" && result.status === "complete"
+      ? { status, result: { ...result, claimedWorkspaceId: WORKSPACE } } : { status, result };
+    const endpoint = `${remote.origin.replace("http:", "ws:")}/custom path/O'Reilly;literal&dollar$test`;
+    const login = await runUbAsync(["auth", "login", endpoint], unboundSandbox());
+    expect(login.status, login.stderr).toBe(0);
+    const command = login.stdout.match(/^Use it here: (.+)$/m)?.[1];
+    expect(command).toBeDefined();
+    const pasted = spawnSync("/bin/sh", ["-c", `ub() { printf '%s\\n' "$@"; }\n${command}`], { encoding: "utf8", timeout: 5_000 });
+    expect(pasted.status, pasted.stderr).toBe(0);
+    expect(pasted.stdout).toBe(`workspace\njoin\n${endpoint}/${WORKSPACE}\n`);
+    expect(parseJoinTarget(pasted.stdout.trim().split("\n")[2]!)).toEqual({ endpoint, workspace: WORKSPACE });
   });
 
   it("reports ordinary completion when another account claimed after the unclaimed notice", async () => {

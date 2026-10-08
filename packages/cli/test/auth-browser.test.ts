@@ -79,7 +79,8 @@ function stdout(origin: string, unclaimed = true): string {
   return guidance(origin, unclaimed) +
     `signed in  browser-test-user on ${origin}\n` +
     `claimed    default workspace (${WORKSPACE}), you are admin\n` +
-    `available workspaces:\n  ${WORKSPACE}\n`;
+    `available workspaces:\n  ${WORKSPACE}\n` +
+    `Use it here: ub workspace join ${origin.replace("http:", "ws:")}/ws/${WORKSPACE}\n`;
 }
 
 function recorder(box: Sandbox, mode = "success") {
