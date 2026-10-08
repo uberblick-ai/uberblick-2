@@ -259,11 +259,12 @@ describe("ub doctor", () => {
   });
 
   it("reports the default database path and absent local secret", async () => {
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
-    const { checks } = await doctor(box);
+    const port = await freePort();
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: `ws://127.0.0.1:${port}` } });
+    const { checks } = await doctor(box, { PORT: String(port) });
     expect(check(checks, "database").reason).toContain(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`));
     expect(listener(checks, "hub listener").status).toBe("skipped");
-    expect(listener(checks, "hub listener").reason).toMatch(/no signing secret/);
+    expect(listener(checks, "hub listener").reason).toMatch(/no signing secret in force/);
     expect(listener(checks, "hub listener").reason).not.toMatch(/ub open starts/);
   });
 
