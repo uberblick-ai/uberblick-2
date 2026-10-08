@@ -2,13 +2,17 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, RefObject } from "react";
 import type { Editor } from "@tiptap/core";
+import { DragDropProvider } from "@dnd-kit/react";
+import type { DragDropManager } from "@dnd-kit/react";
+import { Accessibility, Feedback } from "@dnd-kit/dom";
 import { findBlockById } from "../editor/block-menu.js";
 import { isOrdinaryTable } from "../editor/table.js";
-import { actOnTable, resolveTableRow, tableRowTarget, tableRowTargets } from "../editor/table-controls.js";
+import { actOnTable, moveTableRow, resolveTableRow, tableRowTarget, tableRowTargets } from "../editor/table-controls.js";
 import type { TableAction, TableRowTarget } from "../editor/table-controls.js";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
 } from "./shadcn/dropdown-menu.js";
+import { TableRowHandle, tableRowSensors } from "./table-row-drag.js";
 
 interface Geometry {
   tableId: string;
@@ -36,6 +40,20 @@ function tableIdAt(target: EventTarget | null): string | null {
   const controls = element?.closest<HTMLElement>(".ub-table-controls");
   if (controls !== null && controls !== undefined) return controls.dataset.tableId ?? null;
   return element?.closest(".tableWrapper")?.querySelector("table")?.id || null;
+}
+
+/** Map the live pointer to a body-row gap, including the reserved end space. */
+function rowGap(geometry: Geometry, base: DOMRect, point: { x: number; y: number }): number | null {
+  const x = point.x - base.left - geometry.left;
+  const y = point.y - base.top - geometry.top;
+  const header = geometry.rows[0];
+  const last = geometry.rows.at(-1);
+  if (header === undefined || last === undefined || x < 0 || x > geometry.width || y < header.bottom || y > last.bottom + 22) return null;
+  for (let index = 1; index < geometry.rows.length; index += 1) {
+    const row = geometry.rows[index];
+    if (row !== undefined && y < row.middle) return index;
+  }
+  return geometry.rows.length;
 }
 
 /** Each eligible table reveals independently, including a hovered second table. */
@@ -83,6 +101,15 @@ function TableControlSurface({ tableId, editor, host }: {
   const refresh = useRef<() => void>(() => {});
   const acted = useRef(false);
   const closing = useRef(false);
+  const drag = useRef<{ target: TableRowTarget; manager: DragDropManager; point: { x: number; y: number } } | null>(null);
+  const dragged = useRef(false);
+  const [gap, setGap] = useState<number | null>(null);
+  const geometryRef = useRef<Geometry | null>(null);
+  const cancelDrag = useCallback((): void => {
+    drag.current?.manager.actions.stop({ canceled: true });
+    drag.current = null;
+    setGap(null);
+  }, []);
   const setTarget = useCallback((target: TableRowTarget | null): void => {
     if (target === null && menuRef.current !== null) closing.current = true;
     if (target !== null) closing.current = false;
@@ -98,6 +125,7 @@ function TableControlSurface({ tableId, editor, host }: {
     const win = owner.defaultView;
     const read = (): void => {
       if (editor.isDestroyed) return;
+      if (drag.current !== null && resolveTableRow(editor, drag.current.target) === null) cancelDrag();
       let target = menuRef.current;
       if (target !== null && resolveTableRow(editor, target) === null) {
         menuRef.current = null;
@@ -106,7 +134,7 @@ function TableControlSurface({ tableId, editor, host }: {
       }
       const caret = caretTable(editor);
       const focused = tableIdAt(owner.activeElement);
-      const eligible = closing.current || target?.tableId === tableId || focused === tableId || editor.isFocused && caret?.id === tableId || hovered.current === tableId;
+      const eligible = drag.current !== null || closing.current || target?.tableId === tableId || focused === tableId || editor.isFocused && caret?.id === tableId || hovered.current === tableId;
       const id = tableId;
       const found = eligible ? findBlockById(editor.state.doc, id) : null;
       if (!editor.isEditable || found === null || !isOrdinaryTable(found.node)) {
@@ -144,7 +172,7 @@ function TableControlSurface({ tableId, editor, host }: {
         const rect = row.getBoundingClientRect();
         rows.push({ key, target, middle: (rect.top + rect.bottom) / 2 - box.top, bottom: rect.bottom - box.top });
       }
-      setGeometry({
+      const next: Geometry = {
         tableId: id, left: box.left - base.left, top: box.top - base.top,
         width: width + 88, viewportWidth: width, height: wrapper.clientHeight, scrollLeft: wrapper.scrollLeft, scrollWidth: wrapper.scrollWidth,
         // A native scroll strip keeps every column in keyboard order. Focus
@@ -152,7 +180,10 @@ function TableControlSurface({ tableId, editor, host }: {
         columns: edges.map((edge) => Math.max(0, Math.min(wrapper.scrollWidth - size, edge - box.left + wrapper.scrollLeft - size / 2))),
         rows,
         caretRow: caret?.id === id ? caret.row : null, touch: touch.current,
-      });
+      };
+      geometryRef.current = next;
+      setGeometry(next);
+      if (drag.current !== null) setGap(rowGap(next, base, drag.current.point));
     };
     const move = (event: PointerEvent): void => {
       if (event.pointerType === "touch") return;
@@ -171,8 +202,8 @@ function TableControlSurface({ tableId, editor, host }: {
     // During native Tab or a touch press, focusout briefly sees body as the
     // active element. Read after the focus transfer so its destination survives.
     const blur = (): void => { queueMicrotask(read); };
-    const scroll = (event: Event): void => {
-      if (event.target instanceof HTMLElement && event.target.classList.contains("tableWrapper")) read();
+    const scroll = (): void => {
+      read();
     };
     const key = (event: KeyboardEvent): void => {
       if (event.isComposing || !editor.isEditable) return;
@@ -207,9 +238,9 @@ function TableControlSurface({ tableId, editor, host }: {
     };
     dom.addEventListener("keydown", key);
     frame.addEventListener("pointermove", move);
-    frame.addEventListener("pointerdown", press);
+    frame.addEventListener("pointerdown", press, true);
     frame.addEventListener("pointerleave", leave);
-    frame.addEventListener("scroll", scroll, true);
+    owner.addEventListener("scroll", scroll, true);
     owner.addEventListener("focusin", focus);
     owner.addEventListener("focusout", blur);
     win?.addEventListener("resize", read);
@@ -224,9 +255,10 @@ function TableControlSurface({ tableId, editor, host }: {
     return () => {
       dom.removeEventListener("keydown", key);
       frame.removeEventListener("pointermove", move);
-      frame.removeEventListener("pointerdown", press);
+      cancelDrag();
+      frame.removeEventListener("pointerdown", press, true);
       frame.removeEventListener("pointerleave", leave);
-      frame.removeEventListener("scroll", scroll, true);
+      owner.removeEventListener("scroll", scroll, true);
       owner.removeEventListener("focusin", focus);
       owner.removeEventListener("focusout", blur);
       win?.removeEventListener("resize", read);
@@ -236,7 +268,7 @@ function TableControlSurface({ tableId, editor, host }: {
       observer?.disconnect();
       refresh.current = () => {};
     };
-  }, [editor, host, tableId]);
+  }, [editor, host, tableId, cancelDrag]);
 
   useLayoutEffect(() => { menuRef.current = menu; refresh.current(); }, [menu]);
 
@@ -275,10 +307,81 @@ function TableControlSurface({ tableId, editor, host }: {
     setTarget(null);
     if (acted.current) editor.view.focus();
   };
+  const moveRow = (direction: -1 | 1): void => {
+    const live = menu === null ? null : resolveTableRow(editor, menu);
+    if (menu === null || live === null) return;
+    acted.current = moveTableRow(editor, menu, live.rowIndex + (direction === -1 ? -1 : 2));
+    setTarget(null);
+    if (acted.current) editor.view.focus();
+  };
+  const indicate = (point: { x: number; y: number }): void => {
+    if (drag.current === null) return;
+    drag.current.point = point;
+    const current = geometryRef.current;
+    const frame = host.current;
+    setGap(current === null || frame === null ? null : rowGap(current, frame.getBoundingClientRect(), point));
+  };
   const button = "ub-table-control";
   return (
+    <DragDropProvider sensors={tableRowSensors}
+      plugins={(defaults) => defaults.filter((plugin) => plugin !== Feedback && plugin !== Accessibility)}
+      onBeforeDragStart={(event) => {
+        const target = event.operation.source?.data.target as TableRowTarget | undefined;
+        const live = target === undefined ? null : resolveTableRow(editor, target);
+        if (live === null || live.rowIndex === 0 || menuRef.current !== null) event.preventDefault();
+      }}
+      onDragStart={(event, manager) => {
+        const target = event.operation.source?.data.target as TableRowTarget;
+        dragged.current = true;
+        drag.current = { target, manager, point: event.operation.position.current };
+        indicate(event.operation.position.current);
+      }}
+      onDragMove={(event) => {
+        // dnd-kit publishes dragmove before updating position.current.
+        if (event.to !== undefined) indicate(event.to);
+      }}
+      onDragEnd={(event, manager) => {
+        const active = drag.current;
+        const current = geometryRef.current;
+        const frame = host.current;
+        drag.current = null;
+        setGap(null);
+        if (active === null) return;
+        let moved = false;
+        let caretTarget: TableRowTarget | null = active.target;
+        if (!event.canceled && current !== null && frame !== null) {
+          const native = event.nativeEvent;
+          const point = native instanceof PointerEvent ? { x: native.clientX, y: native.clientY } : active.point;
+          const destination = rowGap(current, frame.getBoundingClientRect(), point);
+          const source = resolveTableRow(editor, active.target);
+          moved = destination !== null && moveTableRow(editor, active.target, destination);
+          if (moved && source !== null && destination !== null) {
+            caretTarget = tableRowTarget(editor, tableId, destination > source.rowIndex ? destination - 1 : destination);
+          }
+        }
+        // PreventSelection clears native ranges during pickup. Restore the PM
+        // caret after dnd-kit removes that guard, including no-op/cancelled
+        // holds, so the caret-row touch handle remains reachable.
+        if (caretTarget !== null && (moved || resolveTableRow(editor, caretTarget) !== null)) {
+          const target = caretTarget;
+          const win = editor.view.dom.ownerDocument.defaultView;
+          const restore = (): void => {
+            if (editor.isDestroyed) return;
+            // The React renderer completes dropping asynchronously. Waiting
+            // for idle avoids restoring a range while its guard is still live.
+            if (!manager.dragOperation.status.idle) { win?.requestAnimationFrame(restore); return; }
+            const live = resolveTableRow(editor, target);
+            if (live === null) return;
+            editor.commands.setTextSelection(live.rowPos + 3);
+            editor.view.focus();
+          };
+          win?.requestAnimationFrame(restore);
+        }
+      }}>
     <div ref={controls} className="ub-table-controls" data-table-id={geometry.tableId} data-touch={geometry.touch}
       style={{ left: geometry.left, top: geometry.top, width: geometry.width, height: geometry.height }}>
+      {gap !== null && <div className="ub-table-row-drop" data-gap={gap}
+        style={{ top: geometry.rows[gap - 1]?.bottom, width: geometry.viewportWidth }} />}
       <div ref={columnStrip} className="ub-table-column-controls" style={{ width: geometry.viewportWidth }}
         onScroll={(event) => {
           // Only native control focus drives the table back. A programmatic
@@ -317,20 +420,21 @@ function TableControlSurface({ tableId, editor, host }: {
           <span aria-hidden="true">+</span>
         </button>
       ))}
-      {geometry.rows.map((row, index) => geometry.touch && geometry.caretRow !== index && openRow !== index ? null : (
+      {geometry.rows.map((row, index) => geometry.touch && geometry.caretRow !== index && openRow !== index && drag.current?.target.row !== row.target.row ? null : (
         <DropdownMenu key={row.key} modal={false} open={openRow === index}
           onOpenChange={(open) => {
             if (open) acted.current = false;
             setTarget(open ? row.target : null);
           }}>
-          <DropdownMenuTrigger asChild>
-            <button type="button" className={button}
-              style={{ right: 0, top: row.middle - size / 2, width: size, height: size }}
-              aria-label={`Row ${index + 1} actions`} aria-keyshortcuts="Control+Alt+R Shift+F10"
-              title="Row actions · Control+Alt+R or Shift+F10">
-              <span aria-hidden="true">⋮</span>
-            </button>
-          </DropdownMenuTrigger>
+          <TableRowHandle target={row.target} index={index} rowKey={row.key} middle={row.middle} size={size}
+            resetGuard={() => { if (drag.current === null) dragged.current = false; }}
+            clickGuard={(event) => {
+              if (!dragged.current || event.detail === 0) return;
+              dragged.current = false;
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            open={() => { acted.current = false; setTarget(openRow === index ? null : row.target); }} />
           <DropdownMenuContent align="end" collisionPadding={8}
             onCloseAutoFocus={(event) => {
               // Retain the trigger through Radix's close/focus phase on touch,
@@ -342,6 +446,8 @@ function TableControlSurface({ tableId, editor, host }: {
               editor.view.focus();
               refresh.current();
             }}>
+            <DropdownMenuItem className="min-h-11" disabled={index <= 1} onSelect={() => moveRow(-1)}>Move row up</DropdownMenuItem>
+            <DropdownMenuItem className="min-h-11" disabled={index === 0 || index === geometry.rows.length - 1} onSelect={() => moveRow(1)}>Move row down</DropdownMenuItem>
             <DropdownMenuItem className="min-h-11" disabled={index === 0} onSelect={() => act(index, 0, "row-before", true)}>Insert row above</DropdownMenuItem>
             <DropdownMenuItem className="min-h-11" onSelect={() => act(index, 0, "row-after", true)}>Insert row below</DropdownMenuItem>
             <DropdownMenuItem className="min-h-11" disabled={index === 0} variant="destructive" onSelect={() => act(index, 0, "row-delete", true)}>Delete row</DropdownMenuItem>
@@ -349,5 +455,6 @@ function TableControlSurface({ tableId, editor, host }: {
         </DropdownMenu>
       ))}
     </div>
+    </DragDropProvider>
   );
 }

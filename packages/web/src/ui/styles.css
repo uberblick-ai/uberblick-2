@@ -1058,6 +1058,21 @@ h3.ub-heading {
   background: var(--background);
 }
 
+.ub-table-row-handle {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.ub-table-row-drop {
+  position: absolute;
+  left: 0;
+  height: 3px;
+  transform: translateY(-50%);
+  background: var(--brand);
+  pointer-events: none;
+}
+
 .ub-table-control:hover span,
 .ub-table-control:focus-visible span,
 .ub-table-control[data-state="open"] span {
