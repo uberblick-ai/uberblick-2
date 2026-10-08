@@ -141,13 +141,20 @@ async function columnBorders(table: Locator): Promise<void> {
     const edges = [first.getBoundingClientRect().left, ...cells.map((cell) => cell.getBoundingClientRect().right)];
     return Array.from(overlay.querySelectorAll("button[aria-label^='Insert column']")).map((control, index) => {
       const bounds = control.getBoundingClientRect();
-      return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2, edge: edges[index], top, opacity: getComputedStyle(control).opacity };
+      return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2, left: bounds.left, right: bounds.right,
+        edge: edges[index], outer: index === 0 || index === cells.length, touch: overlay.dataset.touch === "true",
+        top, opacity: getComputedStyle(control).opacity };
     });
   });
   expect(geometry.length).toBeGreaterThan(1);
   for (const boundary of geometry) {
     expect(boundary.opacity).toBe("1");
-    expect(Math.abs(boundary.x - (boundary.edge ?? Number.NaN))).toBeLessThanOrEqual(1);
+    if (boundary.touch && boundary.outer) {
+      // Touch edge targets move inward only to fit the document pane, while
+      // still crossing their column border. Mouse targets stay centred.
+      expect(boundary.left).toBeLessThan(boundary.edge ?? Number.NaN);
+      expect(boundary.right).toBeGreaterThan(boundary.edge ?? Number.NaN);
+    } else expect(Math.abs(boundary.x - (boundary.edge ?? Number.NaN))).toBeLessThanOrEqual(1);
     expect(Math.abs(boundary.y - boundary.top)).toBeLessThanOrEqual(1);
   }
 }
@@ -162,7 +169,10 @@ async function rowBorder(table: Locator, row: number): Promise<void> {
   }, row);
   const bounds = await target.boundingBox();
   if (bounds === null) throw new Error("e2e: row insertion control has no geometry");
-  expect(Math.abs(bounds.x + bounds.width / 2 - expected.right)).toBeLessThanOrEqual(1);
+  if (await (await tableControls(table)).getAttribute("data-touch") === "true") {
+    expect(bounds.x).toBeLessThan(expected.right);
+    expect(bounds.x + bounds.width).toBeGreaterThan(expected.right);
+  } else expect(Math.abs(bounds.x + bounds.width / 2 - expected.right)).toBeLessThanOrEqual(1);
   expect(Math.abs(bounds.y + bounds.height / 2 - expected.bottom)).toBeLessThanOrEqual(1);
 }
 
@@ -196,8 +206,36 @@ async function hitTarget(target: Locator): Promise<void> {
   })).toBe(true);
 }
 
+/** The whole touch target fits the pane, with input delivered at each edge. */
+async function fullyTappable(target: Locator): Promise<void> {
+  const hit = await target.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const pane = element.closest(".ub-document-pane")?.getBoundingClientRect();
+    if (pane === undefined) throw new Error("e2e: touch target has no document pane");
+    const centerX = bounds.x + bounds.width / 2;
+    const centerY = bounds.y + bounds.height / 2;
+    // Use the first interior CSS pixel: subpixel hit tests can round across
+    // the viewport edge or a neighbouring collapsed-border target.
+    const points: [number, number][] = [[bounds.left + 1, centerY], [bounds.right - 1, centerY],
+      [centerX, bounds.top + 1], [centerX, bounds.bottom - 1]];
+    const targets = points.map(([x, y]) => document.elementFromPoint(x, y));
+    return { name: element.getAttribute("aria-label"), left: bounds.left, right: bounds.right,
+      top: bounds.top, bottom: bounds.bottom, paneLeft: pane.left, paneRight: pane.right,
+      targets: targets.map((target) => target?.outerHTML.slice(0, 160)),
+      edges: targets.map((target) => element.contains(target)) };
+  });
+  expect(hit.left + 0.001).toBeGreaterThanOrEqual(hit.paneLeft);
+  expect(hit.right - 0.001).toBeLessThanOrEqual(hit.paneRight);
+  expect(hit.edges, JSON.stringify(hit)).toEqual([true, true, true, true]);
+}
+
 async function pageFits(page: Page): Promise<void> {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const panes = await page.locator(".ub-document-pane").evaluateAll((elements) => elements.map((element) => ({
+    width: element.clientWidth, scrollWidth: element.scrollWidth,
+  })));
+  expect(panes.length).toBeGreaterThan(0);
+  for (const pane of panes) expect(pane.scrollWidth).toBeLessThanOrEqual(pane.width);
 }
 
 async function capture(page: Page, info: TestInfo, label: string, colorScheme: "light" | "dark"): Promise<void> {
@@ -574,7 +612,11 @@ test("header-only edge controls follow wide-table scrolling and retain the only 
   const lastColumnBox = await lastColumn.boundingBox();
   const lastCellBox = await table.locator("th").last().boundingBox();
   if (lastColumnBox === null || lastCellBox === null) throw new Error("e2e: scrolled column boundary has no geometry");
-  expect(Math.abs(lastColumnBox.x + lastColumnBox.width / 2 - lastCellBox.x - lastCellBox.width)).toBeLessThanOrEqual(1);
+  if (info.project.use.hasTouch === true) {
+    expect(lastColumnBox.x).toBeLessThan(lastCellBox.x + lastCellBox.width);
+    expect(lastColumnBox.x + lastColumnBox.width).toBeGreaterThan(lastCellBox.x + lastCellBox.width);
+    await fullyTappable(lastColumn);
+  } else expect(Math.abs(lastColumnBox.x + lastColumnBox.width / 2 - lastCellBox.x - lastCellBox.width)).toBeLessThanOrEqual(1);
   await hitTarget(lastColumn);
   await activate(lastColumn, info);
   await expect(table.locator("th")).toHaveCount(10);
@@ -600,12 +642,16 @@ test("touch exposes 44px controls for the caret table and row without hover", { 
   await columnBorders(table);
   await rowBorder(table, 2);
   await controlsDoNotOverlap(table);
-  await hitTarget(button(page, "Insert row after 2"));
-  await hitTarget(button(page, "Row 2 actions"));
+  await fullyTappable(button(page, "Insert row after 2"));
+  await fullyTappable(button(page, "Row 2 actions"));
+  await fullyTappable(button(page, "Insert column before 1"));
+  await pageFits(page);
   await table.locator("..").evaluate((element) => { element.scrollLeft = element.scrollWidth; });
   await rowBorder(table, 2);
+  await fullyTappable(button(page, "Insert column after 3"));
+  await pageFits(page);
   await table.locator("..").evaluate((element) => { element.scrollLeft = 0; });
-  await button(page, "Insert row after 2").tap();
+  await button(page, "Insert row after 2").tap({ position: { x: 43, y: 22 } });
   await expect(table.locator("tr")).toHaveCount(4);
   await table.locator("tr").nth(1).locator("td").first().tap();
   await button(page, "Row 2 actions").tap();

@@ -983,9 +983,15 @@ h3.ub-heading {
 }
 
 .ub-table-controls {
+  --ub-table-control-overhang: 12px;
   position: absolute;
   z-index: 1;
   pointer-events: none;
+}
+
+.ub-table-controls[data-touch="true"] {
+  /* Keep the entire 44px target within the pane's padding on narrow screens. */
+  --ub-table-control-overhang: min(22px, var(--document-rail-gap));
 }
 
 .ub-table-column-controls {

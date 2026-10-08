@@ -47,9 +47,7 @@ function tableIdAt(target: EventTarget | null): string | null {
 function rowAt(target: EventTarget | null): number | null {
   const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
   const control = element?.closest<HTMLElement>("[data-table-row]");
-  if (control !== null && control !== undefined) return Number(control.dataset.tableRow);
-  const row = element?.closest("tr");
-  return row instanceof HTMLTableRowElement ? row.rowIndex : null;
+  return control === null || control === undefined ? null : Number(control.dataset.tableRow);
 }
 
 /** Map the live pointer to a body-row gap, including the reserved end space. */
@@ -439,7 +437,8 @@ function TableControlSurface({ tableId, editor, host }: {
       {gap !== null && <div className="ub-table-row-drop" data-gap={gap}
         style={{ top: geometry.rows[gap - 1]?.bottom, width: geometry.viewportWidth }} />}
       <div ref={columnStrip} className="ub-table-column-controls"
-        style={{ left: -size / 2, top: -size / 2, width: geometry.viewportWidth + size, height: size }}
+        style={{ left: "calc(0px - var(--ub-table-control-overhang))", top: -size / 2,
+          width: `calc(${geometry.viewportWidth}px + 2 * var(--ub-table-control-overhang))`, height: size }}
         onScroll={(event) => {
           // Only native control focus drives the table back. A programmatic
           // strip scroll follows the table and must never feed an old offset
@@ -452,12 +451,16 @@ function TableControlSurface({ tableId, editor, host }: {
             refresh.current();
           }
         }}>
-      <div style={{ position: "relative", width: geometry.scrollWidth + size, height: size }}>
+      <div style={{ position: "relative", width: `calc(${geometry.scrollWidth}px + 2 * var(--ub-table-control-overhang))`, height: size }}>
       {geometry.columns.map((left, boundary) => (
         // These buttons name positional boundaries, not persistent cells.
+        // Touch outer targets move inward only where the pane's padding
+        // cannot hold half a target; inner boundaries still centre on cells.
         // biome-ignore lint/suspicious/noArrayIndexKey: boundary is the action's column coordinate.
         <button key={boundary} type="button" className={button}
-          style={{ left, top: 0, width: size, height: size }}
+          style={{ left: geometry.touch
+            ? `clamp(0px, calc(${left - size / 2}px + var(--ub-table-control-overhang)), calc(100% - ${size}px))`
+            : left, top: 0, width: size, height: size }}
           aria-label={boundary === 0 ? "Insert column before 1" : `Insert column after ${boundary}`}
           title="Insert column · Control+Alt+Left/Right from a cell; Control+Alt+T reaches controls"
           aria-keyshortcuts="Control+Alt+T"
@@ -471,7 +474,7 @@ function TableControlSurface({ tableId, editor, host }: {
       {geometry.rows.map((row, index) => (
         <button key={`insert-${row.key}`} type="button" className={button}
           data-table-row={index} data-revealed={rowVisible(index)}
-          style={{ right: -size / 2, top: row.bottom - size / 2, width: size, height: size }}
+          style={{ right: "calc(0px - var(--ub-table-control-overhang))", top: row.bottom - size / 2, width: size, height: size }}
           aria-label={`Insert row after ${index + 1}`} title="Insert row · Control+Alt+Up/Down from a cell"
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => act(index, 0, "row-after")}>
