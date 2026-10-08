@@ -143,19 +143,33 @@ describe("closed document data schema vocabulary", () => {
 });
 
 describe("plain canonical JSON", () => {
-  it("detaches records, sorts keys by Unicode code point and preserves special property names", () => {
-    const original = JSON.parse('{"😀":2,"\\ue000":1,"nested":{"b":2,"a":[true]},"__proto__":{"safe":true}}') as JSONValue;
+  it("detaches records, sorts keys by Unicode code point and preserves safe property names", () => {
+    const original = JSON.parse('{"😀":2,"\\ue000":1,"nested":{"b":2,"a":[true]},"prototype":{"constructor":"__proto__"}}') as JSONValue;
     const copy = cloneJson(original);
     expect(copy).toEqual(original);
     expect(copy).not.toBe(original);
-    expect(Object.hasOwn(copy as object, "__proto__")).toBe(true);
-    expect(canonicalJson(original)).toBe('{"__proto__":{"safe":true},"nested":{"a":[true],"b":2},"\ue000":1,"😀":2}');
+    expect(Object.hasOwn(copy as object, "prototype")).toBe(true);
+    expect(canonicalJson(original)).toBe('{"nested":{"a":[true],"b":2},"prototype":{"constructor":"__proto__"},"\ue000":1,"😀":2}');
     expect(compareCodePoints("\ue000", "😀")).toBe(-1);
     expect(compareCodePoints("a", "ab")).toBe(-1);
     expect(compareCodePoints("ab", "a")).toBe(1);
     expect(compareCodePoints("same", "same")).toBe(0);
     expect(canonicalJson({ b: 2, a: 1 })).toBe(canonicalJson({ a: 1, b: 2 }));
     expect(canonicalJson(-0)).toBe("0");
+  });
+
+  it.each([
+    [JSON.parse('{"__proto__":1}'), "/__proto__"],
+    [{ constructor: "text" }, "/constructor"],
+    [JSON.parse('{"nested":[{"__proto__":{"x":1}}]}'), "/nested/0/__proto__"],
+    [{ nested: ["\uD800"] }, "/nested/0"],
+    [{ nested: ["\uDC00"] }, "/nested/0"],
+    [{ nested: { ["a/~\uD800"]: true } }, "/nested/a~1~0\uD800"],
+    [{ nested: { ["a/~\uDC00"]: true } }, "/nested/a~1~0\uDC00"],
+  ])("rejects JSON that Yjs cannot preserve: %j", (value, path) => {
+    expect(failure(() => assertJSON(value))).toMatchObject({
+      code: "data_invalid_input", details: { path },
+    });
   });
 
   it("rejects lossy JSON input and live shared types", () => {

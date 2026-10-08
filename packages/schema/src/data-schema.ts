@@ -72,14 +72,19 @@ function invalidJSON(path: string, reason: string): never {
 }
 
 /**
- * Reject values JSON would silently drop or transform. Depth counts containers:
+ * Reject values JSON or Yjs would drop, transform or refuse. Depth counts containers:
  * a root object/array has depth one, its nested containers have depth two.
  * Shared-root envelopes may use Infinity after each schema/record is checked.
  */
 export function assertJSON(value: unknown, maxDepth = MAX_DATA_DEPTH): asserts value is JSONValue {
   const ancestors = new Set<object>();
   function visit(current: unknown, path: string, depth: number): void {
-    if (current === null || typeof current === "string" || typeof current === "boolean") return;
+    if (current === null || typeof current === "boolean") return;
+    if (typeof current === "string") {
+      // With Unicode matching a valid surrogate pair is one astral code point.
+      if (/[\uD800-\uDFFF]/u.test(current)) invalidJSON(path, "strings must not contain lone surrogates");
+      return;
+    }
     if (typeof current === "number") {
       if (!Number.isFinite(current)) invalidJSON(path, "numbers must be finite");
       return;
@@ -111,6 +116,12 @@ export function assertJSON(value: unknown, maxDepth = MAX_DATA_DEPTH): asserts v
       for (const key of Reflect.ownKeys(current).sort((a, b) =>
         typeof a === "string" && typeof b === "string" ? compareCodePoints(a, b) : 0)) {
         if (typeof key !== "string") invalidJSON(path, "object keys must be strings");
+        // lib0 assigns decoded keys through the prototype setter; Y.Map.set
+        // dispatches on the root value's constructor before encoding it.
+        if (key === "__proto__" || (path === "" && key === "constructor")) {
+          invalidJSON(pointer(path, key), "property name cannot be stored as a Yjs JSON value");
+        }
+        if (/[\uD800-\uDFFF]/u.test(key)) invalidJSON(pointer(path, key), "property names must not contain lone surrogates");
         const descriptor = Object.getOwnPropertyDescriptor(current, key);
         if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
           invalidJSON(pointer(path, key), "expected an ordinary JSON property");

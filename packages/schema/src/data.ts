@@ -1,9 +1,10 @@
 /**
  * Optional document content in one flat Y.Map. Schemas and whole JSON records
  * are independent conflict units; transactions are local, not distributed CAS.
- * Key tuples avoid separators/escaping ambiguities, including arbitrary JSON
- * property names. Names and ids are nonempty Unicode strings, without lone
- * surrogates. There is no record-count limit or CRDT-history reclamation.
+ * Key tuples avoid separators/escaping ambiguities. JSON property names exclude
+ * __proto__ at any depth and constructor at the value root for Yjs safety.
+ * Names and ids are nonempty; all JSON strings exclude lone surrogates.
+ * There is no record-count limit or CRDT-history reclamation.
  */
 import type * as Y from "yjs";
 import { getMeta } from "./doc.js";

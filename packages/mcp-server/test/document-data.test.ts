@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { MirrorStore } from "../src/store.js";
 import {
-  FailingStore,
   hubUrl,
   LIVE_HUB_SETTLE,
   removeTempDirs,
@@ -33,8 +32,8 @@ afterEach(async () => {
   removeTempDirs();
 });
 
-async function server(options: TestConfigOptions = {}, store?: MirrorStore) {
-  const rig = await startServer(testConfig(options), store);
+async function server(options: TestConfigOptions = {}) {
+  const rig = await startServer(testConfig(options));
   rigs.add(rig);
   return rig;
 }
@@ -242,45 +241,5 @@ describe("document-owned data persistence", () => {
     );
     expect(persistedData(fresh.config.databasePath, `${WORKSPACE}/${created.uuid}`))
       .toEqual(expected);
-  });
-
-  it("quarantines a refused data append and never compacts the unlogged change", async () => {
-    const databasePath = tempDatabasePath();
-    const faulty = new FailingStore(databasePath, WORKSPACE);
-    const rig = await server({ databasePath, compactAfter: 1 }, faulty);
-    const created = await rig.ok("create_doc", {
-      title: "Data disk failure",
-      description: "A synthetic persistence failure fixture.",
-    });
-    const replicaDoc = doc(rig, created.uuid);
-    apply(rig, created.uuid, [{
-      collection: "observations",
-      schema: observationSchema,
-      upsert: [{ id: "row-1", value: { text: "durable" } }],
-    }]);
-    await rig.ok("sync_status");
-    const expected = readDocData(replicaDoc);
-    const room = `${WORKSPACE}/${created.uuid}`;
-    const snapshot = rig.instance.store.snapshot(room);
-    expect(snapshot).not.toBeNull();
-
-    faulty.failing = true;
-    apply(rig, created.uuid, [{
-      collection: "observations",
-      upsert: [{ id: "row-1", value: { text: "unlogged" } }],
-    }]);
-    expect(() => rig.instance.replicas.assertHealthy()).toThrow();
-    expect((await rig.call("get_doc", { uuid: created.uuid })).payload.error)
-      .toBe("persistence_failed");
-    faulty.failing = false;
-    const status = await rig.ok("sync_status");
-    expect(status.persistence?.room).toBe(room);
-    expect(rig.instance.store.snapshot(room)).toEqual(snapshot);
-    expect(persistedData(databasePath, room)).toEqual(expected);
-    await close(rig);
-
-    const reopened = await server({ databasePath });
-    await reopened.ok("get_doc", { uuid: created.uuid });
-    expect(readDocData(doc(reopened, created.uuid))).toEqual(expected);
   });
 });

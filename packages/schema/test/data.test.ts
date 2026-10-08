@@ -2,7 +2,7 @@ import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
 import {
   applyDocData, canonicalJson, DATA_KEY, DATA_LIMITS, DataError,
-  getAnnotationsMap, getBlocksFragment, getMetaMap, initDoc, readDocData,
+  decisionApprovalFingerprint, getAnnotationsMap, getBlocksFragment, getMetaMap, initDoc, readDocData,
   setKind, setStatus, tombstoneDirectoryEntry, upsertDirectoryEntry,
 } from "../src/index.js";
 import type { CollectionSchema, DataOperation, JSONObject } from "../src/index.js";
@@ -66,6 +66,75 @@ describe("document-owned data", () => {
     expect(updates).toBe(2);
     expect(sizes[1]).toBeLessThan(250);
     expect(sizes[1]!).toBeLessThan(sizes[0]! / 100);
+  });
+
+  it.each([
+    [JSON.parse('{"__proto__":1,"keep":true}'), "/__proto__"],
+    [JSON.parse('{"nested":[{"__proto__":{"x":1}}]}'), "/nested/0/__proto__"],
+    [{ constructor: "text" }, "/constructor"],
+    [{ constructor: {} }, "/constructor"],
+    [{ nested: ["Launch 😀".slice(0, 8)] }, "/nested/0"],
+    [{ nested: ["\uDC00"] }, "/nested/0"],
+    [{ nested: { ["a/~\uD800"]: true } }, "/nested/a~1~0\uD800"],
+    [{ nested: { ["a/~\uDC00"]: true } }, "/nested/a~1~0\uDC00"],
+  ])("refuses lossy record JSON before any write: %j", (value, path) => {
+    const { doc, apply } = rig();
+    apply([{ collection: "c", schema: SCHEMA, upsert: [{ id: "kept", value: {} }] }]);
+    const error = failUnchanged(doc, () => apply([
+      { collection: "new", schema: SCHEMA, upsert: [{ id: "okay", value: {} }] },
+      { collection: "c", upsert: [{ id: "bad", value: value as JSONObject }] },
+    ]));
+    expect(error).toMatchObject({ code: "data_invalid_input", details: { collection: "c", recordId: "bad", path } });
+    const reopened = new Y.Doc();
+    Y.applyUpdate(reopened, Y.encodeStateAsUpdate(doc));
+    expect(readDocData(reopened)).toEqual(readDocData(doc));
+    expect(decisionApprovalFingerprint(reopened)).toBe(decisionApprovalFingerprint(doc));
+  });
+
+  it.each([
+    [JSON.parse('{"version":1,"schema":{"type":"object","properties":{"__proto__":{"type":"string"}}}}'), "/schema/properties/__proto__"],
+    [{ version: 1, schema: { type: "object", properties: { ["\uD800"]: { type: "string" } } } }, "/schema/properties/\uD800"],
+    [{ version: 1, schema: { type: "object", properties: { text: { const: "\uDC00" } } } }, "/schema/properties/text/const"],
+  ])("refuses lossy schema JSON before any write: %j", (schema, path) => {
+    const { doc, apply } = rig();
+    const error = failUnchanged(doc, () => apply([
+      { collection: "new", schema: SCHEMA },
+      { collection: "c", schema: schema as CollectionSchema },
+    ]));
+    expect(error).toMatchObject({ code: "data_schema_invalid", details: { collection: "c", path } });
+    const reopened = new Y.Doc();
+    Y.applyUpdate(reopened, Y.encodeStateAsUpdate(doc));
+    expect(readDocData(reopened)).toBeNull();
+  });
+
+  it("round-trips accepted Unicode and prototype-like names with stable approval and refreshes", () => {
+    const { doc, directory, apply } = rig();
+    setKind(doc, "decision");
+    const schema: CollectionSchema = { version: 1, schema: {
+      type: "object",
+      properties: {
+        prototype: { type: "object", properties: { constructor: { const: "__proto__" }, toString: { type: "string" } } },
+        toString: { enum: ["__proto__"] },
+        "😀": { type: "array", items: { type: "string" } },
+      },
+      required: ["prototype", "toString", "😀"],
+      additionalProperties: false,
+    } };
+    const value = Object.assign(Object.create(null) as JSONObject, {
+      prototype: { constructor: "__proto__", toString: "Launch 😀" }, toString: "__proto__", "😀": ["\uE000", "\uFFFD", "😀"],
+    });
+    const ops = [{ collection: "__proto__", schema, upsert: [{ id: "__proto__", value }] }];
+    apply(ops);
+    const expected = readDocData(doc);
+    const reopened = new Y.Doc();
+    Y.applyUpdate(reopened, Y.encodeStateAsUpdate(doc));
+    expect(readDocData(reopened)).toEqual(expected);
+    expect(expected!.collections[0]!.records[0]!.value).toEqual(value);
+    expect(decisionApprovalFingerprint(reopened)).toBe(decisionApprovalFingerprint(doc));
+    let updates = 0;
+    reopened.on("update", () => { updates++; });
+    expect(applyDocData(reopened, directory, ops)).toEqual({ changed: false });
+    expect(updates).toBe(0);
   });
 
   it("producer replacements and deletion preserve separate human dispositions", () => {
