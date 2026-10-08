@@ -15,8 +15,8 @@ import {
 import { budget } from "./budget.js";
 import { resolveProjectBinding } from "./project-binding.js";
 import { openBrowser } from "./browser.js";
-import type { Io } from "./io.js";
-import { authenticationOrigin } from "@uberblick/hub/remote-url";
+import { type Io, shellArgument } from "./io.js";
+import { authenticationOrigin, normalizeRemoteUrl } from "@uberblick/hub/remote-url";
 import { manageRequest, ManagementResponseError } from "./access-management.js";
 export { authenticationOrigin } from "@uberblick/hub/remote-url";
 
@@ -44,6 +44,7 @@ Signing in again stores the new login, then revokes the replaced device.
 If that revocation is not confirmed, login still succeeds and warns that the
 previous device is not revoked.
 Local-only work needs no login. Login never changes the project binding.
+Signing in grants no workspace membership, except for the first claim below.
 On a fresh, unclaimed hub, the first GitHub account to complete approval
 claims its default workspace as administrator. Claiming is one-time; this
 command reports the claim after storing the login, then lists the available
@@ -87,6 +88,7 @@ options:
 
 interface Selection {
   origin: string;
+  endpoint: string;
   bound: boolean;
   workspace: string | undefined;
   bindingOrigin: ReturnType<typeof resolveProjectBinding>["origin"];
@@ -113,8 +115,10 @@ function selectHub(hub: string | undefined, io: Io, describe = true): Selection 
     return 1;
   }
   let origin: string;
+  let endpoint: string;
   try {
-    origin = authenticationOrigin(selected);
+    endpoint = normalizeRemoteUrl(selected);
+    origin = authenticationOrigin(endpoint);
   } catch {
     // Never echo an operand: it may be a pasted secret or a credential URL.
     io.err("ub auth: invalid hub; use a bare host, http(s) address or ws(s) endpoint without credentials, query or fragment.\n");
@@ -127,7 +131,7 @@ function selectHub(hub: string | undefined, io: Io, describe = true): Selection 
   if (describe) {
     authField(io, "hub", origin);
   }
-  return { origin, bound, workspace: binding?.workspaceId, bindingOrigin: resolved?.origin ?? null };
+  return { origin, endpoint, bound, workspace: binding?.workspaceId, bindingOrigin: resolved?.origin ?? null };
 }
 
 export function displayUsername(user: string): string {
@@ -400,7 +404,7 @@ function terminal(result: Record<string, unknown>): never {
   throw new SignInFailure(messages[String(result.status)] ?? "the hub returned an invalid GitHub sign-in response; update the hub");
 }
 
-async function login(selection: Selection, io: Io): Promise<number> {
+async function login(selection: Selection, io: Io, nextAction: boolean): Promise<number> {
   try { preflightHubLoginStore(); } catch (error) {
     io.err(`ub auth: ${error instanceof Error ? error.message : "credential store is not writable"}\n`);
     return 1;
@@ -500,6 +504,11 @@ async function login(selection: Selection, io: Io): Promise<number> {
       authField(io, "signed in", `${displayUsername(credential.identity.githubUsername)} on ${selection.origin}`);
       if (claimedWorkspaceId !== undefined) authField(io, "claimed", `default workspace (${claimedWorkspaceId}), you are admin`);
       describeWorkspaces(credential, io);
+      if (nextAction && claimedWorkspaceId !== undefined &&
+          (!selection.bound || selection.workspace === undefined ||
+            parseWorkspaceId(selection.workspace).uuid !== claimedWorkspaceId)) {
+        io.out(`Use it here: ub workspace join ${shellArgument(`${selection.endpoint}/${claimedWorkspaceId}`)}\n`);
+      }
       return 0;
     }
   } catch (error) {
@@ -526,7 +535,7 @@ async function login(selection: Selection, io: Io): Promise<number> {
   }
 }
 
-export async function authCommand(argv: string[], io: Io): Promise<number> {
+export async function authCommand(argv: string[], io: Io, options: { loginNextAction?: boolean } = {}): Promise<number> {
   const [sub, ...args] = argv;
   if (sub === undefined || sub === "help" || sub === "--help" || sub === "-h") {
     io.out(AUTH_HELP);
@@ -551,7 +560,7 @@ export async function authCommand(argv: string[], io: Io): Promise<number> {
   }
   const selection = selectHub(hub, io, sub !== "logout");
   if (typeof selection === "number") return selection;
-  if (sub === "login") return await login(selection, io);
+  if (sub === "login") return await login(selection, io, options.loginNextAction !== false);
   if (sub === "status") return status(selection, io);
   return await logout(selection, io, allDevices);
 }

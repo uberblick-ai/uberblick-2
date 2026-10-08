@@ -312,7 +312,7 @@ describe("workspace creation and promotion", () => {
   });
 });
 
-it("runs GitHub approval when the stored login no longer works", async () => {
+it.each(["missing", "revoked"])("runs GitHub approval with a %s login without login next actions", async state => {
   const box = await localWorkspace();
   let approvals = 0;
   const github: typeof fetch = async input => {
@@ -333,12 +333,16 @@ it("runs GitHub approval when the stored login no longer works", async () => {
   const endpoint = `ws://127.0.0.1:${hub.port}`;
   const identity = hub.principals!.identify("1234", "test-first-owner");
   const issued = hub.credentials!.issue({ principalId: identity.id, deviceId: randomUUID(), workspaces: [] });
-  await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity,
+  if (state === "revoked") await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity,
     credential: { record: issued.record, key: Buffer.from(issued.keyBytes).toString("base64url") } }, box.env);
   hub.credentials!.revokeDevice(identity.id, issued.record.deviceId);
   const result = await runUbAsync(["workspace", "promote", endpoint], box);
   expect(result.status, result.output).toBe(0);
   expect(result.stdout).toContain("open       https://github.com/login/device\n");
+  expect(result.stdout).toContain("claimed    default workspace (");
+  expect(result.stdout).not.toContain("Use it here:");
+  expect(result.stdout).not.toContain("Project binding unchanged");
+  expect(result.stdout).toContain(`Join on another machine: ub workspace join ${endpoint}/${selected(box).workspaceId}\n`);
   expect(result.output).not.toContain("fixture-private");
   expect(approvals).toBe(1);
   const rows = accessRows(hub);
