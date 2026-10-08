@@ -68,6 +68,7 @@ const BLOCK_LABELS: Record<BlockType, string> = {
   quote: "Quote",
   table: "Table",
   terminal: "Terminal demo",
+  chart: "Line chart",
 };
 
 /**

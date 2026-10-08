@@ -4,6 +4,14 @@ import { strictInput } from "../inputs.js";
 import { uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
 
+/**
+ * What a changelog suggestion is, and how its three states are asked for.
+ *
+ * The same trim-then-measure discipline descriptionArg in ./schemas.ts has, and the
+ * same ceiling: document metadata has one length to remember. The field is
+ * required, so each state is a value rather than an absence — omitting it would
+ * be a fourth, unstated answer.
+ */
 const changelogSuggestionArg = z
   .string({
     error:

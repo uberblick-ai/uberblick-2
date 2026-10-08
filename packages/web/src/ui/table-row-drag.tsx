@@ -12,12 +12,13 @@ export const tableRowSensors = [PointerSensor.configure({
     : [new PointerActivationConstraints.Distance({ value: 5 })],
 })];
 
-export function TableRowHandle({ target, index, rowKey, middle, size, open, clickGuard, resetGuard }: {
+export function TableRowHandle({ target, index, rowKey, bottom, size, revealed, open, clickGuard, resetGuard }: {
   target: TableRowTarget;
   index: number;
   rowKey: number;
-  middle: number;
+  bottom: number;
   size: number;
+  revealed: boolean;
   open: () => void;
   clickGuard: (event: MouseEvent<HTMLButtonElement>) => void;
   resetGuard: () => void;
@@ -46,7 +47,8 @@ export function TableRowHandle({ target, index, rowKey, middle, size, open, clic
     <DropdownMenuTrigger asChild>
       <button ref={attach}
         type="button" className="ub-table-control ub-table-row-handle"
-        style={{ right: 0, top: middle - size / 2, width: size, height: size }}
+        data-table-row={index} data-revealed={revealed}
+        style={{ right: `calc(${size}px - var(--ub-table-control-overhang))`, top: bottom - size / 2, width: size, height: size }}
         aria-label={`Row ${index + 1} actions`} aria-keyshortcuts="Control+Alt+R Shift+F10"
         title="Row actions · drag to move; Control+Alt+R or Shift+F10"
         onMouseDown={(event) => event.preventDefault()}

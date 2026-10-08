@@ -1,4 +1,15 @@
-/** Shared sidebar lookup, placement and payload helpers, independent of transport. */
+/**
+ * Shared sidebar lookup, placement and payload helpers, independent of transport.
+ *
+ * The sidebar is explicit curation: named groups and their document uuids are
+ * stored in order in the synced `<workspaceId>/_sidebar` room. Schema owns the
+ * one-pin rule, unpin counters and stored order; these helpers preserve them.
+ *
+ * Titles come from directory stubs, never by opening pinned documents. Unknown
+ * and archived pins stay visible so readers can unpin unresolved entries.
+ * Tags never derive navigation: `ub init` writes an optional starter sidebar
+ * explicitly, and these helpers expose only the curation a caller requested.
+ */
 import {
   decisionTopicArchived,
   getDirectoryEntry,
@@ -29,7 +40,13 @@ export function pinnedUuids(replicas: Replicas): Set<string> {
   return pinned;
 }
 
-/** A group by id, else by name — first match in sidebar order. */
+/**
+ * A group by id, else by name — first match in sidebar order.
+ *
+ * Callers can name their curation instead of managing group uuids. Ids win so
+ * groups sharing a name remain separately addressable. `pin_doc` creates a
+ * group for a new name; `create_doc` uses {@link requireGroup} for ids only.
+ */
 export function findGroup(groups: SidebarGroup[], key: string): SidebarGroup | null {
   return (
     groups.find((group) => group.id === key) ??

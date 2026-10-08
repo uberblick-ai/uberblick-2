@@ -196,6 +196,7 @@ describe("the registry", () => {
       "Table",
       "Mermaid",
       "Terminal demo",
+      "Line chart",
     ]);
   });
 

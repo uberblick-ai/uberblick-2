@@ -35,15 +35,16 @@
  * happens to hold — a path, a SQL statement, a token — to the caller. The
  * original goes to the log, on stderr, where an operator reads it.
  *
- * Arguments that do not match a tool's input schema never reach a handler at
- * all: the MCP SDK rejects them at the protocol boundary with its own
+ * Over MCP, arguments that do not match a tool's input schema never reach a
+ * handler: the MCP SDK rejects them at the protocol boundary with its own
  * plain-text validation error, before any code here runs and therefore before
  * anything durable could change. That class is documented rather than wrapped —
  * disguising it as a handler failure would make a boundary rejection look like
  * a call that got somewhere. It covers every wrong argument, including the ones
  * that are individually well-formed but do not add up to a call: ./inputs.ts
  * states each multiplexed tool's valid shapes in the schema itself, so no
- * handler here is left holding an arguments complaint of its own.
+ * handler here is left holding an arguments complaint of its own. Direct
+ * operation callers must parse the exported inputSchema before calling it.
  *
  * Nothing here promises a rollback, and nothing here reconciles: a call that
  * touched several rooms reports what is durable and names the call that
@@ -264,7 +265,7 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Call get_doc for the block's current text, its type and its `doc_links`, then link a range that fits — " +
       "`reason` says which of the three is in the way: `empty` (the range covers no characters), `not-prose` " +
-      "(code, mermaid and terminal hold source text; table links belong to cells and have no block-level ranges) or `overlap` (the range " +
+      "(code, mermaid, terminal and chart hold source text; table links belong to cells and have no block-level ranges) or `overlap` (the range " +
       "is already an external link, and one range cannot be both).",
   },
   // Never `retry`: the directory is a synced document, so a target this

@@ -973,42 +973,90 @@ h3.ub-heading {
   margin: 0.7em 0;
 }
 
-.tableWrapper {
-  max-width: calc(100% - 88px);
-  margin-right: 88px;
+.ub-chart {
+  position: relative;
+  margin: 0.7em 0;
+  padding-top: 1.8rem;
+}
+
+.ub-chart::before {
+  content: "chart mapping";
+  position: absolute;
+  top: 0;
+  color: var(--muted-foreground);
+  font: 0.75rem var(--font-mono);
+}
+
+.ub-chart-panel {
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--prose-text);
+}
+
+.ub-chart-title { margin: 0 0 0.5rem; font-weight: 500; }
+.ub-chart-screen { position: relative; height: 300px; }
+.ub-chart-open {
+  color: var(--muted-foreground);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.5rem;
+  margin-bottom: 0.5rem;
+  font: 0.75rem var(--font-mono);
+  cursor: pointer;
+}
+.ub-chart-message, .ub-chart-diagnostics, .ub-chart-notice {
+  font-size: 0.8rem;
+  margin: 0.5rem 0 0;
+}
+.ub-chart-source {
+  display: none;
+  font: 0.8rem var(--font-mono);
+  white-space: pre;
   overflow-x: auto;
   overscroll-behavior-x: contain;
-  /* Always reserved, including at rest: revealing the overlay changes no cell
-     geometry. The frame owns the controls, outside the scrolling editable DOM. */
-  padding: 44px 0 22px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted-foreground);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+}
+.ub-chart-editing > .ub-chart-source,
+.ub-chart[data-annotated="true"] > .ub-chart-source { display: block; }
+.ub-chart-editing > .ub-chart-panel,
+.ub-chart[data-annotated="true"] > .ub-chart-panel { display: none; }
+.ub-chart-probe { position: absolute; visibility: hidden; color: var(--prose-text); border-color: var(--border); }
+
+.tableWrapper {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  /* Keep the final drag gap. Controls belong to the frame, outside this
+     scrolling editable DOM, and straddle its borders without moving cells. */
+  padding: 0 0 22px;
 }
 
 .ub-table-controls {
+  --ub-table-control-overhang: 12px;
   position: absolute;
   z-index: 1;
   pointer-events: none;
-  overflow: clip;
 }
 
-.ub-table-controls::before {
-  /* Keep hover across the reserved row lanes, including between buttons,
-     while pointer events over cell content still reach the editor. */
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 88px;
-  height: 100%;
-  pointer-events: auto;
+.ub-table-controls[data-touch="true"] {
+  /* Keep the entire 44px target within the pane's padding on narrow screens. */
+  --ub-table-control-overhang: min(22px, var(--document-rail-gap));
 }
 
 .ub-table-column-controls {
-  height: 44px;
+  position: absolute;
   /* Hidden overflow still supports the browser's native focus scrolling. The
      table below supplies pointer/touch scrolling for both surfaces. */
   overflow-x: hidden;
   overflow-y: hidden;
-  pointer-events: auto;
+  pointer-events: none;
   scrollbar-width: none;
 }
 
@@ -1040,6 +1088,18 @@ h3.ub-heading {
   height: 18px;
   border-radius: var(--radius-sm);
   background: var(--background);
+}
+
+/* Opacity keeps every row in native Tab order. Only revealed or focused
+   controls receive pointer input; cells remain editable underneath the rest. */
+.ub-table-control[data-revealed="false"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ub-table-control[data-revealed="false"]:focus {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .ub-table-row-handle {

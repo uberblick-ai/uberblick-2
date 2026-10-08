@@ -35,6 +35,16 @@ function firstStatus(kind: DocumentKind): DocumentStatus {
     : DECISION_STATUSES[0];
 }
 
+/**
+ * Where a new document goes in the sidebar — optional, and the whole of it.
+ *
+ * Placement implies pinning, so there is no `pinned` boolean and no `state`
+ * enum: a contradictory pair like `{pinned: false, group: …}` is not a state
+ * this input can express. Both objects are `.strict()`, so a caller reaching
+ * for either is told rather than having it silently dropped — and the group is
+ * an object with an id rather than a bare name, because creating a group is
+ * pin_doc's job and must not happen as a side effect of creating a document.
+ */
 const sidebarPlacementArg = z
   .object({
     group: z
@@ -79,6 +89,9 @@ const RECOVERY: Record<string, string> & { other: string } = {
     "predicate — and get_sidebar what the rooms in `completed` left behind.",
 };
 
+// `{sidebar: {...}, pinned: true}` must be refused wherever the redundant
+// key sits, so the nested placement object is strict too — see
+// {@link sidebarPlacementArg}. The top level is strict like every tool's.
 export const inputSchema = strictInput(
   {
     title: titleArg,

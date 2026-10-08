@@ -26,6 +26,8 @@ interface Geometry {
   columns: number[];
   rows: { key: number; target: TableRowTarget; middle: number; bottom: number }[];
   caretRow: number | null;
+  hoveredRow: number | null;
+  focusedRow: number | null;
   touch: boolean;
 }
 
@@ -40,6 +42,12 @@ function tableIdAt(target: EventTarget | null): string | null {
   const controls = element?.closest<HTMLElement>(".ub-table-controls");
   if (controls !== null && controls !== undefined) return controls.dataset.tableId ?? null;
   return element?.closest(".tableWrapper")?.querySelector("table")?.id || null;
+}
+
+function rowAt(target: EventTarget | null): number | null {
+  const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+  const control = element?.closest<HTMLElement>("[data-table-row]");
+  return control === null || control === undefined ? null : Number(control.dataset.tableRow);
 }
 
 /** Map the live pointer to a body-row gap, including the reserved end space. */
@@ -91,11 +99,12 @@ function TableControlSurface({ tableId, editor, host }: {
   const [geometry, setGeometry] = useState<Geometry | null>(null);
   const [menu, setMenu] = useState<TableRowTarget | null>(null);
   const menuRef = useRef<TableRowTarget | null>(null);
-  const hovered = useRef<string | null>(null);
+  const hovered = useRef<{ id: string; row: number | null; y?: number | undefined } | null>(null);
   const touch = useRef(editor.view.dom.ownerDocument.defaultView?.matchMedia?.("(pointer: coarse)").matches ?? false);
   const pendingFocus = useRef(false);
   const controls = useRef<HTMLDivElement | null>(null);
   const columnStrip = useRef<HTMLDivElement | null>(null);
+  const focusDestination = useRef<EventTarget | null>(null);
   const rowKeys = useRef(new WeakMap<TableRowTarget["row"], number>());
   const nextRowKey = useRef(0);
   const refresh = useRef<() => void>(() => {});
@@ -133,8 +142,9 @@ function TableControlSurface({ tableId, editor, host }: {
         target = null;
       }
       const caret = caretTable(editor);
-      const focused = tableIdAt(owner.activeElement);
-      const eligible = drag.current !== null || closing.current || target?.tableId === tableId || focused === tableId || editor.isFocused && caret?.id === tableId || hovered.current === tableId;
+      const focusTarget = focusDestination.current ?? owner.activeElement;
+      const focused = tableIdAt(focusTarget);
+      const eligible = drag.current !== null || closing.current || target?.tableId === tableId || focused === tableId || editor.isFocused && caret?.id === tableId || hovered.current?.id === tableId;
       const id = tableId;
       const found = eligible ? findBlockById(editor.state.doc, id) : null;
       if (!editor.isEditable || found === null || !isOrdinaryTable(found.node)) {
@@ -153,7 +163,6 @@ function TableControlSurface({ tableId, editor, host }: {
       const base = frame.getBoundingClientRect();
       const box = wrapper.getBoundingClientRect();
       const width = wrapper.clientWidth;
-      const size = touch.current ? 44 : 24;
       const header = table.rows[0];
       const cells = Array.from(header?.cells ?? []);
       const first = cells[0];
@@ -172,14 +181,27 @@ function TableControlSurface({ tableId, editor, host }: {
         const rect = row.getBoundingClientRect();
         rows.push({ key, target, middle: (rect.top + rect.bottom) / 2 - box.top, bottom: rect.bottom - box.top });
       }
+      let hoveredRow = hovered.current?.id === id ? hovered.current.row : null;
+      const pointerY = hovered.current?.id === id ? hovered.current.y : undefined;
+      if (pointerY !== undefined) {
+        // Collapsed borders can hit-test as the next row in Chromium. Resolve
+        // the pointer against the fresh boxes that also draw the controls,
+        // including the first hover after a hidden table moves or reflows.
+        const y = pointerY - box.top;
+        const index = rows.findIndex((row) => y >= 2 * row.middle - row.bottom && y <= row.bottom);
+        hoveredRow = index < 0 ? null : index;
+      }
       const next: Geometry = {
         tableId: id, left: box.left - base.left, top: box.top - base.top,
-        width: width + 88, viewportWidth: width, height: wrapper.clientHeight, scrollLeft: wrapper.scrollLeft, scrollWidth: wrapper.scrollWidth,
+        width, viewportWidth: width, height: wrapper.clientHeight, scrollLeft: wrapper.scrollLeft, scrollWidth: wrapper.scrollWidth,
         // A native scroll strip keeps every column in keyboard order. Focus
         // scrolls it normally, and its scroll also brings the table along.
-        columns: edges.map((edge) => Math.max(0, Math.min(wrapper.scrollWidth - size, edge - box.left + wrapper.scrollLeft - size / 2))),
+        columns: edges.map((edge) => edge - box.left + wrapper.scrollLeft),
         rows,
-        caretRow: caret?.id === id ? caret.row : null, touch: touch.current,
+        caretRow: caret?.id === id ? caret.row : null,
+        hoveredRow,
+        focusedRow: focused === id ? rowAt(focusTarget) : null,
+        touch: touch.current,
       };
       geometryRef.current = next;
       setGeometry(next);
@@ -188,20 +210,43 @@ function TableControlSurface({ tableId, editor, host }: {
     const move = (event: PointerEvent): void => {
       if (event.pointerType === "touch") return;
       touch.current = false;
-      hovered.current = tableIdAt(event.target);
+      const id = tableIdAt(event.target);
+      const element = event.target instanceof Element ? event.target : null;
+      hovered.current = id === null ? null : {
+        id, row: rowAt(event.target),
+        y: element?.closest(".tableWrapper") ? event.clientY : undefined,
+      };
+      // The column strip straddles the top border without intercepting cell
+      // input between its buttons. Keep the short path through that empty
+      // space alive using its box, rather than a pointer-catching gutter.
+      if (id === null && columnStrip.current !== null) {
+        const box = columnStrip.current.getBoundingClientRect();
+        if (event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom) {
+          hovered.current = { id: tableId, row: null };
+        }
+      }
       read();
     };
     const press = (event: PointerEvent): void => {
       touch.current = event.pointerType === "touch";
       if (touch.current) hovered.current = null;
-      else hovered.current = tableIdAt(event.target);
+      else {
+        const id = tableIdAt(event.target);
+        const element = event.target instanceof Element ? event.target : null;
+        hovered.current = id === null ? null : {
+          id, row: rowAt(event.target), y: element?.closest(".tableWrapper") ? event.clientY : undefined,
+        };
+      }
       read();
     };
     const leave = (): void => { hovered.current = null; read(); };
-    const focus = (): void => { read(); };
-    // During native Tab or a touch press, focusout briefly sees body as the
-    // active element. Read after the focus transfer so its destination survives.
-    const blur = (): void => { queueMicrotask(read); };
+    const focus = (): void => { focusDestination.current = null; read(); };
+    // A native Tab focusout can run microtasks before focusin. Its related
+    // target keeps the destination mounted during that browser-owned transfer.
+    const blur = (event?: unknown): void => {
+      if (event instanceof FocusEvent) focusDestination.current = event.relatedTarget;
+      queueMicrotask(read);
+    };
     const scroll = (event: Event): void => {
       if (drag.current !== null || event.target instanceof HTMLElement && event.target.classList.contains("tableWrapper")) read();
     };
@@ -299,6 +344,10 @@ function TableControlSurface({ tableId, editor, host }: {
 
   const size = geometry?.touch ? 44 : 24;
   const openRow = menu === null ? null : resolveTableRow(editor, menu)?.rowIndex;
+  const rowVisible = (index: number): boolean => geometry !== null && (
+    geometry.hoveredRow === index || geometry.caretRow === index || geometry.focusedRow === index ||
+    openRow === index || drag.current?.target.row === geometry.rows[index]?.target.row
+  );
   const act = (row: number, column: number, action: TableAction, fromMenu = false): void => {
     const target = fromMenu ? menu : geometry?.rows[row]?.target;
     if (target === null || target === undefined) return;
@@ -336,6 +385,7 @@ function TableControlSurface({ tableId, editor, host }: {
         dragged.current = true;
         drag.current = { target, manager, point: event.operation.position.current, focused: editor.isFocused };
         indicate(event.operation.position.current);
+        refresh.current();
       }}
       onDragMove={(event) => {
         // dnd-kit publishes dragmove before updating position.current.
@@ -386,7 +436,9 @@ function TableControlSurface({ tableId, editor, host }: {
       style={{ left: geometry.left, top: geometry.top, width: geometry.width, height: geometry.height }}>
       {gap !== null && <div className="ub-table-row-drop" data-gap={gap}
         style={{ top: geometry.rows[gap - 1]?.bottom, width: geometry.viewportWidth }} />}
-      <div ref={columnStrip} className="ub-table-column-controls" style={{ width: geometry.viewportWidth }}
+      <div ref={columnStrip} className="ub-table-column-controls"
+        style={{ left: "calc(0px - var(--ub-table-control-overhang))", top: -size / 2,
+          width: `calc(${geometry.viewportWidth}px + 2 * var(--ub-table-control-overhang))`, height: size }}
         onScroll={(event) => {
           // Only native control focus drives the table back. A programmatic
           // strip scroll follows the table and must never feed an old offset
@@ -399,12 +451,16 @@ function TableControlSurface({ tableId, editor, host }: {
             refresh.current();
           }
         }}>
-      <div style={{ position: "relative", width: geometry.scrollWidth, height: 44 }}>
+      <div style={{ position: "relative", width: `calc(${geometry.scrollWidth}px + 2 * var(--ub-table-control-overhang))`, height: size }}>
       {geometry.columns.map((left, boundary) => (
         // These buttons name positional boundaries, not persistent cells.
+        // Touch outer targets move inward only where the pane's padding
+        // cannot hold half a target; inner boundaries still centre on cells.
         // biome-ignore lint/suspicious/noArrayIndexKey: boundary is the action's column coordinate.
         <button key={boundary} type="button" className={button}
-          style={{ left, top: 0, width: size, height: size }}
+          style={{ left: geometry.touch
+            ? `clamp(0px, calc(${left - size / 2}px + var(--ub-table-control-overhang)), calc(100% - ${size}px))`
+            : left, top: 0, width: size, height: size }}
           aria-label={boundary === 0 ? "Insert column before 1" : `Insert column after ${boundary}`}
           title="Insert column · Control+Alt+Left/Right from a cell; Control+Alt+T reaches controls"
           aria-keyshortcuts="Control+Alt+T"
@@ -417,20 +473,22 @@ function TableControlSurface({ tableId, editor, host }: {
       </div>
       {geometry.rows.map((row, index) => (
         <button key={`insert-${row.key}`} type="button" className={button}
-          style={{ right: 44, top: row.bottom - size / 2, width: size, height: size }}
+          data-table-row={index} data-revealed={rowVisible(index)}
+          style={{ right: "calc(0px - var(--ub-table-control-overhang))", top: row.bottom - size / 2, width: size, height: size }}
           aria-label={`Insert row after ${index + 1}`} title="Insert row · Control+Alt+Up/Down from a cell"
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => act(index, 0, "row-after")}>
           <span aria-hidden="true">+</span>
         </button>
       ))}
-      {geometry.rows.map((row, index) => geometry.touch && geometry.caretRow !== index && openRow !== index && drag.current?.target.row !== row.target.row ? null : (
+      {geometry.rows.map((row, index) => (
         <DropdownMenu key={row.key} modal={false} open={openRow === index}
           onOpenChange={(open) => {
             if (open) acted.current = false;
             setTarget(open ? row.target : null);
           }}>
-          <TableRowHandle target={row.target} index={index} rowKey={row.key} middle={row.middle} size={size}
+          <TableRowHandle target={row.target} index={index} rowKey={row.key} bottom={row.bottom} size={size}
+            revealed={rowVisible(index)}
             resetGuard={() => { if (drag.current === null) dragged.current = false; }}
             clickGuard={(event) => {
               if (!dragged.current || event.detail === 0) return;

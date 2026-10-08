@@ -68,9 +68,6 @@ export function registerCreateDoc(server: McpServer, context: ToolContext): void
       "\n\n" +
       SYNCED_MEANS +
       toolContract("create_doc"),
-    // `{sidebar: {...}, pinned: true}` must be refused wherever the redundant
-    // key sits, so the nested placement object is strict too — see
-    // {@link sidebarPlacementArg}. The top level is strict like every tool's.
     outputSchema: outputSchemas.create_doc,
     inputSchema,
   }, guarded("create_doc", context, createDocOperation));

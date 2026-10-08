@@ -3,6 +3,11 @@ import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
 import { ARCHIVED_IS_READ_ONLY, DECIDED_IS_READ_ONLY, SYNCED_MEANS, TLDR_AFTER_CONTENT_CHANGE } from "../tools/descriptions.js";
 
+/**
+ * What a splice costs the marks already in a block — the boundary that is
+ * mechanically fine and semantically wrong, so it has to be said rather than
+ * left to be discovered in a damaged document.
+ */
 const MARKS_ANCHOR_TO_POSITIONS =
   "Marks anchor to positions in the block's text, not to the words they cover, and this tool writes text " +
   "without ever writing a mark. A splice strictly inside unmarked text leaves every mark — inline formatting " +

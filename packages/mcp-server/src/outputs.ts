@@ -117,7 +117,7 @@ function blockSchema(withLinks: boolean) {
     z.object({ ...prose, type: z.literal("heading"), level: z.number().int().min(1).max(6) }).strict(),
     z.object({ ...prose, type: z.literal("list-item"), list: z.enum(["bullet", "ordered"]), indent: z.number().int().min(0).max(3) }).strict(),
     z.object({ ...blockFields, type: z.literal("code"), language: z.string() }).strict(),
-    z.object({ ...blockFields, type: z.enum(["mermaid", "table", "terminal"]) }).strict(),
+    z.object({ ...blockFields, type: z.enum(["mermaid", "table", "terminal", "chart"]) }).strict(),
   ]);
 }
 const block = blockSchema(false);

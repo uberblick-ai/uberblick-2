@@ -6,6 +6,15 @@ import type { ToolMode } from "../inputs.js";
 import { uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
 
+/**
+ * `annotate`'s two shapes, stated once for the boundary and for `tools/list`.
+ *
+ * The fields are not independently optional: a reply names a thread, opening
+ * one names a block and a range, and a call carrying both says two things at
+ * once. A reply may also resolve or reopen its thread; opening one cannot.
+ * The shape is selected on `thread_id` rather than on an added `action` field,
+ * so every call an agent already writes stays valid.
+ */
 const ANNOTATE_MODES: readonly ToolMode[] = [
   {
     title: "A reply (`thread_id`)",

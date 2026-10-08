@@ -10,13 +10,20 @@ export interface OperationRequest {
   progressToken?: string | number | undefined;
 }
 
+/**
+ * Args must already be parsed with the tool's exported inputSchema. The MCP
+ * SDK does this before calling the adapter; direct callers must do it too.
+ */
 export type Operation<Args, Payload extends object = object> = (
   context: ToolContext,
   args: Args,
   request: OperationRequest,
 ) => Promise<Payload>;
 
-/** The common prologue belongs to operations, including callers without MCP. */
+/**
+ * The common prologue belongs to operations, including callers without MCP.
+ * The schema infers Args here; input parsing remains the caller's responsibility.
+ */
 export function operation<Args, Payload extends object>(
   tool: string,
   _input: z.ZodType<Args>,
@@ -72,8 +79,12 @@ export function sidebarOperation<Args extends object, Payload extends object>(
   body: (context: ToolContext, args: Args, request: OperationRequest, sidebar: Replica) => Payload,
 ) {
   return operation(tool, input, (context, args, request) => {
-    // Refuse a typo before opening or creating a sidebar group. Unknown pins
-    // must remain removable, so the other sidebar operations have no check.
+    // The sidebar stores uuids and nothing else, so a typo pinned here is a
+    // reference nothing can ever resolve. Identity is checked against the
+    // directory — an archived document is still pinnable, deliberately:
+    // archive_doc unpins, so this is the one way back to a pin, and
+    // get_sidebar surfaces the archived state either way. Unknown pins must
+    // remain removable, so the other sidebar operations have no check.
     if (tool === "pin_doc") context.requireStub((args as Args & { uuid: string }).uuid);
     const sidebar = context.replicas.sidebar();
     return { ...body(context, args, request, sidebar), ...context.durability(sidebar) };

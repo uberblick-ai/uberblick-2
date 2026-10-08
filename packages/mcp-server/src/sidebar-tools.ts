@@ -17,6 +17,16 @@ const indexArg = z
   .optional()
   .describe("Position, clamped into range. Omitted means last.");
 
+/**
+ * `sidebar_group`'s three shapes, stated once for the boundary and for
+ * `tools/list`.
+ *
+ * `action` already said which one a call means; what it did not say is that the
+ * other actions' fields are then wrong rather than spare. A `rename` carrying
+ * an `index` used to move nothing and say nothing — the handler simply read the
+ * fields its branch wanted — so a caller that meant to move a group and typed
+ * the wrong action was told it had succeeded.
+ */
 const SIDEBAR_GROUP_MODES: readonly ToolMode[] = [
   {
     title: "rename",
@@ -55,11 +65,6 @@ export const pinDocInput = strictInput({
 export const pinDocOperation = sidebarOperation("pin_doc", pinDocInput, (context, { uuid, group, index }, _request, sidebar) => {
   const { replicas } = context;
 
-  // The sidebar stores uuids and nothing else, so a typo pinned here is a
-  // reference nothing can ever resolve. Identity is checked against the
-  // directory — an archived document is still pinnable, deliberately:
-  // archive_doc unpins (#957), so this is the one way back to a pin, and
-  // get_sidebar surfaces the archived state either way.
   const groups = readSidebar(sidebar.doc);
   const target = findGroup(groups, group);
   const groupId = target?.id ?? createGroup(sidebar.doc, group);

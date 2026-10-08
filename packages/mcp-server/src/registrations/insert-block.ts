@@ -21,7 +21,13 @@ export function registerInsertBlock(server: McpServer, context: ToolContext): vo
       "`doclink_target_not_known_locally` refuses before any write. A terminal's text is " +
       "a transcript in which a line beginning `$ ` is a command " +
       "typed out and every other line is output shown whole — the format has no escape, so an output line " +
-      "that itself begins `$ ` cannot be written. Every block has one text an agent can edit.\n\n" +
+      "that itself begins `$ ` cannot be written. A chart's text is a JSON mapping, for example " +
+      "`{\"version\":1,\"type\":\"line\",\"collection\":\"observations\",\"x\":{\"field\":\"day\",\"type\":\"date\"}," +
+      "\"y\":[{\"field\":\"count\"}]}`. It names top-level record fields: x type is number or date, " +
+      "and y has one to eight numeric series. Optional x and y labels, y units, title and " +
+      "missing (gap or connect, default gap) control presentation. The chart only " +
+      "reads its document's collection; use update_data to write records. Invalid mappings stay " +
+      "editable source and show a problem message. Every block has one text an agent can edit.\n\n" +
       DECIDED_IS_READ_ONLY +
       "\n\n" +
       ARCHIVED_IS_READ_ONLY +

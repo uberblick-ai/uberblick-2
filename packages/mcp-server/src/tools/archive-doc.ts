@@ -21,6 +21,19 @@ const ARCHIVE_RECOVERY: Record<string, string> & { other: string } = {
 
 export const inputSchema = strictInput({ uuid: uuidArg });
 
+/**
+ * Archiving and restoring never write the *document*.
+ *
+ * Restore writes the directory alone, and reports durability for that room,
+ * because that is the room whose update has to reach the hub. Archive writes
+ * the sidebar too: a document that has left every other listing is not an
+ * entry point, so archiving unpins it and reports both rooms. Restore does
+ * not put the pin back — pinning again is a separate, deliberate act.
+ *
+ * Neither touches the derived index itself: `Replicas` reconciles it from the
+ * directory update, which means the index follows an archive on every replica
+ * that observes it, not only on the one that called the tool.
+ */
 export const archiveDocOperation = operation("archive_doc", inputSchema, (context, { uuid }, _request) => {
   const { replicas, requireStub, titleFor, durabilityAcross } = context;
 

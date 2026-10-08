@@ -695,6 +695,10 @@ function renderBlock(
       const fence = fenceFor(block.text);
       return `${fence}terminal\n${block.text}\n${fence}`;
     }
+    case "chart": {
+      const fence = fenceFor(block.text);
+      return `${fence}chart\n${block.text}\n${fence}`;
+    }
     case "list-item": {
       // One item, one line — a second line would be a continuation the reader
       // resolves against the marker's column, which no flat block can promise.
@@ -750,7 +754,8 @@ function renderDecision(reference: DecisionReference): string {
  *
  * headings → `#`×level, paragraphs → their text, code → a fenced block tagged
  * with its language, mermaid → a ```mermaid fence, terminal → a ```terminal
- * fence, list items → a `- `/`1. ` line indented by their level, quotes → `> `
+ * fence, chart → a ```chart fence, list items → a `- `/`1. ` line indented by
+ * their level, quotes → `> `
  * on every line, tables → padded GFM rows with cell marks as inline markdown.
  *
  * Blocks are separated by a blank line, except two adjacent list items: a blank
@@ -1687,7 +1692,7 @@ function advanceColumn(text: string, column: number): number {
 /**
  * Parse markdown into the pieces needed to build a document: title,
  * description, tags, links and a flat block list. Handles frontmatter, ATX
- * headings, fenced code (with language), mermaid and terminal fences, list
+ * headings, fenced code (with language), mermaid, terminal and chart fences, list
  * items, block quotes and GFM tables; everything else becomes a paragraph, with
  * its inline formatting read into `inline`.
  *
@@ -1882,6 +1887,8 @@ export function importMarkdown(markdown: string): ImportedDoc {
         blocks.push({ type: "mermaid", text });
       } else if (info === "terminal") {
         blocks.push({ type: "terminal", text });
+      } else if (info === "chart") {
+        blocks.push({ type: "chart", text });
       } else {
         blocks.push({ type: "code", text, language: info });
       }

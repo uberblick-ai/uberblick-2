@@ -5,6 +5,8 @@ import { strictInput } from "../inputs.js";
 import { uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
 
+// Only the operation envelope is parsed. Unknown JSON passes through untouched
+// so the shared validator can refuse unsupported rules and unsafe own keys.
 const record = strictInput({ id: z.string(), value: z.unknown() });
 
 const operation = strictInput({
