@@ -1,5 +1,6 @@
 /**
- * A document has three fixed Y.Doc roots: metadata, blocks and annotations.
+ * A document has three fixed Y.Doc roots: metadata, blocks and annotations,
+ * and an optional flat structured-data root (see `data.ts`).
  * Decision relationships live in the record's own metadata; topic answers and
  * requirement logs derive from the directory stubs, never another room.
  * Writers transact so callers may supply attribution through an outer origin.

@@ -15,6 +15,8 @@
  *   - `annotations` Y.Map of one Y.Map per thread — anchor, resolved flag and
  *                   the conversation as a nested Y.Array — anchored by
  *                   `comment` formatting marks on the block's text
+ *   - `data`        optional flat Y.Map: versioned collection schemas and
+ *                   id-keyed whole JSON records, independently replaceable
  *
  * …plus workspace ids (a uuid, optionally slug-decorated for display), room
  * names (`<workspaceId>/<uuid>`), the directory doc that makes discovery a
@@ -48,6 +50,12 @@ export {
   setTitle,
 } from "./doc.js";
 export type { InitDocOptions } from "./doc.js";
+export {
+  DATA_KEY, DATA_LIMITS, applyDocData, getDocDataEntries, hasDocData, readDocData,
+} from "./data.js";
+export type { DataCollection, DataIssue, DataOperation, DataRecord, DocData } from "./data.js";
+export { DataError, canonicalJson, compareCodePoints, validateCollectionSchema, validateDataRecord } from "./data-schema.js";
+export type { CollectionSchema, DataSchema, JSONObject, JSONValue } from "./data-schema.js";
 export { decisionRelations, readDecisions, resolveDecisionTopics } from "./decisions.js";
 export { decisionApprovalChanged, decisionApprovalFingerprint } from "./approval.js";
 

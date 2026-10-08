@@ -72,6 +72,53 @@ function repair(directory: Y.Doc, doc: Y.Doc): void {
 }
 
 describe("decision approval content", () => {
+  it("preserves the historical fingerprint with absent or empty structured data", () => {
+    const doc = decision();
+    const historical = blockRev({
+      type: "paragraph",
+      text: JSON.stringify(["The topic", "The decision.", ["First reason", "Second reason"]]),
+    });
+    expect(decisionApprovalFingerprint(doc)).toBe(historical);
+    doc.getMap("data");
+    expect(decisionApprovalFingerprint(doc)).toBe(historical);
+    doc.destroy();
+  });
+
+  it("approves all data content, including invalid records and unknown schema versions", () => {
+    const doc = decision();
+    const data = doc.getMap("data");
+    const schemaKey = JSON.stringify(["schema", "observations"]);
+    const recordKey = JSON.stringify(["record", "observations", "row-a"]);
+    data.set(schemaKey, { version: 1, schema: { type: "object" } });
+    data.set(recordKey, { value: 1 });
+    approve(doc);
+    const fingerprint = decisionApprovalFingerprint(doc);
+    data.set(recordKey, { value: 2 });
+    expect(decisionApprovalChanged(doc)).toBe(true);
+    data.set(recordKey, { value: 1 });
+    expect(decisionApprovalFingerprint(doc)).toBe(fingerprint);
+    data.set(schemaKey, { version: 99, schema: { type: "object" } });
+    expect(decisionApprovalChanged(doc)).toBe(true);
+    approve(doc);
+    data.set(recordKey, "invalid merged record");
+    expect(decisionApprovalChanged(doc)).toBe(true);
+    approve(doc);
+    data.delete(recordKey);
+    expect(decisionApprovalChanged(doc)).toBe(true);
+    doc.destroy();
+  });
+
+  it("fingerprints equivalent structured JSON independently of property insertion order", () => {
+    const first = decision();
+    const second = decision();
+    const key = JSON.stringify(["record", "observations", "row-a"]);
+    first.getMap("data").set(key, { a: 1, b: { c: 2, d: 3 } });
+    second.getMap("data").set(key, { b: { d: 3, c: 2 }, a: 1 });
+    expect(decisionApprovalFingerprint(first)).toBe(decisionApprovalFingerprint(second));
+    first.destroy();
+    second.destroy();
+  });
+
   it.each([
     ["title", (doc: Y.Doc) => setTitle(doc, "Changed topic")],
     ["decision line", (doc: Y.Doc) => setTldr(doc, "Changed decision.")],

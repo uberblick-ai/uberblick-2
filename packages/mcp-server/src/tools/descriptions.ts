@@ -56,7 +56,7 @@ export const ARCHIVED_IS_READ_ONLY =
   "the archive yet is an ordinary CRDT write and merges normally when the two replicas meet.";
 
 export const DECIDED_IS_READ_ONLY =
-  "A decided decision record's title, decision line and blocks are read-only: this tool refuses with " +
+  "A decided decision record's title, decision line, blocks and structured data are read-only: this tool refuses with " +
   "`decision_read_only` and changes nothing. Use a new superseding record for any content change. Comments, " +
   "description, tags, curated links and changelog suggestion stay writable. This check runs on this replica " +
   "at call time; an unseen offline edit can still merge later, detected as changed after approval.";
@@ -68,10 +68,12 @@ export const DECISION_AUTHORITY =
   "table starts `open` with the agent's recommendation, even as a first record. Any other move to `decided`, " +
   "or confirming an agent stance, requires `answer: {who, when, where}`, recording a person's answer. " +
   "The answer stores `decidedBy`, `decidedAt` and `decidedWhere`, clears the stance marker and approves the " +
-  "current title, decision line and ordered block text with an `approvalFingerprint`. Comments, comment " +
+  "current title, decision line, ordered block text and structured data with an `approvalFingerprint`. Comments, comment " +
   "anchors and approval bookkeeping are excluded. `approvalChanged: true` means changed after approval; " +
   "recording an answer again approves the current content. get_doc returns where; list_docs and every " +
-  "`inForce`, `pending` and `conflicts` entry expose the stance, who, when and approvalChanged from stubs.";
+  "`inForce`, `pending` and `conflicts` entry expose the stance, who, when and approvalChanged from stubs. " +
+  "During version skew, older clients fingerprint without structured data, so a decided record holding data " +
+  "can show `approvalChanged` differently per client.";
 
 /** The same narrowing for the mutators that do not restate it in full. */
 export const SYNCED_IS_ACKNOWLEDGED =
