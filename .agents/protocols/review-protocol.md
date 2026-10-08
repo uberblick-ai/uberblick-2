@@ -84,6 +84,14 @@ limitation.
 - **P2:** another concrete defect in supported usage.
 - **P3:** minor or theoretical impact.
 
+A visible edge case is accepted by default: a failure that needs an unlikely
+sequence (a race, two people acting at once, an odd input), shows itself plainly
+to the person it affects, and is fixed by hand without lost work. It is P3 at
+most, whatever guarantee the issue states. Name it as a known limit; it is not
+an owner question and never blocks, escalates or reopens settled work. If it
+happens in use, it is filed as a bug then. This does not cover a silent wrong
+result, lost work, secret exposure or damage the product cannot repair.
+
 A finding keeps its id across heads. Reopen a settled one only when changed
 code or new evidence invalidates how it was settled.
 

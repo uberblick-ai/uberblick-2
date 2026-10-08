@@ -57,8 +57,9 @@ merge does not invalidate prior review.
 ## Decide the work shape and route
 
 Leave ordinary engineering choices to implementation; do not prescribe preferences
-or exhaustive edge cases. An investigation names its decision, uncertain assumption
-and confirming or refuting observation. A bounded negative result may complete it;
+or exhaustive edge cases. A [visible edge case](review-protocol.md#findings)
+becomes a known limit, not a question. An investigation names its decision,
+uncertain assumption and confirming or refuting observation. A bounded negative result may complete it;
 the eventual feature is not its deliverable.
 
 On every route, apply [library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices).
