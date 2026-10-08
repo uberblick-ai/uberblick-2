@@ -208,7 +208,8 @@ async function hitTarget(target: Locator): Promise<void> {
 
 /** The whole touch target fits the pane, with input delivered at each edge. */
 async function fullyTappable(target: Locator): Promise<void> {
-  const hit = await target.evaluate((element) => {
+  // Native scrolling reaches the sibling strip through a geometry refresh.
+  await expect.poll(() => target.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     const pane = element.closest(".ub-document-pane")?.getBoundingClientRect();
     if (pane === undefined) throw new Error("e2e: touch target has no document pane");
@@ -222,11 +223,9 @@ async function fullyTappable(target: Locator): Promise<void> {
     return { name: element.getAttribute("aria-label"), left: bounds.left, right: bounds.right,
       top: bounds.top, bottom: bounds.bottom, paneLeft: pane.left, paneRight: pane.right,
       targets: targets.map((target) => target?.outerHTML.slice(0, 160)),
+      withinPane: bounds.left + 0.001 >= pane.left && bounds.right - 0.001 <= pane.right,
       edges: targets.map((target) => element.contains(target)) };
-  });
-  expect(hit.left + 0.001).toBeGreaterThanOrEqual(hit.paneLeft);
-  expect(hit.right - 0.001).toBeLessThanOrEqual(hit.paneRight);
-  expect(hit.edges, JSON.stringify(hit)).toEqual([true, true, true, true]);
+  })).toMatchObject({ withinPane: true, edges: [true, true, true, true] });
 }
 
 async function pageFits(page: Page): Promise<void> {
