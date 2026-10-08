@@ -1327,8 +1327,10 @@ nothing.
 
 Promotion grants this account the new workspace's sole initial admin membership,
 then renews its device credential, uploads documents (including archived
-content), name and sidebar, and verifies the copy with a fresh authenticated
-client. It preserves the UUID and CRDT history. Only after verification does it
+content), name and sidebar, and verifies every live and archived document,
+settings and sidebar history with a fresh authenticated client. This is a read
+of acknowledged hub state, not a guarantee that the hub has flushed it to disk.
+It preserves the UUID and CRDT history. Only after verification does it
 bind the project to the hub; no separate use or host command is needed.
 Promotion prints the complete connection link for use on another machine.
 
@@ -1402,6 +1404,7 @@ open it with: ub open
 ```
 
 The previous selection and recovery line appear only when the binding changed.
+The id form starts with `using` and omits the `open it with: ub open` hint.
 Fetching shows at most one progress line on stderr, replaced by the result on a
 terminal. Library messages do not reach the terminal. `--verbose` adds the document
 list, verification details and configuration paths. `--json` prints only an object
@@ -1450,6 +1453,8 @@ pair overrides it atomically; incomplete overrides fail. New MCP installations
 pin both values, including a selected `--workspace <id> --hub <url>` override.
 Credentials remain private and separate. The deployed web client reads its
 endpoint at runtime from `/uberblick-config.json` rather than these client files.
+For a GitHub-enabled hub behind a loopback proxy, private user configuration
+remembers device admission per endpoint, including after logout.
 
 Remote commands accept no signing secret and send no GitHub token. A missing
 login names `ub auth login`; a refused renewal requires signing in again; missing

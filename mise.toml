@@ -189,7 +189,7 @@ run = 'sh "{{config_root}}/bin/run-e2e.sh"'
 description = "First-user experience: run the documented install path on a clean machine, then assert what it promised"
 # On demand like `mise run e2e`, and for the same reason: it is heavy, and it
 # proves something no unit test can. What it proves is the *documentation* —
-# `Dockerfile.fue` runs the README's install path verbatim on a machine that has
+# `Dockerfile.fue` runs CONTRIBUTING.md's setup path on a machine that has
 # only git and mise on it, so deleting a documented step is what makes this fail.
 #
 # Two halves, and the split is the test. The build installs, with network. The
@@ -223,7 +223,7 @@ printf 'fue image retained for probes: %s\\n' "$tag"
 [tasks.review]
 description = "Build and verify an immutable commit in Docker (SHA argument defaults to HEAD)"
 usage = 'arg "[sha]" help="Commit to review" default="HEAD"'
-# Trust boundary (README, "Review isolation"): the reviewed commit supplies file
+# Trust boundary (CONTRIBUTING.md, "Review isolation"): the reviewed commit supplies file
 # contents, and main supplies the build recipe — this task, `Dockerfile.review`,
 # `.dockerignore`, and how the context is assembled at all. The task
 # therefore refuses unless the checkout it runs in is a freshly fetched
@@ -339,6 +339,6 @@ printf 'Review image retained for probes: %s\\n' "$review_tag"
 [tasks.ci]
 description = "Local CI: run the isolated review and browser e2e on a pushed commit, then sign off"
 usage = 'arg "<commit>" help="Full SHA of the pushed commit"'
-# The merge gate is the `signoff` commit status this task posts (README,
+# The merge gate is the `signoff` commit status this task posts (CONTRIBUTING.md,
 # "Local CI"). It runs from a checkout at origin/main because `review` does.
 run = 'sh "{{config_root}}/bin/ci.sh" "${usage_commit?}"'

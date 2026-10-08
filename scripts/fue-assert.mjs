@@ -420,7 +420,7 @@ async function main() {
     );
   });
 
-  // 3. `mise run dev` — the command the README actually hands a new user, not
+  // 3. `mise run dev` — the command CONTRIBUTING.md gives a contributor, not
   //    the two halves it happens to be made of. Starting the hub and the web
   //    server separately here would test two tasks nobody was told to run and
   //    leave the orchestration itself unproven: `dev` fans out explicitly

@@ -263,7 +263,7 @@ export function ensureBundle(plan: BundleAction, io: Io): "servable" | "refused"
       ? "Reinstall Uberblick; an installation never builds or changes its packaged web app at run time."
       : plan.source === "default"
         ? "Run `mise run build-web` from the checkout."
-        : "Point UBERBLICK_WEB_DIST at a built bundle, or build one from a checkout — the README says how.";
+        : "Point UBERBLICK_WEB_DIST at a built bundle, or build one from a checkout — CONTRIBUTING.md's Updating section links the build instructions.";
     io.err(`ub open: ${reason}. ${recovery}\n`);
     return "refused";
   }
