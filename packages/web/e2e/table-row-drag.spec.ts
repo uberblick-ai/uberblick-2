@@ -2,7 +2,6 @@
 import { expect, test } from "@playwright/test";
 import type { Browser, CDPSession, Locator, Page, TestInfo } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/hub";
 import { wrapToken } from "@uberblick/hub/protocol";
@@ -149,10 +148,9 @@ async function touch(session: CDPSession, type: "touchStart" | "touchMove", poin
   await session.send("Input.dispatchTouchEvent", { type, touchPoints: [{ ...point, id: 1 }] });
 }
 
-for (const colorScheme of ["light", "dark"] as const) {
-test(`mouse pickup leaves every row readable and drops only at a body gap — ${colorScheme}`, { tag: "@webkit" }, async ({ page }, info) => {
+test("mouse pickup leaves every row readable and drops only at a body gap", { tag: "@webkit" }, async ({ page }, info) => {
   test.skip(info.project.use.hasTouch === true, "Mouse pickup requires a pointer device");
-  await page.emulateMedia({ colorScheme });
+  await page.emulateMedia({ colorScheme: "light" });
   const fixture = await publishTable();
   try {
     const table = await openTable(page, fixture.uuid);
@@ -177,16 +175,17 @@ test(`mouse pickup leaves every row readable and drops only at a body gap — ${
     await startMouse(page, table);
     await overGap(page, table, 4);
     await expect(indicator(page)).toBeVisible();
-    const painted = await indicator(page).evaluate((element) => {
-      const style = getComputedStyle(element);
-      return { color: style.backgroundColor, opacity: Number(style.opacity) };
-    });
-    expect(painted.color).not.toBe("transparent");
-    expect(painted.color).not.toBe("rgba(0, 0, 0, 0)");
-    expect(painted.opacity).toBeGreaterThan(0);
-    if (info.project.name === "chromium" && process.env.UB_AGENTS_SCRATCH !== undefined) {
-      await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH, `table-row-drag-${colorScheme}.png`) });
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      const painted = await indicator(page).evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { color: style.backgroundColor, opacity: Number(style.opacity) };
+      });
+      expect(painted.color).not.toBe("transparent");
+      expect(painted.color).not.toBe("rgba(0, 0, 0, 0)");
+      expect(painted.opacity).toBeGreaterThan(0);
     }
+    await page.emulateMedia({ colorScheme: "light" });
     await expect(bodyNames(table)).toHaveText(INITIAL);
     expect(await table.locator("tr").evaluateAll((rows) => rows.map((row) => {
       const bounds = row.getBoundingClientRect();
@@ -215,24 +214,58 @@ test(`mouse pickup leaves every row readable and drops only at a body gap — ${
     await expect(page.getByRole("menu")).toHaveCount(0);
   } finally { fixture.close(); }
 });
-}
 
-test("own gaps, outside release and Escape write nothing and never open a menu", async ({ page }) => {
+test("own gaps, outside release and Escape preserve the caret and focus without writing", { tag: "@webkit" }, async ({ page }, info) => {
+  test.skip(info.project.use.hasTouch === true, "Mouse cancellation requires a pointer device");
   const fixture = await publishTable();
   try {
+    const afterId = appendBlock(fixture.doc, { type: "paragraph", text: "after" });
     const table = await openTable(page, fixture.uuid);
-    for (const ending of ["own", "outside", "escape"] as const) {
-      const before = Y.encodeStateVector(fixture.doc);
-      await startMouse(page, table);
-      if (ending === "own") await overGap(page, table, 2);
-      else if (ending === "outside") await page.mouse.move(2, 2);
-      else { await overGap(page, table, 4); await page.keyboard.press("Escape"); }
-      await page.mouse.up();
-      await expect(indicator(page)).toHaveCount(0);
-      await expect(page.getByRole("menu")).toHaveCount(0);
-      await expect(bodyNames(table)).toHaveText(INITIAL);
-      expect(Y.encodeStateVector(fixture.doc)).toEqual(before);
+    const after = editor(page).locator(":scope > p").last();
+    const secondCell = table.locator("tr").nth(1).locator("td").nth(1);
+    for (const caret of [after, secondCell]) {
+      for (const ending of ["own", "outside", "escape"] as const) {
+        await caretIn(caret, info);
+        // Commit the native selection to PM before the drag begins.
+        await page.keyboard.insertText("1");
+        let text = await caret.textContent() ?? "";
+        await expect.poll(() => getBlocks(fixture.doc).find((block) => block.id === (caret === after ? afterId : fixture.id))?.text)
+          .toContain(text);
+        let before = Y.encodeStateVector(fixture.doc);
+        await startMouse(page, table);
+        if (caret === after && ending === "own") {
+          // Received edits before the saved caret must keep it mapped in PM.
+          editBlock(fixture.doc, afterId, text, `remote ${text}`);
+          text = `remote ${text}`;
+          await expect(caret).toHaveText(text);
+          before = Y.encodeStateVector(fixture.doc);
+        }
+        if (ending === "own") await overGap(page, table, 2);
+        else if (ending === "outside") await page.mouse.move(2, 2);
+        else { await overGap(page, table, 4); await page.keyboard.press("Escape"); }
+        await page.mouse.up();
+        await expect(indicator(page)).toHaveCount(0);
+        await expect(page.getByRole("menu")).toHaveCount(0);
+        await expect(editor(page)).toBeFocused();
+        await expect.poll(() => caret.evaluate((element) => {
+          const selection = document.getSelection();
+          return selection?.anchorNode !== null && selection?.anchorNode !== undefined
+            && element.contains(selection.anchorNode) && selection.anchorOffset === selection.anchorNode.textContent?.length;
+        })).toBe(true);
+        await expect(bodyNames(table)).toHaveText(INITIAL);
+        expect(Y.encodeStateVector(fixture.doc)).toEqual(before);
+        await page.keyboard.insertText(` ${ending}`);
+        await expect(caret).toHaveText(`${text} ${ending}`);
+      }
     }
+    // A handle gesture must also leave focus outside the editor alone.
+    const title = page.locator(".ub-title");
+    await title.focus();
+    await startMouse(page, table);
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    await expect(indicator(page)).toHaveCount(0);
+    await expect(title).toBeFocused();
     // The suppression guard must clear for a deliberate later click.
     await handle(page, 1).click();
     await expect(page.getByRole("menu")).toBeVisible();
@@ -448,7 +481,10 @@ test("native touch holds pick up rows and swallow release clicks, including canc
   try {
     const table = await openTable(page, fixture.uuid);
     for (const ending of ["own", "escape", "cancel", "move"] as const) {
-      await table.locator("tr").nth(1).locator("td").first().tap();
+      const cell = table.locator("tr").nth(1).locator("td").nth(1);
+      await cell.tap();
+      await page.keyboard.press("End");
+      const offset = await cell.evaluate(() => document.getSelection()?.anchorOffset);
       const bounds = await box(handle(page, 1));
       const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
       const before = Y.encodeStateVector(fixture.doc);
@@ -463,7 +499,14 @@ test("native touch holds pick up rows and swallow release clicks, including canc
       await expect(indicator(page)).toHaveCount(0);
       await expect(page.getByRole("menu")).toHaveCount(0);
       await expect(bodyNames(table)).toHaveText(ending === "move" ? ["beta", "gamma", "alpha"] : INITIAL);
-      if (ending !== "move") expect(Y.encodeStateVector(fixture.doc)).toEqual(before);
+      if (ending !== "move") {
+        expect(Y.encodeStateVector(fixture.doc)).toEqual(before);
+        await expect.poll(() => cell.evaluate((element) => {
+          const selection = document.getSelection();
+          return selection?.anchorNode !== null && selection?.anchorNode !== undefined
+            && element.contains(selection.anchorNode) ? selection.anchorOffset : null;
+        })).toBe(offset);
+      }
       const current = ending === "move" ? 3 : 1;
       // A stationary hold generates a native click after release; a later
       // deliberate tap or keyboard action still has to open this handle.

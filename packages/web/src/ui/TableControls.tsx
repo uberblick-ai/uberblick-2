@@ -101,7 +101,7 @@ function TableControlSurface({ tableId, editor, host }: {
   const refresh = useRef<() => void>(() => {});
   const acted = useRef(false);
   const closing = useRef(false);
-  const drag = useRef<{ target: TableRowTarget; manager: DragDropManager; point: { x: number; y: number } } | null>(null);
+  const drag = useRef<{ target: TableRowTarget; manager: DragDropManager; point: { x: number; y: number }; focused: boolean } | null>(null);
   const dragged = useRef(false);
   const [gap, setGap] = useState<number | null>(null);
   const geometryRef = useRef<Geometry | null>(null);
@@ -202,8 +202,8 @@ function TableControlSurface({ tableId, editor, host }: {
     // During native Tab or a touch press, focusout briefly sees body as the
     // active element. Read after the focus transfer so its destination survives.
     const blur = (): void => { queueMicrotask(read); };
-    const scroll = (): void => {
-      read();
+    const scroll = (event: Event): void => {
+      if (drag.current !== null || event.target instanceof HTMLElement && event.target.classList.contains("tableWrapper")) read();
     };
     const key = (event: KeyboardEvent): void => {
       if (event.isComposing || !editor.isEditable) return;
@@ -334,7 +334,7 @@ function TableControlSurface({ tableId, editor, host }: {
       onDragStart={(event, manager) => {
         const target = event.operation.source?.data.target as TableRowTarget;
         dragged.current = true;
-        drag.current = { target, manager, point: event.operation.position.current };
+        drag.current = { target, manager, point: event.operation.position.current, focused: editor.isFocused };
         indicate(event.operation.position.current);
       }}
       onDragMove={(event) => {
@@ -349,7 +349,7 @@ function TableControlSurface({ tableId, editor, host }: {
         setGap(null);
         if (active === null) return;
         let moved = false;
-        let caretTarget: TableRowTarget | null = active.target;
+        let caretTarget: TableRowTarget | null = null;
         if (!event.canceled && current !== null && frame !== null) {
           const native = event.nativeEvent;
           const point = native instanceof PointerEvent ? { x: native.clientX, y: native.clientY } : active.point;
@@ -360,20 +360,23 @@ function TableControlSurface({ tableId, editor, host }: {
             caretTarget = tableRowTarget(editor, tableId, destination > source.rowIndex ? destination - 1 : destination);
           }
         }
-        // PreventSelection clears native ranges during pickup. Restore the PM
-        // caret after dnd-kit removes that guard, including no-op/cancelled
-        // holds, so the caret-row touch handle remains reachable.
-        if (caretTarget !== null && (moved || resolveTableRow(editor, caretTarget) !== null)) {
+        // PreventSelection clears native ranges, but PM retains its selection
+        // and maps it through received edits. On a no-op, focus() redraws that
+        // selection only if the editor already had focus; only a move needs a
+        // new caret in the copied row.
+        if (moved || active.focused) {
           const target = caretTarget;
           const win = editor.view.dom.ownerDocument.defaultView;
           const restore = (): void => {
             if (editor.isDestroyed) return;
-            const live = resolveTableRow(editor, target);
-            if (live === null) return;
             // The React renderer completes dropping asynchronously. Waiting
             // for idle avoids restoring a range while its guard is still live.
             if (!manager.dragOperation.status.idle) { win?.requestAnimationFrame(restore); return; }
-            editor.commands.setTextSelection(live.rowPos + 3);
+            if (target !== null) {
+              const live = resolveTableRow(editor, target);
+              if (live === null) return;
+              editor.commands.setTextSelection(live.rowPos + 3);
+            }
             editor.view.focus();
           };
           win?.requestAnimationFrame(restore);
