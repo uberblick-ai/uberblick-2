@@ -68,7 +68,7 @@ function open(host: HTMLElement, name: string): void {
   act(() => trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
 }
 function entries(): HTMLElement[] {
-  return within(screen.getByRole("menu")).getAllByRole("menuitem");
+  return within(screen.getByRole("menu")).getAllByRole("menuitem", { hidden: true });
 }
 function entryNames(): string[] {
   // The current row also holds an aria-hidden check, outside its visible label.

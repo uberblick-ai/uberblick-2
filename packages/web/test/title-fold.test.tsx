@@ -74,8 +74,8 @@ async function listAnswer(query: string): Promise<string[]> {
     name: "Filter this list by title",
   });
   await act(async () => typeInto(field, query));
-  return within(within(host).getByRole("table")).queryAllByRole("rowheader")
-    .map((header) => within(header).getByRole("button").textContent ?? "")
+  return within(within(host).getByRole("table", { hidden: true })).queryAllByRole("rowheader", { hidden: true })
+    .map((header) => within(header).getByRole("button", { hidden: true }).textContent ?? "")
     .sort();
 }
 

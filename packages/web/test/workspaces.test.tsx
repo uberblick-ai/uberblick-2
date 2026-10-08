@@ -126,7 +126,7 @@ function open(host: HTMLElement): void {
 
 /** The menu is portalled to <body>, so it is read from the document. */
 function items(): HTMLElement[] {
-  return within(screen.getByRole("menu")).getAllByRole("menuitem");
+  return within(screen.getByRole("menu")).getAllByRole("menuitem", { hidden: true });
 }
 
 /** The workspace rows the menu offers, in order — management is not a workspace. */

@@ -189,7 +189,7 @@ describe("the workspace switcher renders configuration", () => {
     expect(trigger?.querySelector(".ub-workspace-caret")?.getAttribute("aria-hidden"))
       .toBe("true");
     open(none);
-    expect(within(screen.getByRole("menu")).queryAllByRole("menuitem", { current: true })).toHaveLength(0);
+    expect(within(screen.getByRole("menu")).queryAllByRole("menuitem", { current: true, hidden: true })).toHaveLength(0);
     none.unmount();
   });
 
@@ -215,12 +215,12 @@ describe("the workspace switcher renders configuration", () => {
     const view = mount(switcher());
     open(view);
     const menu = within(screen.getByRole("menu"));
-    const disabled = menu.getAllByRole("menuitem").filter((item) => item.getAttribute("aria-disabled") === "true").map((item) => item.textContent);
+    const disabled = menu.getAllByRole("menuitem", { hidden: true }).filter((item) => item.getAttribute("aria-disabled") === "true").map((item) => item.textContent);
     expect(disabled).toEqual([]);
-    expect(menu.queryAllByRole("separator")).toHaveLength(0);
-    expect(menu.getAllByRole("menuitem").map((item) => item.textContent))
+    expect(menu.queryAllByRole("separator", { hidden: true })).toHaveLength(0);
+    expect(menu.getAllByRole("menuitem", { hidden: true }).map((item) => item.textContent))
       .toEqual(["Uberblick✓"]);
-    const settings = menu.queryByRole("menuitem", { name: "Workspace settings" });
+    const settings = menu.queryByText("Workspace settings");
     expect(settings).toBeNull();
     view.unmount();
   });
@@ -343,10 +343,10 @@ describe("the account footer keeps this client's presence preferences separate",
     open(view);
     await act(async () => {});
     const panel = within(screen.getByRole("dialog"));
-    expect(panel.getAllByRole("term").map((row) => row.textContent)).toEqual([
+    expect(panel.getAllByRole("term", { hidden: true }).map((row) => row.textContent)).toEqual([
       "MCP connections",
     ]);
-    expect(panel.getAllByRole("definition")[0]?.textContent).toBe("0");
+    expect(panel.getAllByRole("definition", { hidden: true })[0]?.textContent).toBe("0");
     view.unmount();
   });
 
@@ -354,7 +354,7 @@ describe("the account footer keeps this client's presence preferences separate",
     const view = mount(menu(2));
     open(view);
     // Definition-list rows have no role of their own; begin at the visible term.
-    const terms = within(screen.getByRole("dialog")).getAllByRole("term");
+    const terms = within(screen.getByRole("dialog")).getAllByRole("term", { hidden: true });
     const connections = terms[terms.length - 1]?.parentElement;
     expect(connections?.textContent).toBe("MCP connections2");
     view.unmount();

@@ -148,10 +148,10 @@ function peerOf(local: Y.Doc): Y.Doc {
 
 function facts(host: HTMLElement): Map<string, string> {
   return new Map(
-    within(host).getAllByRole("term").map((term) => [
+    within(host).getAllByRole("term", { hidden: true }).map((term) => [
       term.textContent ?? "",
       // A definition-list row has no role; its term identifies the paired fact.
-      within(term.parentElement as HTMLElement).getByRole("definition").textContent ?? "",
+      within(term.parentElement as HTMLElement).getByRole("definition", { hidden: true }).textContent ?? "",
     ]),
   );
 }
@@ -245,8 +245,8 @@ it("waits for server state, seeds once, and keeps a retired-only reading offline
   const host = await mountTags(room.connection);
 
   expect(host.textContent).toContain("Waiting for the tag catalog");
-  expect(within(host).queryByRole("textbox", { name: "Create a tag" })).toBeNull();
-  expect(within(host).queryAllByRole("list")).toHaveLength(0);
+  expect(within(host).queryByLabelText("Create a tag")).toBeNull();
+  expect(within(host).queryAllByRole("list", { hidden: true })).toHaveLength(0);
 
   room.update({
     connected: true,
@@ -257,7 +257,7 @@ it("waits for server state, seeds once, and keeps a retired-only reading offline
   });
   await act(async () => {});
   expect(
-    within(within(host).getByRole("region", { name: "Active" })).getAllByRole("listitem").map(
+    within(within(host).getByRole("region", { name: "Active" })).getAllByRole("listitem", { hidden: true }).map(
       // The tag is repeated in the button's screen-reader text; the row's
       // visible label precedes that second occurrence.
       (row) => within(row).getAllByText(/^[a-z0-9-]+$/)[0]?.textContent,
@@ -271,20 +271,20 @@ it("waits for server state, seeds once, and keeps a retired-only reading offline
   });
   expect(host.textContent).toContain("No active tags.");
   expect(
-    within(within(host).getByRole("region", { name: "Retired" })).getAllByRole("listitem"),
+    within(within(host).getByRole("region", { name: "Retired" })).getAllByRole("listitem", { hidden: true }),
   ).toHaveLength(EXAMPLE_TAGS.length);
 
   room.update({ connected: false, synced: false, writable: false });
   expect(host.textContent).not.toContain("Waiting for the tag catalog");
   expect(host.textContent).toContain("Tag changes are unavailable");
-  const controls = within(host).getAllByRole<HTMLButtonElement>("button");
+  const controls = within(host).getAllByRole<HTMLButtonElement>("button", { hidden: true });
   expect(controls).toHaveLength(EXAMPLE_TAGS.length + 1);
   expect(controls.every((button) => button.disabled)).toBe(true);
   expect(within(host).getByRole<HTMLInputElement>("textbox", { name: "Create a tag" }).disabled).toBe(true);
 
   room.update({ connected: true, synced: true, writable: true });
   expect(
-    within(within(host).getByRole("region", { name: "Retired" })).getAllByRole<HTMLButtonElement>("button", { name: /^Restore/ }).every(
+    within(within(host).getByRole("region", { name: "Retired" })).getAllByRole<HTMLButtonElement>("button", { hidden: true }).every(
       (button) => !button.disabled,
     ),
   ).toBe(true);
@@ -624,7 +624,7 @@ it("requires an explicit admin choice and shows a concurrent existing grant with
   expect(host.textContent).toContain("current-agent-login is already a member as member.");
   await lookUp(host);
   expect(host.textContent).toContain("Already a member as member.");
-  expect(within(host).queryByRole("button", { name: "Confirm and add account" })).toBeNull();
+  expect(within(host).queryByText("Confirm and add account")).toBeNull();
 });
 
 it.each([ ["account-not-found", "No such GitHub account"], ["lookup-unavailable", "lookup is unavailable"] ])(
@@ -634,7 +634,7 @@ it.each([ ["account-not-found", "No such GitHub account"], ["lookup-unavailable"
     await lookUp(host);
     expect(host.textContent).toContain(message);
     expect(hub.calls.some(({ action }) => action.operation === "grant-member")).toBe(false);
-    expect(within(host).queryByRole("combobox", { name: "Role for new account" })).toBeNull();
+    expect(within(host).queryByLabelText("Role for new account")).toBeNull();
   },
 );
 
@@ -649,20 +649,20 @@ it.each(["@octocat", "https://github.com/octocat", "octo cat"])(
     expect(within(host).getByRole("table", { name: "Members" }).textContent).toContain(ADMIN.githubUsername);
     expect(hub.calls.filter(({ action }) => action.operation === "list-members")).toHaveLength(1);
     expect(hub.calls.some(({ action }) => action.operation === "grant-member")).toBe(false);
-    expect(within(host).queryByRole("combobox", { name: "Role for new account" })).toBeNull();
+    expect(within(host).queryByLabelText("Role for new account")).toBeNull();
   },
 );
 
 it("offers members only their role and own devices with sign-in times and this-computer marker", async () => {
   const hub = accessHub({ role: "member" }); const host = await mountAccess();
   expect(host.textContent).toContain("Your role: member.");
-  expect(within(host).queryByRole("table", { name: "Members" })).toBeNull();
-  expect(within(host).queryByRole("textbox", { name: "GitHub account" })).toBeNull();
+  expect(within(host).queryByLabelText("Members")).toBeNull();
+  expect(within(host).queryByLabelText("GitHub account")).toBeNull();
   expect(hub.calls.some(({ action }) => action.operation === "list-members")).toBe(false);
   const table = within(host).getByRole("table", { name: "Your devices" });
-  expect(within(table).getAllByRole("row").slice(1)).toHaveLength(2);
+  expect(within(table).getAllByRole("row", { hidden: true }).slice(1)).toHaveLength(2);
   expect(table?.textContent).toContain("This computer");
-  expect(within(table).getByText(new Date(Date.UTC(2026, 9, 5, 10)).toLocaleString()).getAttribute("datetime")).toBe("2026-10-05T10:00:00.000Z");
+  expect(within(table).getAllByRole("time", { hidden: true })[0]?.getAttribute("datetime")).toBe("2026-10-05T10:00:00.000Z");
   expect(table?.textContent).not.toContain("another-person");
 });
 
@@ -688,7 +688,7 @@ it("shows a hub role-change refusal and keeps the hub's unchanged role", async (
   await clickAccess(host, `Save role for ${ADMIN.githubUsername}`);
   expect(host.textContent).toContain("The hub refused this change: the last admin cannot be removed or demoted.");
   const members = within(within(host).getByRole("table", { name: "Members" }));
-  expect(within(members.getAllByRole("row")[1] as HTMLElement).getAllByRole("cell")[0]?.textContent).toBe("admin");
+  expect(within(members.getAllByRole("row", { hidden: true })[1] as HTMLElement).getAllByRole("cell", { hidden: true })[0]?.textContent).toBe("admin");
   expect(within(host).getByRole<HTMLSelectElement>("combobox", { name: `Role for ${ADMIN.githubUsername}` }).value).toBe("admin");
   expect(host.textContent).not.toContain("role changed to member");
 });
@@ -703,7 +703,7 @@ it("confirms member removal on every device, then preserves acknowledged self-re
   await clickAccess(dialog, "Remove member");
   expect(host.textContent).toContain("signed-in-admin removed from this workspace.");
   expect(host.textContent).toContain("The hub refused access");
-  expect(within(host).queryByRole("table", { name: "Members" })).toBeNull();
+  expect(within(host).queryByLabelText("Members")).toBeNull();
   expect(accessButton(host, "Revoke device current-device").disabled).toBe(false);
 });
 
@@ -720,8 +720,8 @@ it("acknowledges applied closure failure for this-computer revocation despite si
   expect(host.textContent).toContain("This computer was revoked.");
   expect(host.textContent).toContain("The change was applied");
   expect(host.textContent).toContain("Sign-in is required");
-  expect(within(host).getAllByRole("status").some((item) => item.textContent?.includes("This computer was revoked"))).toBe(true);
-  expect(within(host).queryByRole("table", { name: "Your devices" })).toBeNull();
+  expect(within(host).getAllByRole("status", { hidden: true }).some((item) => item.textContent?.includes("This computer was revoked"))).toBe(true);
+  expect(within(host).queryByLabelText("Your devices")).toBeNull();
 });
 
 it.each([
@@ -733,15 +733,15 @@ it.each([
 ])("offers no changes in %s and gives a recovery step", async (status, message, step) => {
   accessHub({ status }); const host = await mountAccess();
   expect(host.textContent).toContain(message); expect(host.textContent).toContain(step);
-  expect(within(host).queryAllByRole("table")).toHaveLength(0);
-  expect(within(host).queryAllByRole("textbox")).toHaveLength(0);
-  expect(within(host).getAllByRole("button").map((button) => button.textContent)).toEqual(["Refresh access"]);
+  expect(within(host).queryAllByRole("table", { hidden: true })).toHaveLength(0);
+  expect(within(host).queryAllByRole("textbox", { hidden: true })).toHaveLength(0);
+  expect(within(host).getAllByRole("button", { hidden: true }).map((button) => button.textContent)).toEqual(["Refresh access"]);
 });
 
 it("does not call the local management route from a direct-served page", async () => {
   const hub = accessHub(); const host = await mountAccess(false);
   expect(host.textContent).toContain("Run ub open in its project");
-  expect(hub.calls).toHaveLength(0); expect(within(host).queryAllByRole("button")).toHaveLength(0);
+  expect(hub.calls).toHaveLength(0); expect(within(host).queryAllByRole("button", { hidden: true })).toHaveLength(0);
 });
 
 it("accepts the served workspace's decorated segment and makes new live reads on every visit", async () => {

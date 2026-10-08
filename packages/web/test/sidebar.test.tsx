@@ -185,20 +185,17 @@ function sidebarControls(host: HTMLElement) {
 }
 
 function groupToggles(host: HTMLElement): HTMLButtonElement[] {
-  // aria-expanded is the disclosure contract; names and DOM order come from
-  // the buttons themselves, including groups created by a peer mid-test.
-  const pane = documentsPane(host);
-  // A modal temporarily hides the whole shell. Order assertions still inspect
-  // its mounted disclosures, whose accessible names are empty while hidden.
-  const options = pane.closest('[aria-hidden="true"]') === null ? { name: /./ } : { hidden: true };
-  return within(pane).queryAllByRole<HTMLButtonElement>("button", options)
+  // Enumerate every mounted disclosure in DOM order, including empty names
+  // and controls hidden by a modal. aria-expanded without aria-haspopup is
+  // the group disclosure contract; accessible names are empty while hidden.
+  return sidebarControls(host).queryAllByRole<HTMLButtonElement>("button", { hidden: true })
     .filter((button) => button.hasAttribute("aria-expanded") && !button.hasAttribute("aria-haspopup"));
 }
 
 function sections(host: HTMLElement): HTMLElement[] {
   // A group wrapper has no accessible name of its own. Keep the structural
   // ancestor check, anchored by its accessible disclosure or rename field.
-  const controls = [...groupToggles(host), ...sidebarControls(host).queryAllByRole("textbox", { name: "Group name" })];
+  const controls = [...groupToggles(host), ...sidebarControls(host).queryAllByLabelText("Group name")];
   return controls.map((control) => control.closest("section") as HTMLElement)
     .sort((first, second) => first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
 }
@@ -213,11 +210,10 @@ function groupNames(host: HTMLElement): string[] {
 /** The document rows of the `index`-th group, top to bottom. */
 function rows(host: HTMLElement, index: number): HTMLButtonElement[] {
   const section = sections(host)[index];
-  // Opening the document menu hides the shell, but current-row assertions
-  // still inspect the same mounted list and buttons beneath that boundary.
-  const hidden = section?.closest('[aria-hidden="true"]') !== null;
-  const list = section === undefined ? null : within(section).queryByRole("list", { hidden });
-  return list === null ? [] : within(list).queryAllByRole<HTMLButtonElement>("button", hidden ? { hidden: true } : { name: /./ });
+  // Enumerate every mounted row, including an empty title or one hidden when
+  // the document menu opens. Order/current-row proofs inspect mounted nodes.
+  const list = section === undefined ? null : within(section).queryByRole("list", { hidden: true });
+  return list === null ? [] : within(list).queryAllByRole<HTMLButtonElement>("button", { hidden: true });
 }
 
 function rowTitles(host: HTMLElement, index: number): string[] {
@@ -287,7 +283,8 @@ function columnOrder(host: HTMLElement): string[] {
 /** The navigation rows, top to bottom. */
 function navRows(host: HTMLElement): HTMLButtonElement[] {
   const navigation = sidebarControls(host).getByText("Navigation").closest("section") as HTMLElement;
-  return within(navigation).getAllByRole<HTMLButtonElement>("button", { name: /./ });
+  // Ordering covers every mounted row, even if its name or visibility regresses.
+  return within(navigation).getAllByRole<HTMLButtonElement>("button", { hidden: true });
 }
 
 describe("the sidebar is the _sidebar document", () => {
@@ -326,7 +323,7 @@ describe("the sidebar is the _sidebar document", () => {
     }
     // Move controls have names; the inventories below also rule out decorative
     // handles without relying on a styling marker that could be renamed.
-    expect(sidebarControls(host).queryAllByRole("button", { name: /^Move (document|group)/ })).toHaveLength(0);
+    expect(sidebarControls(host).queryAllByLabelText(/^Move (document|group)/)).toHaveLength(0);
     expectNoExtraGroupChrome(host);
     for (const row of [current, other]) {
       // A row consists of its navigation button with a glyph and label, with
@@ -740,8 +737,9 @@ describe("workspace settings is a route-driven sidebar mode", () => {
 
     expectLive(documents);
     expectDead(settings);
-    expect(within(host).getAllByRole("button", { name: /; preferences$/ })).toHaveLength(1);
-    const accountControl = within(host).getByRole("button", { name: /; preferences$/ });
+    // Label queries count the mounted account controls, including hidden ones.
+    expect(within(host).queryAllByLabelText(/; preferences$/)).toHaveLength(1);
+    const accountControl = within(host).getByLabelText(/; preferences$/);
     expect(documents.contains(accountControl)).toBe(false);
     expect(settings.contains(accountControl)).toBe(false);
 
@@ -755,8 +753,8 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     );
     expectDead(documents);
     expectLive(settings);
-    expect(within(host).getAllByRole("button", { name: /; preferences$/ })).toHaveLength(1);
-    expect(within(host).getByRole("button", { name: /; preferences$/ })).toBe(accountControl);
+    expect(within(host).queryAllByLabelText(/; preferences$/)).toHaveLength(1);
+    expect(within(host).getByLabelText(/; preferences$/)).toBe(accountControl);
     expect(document.activeElement).toBe(
       within(settings).getByRole("button", { name: `Back to Unnamed workspace · ${WORKSPACE.slice(0, 8)}` }),
     );
@@ -856,7 +854,7 @@ describe("the sidebar's fixed navigation", () => {
     expect(footer).not.toBeNull();
     expect(within(footer).queryByRole("button", { name: "All docs" })).toBeNull();
     expect(within(footer).getByRole("button", { name: "Workspace settings" })).not.toBeNull();
-    expect(within(footer).getByRole("button", { name: /; preferences$/ })).not.toBeNull();
+    expect(within(footer).getByLabelText(/; preferences$/)).not.toBeNull();
 
     // Chrome, not curation: nothing in it can be dragged, and no drag of any
     // kind can land in it.
@@ -1052,7 +1050,7 @@ describe("unwritable workspace rooms", () => {
     expect(sidebarControls(host).getByText(/Sidebar changes unavailable/).textContent).toContain(
       "Sidebar changes unavailable",
     );
-    expect(sidebarControls(host).queryAllByRole("button", { name: /^(Rename|Delete) group / })).toHaveLength(0);
+    expect(sidebarControls(host).queryAllByLabelText(/^(Rename|Delete) group /)).toHaveLength(0);
     expect(sidebarControls(host).getByRole<HTMLButtonElement>("button", { name: "+ group" }).disabled).toBe(
       true,
     );

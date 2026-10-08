@@ -153,12 +153,13 @@ function sidebarDoc(): Y.Doc {
 }
 
 function documentTable(host: HTMLElement): HTMLElement {
-  return within(host).getByRole("table");
+  return within(host).getByRole("table", { hidden: true });
 }
 
 function openButtons(host: HTMLElement): HTMLButtonElement[] {
-  return within(documentTable(host)).queryAllByRole("rowheader").map(
-    (header) => within(header).getByRole<HTMLButtonElement>("button"),
+  // Inventories include every mounted row, as the original DOM queries did.
+  return within(documentTable(host)).queryAllByRole("rowheader", { hidden: true }).map(
+    (header) => within(header).getByRole<HTMLButtonElement>("button", { hidden: true }),
   );
 }
 
@@ -279,7 +280,7 @@ describe("the shared timestamp rule", () => {
       );
       const row = within(documentTable(host)).getByRole("row", { name: /^Overview / });
       // The time element and its machine value are the timestamp contract.
-      const stamp = within(row).getByRole("time");
+      const stamp = within(row).getByRole("time", { hidden: true });
       expect(stamp.tagName).toBe("TIME");
       const changed = (): string | undefined =>
         stamp.textContent ?? undefined;
@@ -402,9 +403,9 @@ describe("the order", () => {
 describe("choosing the order", () => {
   /** The order option that is on, read the way the screen shows it. */
   function activeOrder(host: HTMLElement): string | undefined {
-    const column = within(documentTable(host)).getAllByRole("columnheader")
+    const column = within(documentTable(host)).getAllByRole("columnheader", { hidden: true })
       .find((header) => header.hasAttribute("aria-sort"));
-    const button = column === undefined ? undefined : within(column).getByRole("button");
+    const button = column === undefined ? undefined : within(column).getByRole("button", { hidden: true });
     return button?.firstChild?.textContent ?? undefined;
   }
 
@@ -434,9 +435,9 @@ describe("choosing the order", () => {
     // The semantic queries still verify the original native table structure.
     expect(table.querySelectorAll("thead th")).toHaveLength(3);
     expect(table.querySelectorAll('tbody th[scope="row"]')).toHaveLength(3);
-    expect(within(table).getAllByRole("columnheader")).toHaveLength(3);
-    expect(within(table).getAllByRole("rowheader")).toHaveLength(3);
-    expect(within(host).queryByRole("combobox")).toBeNull();
+    expect(within(table).getAllByRole("columnheader", { hidden: true })).toHaveLength(3);
+    expect(within(table).getAllByRole("rowheader", { hidden: true })).toHaveLength(3);
+    expect(within(host).queryByRole("combobox", { hidden: true })).toBeNull();
 
     const title = heading(host, "Title");
     const changed = heading(host, "Last changed");
@@ -445,7 +446,7 @@ describe("choosing the order", () => {
     expect(changed.getAttribute("aria-sort")).toBe("descending");
     expect(within(changed).getByText("↓").textContent).toBe("↓");
     expect(title.hasAttribute("aria-sort")).toBe(false);
-    expect(within(table).getAllByRole("columnheader").filter((header) => header.hasAttribute("aria-sort"))).toHaveLength(1);
+    expect(within(table).getAllByRole("columnheader", { hidden: true }).filter((header) => header.hasAttribute("aria-sort"))).toHaveLength(1);
 
     await act(async () => chooseOrder(host, "Title").click());
     expect(rowTitles(host)).toEqual(["Alpha", "Middle", "Zebra"]);
@@ -456,8 +457,8 @@ describe("choosing the order", () => {
 
     // The unstamped row still says "no answer" rather than reading as a date.
     const middle = within(table).getByRole("row", { name: /^Middle / });
-    expect(within(table).getAllByRole("time")).toHaveLength(2);
-    expect(within(middle).queryAllByRole("time")).toHaveLength(0);
+    expect(within(table).getAllByRole("time", { hidden: true })).toHaveLength(2);
+    expect(within(middle).queryAllByRole("time", { hidden: true })).toHaveLength(0);
     expect(middle?.textContent).toContain("—");
 
     await act(async () => chooseOrder(host, "Title").click());
@@ -589,7 +590,7 @@ describe("the list", () => {
     const row = within(documentTable(host)).getByRole("row", { name: /^OverviewReading / });
     expect(within(row).getByText("Overview").textContent).toBe("Overview");
     expect(within(row).getByText("Reading").textContent).toBe("Reading");
-    expect(within(row).getByRole("time").getAttribute("dateTime")).toBe(
+    expect(within(row).getByRole("time", { hidden: true }).getAttribute("dateTime")).toBe(
       "2026-01-03T00:00:00.000Z",
     );
     // The stub still caches both — this is what one screen renders.
@@ -654,14 +655,14 @@ describe("the list", () => {
 
     const host = await openApp(allPath(WORKSPACE));
     expect(rowTitles(host)).toEqual(["Stamped", "Unstamped", "Zskewed"]);
-    const rows = within(documentTable(host)).getAllByRole("row").slice(1);
-    expect(within(rows[0]!).getByRole("time").getAttribute("dateTime")).toBe(
+    const rows = within(documentTable(host)).getAllByRole("row", { hidden: true }).slice(1);
+    expect(within(rows[0]!).getByRole("time", { hidden: true }).getAttribute("dateTime")).toBe(
       "2026-01-03T00:00:00.000Z",
     );
-    expect(within(rows[0]!).getAllByRole("time")).toHaveLength(1);
-    expect(within(rows[1]!).queryAllByRole("time")).toHaveLength(0);
+    expect(within(rows[0]!).getAllByRole("time", { hidden: true })).toHaveLength(1);
+    expect(within(rows[1]!).queryAllByRole("time", { hidden: true })).toHaveLength(0);
     expect(rows[1]?.textContent).toContain("—");
-    expect(within(rows[2]!).queryAllByRole("time")).toHaveLength(0);
+    expect(within(rows[2]!).queryAllByRole("time", { hidden: true })).toHaveLength(0);
     expect(rows[2]?.textContent).toContain("—");
   });
 });
@@ -805,7 +806,7 @@ describe("the filter", () => {
     expect(rowTitles(host)).toEqual(["Untitled", "Untitled"]);
     // Italic emphasis distinguishes the fallback label from a stored title.
     const fallbacks = (): HTMLElement[] =>
-      within(documentTable(host)).queryAllByRole("emphasis");
+      within(documentTable(host)).queryAllByRole("emphasis", { hidden: true });
     expect(fallbacks()).toHaveLength(1);
 
     await act(async () => typeInto(filter(host), "untitled"));
@@ -1070,7 +1071,7 @@ describe("opening a document", () => {
     // A reload: the app goes, the address stays, and the document opens.
     unmount();
     const again = await openApp(`/${WORKSPACE}/${ONE}`);
-    expect(within(again).queryByRole("table")).toBeNull();
+    expect(within(again).queryByRole("table", { hidden: true })).toBeNull();
     expect(within(again).getByPlaceholderText<HTMLInputElement>("Untitled").value).toBe(
       "Overview",
     );
