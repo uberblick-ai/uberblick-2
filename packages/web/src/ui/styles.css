@@ -1163,6 +1163,16 @@ h3.ub-heading {
   font-size: 0.7rem;
   letter-spacing: 0.04em;
   user-select: none;
+  pointer-events: none;
+}
+
+.ub-code-caption,
+.ub-code .ub-copy {
+  line-height: 1.5;
+}
+
+.ub-code-language-trigger {
+  pointer-events: auto;
 }
 
 .ub-code-caption-text {
@@ -1176,7 +1186,8 @@ h3.ub-heading {
 }
 
 @media (pointer: coarse) {
-  .ub-code {
+  /* Only the active picker needs a touch target clear of the editable source. */
+  .ub-code:has(.ub-code-language-trigger) {
     padding-top: 3rem;
   }
 }

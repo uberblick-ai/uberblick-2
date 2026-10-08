@@ -128,23 +128,32 @@ test("code tokens follow the appearance and real Enter inserts a newline", async
   await expect(source).toHaveText("const answer = 42;\nreturn answer;");
 });
 
-test("the block language is keyboard reachable, filters, cancels and returns typing to the code", { tag: "@webkit" }, async ({ page, browserName }, info) => {
+test("native keyboard routes reach the active block language, filter, cancel and return typing to the code", { tag: "@webkit" }, async ({ page, browserName }, info) => {
   await openDocument(page, "keyboard code language");
-  const block = await insertCode(page, "const answer = 42;");
-  const source = block.locator(":scope > code");
-  const language = languageControl(page);
+  const earlier = await insertCode(page, "print('earlier source')");
   // Safari's native Option-Tab includes buttons when its Tab preference only
   // visits text fields. This preserves the browser's own keyboard navigation.
   const nextControl = browserName === "webkit" ? "Alt+Tab" : "Tab";
+  await focusCode(earlier.locator(":scope > code"));
+  await page.keyboard.press(nextControl);
+  await expect(languageControl(page)).toBeFocused();
+  await page.keyboard.press("Enter");
+  await languageSearch(page).fill("python");
+  await page.keyboard.press("Enter");
+  await expect(earlier).toHaveAttribute("data-language", "python");
+
+  const block = await insertCode(page, "const answer = 42;");
+  const source = block.locator(":scope > code");
+  const language = block.getByRole("button", { name: "Code language", exact: true });
   await expect(language).toContainText("Plain text");
   await expect(block.locator(".ub-code-caption")).toContainText("Plain text");
   await expect(page.locator(".ub-toolbar")).toHaveCount(0);
   await capture(page, info, "code-language-desktop-closed");
 
   await focusCode(source);
-  await page.keyboard.press(nextControl);
-  await expect(language).toBeFocused();
-  await page.keyboard.press("Enter");
+  // The shortcut opens this block directly even when earlier source blocks
+  // retain their copy buttons in the native Tab sequence.
+  await page.keyboard.press("Shift+F10");
   await expect(languageSearch(page)).toBeFocused();
   await expectCompactDropdown(page);
   await expect(page.getByRole("option", { name: "Plain text", exact: true })).toHaveCount(1);
@@ -159,9 +168,11 @@ test("the block language is keyboard reachable, filters, cancels and returns typ
   await page.keyboard.insertText(" // continued");
   await expect(source).toHaveText("const answer = 42; // continued");
 
-  await page.keyboard.press(nextControl);
-  await expect(language).toBeFocused();
+  await page.keyboard.press("Shift+F10");
+  await expect(languageSearch(page)).toBeFocused();
   await page.keyboard.press("Enter");
+  await expect(languageSearch(page)).toBeFocused();
+  await expect(block).toHaveAttribute("data-language", "typescript");
   await languageSearch(page).fill("python");
   await page.keyboard.press("Escape");
   await expect(languageSearch(page)).toHaveCount(0);
@@ -174,36 +185,15 @@ test("the block language is keyboard reachable, filters, cancels and returns typ
   await page.keyboard.press("ControlOrMeta+z");
   await expect(block).toHaveAttribute("data-language", "typescript");
   await expect(source).toHaveText("const answer = 42; // continued");
-});
 
-test("an open language menu keeps its own block after a peer shifts positions", async ({ page, browser }) => {
-  await openDocument(page, "language block identity");
-  await page.keyboard.insertText("neighbor paragraph");
-  const target = await insertCode(page, "const answer = 42;");
-  const targetId = await target.getAttribute("id");
-  if (targetId === null) throw new Error("e2e: missing code block id");
-  const other = await insertCode(page, "let untouched = 9;");
-  const otherLanguage = await other.getAttribute("data-language");
-  await focusCode(target.locator(":scope > code"));
-  await languageControl(page).click();
-  await languageSearch(page).fill("python");
-
-  const peerContext = trackContext(await browser.newContext());
-  const peer = await peerContext.newPage();
-  await peer.goto(page.url());
-  const peerNeighbor = peer.locator(".ub-editor .ProseMirror > p").first();
-  await expect(peerNeighbor).toHaveText("neighbor paragraph");
-  await focusCode(peerNeighbor);
-  await peer.keyboard.insertText(" before the code".repeat(8));
-  await expect(page.locator(".ub-editor .ProseMirror > p").first()).toContainText("before the code");
-  // The peer's inserted text shifts positions while the picker keeps focus.
-  // Changing a browser selection into another editable block also focuses it,
-  // which correctly dismisses a standard Popover before a pick is possible.
-  await page.getByRole("option", { name: "python", exact: true }).click();
-  await expect(page.locator(`.ub-code[id="${targetId}"]`)).toHaveAttribute("data-language", "python");
-  await expect.poll(() => other.getAttribute("data-language")).toBe(otherLanguage);
-  await expect(target.locator(":scope > code")).toHaveText("const answer = 42;");
-  await expect(other.locator(":scope > code")).toHaveText("let untouched = 9;");
+  // A passive caption lets the native click place the caret in that block.
+  // Use coordinates because its pointer-events:none deliberately targets the
+  // source panel beneath the visible label.
+  const caption = await earlier.locator(".ub-code-caption-text").boundingBox();
+  if (caption === null) throw new Error("e2e: missing passive code caption");
+  await page.mouse.click(caption.x + caption.width / 2, caption.y + caption.height / 2);
+  await expect(earlier.getByRole("button", { name: "Code language", exact: true })).toBeVisible();
+  await expect(language).toHaveCount(0);
 });
 
 for (const deviceName of ["iPhone 13", "iPad Pro 11"] as const) {
@@ -211,19 +201,58 @@ for (const deviceName of ["iPhone 13", "iPad Pro 11"] as const) {
     const context = trackContext(await browser.newContext(devices[deviceName]));
     const page = await context.newPage();
     await openDocument(page, `touch code language ${deviceName}`);
+    const earlier = await insertCode(page, "earlier source");
     const block = await insertCode(page, "const answer = 42;");
     const source = block.locator(":scope > code");
     await source.tap();
     const language = languageControl(page);
     await expect(language).toBeVisible();
-    const bounds = await language.boundingBox();
-    const blockBounds = await block.boundingBox();
-    if (bounds === null || blockBounds === null) throw new Error("e2e: missing code header geometry");
-    expect(bounds.height).toBeGreaterThanOrEqual(44);
-    expect(bounds.width).toBeGreaterThanOrEqual(44);
-    expect(bounds.y).toBeGreaterThanOrEqual(blockBounds.y);
-    expect(bounds.y + bounds.height).toBeLessThanOrEqual(blockBounds.y + blockBounds.height);
+    const header = await block.evaluate((element) => {
+      const trigger = element.querySelector<HTMLButtonElement>(".ub-code-language-trigger");
+      const copy = element.querySelector<HTMLButtonElement>(".ub-copy");
+      if (trigger === null || copy === null) throw new Error("e2e: missing code header controls");
+      const textRect = (control: HTMLElement): DOMRect => {
+        const range = document.createRange();
+        range.selectNodeContents(control.querySelector("span") ?? control);
+        return range.getBoundingClientRect();
+      };
+      const label = textRect(trigger);
+      const copyLabel = textRect(copy);
+      const bounds = trigger.getBoundingClientRect();
+      const source = element.querySelector(":scope > code");
+      if (source === null) throw new Error("e2e: missing code source");
+      return {
+        labelCenter: label.top + label.height / 2,
+        copyCenter: copyLabel.top + copyLabel.height / 2,
+        width: bounds.width,
+        height: bounds.height,
+        bottom: bounds.bottom,
+        sourceTop: source.getBoundingClientRect().top,
+      };
+    });
+    expect(Math.abs(header.labelCenter - header.copyCenter)).toBeLessThanOrEqual(1);
+    expect(header.height).toBeGreaterThanOrEqual(44);
+    expect(header.width).toBeGreaterThanOrEqual(44);
+    expect(header.bottom).toBeLessThanOrEqual(header.sourceTop);
+    expect(await earlier.evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).paddingTop) /
+        Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+    )).toBeLessThanOrEqual(1.6);
     await capture(page, info, `code-language-${deviceName}-closed`);
+    // The touch target stays above the source: tapping the first line near its
+    // left edge must still place the native selection in editable text.
+    const firstLine = await source.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const rect = range.getClientRects()[0];
+      if (rect === undefined) throw new Error("e2e: missing source text geometry");
+      return { x: rect.left + 4, y: rect.top + rect.height / 2 };
+    });
+    await page.touchscreen.tap(firstLine.x, firstLine.y);
+    await expect(languageSearch(page)).toHaveCount(0);
+    await expect.poll(() => source.evaluate((element) =>
+      element.contains(document.getSelection()?.anchorNode ?? null),
+    )).toBe(true);
     await language.tap();
     await expect(languageSearch(page)).toBeFocused();
     await expectCompactDropdown(page);

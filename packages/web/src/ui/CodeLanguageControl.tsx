@@ -41,6 +41,24 @@ export function CodeLanguageControl({ editor, canWrite }: {
     return () => { editor.off("transaction", read); };
   }, [editor]);
 
+  useEffect(() => {
+    const dom = editor.view.dom;
+    const key = (event: KeyboardEvent): void => {
+      if (event.isComposing || event.keyCode === 229 || event.key !== "F10" || !event.shiftKey ||
+        event.ctrlKey || event.altKey || event.metaKey || !editor.isEditable || !canWrite()) return;
+      const block = selectedBlock(editor.state, "code");
+      const node = block === null ? null : editor.view.nodeDOM(block.pos);
+      const trigger = node instanceof HTMLElement ? node.querySelector<HTMLButtonElement>(".ub-code-language-trigger") : null;
+      if (trigger === null) return;
+      // Like the table's caret menu shortcut, activate the framework trigger
+      // directly without changing native Tab traversal or copy-button access.
+      event.preventDefault();
+      trigger.click();
+    };
+    dom.addEventListener("keydown", key);
+    return () => { dom.removeEventListener("keydown", key); };
+  }, [editor, canWrite]);
+
   const caret = selectedBlock(editor.state, "code");
   const id = target?.id ?? caret?.node.attrs.id;
   const found = typeof id === "string" ? findBlockById(editor.state.doc, id) : null;
@@ -100,7 +118,8 @@ export function CodeLanguageControl({ editor, canWrite }: {
       setOpen(next);
     }}>
       <PopoverTrigger asChild>
-        <button type="button" className="ub-code-language-trigger flex max-w-full min-h-6 cursor-pointer items-center gap-[0.35rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.3rem] py-0 text-muted-foreground [font:inherit] hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11" aria-label="Code language"
+        <button type="button" className="ub-code-language-trigger flex max-w-full cursor-pointer items-start gap-[0.35rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.3rem] py-[0.05rem] text-muted-foreground [font:inherit] hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11" aria-label="Code language"
+          title="Code language · Shift+F10 from the code block" aria-keyshortcuts="Shift+F10"
           aria-haspopup="listbox" aria-controls={open ? listId : undefined}>
           <span className="overflow-hidden text-ellipsis">{language || "Plain text"}</span><span aria-hidden="true">▾</span>
         </button>
@@ -122,7 +141,7 @@ export function CodeLanguageControl({ editor, canWrite }: {
         }}>
         <form className="border-b border-border p-2" onSubmit={(event) => {
           event.preventDefault();
-          if (filtered[0] !== undefined) choose(filtered[0]);
+          if (query.trim() !== "" && filtered[0] !== undefined) choose(filtered[0]);
         }}>
           <input ref={search} type="search" role="combobox" aria-label="Search languages"
             aria-autocomplete="list" aria-expanded={open} aria-controls={listId}

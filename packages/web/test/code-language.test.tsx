@@ -181,10 +181,17 @@ describe("code block language", () => {
     peer.destroy();
   });
 
-  it("rereads permission at pick time instead of trusting the open menu", async () => {
-    let writable = true;
+  it("rereads permission for the caret shortcut and at pick time", async () => {
+    let writable = false;
     const fix = await fixture("ts", () => writable);
-    await open();
+    const shortcut = (): boolean => fix.editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "F10", shiftKey: true, bubbles: true, cancelable: true,
+    }));
+    await act(async () => { expect(shortcut()).toBe(true); });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    writable = true;
+    await act(async () => { expect(shortcut()).toBe(false); });
+    expect(screen.getByRole("combobox", { name: "Search languages" })).not.toBeNull();
     const before = snapshotFragment(fix.ydoc);
     writable = false;
     await pick("javascript");
