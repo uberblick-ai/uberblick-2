@@ -49,6 +49,16 @@ normally; the implementer builds alongside it under
 [scheduling semantics](workflow.md#scheduling-semantics). Invent no dependency,
 scan no further and leave the other issue unedited.
 
+A prerequisite another change supplies, in this or another repository, is a
+native blocker, never a `needs-human` stop. GitHub accepts only issues as
+blockers, in any repository, and ub-agents waits on open blockers from other
+repositories. For a pull request, block on the issue it closes. If it closes
+none, create one in that pull request's repository with no labels, add
+`Closes OWNER/REPO#N` to the pull request description, and add the issue as a
+blocker (`gh api repos/uberblick-ai/uberblick-2/issues/N/dependencies/blocked_by
+-F issue_id=ID`, ID being the blocker's numeric issue id). Then finish
+preparation normally.
+
 Keep investigation proportional. On resumption or relevant main changes, refresh
 only affected evidence, corpus sources and governing instructions; expand discovery
 only for newly exposed gaps. Do not require new planning artifacts. An unrelated
