@@ -27,8 +27,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { act, renderSettled } from "./react-render.js";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -438,46 +437,34 @@ describe("an unwritable document room", () => {
       synced: false,
       writable: false,
     });
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
-    try {
-      await act(async () => {
-        root.render(
-          <EditorPane
-            connection={connection}
-            segment={WORKSPACE}
-            presence={[]}
-            author="tester"
-            archived={false}
-            docLinks={null}
-            onRestore={() => {}}
-            onSelectThread={() => {}}
-          />,
-        );
-      });
-      const title = host.querySelector<HTMLInputElement>(".ub-title");
-      expect(title?.readOnly).toBe(true);
-      expect(host.querySelector(".ub-tag-add")).toBeNull();
-      expect(host.querySelector(".ub-editor [contenteditable=true]")).toBeNull();
-      expect(
-        host.querySelector('.ub-editor [role="textbox"]')?.getAttribute("aria-readonly"),
-      ).toBe("true");
-      expect(host.querySelector(".ub-status")?.textContent).toContain("not saved");
+    const { container: host } = await renderSettled(
+      <EditorPane
+        connection={connection}
+        segment={WORKSPACE}
+        presence={[]}
+        author="tester"
+        archived={false}
+        docLinks={null}
+        onRestore={() => {}}
+        onSelectThread={() => {}}
+      />,
+    );
+    const title = host.querySelector<HTMLInputElement>(".ub-title");
+    expect(title?.readOnly).toBe(true);
+    expect(host.querySelector(".ub-tag-add")).toBeNull();
+    expect(host.querySelector(".ub-editor [contenteditable=true]")).toBeNull();
+    expect(
+      host.querySelector('.ub-editor [role="textbox"]')?.getAttribute("aria-readonly"),
+    ).toBe("true");
+    expect(host.querySelector(".ub-status")?.textContent).toContain("not saved");
 
-      const setter = Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,
-        "value",
-      )?.set;
-      setter?.call(title, "Browser only");
-      act(() => title?.dispatchEvent(new Event("input", { bubbles: true })));
-      expect(getMeta(ydoc).title).toBe("References");
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    setter?.call(title, "Browser only");
+    act(() => title?.dispatchEvent(new Event("input", { bubbles: true })));
+    expect(getMeta(ydoc).title).toBe("References");
   });
 });
 
@@ -511,87 +498,75 @@ describe("following a reference", () => {
       { uuid: TARGET, title: "The hub" },
     ]);
     const selected: string[] = [];
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
-    try {
-      await act(async () => {
-        root.render(
-          <EditorPane
-            connection={connectionFor(ydoc)}
-            segment={WORKSPACE}
-            presence={[]}
-            author="tester"
-            archived={false}
-            docLinks={context}
-            onRestore={() => {}}
-            onSelectThread={(threadId) => selected.push(threadId)}
-          />,
-        );
+    const { container: host } = await renderSettled(
+      <EditorPane
+        connection={connectionFor(ydoc)}
+        segment={WORKSPACE}
+        presence={[]}
+        author="tester"
+        archived={false}
+        docLinks={context}
+        onRestore={() => {}}
+        onSelectThread={(threadId) => selected.push(threadId)}
+      />,
+    );
+
+    const anchor = host.querySelector<HTMLAnchorElement>("a.ub-doclink");
+    expect(anchor?.textContent).toBe("the hub");
+
+    const click = (
+      target: Element | null | undefined,
+      init: MouseEventInit = {},
+    ): MouseEvent => {
+      const event = new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        ...init,
       });
+      act(() => {
+        target?.dispatchEvent(event);
+      });
+      return event;
+    };
 
-      const anchor = host.querySelector<HTMLAnchorElement>("a.ub-doclink");
-      expect(anchor?.textContent).toBe("the hub");
+    // ---- the reference owns its own words ----
+    const followed = click(anchor);
+    expect(opened).toEqual([TARGET]);
+    expect(selected).toEqual([]);
+    // The app navigated, so the browser must not: a real anchor would
+    // otherwise reload the whole client on its href.
+    expect(followed.defaultPrevented).toBe(true);
 
-      const click = (
-        target: Element | null | undefined,
-        init: MouseEventInit = {},
-      ): MouseEvent => {
-        const event = new MouseEvent("click", {
-          bubbles: true,
-          cancelable: true,
-          ...init,
-        });
-        act(() => {
-          target?.dispatchEvent(event);
-        });
-        return event;
-      };
+    // ---- a modified click is the browser's ----
+    // Read whether the app left it alone once it has bubbled past the app,
+    // then stand in for the browser: jsdom cannot open a new tab, and logs
+    // "Not implemented: navigation" when a click asks it to.
+    let leftToBrowser: boolean | undefined;
+    window.addEventListener(
+      "click",
+      (event) => {
+        leftToBrowser = !event.defaultPrevented;
+        event.preventDefault();
+      },
+      { once: true },
+    );
+    click(anchor, { metaKey: true });
+    expect(opened).toEqual([TARGET]);
+    expect(leftToBrowser).toBe(true);
 
-      // ---- the reference owns its own words ----
-      const followed = click(anchor);
-      expect(opened).toEqual([TARGET]);
-      expect(selected).toEqual([]);
-      // The app navigated, so the browser must not: a real anchor would
-      // otherwise reload the whole client on its href.
-      expect(followed.defaultPrevented).toBe(true);
+    // ---- and the thread is still reachable from the rest of the highlight ----
+    const highlight = host.querySelector("[data-comment-thread]");
+    expect(highlight).not.toBeNull();
+    click(highlight);
+    expect(selected).toEqual(["t-1"]);
+    expect(opened).toEqual([TARGET]);
 
-      // ---- a modified click is the browser's ----
-      // Read whether the app left it alone once it has bubbled past the app,
-      // then stand in for the browser: jsdom cannot open a new tab, and logs
-      // "Not implemented: navigation" when a click asks it to.
-      let leftToBrowser: boolean | undefined;
-      window.addEventListener(
-        "click",
-        (event) => {
-          leftToBrowser = !event.defaultPrevented;
-          event.preventDefault();
-        },
-        { once: true },
-      );
-      click(anchor, { metaKey: true });
-      expect(opened).toEqual([TARGET]);
-      expect(leftToBrowser).toBe(true);
-
-      // ---- and the thread is still reachable from the rest of the highlight ----
-      const highlight = host.querySelector("[data-comment-thread]");
-      expect(highlight).not.toBeNull();
-      click(highlight);
-      expect(selected).toEqual(["t-1"]);
-      expect(opened).toEqual([TARGET]);
-
-      // ---- and an archived target is still somewhere you can go ----
-      // Archiving says which document this is, not whether it opens: the read
-      // view is still the destination (#146), so the click keeps navigating.
-      tombstoneDirectoryEntry(directory, TARGET);
-      expect(anchor?.getAttribute("data-doc-link-state")).toBe("archived");
-      expect(click(anchor).defaultPrevented).toBe(true);
-      expect(opened).toEqual([TARGET, TARGET]);
-    } finally {
-      await act(async () => root.unmount());
-      host.remove();
-    }
+    // ---- and an archived target is still somewhere you can go ----
+    // Archiving says which document this is, not whether it opens: the read
+    // view is still the destination (#146), so the click keeps navigating.
+    tombstoneDirectoryEntry(directory, TARGET);
+    expect(anchor?.getAttribute("data-doc-link-state")).toBe("archived");
+    expect(click(anchor).defaultPrevented).toBe(true);
+    expect(opened).toEqual([TARGET, TARGET]);
   });
 });

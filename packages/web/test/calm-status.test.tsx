@@ -19,9 +19,8 @@
  *   that a real backlog was being read as "synced".
  */
 
+import { act, render } from "./react-render.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
 import { SETTLE_MS, rawSyncState, useCalmSyncState } from "../src/ui/calm.js";
 import type { SyncState } from "../src/ui/calm.js";
 import type { RoomStatus } from "../src/collab/rooms.js";
@@ -52,28 +51,20 @@ function probe(initial: RoomStatus): {
   shown: () => SyncState;
   feed: (status: RoomStatus) => void;
   wait: (ms: number) => void;
-  unmount: () => void;
 } {
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
   let shown: SyncState = "synced";
   function Probe({ status }: { status: RoomStatus }): null {
     shown = useCalmSyncState(rawSyncState(status));
     return null;
   }
+  const view = render(<Probe status={initial} />);
   const feed = (status: RoomStatus): void => {
-    act(() => root.render(<Probe status={status} />));
+    view.rerender(<Probe status={status} />);
   };
-  feed(initial);
   return {
     shown: () => shown,
     feed,
     wait: (ms) => act(() => void vi.advanceTimersByTime(ms)),
-    unmount: () => {
-      act(() => root.unmount());
-      host.remove();
-    },
   };
 }
 
@@ -82,36 +73,26 @@ function scopedProbe(initial: RoomStatus): {
   shown: () => SyncState | null;
   feed: (status: RoomStatus) => void;
   wait: (ms: number) => void;
-  unmount: () => void;
 } {
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
   const source = {};
   let shown: SyncState | null = null;
   function Probe({ status }: { status: RoomStatus }): null {
     shown = useCalmSyncState(rawSyncState(status), source);
     return null;
   }
+  const view = render(<Probe status={initial} />);
   const feed = (status: RoomStatus): void => {
-    act(() => root.render(<Probe status={status} />));
+    view.rerender(<Probe status={status} />);
   };
-  feed(initial);
   return {
     shown: () => shown,
     feed,
     wait: (ms) => act(() => void vi.advanceTimersByTime(ms)),
-    unmount: () => {
-      act(() => root.unmount());
-      host.remove();
-    },
   };
 }
 
 describe("the sync indicator only draws a state that has persisted", () => {
   beforeEach(() => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
     vi.useFakeTimers();
   });
 
@@ -138,7 +119,6 @@ describe("the sync indicator only draws a state that has persisted", () => {
       view.wait(60);
       expect(view.shown()).toBe("synced");
     }
-    view.unmount();
   });
 
   it("bounds a new room's blank slot even while its reading oscillates", () => {
@@ -158,8 +138,6 @@ describe("the sync indicator only draws a state that has persisted", () => {
     expect(view.shown()).toBeNull();
     view.wait(1);
     expect(view.shown()).toBe("synced");
-
-    view.unmount();
   });
 
   it("crosses to busy at 400ms, and back to synced at 300ms of quiet", () => {
@@ -176,8 +154,6 @@ describe("the sync indicator only draws a state that has persisted", () => {
     expect(view.shown()).toBe("syncing");
     view.wait(1);
     expect(view.shown()).toBe("synced");
-
-    view.unmount();
   });
 
   /**
@@ -207,8 +183,6 @@ describe("the sync indicator only draws a state that has persisted", () => {
     view.feed(room({ unsyncedChanges: 12 }));
     view.wait(60_000);
     expect(view.shown()).toBe("syncing");
-
-    view.unmount();
   });
 
   it("does not bounce back when typing resumes inside the quiet window", () => {
@@ -224,8 +198,6 @@ describe("the sync indicator only draws a state that has persisted", () => {
     view.feed(UNACKED);
     view.wait(10_000);
     expect(view.shown()).toBe("syncing");
-
-    view.unmount();
   });
 
   it("never delays a disconnect", () => {
@@ -234,6 +206,5 @@ describe("the sync indicator only draws a state that has persisted", () => {
     // No timer advanced: offline is on screen as soon as it is reported, which
     // is what keeps #49's "surfaces within ~5s" true.
     expect(view.shown()).toBe("offline");
-    view.unmount();
   });
 });

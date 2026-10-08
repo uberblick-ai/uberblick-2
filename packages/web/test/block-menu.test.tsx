@@ -26,9 +26,8 @@
  * the prose" claim is checked in the browser (`e2e/block-menu.spec.ts`).
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { describe, expect, it, vi } from "vitest";
+import { act, render } from "./react-render.js";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -48,11 +47,7 @@ import {
 import type { SlashTrigger } from "../src/editor/block-menu.js";
 import { BlockMenu } from "../src/ui/BlockMenu.js";
 import { mountEditor } from "./helpers.js";
-
-beforeEach(() => {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-});
+import { onTestCleanup } from "./test-cleanup.js";
 
 interface Mounted {
   editor: Editor;
@@ -81,22 +76,20 @@ interface Mounted {
 function mountMenu(ydoc: Y.Doc, initiallyFocused = false): Mounted {
   const { editor, element } = mountEditor(ydoc);
   const frame = document.createElement("div");
+  onTestCleanup(() => frame.remove());
   document.body.appendChild(frame);
   frame.appendChild(element);
   const container = document.createElement("div");
   frame.appendChild(container);
-  const root = createRoot(container);
-  act(() => {
-    if (initiallyFocused) editor.view.focus();
-    root.render(<BlockMenu editor={editor} host={{ current: frame }} />);
-  });
+  if (initiallyFocused) act(() => editor.view.focus());
+  const view = render(<BlockMenu editor={editor} host={{ current: frame }} />, { container });
 
   const query = <T extends Element>(selector: string): T | null =>
     document.body.querySelector<T>(selector);
   let menuMounted = true;
   const unmountMenu = (): void => {
     if (!menuMounted) return;
-    act(() => root.unmount());
+    view.unmount();
     menuMounted = false;
   };
   return {

@@ -88,7 +88,7 @@ test("a release bundle makes no implicit connection and uses a valid served endp
 
 
 for (const endpoint of ["ws://localhost:8080/ws", "wss://remote.example/ws"]) {
-  test(`a released page for ${endpoint} guides every route without credentials or documents @webkit`, async ({ context, page }, testInfo) => {
+  test(`a released page for ${endpoint} guides every route without credentials or documents`, async ({ context, page }, testInfo) => {
     await context.route("**/uberblick-config.json", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
         hubUrl: endpoint, workspaces: [WORKSPACE],
@@ -112,8 +112,8 @@ for (const endpoint of ["ws://localhost:8080/ws", "wss://remote.example/ws"]) {
       await expect(commands).toHaveText([
         `ub auth login '${appUrl}'`, `ub workspace join '${appUrl}/<workspace-id>'`, "ub open",
       ]);
-      // Inherited WebKit viewports cover iPhone, iPad and MacBook; long origins
-      // and the placeholder must wrap, and remain native selectable text.
+      // Long origins and the placeholder must wrap and remain native
+      // selectable text.
       expect(await commands.evaluateAll((nodes) => nodes.every((node) => {
         const style = getComputedStyle(node);
         return (style.getPropertyValue("user-select") || style.getPropertyValue("-webkit-user-select")) === "text";

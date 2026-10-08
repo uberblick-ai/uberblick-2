@@ -1,7 +1,5 @@
 /** The remote guide makes only the claims established by the public answer. */
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, render } from "./react-render.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CLAIM_STATE_POLL_MS,
@@ -9,7 +7,6 @@ import {
   RemoteHubGuide,
 } from "../src/ui/RemoteHubGuide.js";
 
-const roots = new Set<Root>();
 const fetchMock = vi.fn<typeof fetch>();
 
 function answer(value: unknown): Response {
@@ -19,12 +16,7 @@ function answer(value: unknown): Response {
 }
 
 function mount(): HTMLElement {
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  roots.add(root);
-  act(() => root.render(<RemoteHubGuide />));
-  return host;
+  return render(<RemoteHubGuide />).container;
 }
 
 async function flush(): Promise<void> {
@@ -49,19 +41,15 @@ function expectUnconfirmed(host: HTMLElement): void {
 }
 
 beforeEach(() => {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.useFakeTimers();
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
 });
 
 afterEach(() => {
-  for (const root of roots) act(() => root.unmount());
-  roots.clear();
   vi.clearAllTimers();
   vi.useRealTimers();
   vi.unstubAllGlobals();
-  document.body.replaceChildren();
 });
 
 describe("the remote hub setup reading", () => {
@@ -226,9 +214,8 @@ describe("the remote hub setup reading", () => {
       signal = init?.signal;
       return new Promise<Response>((resolve) => { complete = resolve; });
     });
-    mount();
-    for (const root of roots) act(() => root.unmount());
-    roots.clear();
+    const view = render(<RemoteHubGuide />);
+    view.unmount();
     expect(signal?.aborted).toBe(true);
     await act(async () => complete(answer({ unclaimed: true, canClaim: true })));
     await advance(CLAIM_STATE_POLL_MS * 2);

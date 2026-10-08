@@ -81,8 +81,6 @@ permissions or policy.
     --jq '.data.addDiscussionComment.comment.url'
   ```
 
-  A retrospective is non-blocking telemetry: a failed post blocks nothing.
-
 ## How roles run
 
 Delivery runs four roles: issue-preparer, implementer, reviewer and integrator.
@@ -135,7 +133,12 @@ A pointer is a route to the source, not a substitute for reading it.
   `.agents/protocols/review-protocol.md` or `.agents/protocols/integration.md`.
 - **Edit corpus:** update the owning document rather than copying its content
   into repository instructions. Keep pages short and practical: usage, example
-  output, scenarios, then Related; cut sentences that restate output. Corpus edits
+  output, scenarios, then Related; cut sentences that restate output. Rewrite,
+  never append: change the affected sentences to the new present-tense truth,
+  delete what they replace, and add a block only for a fact no existing block
+  owns. No PR or issue number, merge date, run id or "since" clause reaches a
+  Regular Document; GitHub owns that provenance. Decision-record Links may cite
+  GitHub items. Corpus edits
   must stay within recorded authorization: update descriptions of delivered
   behavior, but do not weaken a guarantee or expand agent authority through a
   doc edit. An unsettled change to those commitments requires an owner decision.

@@ -15,7 +15,9 @@
  *
  *     {"hubUrl": "wss://host/ws", "workspaces": ["uberblick-<uuid>", "<uuid>"],
  *      "hubAuthToken": "<token-signing key>",
- *      "remoteHubUrl": "wss://team-host/ws", "rebound": true}
+ *      "remoteHubUrl": "wss://team-host/ws", "rebound": true,
+ *      "servedWorkspaces": {"<uuid>": {"browserKey": "<workspace key>",
+ *        "remoteHubUrl": "wss://team-host/ws"}}}
  *
  * The final two keys are present only when `ub open` is the serving process:
  * `hubUrl` then names its loopback websocket, `remoteHubUrl` names the hub its
@@ -38,8 +40,10 @@
  * Remote hosts serve no signing secret or device credential. Direct remote
  * browser sign-in is unavailable; use ub auth login and ub open on a computer.
  * A loopback development server still supplies its local signing secret.
- * Bound ub open supplies a stable, independent workspace browser key, admitting
- * only that workspace's loopback rooms and read API, never the upstream hub.
+ * Bound ub open supplies stable, independent keys for the workspaces it serves,
+ * admitting only each key's workspace rooms and API, never the upstream hub.
+ * Its servedWorkspaces map uses bare UUIDs; a null remoteHubUrl means an
+ * explicitly local workspace. The legacy fields describe the startup binding.
  * Unbound ub open supplies no workspace or key.
  *
  * Configuration invariant: no hardcoded hub addresses anywhere except the in-code
@@ -55,7 +59,7 @@
  */
 
 import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
-import { parseWorkspaceId } from "@uberblick/schema";
+import { parseWorkspaceId, validateWorkspaceName } from "@uberblick/schema";
 
 // Injected as string literals at build time. Declared, never imported.
 declare const __RUNTIME_CONFIG_ONLY__: boolean;
@@ -116,12 +120,20 @@ export interface ClientConfig {
    * `ub open` process serves.
    */
   localServing: LocalServing | null;
+  /** Exact local-serving admission map; absent for legacy/dev documents. */
+  servedWorkspaces?: Readonly<Record<string, ServedWorkspace>>;
+}
+
+export interface ServedWorkspace extends LocalServing {
+  browserKey: string;
+  /** Name read from this machine's replica without taking its serving role. */
+  name: string | null;
 }
 
 /** The startup binding `ub open` keeps serving until it is restarted. */
 export interface LocalServing {
   workspace: string | null;
-  remoteHubUrl: string;
+  remoteHubUrl: string | null;
   rebound: boolean;
 }
 
@@ -333,6 +345,51 @@ interface DocumentConfig {
   /** Empty when the document named no usable token-signing key. */
   hubAuthToken: string;
   localServing: LocalServing | { rejected: string } | null;
+  servedWorkspaces?: Readonly<Record<string, ServedWorkspace>>;
+  servedWorkspacesRejected?: string;
+}
+
+/** Invalid local maps deny admission rather than falling back to the legacy key. */
+function usableServedWorkspaces(
+  value: unknown,
+  workspaces: DocumentConfig["workspaces"],
+  rebound: boolean,
+): { map: Record<string, ServedWorkspace>; rejected?: string } {
+  const map: Record<string, ServedWorkspace> = {};
+  if (value === null || typeof value !== "object" || Array.isArray(value) || "rejected" in workspaces) {
+    return { map, rejected: "servedWorkspaces is not a usable local-serving map" };
+  }
+  const offered = new Map(workspaces.list.map((segment) => [parseWorkspaceId(segment).uuid, segment]));
+  const startup = workspaces.list[0];
+  const startupUuid = startup === undefined ? null : parseWorkspaceId(startup).uuid;
+  let invalid = false;
+  for (const [uuid, entryValue] of Object.entries(value)) {
+    if (!offered.has(uuid) || entryValue === null || typeof entryValue !== "object" || Array.isArray(entryValue)) {
+      invalid = true;
+      continue;
+    }
+    const entry = entryValue as Record<string, unknown>;
+    const remote = entry.remoteHubUrl === null ? null : typeof entry.remoteHubUrl === "string"
+      ? usableEndpoint(entry.remoteHubUrl, "remoteHubUrl") : { rejected: "invalid upstream" };
+    if (remote !== null && "rejected" in remote) {
+      invalid = true;
+      continue;
+    }
+    map[uuid] = {
+      browserKey: typeof entry.browserKey === "string" ? entry.browserKey.trim() : "",
+      workspace: offered.get(uuid) ?? uuid,
+      remoteHubUrl: remote?.url ?? null,
+      rebound: rebound && uuid === startupUuid,
+      name: usableWorkspaceName(entry.name),
+    };
+  }
+  return { map, ...(invalid ? { rejected: "servedWorkspaces contains an unusable entry" } : {}) };
+}
+
+function usableWorkspaceName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try { return validateWorkspaceName(value); }
+  catch { return null; }
 }
 
 /**
@@ -400,19 +457,26 @@ function readDocument(
   // spelling out `,"hubUrl":` is not either: the body parsed as JSON above, so
   // a quote inside a string is written `\"`, while a real key's opening quote
   // can only follow `{` or `,`.
+  const document = parsed as Record<string, unknown>;
+  // Each served workspace owns one upstream too. Count these expected nested
+  // keys before the same best-effort duplicate check used for legacy documents.
+  const nestedUpstreams = document.servedWorkspaces !== null && typeof document.servedWorkspaces === "object"
+    ? Object.values(document.servedWorkspaces).filter((entry) => entry !== null && typeof entry === "object" && Object.hasOwn(entry, "remoteHubUrl")).length
+    : 0;
   const twice = [
     "hubUrl",
     "workspaces",
     "hubAuthToken",
     "remoteHubUrl",
     "rebound",
+    "servedWorkspaces",
   ].find(
-    (key) => (body.match(new RegExp(`(^|[^\\\\])"${key}"\\s*:`, "g")) ?? []).length > 1,
+    (key) => (body.match(new RegExp(`(^|[^\\\\])"${key}"\\s*:`, "g")) ?? []).length >
+      (key === "remoteHubUrl" ? nestedUpstreams + (Object.hasOwn(document, key) ? 1 : 0) : 1),
   );
   if (twice !== undefined) {
     return { rejected: `it names ${twice} more than once` };
   }
-  const document = parsed as Record<string, unknown>;
   const url = document.hubUrl;
   const secret = document.hubAuthToken;
   const workspaces = usableWorkspaces(document.workspaces);
@@ -423,6 +487,9 @@ function readDocument(
       : typeof remote === "string" && remote !== ""
         ? usableEndpoint(remote, "remoteHubUrl")
         : { rejected: "remoteHubUrl is not a non-empty string" };
+  const served = Object.hasOwn(document, "servedWorkspaces")
+    ? usableServedWorkspaces(document.servedWorkspaces, workspaces, document.rebound === true)
+    : null;
   return {
     hubUrl:
       typeof url === "string" && url !== ""
@@ -443,6 +510,7 @@ function readDocument(
             workspace: "rejected" in workspaces ? null : (workspaces.list[0] ?? null),
             rebound: document.rebound === true,
           },
+    ...(served === null ? {} : { servedWorkspaces: served.map, servedWorkspacesRejected: served.rejected }),
   };
 }
 
@@ -512,6 +580,7 @@ export async function readClientConfig(
   if (outcome.localServing !== null && "rejected" in outcome.localServing) {
     notes.push(outcome.localServing.rejected);
   }
+  if (outcome.servedWorkspacesRejected !== undefined) notes.push(outcome.servedWorkspacesRejected);
 
   const endpoint = "rejected" in outcome.hubUrl
     ? BUILT_IN_HUB_URL
@@ -530,6 +599,9 @@ export async function readClientConfig(
       outcome.localServing === null || "rejected" in outcome.localServing
         ? null
         : outcome.localServing,
+    ...(outcome.servedWorkspaces === undefined ? {} : {
+      servedWorkspaces: isLoopbackEndpoint(endpoint.hubUrl) ? outcome.servedWorkspaces : {},
+    }),
     ...(notes.length === 0 ? {} : { rejected: notes.join("; ") }),
   };
 }
@@ -558,7 +630,7 @@ export function resolveClientConfig(
 ): Promise<ClientConfig> {
   pending ??= readClientConfig(fetchImpl).then(({ rejected, ...config }) => {
     resolved = config;
-    if (config.hubAuthToken === "") pending = null;
+    if (config.hubAuthToken === "" && !Object.values(config.servedWorkspaces ?? {}).some((entry) => entry.browserKey !== "")) pending = null;
     // One line, always: the sources in force, and — when there was one — why
     // the document was not used. A hub that is merely misconfigured otherwise
     // looks exactly like a hub that is down, and a switcher with nothing on it
@@ -599,8 +671,16 @@ export function hubUrl(): string {
  * until a `fetch` completes. Empty means the served document carried none —
  * which is a state, not an error, and the caller is what says so.
  */
-export function hubAuthToken(): string {
-  return settled().hubAuthToken;
+export function hubAuthToken(workspace?: string): string {
+  const config = settled();
+  if (config.servedWorkspaces === undefined) return config.hubAuthToken;
+  const selected = workspace ?? config.workspaces[0];
+  if (selected === undefined) return "";
+  try {
+    return config.servedWorkspaces[parseWorkspaceId(selected).uuid]?.browserKey ?? "";
+  } catch {
+    return "";
+  }
 }
 
 /** The resolved configuration, or the error every reader of it shares. */
@@ -626,8 +706,22 @@ export function hubEndpoint(): HubEndpoint {
 }
 
 /** The `ub open` startup binding this page was served with, when there is one. */
-export function localServing(): LocalServing | null {
-  return settled().localServing;
+export function localServing(workspace?: string): LocalServing | null {
+  const config = settled();
+  if (config.servedWorkspaces === undefined) return config.localServing;
+  const selected = workspace ?? config.workspaces[0];
+  if (selected === undefined) return null;
+  try {
+    return config.servedWorkspaces[parseWorkspaceId(selected).uuid] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Local menu labels require no room connection or replica startup. */
+export function servedWorkspaceNames(): ReadonlyMap<string, string | null> | null {
+  const workspaces = settled().servedWorkspaces;
+  return workspaces === undefined ? null : new Map(Object.entries(workspaces).map(([uuid, entry]) => [uuid, entry.name]));
 }
 
 /**
@@ -650,6 +744,6 @@ export function browserSignInRequired(): boolean {
   // runtime document supplies no browser key or local-serving diagnostic.
   return config.hubUrl !== "" && (
     !isLoopbackEndpoint(config.hubUrl) ||
-    (RUNTIME_CONFIG_ONLY && config.hubAuthToken === "" && config.localServing === null)
+    (RUNTIME_CONFIG_ONLY && config.hubAuthToken === "" && config.localServing === null && config.servedWorkspaces === undefined)
   );
 }

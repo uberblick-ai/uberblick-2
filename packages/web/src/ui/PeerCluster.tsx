@@ -31,9 +31,12 @@ function peerKey(clientId: number): string {
 export function PeerCluster({
   presence,
   onActivate,
+  reserveSpace = false,
 }: {
   presence: readonly RemotePresence[];
   onActivate?: ((session: RemotePresence) => void) | undefined;
+  /** Keep the editor's status and prose still as the capped roster changes. */
+  reserveSpace?: boolean;
 }): ReactElement {
   const visible = presence.slice(0, VISIBLE_PEERS);
   const remaining = presence.slice(VISIBLE_PEERS);
@@ -106,7 +109,9 @@ export function PeerCluster({
           setOpen(shown);
         }}
       >
-        <span className="ub-peers" ref={cluster}>
+        {/* Four 28px controls with three 6px overlaps occupy 94px. Only the
+            editor reserves the cap; waiting notices keep their compact row. */}
+        <span className={`ub-peers relative flex flex-none items-center justify-end ml-auto${reserveSpace ? " min-w-[94px]" : ""}`} ref={cluster}>
           {visible.map((session, index) => {
             const label = presenceLabel(session);
             return (

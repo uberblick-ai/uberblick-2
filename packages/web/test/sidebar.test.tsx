@@ -17,9 +17,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, renderSettled, type RenderResult } from "./react-render.js";
 import type { ReactNode } from "react";
 import * as Y from "yjs";
 import {
@@ -122,7 +120,7 @@ function installStorage(): void {
   });
 }
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
+let mounted: RenderResult | null = null;
 
 beforeEach(() => {
   installStorage();
@@ -139,12 +137,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  const open = mounted;
   mounted = null;
-  if (open !== null) {
-    act(() => open.root.unmount());
-    open.host.remove();
-  }
   rooms.clear();
   statusListeners.clear();
   roomStatus = LIVE;
@@ -153,16 +146,8 @@ afterEach(() => {
 });
 
 async function mount(node: ReactNode): Promise<HTMLElement> {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => {
-    root.render(node);
-  });
-  return host;
+  mounted = await renderSettled(node);
+  return mounted.container;
 }
 
 /** Render at `path`, and let the hub endpoint settle before anything is asserted. */
@@ -584,12 +569,8 @@ describe("the sidebar is the _sidebar document", () => {
     expect(body()?.hasAttribute("inert")).toBe(true);
 
     // A fresh mount is what a reload looks like to the component.
-    const open = mounted;
+    mounted?.unmount();
     mounted = null;
-    if (open !== null) {
-      act(() => open.root.unmount());
-      open.host.remove();
-    }
     const again = await openApp(`/${WORKSPACE}`);
     expect(groupToggle(again, 0)?.getAttribute("aria-expanded")).toBe("false");
   });
@@ -691,13 +672,15 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     const host = await openApp(`/${WORKSPACE}`);
     const documents = pane(host, ".ub-document-sidebar");
     const settings = pane(host, ".ub-settings-sidebar");
-    const settingsEntry = documents.querySelector<HTMLButtonElement>(
+    const settingsEntry = host.querySelector<HTMLButtonElement>(
       ".ub-settings-entry",
     );
 
     expectLive(documents);
     expectDead(settings);
-    expect(host.querySelectorAll(".ub-user-card")).toHaveLength(1);
+    expect(host.querySelectorAll('[data-testid="account-menu"]')).toHaveLength(1);
+    const accountControl = host.querySelector('[data-testid="account-menu"]');
+    expect(accountControl?.closest(".ub-sidebar-pane")).toBeNull();
 
     settingsEntry?.focus();
     act(() => settingsEntry?.click());
@@ -709,7 +692,8 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     );
     expectDead(documents);
     expectLive(settings);
-    expect(host.querySelectorAll(".ub-user-card")).toHaveLength(1);
+    expect(host.querySelectorAll('[data-testid="account-menu"]')).toHaveLength(1);
+    expect(host.querySelector('[data-testid="account-menu"]')).toBe(accountControl);
     expect(document.activeElement).toBe(
       settings.querySelector(".ub-settings-back"),
     );
@@ -795,7 +779,7 @@ describe("the sidebar's fixed navigation", () => {
     ]);
 
     // A pin arrives and the groups appear under it; the section has not moved,
-    // and the footer keeps the settings entry and user card.
+    // and the footer keeps the settings entry and account control.
     act(() => {
       const sidebar = sidebarDoc();
       pinDoc(sidebar, createGroup(sidebar, "Reading"), ONE);
@@ -807,7 +791,7 @@ describe("the sidebar's fixed navigation", () => {
     ]);
     expect(host.querySelector('[data-slot="sidebar-footer"] .ub-all-open-entry')).toBeNull();
     expect(host.querySelector('[data-slot="sidebar-footer"] .ub-settings-entry')).not.toBeNull();
-    expect(host.querySelector('[data-slot="sidebar-footer"] .ub-user-card')).not.toBeNull();
+    expect(host.querySelector('[data-slot="sidebar-footer"] [data-testid="account-menu"]')).not.toBeNull();
 
     // Chrome, not curation: nothing in it can be dragged, and no drag of any
     // kind can land in it.
@@ -865,12 +849,8 @@ describe("the sidebar's directory line reads a refusal", () => {
   async function directoryLine(status: Partial<RoomStatus>): Promise<string> {
     // A fresh mount per reading, the way the collapse test remounts: the rooms
     // are cached, so a new status has to be in place before they are made.
-    const open = mounted;
+    mounted?.unmount();
     mounted = null;
-    if (open !== null) {
-      act(() => open.root.unmount());
-      open.host.remove();
-    }
     rooms.clear();
     roomStatus = {
       ...LIVE,

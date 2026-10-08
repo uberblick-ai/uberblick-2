@@ -1,9 +1,7 @@
 /** New-document creation crosses both the directory and new room admission gates. */
 
+import { act, renderSettled } from "./react-render.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
 import * as Y from "yjs";
 import {
   directoryRoom,
@@ -74,8 +72,6 @@ vi.mock("../src/collab/rooms.js", () => ({
 
 const { App } = await import("../src/ui/App.js");
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
-
 beforeEach(() => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 404 }));
   vi.stubGlobal(
@@ -90,24 +86,13 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (mounted !== null) {
-    act(() => mounted?.root.unmount());
-    mounted.host.remove();
-    mounted = null;
-  }
   rooms.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 it("writes neither room until the new room is admitted", async () => {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => root.render(<App />));
+  const { container: host } = await renderSettled(<App />);
 
   const create = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent?.includes("new doc"),
@@ -136,13 +121,7 @@ it("writes neither room until the new room is admitted", async () => {
 });
 
 it("cancels a deferred create when the reader leaves its room", async () => {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => root.render(<App />));
+  const { container: host } = await renderSettled(<App />);
 
   const create = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent?.includes("new doc"),
@@ -175,13 +154,7 @@ it("cancels a deferred create when the reader leaves its room", async () => {
 it.each(["document", "directory"] as const)(
   "leaves a generated route when the %s room terminally refuses creation",
   async (refused) => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    mounted = { root, host };
-    await act(async () => root.render(<App />));
+    const { container: host } = await renderSettled(<App />);
 
     const create = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => button.textContent?.includes("new doc"),

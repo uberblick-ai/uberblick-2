@@ -101,6 +101,11 @@ function validTable(node: ProseMirrorNode, allowRagged: boolean): boolean {
   return true;
 }
 
+/** The ordinary shape structural controls may change without triggering repair. */
+export function isOrdinaryTable(node: ProseMirrorNode): boolean {
+  return node.type.name === "table" && validTable(node, false);
+}
+
 function tableLimitsPlugin(): Plugin {
   return new Plugin({
     filterTransaction(tr, state) {

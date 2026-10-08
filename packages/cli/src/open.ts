@@ -27,13 +27,13 @@
  *    both, never a silent bind of a socket nobody will connect to.
  *
  * 3. **It serves #91's configuration document** at {@link CONFIG_PATH}, with
- *    the local browser endpoint, frozen workspace, independent browser key and
- *    upstream endpoint, with
+ *    the local browser endpoint, frozen startup binding and recorded machine
+ *    destinations, with independent browser keys and upstream endpoints and
  *    `Cache-Control: no-store` on it, matched *ahead* of the SPA fallback. That
  *    document is what lets one prebuilt bundle target any hub; the fallback
  *    answering it with the app's own HTML is precisely the production failure
  *    #91 exists to remove. A serving run freezes its binding at startup so the
- *    browser and silent replica cannot split identities; later binding changes
+ *    browser and silent replicas cannot split identities; later binding changes
  *    add `rebound: true` until restart. Unbound serving retains
  *    #449's per-request resolution because it owns no replica identity.
  *
@@ -115,7 +115,6 @@ import {
 import { buildLockPath } from "./build-lock.js";
 import { budget, resolveMcpConfig } from "./budget.js";
 import { openBrowser } from "./browser.js";
-import { localBrowserKey } from "./browser-key.js";
 import { resolveConfig, requireBinding } from "./config.js";
 import { takeHelp } from "./help.js";
 import { isInstallPayload } from "./installation.js";
@@ -124,6 +123,9 @@ import { acquireInitLock, tryAcquireInitLock, tryAcquireLock } from "./init-lock
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { readAccessAction, requestAccess, type AccessBinding } from "./open-access.js";
+import { requestAccount } from "./open-account.js";
+import { BrowserReplicas, BrowserReplicaUnavailable, browserWorkspaces, type ServedWorkspace } from "./open-workspaces.js";
+import { rememberWorkspaceBinding } from "./workspace-registry.js";
 import {
   endpointOf,
   hubBind,
@@ -677,14 +679,12 @@ function fileFor(root: string, pathname: string): string {
 /**
  * The configuration document, byte for byte.
  *
- * One key was #91's contract, `workspaces` is #189's second and `hubAuthToken`
- * is #426's third; all three are read by `packages/web/src/config.ts` and
- * anything else is ignored. The workspace is the spelling that is configured,
- * decoration and all — the client parses the uuid out of it, and the slug is
- * what makes the switcher readable.
+ * The legacy endpoint/key describe the startup workspace. Local serving also
+ * publishes an exact UUID-to-browser-key/upstream map for the offered replicas.
+ * Workspace strings preserve the startup spelling; bare UUIDs key admission.
  *
  * Serialization only. {@link configSource} supplies live direct-serving
- * values; {@link servingConfigSource} supplies a frozen local/upstream pair and
+ * values; {@link servingConfigSource} supplies frozen local/upstream pairs and
  * the live `rebound` diagnostic. Only the loopback browser key may be served;
  * an unbound process has no key to give the page.
  */
@@ -692,17 +692,23 @@ export function configDocument(
   hubUrl: string,
   workspace: string | null,
   hubAuthToken: string,
-  serving?: { remoteHubUrl: string; rebound: boolean },
+  serving?: {
+    remoteHubUrl: string;
+    rebound: boolean;
+    workspaces?: readonly string[];
+    servedWorkspaces?: Record<string, { browserKey: string; remoteHubUrl: string | null; name: string | null }>;
+  },
 ): string {
   return JSON.stringify({
     hubUrl,
-    workspaces: workspace === null ? [] : [workspace],
+    workspaces: serving?.workspaces ?? (workspace === null ? [] : [workspace]),
     hubAuthToken,
     ...(serving === undefined
       ? {}
       : {
           remoteHubUrl: serving.remoteHubUrl,
           ...(serving.rebound ? { rebound: true } : {}),
+          ...(serving.servedWorkspaces === undefined ? {} : { servedWorkspaces: serving.servedWorkspaces }),
         }),
   });
 }
@@ -765,8 +771,8 @@ function resolvedConfigDocument(resolved: ReturnType<typeof resolveConfig>): str
  * The per-request source of the unbound configuration document. It refreshes
  * the hub endpoint and publishes no workspace or browser key.
  *
- * `ub init`, `ub workspace join` and `ub workspace use` publish `credentials.json`
- * and `config.json` as separate atomic writes, holding `.init.lock` across both.
+ * `ub init`, `ub workspace join` and `ub workspace use` publish configuration
+ * files as separate atomic writes, holding `.init.lock` across the publication.
  * Each file is therefore whole whenever it is read. This source uses the same
  * lock so its resolution sees a completed configuration publication.
  *
@@ -797,21 +803,33 @@ function configSource(env: NodeJS.ProcessEnv, initial: string): () => string {
 }
 
 /**
- * The frozen local-serving document, plus one live fact: whether this machine
+ * The frozen local-serving destinations, plus one live fact: whether this machine
  * has since been rebound and `ub open` must be restarted.
  */
 function servingConfigSource(
   env: NodeJS.ProcessEnv,
   startup: ReturnType<typeof resolveConfig>,
   localHubUrl: string,
-  browserKey: string,
+  workspaces: ReadonlyMap<string, ServedWorkspace>,
 ): () => string {
   const binding = bindingOf(startup);
+  const startupId = workspaces.keys().next().value;
+  const destinations = {
+    workspaces: [...workspaces.values()].map(entry => entry.workspace),
+    servedWorkspaces: Object.fromEntries([...workspaces].map(([id, entry]) => [id, {
+      browserKey: entry.browserKey,
+      name: entry.name,
+      // The startup replica retains ensureHub's loopback behavior. Explicit
+      // local-only secondaries have no upstream to name or start.
+      remoteHubUrl: id === startupId ? binding.hubUrl : entry.binding.hubUrl,
+    }])),
+  };
+  const browserKey = workspaces.values().next().value?.browserKey ?? "";
   let accepted = configDocument(
     localHubUrl,
     binding.workspace,
     browserKey,
-    { remoteHubUrl: binding.hubUrl, rebound: false },
+    { remoteHubUrl: binding.hubUrl, rebound: false, ...destinations },
   );
   return () => {
     const lock = tryAcquireInitLock(env);
@@ -822,7 +840,7 @@ function servingConfigSource(
         localHubUrl,
         binding.workspace,
         browserKey,
-        { remoteHubUrl: binding.hubUrl, rebound: !sameBinding(binding, current) },
+        { remoteHubUrl: binding.hubUrl, rebound: !sameBinding(binding, current), ...destinations },
       );
       return accepted;
     } finally {
@@ -860,31 +878,33 @@ const API_PREFIX = "/api/";
 const SEARCH_PATH = "/api/search";
 const STATUS_PATH = "/api/status";
 const ACCESS_PATH = "/api/access";
+const ACCOUNT_PATH = "/api/account";
 const SEARCH_LIMIT = 100;
 const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
-type ApiAuthenticator = (authMessage: string) => Promise<boolean>;
+type ApiAuthenticator = (authMessage: string) => Promise<string | null>;
 type ApiStatus = () => ServingSyncStatus;
 
 async function createApiAuthenticator(
-  browserKey: string,
-  workspaceId: string,
+  workspaces: ReadonlyMap<string, ServedWorkspace>,
 ): Promise<ApiAuthenticator> {
-  const key = await importRootSecret(browserKey);
+  const keys = new Map(await Promise.all([...workspaces].map(async ([id, workspace]) => [id, await importRootSecret(workspace.browserKey)] as const)));
   return async (authMessage) => {
     const envelope = readAuthEnvelope(authMessage);
     if (
       envelope === null ||
       envelope.protocolVersion !== SYNC_PROTOCOL_VERSION
     ) {
-      return false;
+      return null;
     }
-    const claims = await verifyToken(key, envelope.token);
-    return !(
-      claims === null ||
-      claims.workspace !== workspaceId ||
-      clampToken(claims, Math.floor(Date.now() / 1_000)) !== null
-    );
+    // Reuse the bounded token verifier. A valid signature alone is insufficient:
+    // each key admits only its own workspace, including on the HTTP boundary.
+    for (const [workspaceId, key] of keys) {
+      const claims = await verifyToken(key, envelope.token);
+      if (claims !== null && claims.workspace === workspaceId &&
+        clampToken(claims, Math.floor(Date.now() / 1_000)) === null) return workspaceId;
+    }
+    return null;
   };
 }
 
@@ -939,23 +959,40 @@ async function serveApiRequest(
   response: ServerResponse,
   target: URL,
   authenticate: ApiAuthenticator,
-  engine: UberblickMcpEngine,
-  status: ApiStatus,
-  accessBinding: AccessBinding,
+  replicas: BrowserReplicas,
+  statusForWorkspace: (workspace: string) => ServingSyncStatus,
+  env: NodeJS.ProcessEnv,
   expectedOrigin: string,
 ): Promise<void> {
   const queriedToken = TOKEN_QUERY_PARAMS.some((name) =>
     target.searchParams.has(name),
   );
   const authMessage = bearerToken(request);
+  const workspaceId = queriedToken || authMessage === null ? null : await authenticate(authMessage);
   if (
-    queriedToken ||
-    authMessage === null ||
-    !(await authenticate(authMessage))
+    workspaceId === null ||
+    (target.searchParams.has("workspace") && target.searchParams.get("workspace") !== workspaceId)
   ) {
     apiResponse(request, response, 401, { error: "unauthorized" });
     return;
   }
+
+  const workspace = replicas.workspaces.get(workspaceId);
+  if (workspace === undefined) {
+    apiResponse(request, response, 401, { error: "unauthorized" });
+    return;
+  }
+  let engine: UberblickMcpEngine;
+  try { engine = await replicas.prepare(workspaceId); }
+  catch (error) {
+    apiResponse(request, response, 503, {
+      error: "replica_unavailable",
+      reason: error instanceof BrowserReplicaUnavailable ? error.reason : "replica-failed",
+    });
+    return;
+  }
+  const status: ApiStatus = () => statusForWorkspace(workspaceId);
+  const accessBinding: AccessBinding = { workspaceId, hubUrl: workspace.binding.hubUrl, env };
 
   if (target.pathname === ACCESS_PATH) {
     if (request.headers.origin !== expectedOrigin) {
@@ -1000,6 +1037,19 @@ async function serveApiRequest(
     apiResponse(request, response, 200, status());
     return;
   }
+  if (target.pathname === ACCOUNT_PATH) {
+    const aborted = new AbortController();
+    const abort = () => { if (!response.writableFinished) aborted.abort(); };
+    request.once("aborted", abort);
+    response.once("close", abort);
+    try {
+      apiResponse(request, response, 200, await requestAccount(accessBinding, () => status().notSharedReason, aborted.signal));
+    } finally {
+      request.off("aborted", abort);
+      response.off("close", abort);
+    }
+    return;
+  }
   if (target.pathname !== SEARCH_PATH) {
     apiResponse(request, response, 404, { error: "not_found" });
     return;
@@ -1035,9 +1085,9 @@ function serveBoundRequest(
   root: string,
   document: () => string,
   authenticate: ApiAuthenticator,
-  engine: UberblickMcpEngine,
-  status: ApiStatus,
-  accessBinding: AccessBinding,
+  replicas: BrowserReplicas,
+  status: (workspace: string) => ServingSyncStatus,
+  env: NodeJS.ProcessEnv,
   expectedOrigin: string,
   request: IncomingMessage,
   response: ServerResponse,
@@ -1053,9 +1103,9 @@ function serveBoundRequest(
     response,
     target,
     authenticate,
-    engine,
+    replicas,
     status,
-    accessBinding,
+    env,
     expectedOrigin,
   ).catch(() => {
     if (!response.headersSent) {
@@ -1418,7 +1468,7 @@ interface Owned {
   localServer: LocalBrowserServer | null;
   engine: UberblickMcpEngine | null;
   engineMonitor: EngineMonitor | null;
-  stopEngineRefresh: (() => void) | null;
+  replicas: BrowserReplicas | null;
 }
 
 interface EngineMonitor {
@@ -1488,8 +1538,6 @@ function takeForeground(owned: Owned, io: Io): Foreground {
     process.off("SIGTERM", onSignal);
 
     owned.engineMonitor?.stop();
-    owned.stopEngineRefresh?.();
-    owned.stopEngineRefresh = null;
     let result = code;
 
     if (owned.localServer !== null) {
@@ -1512,9 +1560,10 @@ function takeForeground(owned: Owned, io: Io): Foreground {
         server.closeAllConnections();
       });
     }
-    if (owned.engine !== null) {
+    if (owned.replicas !== null || owned.engine !== null) {
       try {
-        await owned.engine.close();
+        if (owned.replicas !== null) await owned.replicas.close();
+        else await owned.engine?.close();
       } catch (error) {
         io.err(`ub open: the local replica did not shut down cleanly: ${message(error)}\n`);
         result = 1;
@@ -1573,7 +1622,7 @@ export async function openCommand(
     localServer: null,
     engine: null,
     engineMonitor: null,
-    stopEngineRefresh: null,
+    replicas: null,
   };
   const foreground = takeForeground(owned, io);
   let hubNote = "";
@@ -1627,61 +1676,53 @@ export async function openCommand(
       const engine = await createMcpEngine(mcpConfig, { serving: true });
       owned.engine = engine;
       owned.engineMonitor = monitorEngine(engine);
-      const browserKey = localBrowserKey(mcpConfig.workspaceId, startupEnv);
-      const authenticateApi = await createApiAuthenticator(
-        browserKey,
-        mcpConfig.workspaceId,
-      );
+      const workspaces = browserWorkspaces(projectBinding, mcpConfig, startupEnv,
+        message => io.err(`ub: warning: ${message}\n`));
+      const authenticateApi = await createApiAuthenticator(workspaces);
       const document = servingConfigSource(
         startupEnv,
         initial.resolved,
         localHubUrl,
-        browserKey,
+        workspaces,
       );
       const observedServedRooms = new Set<string>();
       let collectingServedRooms: Set<string> | null = null;
       let localServer: LocalBrowserServer | null = null;
-      const status = (): ServingSyncStatus => {
+      const replicas = new BrowserReplicas(workspaces, engine, workspaceId => localServer?.refresh(workspaceId));
+      owned.replicas = replicas;
+      const status = (workspaceId: string): ServingSyncStatus => {
         if (localServer !== null) {
           const current = new Set<string>();
           collectingServedRooms = current;
           try {
-            // `refresh` synchronously walks the Hocuspocus document map. The
+            // `refresh` synchronously walks this workspace's loaded rooms. The
             // read callback below therefore gives this endpoint exactly the
             // rooms the in-process server currently has loaded, including the
             // directory and sidebar rooms.
-            localServer.refresh();
+            localServer.refresh(workspaceId);
           } finally {
             collectingServedRooms = null;
           }
           observedServedRooms.clear();
           for (const room of current) observedServedRooms.add(room);
         }
-        return collectServingSyncStatus(engine, observedServedRooms);
+        return collectServingSyncStatus(replicas.read(workspaceId), [...observedServedRooms].filter(room => parseRoom(room).workspaceId === workspaceId));
       };
+      const engineForRoom = (room: string): UberblickMcpEngine => replicas.read(parseRoom(room).workspaceId);
       localServer = await createLocalBrowserServer({
         port: options.port,
-        workspaceId: mcpConfig.workspaceId,
-        browserKey,
+        workspaces: new Map([...workspaces].map(([id, entry]) => [id, entry.browserKey])),
         expectedOrigin: servedUrl.origin,
+        prepareRoom: async room => { await replicas.prepare(parseRoom(room).workspaceId); },
         readRoom: (room, afterSeq) => {
           (collectingServedRooms ?? observedServedRooms).add(room);
-          return engine.store.readSince(room, afterSeq);
+          return engineForRoom(room).store.readSince(room, afterSeq);
         },
         appendUpdate: (room, payload) => {
-          const health = engine.health;
-          if (health.status === "quarantined") {
-            throw new Error(
-              `local replica quarantined in ${health.room}: ${health.message}`,
-            );
-          }
-          const refresh = engine.refreshStatus;
-          if (refresh.status === "failed") {
-            throw new Error(`local replica refresh failed: ${refresh.message}`);
-          }
-          engine.store.appendUpdate(room, payload, "local");
+          engineForRoom(room).store.appendUpdate(room, payload, "local");
         },
         awarenessForRoom: (room) => {
+          const engine = engineForRoom(room);
           const { uuid } = parseRoom(room);
           if (uuid === DIRECTORY_SUFFIX) return engine.replicas.directory().awareness;
           if (uuid === SIDEBAR_SUFFIX) return engine.replicas.sidebar().awareness;
@@ -1693,9 +1734,9 @@ export async function openCommand(
             plan.dir,
             document,
             authenticateApi,
-            engine,
+            replicas,
             status,
-            { workspaceId: mcpConfig.workspaceId, hubUrl: projectBinding.hubUrl, env: startupEnv },
+            startupEnv,
             servedUrl.origin,
             request,
             response,
@@ -1703,7 +1744,6 @@ export async function openCommand(
         },
       });
       owned.localServer = localServer;
-      owned.stopEngineRefresh = engine.onRefresh(() => localServer.refresh());
     } else {
       // An unbound run serves only the bundle: there is no workspace or key.
       const server = serveBundle(
@@ -1735,6 +1775,13 @@ export async function openCommand(
   const earlyFailure = owned.engineMonitor?.failure() ?? null;
   if (earlyFailure !== null) {
     io.err(`ub open: ${earlyFailure}\n`);
+    return await foreground.shutdown(1);
+  }
+
+  try {
+    await rememberWorkspaceBinding(projectBinding, startupEnv);
+  } catch (error) {
+    io.err(`ub open: could not record this workspace: ${message(error)}\n`);
     return await foreground.shutdown(1);
   }
 

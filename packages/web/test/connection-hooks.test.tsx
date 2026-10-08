@@ -4,10 +4,9 @@
  * checking only after `act` would hide a previous document's reading.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { act } from "react";
+import { act, render, type RenderResult } from "./react-render.js";
+import { afterEach, describe, expect, it } from "vitest";
 import { flushSync } from "react-dom";
-import { createRoot } from "react-dom/client";
 import * as Y from "yjs";
 import {
   applyAwarenessUpdate,
@@ -55,11 +54,6 @@ interface Fixture {
 
 const fixtures: Fixture[] = [];
 const remotePeers: Array<{ awareness: Awareness; ydoc: Y.Doc }> = [];
-
-beforeEach(() => {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-});
 
 afterEach(() => {
   for (const peer of remotePeers.splice(0)) {
@@ -190,36 +184,31 @@ describe("connection-scoped readings", () => {
       seen.push(useReading(current));
       return null;
     }
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    try {
-      for (const fix of [alpha, beta, replacement]) {
-        const before = seen.length;
-        act(() => root.render(<Probe current={fix.connection} />));
-        expect(seen[before]).toEqual(EMPTY);
-        const populated = seen.at(-1)!;
-        // Every reset below has a retained, non-empty reading to defend against.
-        expect(populated.directory[0]?.title).toBe(fix === alpha ? "Alpha" : fix === beta ? "Beta" : "Replacement");
-        expect(populated.sidebar).toHaveLength(1);
-        expect(populated.meta?.title).toBe(populated.directory[0]?.title);
-        expect(populated.foreign).toHaveLength(2);
-        expect(populated.conflicts).toHaveLength(1);
-        expect(populated.peers).toHaveLength(1);
-        expect(populated.agentSessions).toBe(1);
-        expect(populated.presence).toHaveLength(1);
-        expect(populated.rev).toMatch(/^[0-9a-f]{8}$/);
-        expect(populated.blocks).toHaveLength(3);
-        expect(populated.outline).toHaveLength(1);
-        expect(populated.threads).toHaveLength(1);
-      }
+
+    let view: RenderResult | undefined;
+    for (const fix of [alpha, beta, replacement]) {
       const before = seen.length;
-      act(() => root.render(<Probe current={null} />));
-      for (const snapshot of seen.slice(before)) expect(snapshot).toEqual(EMPTY);
-    } finally {
-      act(() => root.unmount());
-      host.remove();
+      if (view === undefined) view = render(<Probe current={fix.connection} />);
+      else view.rerender(<Probe current={fix.connection} />);
+      expect(seen[before]).toEqual(EMPTY);
+      const populated = seen.at(-1)!;
+      // Every reset below has a retained, non-empty reading to defend against.
+      expect(populated.directory[0]?.title).toBe(fix === alpha ? "Alpha" : fix === beta ? "Beta" : "Replacement");
+      expect(populated.sidebar).toHaveLength(1);
+      expect(populated.meta?.title).toBe(populated.directory[0]?.title);
+      expect(populated.foreign).toHaveLength(2);
+      expect(populated.conflicts).toHaveLength(1);
+      expect(populated.peers).toHaveLength(1);
+      expect(populated.agentSessions).toBe(1);
+      expect(populated.presence).toHaveLength(1);
+      expect(populated.rev).toMatch(/^[0-9a-f]{8}$/);
+      expect(populated.blocks).toHaveLength(3);
+      expect(populated.outline).toHaveLength(1);
+      expect(populated.threads).toHaveLength(1);
     }
+    const before = seen.length;
+    view!.rerender(<Probe current={null} />);
+    for (const snapshot of seen.slice(before)) expect(snapshot).toEqual(EMPTY);
   });
 
   it("distinguishes metadata that has not been read from a genuinely empty room", () => {
@@ -229,18 +218,13 @@ describe("connection-scoped readings", () => {
       seen.push(useDocMeta(current));
       return null;
     }
-    const host = document.createElement("div");
-    const root = createRoot(host);
-    try {
-      act(() => root.render(<Probe current={fix.connection} />));
-      expect(seen[0]).toBeNull();
-      expect(seen.at(-1)?.uuid).toBe("");
-      const before = seen.length;
-      act(() => root.render(<Probe current={null} />));
-      for (const meta of seen.slice(before)) expect(meta).toBeNull();
-    } finally {
-      act(() => root.unmount());
-    }
+
+    const view = render(<Probe current={fix.connection} />);
+    expect(seen[0]).toBeNull();
+    expect(seen.at(-1)?.uuid).toBe("");
+    const before = seen.length;
+    view.rerender(<Probe current={null} />);
+    for (const meta of seen.slice(before)) expect(meta).toBeNull();
   });
 
   it("updates directory filtering when includeDeleted changes on one connection", () => {
@@ -253,19 +237,14 @@ describe("connection-scoped readings", () => {
       entries = useDirectory(fix.connection, includeDeleted);
       return null;
     }
-    const host = document.createElement("div");
-    const root = createRoot(host);
-    try {
-      act(() => root.render(<Probe includeDeleted={false} />));
-      expect(entries.map(({ uuid }) => uuid)).toEqual([UUID]);
-      act(() => root.render(<Probe includeDeleted />));
-      expect(entries.map(({ uuid }) => uuid).sort()).toEqual([UUID, OTHER_UUID].sort());
-      expect(entries.find(({ uuid }) => uuid === OTHER_UUID)?.deleted).toBe(true);
-      act(() => root.render(<Probe includeDeleted={false} />));
-      expect(entries.map(({ uuid }) => uuid)).toEqual([UUID]);
-    } finally {
-      act(() => root.unmount());
-    }
+
+    const view = render(<Probe includeDeleted={false} />);
+    expect(entries.map(({ uuid }) => uuid)).toEqual([UUID]);
+    view.rerender(<Probe includeDeleted />);
+    expect(entries.map(({ uuid }) => uuid).sort()).toEqual([UUID, OTHER_UUID].sort());
+    expect(entries.find(({ uuid }) => uuid === OTHER_UUID)?.deleted).toBe(true);
+    view.rerender(<Probe includeDeleted={false} />);
+    expect(entries.map(({ uuid }) => uuid)).toEqual([UUID]);
   });
 
   it("refreshes link conflicts before the transaction has notified observers", () => {
@@ -275,23 +254,18 @@ describe("connection-scoped readings", () => {
       links = useLinkConflicts(fix.connection);
       return null;
     }
-    const host = document.createElement("div");
-    const root = createRoot(host);
-    try {
-      act(() => root.render(<Probe />));
-      expect(links?.conflicts).toHaveLength(1);
-      act(() => {
-        fix.ydoc.transact(() => {
-          textAt(fix.ydoc, 1).format(0, 6, { link: null });
-          // Yjs dispatches observers after the transaction. A repair can still
-          // ask for the current scan while that notification has not happened.
-          flushSync(() => links?.refresh());
-          expect(links?.conflicts).toEqual([]);
-        });
+
+    render(<Probe />);
+    expect(links?.conflicts).toHaveLength(1);
+    act(() => {
+      fix.ydoc.transact(() => {
+        textAt(fix.ydoc, 1).format(0, 6, { link: null });
+        // Yjs dispatches observers after the transaction. A repair can still
+        // ask for the current scan while that notification has not happened.
+        flushSync(() => links?.refresh());
+        expect(links?.conflicts).toEqual([]);
       });
-    } finally {
-      act(() => root.unmount());
-    }
+    });
   });
 
   it("stores no new presence reading for a caret moving inside the same block", () => {
@@ -311,24 +285,19 @@ describe("connection-scoped readings", () => {
     function Probe() {
       return <DrawPresence current={usePresence(fix.connection)} />;
     }
-    const host = document.createElement("div");
-    const root = createRoot(host);
-    try {
-      act(() => root.render(<Probe />));
-      expect(presence[0]?.block).toBe(1);
-      const before = renders;
-      const previous = presence;
-      act(() => publish(fix, { ...state, cursor: { anchor: anchorAt(1) } }));
-      expect(presence).toBe(previous);
-      expect(renders).toBe(before);
-      act(() => publish(fix, { ...state, cursor: { anchor: Y.relativePositionToJSON(
-        Y.createRelativePositionFromTypeIndex(textAt(fix.ydoc, 1), 0),
-      ) } }));
-      expect(presence[0]?.block).toBe(2);
-      expect(renders).toBeGreaterThan(before);
-    } finally {
-      act(() => root.unmount());
-    }
+
+    render(<Probe />);
+    expect(presence[0]?.block).toBe(1);
+    const before = renders;
+    const previous = presence;
+    act(() => publish(fix, { ...state, cursor: { anchor: anchorAt(1) } }));
+    expect(presence).toBe(previous);
+    expect(renders).toBe(before);
+    act(() => publish(fix, { ...state, cursor: { anchor: Y.relativePositionToJSON(
+      Y.createRelativePositionFromTypeIndex(textAt(fix.ydoc, 1), 0),
+    ) } }));
+    expect(presence[0]?.block).toBe(2);
+    expect(renders).toBeGreaterThan(before);
   });
 
   it("keeps each awareness reader's inclusion rule through presence withdrawal", () => {
@@ -363,53 +332,48 @@ describe("connection-scoped readings", () => {
       agents = useAgentSessions(fix.connection);
       return null;
     }
-    const host = document.createElement("div");
-    const root = createRoot(host);
-    try {
-      act(() => root.render(<Probe />));
-      expect(peers.map(({ clientId }) => clientId).sort()).toEqual(
-        [fallback.clientId, agent.clientId, human.clientId].sort(),
-      );
-      expect(peers.find(({ clientId }) => clientId === fallback.clientId)).toEqual({
-        clientId: fallback.clientId,
-        name: `client ${fallback.clientId}`,
-      });
-      expect(agents).toBe(1);
-      const presence = readPresence(fix.ydoc, fix.awareness);
-      expect(presence.map(({ clientId }) => clientId).sort()).toEqual(
-        [fallback.clientId, agent.clientId, human.clientId, cursorOnly.clientId].sort(),
-      );
-      expect(presence.find(({ clientId }) => clientId === agent.clientId)).toMatchObject({
-        name: "Agent", color: "#123456", kind: "agent", session, block: 1,
-      });
-      expect(presence.find(({ clientId }) => clientId === human.clientId)).toMatchObject({
-        name: "Human", color: AWARENESS_FALLBACK_COLOR, kind: "human", session: null,
-      });
-      expect(presence.find(({ clientId }) => clientId === cursorOnly.clientId)).toMatchObject({
-        name: `client ${cursorOnly.clientId}`,
-        color: AWARENESS_FALLBACK_COLOR,
-        kind: "human",
-        session: null,
-        block: 1,
-      });
 
-      // Withdrawal keeps the awareness state and caret, but removes the name,
-      // marker and agent session. It stops being a mention candidate or agent.
-      act(() => agent.publish({ cursor: { anchor } }));
-      expect(fix.awareness.getStates().has(agent.clientId)).toBe(true);
-      expect(peers.map(({ clientId }) => clientId).sort()).toEqual(
-        [fallback.clientId, human.clientId].sort(),
-      );
-      expect(agents).toBe(0);
-      expect(readPresence(fix.ydoc, fix.awareness).find(({ clientId }) => clientId === agent.clientId)).toMatchObject({
-        name: `client ${agent.clientId}`,
-        color: AWARENESS_FALLBACK_COLOR,
-        kind: "human",
-        session: null,
-        block: 1,
-      });
-    } finally {
-      act(() => root.unmount());
-    }
+    render(<Probe />);
+    expect(peers.map(({ clientId }) => clientId).sort()).toEqual(
+      [fallback.clientId, agent.clientId, human.clientId].sort(),
+    );
+    expect(peers.find(({ clientId }) => clientId === fallback.clientId)).toEqual({
+      clientId: fallback.clientId,
+      name: `client ${fallback.clientId}`,
+    });
+    expect(agents).toBe(1);
+    const presence = readPresence(fix.ydoc, fix.awareness);
+    expect(presence.map(({ clientId }) => clientId).sort()).toEqual(
+      [fallback.clientId, agent.clientId, human.clientId, cursorOnly.clientId].sort(),
+    );
+    expect(presence.find(({ clientId }) => clientId === agent.clientId)).toMatchObject({
+      name: "Agent", color: "#123456", kind: "agent", session, block: 1,
+    });
+    expect(presence.find(({ clientId }) => clientId === human.clientId)).toMatchObject({
+      name: "Human", color: AWARENESS_FALLBACK_COLOR, kind: "human", session: null,
+    });
+    expect(presence.find(({ clientId }) => clientId === cursorOnly.clientId)).toMatchObject({
+      name: `client ${cursorOnly.clientId}`,
+      color: AWARENESS_FALLBACK_COLOR,
+      kind: "human",
+      session: null,
+      block: 1,
+    });
+
+    // Withdrawal keeps the awareness state and caret, but removes the name,
+    // marker and agent session. It stops being a mention candidate or agent.
+    act(() => agent.publish({ cursor: { anchor } }));
+    expect(fix.awareness.getStates().has(agent.clientId)).toBe(true);
+    expect(peers.map(({ clientId }) => clientId).sort()).toEqual(
+      [fallback.clientId, human.clientId].sort(),
+    );
+    expect(agents).toBe(0);
+    expect(readPresence(fix.ydoc, fix.awareness).find(({ clientId }) => clientId === agent.clientId)).toMatchObject({
+      name: `client ${agent.clientId}`,
+      color: AWARENESS_FALLBACK_COLOR,
+      kind: "human",
+      session: null,
+      block: 1,
+    });
   });
 });

@@ -41,8 +41,9 @@ requirements.
 - `changes` — a correctable P1 or P2.
 - `needs-human` — an owner-boundary finding; escalate it yourself under
   [human-decisions.md](human-decisions.md).
-- `defer` — a document the judgment needs could not be read; name it and the
-  failure.
+- `defer` — no live document covering the judgment could be read under
+  [AGENTS.md's read rules](../../AGENTS.md#read-for-the-action); name what was
+  searched and the failure.
 
 Post the verdict once as an issue comment. It opens with
 `Verdict: <no findings | P1 <n>, P2 <n>, P3 <n>>`, then the findings;

@@ -26,9 +26,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, renderSettled, type RenderResult } from "./react-render.js";
 import type { ReactNode } from "react";
 import * as Y from "yjs";
 import {
@@ -149,8 +147,6 @@ function peerDirectory(local: Y.Doc): Y.Doc {
   return peer;
 }
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
-
 // No served configuration document: the client falls back to its build-time
 // endpoint, which is the deployment every other test in this suite assumes.
 // Answered here rather than left to a real `fetch` so the gate settles on this
@@ -171,12 +167,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  const open = mounted;
-  mounted = null;
-  if (open !== null) {
-    act(() => open.root.unmount());
-    open.host.remove();
-  }
   rooms.clear();
   roomStatus.clear();
   statusListeners.clear();
@@ -193,22 +183,13 @@ afterEach(() => {
  * with no rooms and no pane at all — every assertion here would be about an
  * empty document. Awaiting is what the app itself waits for.
  */
-async function mount(node: ReactNode): Promise<{ host: HTMLElement; root: Root }> {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => {
-    root.render(node);
-  });
-  return { host, root };
+async function mount(node: ReactNode): Promise<RenderResult> {
+  return await renderSettled(node);
 }
 
 async function openApp(path: string): Promise<HTMLElement> {
   window.history.replaceState(null, "", path);
-  return (await mount(<App />)).host;
+  return (await mount(<App />)).container;
 }
 
 /**
@@ -596,16 +577,16 @@ describe("an archived document is readable, says so, and offers one way back", (
     }
 
     // A deep link straight to the archived document: the very first value.
-    const { root } = await mount(<Probe uuid={UUID} />);
+    const { rerender } = await mount(<Probe uuid={UUID} />);
     expect(seen[0]).toBe(true);
     expect(seen).not.toContain(false);
 
     // And the route switch from a live document to an archived one, which is
     // the same hazard with a stale previous value in place of the initial one.
-    act(() => root.render(<Probe uuid={OTHER} />));
+    rerender(<Probe uuid={OTHER} />);
     expect(seen.at(-1)).toBe(false);
     const switched = seen.length;
-    act(() => root.render(<Probe uuid={UUID} />));
+    rerender(<Probe uuid={UUID} />);
     expect(seen.slice(switched)).not.toContain(false);
   });
 });

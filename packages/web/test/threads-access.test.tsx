@@ -20,9 +20,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, renderSettled } from "./react-render.js";
 import * as Y from "yjs";
 import {
   addComment,
@@ -95,8 +93,6 @@ vi.mock("../src/collab/rooms.js", () => ({
 
 const { App } = await import("../src/ui/App.js");
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
-
 function threadsWidth(narrow: boolean): { change: (next: boolean) => Promise<void> } {
   let matches = narrow;
   const listeners = new Set<(event: MediaQueryListEvent) => void>();
@@ -129,8 +125,6 @@ function threadsWidth(narrow: boolean): { change: (next: boolean) => Promise<voi
 }
 
 beforeEach(() => {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
   // jsdom implements none of these. The rail scrolls a card into view, and
   // ProseMirror measures the caret's Range to scroll a split block into view.
   Element.prototype.scrollIntoView = function scrollIntoView() {};
@@ -145,12 +139,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  const open = mounted;
-  mounted = null;
-  if (open !== null) {
-    act(() => open.root.unmount());
-    open.host.remove();
-  }
   rooms.clear();
   roomStatus.clear();
   statusListeners.clear();
@@ -178,13 +166,7 @@ async function openAnnotatedDoc(resolved = false): Promise<{
   if (resolved) setAnnotationResolved(ydoc, thread.id, true);
 
   window.history.replaceState(null, "", `/${WORKSPACE}/${UUID}`);
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => {
-    root.render(<App />);
-  });
+  const { container: host } = await renderSettled(<App />);
   return { host, ydoc, threadId: thread.id };
 }
 

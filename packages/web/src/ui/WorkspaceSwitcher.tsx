@@ -11,7 +11,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./shadcn/dropdown-menu.js";
 import { SidebarMenu, SidebarMenuItem, SidebarMenuButton } from "./shadcn/sidebar.js";
@@ -32,13 +31,13 @@ export function WorkspaceSwitcher({
   workspaces: readonly Workspace[];
   /** The workspace the address names, or null when it names none. */
   current: Workspace | null;
-  /** Live readings from each workspace's shared settings room. */
+  /** Names from local replicas or live shared settings, keyed by workspace. */
   names?: ReadonlyMap<string, string | null> | undefined;
   /** Go there. The value is a segment, spelled as the list spells it. */
   onSwitch: (segment: string) => void;
   /** Whether the document-sidebar pane that owns this portalled menu is live. */
   active?: boolean;
-  /** Acquire other workspaces' name readings only while their menu is open. */
+  /** Limit direct-hub name readings to the time their menu is open. */
   onOpenChange?: ((open: boolean) => void) | undefined;
 }): ReactElement {
   const [open, setOpen] = useState(false);
@@ -87,9 +86,6 @@ export function WorkspaceSwitcher({
                 </DropdownMenuItem>
               );
             })}
-            <DropdownMenuSeparator />
-            {/* Workspace creation still belongs to ub init. */}
-            <DropdownMenuItem className="[@media(any-pointer:coarse)]:min-h-11" disabled>New workspace</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

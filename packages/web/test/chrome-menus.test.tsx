@@ -8,10 +8,11 @@
  * be lied to about.
  *
  * - The switcher names the current workspace accessibly, marks the current
- *   menu row and keeps machine-owned workspace creation disabled. Settings
+ *   menu row and offers no workspace creation item. Settings
  *   remain outside its menu, and neither surface shows a document count.
- * - The workspace marker is decorative; the user card retains its identity
- *   tile. An address with no workspace keeps the neutral reading and no marker.
+ * - The workspace marker is decorative. An address with no workspace keeps
+ *   the neutral reading and no marker. The footer shows the served hub's
+ *   account independently of the tab's generated presence identity.
  * - A presence colour, once chosen, is what the client publishes — and is still
  *   what it publishes after a reload. Whether peers *see* it is a claim about
  *   awareness, and lives in `presence-color.test.ts`.
@@ -23,9 +24,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, render } from "./react-render.js";
 import * as Y from "yjs";
 import {
   Awareness,
@@ -36,6 +35,7 @@ import {
 import type { ReactElement } from "react";
 import { WorkspaceSwitcher } from "../src/ui/WorkspaceSwitcher.js";
 import { UserMenu } from "../src/ui/UserMenu.js";
+import type { AccountIdentity } from "../src/shell/account.js";
 import { useAgentSessions } from "../src/ui/hooks.js";
 import { applyStoredAppearance } from "../src/ui/theme.js";
 import { getSetting } from "../src/settings.js";
@@ -77,24 +77,16 @@ function installStorage(): void {
 
 interface View {
   host: HTMLElement;
-  root: Root;
   render: (element: ReactElement) => void;
   unmount: () => void;
 }
 
 function mount(element: ReactElement): View {
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  act(() => root.render(element));
+  const view = render(element);
   return {
-    host,
-    root,
-    render: (next) => act(() => root.render(next)),
-    unmount: () => {
-      act(() => root.unmount());
-      host.remove();
-    },
+    host: view.container,
+    render: view.rerender,
+    unmount: view.unmount,
   };
 }
 
@@ -112,8 +104,6 @@ beforeEach(() => {
   vi.stubGlobal("ResizeObserver", FakeResizeObserver);
   Element.prototype.scrollIntoView = function scrollIntoView() {};
   document.documentElement.removeAttribute("data-theme");
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
 });
 
 afterEach(() => {
@@ -217,13 +207,16 @@ describe("the workspace switcher renders configuration", () => {
     view.unmount();
   });
 
-  it("keeps machine-owned creation disabled and offers no settings action", () => {
+  it("offers only workspaces, with no creation placeholder or settings action", () => {
     const view = mount(switcher());
     open(view);
     const disabled = panel("[data-slot=dropdown-menu-item][data-disabled]").map(
       (item) => item.textContent,
     );
-    expect(disabled).toEqual(["New workspace"]);
+    expect(disabled).toEqual([]);
+    expect(panel("[data-slot=dropdown-menu-separator]")).toHaveLength(0);
+    expect(panel("[data-slot=dropdown-menu-item]").map((item) => item.textContent))
+      .toEqual(["Uberblick✓"]);
     const settings = panel("[data-slot=dropdown-menu-item]").find(
       (item) => item.textContent === "Workspace settings",
     );
@@ -232,14 +225,14 @@ describe("the workspace switcher renders configuration", () => {
   });
 });
 
-describe("the user menu is this client, as it publishes itself", () => {
-  /** The card opens its panel on a click, like any popover trigger. */
+describe("the account footer keeps this client's presence preferences separate", () => {
+  /** The standard identity button opens its preferences panel. */
   function open(view: View): void {
-    click(view.host.querySelector(".ub-user-card"));
+    click(view.host.querySelector('[data-testid="account-menu"]'));
   }
 
-  function menu(agentSessions = 0): ReactElement {
-    return <UserMenu identity={IDENTITY} agentSessions={agentSessions} />;
+  function menu(agentSessions = 0, account: AccountIdentity = { state: "signed-in", handle: "hub-person" }): ReactElement {
+    return <UserMenu identity={IDENTITY} account={account} agentSessions={agentSessions} />;
   }
 
   function swatch(name: string): HTMLButtonElement | undefined {
@@ -256,37 +249,56 @@ describe("the user menu is this client, as it publishes itself", () => {
     ) as HTMLButtonElement | undefined;
   }
 
-  /** The trigger's tile: the letter it draws, and the colour it is filled with. */
-  function tile(view: View): HTMLElement | null {
-    return view.host.querySelector<HTMLElement>(".ub-user-tile");
-  }
-
-  it("names the session and marks the colour it is currently published in", () => {
+  it("shows the account in the standard button and keeps Account settings inert", () => {
     const view = mount(menu());
-    expect(view.host.querySelector(".ub-user-card")?.textContent).toContain(
-      IDENTITY.name,
-    );
-    // Awareness names are two lowercase words, so the tile is the first of them
-    // upper-cased (#482).
-    expect(tile(view)?.textContent).toBe("U");
+    const trigger = view.host.querySelector('[data-testid="account-menu"]');
+    expect(trigger?.textContent).toContain("@hub-person");
+    expect(trigger?.textContent).not.toContain(IDENTITY.name);
+    expect(trigger?.getAttribute("data-sidebar")).toBe("menu-button");
+    expect(trigger?.closest('[data-slot="sidebar-menu-item"]')?.parentElement?.getAttribute("data-slot"))
+      .toBe("sidebar-menu");
+    const placeholder = view.host.querySelector("p");
+    expect(placeholder?.textContent).toBe("Account settings");
+    expect(placeholder?.closest("button, a, [role=button], [role=link]")).toBeNull();
+    expect(placeholder?.hasAttribute("tabindex")).toBe(false);
+    click(placeholder);
+    expect(panel(".ub-user-panel")).toHaveLength(0);
     open(view);
-    expect(panel(".ub-user-heading")[0]?.textContent).toBe(IDENTITY.name);
+    expect(panel(".ub-user-heading")[0]?.textContent).toBe(`Presence name: ${IDENTITY.name}`);
     // The tab's dealt colour is the blue one, and nothing was chosen yet.
     expect(chosenSwatch()).toBe("blue");
+    view.unmount();
+  });
+
+  it.each([
+    [{ state: "signed-out" }, "Not signed in"],
+    [{ state: "unavailable" }, "Account unavailable"],
+  ] as const)("shows the unverified account state without a presence name", (account, label) => {
+    const view = mount(menu(0, account));
+    expect(view.host.querySelector('[data-testid="account-menu"]')?.textContent).toContain(label);
+    expect(view.host.textContent).not.toContain(IDENTITY.name);
+    view.unmount();
+  });
+
+  it("retires the portalled panel when the sidebar becomes inactive", () => {
+    const view = mount(menu());
+    open(view);
+    expect(panel(".ub-user-panel")).toHaveLength(1);
+    view.render(<UserMenu identity={IDENTITY} agentSessions={0} active={false} />);
+    expect(panel(".ub-user-panel")).toHaveLength(0);
+    view.render(menu());
+    expect(panel(".ub-user-panel")).toHaveLength(0);
     view.unmount();
   });
 
   it("stores a chosen presence colour, and starts from it after a reload", () => {
     const view = mount(menu());
     open(view);
-    // The tile is filled with what this client publishes, so it moves with the
-    // choice rather than with a reload.
-    expect(tile(view)?.style.background).toBe("rgb(6, 117, 201)");
     click(swatch("green"));
 
     expect(getSetting("presenceColor")).toBe("#0c853d");
     expect(chosenSwatch()).toBe("green");
-    expect(tile(view)?.style.background).toBe("rgb(12, 133, 61)");
+    expect(view.host.querySelector('[data-testid="account-menu"]')?.textContent).toContain("@hub-person");
     view.unmount();
 
     // The reload: a new tab, dealt a different colour, reading the same storage.
@@ -295,8 +307,7 @@ describe("the user menu is this client, as it publishes itself", () => {
     );
     open(reloaded);
     expect(chosenSwatch()).toBe("green");
-    expect(tile(reloaded)?.textContent).toBe("A");
-    expect(tile(reloaded)?.style.background).toBe("rgb(12, 133, 61)");
+    expect(panel(".ub-user-heading")[0]?.textContent).toBe("Presence name: adjacent heron");
     reloaded.unmount();
   });
 

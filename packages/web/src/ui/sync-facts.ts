@@ -33,6 +33,7 @@ export function documentSyncFacts(
   reading: StatusReading,
   hubAcked: boolean | null | undefined,
   notSharedReason: NotSharedReason | null = null,
+  localWorkspace = false,
 ): DocumentSyncFacts {
   const blank = state === null && reading.detail === null;
   const twoFact =
@@ -56,6 +57,9 @@ export function documentSyncFacts(
         : state === "syncing"
           ? "saving here…"
           : reading.word;
+  if (localWorkspace) {
+    return { primary, primaryTone: state, hub: null, hubTone: null, hubDetail: null, twoFact: true };
+  }
   const localOnly = notSharedReason !== null;
   const hub =
     state === null || hubAcked === null

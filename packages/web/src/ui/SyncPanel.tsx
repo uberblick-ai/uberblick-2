@@ -92,7 +92,8 @@ export function SyncPanel({
   // cadence, never a quieter version of the truth (see calm.ts) — and two
   // different words in one corner of the screen would be worse than either.
   const reading = statusReading(status, state ?? raw);
-  const facts = documentSyncFacts(status, state, reading, hubAcked, notSharedReason);
+  const localWorkspace = endpoint?.url === "local";
+  const facts = documentSyncFacts(status, state, reading, hubAcked, notSharedReason, localWorkspace);
   const reason = reading.detail ?? facts.hubDetail;
   const hasReading = connection !== null && facts.primary !== null;
   const namedEndpoint = hubAcked !== undefined && !facts.twoFact ? null : endpoint;
@@ -119,7 +120,7 @@ export function SyncPanel({
           label="State"
           value={hasReading ? (facts.primary ?? UNKNOWN) : UNKNOWN}
         />
-        {facts.twoFact && (
+        {facts.twoFact && !localWorkspace && (
           <Fact label="Hub state" value={facts.hub ?? UNKNOWN} />
         )}
         {/* Refusals and known not-shared causes explain their own reading.

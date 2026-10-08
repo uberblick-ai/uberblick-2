@@ -229,7 +229,8 @@ body {
 
 /* The rebound notice occupies its own row above every route, keeping the
    panes visible and operable. */
-.ub-rebound-notice {
+.ub-rebound-notice,
+.ub-replica-unavailable {
   flex: none;
   margin: 0;
   padding: 0.55rem 0.75rem;
@@ -395,7 +396,6 @@ body {
 /* Truncate titles, names and metadata without growing their rows. Pinned
    titles keep their suffix inside the same flex child. */
 .ub-pin-label,
-.ub-user-name,
 .ub-group-label,
 .ub-last-updated,
 .ub-peer-overflow-name,
@@ -417,11 +417,6 @@ body {
 /* Portalled menus sit outside `.ub-app`, so their selectors must match
    classes on the menu or its descendants. */
 
-.ub-menu-caret {
-  color: var(--sidebar-muted-foreground);
-  font-size: 0.7rem;
-}
-
 .ub-terminal-toggle,
 .ub-copy,
 .ub-docs-open,
@@ -439,35 +434,10 @@ body {
   text-align: left;
 }
 
-.ub-identity-tile,
 .ub-copied {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-/* Sidebar identity tiles are rounded squares; present-session avatars
-   are circles, so the two kinds of identity remain visually distinct. */
-.ub-identity-tile {
-  flex: none;
-  width: 1.75rem;
-  height: 1.75rem;
-  border-radius: var(--radius-sm);
-  font-size: 0.8rem;
-  /* Identity tiles use the default 500 emphasis weight. */
-  font-weight: 500;
-  line-height: 1;
-  user-select: none;
-}
-
-/* White ink keeps at least 4.69:1 contrast on every inline presence fill
-   in both appearances. */
-.ub-user-tile {
-  color: var(--cursor-label-foreground);
-}
-
-.ub-user-name {
-  flex: 1;
 }
 
 .ub-user-panel {
@@ -790,21 +760,6 @@ h1.ub-heading {
   white-space: nowrap;
 }
 
-.ub-pending {
-  background: var(--status-warning-subtle);
-  color: var(--foreground);
-  border-radius: var(--radius-sm);
-  padding: 0 0.3rem;
-}
-
-.ub-peers {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex: none;
-  margin-left: auto;
-}
-
 /* Small identity initials and overflow counts keep their heavier UI weight. */
 .ub-avatar {
   font-family: var(--font-sans);
@@ -1035,9 +990,86 @@ h3.ub-heading {
 }
 
 .tableWrapper {
-  max-width: 100%;
+  max-width: calc(100% - 88px);
+  margin-right: 88px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
+  /* Always reserved, including at rest: revealing the overlay changes no cell
+     geometry. The frame owns the controls, outside the scrolling editable DOM. */
+  padding: 44px 0 22px;
+}
+
+.ub-table-controls {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  overflow: clip;
+}
+
+.ub-table-controls::before {
+  /* Keep hover across the reserved row lanes, including between buttons,
+     while pointer events over cell content still reach the editor. */
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 88px;
+  height: 100%;
+  pointer-events: auto;
+}
+
+.ub-table-column-controls {
+  height: 44px;
+  /* Hidden overflow still supports the browser's native focus scrolling. The
+     table below supplies pointer/touch scrolling for both surfaces. */
+  overflow-x: hidden;
+  overflow-y: hidden;
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+
+.ub-table-column-controls::-webkit-scrollbar {
+  display: none;
+}
+
+.ub-table-control {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.ub-table-control span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  background: var(--background);
+}
+
+.ub-table-control:hover span,
+.ub-table-control:focus-visible span,
+.ub-table-control[data-state="open"] span {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
+@media (any-pointer: coarse) {
+  .ub-table th,
+  .ub-table td {
+    height: 44px;
+  }
 }
 
 .ub-table,

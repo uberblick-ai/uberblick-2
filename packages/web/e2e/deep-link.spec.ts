@@ -36,6 +36,7 @@ import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { devConfigDocument } from "../dev-config-document.js";
 import { createDoc, docButton, docTitle, editor, openPath, setupHarness } from "./app-helpers.js";
+import { openUpstreamApp, startHarness } from "./harness.js";
 import type { Page } from "@playwright/test";
 
 const { harness, openApp, trackContext, ws } = setupHarness();
@@ -265,8 +266,8 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
 
   await page.locator(".ub-workspace").click();
   await expect(page.getByRole("menu").getByRole("menuitem")).toHaveCount(
-    // Two workspaces, plus the unavailable creation item.
-    3,
+    // Only the two configured workspaces.
+    2,
   );
 
   await page.getByRole("menuitem", { name: unnamedLabel(harness().secondWorkspace) }).click();
@@ -287,27 +288,40 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
 });
 
 test("an unbound development config keeps its local key with the compiled loopback endpoint", async ({ browser }) => {
+  // This one proof needs a bundle whose compiled endpoint is a real hub.
+  // The file's ordinary harness continues serving the shared run artifact.
   const context = trackContext(await browser.newContext());
-  await context.route("**/uberblick-config.json", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json",
-      body: devConfigDocument({
-        WORKSPACE_ID: ws(), HUB_AUTH_TOKEN: harness().authSecret,
-      }),
+  const fallback = await startHarness({ compiledFallback: true });
+  try {
+    await context.route("**/uberblick-config.json", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json",
+        body: devConfigDocument({
+          WORKSPACE_ID: fallback.workspace, HUB_AUTH_TOKEN: fallback.authSecret,
+        }),
+      });
     });
-  });
-  const page = await context.newPage();
-  await page.goto(harness().appUrl);
-  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
-  const title = docTitle("unbound-dev");
-  const uuid = await createDoc(page, title);
-  await expect(editor(page)).toHaveAttribute("contenteditable", "true");
-  await editor(page).fill("A development write reaches the hub.");
+    const page = await context.newPage();
+    await page.goto(fallback.appUrl);
+    await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+    const title = docTitle("unbound-dev");
+    const uuid = await createDoc(page, title);
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await editor(page).fill("A development write reaches the hub.");
 
-  // A separate upstream browser receives the new document and edit, proving
-  // admission and transport through the fallback rather than only a UI state.
-  const observer = await openApp(browser, `/${ws()}/${uuid}`, { upstream: true });
-  await expect(observer.locator(".ub-title")).toHaveValue(title);
-  await expect(editor(observer)).toContainText("A development write reaches the hub.");
+    // A separate upstream browser receives the new document and edit, proving
+    // admission and transport through the fallback rather than only a UI state.
+    const upstream = await openUpstreamApp(browser, fallback, `/${fallback.workspace}/${uuid}`);
+    const observer = upstream.page;
+    trackContext(upstream.context);
+    await expect(observer.locator(".ub-title")).toHaveValue(title);
+    await expect(editor(observer)).toContainText("A development write reaches the hub.");
+  } finally {
+    try {
+      await context.close();
+    } finally {
+      await fallback.stop();
+    }
+  }
 });
 
 test("the served configuration names the workspaces, and the build's define is only the fallback", async ({
@@ -338,7 +352,7 @@ test("the served configuration names the workspaces, and the build's define is o
   await page.goto(harness().appUrl);
 
   // `/` opens the *served* list's first entry — not the `WORKSPACE_ID` the
-  // bundle carries, which is what every other test in this file redirects to.
+  // shared bundle carries. Ordinary tests open the runtime document's workspace.
   await expect(page).toHaveURL(new RegExp(`/${served[0]}$`));
   expect(openPath(page)).not.toBe(`/${ws()}`);
   await page.locator(".ub-workspace").click();

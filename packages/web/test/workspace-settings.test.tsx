@@ -1,7 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, renderSettled, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
 import {
   EXAMPLE_TAGS,
@@ -90,14 +88,10 @@ function seedDocuments(connection: RoomConnection, count: number): void {
   }
 }
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
+let mounted: RenderResult | null = null;
 
 afterEach(() => {
-  if (mounted !== null) {
-    act(() => mounted?.root.unmount());
-    mounted.host.remove();
-    mounted = null;
-  }
+  mounted = null;
   vi.unstubAllGlobals();
 });
 
@@ -106,46 +100,30 @@ async function mount(
   endpoint: HubEndpoint | null = ENDPOINT,
   catalogConnection: RoomConnection | null = null,
 ): Promise<HTMLElement> {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => {
-    root.render(
-      <WorkspaceSettings
-        workspace={WORKSPACE}
-        endpoint={endpoint}
-        connection={connection}
-        catalogConnection={catalogConnection}
-        agentSessions={2}
-      />,
-    );
-  });
-  return host;
+  mounted = await renderSettled(
+    <WorkspaceSettings
+      workspace={WORKSPACE}
+      endpoint={endpoint}
+      connection={connection}
+      catalogConnection={catalogConnection}
+      agentSessions={2}
+    />,
+  );
+  return mounted.container;
 }
 
 async function mountTags(connection: RoomConnection | null): Promise<HTMLElement> {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => {
-    root.render(
-      <WorkspaceSettings
-        page="tags"
-        workspace={WORKSPACE}
-        endpoint={ENDPOINT}
-        connection={null}
-        catalogConnection={connection}
-        agentSessions={2}
-      />,
-    );
-  });
-  return host;
+  mounted = await renderSettled(
+    <WorkspaceSettings
+      page="tags"
+      workspace={WORKSPACE}
+      endpoint={ENDPOINT}
+      connection={null}
+      catalogConnection={connection}
+      agentSessions={2}
+    />,
+  );
+  return mounted.container;
 }
 
 /** Change a controlled input through the native setter, like a keystroke. */
@@ -200,8 +178,7 @@ it("renders only live client-held facts and preserves each unknown rule", async 
   expect(shown.get("Connection")).toBe("synced");
   expect(shown.get("MCP connections")).toBe("2");
 
-  act(() => mounted?.root.unmount());
-  mounted?.host.remove();
+  mounted?.unmount();
   mounted = null;
   const unknown = facts(await mount(null, null));
   expect(unknown.get("Hub")).toBe("—");
@@ -240,7 +217,7 @@ it("counts only the routed directory after server state, across disconnects", as
   );
   seedDocuments(foreign.connection, 1);
   await act(async () => {
-    mounted?.root.render(
+    mounted?.rerender(
       <WorkspaceSettings
         workspace={WORKSPACE}
         endpoint={ENDPOINT}
@@ -601,13 +578,10 @@ function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?
 }
 
 async function mountAccess(local = true, catalogConnection: RoomConnection | null = null, servingWorkspace = WORKSPACE.uuid): Promise<HTMLElement> {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  const host = document.createElement("div"); document.body.appendChild(host);
-  const root = createRoot(host); mounted = { root, host };
-  await act(async () => root.render(<WorkspaceSettings page="access" workspace={WORKSPACE}
+  mounted = await renderSettled(<WorkspaceSettings page="access" workspace={WORKSPACE}
     serving={local ? { workspace: servingWorkspace, remoteHubUrl: "ws://127.0.0.1:1234", rebound: false } : null}
-    subject="browser-person" endpoint={ENDPOINT} connection={null} catalogConnection={catalogConnection} agentSessions={2} />));
-  return host;
+    subject="browser-person" endpoint={ENDPOINT} connection={null} catalogConnection={catalogConnection} agentSessions={2} />);
+  return mounted.container;
 }
 
 function accessButton(host: ParentNode, label: string): HTMLButtonElement {
@@ -788,7 +762,7 @@ it("accepts the served workspace's decorated segment and makes new live reads on
   expect(host.textContent).toContain("Your role: member.");
   expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(1);
   const priorSignals = hub.calls.map(({ init }) => init.signal);
-  act(() => mounted?.root.unmount()); mounted?.host.remove(); mounted = null;
+  mounted?.unmount(); mounted = null;
   expect(priorSignals.every((signal) => signal?.aborted)).toBe(true);
   await mountAccess(true, null, WORKSPACE.segment);
   expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(2);

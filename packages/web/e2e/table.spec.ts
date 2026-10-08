@@ -71,9 +71,9 @@ test("TableKit cells stay drawn and wide tables contain horizontal scrolling", {
     const range = document.createRange(); range.selectNodeContents(element);
     const selection = document.getSelection(); selection?.removeAllRanges(); selection?.addRange(range);
   }, info.project.use.hasTouch === true ? "touch" : "mouse");
-  const formatting = page.getByRole("toolbar", { name: "Text formatting", exact: true });
+  const formatting = page.getByRole("toolbar", { name: "Text formatting and comment", exact: true });
   await expect(formatting).toBeVisible();
-  await expect(formatting.getByRole("button", { name: "Comment", exact: true })).toHaveCount(0);
+  await expect(formatting.getByRole("button", { name: "Comment", exact: true })).toBeVisible();
   if (process.env.UB_AGENTS_SCRATCH !== undefined) {
     for (const colorScheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme });
@@ -82,7 +82,7 @@ test("TableKit cells stay drawn and wide tables contain horizontal scrolling", {
   }
 });
 
-test("a document link typed in a table cell opens its target and Back restores the table", { tag: "@webkit" }, async ({ page }, info) => {
+test("a document link typed in a table cell opens its target and Back restores the table", async ({ page }, info) => {
   await page.goto(harness().appUrl);
   if ((page.viewportSize()?.width ?? 1280) < 1280) {
     await page.getByRole("button", { name: "Show document list", exact: true }).click();
@@ -112,7 +112,7 @@ test("a document link typed in a table cell opens its target and Back restores t
   await expect(page.locator(".ub-table th").first().locator("a.ub-doclink")).toHaveText("the target");
 });
 
-test("two merged cell link conflicts stay distinct through repair and the table binds afterwards", { tag: "@webkit" }, async ({ page }, info) => {
+test("two merged cell link conflicts stay distinct through repair and the table binds afterwards", async ({ page }, info) => {
   const source = randomUUID();
   const targets = [randomUUID(), randomUUID()] as const;
   const hrefs = ["https://example.invalid/first", "https://example.invalid/other"] as const;

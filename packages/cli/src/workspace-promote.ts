@@ -114,11 +114,11 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
     const selection = resolveProjectBinding({ env: {} });
     const selected = selection.binding;
     if (selected === null || selection.path === null) {
-      throw new Error("promotion requires a project binding; select the local workspace with `ub workspace use <id> --hub local` first");
+      throw new Error("promotion requires a project binding; select the recorded local workspace with `ub workspace use <id>` first");
     }
     if (resolved.origins.workspace === "environment" &&
         (effective.workspaceId !== selected.workspaceId || effective.hubUrl !== selected.hubUrl)) {
-      throw new Error("the environment selects a different binding; unset UB_WORKSPACE_ID and UB_HUB_URL or explicitly select that project with `ub workspace use <id> --hub local` first");
+      throw new Error("the environment selects a different binding; unset UB_WORKSPACE_ID and UB_HUB_URL or explicitly select that project with `ub workspace use <id>` first");
     }
     if (selected.hubUrl !== null) throw new Error("the selected workspace already has a hub; only local-only workspaces can be promoted");
     const workspaceId = parseWorkspaceId(selected.workspaceId).uuid;
@@ -191,7 +191,7 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
         // cannot make a loopback Docker route fall back to the local secret.
         const admission = writeHubAdmission(endpoint, true);
         for (const warning of admission.warnings) io.err(`ub: warning: ${warning}\n`);
-        writeProjectBinding(binding, { path });
+        writeProjectBinding(binding, { path, record: "promote" });
       } finally { bindingLock.release(); }
       io.out(`Promoted workspace ${selected.workspaceId} to ${endpoint}.\nProject connected; ${uploaded.entries.length} documents verified, including archived documents.\n` +
         `Join on another machine: ub workspace join ${endpoint.replace(/\/$/, "")}/${selected.workspaceId}\n`);
