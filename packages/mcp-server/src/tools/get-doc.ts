@@ -73,6 +73,6 @@ export function registerGetDoc(server: McpServer, context: ToolContext): void {
       });
       briefing.recordRead(uuid);
       return result;
-    }),
+    }, context.work),
   );
 }

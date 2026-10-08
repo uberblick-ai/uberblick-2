@@ -27,6 +27,6 @@ export function registerBacklinks(server: McpServer, context: ToolContext): void
     guarded("backlinks", async ({ uuid }) => {
       await replicas.settle();
       return json({ uuid, backlinks: replicas.store.backlinks(uuid) });
-    }),
+    }, context.work),
   );
 }

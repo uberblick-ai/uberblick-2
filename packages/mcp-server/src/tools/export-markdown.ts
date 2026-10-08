@@ -49,6 +49,6 @@ export function registerExportMarkdown(server: McpServer, context: ToolContext):
           ...(annotations === undefined ? {} : { annotations }),
         }),
       });
-    }),
+    }, context.work),
   );
 }

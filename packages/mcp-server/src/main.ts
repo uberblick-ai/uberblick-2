@@ -15,6 +15,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { resolveMcpConfig } from "./config.js";
 import { log } from "./log.js";
 import { createMcpServer } from "./server.js";
+import { closeWithDeadline } from "./shutdown.js";
 
 async function main(): Promise<void> {
   const config = resolveMcpConfig();
@@ -27,7 +28,7 @@ async function main(): Promise<void> {
     }
     shuttingDown = true;
     log.info("shutting down", { signal });
-    void instance.close().then(
+    void closeWithDeadline(() => instance.close()).then(
       () => process.exit(0),
       (error: unknown) => {
         log.error("shutdown failed", error);

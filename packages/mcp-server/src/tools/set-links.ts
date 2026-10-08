@@ -38,6 +38,6 @@ export function registerSetLinks(server: McpServer, context: ToolContext): void 
       const replica = requireWritableDoc(uuid);
       setLinks(replica.doc, links);
       return json({ uuid, links, ...durability(replica) });
-    }),
+    }, context.work),
   );
 }

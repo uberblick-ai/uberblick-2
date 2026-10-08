@@ -43,6 +43,7 @@ import { strictInput } from "./inputs.js";
 import { outputSchemas } from "./outputs.js";
 import type { ToolMode } from "./inputs.js";
 import type { Replica, Replicas } from "./replica.js";
+import type { ServerWork } from "./server-work.js";
 
 /**
  * What the tools need from the shared tool context and JSON responder.
@@ -52,6 +53,7 @@ import type { Replica, Replicas } from "./replica.js";
  * one place beats two modules agreeing to pass the same wrapper around.
  */
 export interface SidebarToolContext {
+  work: ServerWork;
   /** The directory entry for a uuid, or a `doc_not_found` failure. */
   requireStub(uuid: string): DirectoryEntry;
   /** `{applied, synced, hub}` for a write that just landed. */
@@ -263,7 +265,7 @@ export function registerSidebarTools(
         ...sidebarPayload(replicas, sidebar),
         hub: replicas.sync.state(),
       });
-    }),
+    }, context.work),
   );
 
   server.registerTool(
@@ -306,7 +308,7 @@ export function registerSidebarTools(
         ...sidebarPayload(replicas, sidebar),
         ...context.durability(sidebar),
       });
-    }),
+    }, context.work),
   );
 
   server.registerTool(
@@ -341,7 +343,7 @@ export function registerSidebarTools(
         ...sidebarPayload(replicas, sidebar),
         ...context.durability(sidebar),
       });
-    }),
+    }, context.work),
   );
 
   server.registerTool(
@@ -405,6 +407,6 @@ export function registerSidebarTools(
         ...sidebarPayload(replicas, sidebar),
         ...context.durability(sidebar),
       });
-    }),
+    }, context.work),
   );
 }

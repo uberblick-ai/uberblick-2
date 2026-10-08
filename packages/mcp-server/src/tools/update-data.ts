@@ -56,5 +56,5 @@ export function registerUpdateData(server: McpServer, context: ToolContext): voi
       })),
       ...durability(replica),
     });
-  }));
+  }, context.work));
 }

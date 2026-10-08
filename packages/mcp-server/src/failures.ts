@@ -70,6 +70,8 @@ import {
 import { log } from "./log.js";
 import { outputSchemas } from "./outputs.js";
 import { PersistenceError } from "./replica.js";
+import { ServerShuttingDownError } from "./server-work.js";
+import type { ServerWork } from "./server-work.js";
 
 /**
  * What the caller is told when a handler threw something nobody mapped. Fixed
@@ -171,6 +173,10 @@ interface Recovery {
  * the call that finishes it — but never contradict the class.
  */
 const RECOVERIES: Record<string, Recovery> = {
+  server_shutting_down: {
+    recoveryClass: "manual",
+    guidance: "Start a new MCP server session, then repeat the refused call. Nothing was written.",
+  },
   data_collection_not_found: {
     recoveryClass: "reread",
     guidance: "Call get_data with this uuid and no collection to read the collection summary, then choose an existing collection.",
@@ -679,14 +685,21 @@ export function toFailure(tool: string, error: unknown): CallToolResult {
  * The tool's own name is what tells the contract whether this call could have
  * written anything — the single fact a failure payload cannot work out for
  * itself, since the same `doc_not_found` is a read's dead end and a write's.
+ *
+ * Concurrency invariant: handlers await only their opening replicas.settle(),
+ * then perform every read and write synchronously. Never add an await after
+ * settle: another handler could interleave writes to the same Y.Doc. The
+ * handler-invariants test checks all registrations and collectSyncStatus,
+ * whose only await is also its opening settle.
  */
 export function guarded<Args>(
   tool: keyof typeof outputSchemas,
   handler: (args: Args) => Promise<CallToolResult>,
+  work?: ServerWork,
 ): (args: Args) => Promise<CallToolResult> {
   return async (args: Args) => {
     try {
-      const result = await handler(args);
+      const result = await (work === undefined ? handler(args) : work.run(() => handler(args)));
       if (!result.isError) {
         const parsed = outputSchemas[tool].safeParse(result.structuredContent);
         if (!parsed.success) {
@@ -695,6 +708,9 @@ export function guarded<Args>(
       }
       return result;
     } catch (error) {
+      if (error instanceof ServerShuttingDownError) {
+        return toFailure(tool, new ToolError("server_shutting_down", error.message));
+      }
       return toFailure(tool, error);
     }
   };

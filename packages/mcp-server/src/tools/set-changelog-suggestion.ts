@@ -86,6 +86,6 @@ export function registerSetChangelogSuggestion(server: McpServer, context: ToolC
         ...(suggestion === "" ? {} : { changelogSuggestion: suggestion }),
         ...durability(replica),
       });
-    }),
+    }, context.work),
   );
 }

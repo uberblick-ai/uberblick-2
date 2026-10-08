@@ -103,5 +103,5 @@ export function registerGetData(server: McpServer, context: ToolContext): void {
         missing_ids: [...requested].filter((id) => !existing.has(id)).sort(compareCodePoints),
       }),
     });
-  }));
+  }, context.work));
 }

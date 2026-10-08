@@ -469,6 +469,6 @@ export function registerCreateDoc(server: McpServer, context: ToolContext): void
         ...durabilityAcross(replica, completed),
         ...(inputs.length === 0 || lifecycle?.status === "decided" ? {} : tldrReview(replica)),
       });
-    }),
+    }, context.work),
   );
 }

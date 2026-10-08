@@ -103,6 +103,6 @@ export function registerListDocs(server: McpServer, context: ToolContext): void 
         })),
         hub: replicas.sync.state(),
       });
-    }),
+    }, context.work),
   );
 }

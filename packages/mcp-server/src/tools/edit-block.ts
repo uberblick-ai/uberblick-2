@@ -132,6 +132,6 @@ export function registerEditBlock(server: McpServer, context: ToolContext): void
         block: getBlock(replica.doc, block_id),
         ...contentDurability(replica),
       });
-    }),
+    }, context.work),
   );
 }

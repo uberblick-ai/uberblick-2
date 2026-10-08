@@ -453,6 +453,9 @@ export class Replicas {
   }
 
   private ensureRoom(room: string, id: string): Replica {
+    if (this.destroyed) {
+      throw new Error("Cannot open a room on destroyed replicas.");
+    }
     const existing = this.replicas.get(room);
     if (existing !== undefined) {
       return existing;

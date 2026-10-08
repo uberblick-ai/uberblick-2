@@ -149,6 +149,6 @@ export function registerAnnotate(server: McpServer, context: ToolContext): void 
         annotation: annotationJson(replica, created),
         ...durability(replica),
       });
-    }),
+    }, context.work),
   );
 }

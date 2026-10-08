@@ -75,6 +75,6 @@ export function registerInsertBlock(server: McpServer, context: ToolContext): vo
         block,
         ...contentDurability(replica),
       });
-    }),
+    }, context.work),
   );
 }

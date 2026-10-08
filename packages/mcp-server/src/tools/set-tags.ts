@@ -50,6 +50,6 @@ export function registerSetTags(server: McpServer, context: ToolContext): void {
       );
       assignDocumentTags(replica.doc, tagCatalog(), tagIds);
       return json({ uuid, tags: documentTags(replica), ...durability(replica) });
-    }),
+    }, context.work),
   );
 }

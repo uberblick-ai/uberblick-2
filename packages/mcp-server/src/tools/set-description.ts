@@ -44,6 +44,6 @@ export function registerSetDescription(server: McpServer, context: ToolContext):
       const replica = requireWritableDoc(uuid);
       setDescription(replica.doc, description);
       return json({ uuid, description, ...durability(replica) });
-    }),
+    }, context.work),
   );
 }

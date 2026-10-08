@@ -37,6 +37,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { GuidanceBriefing } from "./guidance.js";
 import type { Replicas } from "./replica.js";
+import type { ServerWork } from "./server-work.js";
 import { registerSidebarTools } from "./sidebar-tools.js";
 import { createToolContext } from "./tools/context.js";
 import { json } from "./tools/helpers.js";
@@ -70,8 +71,9 @@ export function registerTools(
   server: McpServer,
   replicas: Replicas,
   briefing: GuidanceBriefing,
+  work: ServerWork,
 ): void {
-  const context = createToolContext(replicas, briefing);
+  const context = createToolContext(replicas, briefing, work);
 
   registerListTags(server, context);
   registerCreateDoc(server, context);
@@ -103,5 +105,6 @@ export function registerTools(
     requireStub: context.requireStub,
     durability: context.durability,
     json,
+    work,
   });
 }

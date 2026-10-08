@@ -55,6 +55,6 @@ export function registerSearch(server: McpServer, context: ToolContext): void {
           tags: resolveTagAssignments(catalog, hit.tags),
         })),
       });
-    }),
+    }, context.work),
   );
 }

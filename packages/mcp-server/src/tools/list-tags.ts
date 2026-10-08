@@ -33,6 +33,6 @@ export function registerListTags(server: McpServer, context: ToolContext): void 
         tags: activeTagCatalog(tagCatalog()).map(({ id, name }) => ({ id, name })),
         hub: replicas.sync.state(),
       });
-    }),
+    }, context.work),
   );
 }

@@ -53,6 +53,6 @@ export function registerSyncStatus(server: McpServer, context: ToolContext): voi
     // The same snapshot `ub status` prints — see ../status.ts. Diagnostics must
     // still answer when persistence has failed, which is exactly when someone
     // needs to know why every other tool stopped.
-    guarded("sync_status", async () => json(await collectSyncStatus(replicas))),
+    guarded("sync_status", async () => json(await collectSyncStatus(replicas)), context.work),
   );
 }

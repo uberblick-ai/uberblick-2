@@ -41,6 +41,6 @@ export function registerDeleteBlock(server: McpServer, context: ToolContext): vo
       const replica = requireWritableDoc(uuid, true);
       deleteBlock(replica.doc, block_id);
       return json({ uuid, blockId: block_id, ...contentDurability(replica) });
-    }),
+    }, context.work),
   );
 }

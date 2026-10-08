@@ -156,6 +156,6 @@ export function registerSetStatus(server: McpServer, context: ToolContext): void
       }
 
       return json({ uuid, kind, status, ...decisionAuthorityJson(replica), ...durability(replica) });
-    }),
+    }, context.work),
   );
 }

@@ -55,6 +55,6 @@ export function registerFindDecisions(server: McpServer, context: ToolContext): 
           status: getDirectoryEntry(directory, record.uuid)?.status ?? null,
         })),
       });
-    }),
+    }, context.work),
   );
 }

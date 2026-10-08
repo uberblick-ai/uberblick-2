@@ -73,6 +73,6 @@ export function registerLinkRange(server: McpServer, context: ToolContext): void
         rev: getBlockRev(replica.doc, block_id),
         ...durability(replica),
       });
-    }),
+    }, context.work),
   );
 }

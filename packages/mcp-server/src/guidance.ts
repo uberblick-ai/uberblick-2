@@ -7,6 +7,7 @@ import { exportMarkdown, getMeta, listDirectory, readDocumentTags } from "@uberb
 import { ToolError } from "./failures.js";
 import { log } from "./log.js";
 import type { Replicas } from "./replica.js";
+import type { ServerWork } from "./server-work.js";
 import { activeTagCatalog } from "./tag-catalog.js";
 
 export const GUIDANCE_INSTRUCTIONS =
@@ -95,11 +96,13 @@ export function registerGuidanceResources(
   server: McpServer,
   replicas: Replicas,
   briefing: GuidanceBriefing,
+  work: ServerWork,
 ): void {
   server.registerResource(
     "guidance",
     new ResourceTemplate("uberblick://doc/{uuid}", {
       list: () => {
+        work.assertOpen();
         replicas.refresh();
         return {
           resources: briefing.documents().map(({ uuid, title }) => ({
@@ -114,6 +117,7 @@ export function registerGuidanceResources(
     }),
     { title: "Workspace guidance", mimeType: "text/markdown", description: GUIDANCE_INSTRUCTIONS },
     (uri, { uuid }) => {
+      work.assertOpen();
       replicas.refresh();
       if (typeof uuid !== "string" || !briefing.documents().some((doc) => doc.uuid === uuid)) {
         throw new McpError(ErrorCode.InvalidParams, "No locally readable guidance at this URI; list resources again.");

@@ -41,6 +41,6 @@ export function registerSetTldr(server: McpServer, context: ToolContext): void {
       const replica = requireWritableDoc(uuid, true);
       setTldr(replica.doc, tldr);
       return json({ uuid, tldr, ...durability(replica) });
-    }),
+    }, context.work),
   );
 }

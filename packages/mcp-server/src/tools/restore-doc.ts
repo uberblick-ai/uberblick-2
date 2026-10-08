@@ -78,6 +78,6 @@ export function registerRestoreDoc(server: McpServer, context: ToolContext): voi
         indexed: affected.every(recordUuid => replicas.hydrated(recordUuid) && replicas.indexReconciled(recordUuid)),
         ...durabilityAcross(directory, completed),
       });
-    }),
+    }, context.work),
   );
 }

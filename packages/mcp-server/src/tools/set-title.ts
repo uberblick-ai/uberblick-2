@@ -44,6 +44,6 @@ export function registerSetTitle(server: McpServer, context: ToolContext): void 
       const replica = requireWritableDoc(uuid, true);
       setTitle(replica.doc, title);
       return json({ uuid, title, ...durability(replica) });
-    }),
+    }, context.work),
   );
 }
