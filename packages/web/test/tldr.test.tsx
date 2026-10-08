@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { screen, within } from "@testing-library/react";
 import { act, renderSettled, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
 import {
@@ -96,20 +97,20 @@ function typeInto(field: HTMLTextAreaElement | null, value: string): void {
 }
 
 function openActions(host: HTMLElement): void {
-  const trigger = host.querySelector<HTMLButtonElement>(".ub-actions-trigger");
+  const trigger = within(host).getByRole("button", { name: "Document actions" });
   trigger?.dispatchEvent(
     new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
   );
 }
 
 function menuItem(label: string): HTMLElement | undefined {
-  return [
-    ...document.querySelectorAll<HTMLElement>("[data-slot=dropdown-menu-item]"),
-  ].find((item) => item.textContent === label);
+  return screen.queryByRole("menuitem", { name: label }) ?? undefined;
 }
 
 function field(host: HTMLElement): HTMLTextAreaElement | null {
-  return host.querySelector<HTMLTextAreaElement>("#ub-tldr-input");
+  return within(host).queryByRole<HTMLTextAreaElement>("textbox", {
+    name: /Write one or two plain-English sentences/,
+  });
 }
 
 describe("the document TL;DR", () => {
@@ -117,14 +118,15 @@ describe("the document TL;DR", () => {
     const ydoc = documentWith(null);
     const { host } = await mountPane(ydoc);
 
-    expect(host.querySelector(".ub-tldr")).toBeNull();
+    expect(within(host).queryByRole("region", { name: "TL;DR" })).toBeNull();
     act(() => openActions(host));
     expect(menuItem("Add TL;DR")).not.toBeUndefined();
     act(() => menuItem("Add TL;DR")?.click());
-    expect(host.querySelector(".ub-tldr-label")?.textContent).toBe("Quick summary");
-    expect(host.querySelector(".ub-tldr h2")?.textContent).toBe("TL;DR");
+    expect(within(host).getByText("Quick summary").textContent).toBe("Quick summary");
+    expect(within(host).getByRole("heading", { name: "TL;DR" }).textContent).toBe("TL;DR");
+    // Decorative, aria-hidden icon has no accessible handle.
     expect(host.querySelector(".ub-tldr-icon")).not.toBeNull();
-    expect(host.querySelector(".ub-tldr-form label")?.textContent).toContain(
+    expect(within(host).getByText(/Write one or two plain-English sentences/).textContent).toContain(
       "plain-English sentences",
     );
     await act(async () => {
@@ -133,38 +135,34 @@ describe("the document TL;DR", () => {
     expect(document.activeElement).toBe(field(host));
 
     act(() => typeInto(field(host), "x".repeat(MAX_TLDR_LENGTH + 1)));
-    expect(host.querySelector("#ub-tldr-count")?.textContent).toContain(
+    expect(within(host).getByText(`${MAX_TLDR_LENGTH + 1} / ${MAX_TLDR_LENGTH} characters`).textContent).toContain(
       `${MAX_TLDR_LENGTH + 1} / ${MAX_TLDR_LENGTH}`,
     );
-    act(() => host.querySelector<HTMLButtonElement>("button[type=submit]")?.click());
-    expect(host.querySelector("[role=alert]")?.textContent).toContain(
+    act(() => within(host).getByRole("button", { name: "Save" }).click());
+    expect(within(host).getByRole("alert").textContent).toContain(
       `at most ${MAX_TLDR_LENGTH} characters`,
     );
     expect(getMeta(ydoc).tldr).toBeNull();
 
     const atLimit = "x".repeat(MAX_TLDR_LENGTH);
     act(() => typeInto(field(host), atLimit));
-    act(() => host.querySelector<HTMLButtonElement>("button[type=submit]")?.click());
+    act(() => within(host).getByRole("button", { name: "Save" }).click());
     expect(getMeta(ydoc).tldr).toBe(atLimit);
 
     act(() => openActions(host));
     act(() => menuItem("Edit TL;DR")?.click());
     act(() => typeInto(field(host), "  A short summary for a person.  "));
-    act(() => host.querySelector<HTMLButtonElement>("button[type=submit]")?.click());
+    act(() => within(host).getByRole("button", { name: "Save" }).click());
     expect(getMeta(ydoc).tldr).toBe("A short summary for a person.");
-    expect(host.querySelector(".ub-tldr-body > p")?.textContent).toBe(
+    expect(within(host).getByText("A short summary for a person.").textContent).toBe(
       "A short summary for a person.",
     );
 
     act(() => openActions(host));
     act(() => menuItem("Edit TL;DR")?.click());
-    act(() =>
-      [...host.querySelectorAll<HTMLButtonElement>(".ub-tldr-actions button")]
-        .find((button) => button.textContent === "Clear")
-        ?.click(),
-    );
+    act(() => within(host).getByRole("button", { name: "Clear" }).click());
     expect(getMeta(ydoc).tldr).toBeNull();
-    expect(host.querySelector(".ub-tldr")).toBeNull();
+    expect(within(host).queryByRole("region", { name: "TL;DR" })).toBeNull();
   });
 
   it("follows a remote value and guards an edit when the document is archived", async () => {
@@ -173,7 +171,7 @@ describe("the document TL;DR", () => {
     const { host, view, connection } = await mountPane(ydoc);
 
     act(() => setTldr(peer, "Changed by another client."));
-    expect(host.querySelector(".ub-tldr-body > p")?.textContent).toBe(
+    expect(within(host).getByText("Changed by another client.").textContent).toBe(
       "Changed by another client.",
     );
 
@@ -192,21 +190,17 @@ describe("the document TL;DR", () => {
       />,
     );
     expect(field(host)?.readOnly).toBe(true);
-    expect(host.querySelector(".ub-tldr-form-meta")?.textContent).toContain(
+    expect(within(host).getByText("Restore to edit.").textContent).toContain(
       "Restore to edit",
     );
     act(() => typeInto(field(host), "Typed through the read-only field."));
-    act(() => host.querySelector<HTMLFormElement>(".ub-tldr-form")?.requestSubmit());
+    act(() => within(host).getByRole<HTMLFormElement>("form", { name: "Edit TL;DR" }).requestSubmit());
     expect(getMeta(ydoc).tldr).toBe("Changed by another client.");
 
     act(() => setTldr(peer, null));
     // The in-progress draft stays visible and read-only while archived; cancel
     // reveals the remote clear, with no empty callout left behind.
-    act(() =>
-      [...host.querySelectorAll<HTMLButtonElement>(".ub-tldr-actions button")]
-        .find((button) => button.textContent === "Cancel")
-        ?.click(),
-    );
-    expect(host.querySelector(".ub-tldr")).toBeNull();
+    act(() => within(host).getByRole("button", { name: "Cancel" }).click());
+    expect(within(host).queryByRole("region", { name: "TL;DR" })).toBeNull();
   });
 });

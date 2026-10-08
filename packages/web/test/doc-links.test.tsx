@@ -28,6 +28,7 @@
 
 import { describe, expect, it } from "vitest";
 import { act, renderSettled } from "./react-render.js";
+import { within } from "@testing-library/react";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -155,7 +156,8 @@ describe("making a reference", () => {
         { insert: "the hub", attributes: { docLink: { docId: TARGET } } },
         { insert: " today" },
       ]);
-      const anchor = element.querySelector("th a.ub-doclink");
+      // The mark class distinguishes document references from external links.
+      const anchor = within(element).getByRole("columnheader", { name: "see the hub today" }).querySelector("a.ub-doclink");
       expect(anchor?.getAttribute("href")).toBe(`/${WORKSPACE}/${TARGET}`);
       expect(anchor?.getAttribute("data-doc-link-state")).toBe("resolved");
     } finally { editor.destroy(); ydoc.destroy(); directory.destroy(); }
@@ -219,6 +221,7 @@ describe("making a reference", () => {
       typeText(editor, `[${TARGET}]`);
 
       expect(getBlocks(ydoc)[0]?.text).toBe(hostile);
+      // This checks injected markup itself, including an image with no name.
       expect(element.querySelector("img")).toBeNull();
       expect(element.querySelector("a.ub-doclink")?.textContent).toBe(hostile);
     } finally {
@@ -449,14 +452,18 @@ describe("an unwritable document room", () => {
         onSelectThread={() => {}}
       />,
     );
-    const title = host.querySelector<HTMLInputElement>(".ub-title");
+    const title = within(host).getByPlaceholderText<HTMLInputElement>("Untitled");
     expect(title?.readOnly).toBe(true);
-    expect(host.querySelector(".ub-tag-add")).toBeNull();
-    expect(host.querySelector(".ub-editor [contenteditable=true]")).toBeNull();
+    expect(within(host).queryByRole("button", { name: "Edit tags" })).toBeNull();
+    const content = within(host).getByRole("textbox", { name: "Document content" });
+    // contenteditable is the browser editing contract. The parent is the
+    // editor-owned host; the writable case below witnesses this same query.
+    expect(content.getAttribute("contenteditable")).toBe("false");
+    expect(content.parentElement?.querySelector("[contenteditable=true]")).toBeNull();
     expect(
-      host.querySelector('.ub-editor [role="textbox"]')?.getAttribute("aria-readonly"),
+      content.getAttribute("aria-readonly"),
     ).toBe("true");
-    expect(host.querySelector(".ub-status")?.textContent).toContain("not saved");
+    expect(within(host).getByText("not saved").textContent).toContain("not saved");
 
     const setter = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
@@ -511,6 +518,8 @@ describe("following a reference", () => {
       />,
     );
 
+    const content = within(host).getByRole("textbox", { name: "Document content" });
+    expect(content.parentElement?.querySelector("[contenteditable=true]")).toBe(content);
     const anchor = host.querySelector<HTMLAnchorElement>("a.ub-doclink");
     expect(anchor?.textContent).toBe("the hub");
 
@@ -555,6 +564,7 @@ describe("following a reference", () => {
     expect(leftToBrowser).toBe(true);
 
     // ---- and the thread is still reachable from the rest of the highlight ----
+    // Serialized editor highlights identify their actual delegated thread target.
     const highlight = host.querySelector("[data-comment-thread]");
     expect(highlight).not.toBeNull();
     click(highlight);

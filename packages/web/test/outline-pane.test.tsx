@@ -1,6 +1,7 @@
 /** The Contents menu must forget its open state when its last heading leaves. */
 
 import { act, renderSettled } from "./react-render.js";
+import { screen, within } from "@testing-library/react";
 import { onTestCleanup } from "./test-cleanup.js";
 import { expect, it } from "vitest";
 import * as Y from "yjs";
@@ -15,18 +16,18 @@ it("closes when the last eligible heading disappears and stays closed when it re
   const heading = appendBlock(ydoc, { type: "heading", text: "Install", level: 2 });
   const connection = { ydoc } as RoomConnection;
   const { container: host } = await renderSettled(<OutlinePane connection={connection} />);
-  const trigger = host.querySelector<HTMLButtonElement>("button");
+  const trigger = within(host).queryByRole("button", { name: "Contents 1" });
   expect(trigger).not.toBeNull();
   await act(async () => {
     trigger?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   });
-  expect(document.querySelector('[role="menu"]')?.textContent).toContain("Install");
+  expect(screen.queryByRole("menu", { name: "Contents 1" })?.textContent).toContain("Install");
 
   await act(async () => setBlockLevel(ydoc, heading, 3));
-  expect(host.querySelector("button")).toBeNull();
-  expect(document.querySelector('[role="menu"]')).toBeNull();
+  expect(within(host).queryByRole("button", { name: "Contents 1" })).toBeNull();
+  expect(screen.queryByRole("menu", { name: "Contents 1" })).toBeNull();
 
   await act(async () => setBlockLevel(ydoc, heading, 2));
-  expect(host.querySelector("button")?.textContent).toContain("Contents 1");
-  expect(document.querySelector('[role="menu"]')).toBeNull();
+  expect(within(host).queryByRole("button", { name: "Contents 1" })?.textContent).toContain("Contents 1");
+  expect(screen.queryByRole("menu", { name: "Contents 1" })).toBeNull();
 });

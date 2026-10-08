@@ -21,6 +21,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderSettled } from "./react-render.js";
+import { screen, within } from "@testing-library/react";
 import * as Y from "yjs";
 import {
   addComment,
@@ -37,7 +38,6 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
-import { threadCardId } from "../src/ui/threads.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 /** The annotated paragraph. "quick brown" — [4, 15) — is the marked range. */
@@ -171,11 +171,22 @@ async function openAnnotatedDoc(resolved = false): Promise<{
 }
 
 function highlight(host: HTMLElement, threadId: string): HTMLElement {
+  // The mark's UUID is the editor-to-thread routing contract.
   const span = host.querySelector<HTMLElement>(
     `[data-comment-thread="${CSS.escape(threadId)}"]`,
   );
   if (span === null) throw new Error("no highlight for that thread");
   return span;
+}
+
+function threadButton(item: HTMLElement): HTMLButtonElement {
+  return within(item).getByRole<HTMLButtonElement>("button", { name: /^Paragraph \d/ });
+}
+
+function threadCard(host: HTMLElement, excerpt = "quick brown"): HTMLElement {
+  const region = within(host).getByRole("region", { name: "Threads" });
+  const control = within(region).getByRole("button", { name: new RegExp(excerpt) });
+  return within(region).getAllByRole("listitem").find((item) => item.contains(control))!;
 }
 
 function press(target: HTMLElement, key: string, init: KeyboardEventInit = {}): void {
@@ -187,28 +198,18 @@ function press(target: HTMLElement, key: string, init: KeyboardEventInit = {}): 
 }
 
 describe("thread writes require a writable, unarchived document", () => {
-  function card(host: HTMLElement, threadId: string): HTMLElement {
-    const item = host.querySelector<HTMLElement>(`#${CSS.escape(threadCardId(threadId))}`);
-    if (item === null) throw new Error("no thread card");
-    return item;
-  }
-
-  function findButton(host: HTMLElement, label: string): HTMLButtonElement | undefined {
-    return [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      (candidate) => candidate.textContent === label,
-    );
+  function findButton(host: HTMLElement, label: string): HTMLButtonElement | null {
+    return within(host).queryByRole<HTMLButtonElement>("button", { name: label });
   }
 
   function button(host: HTMLElement, label: string): HTMLButtonElement {
     const control = findButton(host, label);
-    if (control === undefined) throw new Error(`no ${label} button`);
+    if (control === null) throw new Error(`no ${label} button`);
     return control;
   }
 
   function replyField(item: HTMLElement): HTMLTextAreaElement {
-    const field = item.querySelector<HTMLTextAreaElement>(".ub-comment-input");
-    if (field === null) throw new Error("no reply field");
-    return field;
+    return within(item).getByPlaceholderText<HTMLTextAreaElement>("Reply…");
   }
 
   function typeReply(field: HTMLTextAreaElement, text: string): void {
@@ -229,12 +230,12 @@ describe("thread writes require a writable, unarchived document", () => {
       addComment(ydoc, resolvedId, "Reader", "resolved reply");
       setAnnotationResolved(ydoc, resolvedId, true);
     });
-    const open = card(host, threadId);
-    const resolved = card(host, resolvedId);
+    const open = threadCard(host);
+    const resolved = threadCard(host, "jumps");
     // A collapsed resolved card has no actions even when writable. Expand
     // first so removing the read-only gate cannot pass this test vacuously.
-    await act(async () => resolved.querySelector<HTMLButtonElement>(".ub-thread")!.click());
-    expect(resolved.querySelector(".ub-thread")?.getAttribute("aria-expanded")).toBe("true");
+    await act(async () => threadButton(resolved).click());
+    expect(threadButton(resolved).getAttribute("aria-expanded")).toBe("true");
     expect(button(open, "Reply")).toBeDefined();
     expect(button(open, "Resolve")).toBeDefined();
     expect(button(resolved, "Reopen")).toBeDefined();
@@ -246,14 +247,16 @@ describe("thread writes require a writable, unarchived document", () => {
       [open, "quick brown", ["why quick?", "open reply"]],
       [resolved, "jumps", ["why jumps?", "resolved reply"]],
     ] as const) {
-      expect(item.querySelector(".ub-thread-excerpt")?.textContent).toBe(excerpt);
-      expect([...item.querySelectorAll(".ub-thread-text")].map((node) => node.textContent)).toEqual(comments);
+      expect(within(item).getByText(excerpt).textContent).toBe(excerpt);
+      expect(within(item).getAllByRole("time").map((time) =>
+        within(time.parentElement!.parentElement!).getByText((text) => comments.some((comment) => comment === text)).textContent,
+      )).toEqual(comments);
       for (const label of ["Reply", "Resolve", "Reopen"]) {
-        expect(findButton(item, label)).toBeUndefined();
+        expect(findButton(item, label)).toBeNull();
       }
-      expect(item.querySelector(".ub-comment-input")).toBeNull();
+      expect(within(item).queryByPlaceholderText("Reply…")).toBeNull();
     }
-    expect(resolved.querySelector(".ub-thread")?.getAttribute("aria-expanded")).toBe("true");
+    expect(threadButton(resolved).getAttribute("aria-expanded")).toBe("true");
     expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
 
     await act(async () => emitStatus(roomForDoc(WORKSPACE, UUID), { writable: true }));
@@ -264,17 +267,17 @@ describe("thread writes require a writable, unarchived document", () => {
     });
 
   it("lets an unsent reply go on archive, without writing or reviving it on Restore", async () => {
-    const { host, ydoc, threadId } = await openAnnotatedDoc();
-    const item = card(host, threadId);
+    const { host, ydoc } = await openAnnotatedDoc();
+    const item = threadCard(host);
     await act(async () => button(item, "Reply").click());
     typeReply(replyField(item), "Unsent draft");
     const before = [...Y.encodeStateAsUpdate(ydoc)];
 
     await act(async () => tombstoneDirectoryEntry(room(directoryRoom(WORKSPACE)).ydoc, UUID));
-    expect(item.querySelector(".ub-comment-input")).toBeNull();
+    expect(within(item).queryByPlaceholderText("Reply…")).toBeNull();
     expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
     await act(async () => button(host, "Restore").click());
-    expect(item.querySelector(".ub-comment-input")).toBeNull();
+    expect(within(item).queryByPlaceholderText("Reply…")).toBeNull();
     expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
     await act(async () => button(item, "Reply").click());
     expect(replyField(item).value).toBe("");
@@ -283,7 +286,7 @@ describe("thread writes require a writable, unarchived document", () => {
 
   it("refuses Reply when the room stops being writable before the rail re-renders", async () => {
     const { host, ydoc, threadId } = await openAnnotatedDoc();
-    const item = card(host, threadId);
+    const item = threadCard(host);
     await act(async () => button(item, "Reply").click());
     const field = replyField(item);
     typeReply(field, "Reply from the stale form");
@@ -329,9 +332,7 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
     expect(document.activeElement).toBe(span);
     press(span, "Enter");
 
-    const card = host.querySelector<HTMLButtonElement>(
-      `#${CSS.escape(threadCardId(threadId))} button`,
-    );
+    const card = threadButton(threadCard(host));
     expect(card).not.toBeNull();
     expect(card?.textContent).toContain("why quick?");
     expect(document.activeElement).toBe(card);
@@ -369,19 +370,15 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
 
     const before = [...Y.encodeStateAsUpdate(ydoc)];
     await act(async () => span.click());
-    const item = host.querySelector<HTMLElement>(
-      `#${CSS.escape(threadCardId(threadId))}`,
-    );
-    const card = item?.querySelector<HTMLButtonElement>(".ub-thread");
+    const item = threadCard(host);
+    const card = threadButton(item);
     expect(card?.getAttribute("aria-expanded")).toBe("true");
     expect(card?.textContent).toContain("why quick?");
     expect(scrolled).toContain(item);
     expect(getAnnotation(ydoc, threadId)?.resolved).toBe(true);
-    expect(item?.querySelector(".ub-comment-input")).toBeNull();
+    expect(within(item!).queryByPlaceholderText("Reply…")).toBeNull();
     expect(
-      [...(item?.querySelectorAll<HTMLButtonElement>("button") ?? [])].some(
-        (button) => button.textContent === "Reply",
-      ),
+      within(item).queryByRole("button", { name: "Reply" }) !== null,
     ).toBe(false);
 
     // A second anchor activation is another request to reveal, never the
@@ -427,7 +424,7 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
    */
   it("leaves Enter alone when the caret, not the highlight, is what is focused", async () => {
     const { host, ydoc, threadId } = await openAnnotatedDoc();
-    const prose = host.querySelector<HTMLElement>(".ub-editor .ProseMirror");
+    const prose = within(host).getByRole("textbox", { name: "Document content" });
     expect(prose).not.toBeNull();
     const span = highlight(host, threadId);
     expect(getBlocks(ydoc)).toHaveLength(1);
@@ -466,32 +463,29 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
     expect(blocks).toHaveLength(2);
     expect(blocks.map((block) => block.text).join("")).toBe(PARAGRAPH);
     // And nothing was selected, so nothing took focus off the prose.
-    const card = host.querySelector<HTMLButtonElement>(
-      `#${CSS.escape(threadCardId(threadId))} button`,
-    );
+    const card = threadButton(threadCard(host));
     expect(document.activeElement).not.toBe(card);
   });
 });
 
 describe("the threads rail can be opened where the layout hides it", () => {
+  const toggles = new WeakMap<HTMLElement, HTMLButtonElement>();
+
   function toggle(host: HTMLElement): HTMLButtonElement {
-    const button = host.querySelector<HTMLButtonElement>(".ub-threads-toggle");
-    if (button === null) throw new Error("no threads toggle");
-    return button;
+    // Radix hides the app while its modal is open; keep the opener found before
+    // that transition so assertions can inspect its expanded state afterward.
+    const found = toggles.get(host)
+      ?? within(host).getByRole<HTMLButtonElement>("button", { name: /^Threads \d+$/ });
+    toggles.set(host, found);
+    return found;
   }
 
   function sheet(): HTMLElement {
-    const content = document.querySelector<HTMLElement>("[data-slot=sheet-content]");
-    if (content === null) throw new Error("no threads sheet");
-    return content;
+    return screen.getByRole("dialog", { name: "Threads" });
   }
 
   function button(label: string): HTMLButtonElement {
-    const control = [...sheet().querySelectorAll<HTMLButtonElement>("button")].find(
-      (candidate) => candidate.textContent === label || candidate.getAttribute("aria-label") === label,
-    );
-    if (control === undefined) throw new Error(`no ${label} button`);
-    return control;
+    return within(sheet()).getByRole<HTMLButtonElement>("button", { name: label });
   }
 
   async function settle(action: () => void): Promise<void> {
@@ -503,7 +497,7 @@ describe("the threads rail can be opened where the layout hides it", () => {
   }
 
   function typeReply(text: string): void {
-    const field = sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input");
+    const field = within(sheet()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…");
     if (field === null) throw new Error("no reply field");
     act(() => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(field, text);
@@ -534,51 +528,52 @@ describe("the threads rail can be opened where the layout hides it", () => {
     await settle(() => toggle(host).click());
     await settle(() => button("Reply").click());
     typeReply("日本語の返信");
-    const field = sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")!;
+    const field = within(sheet()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")!;
 
     // Radix's capture-phase dismissal runs before the textarea sees Escape.
     await settle(() => composingKey(field, "Escape", true));
-    expect(sheet().querySelector(".ub-comment-input")).toBe(field);
+    expect(within(sheet()).queryByPlaceholderText("Reply…")).toBe(field);
     expect(field.value).toBe("日本語の返信");
     expect(document.activeElement).toBe(field);
     expect(getAnnotation(ydoc, threadId)?.comments).toHaveLength(1);
     expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
 
     await settle(() => press(field, "Escape"));
-    expect(sheet().querySelector(".ub-comment-input")).toBeNull();
+    expect(within(sheet()).queryByPlaceholderText("Reply…")).toBeNull();
     expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
     await settle(() => button("Reply").click());
-    expect(sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe("");
+    expect(within(sheet()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")?.value).toBe("");
   });
 
   it("counts threads and lets reply-form Escape cancel only the form", async () => {
     threadsWidth(true);
     const { host } = await openAnnotatedDoc();
 
+    // The unnamed scroll container is the placement contract, not a control.
     expect(toggle(host).closest(".ub-pane")).not.toBeNull();
     expect(toggle(host).textContent).toBe("Threads 1");
     expect(toggle(host).getAttribute("aria-controls")).toBe("ub-rail");
     expect(toggle(host).getAttribute("aria-expanded")).toBe("false");
-    expect(document.querySelector("[data-slot=sheet-content]")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Threads" })).toBeNull();
 
     await settle(() => toggle(host).click());
     expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
     expect(sheet().id).toBe("ub-rail");
 
     await settle(() => button("Reply").click());
-    const field = sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input");
+    const field = within(sheet()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…");
     expect(field).not.toBeNull();
     expect(document.activeElement).toBe(field);
     await settle(() => press(field!, "Escape"));
-    expect(sheet().querySelector(".ub-comment-input")).toBeNull();
+    expect(within(sheet()).queryByPlaceholderText("Reply…")).toBeNull();
     expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
 
-    const card = sheet().querySelector<HTMLButtonElement>(".ub-thread");
+    const card = threadButton(sheet());
     card?.focus();
     expect(document.activeElement).toBe(card);
     await settle(() => press(card!, "Escape"));
     expect(toggle(host).getAttribute("aria-expanded")).toBe("false");
-    expect(document.querySelector("[data-slot=sheet-content]")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Threads" })).toBeNull();
     expect(document.activeElement).toBe(toggle(host));
   });
 
@@ -592,45 +587,45 @@ describe("the threads rail can be opened where the layout hides it", () => {
     for (const close of [
       () => button("Close threads").click(),
       () => {
-        const card = sheet().querySelector<HTMLButtonElement>(".ub-thread");
+        const card = threadButton(sheet());
         card!.focus();
         press(card!, "Escape");
       },
     ]) {
       await settle(close);
-      expect(document.querySelector("[data-slot=sheet-content]")).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "Threads" })).toBeNull();
       await settle(() => toggle(host).click());
-      expect(sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe(
+      expect(within(sheet()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")?.value).toBe(
         "Keep this unsent reply",
       );
     }
 
     await width.change(false);
-    expect(document.querySelector("[data-slot=sheet-content]")).toBeNull();
-    expect(host.querySelector<HTMLTextAreaElement>(".ub-rail .ub-comment-input")?.value).toBe(
+    expect(screen.queryByRole("dialog", { name: "Threads" })).toBeNull();
+    expect(within(within(host).getByRole("region", { name: "Threads" })).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")?.value).toBe(
       "Keep this unsent reply",
     );
     await width.change(true);
-    expect(sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe(
+    expect(within(sheet()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")?.value).toBe(
       "Keep this unsent reply",
     );
 
     // A retained draft is not another request to start replying. While the
     // sheet is closed, resizing must leave the writer in the prose.
     await settle(() => button("Close threads").click());
-    const prose = host.querySelector<HTMLElement>(".ub-editor .ProseMirror");
+    const prose = within(host).getByRole("textbox", { name: "Document content" });
     expect(prose).not.toBeNull();
     await settle(() => prose!.focus());
     await width.change(false);
     expect(document.activeElement).toBe(prose);
-    expect(host.querySelector<HTMLTextAreaElement>(".ub-rail .ub-comment-input")?.value).toBe(
+    expect(within(within(host).getByRole("region", { name: "Threads" })).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")?.value).toBe(
       "Keep this unsent reply",
     );
     await width.change(true);
-    expect(document.querySelector("[data-slot=sheet-content]")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Threads" })).toBeNull();
     expect(document.activeElement).toBe(prose);
     await settle(() => toggle(host).click());
-    expect(sheet().querySelector<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe(
+    expect(within(sheet()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")?.value).toBe(
       "Keep this unsent reply",
     );
   });
@@ -647,7 +642,7 @@ describe("the threads rail can be opened where the layout hides it", () => {
     const text = (getBlocksFragment(ydoc).get(0) as Y.XmlElement).firstChild as Y.XmlText;
     await settle(() => text.delete(4, 11));
     expect(opener.isConnected).toBe(false);
-    expect(sheet().querySelector(".ub-thread-orphaned")).not.toBeNull();
+    expect(within(sheet()).queryByRole("button", { name: /orphaned/ })).not.toBeNull();
 
     await settle(() => button("Close threads").click());
     expect(document.activeElement).toBe(toggle(host));

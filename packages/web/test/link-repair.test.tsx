@@ -24,6 +24,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderSettled } from "./react-render.js";
+import { within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import * as Y from "yjs";
 import {
@@ -313,23 +314,30 @@ function stageTableConflicts(): { ydoc: Y.Doc; first: Y.XmlText; second: Y.XmlTe
 }
 
 function repairButtons(host: HTMLElement): HTMLButtonElement[] {
-  return [...host.querySelectorAll<HTMLButtonElement>(".ub-link-repair button")];
+  const repair = repairOffer(host);
+  return repair === null ? [] : within(repair).getAllByRole<HTMLButtonElement>("button", { name: /^Keep the (document|link):/ });
 }
 
 function buttonSaying(host: HTMLElement, text: string): HTMLButtonElement | null {
-  return (
-    repairButtons(host).find((button) =>
-      (button.textContent ?? "").includes(text),
-    ) ?? null
-  );
+  const repair = repairOffer(host);
+  return repair === null ? null : within(repair).queryByRole<HTMLButtonElement>("button", { name: (name) => name.includes(text) });
+}
+
+function repairOffer(host: HTMLElement): HTMLElement | null {
+  return within(host).queryByText(/^One range, two links\./)?.parentElement ?? null;
+}
+
+function repairRows(host: HTMLElement): HTMLElement[] {
+  const repair = repairOffer(host);
+  return repair === null ? [] : within(repair).getAllByRole("listitem");
 }
 
 function prose(host: HTMLElement): HTMLElement | null {
-  return host.querySelector(".ub-editor .ProseMirror");
+  return within(host).queryByRole("textbox", { name: "Document content" });
 }
 
 function banner(host: HTMLElement): string {
-  return host.querySelector(".ub-foreign-banner")?.textContent ?? "";
+  return within(host).queryByText("Editor disabled.")?.parentElement?.textContent ?? "";
 }
 
 describe("the fallback offers the person the choice, and takes only that write", () => {
@@ -342,14 +350,14 @@ describe("the fallback offers the person the choice, and takes only that write",
     let writes = 0;
     ydoc.on("update", () => { writes += 1; });
     const host = await openApp(`/${WORKSPACE}/${UUID}`);
-    let rows = [...host.querySelectorAll<HTMLLIElement>(".ub-link-repair li")];
+    let rows = repairRows(host);
     expect(rows).toHaveLength(2);
     expect(errors.mock.calls.flat().join(" ")).not.toContain("same key");
     expect(prose(host)).toBeNull();
     expect(banner(host)).toContain("conflicting external and document links");
     expect(writes).toBe(0);
 
-    act(() => rows[0]?.querySelector<HTMLButtonElement>("button")?.click());
+    act(() => within(rows[0]!).getByRole<HTMLButtonElement>("button", { name: "Keep the document: The hub" }).click());
     expect(writes).toBe(1);
     expect(first.toDelta()).toEqual([
       { insert: "fi", attributes: { bold: true, docLink: { docId: TARGET } } },
@@ -358,9 +366,9 @@ describe("the fallback offers the person the choice, and takes only that write",
     ]);
     expect(findLinkConflicts(getBlocksFragment(ydoc))[0]?.text).toBe(second);
     expect(prose(host)).toBeNull();
-    rows = [...host.querySelectorAll<HTMLLIElement>(".ub-link-repair li")];
+    rows = repairRows(host);
     expect(rows).toHaveLength(1);
-    act(() => rows[0]?.querySelectorAll<HTMLButtonElement>("button")[1]?.click());
+    act(() => within(rows[0]!).getByRole<HTMLButtonElement>("button", { name: `Keep the link: ${OTHER_HREF}` }).click());
     expect(writes).toBe(2);
     expect(second.toDelta()).toEqual([
       { insert: "oth", attributes: { italic: true, link: { href: OTHER_HREF } } },
@@ -369,7 +377,7 @@ describe("the fallback offers the person the choice, and takes only that write",
     ]);
     expect(untouched.toDelta()).toEqual(beforeUntouched);
     expect(prose(host)).not.toBeNull();
-    expect(host.querySelector(".ub-link-repair")).toBeNull();
+    expect(repairOffer(host)).toBeNull();
     Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
     expect(getBlocks(peer)).toEqual(getBlocks(ydoc));
     expect(findForeignBlocks(getBlocksFragment(peer))).toEqual([]);
@@ -384,7 +392,7 @@ describe("the fallback offers the person the choice, and takes only that write",
     ydoc.on("update", () => { writes += 1; });
     const host = await openApp(`/${WORKSPACE}/${UUID}`);
     expect(prose(host)).toBeNull();
-    expect(host.querySelector(".ub-link-repair")).toBeNull();
+    expect(repairOffer(host)).toBeNull();
     expect(findLinkConflicts(getBlocksFragment(ydoc))).toHaveLength(2);
     expect(banner(host)).toContain(restriction === "archived" ? "restore this document" : "a change to a decided record needs a new record");
     expect(writes).toBe(0);
@@ -395,20 +403,20 @@ describe("the fallback offers the person the choice, and takes only that write",
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const host = await openApp(`/${WORKSPACE}/${UUID}`);
-    let rows = [...host.querySelectorAll<HTMLLIElement>(".ub-link-repair li")];
+    let rows = repairRows(host);
     expect(rows).toHaveLength(2);
     expect(errors.mock.calls.flat().join(" ")).not.toContain("same key");
 
-    act(() => rows[0]?.querySelector<HTMLButtonElement>("button")?.click());
+    act(() => within(rows[0]!).getByRole<HTMLButtonElement>("button", { name: "Keep the document: The hub" }).click());
     expect(findLinkConflicts(getBlocksFragment(ydoc))).toHaveLength(1);
     expect(findLinkConflicts(getBlocksFragment(ydoc))[0]?.text).toBe(second);
     expect(deltaOf(first)).toEqual([
       { insert: "first", attributes: { docLink: { docId: TARGET } } },
     ]);
 
-    rows = [...host.querySelectorAll<HTMLLIElement>(".ub-link-repair li")];
+    rows = repairRows(host);
     expect(rows).toHaveLength(1);
-    act(() => rows[0]?.querySelectorAll<HTMLButtonElement>("button")[1]?.click());
+    act(() => within(rows[0]!).getByRole<HTMLButtonElement>("button", { name: `Keep the link: ${HREF}` }).click());
     expect(findLinkConflicts(getBlocksFragment(ydoc))).toEqual([]);
     expect(deltaOf(first)).toEqual([
       { insert: "first", attributes: { docLink: { docId: TARGET } } },
@@ -432,7 +440,7 @@ describe("the fallback offers the person the choice, and takes only that write",
     expect(banner(host)).toContain("conflicting external and document links");
     expect(banner(host)).not.toContain("MCP tools");
     expect(repairButtons(host)).toHaveLength(2);
-    expect(host.querySelector(".ub-link-repair")?.textContent).toContain("see the");
+    expect(repairOffer(host)?.textContent).toContain("see the");
     expect(buttonSaying(host, "The hub")).not.toBeNull();
     expect(buttonSaying(host, HREF)).not.toBeNull();
     expect(updates).toBe(0);
@@ -452,7 +460,7 @@ describe("the fallback offers the person the choice, and takes only that write",
     // The gate is clean, so the editor is back — and the offer is gone with the
     // conflict that justified it.
     expect(prose(host)).not.toBeNull();
-    expect(host.querySelector(".ub-link-repair")).toBeNull();
+    expect(repairOffer(host)).toBeNull();
   });
 
   it("keeps the external link, in the same one write", async () => {
@@ -485,7 +493,7 @@ describe("the fallback offers the person the choice, and takes only that write",
     expect(prose(host)).toBeNull();
     expect(banner(host)).toContain("callout");
     expect(banner(host)).not.toContain("conflicting external and document links");
-    expect(host.querySelector(".ub-link-repair")).toBeNull();
+    expect(repairOffer(host)).toBeNull();
   });
 
   it("offers an archived document no repair, and takes no write from it", async () => {
@@ -498,11 +506,11 @@ describe("the fallback offers the person the choice, and takes only that write",
 
     const host = await openApp(`/${WORKSPACE}/${UUID}`);
 
-    expect(host.querySelector(".ub-link-repair")).toBeNull();
+    expect(repairOffer(host)).toBeNull();
     // Restore is the one action, and the sentence points at it rather than at a
     // control that is not there.
     expect(
-      host.querySelector(".ub-archived-banner button")?.textContent,
+      within(host).getByRole("button", { name: "Restore" }).textContent,
     ).toBe("Restore");
     expect(banner(host)).toContain("restore this document");
     expect(findLinkConflicts(getBlocksFragment(ydoc))).toHaveLength(1);

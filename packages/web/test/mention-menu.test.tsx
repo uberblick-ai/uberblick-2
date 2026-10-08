@@ -24,6 +24,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { screen, within } from "@testing-library/react";
 import { act, render } from "./react-render.js";
 import * as Y from "yjs";
 import {
@@ -120,9 +121,11 @@ function mountPicker(ydoc: Y.Doc, context: DocLinkContext): Mounted {
   };
   return {
     editor,
+    // The card is nameless presentation and stays open when no listbox exists;
+    // empty-state tests below prove this same handle still finds that open card.
     card: () => document.body.querySelector('[data-slot="caret-menu-content"]'),
     labels: () =>
-      [...document.body.querySelectorAll('[role="option"]')].map(
+      screen.queryAllByRole("option").map(
         (node) => node.getAttribute("aria-label") ?? "",
       ),
     press: (key: string, init: KeyboardEventInit = {}) => {
@@ -138,12 +141,7 @@ function mountPicker(ydoc: Y.Doc, context: DocLinkContext): Mounted {
       return event;
     },
     pick: (label: string) => {
-      const entry = [
-        ...document.body.querySelectorAll<HTMLButtonElement>(
-          '[role="option"]',
-        ),
-      ].find((node) => node.getAttribute("aria-label") === label);
-      if (entry === undefined) throw new Error(`no entry ${label}`);
+      const entry = screen.getByRole("option", { name: label });
       act(() => entry.click());
     },
     unmountMenu,
@@ -202,9 +200,9 @@ describe("the picker", () => {
     try {
       caret(mounted.editor, 0, 0);
       type(mounted.editor, "@");
-      const list = mounted.card()?.querySelector('[role="listbox"]');
+      const list = screen.queryByRole("listbox", { name: "Documents" });
       if (list === null || list === undefined) throw new Error("no list");
-      const options = [...list.querySelectorAll<HTMLElement>('[role="option"]')];
+      const options = within(list).getAllByRole("option");
       expect(mounted.editor.view.dom.getAttribute("aria-controls")).toBe(list.id);
       expect(mounted.editor.view.dom.getAttribute("aria-activedescendant")).toBe(
         options[0]?.id,

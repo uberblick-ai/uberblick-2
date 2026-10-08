@@ -27,6 +27,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { screen, within } from "@testing-library/react";
 import { act, render } from "./react-render.js";
 import * as Y from "yjs";
 import {
@@ -54,7 +55,7 @@ interface Mounted {
   ydoc: Y.Doc;
   /** The frame the menu is positioned inside — its own DOM, queried below. */
   frame: HTMLElement;
-  query: <T extends Element>(selector: string) => T | null;
+  card: () => Element | null;
   entryLabels: () => string[];
   /**
    * A key, taken the way the browser delivers it: from inside the prose.
@@ -84,8 +85,11 @@ function mountMenu(ydoc: Y.Doc, initiallyFocused = false): Mounted {
   if (initiallyFocused) act(() => editor.view.focus());
   const view = render(<BlockMenu editor={editor} host={{ current: frame }} />, { container });
 
-  const query = <T extends Element>(selector: string): T | null =>
-    document.body.querySelector<T>(selector);
+  // The nameless presentation card has no accessible handle of its own. It
+  // remains open with an empty-state line and no listbox, so keep the card
+  // selector rather than weakening dismissal checks to listbox absence.
+  const card = (): Element | null =>
+    document.body.querySelector('[data-slot="caret-menu-content"]');
   let menuMounted = true;
   const unmountMenu = (): void => {
     if (!menuMounted) return;
@@ -96,9 +100,9 @@ function mountMenu(ydoc: Y.Doc, initiallyFocused = false): Mounted {
     editor,
     ydoc,
     frame,
-    query,
+    card,
     entryLabels: () =>
-      [...document.body.querySelectorAll('[role="option"]')].map(
+      screen.queryAllByRole("option").map(
         (node) => node.getAttribute("aria-label") ?? "",
       ),
     press: (key: string, init: KeyboardEventInit = {}) => {
@@ -202,11 +206,11 @@ describe("the registry", () => {
    */
   it("renders a listbox whose every announced child is an option", () => {
     const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
-    const { editor, query, unmount } = mountMenu(ydoc);
+    const { editor, unmount } = mountMenu(ydoc);
     try {
       caret(editor, 0, 0);
       type(editor, "/");
-      const list = query('[role="listbox"]');
+      const list = screen.queryByRole("listbox", { name: "Block types" });
       if (list === null) throw new Error("no list");
       expect(list.getAttribute("role")).toBe("listbox");
 
@@ -283,13 +287,13 @@ describe("the slash trigger", () => {
 describe("the slash menu", () => {
   it("identifies the highlighted option, wrapping at both ends, until the menu closes", () => {
     const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
-    const { editor, query, press, unmount } = mountMenu(ydoc);
+    const { editor, press, unmount } = mountMenu(ydoc);
     try {
       caret(editor, 0, 0);
       type(editor, "/");
-      const list = query('[role="listbox"]');
+      const list = screen.queryByRole("listbox", { name: "Block types" });
       if (list === null) throw new Error("no list");
-      const options = [...list.querySelectorAll<HTMLElement>('[role="option"]')];
+      const options = within(list).getAllByRole("option");
       expect(new Set(options.map((option) => option.id)).size).toBe(options.length);
       expect(options.every((option) => option.id !== "")).toBe(true);
       expect(editor.view.dom.getAttribute("aria-controls")).toBe(list.id);
@@ -335,7 +339,7 @@ describe("the slash menu", () => {
       });
       caret(editor, 0, 0);
       type(editor, "/");
-      const first = query<HTMLElement>('[role="option"]');
+      const first = screen.getByRole("option", { name: "Paragraph" });
       expect(editor.view.dom.getAttribute("aria-activedescendant")).toBe(first?.id);
       expect(first?.getAttribute("aria-selected")).toBe("true");
     } finally {
@@ -366,7 +370,7 @@ describe("the slash menu", () => {
 
   it("filters as you type, converts on Enter, and keeps the block id", () => {
     const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
-    const { editor, entryLabels, press, query, unmount } = mountMenu(ydoc);
+    const { editor, entryLabels, press, card, unmount } = mountMenu(ydoc);
     try {
       caret(editor, 0, 0);
       type(editor, "/");
@@ -390,7 +394,7 @@ describe("the slash menu", () => {
       expect(blocks[0]).toMatchObject({ id: ids[0], type: "heading", level: 2 });
       expect(blocks[0]?.text).toBe("");
       expect(soundIds(ydoc)).toEqual([ids[0]]);
-      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
+      expect(card()).toBeNull();
 
       // One gesture, one undo step: the block is a paragraph holding "/he"
       // again, not a heading holding it.
@@ -409,19 +413,19 @@ describe("the slash menu", () => {
 
   it("leaves the slash as text when Esc dismisses it", () => {
     const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
-    const { editor, press, query, unmount } = mountMenu(ydoc);
+    const { editor, press, card, unmount } = mountMenu(ydoc);
     try {
       caret(editor, 0, 0);
       type(editor, "/co");
-      expect(query('[data-slot="caret-menu-content"]')).not.toBeNull();
+      expect(card()).not.toBeNull();
 
       press("Escape");
-      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
+      expect(card()).toBeNull();
       expect(getBlocks(ydoc)[0]).toMatchObject({ type: "paragraph", text: "/co" });
 
       // Dismissed for this session only: typing on keeps the menu shut…
       type(editor, "de");
-      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
+      expect(card()).toBeNull();
       expect(getBlocks(ydoc)[0]?.text).toBe("/code");
 
       // …and clearing the block opens it again on the next slash.
@@ -430,7 +434,7 @@ describe("the slash menu", () => {
       });
       caret(editor, 0, 0);
       type(editor, "/");
-      expect(query('[data-slot="caret-menu-content"]')).not.toBeNull();
+      expect(card()).not.toBeNull();
     } finally {
       unmount();
     }
@@ -447,21 +451,21 @@ describe("the slash menu", () => {
       { type: "paragraph", text: "/co" },
       { type: "paragraph", text: "" },
     ]);
-    const { editor, query, unmount } = mountMenu(ydoc);
+    const { editor, card, unmount } = mountMenu(ydoc);
     try {
       caret(editor, 0, 3);
-      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
+      expect(card()).toBeNull();
 
       // Typing on in it does not open one either: the block was not empty
       // before this keystroke, so the slash is text somebody wrote.
       type(editor, "d");
-      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
+      expect(card()).toBeNull();
       expect(getBlocks(ydoc)[0]?.text).toBe("/cod");
 
       // The empty block below is where a slash *is* a command.
       caret(editor, 1, 0);
       type(editor, "/co");
-      expect(query('[data-slot="caret-menu-content"]')).not.toBeNull();
+      expect(card()).not.toBeNull();
     } finally {
       unmount();
     }
@@ -477,7 +481,7 @@ describe("the slash menu", () => {
   it("never opens on a peer's edit, an undo, or a paste", () => {
     const { ydoc, ids } = docWith([{ type: "paragraph", text: "/co" }]);
     const peer = peerOf(ydoc);
-    const { editor, query, unmount } = mountMenu(ydoc);
+    const { editor, card, unmount } = mountMenu(ydoc);
     try {
       caret(editor, 0, 3);
 
@@ -487,7 +491,7 @@ describe("the slash menu", () => {
       });
       expect(getBlocks(ydoc)[0]?.text).toBe("/cod");
       expect(slashTriggerAt(editor)).toMatchObject({ query: "cod" });
-      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
+      expect(card()).toBeNull();
 
       // A paste that happens to be a slash command is content, not a command.
       act(() => {
@@ -497,13 +501,13 @@ describe("the slash menu", () => {
         );
       });
       expect(getBlocks(ydoc)[0]?.text).toBe("/code");
-      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
+      expect(card()).toBeNull();
 
       // And an undo that restores a slash-looking block is not a request either.
       act(() => {
         editor.commands.keyboardShortcut("Mod-z");
       });
-      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
+      expect(card()).toBeNull();
     } finally {
       unmount();
       peer.destroy();
@@ -512,11 +516,11 @@ describe("the slash menu", () => {
 
   it("leaves composing Enter to ProseMirror", () => {
     const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
-    const { editor, press, query, unmount } = mountMenu(ydoc);
+    const { editor, press, unmount } = mountMenu(ydoc);
     try {
       caret(editor, 0, 0);
       type(editor, "/he");
-      expect(query('[role="listbox"]')).not.toBeNull();
+      expect(screen.queryByRole("listbox", { name: "Block types" })).not.toBeNull();
 
       act(() => {
         editor.view.dom.dispatchEvent(
@@ -528,7 +532,7 @@ describe("the slash menu", () => {
       expect(getBlocks(ydoc)).toEqual([
         expect.objectContaining({ id: ids[0], type: "paragraph", text: "/he" }),
       ]);
-      expect(query('[role="listbox"]')).not.toBeNull();
+      expect(screen.queryByRole("listbox", { name: "Block types" })).not.toBeNull();
     } finally {
       unmount();
     }
@@ -546,20 +550,20 @@ describe("the slash menu", () => {
       { type: "paragraph", text: "a neighbour with content" },
     ]);
     const peer = peerOf(ydoc);
-    const { editor, query, press, unmount } = mountMenu(ydoc);
+    const { editor, card, press, unmount } = mountMenu(ydoc);
     try {
       caret(editor, 0, 0);
       type(editor, "/he");
       const trigger = slashTriggerAt(editor);
       expect(trigger).not.toBeNull();
-      expect(query('[data-slot="caret-menu-content"]')).not.toBeNull();
+      expect(card()).not.toBeNull();
 
       fromPeer(() => {
         deleteBlock(peer, ids[0] ?? "");
       });
 
       // The session went with the block, so the menu is closed…
-      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
+      expect(card()).toBeNull();
       // …and the command refuses the trigger it was holding, rather than
       // deleting the content of whatever now sits at that position.
       expect(
@@ -586,11 +590,11 @@ describe("the slash menu", () => {
 
   it("gives Enter back to the editor once nothing matches", () => {
     const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
-    const { editor, query, press, unmount } = mountMenu(ydoc);
+    const { editor, card, press, unmount } = mountMenu(ydoc);
     try {
       caret(editor, 0, 0);
       type(editor, "/nope");
-      expect(query('[data-slot="caret-menu-content"]')).toBeNull();
+      expect(card()).toBeNull();
       expect(editor.view.dom.hasAttribute("aria-activedescendant")).toBe(false);
       expect(editor.view.dom.hasAttribute("aria-controls")).toBe(false);
 
@@ -617,16 +621,13 @@ describe("the gutter menu", () => {
   /** Hover a block, then click the `+` its gutter reveals. */
   function openGutterMenu(mounted: Mounted, index: number): void {
     hoverBlock(mounted, index);
-    const button = mounted.query<HTMLButtonElement>('[aria-label="Insert block below"][aria-hidden="false"]');
+    const button = screen.queryByRole<HTMLButtonElement>("button", { name: "Insert block below" });
     if (button === null) throw new Error("the gutter button stayed hidden");
     act(() => button.click());
   }
 
   function pick(mounted: Mounted, label: string): void {
-    const entry = [
-      ...mounted.frame.ownerDocument.querySelectorAll<HTMLButtonElement>('[role="option"]'),
-    ].find((node) => node.getAttribute("aria-label") === label);
-    if (entry === undefined) throw new Error(`no entry ${label}`);
+    const entry = within(mounted.frame.ownerDocument.body).getByRole("option", { name: label });
     act(() => entry.click());
   }
 
@@ -642,7 +643,7 @@ describe("the gutter menu", () => {
   }
 
   function visibleButton(mounted: Mounted): HTMLButtonElement | null {
-    return mounted.query('[aria-label="Insert block below"][aria-hidden="false"]');
+    return within(mounted.frame).queryByRole<HTMLButtonElement>("button", { name: "Insert block below" });
   }
 
   it("offers an existing caret on a coarse pointer before the first touch and lets mouse hover take over", () => {
@@ -745,7 +746,7 @@ describe("the gutter menu", () => {
       });
       expect(visibleButton(mounted)).toBe(button);
       act(() => button.click());
-      expect(mounted.query('[role="combobox"][aria-label="Search blocks"]')).not.toBeNull();
+      expect(screen.queryByRole("combobox", { name: "Search blocks" })).not.toBeNull();
       pick(mounted, "Mermaid");
       expect(getBlocks(ydoc).map((block) => block.type)).toEqual(["paragraph", "mermaid"]);
     } finally {
@@ -759,9 +760,9 @@ describe("the gutter menu", () => {
     try {
       // Mounted from the start — revealing it is a class change, never a
       // reflow — but not offered to the pointer or the tab order.
-      expect(mounted.query('[aria-label="Insert block below"]')).not.toBeNull();
-      expect(mounted.query('[aria-label="Insert block below"][aria-hidden="false"]')).toBeNull();
-      expect(mounted.query('[data-slot="caret-menu-content"]')).toBeNull();
+      expect(screen.queryByLabelText("Insert block below")).not.toBeNull();
+      expect(screen.queryByRole<HTMLButtonElement>("button", { name: "Insert block below" })).toBeNull();
+      expect(mounted.card()).toBeNull();
     } finally {
       mounted.unmount();
     }
@@ -780,15 +781,15 @@ describe("the gutter menu", () => {
     const mounted = mountMenu(ydoc);
     try {
       hoverBlock(mounted, 0);
-      expect(mounted.query('[aria-label="Insert block below"][aria-hidden="false"]')).not.toBeNull();
+      expect(screen.queryByRole<HTMLButtonElement>("button", { name: "Insert block below" })).not.toBeNull();
 
       act(() => {
         mounted.editor.commands.insertContentAt(1, "x");
       });
-      expect(mounted.query('[aria-label="Insert block below"][aria-hidden="false"]')).toBeNull();
+      expect(screen.queryByRole<HTMLButtonElement>("button", { name: "Insert block below" })).toBeNull();
 
       hoverBlock(mounted, 0);
-      expect(mounted.query('[aria-label="Insert block below"][aria-hidden="false"]')).not.toBeNull();
+      expect(screen.queryByRole<HTMLButtonElement>("button", { name: "Insert block below" })).not.toBeNull();
     } finally {
       mounted.unmount();
     }
@@ -808,14 +809,14 @@ describe("the gutter menu", () => {
     const mounted = mountMenu(ydoc);
     try {
       openGutterMenu(mounted, 0);
-      expect(mounted.query('[data-slot="caret-menu-content"]')).not.toBeNull();
+      expect(mounted.card()).not.toBeNull();
 
       fromPeer(() => {
         deleteBlock(peer, ids[0] ?? "");
       });
 
-      expect(mounted.query('[data-slot="caret-menu-content"]')).toBeNull();
-      expect(mounted.query('[aria-label="Insert block below"][aria-hidden="false"]')).toBeNull();
+      expect(mounted.card()).toBeNull();
+      expect(screen.queryByRole<HTMLButtonElement>("button", { name: "Insert block below" })).toBeNull();
       // The surviving block is untouched: nothing was inserted anywhere.
       expect(getBlocks(ydoc).map((block) => [block.id, block.text])).toEqual([
         [ids[1], "Second"],
@@ -851,7 +852,7 @@ describe("the gutter menu", () => {
       fromPeer(() => {
         deleteBlock(peer, ids[0] ?? "");
       });
-      expect(mounted.query('[data-slot="caret-menu-content"]')).not.toBeNull();
+      expect(mounted.card()).not.toBeNull();
 
       pick(mounted, "Mermaid");
 
@@ -888,7 +889,7 @@ describe("the gutter menu", () => {
       // The old blocks keep their ids; the new one gets one of its own.
       const after = soundIds(ydoc);
       expect([after[0], after[2]]).toEqual(ids);
-      expect(mounted.query('[data-slot="caret-menu-content"]')).toBeNull();
+      expect(mounted.card()).toBeNull();
 
       // The caret is inside the new block, so the reader can just type.
       const { $head } = mounted.editor.state.selection;
@@ -962,7 +963,7 @@ describe("the gutter menu", () => {
     const mounted = mountMenu(ydoc);
     try {
       openGutterMenu(mounted, 0);
-      const field = mounted.query<HTMLInputElement>('[role="combobox"]');
+      const field = screen.queryByRole<HTMLInputElement>("combobox", { name: "Search blocks" });
       if (field === null) throw new Error("no search field");
 
       act(() => {
@@ -983,7 +984,7 @@ describe("the gutter menu", () => {
           }),
         );
       });
-      expect(mounted.query('[data-slot="caret-menu-content"]')).toBeNull();
+      expect(mounted.card()).toBeNull();
       expect(getBlocks(ydoc).map((block) => block.id)).toEqual(ids);
     } finally {
       mounted.unmount();
@@ -995,10 +996,10 @@ describe("the gutter menu", () => {
     const mounted = mountMenu(ydoc);
     try {
       openGutterMenu(mounted, 0);
-      const field = mounted.query<HTMLInputElement>('[role="combobox"]');
-      const list = mounted.query('[role="listbox"]');
+      const field = screen.queryByRole<HTMLInputElement>("combobox", { name: "Search blocks" });
+      const list = screen.queryByRole("listbox", { name: "Block types" });
       if (field === null || list === null) throw new Error("no search or list");
-      const options = [...list.querySelectorAll<HTMLElement>('[role="option"]')];
+      const options = within(list).getAllByRole("option");
       expect(document.activeElement).toBe(field);
       expect(field.getAttribute("aria-controls")).toBe(list.id);
       expect(field.getAttribute("aria-activedescendant")).toBe(options[0]?.id);
@@ -1019,7 +1020,7 @@ describe("the gutter menu", () => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, "he");
         field.dispatchEvent(new Event("input", { bubbles: true }));
       });
-      const filteredFirst = mounted.query<HTMLElement>('[role="option"]');
+      const filteredFirst = screen.getByRole("option", { name: "Heading 1" });
       expect(field.getAttribute("aria-activedescendant")).toBe(filteredFirst?.id);
       expect(filteredFirst?.getAttribute("aria-selected")).toBe("true");
 
@@ -1027,6 +1028,10 @@ describe("the gutter menu", () => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, "nope");
         field.dispatchEvent(new Event("input", { bubbles: true }));
       });
+      // The same card handle used by dismissal assertions finds the open card
+      // even when it renders only its empty-state line and no listbox.
+      expect(mounted.card()).not.toBeNull();
+      expect(screen.getByText("No blocks match.")).not.toBeNull();
       expect(field.hasAttribute("aria-activedescendant")).toBe(false);
       expect(field.hasAttribute("aria-controls")).toBe(false);
     } finally {
@@ -1039,7 +1044,7 @@ describe("the gutter menu", () => {
     const mounted = mountMenu(ydoc);
     try {
       openGutterMenu(mounted, 0);
-      const field = mounted.query<HTMLInputElement>('[role="combobox"]');
+      const field = screen.queryByRole<HTMLInputElement>("combobox", { name: "Search blocks" });
       if (field === null) throw new Error("no search");
       const enter = new KeyboardEvent("keydown", {
         key: "Enter", bubbles: true, cancelable: true, isComposing: true,
@@ -1047,7 +1052,7 @@ describe("the gutter menu", () => {
       act(() => field.dispatchEvent(enter));
       expect(enter.defaultPrevented).toBe(false);
       expect(getBlocks(ydoc).map((block) => block.id)).toEqual(ids);
-      expect(mounted.query('[role="listbox"]')).not.toBeNull();
+      expect(screen.queryByRole("listbox", { name: "Block types" })).not.toBeNull();
     } finally {
       mounted.unmount();
     }

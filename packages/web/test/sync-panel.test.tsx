@@ -14,6 +14,7 @@
  */
 
 import { act, render, type RenderResult } from "./react-render.js";
+import { within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useCallback, useState } from "react";
 import type { ReactElement } from "react";
@@ -181,9 +182,9 @@ function mount(
 /** The panel's facts, label → value. */
 function facts(host: HTMLElement): Record<string, string> {
   const read: Record<string, string> = {};
-  for (const row of host.querySelectorAll(".ub-sync-fact")) {
-    const label = row.querySelector("dt")?.textContent ?? "";
-    read[label] = (row.querySelector("dd")?.textContent ?? "")
+  for (const term of within(host).queryAllByRole("term")) {
+    const label = term.textContent ?? "";
+    read[label] = (within(term.parentElement!).getByRole("definition").textContent ?? "")
       .replace(/\s+/g, " ")
       .trim();
   }
@@ -196,9 +197,12 @@ function facts(host: HTMLElement): Record<string, string> {
  * them is CSS — `textContent` alone would run them together.
  */
 function presentNow(host: HTMLElement): string[] {
-  return [...host.querySelectorAll(".ub-presence-row")].map((row) =>
-    [".ub-presence-name", ".ub-muted"]
-      .map((selector) => row.querySelector(selector)?.textContent ?? "")
+  return within(host).queryAllByRole("listitem").map((row) =>
+    [
+      // The name span excludes the decorative initial; its styling gap is the contract.
+      row.querySelector(".ub-presence-name")?.textContent ?? "",
+      within(row).queryByText(/^block \d+$/)?.textContent ?? "",
+    ]
       .filter((part) => part !== "")
       .join(" "),
   );
@@ -260,7 +264,7 @@ describe("the sync panel renders the state this client holds", () => {
       try {
         expect(facts(host)["Last updated"]).toBe(exact.format(stamp));
         expect(
-          host.querySelector(".ub-sync-facts time")?.getAttribute("datetime"),
+          within(host).getByRole("time").getAttribute("datetime"),
         ).toBe(new Date(stamp).toISOString());
       } finally {
         view.unmount();
@@ -306,11 +310,11 @@ describe("the sync panel renders the state this client holds", () => {
     ): void => {
       view.rerender(tree(connection, open, value));
     };
-    expect(host.querySelector(".ub-last-updated")).toBeNull();
+    expect(within(host).queryByText(/last updated/)).toBeNull();
     expect(facts(host)["Last updated"]).toBeUndefined();
     act(() => void vi.advanceTimersByTime(300));
     expect(facts(host)["Last updated"]).toBe(
-      host.querySelector(".ub-last-updated time")?.getAttribute("title"),
+      within(within(host).getByText(/last updated/)).getByRole("time").getAttribute("title"),
     );
     draw(first.connection, false);
     draw(first.connection, true);
@@ -318,15 +322,15 @@ describe("the sync panel renders the state this client holds", () => {
     // already visible in the status line remains available immediately.
     expect(facts(host).State).toBe("—");
     expect(facts(host)["Last updated"]).toBe(
-      host.querySelector(".ub-last-updated time")?.getAttribute("title"),
+      within(within(host).getByText(/last updated/)).getByRole("time").getAttribute("title"),
     );
     draw(second.connection, true);
-    expect(host.querySelector(".ub-last-updated")).toBeNull();
+    expect(within(host).queryByText(/last updated/)).toBeNull();
     expect(facts(host)["Last updated"]).toBeUndefined();
     act(() => void vi.advanceTimersByTime(300));
     expect(facts(host)["Last updated"]).toBeDefined();
     draw(second.connection, true, Number.NaN);
-    expect(host.querySelector(".ub-last-updated")).toBeNull();
+    expect(within(host).queryByText(/last updated/)).toBeNull();
     expect(facts(host)["Last updated"]).toBeUndefined();
   });
 
@@ -540,6 +544,7 @@ describe("the sync panel renders the state this client holds", () => {
     ]);
     // Avatar plus name, each in its own presence colour — the one its cursor
     // carries in the prose (#494).
+    // Avatars are decorative; the colour and glyph are their styling contract.
     const avatars = [...host.querySelectorAll<HTMLElement>(".ub-avatar")];
     expect(
       avatars.map((avatar) => [avatar.textContent, avatar.style.borderColor]),
@@ -584,7 +589,7 @@ describe("the sync panel renders the state this client holds", () => {
       removeAwarenessStates(fix.awareness, [AGENT_CLIENT], "test");
     });
     expect(presentNow(host)).toEqual([]);
-    expect(host.querySelector(".ub-presence")).toBeNull();
+    expect(within(host).queryByRole("list")).toBeNull();
   });
 
   /**

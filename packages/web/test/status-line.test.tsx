@@ -9,6 +9,7 @@
  */
 
 import { act, render } from "./react-render.js";
+import { within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StatusLine } from "../src/ui/EditorPane.js";
 import { Popover } from "../src/ui/shadcn/popover.js";
@@ -64,7 +65,7 @@ function label(
     />,
   );
   const host = view.container;
-  const text = host.querySelector(".ub-pending")?.textContent ?? null;
+  const text = within(host).queryByText(/^\d+ sync messages? unacked$/)?.textContent ?? null;
 
   return text?.replace(/\s+/g, " ").trim() ?? null;
 }
@@ -105,7 +106,7 @@ function line(patch: Partial<RoomStatus>): string {
     />,
   );
   const host = view.container;
-  const text = host.querySelector(".ub-status")?.textContent ?? "";
+  const text = host.textContent ?? "";
 
   return text.replace(/\s+/g, " ").trim();
 }
@@ -127,10 +128,11 @@ function updatedReading(
     />,
   );
   const host = view.container;
-  const time = host.querySelector<HTMLTimeElement>(".ub-last-updated time");
+  const updated = within(host).queryByText(/last updated/);
+  const time = updated === null ? null : within(updated).getByRole("time");
   const reading = {
-    text: host.querySelector(".ub-last-updated")?.textContent ?? null,
-    line: host.querySelector(".ub-status")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+    text: updated?.textContent ?? null,
+    line: host.textContent?.replace(/\s+/g, " ").trim() ?? "",
     dateTime: time?.getAttribute("dateTime") ?? null,
     title: time?.getAttribute("title") ?? null,
   };
@@ -256,9 +258,10 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
     // Past every settle window, so what is on screen is what the reader sees.
     act(() => void vi.advanceTimersByTime(5_000));
     const read = {
+      // The fixed-width styling slot is the contract, including blank words.
       word: host.querySelector(".ub-status-word")?.textContent ?? null,
       badge:
-        host.querySelector(".ub-pending")?.textContent?.replace(/\s+/g, " ").trim() ??
+        within(host).queryByText(/^\d+ sync messages? unacked$/)?.textContent?.replace(/\s+/g, " ").trim() ??
         null,
     };
 
@@ -283,7 +286,7 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
     const host = view.container;
     act(() => void vi.advanceTimersByTime(5_000));
     expect(host.querySelector(".ub-status-word")?.textContent).toBe("synced");
-    expect(host.querySelector(".ub-pending")).toBeNull();
+    expect(within(host).queryByText(/^\d+ sync messages? unacked$/)).toBeNull();
   });
 });
 
@@ -312,7 +315,7 @@ describe("a directly connected document's sync reading opens its details", () =>
     const host = view.container;
     act(() => void vi.advanceTimersByTime(5_000));
 
-    const button = host.querySelector<HTMLButtonElement>(".ub-sync-toggle");
+    const button = within(host).getByRole<HTMLButtonElement>("button", { name: /^Sync details —/ });
     expect(button?.tagName).toBe("BUTTON");
     expect(host.querySelectorAll(".ub-status-word")).toHaveLength(1);
     expect(button?.textContent?.trim()).toBe("synced");
@@ -356,12 +359,13 @@ describe("the locally served document's two sync facts", () => {
     const host = view.container;
     act(() => void vi.advanceTimersByTime(5_000));
     const visible = host.cloneNode(true) as HTMLElement;
+    // aria-hidden is the accessibility contract for ink omitted from this reading.
     for (const hidden of visible.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
     const answer = {
       words: [...host.querySelectorAll(".ub-status-word")].map(
         (word) => word.textContent ?? "",
       ),
-      label: host.querySelector(".ub-sync-toggle")?.getAttribute("aria-label") ?? null,
+      label: within(host).getByRole("button", { name: /^Sync details/ }).getAttribute("aria-label"),
       text: visible.textContent ?? "",
     };
 
