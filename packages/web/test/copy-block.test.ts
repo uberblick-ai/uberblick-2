@@ -13,6 +13,7 @@ import * as Y from "yjs";
 import { appendBlock } from "@uberblick/schema";
 import { codeBlockChrome, sourceBlockView } from "../src/editor/source-chrome.js";
 import type { NodeViewRendererProps } from "@tiptap/core";
+import { DecorationSet } from "@tiptap/pm/view";
 import { mountEditor, snapshotFragment } from "./helpers.js";
 
 const SHELL = "pnpm install\npnpm -r build\n";
@@ -84,7 +85,7 @@ describe("copying a source block", () => {
   });
 
   /**
-   * The chrome hides exactly one thing from ProseMirror: its own label.
+   * The chrome hides only its copy label and language caption from ProseMirror.
    *
    * This is not a detail. A browser rewrites the markup inside a source block
    * on its own — Chrome drops an emptied `<code>` and wraps the next keystroke
@@ -93,21 +94,42 @@ describe("copying a source block", () => {
    * the view then drifts away from the document with no error anywhere: every
    * later keystroke is on screen and in no replica. So the boundary is pinned.
    */
-  it("hides the button's own mutations from ProseMirror, and nothing else", () => {
+  it("hides only copy and caption mutations and events, preserving source DOM repair", () => {
     const ydoc = documentWithSourceBlocks();
     const { editor } = mountEditor(ydoc);
     const view = sourceBlockView(codeBlockChrome)({
       node: editor.state.doc.child(0),
     } as NodeViewRendererProps);
     const button = view.dom.querySelector(".ub-copy")!;
+    const caption = view.dom.querySelector(".ub-code-caption")!;
+    const captionText = caption.firstChild!;
+    const sourceText = document.createTextNode(SHELL);
+    view.contentDOM!.appendChild(sourceText);
+    expect(captionText.textContent).toBe("sh");
+    expect((caption as HTMLElement).contentEditable).toBe("false");
 
     // Only `target` is read, so a stand-in record is enough to state the rule.
     const changed = (target: Node): MutationRecord =>
       ({ type: "childList", target }) as unknown as MutationRecord;
 
     expect(view.ignoreMutation!(changed(button))).toBe(true);
+    expect(view.ignoreMutation!(changed(caption))).toBe(true);
+    expect(view.ignoreMutation!(changed(captionText))).toBe(true);
     expect(view.ignoreMutation!(changed(view.contentDOM!))).toBe(false);
+    expect(view.ignoreMutation!(changed(sourceText))).toBe(false);
     expect(view.ignoreMutation!(changed(view.dom))).toBe(false);
+
+    const event = (target: Node): Event => ({ target }) as unknown as Event;
+    expect(view.stopEvent!(event(button))).toBe(true);
+    expect(view.stopEvent!(event(captionText))).toBe(true);
+    expect(view.stopEvent!(event(view.contentDOM!))).toBe(false);
+    expect(view.stopEvent!(event(sourceText))).toBe(false);
+    expect(view.stopEvent!(event(view.dom))).toBe(false);
+
+    // An editing engine can drop an emptied <code>. Refuse to update a detached
+    // contentDOM so ProseMirror rebuilds it instead of writing invisible text.
+    view.contentDOM!.parentNode!.removeChild(view.contentDOM!);
+    expect(view.update!(editor.state.doc.child(0), [], DecorationSet.empty)).toBe(false);
 
     view.destroy!();
     editor.destroy();

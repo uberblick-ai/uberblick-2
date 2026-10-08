@@ -18,6 +18,7 @@ import { writeToClipboard } from "../editor/source-chrome.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useDocRev, useRoomStatus } from "./hooks.js";
 import { LifecycleBadge } from "./LifecycleBadge.js";
+import { PickerList } from "./PickerList.js";
 import { shareUrl } from "./route.js";
 import { useTagCatalog } from "./tags.js";
 import {
@@ -109,7 +110,7 @@ function TagStrip({
   const [query, setQuery] = useState("");
   const search = useRef<HTMLInputElement | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
-  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const list = useRef<HTMLDivElement | null>(null);
   /** Set when a toggle is about to unmount the option that holds focus. */
   const repairFocus = useRef(false);
   const listId = useId();
@@ -150,7 +151,7 @@ function TagStrip({
       search.current?.focus();
       return;
     }
-    const first = filtered.length > 0 ? optionRefs.current[0] : null;
+    const first = list.current?.querySelector<HTMLButtonElement>("[role='option']");
     if (first !== null && first !== undefined) first.focus();
     else trigger.current?.focus();
   };
@@ -165,7 +166,7 @@ function TagStrip({
     focusPanelEntry();
   });
 
-  const toggle = (entry: TagCatalogEntry): void => {
+  const toggle = (id: string): void => {
     if (
       readOnly ||
       !arrived ||
@@ -180,23 +181,17 @@ function TagStrip({
       catalogConnection.ydoc,
       getMeta(ydoc).tags,
     ).map((assigned) => assigned.id);
-    const isSelected = liveIds.includes(entry.id);
-    const liveEntry = getTagCatalogEntry(catalogConnection.ydoc, entry.id);
+    const isSelected = liveIds.includes(id);
+    const liveEntry = getTagCatalogEntry(catalogConnection.ydoc, id);
     if (!isSelected && liveEntry?.state !== "active") return;
     if (isSelected && liveEntry?.state === "retired") repairFocus.current = true;
     assignDocumentTags(
       ydoc,
       catalogConnection.ydoc,
       isSelected
-        ? liveIds.filter((identity) => identity !== entry.id)
-        : [...liveIds, entry.id],
+        ? liveIds.filter((identity) => identity !== id)
+        : [...liveIds, id],
     );
-  };
-
-  const focusOption = (index: number): void => {
-    if (filtered.length === 0) return;
-    const wrapped = (index + filtered.length) % filtered.length;
-    optionRefs.current[wrapped]?.focus();
   };
 
   const labels = shown.map((entry) => (
@@ -271,62 +266,27 @@ function TagStrip({
                   if (native.isComposing || native.keyCode === 229) return;
                   if (event.key === "ArrowDown") {
                     event.preventDefault();
-                    focusOption(0);
+                    list.current?.querySelector<HTMLButtonElement>("[role='option']")?.focus();
                   }
                 }}
               />
             </span>
           </div>
         )}
-        <div
+        <PickerList
           id={listId}
-          className="ub-tag-options max-h-56 overflow-y-auto p-[0.35rem]"
-          role="listbox"
-          aria-multiselectable="true"
-          aria-label="Available tags"
-        >
-          {filtered.map((entry, index) => (
-            <button
-              key={entry.id}
-              ref={(element) => {
-                optionRefs.current[index] = element;
-              }}
-              type="button"
-              className="ub-tag-option flex w-full cursor-pointer items-center gap-[0.45rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.45rem] py-[0.4rem] text-left text-popover-foreground [font:inherit] hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
-              role="option"
-              aria-selected={selected.has(entry.id)}
-              onClick={() => toggle(entry)}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  focusOption(index + 1);
-                } else if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  focusOption(index - 1);
-                } else if (event.key === "Home") {
-                  event.preventDefault();
-                  focusOption(0);
-                } else if (event.key === "End") {
-                  event.preventDefault();
-                  focusOption(filtered.length - 1);
-                }
-              }}
-            >
-              <span className="ub-tag-check inline-flex size-4 shrink-0 items-center justify-center rounded-[0.2rem] border border-(--sidebar-muted-foreground)" aria-hidden="true">
-                {selected.has(entry.id) ? "✓" : ""}
-              </span>
-              <span>{entry.name}</span>
-              {entry.state === "retired" && (
-                <span className="ub-tag-retired ml-auto text-muted-foreground">retired</span>
-              )}
-            </button>
-          ))}
-          {filtered.length === 0 && (
-            <p className="ub-tag-empty m-0 px-2 py-[0.65rem] text-muted-foreground">
-              {options.length === 0 ? "No tags available." : "No matching tags."}
-            </p>
-          )}
-        </div>
+          label="Available tags"
+          options={filtered.map((entry) => ({
+            id: entry.id,
+            label: entry.name,
+            selected: selected.has(entry.id),
+            ...(entry.state === "retired" ? { detail: "retired" } : {}),
+          }))}
+          multiple
+          onPick={toggle}
+          empty={options.length === 0 ? "No tags available." : "No matching tags."}
+          listRef={list}
+        />
       </PopoverContent>
     </Popover>
   );

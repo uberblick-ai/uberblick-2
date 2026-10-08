@@ -24,7 +24,6 @@ import { describeForeignBlocks } from "../editor/palette.js";
 import type { LinkConflict } from "../editor/palette.js";
 import { repairLinkConflict } from "../editor/link-repair.js";
 import type { LinkSurvivor } from "../editor/link-repair.js";
-import { retypeSelectedBlock, selectedBlock } from "../editor/retype.js";
 import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
@@ -35,6 +34,7 @@ import { statusReading } from "./status-reading.js";
 import { documentSyncFacts } from "./sync-facts.js";
 import { formatTimestamp, useTimestampClock } from "./timestamps.js";
 import { BlockMenu } from "./BlockMenu.js";
+import { CodeLanguageControl } from "./CodeLanguageControl.js";
 import { TableControls } from "./TableControls.js";
 import { MentionMenu } from "./MentionMenu.js";
 import {
@@ -619,52 +619,6 @@ function ForeignFallback({
   );
 }
 
-/**
- * The language of the code block the caret is in, and nothing else.
- *
- * What used to sit here was a row of block-type buttons; block types are now
- * chosen from the insertion menu (`/` and the gutter `+`), so the row is gone
- * (#105). The language is not a block type — it is an attribute of one — and
- * dropping this field would leave a human no way to set it at all, so it stays,
- * shown only while it applies.
- */
-function CodeLanguageField({
-  editor,
-  canWrite,
-}: {
-  editor: Editor;
-  canWrite: () => boolean;
-}): ReactElement | null {
-  const [, tick] = useState(0);
-  useEffect(() => {
-    const bump = (): void => tick((n) => n + 1);
-    editor.on("transaction", bump);
-    return () => {
-      editor.off("transaction", bump);
-    };
-  }, [editor]);
-
-  const current = selectedBlock(editor);
-  if (current === null || current.type !== "code") return null;
-
-  return (
-    <div className="ub-toolbar">
-      <input
-        className="ub-lang"
-        placeholder="language"
-        aria-label="Code language"
-        value={
-          typeof current.attrs.language === "string" ? current.attrs.language : ""
-        }
-        onChange={(event) => {
-          if (!canWrite()) return;
-          retypeSelectedBlock(editor, "code", { language: event.target.value });
-        }}
-      />
-    </div>
-  );
-}
-
 // The shell's presence reading also changes when a caret crosses blocks. Keep
 // that parent update outside the editor; its own peer-name/status readers stay
 // live, and actual binding inputs still pass through React's props comparison.
@@ -859,16 +813,16 @@ const BoundEditor = memo(function BoundEditor({
 
   return (
     <>
-      {editor !== null && !contentReadOnly && writable && (
-        <CodeLanguageField
-          editor={editor}
-          canWrite={() => !isDecided(connection) && connection.status.writable}
-        />
-      )}
-      {/* The composer and gutter button use this frame; the menus find the
-          enclosing pane from it. ProseMirror owns every child of `.ub-editor`. */}
+      {/* The composer and gutter button use this frame. ProseMirror owns the
+          source DOM; the code caption's dedicated slot hosts React chrome. */}
       <div className="ub-editor-frame" ref={frame}>
         <div className="ub-editor" ref={host} />
+        {editor !== null && !contentReadOnly && writable && (
+          <CodeLanguageControl
+            editor={editor}
+            canWrite={() => !contentReadOnly && !isDecided(connection) && connection.status.writable}
+          />
+        )}
         {/* Decided content offers no editing controls, but discussion stays
             open. An archive also withholds the comment composer. */}
         {editor !== null && !contentReadOnly && writable && (

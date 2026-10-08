@@ -69,6 +69,8 @@
 @source "./UserMenu.tsx";
 @source "./OutlinePane.tsx";
 @source "./DocChrome.tsx";
+@source "./PickerList.tsx";
+@source "./CodeLanguageControl.tsx";
 @source "./EditorPane.tsx";
 @source "../shell/DocumentList.tsx";
 @source "./PeerCluster.tsx";

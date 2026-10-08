@@ -148,8 +148,10 @@ test("code preserves an empty caret and trailing spaces, reveals typed line ends
   const source = `${LONG_LINE}        `;
   await page.keyboard.insertText(source);
   await expect.poll(() => code.textContent()).toBe(source);
-  await page.getByRole("textbox", { name: "Code language" }).fill("text");
-  await expect(block).toHaveAttribute("data-language", "text");
+  await page.getByRole("button", { name: "Code language" }).click();
+  await page.getByRole("combobox", { name: "Search languages" }).fill("python");
+  await page.getByRole("option", { name: "python", exact: true }).click();
+  await expect(block).toHaveAttribute("data-language", "python");
 
   // Clicking the end's laid-out glyph position must place the caret after spaces.
   await code.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
@@ -192,20 +194,15 @@ test("code preserves an empty caret and trailing spaces, reveals typed line ends
 
   const copy = block.locator(".ub-copy");
   const before = await copy.boundingBox();
-  const caption = await block.evaluate((element) => {
-    const style = getComputedStyle(element, "::before");
-    return { content: style.content, left: style.left, top: style.top };
-  });
-  expect(caption.content).toBe('"text"');
+  const language = block.getByRole("button", { name: "Code language" });
+  await expect(language).toHaveText("python▾");
+  const caption = await language.boundingBox();
   await code.evaluate((element) => { element.scrollLeft = 0; });
   expect(await copy.boundingBox()).toEqual(before);
   await code.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
   expect(await copy.boundingBox()).toEqual(before);
   expect(await block.evaluate((element) => element.scrollLeft)).toBe(0);
-  expect(await block.evaluate((element) => {
-    const style = getComputedStyle(element, "::before");
-    return { content: style.content, left: style.left, top: style.top };
-  })).toEqual(caption);
+  expect(await language.boundingBox()).toEqual(caption);
   await expect(copy).toBeInViewport();
   if (info.project.use.hasTouch === true) await copy.tap();
   else await copy.click();
