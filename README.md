@@ -85,19 +85,9 @@ below is a consequence of that.
 ub update
 ```
 
-One command for both installation kinds, and which one it updates comes from
-where that `ub`'s own files live — never from the directory you are standing
-in, so a Homebrew `ub` typed inside a checkout still updates Homebrew's copy.
-A copy installed from the `uberblick-ai/tap` Homebrew tap is handed to
-Homebrew, exactly as below. A checkout **on `main`** is fast-forwarded to
-`origin/main` and its dependencies and web app are refreshed to match, so it is
-runnable at the new head with nothing left to run by hand; a checkout on any
-other branch is not updated. Nothing is ever stashed, discarded, rebased or
-switched: git decides whether the fast-forward is safe — divergence, or
-uncommitted changes an incoming commit would overwrite, are its refusal to
-make — and when it refuses you get git's own reason and an unchanged checkout.
-Unpushed commits on `main` are not a refusal: that checkout already contains
-`origin/main`, so it goes straight to the refresh and keeps them.
+`ub update` updates only a copy installed from the `uberblick-ai/tap` Homebrew
+tap. It identifies the installation from where that `ub`'s own files live, so a
+Homebrew `ub` typed inside a checkout still updates Homebrew's copy.
 
 The Homebrew commands are these two, and running them directly is the same
 thing — the first refreshes the tap, the second replaces the installed copy
@@ -117,6 +107,21 @@ configuration, credentials, workspaces and their databases — is untouched, and
 held. `.github/workflows/homebrew-formula.yml` proves installation and upgrade
 on a Linux x86_64 runner after every merge that changes the formula or its
 payload, and on demand from the Actions tab.
+
+To update a source checkout, run these commands from the checkout:
+
+```sh
+git pull
+mise run setup
+```
+
+The checkout's `ub update` exits 1 without changing files and names these
+commands, on any branch. `mise run setup` refreshes the toolchain and dependencies
+and runs `ub init`; it does not build the web app. If you use `ub open` from
+source, run `mise run build-web` to build `packages/web/dist`. When that default
+bundle is missing or speaks another sync protocol, `ub open` exits 1 naming
+`mise run build-web`, before starting a hub or creating a database file. It never
+builds the app itself.
 
 ### The signing secret
 
@@ -366,7 +371,7 @@ copy through mise:
 ```
 ub init            # identity, workspace, signing secret
 ub init <hub-url> --workspace <uuid>  # seed a workspace the stored login permits
-ub update          # update this copy — Homebrew, or a checkout on main
+ub update          # update the Homebrew installation
 ub open            # serve the web app and a hub, and open the browser
 ub status          # workspace, hub, stored account, connection, pending work, last sync, local log, failures
 ub status --json   # full report, including account, rooms, configuration and storage paths

@@ -31,8 +31,8 @@ usage: ub <command> [options]
 commands:
   init [hub-url]         identity, workspace and a signing secret — with a hub
                          given, the new workspace is created on that hub
-  update                 update the copy of uberblick you are running — a
-                         Homebrew installation, or a checkout on main
+  update                 update the Homebrew installation; for a checkout, run
+                         git pull, then mise run setup
   open [options]         serve the web app and a hub in the foreground, and
                          open the browser
   status [--json]        workspace, hub, connection, pending work and failures

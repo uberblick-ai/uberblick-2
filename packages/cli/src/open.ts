@@ -37,8 +37,8 @@
  *    add `rebound: true` until restart. Unbound serving retains
  *    #449's per-request resolution because it owns no replica identity.
  *
- * 4. **It never serves a blank page.** With no bundle and no toolchain it exits
- *    non-zero naming what is missing, rather than opening a browser onto 404s.
+ * 4. **It never serves a blank page.** With no bundle it exits 1 naming what
+ *    is missing, rather than opening a browser onto 404s.
  *    A bundle that is *there* but stale is that blank page with extra steps: one
  *    built before a `SYNC_PROTOCOL_VERSION` bump sends a pre-envelope auth
  *    message, the hub refuses it as an unparseable one, and the page sits at
@@ -46,37 +46,17 @@
  *    stamps the protocol it speaks into {@link BUILD_STAMP}, this command
  *    compares it to its own before it starts anything, and a bundle that
  *    differs — or carries no stamp, which is what one built before the stamp
- *    looks like — never gets served. What happens to it instead follows who
- *    owns it (#475): the checkout's own default bundle is rebuilt, because the
- *    CLI has just proved it obsolete and the fix is one documented task; a
- *    bundle `UBERBLICK_WEB_DIST` named is the caller's artifact and is refused
- *    with both versions and the rebuild named. Two local builds are what that
- *    compares: whether the *hub* speaks it too is still settled at connect,
- *    where it always was.
+ *    looks like — never gets served. A checkout's default bundle is refused
+ *    with `mise run build-web` as the next step; a bundle `UBERBLICK_WEB_DIST`
+ *    named is refused with both versions and the rebuild named. It compares
+ *    the CLI and bundle protocols; whether the *hub* speaks it too is still
+ *    settled at connect, where it always was.
  *
- * The *missing*-bundle build shells out to pnpm rather than to
- * `mise run build-web`: tasks are the documented way for *contributors* to run
- * things, and this is a program running a first build for somebody who was
- * never told about them. A rebuild is the other case — nothing is missing, a
- * checkout's bundle went stale — so it runs the task, in the checkout. Both of
- * them write the one directory, so both run under one lock and never at the
- * same time as each other (#512) — {@link ensureBundle} says how.
- *
- * **What a build is handed** (#426, #512): this command's resolved
- * configuration with `HUB_AUTH_TOKEN` taken out of it, on both paths, by
- * {@link buildEnvironment}. Nothing here puts a signing secret into a build,
- * because the bundle carries no authentication material. The served document
- * now carries only a loopback browser key. This describes this command, not
- * everything downstream of it: `mise run build-web` is
- * `fnox exec … -- ub env -- pnpm …`, so the task puts a decrypted secret back
- * into its own child, which is the task's business and unchanged by this. What
- * keeps it out of the artifact either way is `packages/web/vite.config.ts`,
- * whose `define` is a three-key allowlist — `packages/web/test/bundle-secret.test.ts`
- * is what proves it. `ub open` binds loopback, so the document reaches this
- * machine only.
+ * This command never builds or changes a bundle. Contributors build through
+ * `mise run build-web`; installations serve their packaged web app. Bundle
+ * refusals happen before a hub starts or a database file is created.
  */
 
-import { spawn } from "node:child_process";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
@@ -112,14 +92,13 @@ import {
   type ServingSyncStatus,
   type UberblickMcpEngine,
 } from "@uberblick/mcp-server";
-import { buildLockPath } from "./build-lock.js";
 import { budget, resolveMcpConfig } from "./budget.js";
 import { openBrowser } from "./browser.js";
 import { resolveConfig, requireBinding } from "./config.js";
 import { takeHelp } from "./help.js";
 import { isInstallPayload } from "./installation.js";
 import type { InitLock } from "./init-lock.js";
-import { acquireInitLock, tryAcquireInitLock, tryAcquireLock } from "./init-lock.js";
+import { acquireInitLock, tryAcquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { readAccessAction, requestAccess, type AccessBinding } from "./open-access.js";
@@ -158,9 +137,6 @@ const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 /** `packages/web/dist`, resolved from this module rather than from the cwd. */
 const DEFAULT_BUNDLE = join(packageRoot, "..", "web", "dist");
 
-/** The web package, so "there is a toolchain here" is a question about files. */
-const WEB_PACKAGE = join(packageRoot, "..", "web");
-
 export const OPEN_HELP = `usage: ub open [options]
 
 Serve the web app, make sure a hub is available, and open the browser. Runs in
@@ -184,37 +160,14 @@ function trimmed(value: string | undefined): string | null {
   return text === undefined || text === "" ? null : text;
 }
 
-/**
- * The half of the foreground a build has to obey: whether a signal has arrived,
- * and a promise that resolves when one does.
- *
- * A parameter rather than a module-level reader, because the build steps below
- * are exported and driven directly by their tests, and a stop that cannot be
- * supplied is a stop that cannot be tested.
- */
-export interface Stop {
-  /** True once a signal has arrived. Checked between startup steps. */
-  interrupted: () => boolean;
-  /** Resolves on the first SIGINT or SIGTERM. */
-  signalled: Promise<void>;
-}
-
 // --- the bundle --------------------------------------------------------------
 
-/**
- * `ours` is the ownership question, and it is answered by whether
- * `UBERBLICK_WEB_DIST` was supplied — never by where the directory turns out to
- * be. A bundle a caller named is an artifact that caller maintains, even when it
- * resolves to the default directory; only the default this command picked for
- * itself is one it may rebuild.
- */
+/** The default bundle, an installed payload, or a caller-supplied artifact. */
+type BundleSource = "default" | "installed" | "override";
+
 export type BundleAction =
-  /** A built bundle is there; serve it. */
-  | { action: "serve"; dir: string; ours: boolean; installed: boolean }
-  /** No bundle, but a web package to build one from — if pnpm is there. */
-  | { action: "build"; dir: string; ours: boolean; installed: boolean }
-  /** Neither, and `reason` says which half is missing. */
-  | { action: "missing"; dir: string; ours: boolean; reason: string; installed: boolean };
+  | { action: "serve"; dir: string; source: BundleSource }
+  | { action: "missing"; dir: string; source: BundleSource; reason: string };
 
 function isFile(path: string): boolean {
   try {
@@ -225,122 +178,23 @@ function isFile(path: string): boolean {
 }
 
 /**
- * Which of the three bundle situations this machine is in.
- *
- * `UBERBLICK_WEB_DIST` names a bundle directly — the seam the tests use, and
- * the one a distributed artifact (#90) will use when the bundle no longer sits
- * inside a checkout. An override is taken at its word: a named directory with
- * no `index.html` in it is a mistake to report, not a reason to build something
- * somewhere else and serve that instead.
+ * Find the prebuilt bundle, independently of the working directory.
+ * An override is the caller's artifact, even when it names the default path.
  */
 export function bundlePlan(env: NodeJS.ProcessEnv = process.env): BundleAction {
   const override = trimmed(env.UBERBLICK_WEB_DIST);
   const dir = override === null ? resolve(DEFAULT_BUNDLE) : resolve(override);
-  const installed = override === null && isInstallPayload();
-  const ours = override === null && !installed;
+  const source = override !== null ? "override" : isInstallPayload() ? "installed" : "default";
 
   if (isFile(join(dir, "index.html"))) {
-    return { action: "serve", dir, ours, installed };
+    return { action: "serve", dir, source };
   }
-  if (override !== null) {
-    return {
-      action: "missing",
-      dir,
-      ours,
-      installed,
-      reason: `UBERBLICK_WEB_DIST names ${dir}, which holds no index.html`,
-    };
-  }
-  if (installed) {
-    return {
-      action: "missing",
-      dir,
-      ours,
-      installed,
-      reason: `the installed web app at ${dir} holds no index.html`,
-    };
-  }
-  if (!isFile(join(WEB_PACKAGE, "package.json"))) {
-    return {
-      action: "missing",
-      dir,
-      ours,
-      installed,
-      reason: `there is no built web app at ${dir}, and no web package beside this one to build from`,
-    };
-  }
-  return { action: "build", dir, ours, installed };
-}
-
-/**
- * Whether a command is runnable, asked by running it.
- *
- * Only ever asked when there is no bundle: a check that spawns a process has no
- * business running on the path where nothing needs building.
- */
-function hasCommand(command: string): Promise<boolean> {
-  return new Promise((done) => {
-    const child = spawn(command, ["--version"], { stdio: "ignore" });
-    child.on("error", () => done(false));
-    child.on("close", (code) => done(code === 0));
-  });
-}
-
-/**
- * The environment both builds get: this command's resolved configuration with
- * the signing secret taken out. See the module comment for what that does and
- * does not promise.
- */
-function buildEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const child = { ...env };
-  delete child.HUB_AUTH_TOKEN;
-  return child;
-}
-
-/**
- * Run one build to completion, and say why it produced no bundle — or `null`
- * when it exited cleanly.
- *
- * **Never abandoned, not even on Ctrl-C.** The signal is passed on so a build
- * that has not noticed it stops promptly, but this waits for the child either
- * way: returning while a build is still writing `dist` would release the lock
- * around it, which is the one thing that lock exists to prevent.
- *
- * How the child ended is reported, never interpreted. Whether a dead build was
- * *this command* stopping is `stop.interrupted()`'s answer and nothing else's:
- * a supervisor or another tool can kill a build too, and `ub open` failing to
- * produce a bundle is an operational failure that exits 1, as the CLI's exit
- * classes say.
- */
-function runBuild(
-  command: string,
-  args: string[],
-  cwd: string,
-  env: NodeJS.ProcessEnv,
-  stop: Stop,
-): Promise<string | null> {
-  const named = `\`${[command, ...args].join(" ")}\``;
-  return new Promise((done) => {
-    const child = spawn(command, args, {
-      cwd,
-      env: buildEnvironment(env),
-      // Both of the build's streams to stderr: stdout is where this command
-      // prints the URL, and a caller reading it must not have to sift a build
-      // log out of it first.
-      stdio: ["ignore", 2, 2],
-    });
-    void stop.signalled.then(() => child.kill("SIGTERM"));
-    child.on("error", (error) => done(`${named} could not be run (${message(error)})`));
-    child.on("close", (status, signal) =>
-      done(
-        status === 0
-          ? null
-          : signal !== null
-            ? `${named} was killed by ${signal}`
-            : `${named} exited ${status ?? 1}`,
-      ),
-    );
-  });
+  const reason = source === "override"
+    ? `UBERBLICK_WEB_DIST names ${dir}, which holds no index.html`
+    : source === "installed"
+      ? `the installed web app at ${dir} holds no index.html`
+      : `there is no built web app at ${dir}`;
+  return { action: "missing", dir, source, reason };
 }
 
 /**
@@ -378,249 +232,45 @@ function speaks(stamped: number | null): string {
     : `speaks sync protocol ${stamped}`;
 }
 
-/**
- * Why a bundle *somebody else supplied* is not being served, and what makes it
- * servable.
- *
- * Both rebuilds are named because their audiences are different, and it is the
- * same split the builds below make: `pnpm` is the one a user of `ub` can run,
- * while `mise run build-web` is the documented task for a checkout — and since
- * #426 that task wants no age key either (`fnox exec --if-missing warn`), so
- * what it really needs is mise and a `ub` on PATH.
- */
-function staleBundle(dir: string, stamped: number | null, installed: boolean): string {
-  if (installed) {
+/** Why a bundle cannot sync, and the recovery for the copy being served. */
+function staleBundle(dir: string, stamped: number | null, source: BundleSource): string {
+  if (source === "installed") {
     return (
       `ub open: the installed web app at ${dir} ${speaks(stamped)}, and this uberblick speaks ` +
       `${SYNC_PROTOCOL_VERSION} — it could not sync, so it is not being served. ` +
       "Reinstall Uberblick; an installation never rebuilds or changes its packaged web app at run time.\n"
     );
   }
+  const recovery = source === "default"
+    ? "Rebuild it with `mise run build-web` from the checkout.\n"
+    : "Rebuild it with `pnpm --filter @uberblick/web build`, or with " +
+      "`mise run build-web` from a checkout.\n";
   return (
     `ub open: the web app at ${dir} ${speaks(stamped)}, and this uberblick speaks ` +
-    `${SYNC_PROTOCOL_VERSION} — it could not sync, so it is not being served. ` +
-    "Rebuild it with `pnpm --filter @uberblick/web build`, or with " +
-    "`mise run build-web` from a checkout.\n"
+    `${SYNC_PROTOCOL_VERSION} — it could not sync, so it is not being served. ` + recovery
   );
 }
 
-/** The checkout `build-web` is a task of: two levels up from `packages/cli`. */
-const CHECKOUT_ROOT = dirname(dirname(packageRoot));
-
 /**
- * How long a second `ub open` waits for the build the first one is running.
- *
- * A fresh decision, not the init lock's two seconds: that one covers a handful
- * of file writes, so anything approaching it is a dead process. This one waits
- * for a Vite build, which #475 made minutes wide, so it has to outlast a real
- * one. Bounded all the same — there is no takeover of a lock a crashed build
- * left behind, and a foreground command that waits forever on one is worse than
- * one that says which file to remove.
- *
- * Deliberately outside {@link budget}'s test ceiling, for the reason
- * `WAIT_TIMEOUT_MS` is: that ceiling shortens terminal probes, where expiry is a
- * permitted answer. This waits for a live sibling doing real work, and a
- * multi-minute build is not a deadline a test may shrink to milliseconds and
- * still be testing anything.
+ * Check the bundle without changing it. Every refusal precedes hub and
+ * database startup; building is the contributor's explicit mise task.
  */
-const BUILD_WAIT_MS = 10 * 60_000;
-
-/** Long enough not to spin, short enough that Ctrl-C still feels immediate. */
-const BUILD_RETRY_MS = 50;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((done) => setTimeout(done, ms));
-}
-
-/**
- * Take the build lock, or say why this run has not got it.
- *
- * Its own loop rather than {@link acquireInitLock}: the bound is different, the
- * message names a build rather than an `ub init`, and above all this one is
- * interruptible — a run waiting minutes for somebody else's build must still
- * answer Ctrl-C, which a wait that can only end in a lock or a thrown timeout
- * cannot do.
- */
-async function takeBuildLock(
-  dir: string,
-  io: Io,
-  stop: Stop,
-): Promise<InitLock | "interrupted" | "gave-up"> {
-  const path = buildLockPath(dir);
-  const deadline = Date.now() + BUILD_WAIT_MS;
-  let announced = false;
-
-  for (;;) {
-    const lock = tryAcquireLock(path);
-    if (lock !== null) {
-      return lock;
-    }
-    if (stop.interrupted()) {
-      return "interrupted";
-    }
-    if (Date.now() >= deadline) {
-      io.err(
-        "ub open: another `ub open` or `ub update` has been building the web app " +
-          `for more than ${BUILD_WAIT_MS / 60_000} minutes. If nothing is building, ` +
-          `remove ${path} and run \`ub open\` again.\n`,
-      );
-      return "gave-up";
-    }
-    if (!announced) {
-      announced = true;
-      io.err(
-        "ub open: another `ub open` or `ub update` is building the web app — waiting for it\n",
-      );
-    }
-    await sleep(BUILD_RETRY_MS);
+export function ensureBundle(plan: BundleAction, io: Io): "servable" | "refused" {
+  if (plan.action === "missing" || !isFile(join(plan.dir, "index.html"))) {
+    const reason = plan.action === "missing"
+      ? plan.reason
+      : `the web app at ${plan.dir} holds no index.html`;
+    const recovery = plan.source === "installed"
+      ? "Reinstall Uberblick; an installation never builds or changes its packaged web app at run time."
+      : plan.source === "default"
+        ? "Run `mise run build-web` from the checkout."
+        : "Point UBERBLICK_WEB_DIST at a built bundle, or build one from a checkout — the README says how.";
+    io.err(`ub open: ${reason}. ${recovery}\n`);
+    return "refused";
   }
-}
-
-/** What {@link ensureBundle} found, or made, of the bundle it was asked about. */
-export type BundleOutcome =
-  /** There is a bundle at `plan.dir` that speaks this command's protocol. */
-  | "servable"
-  /** There is not, and the reason is already on stderr. */
-  | "refused"
-  /** A signal arrived; the caller stops quietly, as it does everywhere else. */
-  | "interrupted";
-
-/**
- * Make sure the bundle about to be served exists and speaks this command's
- * protocol, building it when it does not and the bundle is ours (#475).
- *
- * Ours means `UBERBLICK_WEB_DIST` named nothing, so the bundle is the checkout's
- * own — the normal contributor path, where the CLI has just proved the bundle
- * obsolete or absent and the recovery is one build away. Making the user run it
- * by hand is a step this command can take itself. A *supplied* bundle is refused
- * exactly as before: it is the caller's artifact, and rebuilding somebody else's
- * deployed bundle behind their back is not this command's business.
- *
- * **One build at a time, machine-wide (#512).** Vite empties its output
- * directory before it writes it, so two `ub open` runs building at once leave
- * one of them serving a directory the other is clearing. Both of the builds
- * below produce that one directory, so both happen under {@link buildLockPath},
- * which is named after the directory itself: a second run waits, then re-reads
- * the stamp and builds only if the first left no servable bundle behind. Two
- * runs of one checkout are excluded however their *configuration* differs, and
- * two checkouts never wait on each other; {@link buildLockPath} states the one
- * thing they do have to agree about.
- *
- * Either way a bundle that cannot sync is never served, and the refusal happens
- * before any hub is started or any database file exists.
- */
-export async function ensureBundle(
-  plan: BundleAction,
-  env: NodeJS.ProcessEnv,
-  io: Io,
-  stop: Stop,
-): Promise<BundleOutcome> {
   const stamped = stampedProtocol(plan.dir);
-  // The stamp alone would be enough if nothing else were writing this directory,
-  // and this one read is the only one taken outside the lock: Vite emits the
-  // stamp from `generateBundle` with nothing ordering it last, so another run's
-  // half-written `dist` can carry a current stamp and no `index.html` yet.
-  // {@link buildBundle}'s pre-build read is paired the same way, because a build
-  // killed between those two writes leaves that state behind with nobody left to
-  // finish it; its read *after* a build needs no pairing, because that build
-  // exited 0 and so wrote both files. On a `serve` plan nothing runs between
-  // those two reads, so the later one is the earlier one over again — which is
-  // why it answers `servable` only when a build actually ran. A *supplied*
-  // bundle missing its `index.html` never reaches this at all:
-  // {@link bundlePlan} answers `missing` for it, and {@link openCommand} stops
-  // there with the reason.
-  if (stamped === SYNC_PROTOCOL_VERSION && isFile(join(plan.dir, "index.html"))) {
-    return "servable";
-  }
-  if (!plan.ours) {
-    io.err(staleBundle(plan.dir, stamped, plan.installed));
-    return "refused";
-  }
-
-  const lock = await takeBuildLock(plan.dir, io, stop);
-  if (lock === "interrupted") {
-    return "interrupted";
-  }
-  if (lock === "gave-up") {
-    return "refused";
-  }
-  try {
-    return await buildBundle(plan, env, io, stop);
-  } finally {
-    lock.release();
-  }
-}
-
-/**
- * The two builds, with the lock held throughout and the stamp re-read first.
- *
- * The re-read is what makes a waiter cheap: whoever held the lock was building
- * this same directory, and a run that waited for them has nothing left to do.
- *
- * Which command runs is the plan's, unchanged (#504): the *missing*-bundle case
- * spawns pnpm, because it is a first build for somebody who was never told about
- * tasks, and the *stale* case runs the documented task in the checkout. A pnpm
- * build that lands a bundle stamped with some other protocol still falls through
- * to the task, exactly as it did when these were two functions.
- */
-async function buildBundle(
-  plan: BundleAction,
-  env: NodeJS.ProcessEnv,
-  io: Io,
-  stop: Stop,
-): Promise<BundleOutcome> {
-  if (stampedProtocol(plan.dir) === SYNC_PROTOCOL_VERSION && isFile(join(plan.dir, "index.html"))) {
-    return "servable";
-  }
-
-  if (plan.action === "build") {
-    io.err(
-      "ub open: no built web app yet — building it now with pnpm; this takes a moment\n",
-    );
-    const failure = await runBuild(
-      "pnpm",
-      ["--filter", "@uberblick/web", "build"],
-      dirname(packageRoot),
-      env,
-      stop,
-    );
-    if (stop.interrupted()) {
-      return "interrupted";
-    }
-    if (failure !== null) {
-      io.err(`ub open: the web build failed, so there is nothing to serve: ${failure}\n`);
-      return "refused";
-    }
-  }
-
-  const built = stampedProtocol(plan.dir);
-  if (built === SYNC_PROTOCOL_VERSION && plan.action === "build") {
-    return "servable";
-  }
-
-  const why =
-    built === SYNC_PROTOCOL_VERSION
-      ? `is a sync protocol ${built} stamp with no bundle behind it, left by a ` +
-        "build that never finished"
-      : `${speaks(built)}, and this uberblick speaks ${SYNC_PROTOCOL_VERSION}`;
-  io.err(
-    `ub open: the web app at ${plan.dir} ${why} — rebuilding it with ` +
-      "`mise run build-web`; this takes a moment\n",
-  );
-  const failure = await runBuild("mise", ["run", "build-web"], CHECKOUT_ROOT, env, stop);
-  if (stop.interrupted()) {
-    return "interrupted";
-  }
-  const rebuilt = failure === null ? stampedProtocol(plan.dir) : null;
-  if (rebuilt === SYNC_PROTOCOL_VERSION) {
-    return "servable";
-  }
-  io.err(
-    `ub open: the stale web app was not rebuilt: ${failure ?? `the rebuilt web app ${speaks(rebuilt)}`}. ` +
-      `Run \`mise run build-web\` in ${CHECKOUT_ROOT} and read what it says, or ` +
-      "point UBERBLICK_WEB_DIST at a bundle that speaks sync protocol " +
-      `${SYNC_PROTOCOL_VERSION}.\n`,
-  );
+  if (stamped === SYNC_PROTOCOL_VERSION) return "servable";
+  io.err(staleBundle(plan.dir, stamped, plan.source));
   return "refused";
 }
 
@@ -1504,7 +1154,11 @@ function monitorEngine(engine: UberblickMcpEngine): EngineMonitor {
   };
 }
 
-interface Foreground extends Stop {
+interface Foreground {
+  /** True once a signal has arrived. Checked between startup steps. */
+  interrupted: () => boolean;
+  /** Resolves on the first SIGINT or SIGTERM. */
+  signalled: Promise<void>;
   /** Stop everything started so far, drop the handlers, and return `code`. */
   shutdown: (code: number) => Promise<number>;
 }
@@ -1611,8 +1265,6 @@ export async function openCommand(
   }
   // The default lives in the MCP server's configuration, which is where every
   // other client reads it from; restating it here would be a second address.
-  // Written back into the environment so a build started below bakes the same
-  // endpoint into the bundle's fallback that the served document names.
   const hubUrl = trimmed(resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
   const env: NodeJS.ProcessEnv = { ...resolved.env, HUB_URL: hubUrl };
 
@@ -1628,29 +1280,12 @@ export async function openCommand(
   let hubNote = "";
 
   const plan = bundlePlan(env);
-  const missing =
-    plan.action === "missing"
-      ? plan.reason
-      : plan.action === "build" && !(await hasCommand("pnpm"))
-        ? `there is no built web app at ${plan.dir}, and pnpm — which builds it — is not on PATH`
-        : null;
-  if (missing !== null) {
-    const recovery =
-      plan.action === "missing" && plan.installed === true
-        ? "Reinstall Uberblick; an installation never builds or changes its packaged web app at run time."
-        : "Point UBERBLICK_WEB_DIST at a built bundle, or build one from a checkout — the README says how.";
-    io.err(`ub open: ${missing}. ${recovery}\n`);
-    return await foreground.shutdown(1);
-  }
-  // Every build this command runs happens in here, under one lock, and it
-  // judges the bundle that will actually be served: one that was already there,
-  // or the one it just produced. Before `ensureHub`, because a refusal must
-  // start no hub and create no database file.
-  const bundle = await ensureBundle(plan, env, io, foreground);
+  // Before ensureHub: a bundle refusal starts no hub and creates no database.
+  const bundle = ensureBundle(plan, io);
   if (bundle === "refused") {
     return await foreground.shutdown(1);
   }
-  if (bundle === "interrupted" || foreground.interrupted()) {
+  if (foreground.interrupted()) {
     return await foreground.shutdown(0);
   }
 

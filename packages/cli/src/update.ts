@@ -1,5 +1,5 @@
 /**
- * `ub update` — update the copy of uberblick this `ub` runs from.
+ * `ub update` — update the Homebrew copy this `ub` runs from.
  *
  * **Which copy is decided by where `ub`'s own files live, never by the working
  * directory.** A Homebrew `ub` typed inside a checkout updates Homebrew's copy,
@@ -7,73 +7,36 @@
  * whatever tree they happen to be standing in — is the surprise this command
  * exists to avoid.
  *
- * Exactly two installation kinds are supported, and everything else is refused
- * with both of them named:
- *
- * - **Homebrew.** The two commands README documents, and nothing else. This
- *   command does not re-prove that Homebrew replaces the installed version;
- *   `.github/workflows/homebrew-formula.yml` owns that.
- * - **A checkout on `main`.** Fetch, `merge --ff-only`, then refresh the two
- *   generated outputs a checkout needs to be runnable at the new head —
- *   `node_modules` and `packages/web/dist` — through the documented tasks.
- *
- * **Git decides whether the fast-forward is safe, and this command does not
- * second-guess it** (owner decision, 2026-09-05, on #846). There is no
- * cleanliness pre-check: divergence, and uncommitted changes an incoming commit
- * would overwrite, surface as git's own refusal, reported as-is, with the
- * checkout untouched. A `main` carrying unpushed commits already contains
- * `origin/main`, so it fast-forwards trivially and goes on to the refresh —
- * refusing it would need exactly the classifier the decision rejected.
- * Uncommitted changes git does not have to touch survive, untracked files are
- * never even looked at, and nothing here stashes, discards, rebases or
- * switches.
- *
- * **The refresh always runs, and records nothing.** A checkout already at
- * `origin/main` still installs and rebuilds before this reports success, which
- * is what makes a run after a failed one a repair rather than a false "up to
- * date". Remembering which commit last built would be the other way to get
- * that, and a second piece of state to go wrong.
- *
- * Both `ub open` and this write `packages/web/dist`, and Vite empties that
- * directory before it writes it, so the rebuild happens under the lock
- * {@link buildLockPath} names (#512).
+ * Homebrew runs the two commands README documents, and nothing else. This
+ * command does not re-prove that Homebrew replaces the installed version;
+ * `.github/workflows/homebrew-formula.yml` owns that. A source checkout is
+ * refused without running any commands or changing any files: contributors
+ * update it with `git pull`, then `mise run setup`.
  */
 
 import { spawn, spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { dirname, join, sep } from "node:path";
+import { dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildLockPath } from "./build-lock.js";
 import { findCheckoutRoot } from "./checkout.js";
 import { takeHelp } from "./help.js";
-import { type InitLock, acquireInitLock, LockWaitTimeoutError } from "./init-lock.js";
 import { isInstallPayload } from "./installation.js";
 import type { Io } from "./io.js";
 
 /** The tap README documents, and the only one this command upgrades from. */
 const FORMULA = "uberblick-ai/tap/uberblick";
 
-/** Long enough to outlast a real Vite build, the same bound `ub open` waits. */
-const BUILD_WAIT_MS = 10 * 60_000;
-
 /** The two a terminal or a supervisor sends; see {@link processHost}'s `run`. */
 const SIGNALS: readonly NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
 
 export const UPDATE_HELP = `usage: ub update
 
-Update the copy of uberblick this \`ub\` runs from. Which copy that is comes from
-where \`ub\`'s own files live, never from the current directory, and exactly two
-kinds are updated:
+Update a Homebrew installation: \`brew update\`, then
+\`brew upgrade ${FORMULA}\`. Which copy that is comes from where
+\`ub\`'s own files live, never from the current directory.
 
-  a Homebrew installation   Homebrew updates it: \`brew update\`, then
-                            \`brew upgrade ${FORMULA}\`
-  a checkout on \`main\`      fast-forwarded to origin/main, then its
-                            dependencies and web app refreshed to match
-
-A checkout on any other branch is not updated, and nothing is ever stashed,
-discarded, rebased or switched: git decides whether the fast-forward is safe,
-and when it refuses, its own reason is what you see and the checkout is left
-exactly as it was.
+A source checkout is not updated. Run \`git pull\`, then \`mise run setup\`
+to update it instead. \`ub update\` leaves the checkout unchanged.
 
 options:
   -h, --help        show this help
@@ -97,7 +60,7 @@ export interface UpdateHost {
   cliDir: string;
   /** Whether those files came from a versioned install payload. */
   installPayload: boolean;
-  /** Read a command's answer, for the two questions that have one. */
+  /** Read Homebrew's installation prefix. */
   capture(command: string, args: readonly string[]): CaptureResult;
   /** Run a command to completion; `null` when it exited 0, else why not. */
   run(command: string, args: readonly string[], cwd?: string): Promise<string | null>;
@@ -135,17 +98,12 @@ export function processHost(): UpdateHost {
       const label = named(command, args);
       return new Promise((done) => {
         // Both streams to stderr: stdout carries this command's own result, and
-        // a reader of it must not have to sift a build log out first.
+        // a reader of it must not have to sift Homebrew's log out first.
         const child = spawn(command, args, { cwd, stdio: ["ignore", 2, 2] });
 
-        // **A signal is passed on, never obeyed by leaving.** Node's default
-        // action for SIGINT is to exit at once, and Ctrl-C during the web build
-        // would then strand the lock this run holds — every later `ub update`
-        // waiting ten minutes on a dead holder. A listener suppresses that
-        // exit; the child is told to stop and this waits for it, so the
-        // `finally` around the lock still runs. A child that survives the
-        // signal keeps the lock, which is the point: releasing it while
-        // something can still write `dist` is the hazard the lock exists for.
+        // Pass terminal and supervisor signals to Homebrew, then wait for it
+        // to exit. The listener suppresses Node's immediate default exit so
+        // the command does not leave its child running behind it.
         const forward = SIGNALS.map((signal) => {
           const stop = (): void => {
             child.kill(signal);
@@ -188,7 +146,7 @@ function within(parent: string, child: string): boolean {
 }
 
 /**
- * Which of the two supported installations this is, or neither.
+ * Whether this copy is Homebrew-owned, a source checkout, or neither.
  *
  * A payload is Homebrew's only when it lies under the prefix Homebrew itself
  * reports — asked, rather than assumed from `/opt/homebrew`, because the prefix
@@ -217,9 +175,8 @@ function withinHomebrew(host: UpdateHost): boolean {
 
 const UNSUPPORTED =
   "ub update: this `ub` is neither a Homebrew installation nor a checkout of " +
-  "the uberblick repository, and those are the two it knows how to update. " +
-  `A Homebrew installation comes from \`brew install ${FORMULA}\`; a checkout ` +
-  "updates only on `main`. Nothing has changed.\n";
+  "the uberblick repository. `ub update` only updates Homebrew installations, " +
+  `installed with \`brew install ${FORMULA}\`. Nothing has changed.\n`;
 
 /** Run one `ub update`. Never throws for a failure a person can act on. */
 export async function updateCommand(
@@ -235,7 +192,13 @@ export async function updateCommand(
 
   const installation = classify(host);
   if (installation.kind === "homebrew") return await updateHomebrew(io, host);
-  if (installation.kind === "checkout") return await updateCheckout(installation.root, io, host);
+  if (installation.kind === "checkout") {
+    io.err(
+      "ub update: this `ub` runs from a source checkout. Run `git pull`, then " +
+        "`mise run setup` to update it. Nothing has changed.\n",
+    );
+    return 1;
+  }
   io.err(UNSUPPORTED);
   return 1;
 }
@@ -250,100 +213,4 @@ async function updateHomebrew(io: Io, host: UpdateHost): Promise<number> {
   }
   io.out("Homebrew has finished. `ub --version` prints the version now installed.\n");
   return 0;
-}
-
-async function updateCheckout(root: string, io: Io, host: UpdateHost): Promise<number> {
-  const branch = host.capture("git", ["-C", root, "branch", "--show-current"]);
-  if (branch.status !== 0) {
-    io.err(
-      `ub update: could not read the branch of the checkout at ${root}: ` +
-        `${branch.stderr.trim() || "git said nothing"}. Nothing has changed.\n`,
-    );
-    return 1;
-  }
-  const current = branch.stdout.trim();
-  if (current !== "main") {
-    io.err(
-      `ub update: the checkout at ${root} is on ` +
-        `${current === "" ? "a detached HEAD" : `\`${current}\``}, and only \`main\` is ` +
-        "updated. Nothing has changed.\n",
-    );
-    return 1;
-  }
-
-  // No cleanliness pre-check: git is the authority on whether this is safe, and
-  // its refusal is the message. `--ff-only` never rewrites and never merges.
-  //
-  // `--no-autostash` because `merge.autostash = true` is a configuration a
-  // person may already have, and under it `--ff-only` stops refusing: it
-  // stashes the tracked changes the incoming commits overwrite, advances HEAD,
-  // and applies the stash back — leaving conflict markers in those files and
-  // still exiting 0, so this command would go on to build and report success.
-  // The owner's decision is that git decides *whether the fast-forward
-  // happens*, not that it may rewrite somebody's uncommitted work to make one
-  // happen; turning the setting off here is what keeps the refusal a refusal
-  // without adding the cleanliness classifier the decision rejected.
-  for (const args of [
-    ["-C", root, "fetch", "origin", "main"],
-    ["-C", root, "merge", "--ff-only", "--no-autostash", "origin/main"],
-  ]) {
-    const failure = await host.run("git", args);
-    if (failure !== null) {
-      io.err(`ub update: ${failure}, so the checkout is unchanged.\n`);
-      return 1;
-    }
-  }
-
-  const failure = await refresh(root, io, host);
-  if (failure !== null) {
-    io.err(
-      `ub update: ${failure}. The checkout is at the commit git left it at; ` +
-        "run `ub update` again to retry that step.\n",
-    );
-    return 1;
-  }
-  // "includes", not "is at": a `main` carrying unpushed commits already
-  // contains `origin/main`, fast-forwards trivially and refreshes, and saying
-  // it now equals `origin/main` would be a claim this command did not make true.
-  io.out(
-    `The checkout at ${root} now includes origin/main, with its dependencies ` +
-      "and web app refreshed.\n",
-  );
-  return 0;
-}
-
-/**
- * Bring the two generated outputs back in step with the head just checked out.
- *
- * Always both, never conditionally: what makes a retry repair a half-finished
- * update is that nothing here remembers having succeeded.
- */
-async function refresh(root: string, io: Io, host: UpdateHost): Promise<string | null> {
-  const install = await host.run("mise", ["run", "install"], root);
-  if (install !== null) return install;
-
-  const dist = join(root, "packages", "web", "dist");
-  const path = buildLockPath(dist);
-  let lock: InitLock;
-  try {
-    lock = await acquireInitLock(process.env, {
-      path,
-      waitMs: BUILD_WAIT_MS,
-      onWait: () => io.err("ub update: another build of the web app is running — waiting for it\n"),
-    });
-  } catch (error) {
-    if (error instanceof LockWaitTimeoutError) {
-      // Its own message names `ub init`; the wait is what was reused, not the text.
-      return (
-        `another build of the web app has held ${path} for more than ` +
-        `${BUILD_WAIT_MS / 60_000} minutes — if nothing is building, remove that file`
-      );
-    }
-    return `could not take the web-build lock at ${path} (${message(error)})`;
-  }
-  try {
-    return await host.run("mise", ["run", "build-web"], root);
-  } finally {
-    lock.release();
-  }
 }
