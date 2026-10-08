@@ -125,14 +125,18 @@ async function capture(page: Page, info: TestInfo, label: string, colorScheme: "
   await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH, `${label}-${colorScheme}.png`) });
 }
 
-/** Native Tab from the insertion shortcut must reach the named button. */
+/**
+ * Native Tab from the insertion shortcut must reach the named button. Like
+ * Safari, WebKit on macOS tabs only to text fields; Option+Tab reaches buttons.
+ */
 async function tabTo(page: Page, name: string): Promise<void> {
   const target = button(page, name);
+  const webkitMac = process.platform === "darwin" && page.context().browser()?.browserType().name() === "webkit";
   for (let index = 0; index < 40; index += 1) {
     const focusedName = await page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.tagName);
     expect(await target.count(), `Tab reached ${focusedName ?? "no element"} and lost the table controls`).toBe(1);
     if (await target.evaluate((element) => element === document.activeElement)) return;
-    await page.keyboard.press("Tab");
+    await page.keyboard.press(webkitMac ? "Alt+Tab" : "Tab");
   }
   await expect(target).toBeFocused();
 }
