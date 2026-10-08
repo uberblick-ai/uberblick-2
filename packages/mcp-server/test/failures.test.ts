@@ -97,7 +97,7 @@ const EXPECTED: Record<
   invalid_table: { recoveryClass: "manual", detail: [] },
   table_mapping_required: { recoveryClass: "manual", detail: [] },
   invalid_table_mapping: { recoveryClass: "manual", detail: [] },
-  table_comments_unavailable: { recoveryClass: "manual", detail: ["blockId"] },
+  annotation_cell: { recoveryClass: "manual", detail: ["blockId", "reason"] },
   invalid_github_reference: { recoveryClass: "manual", detail: ["github_ref"] },
   persistence_failed: { recoveryClass: "manual", detail: ["room"] },
   stale_block: {
@@ -236,7 +236,7 @@ describe("the failure contract", () => {
       table_mapping: { rows: [0, 2], columns: [0] },
     })).payload);
     record((await rig.call("annotate", {
-      uuid: doc.uuid, block_id: table.block.id, start: 0, end: 3, text: "Unavailable",
+      uuid: doc.uuid, block_id: table.block.id, start: 0, end: 3, text: "Missing cell coordinates",
     })).payload);
     record(
       (await rig.call("get_doc", { uuid: stubOnly(rig) })).payload,

@@ -623,8 +623,10 @@ export function App(): ReactElement {
    * to a document that has none — with nobody having closed anything.
    */
   useEffect(() => {
-    if (threads.length === 0 && threadsOpen) closeThreads();
-  }, [threads.length, threadsOpen, closeThreads]);
+    // Opening for a newly created thread can precede the observer's reading.
+    // Close when the rail empties, rather than when its open state changes.
+    if (threads.length === 0) closeThreads();
+  }, [threads.length, closeThreads]);
 
   /**
    * Lift the tombstone — the same schema call `restore_doc` makes, against the

@@ -1,24 +1,23 @@
 /**
- * The prose selection, as the annotation API wants it.
+ * Editor selections, as the annotation API wants them.
  *
- * `createAnnotation` anchors a thread in ONE block at character offsets into
- * that block's text, while a ProseMirror selection is a pair of document
+ * `createAnnotation` anchors a thread in one text block or table cell at character
+ * offsets into its visible text, while a ProseMirror selection is a pair of document
  * positions. Translating between them is this module's whole job.
  *
  * Two facts make the translation exact rather than approximate:
  *
- * 1. The supported comment targets are flat text blocks (see editor/nodes.ts), so an
- *    inline position always resolves at depth 1 and `parentOffset` is already
- *    the offset into the block's text. Structured tables are refused until
- *    table-cell anchoring supplies its own index space.
+ * 1. Prose targets are flat text blocks (see editor/nodes.ts), so an inline
+ *    position resolves at depth 1 and `parentOffset` is the block offset. Cell
+ *    targets use their paragraph's content start and the table's row and column.
  * 2. The palette has no inline nodes other than text, so a ProseMirror content
  *    offset counts the same characters a Y.XmlText index does. An inline node
  *    would count as one position and two indices would drift apart — which is
  *    why the palette gate (palette.ts) refusing foreign content also protects
  *    this mapping.
  *
- * A selection spanning more than one block is **clamped to the first block of
- * the selected range**, and says so. First in document order — the range's
+ * A selection spanning blocks or cells is clamped to its first block or cell,
+ * and says so. First in document order — the range's
  * `$from`, whichever way the drag went, so a backwards drag clamps to the block
  * it ended in rather than the one it started in. A thread has exactly one
  * anchor block, so the honest choices are clamping or refusing; clamping keeps
@@ -48,26 +47,28 @@
  */
 
 import * as Y from "yjs";
-import { BLOCK_TYPES, getBlocksFragment } from "@uberblick/schema";
+import { BLOCK_TYPES, getBlocksFragment, tableCellTexts, tableRows } from "@uberblick/schema";
 import type { BlockType } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import { CellSelection } from "@tiptap/pm/tables";
 import type { ResolvedPos } from "@tiptap/pm/model";
 
-/** A formatting range in one cell; it is deliberately not an annotation target. */
+/** A range in one cell, using that cell's visible character offsets. */
 export interface CellTextTarget {
   kind: "cell";
   blockId: string;
   /** Cell position relative to its table, distinguishing equal offsets in cells. */
   cellPos: number;
+  row: number;
+  column: number;
   start: number;
   end: number;
   text: string;
   contentStart: number;
   blockType: "table";
   blockIndex: number;
-  clamped: false;
+  clamped: boolean;
 }
 
 function cellDepth($pos: ResolvedPos): number | null {
@@ -110,8 +111,68 @@ export function cellTextTargetOf(editor: Editor): CellTextTarget | null {
   return {
     kind: "cell", blockId: table.attrs.id,
     cellPos: $from.before(depth) - $from.before(1),
+    row: $from.index(1), column: $from.index(2),
     start, end, text: doc.textBetween(from, to), contentStart,
     blockType: "table", blockIndex: $from.index(0), clamped: false,
+  };
+}
+
+/** Clamp a text drag or rectangular cell selection to its first cell. */
+function cellCommentTargetOf(editor: Editor, ydoc: Y.Doc): CellTextTarget | null {
+  const { selection, doc } = editor.state;
+  let from = selection.from;
+  let to = selection.to;
+  let clamped = false;
+  if (selection instanceof CellSelection) {
+    let first = Number.MAX_SAFE_INTEGER;
+    let count = 0;
+    selection.forEachCell((_cell, pos) => { first = Math.min(first, pos); count += 1; });
+    const cell = doc.nodeAt(first);
+    if (cell === null || cell.childCount !== 1 || !cell.firstChild?.isTextblock) return null;
+    from = first + 2;
+    to = from + cell.firstChild.content.size;
+    clamped = count > 1;
+  } else if (!(selection instanceof TextSelection)) return null;
+  if (to <= from) return null;
+  const $from = doc.resolve(from);
+  const depth = cellDepth($from);
+  if (depth === null) return null;
+  const cell = $from.node(depth);
+  if (cell.childCount !== 1 || !cell.firstChild?.isTextblock) return null;
+  const table = $from.node(1);
+  if (table.type.name !== "table" || typeof table.attrs.id !== "string" || table.attrs.id === "") return null;
+  const contentStart = $from.before(depth) + 2;
+  const contentEnd = contentStart + cell.firstChild.content.size;
+  clamped ||= to > contentEnd;
+  to = Math.min(to, contentEnd);
+  const start = from - contentStart;
+  const end = to - contentStart;
+  if (start < 0 || end <= start) return null;
+  const row = $from.index(1);
+  const column = $from.index(2);
+  // Concurrent first writes can leave several Y texts in one paragraph. The
+  // schema and editor concatenate them; reject embeds or a mismatched count.
+  let length = 0;
+  let matched = false;
+  for (const element of getBlocksFragment(ydoc).toArray()) {
+    if (!(element instanceof Y.XmlElement) || element.getAttribute("id") !== table.attrs.id) continue;
+    const storedCell = tableRows(element)[row]?.[column];
+    if (storedCell === undefined) return null;
+    for (const text of tableCellTexts(storedCell)) {
+      for (const op of text.toDelta() as Array<{ insert?: unknown }>) {
+        if (typeof op.insert !== "string") return null;
+        length += op.insert.length;
+      }
+    }
+    matched = true;
+    break;
+  }
+  if (!matched || length !== cell.firstChild.content.size) return null;
+  return {
+    kind: "cell", blockId: table.attrs.id,
+    cellPos: $from.before(depth) - $from.before(1), row, column,
+    start, end, text: doc.textBetween(from, to), contentStart,
+    blockType: "table", blockIndex: $from.index(0), clamped,
   };
 }
 
@@ -193,7 +254,7 @@ function anchorTextLength(ydoc: Y.Doc, blockId: string): number | null {
  * transaction — returns at the first line and reads no Y type at all; the walk
  * is O(blocks up to the anchor) and only while a real selection stands.
  */
-export function commentTargetOf(editor: Editor, ydoc: Y.Doc): CommentTarget | null {
+export function commentTargetOf(editor: Editor, ydoc: Y.Doc): CommentTarget | CellTextTarget | null {
   const { selection, doc } = editor.state;
   if (selection.empty) return null;
 
@@ -208,7 +269,7 @@ export function commentTargetOf(editor: Editor, ydoc: Y.Doc): CommentTarget | nu
   if (block === null) return null;
 
   const type = block.type.name;
-  if (type === "table") return null;
+  if (type === "table") return cellCommentTargetOf(editor, ydoc);
   if (!(BLOCK_TYPES as readonly string[]).includes(type)) return null;
   const blockId = block.attrs.id;
   if (typeof blockId !== "string" || blockId === "") return null;

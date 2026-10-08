@@ -34,6 +34,8 @@ import {
   getBlocksFragment,
   normalizeLegacyTables,
   setAnnotationResolved,
+  tableCellText,
+  tableRows,
 } from "@uberblick/schema";
 import { ThreadsPane } from "../src/ui/ThreadsPane.js";
 import {
@@ -91,6 +93,46 @@ function replicas(): { local: Y.Doc; remote: Y.Doc; blocks: string[] } {
 }
 
 describe("a thread over a marked range becomes a card", () => {
+  it("quotes cell characters and orders threads by table, row, column and offset", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "cell-threads", title: "Table comments" });
+    const id = appendBlock(ydoc, { type: "table", text: "| Alpha beta | Second |\n| --- | --- |\n| Gamma delta | Body |" });
+    const body = createAnnotation(ydoc, id, 0, 5, "Reader", "Body", { row: 1, column: 0 });
+    const right = createAnnotation(ydoc, id, 0, 6, "Reader", "Right", { row: 0, column: 1 });
+    const later = createAnnotation(ydoc, id, 6, 10, "Reader", "Later", { row: 0, column: 0 });
+    const first = createAnnotation(ydoc, id, 0, 5, "Reader", "First", { row: 0, column: 0 });
+    expect(threadsFromDoc(ydoc).map((thread) => [thread.id, thread.excerpt, thread.orphaned])).toEqual([
+      [first.id, "Alpha", false], [later.id, "beta", false], [right.id, "Second", false], [body.id, "Gamma", false],
+    ]);
+    const { editor, element } = mountEditor(ydoc);
+    try {
+      const highlight = element.querySelector(`[data-comment-thread="${body.id}"]`)!;
+      expect(highlight.closest("td")).not.toBeNull();
+      expect(threadIdFromTarget(highlight)).toBe(body.id);
+      expect(highlight.textContent).toBe("Gamma");
+    } finally { editor.destroy(); ydoc.destroy(); }
+  });
+
+  it.each(["characters", "row", "column"])("orphans a cell conversation when its marked %s are deleted and keeps replies", (removed) => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "cell-orphan", title: "Table comments" });
+    const id = appendBlock(ydoc, { type: "table", text: "| Header | Second |\n| --- | --- |\n| Alpha | Beta |" });
+    const thread = createAnnotation(ydoc, id, 0, 5, "Reader", "Keep conversation", { row: 1, column: 0 });
+    const table = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
+    const cell = tableRows(table)[1]![0]!;
+    ydoc.transact(() => {
+      if (removed === "characters") tableCellText(cell)!.delete(0, 5);
+      else if (removed === "row") table.delete(1, 1);
+      else (table.get(1) as Y.XmlElement).delete(0, 1);
+    });
+    addComment(ydoc, thread.id, "Reader", "Still here");
+    setAnnotationResolved(ydoc, thread.id, true);
+    expect(threadsFromDoc(ydoc)[0]).toMatchObject({ id: thread.id, blockRef: "Table 1", excerpt: "", orphaned: true, replyCount: 1, resolved: true });
+    setAnnotationResolved(ydoc, thread.id, false);
+    expect(threadsFromDoc(ydoc)[0]).toMatchObject({ orphaned: true, resolved: false });
+    ydoc.destroy();
+  });
+
   it("keeps a legacy table conversation as an orphan that can be replied to, resolved and reopened", () => {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: "legacy-thread", title: "Tables" });
@@ -477,6 +519,36 @@ describe("the rail renders its cards", () => {
     view.refocus(focusThread(first, thread.id));
     expect(scrolled).toEqual([card, card]);
     view.unmount();
+  });
+
+  it.each([false, true])("waits for a newly selected card to arrive before revealing it (keyboard: %s)", (viaKeyboard) => {
+    const scrolled: Element[] = [];
+    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
+      scrolled.push(this);
+    };
+    const { ydoc, blocks } = annotatedDoc();
+    createAnnotation(ydoc, blocks[1]!, 4, 15, "ben", "Existing card");
+    const previousThreads = threadsFromDoc(ydoc);
+    const thread = createAnnotation(ydoc, blocks[1]!, 20, 25, "ben", "New card");
+    const connection = stubConnection(ydoc);
+    const focused = focusThread(null, thread.id, { viaKeyboard });
+    const tree = (threads: ThreadView[]): ReactElement => <ThreadsPane
+      connection={connection} threads={threads} focused={focused} author="ben" onFocus={() => {}}
+    />;
+    const view = render(tree(previousThreads));
+    try {
+      // Selection arrives before the observer's thread list; the old rail
+      // still renders, but the requested card cannot be scrolled or focused.
+      expect(scrolled).toEqual([]);
+      view.rerender(tree(threadsFromDoc(ydoc)));
+      const card = view.container.querySelector(`#${CSS.escape(threadCardId(thread.id))}`);
+      expect(card).not.toBeNull();
+      expect(scrolled).toEqual([card]);
+      if (viaKeyboard) expect(document.activeElement).toBe(card!.querySelector("button"));
+      addComment(ydoc, thread.id, "Reader", "Later reply");
+      view.rerender(tree(threadsFromDoc(ydoc)));
+      expect(scrolled).toEqual([card]);
+    } finally { view.unmount(); ydoc.destroy(); }
   });
 
   it("chips an orphaned thread and keeps its text", () => {

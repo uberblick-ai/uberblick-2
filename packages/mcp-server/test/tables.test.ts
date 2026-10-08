@@ -3,6 +3,7 @@ import {
   COMMENT_MARK,
   appendBlock,
   createAnnotation,
+  deleteAnnotation,
   decisionApprovalFingerprint,
   editBlock,
   findBlockElement,
@@ -11,10 +12,12 @@ import {
   getMetaMap,
   initDoc,
   parseGfmTable,
+  parseTableCell,
   roomForDoc,
   setKind,
   setStatus,
   tableCellText,
+  tableCellTexts,
   tableRows,
   writeGfmTable,
 } from "@uberblick/schema";
@@ -76,6 +79,127 @@ function legacy(source: string, decided = false): { doc: Y.Doc; id: string; thre
 }
 
 describe("structured tables through MCP", () => {
+  it("anchors displayed cell characters including whitespace without changing content, rev or approval", async () => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", {
+      title: "Cell comments", description: "Cell anchors are outside approved table content.", kind: "decision",
+      blocks: [{ type: "table", text: "| Name | Value |\n| --- | --- |\n| **Alpha** | A\\|B |" }],
+    });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const id = created.blocks[0].id;
+    const alpha = cell(doc, id, 1, 0);
+    alpha.insert(0, "  ", {});
+    alpha.insert(alpha.length, "  ", {});
+    const before = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
+    // Canonical padding is exactly one space; ordinary GFM parsing trims the rest.
+    const canonicalCell = before.text.split("\n")[2].split("|")[1].slice(1, -1);
+    expect(parseTableCell(canonicalCell).map(run => run.text).join("")).toBe("  Alpha  ");
+    expect(parseGfmTable(before.text)?.rows[0]?.[0]).toBe("**Alpha**");
+    await rig.ok("set_status", { uuid: created.uuid, status: "decided",
+      answer: { who: "Owner", when: "2026-10-07", where: "https://example.com/answer" } });
+    const approved = getMetaMap(doc).get("approvalFingerprint");
+    const opened = await rig.ok("annotate", { uuid: created.uuid, block_id: id, row: 1, column: 0,
+      start: 2, end: 7, text: "Discuss Alpha" });
+    const threadId = opened.annotation.id;
+    expect(opened.annotation.range).toEqual({ row: 1, column: 0, start: 2, end: 7, collapsed: false });
+    expect(alpha.toDelta()).toContainEqual({ insert: "Alpha", attributes: { bold: {}, comment: { threadId } } });
+    const escaped = await rig.ok("annotate", { uuid: created.uuid, block_id: id, row: 1, column: 1,
+      start: 1, end: 99, text: "Discuss pipe" });
+    expect(escaped.annotation.range).toEqual({ row: 1, column: 1, start: 1, end: 3, collapsed: false });
+    for (const resolved of [true, false]) {
+      const reply = await rig.ok("annotate", { uuid: created.uuid, thread_id: threadId, resolved, text: "Reply" });
+      expect(reply.annotation).toMatchObject({ resolved, range: opened.annotation.range });
+    }
+    const read = await rig.ok("get_doc", { uuid: created.uuid });
+    expect(read.blocks[0]).toEqual(before);
+    expect(read.approvalChanged).toBe(false);
+    expect(getMetaMap(doc).get("approvalFingerprint")).toBe(approved);
+    const exported = await rig.ok("export_markdown", { uuid: created.uuid, annotations: "html-comments", frontmatter: false });
+    expect(exported.markdown).toContain("row=1 column=0 range=2-7");
+    deleteAnnotation(doc, threadId);
+    const deleted = await rig.ok("get_doc", { uuid: created.uuid });
+    expect(deleted.blocks[0]).toEqual(before);
+    expect(deleted.approvalChanged).toBe(false);
+    expect(alpha.toDelta().every((op: { attributes?: Record<string, unknown> }) => op.attributes?.comment === undefined)).toBe(true);
+  });
+
+  it("refuses missing, misplaced, outside, empty and overlapping cell ranges before a write", async () => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", { title: "Cell refusals", description: "Refusals are atomic.",
+      blocks: [{ type: "table", text: GFM }, { type: "paragraph", text: "Prose" }] });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const id = created.blocks[0].id;
+    const args = { uuid: created.uuid, block_id: id, start: 0, end: 3, text: "Thread" };
+    await rig.ok("annotate", { ...args, row: 1, column: 0 });
+    const before = Y.encodeStateAsUpdate(doc);
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    for (const extra of [{}, { row: 1 }, { column: 0 }, { row: 2, column: 0 }, { row: 1, column: 2 },
+      { block_id: created.blocks[1].id, row: 0, column: 0 }]) {
+      const refused = await rig.call("annotate", { ...args, ...extra });
+      expect(refused.payload).toMatchObject({ error: "annotation_cell", recoveryClass: "manual",
+        applied: false, partial: false, synced: false });
+      expect(refused.payload.recovery).toContain("row and column");
+    }
+    for (const offsets of [{ start: 1, end: 4 }, { start: 99, end: 100 }]) {
+      const refused = await rig.call("annotate", { ...args, row: 1, column: 0, ...offsets });
+      expect(refused.payload).toMatchObject({ error: "annotation_range", applied: false });
+    }
+    expect(updates).toBe(0);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    const tool = (await rig.client.listTools()).tools.find(tool => tool.name === "annotate")!;
+    expect(tool.description).toContain("header as row 0");
+    const thread = (await rig.ok("get_doc", { uuid: created.uuid })).annotations[0];
+    for (const coordinates of [{ row: 0 }, { column: 0 }, { row: 0, column: 0 }]) {
+      const refused = await rig.call("annotate", { uuid: created.uuid, thread_id: thread.id, text: "Reply", ...coordinates });
+      expect(refused.payload.error).toBe("schema_validation");
+    }
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    const prose = await rig.ok("annotate", { ...args, block_id: created.blocks[1].id });
+    expect(prose.annotation.range).toEqual({ start: 0, end: 3, collapsed: false });
+  });
+
+  it("recomputes cell coordinates after structural edits and returns null after deletion", async () => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", { title: "Moving cell anchors", description: "Coordinates follow retained cells.",
+      blocks: [{ type: "table", text: GFM }] });
+    const id = created.blocks[0].id;
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const opened = await rig.ok("annotate", { uuid: created.uuid, block_id: id, row: 1, column: 1,
+      start: 0, end: 4, text: "Beta" });
+    const after = "| Name | Extra | Value |\n| --- | --- | --- |\n| New | New | New |\n| Alpha | Added | Beta |";
+    await rig.ok("edit_block", { uuid: created.uuid, block_id: id, old_text: GFM, new_text: after,
+      table_mapping: { rows: [0, null, 1], columns: [0, null, 1] } });
+    let read = await rig.ok("get_doc", { uuid: created.uuid });
+    expect(read.annotations[0].range).toEqual({ row: 2, column: 2, start: 0, end: 4, collapsed: false });
+    cell(doc, id, 2, 2).delete(0, 4);
+    read = await rig.ok("get_doc", { uuid: created.uuid });
+    expect(read.annotations[0]).toMatchObject({ id: opened.annotation.id, range: null });
+    const another = await rig.ok("annotate", { uuid: created.uuid, block_id: id, row: 2, column: 0,
+      start: 0, end: 5, text: "Alpha" });
+    const next = "| Name | Extra | Value |\n| --- | --- | --- |\n| New | New | New |";
+    await rig.ok("edit_block", { uuid: created.uuid, block_id: id, old_text: read.blocks[0].text, new_text: next,
+      table_mapping: { rows: [0, 1], columns: [0, 1, 2] } });
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).annotations.find((a: { id: string }) => a.id === another.annotation.id).range).toBeNull();
+  });
+
+  it("uses concatenated cell offsets for concurrent first-text writes", async () => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", { title: "Several shared texts", description: "One cell coordinate space.",
+      blocks: [{ type: "table", text: GFM }] });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const id = created.blocks[0].id;
+    const target = tableRows(findBlockElement(doc, id)!)[1]![0]!;
+    (target.firstChild as Y.XmlElement).insert(1, [new Y.XmlText(" tail")]);
+    const opened = await rig.ok("annotate", { uuid: created.uuid, block_id: id, row: 1, column: 0,
+      start: 3, end: 8, text: "Concatenated selection" });
+    expect(opened.annotation.range).toEqual({ row: 1, column: 0, start: 3, end: 8, collapsed: false });
+    expect(tableCellTexts(target).map(text => text.toDelta())).toEqual([
+      [{ insert: "Alp" }, { insert: "ha", attributes: { comment: { threadId: opened.annotation.id } } }],
+      [{ insert: " ta", attributes: { comment: { threadId: opened.annotation.id } } }, { insert: "il" }],
+    ]);
+  });
+
   it("creates cells through create_doc and insert_block, with canonical reads, search and export", async () => {
     const rig = await localRig();
     const created = await rig.ok("create_doc", {
@@ -745,7 +869,7 @@ describe("structured tables through MCP", () => {
     expect(cell(doc, block.id, 1, 1)).toBe(beta);
   });
 
-  it("refuses new table threads but preserves orphaned legacy conversations and their lifecycle", async () => {
+  it("opens cell threads while preserving orphaned legacy conversations and their lifecycle", async () => {
     const rig = await localRig();
     const old = legacy(GFM);
     const uuid = getMetaMap(old.doc).get("uuid") as string;
@@ -757,15 +881,19 @@ describe("structured tables through MCP", () => {
     expect(read.annotations[0]).toMatchObject({ id: old.threadId, range: null });
     const state = Y.encodeStateVector(replica.doc);
     const refused = await rig.call("annotate", { uuid, block_id: old.id, start: 0, end: 3, text: "New thread" });
-    expect(refused.payload).toMatchObject({ error: "table_comments_unavailable", applied: false, blockId: old.id });
+    expect(refused.payload).toMatchObject({ error: "annotation_cell", applied: false, blockId: old.id });
     expect(Y.encodeStateVector(replica.doc)).toEqual(state);
     for (const resolved of [true, false]) {
       const reply = await rig.ok("annotate", { uuid, thread_id: old.threadId, text: "Reply", resolved });
       expect(reply.annotation).toMatchObject({ resolved, range: null });
     }
-    expect((await rig.ok("get_doc", { uuid })).annotations[0].comments).toHaveLength(3);
+    const created = await rig.ok("annotate", { uuid, block_id: old.id, row: 1, column: 0, start: 1, end: 4, text: "New cell thread" });
+    expect(created.annotation.range).toEqual({ row: 1, column: 0, start: 1, end: 4, collapsed: false });
+    const annotations = (await rig.ok("get_doc", { uuid })).annotations;
+    expect(annotations.find((entry: { id: string }) => entry.id === old.threadId)).toMatchObject({ range: null, comments: expect.any(Array) });
+    expect(annotations.find((entry: { id: string }) => entry.id === old.threadId).comments).toHaveLength(3);
     const tools = (await rig.client.listTools()).tools;
-    expect(tools.find(tool => tool.name === "annotate")!.description).toContain("table_comments_unavailable");
+    expect(tools.find(tool => tool.name === "annotate")!.description).toContain("zero-based GFM projection");
   });
 
   it("normalizes persisted and late legacy writes, including decided records, and subsequent reads write nothing", async () => {

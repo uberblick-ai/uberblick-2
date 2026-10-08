@@ -191,7 +191,7 @@ describe("the table block", () => {
       expect(getBlocks(ydoc)).toHaveLength(1);
       expect(tableRows(getBlocksFragment(ydoc).get(0) as Y.XmlElement)[0]?.[0]?.length).toBe(1);
       editor.commands.setTextSelection({ from: 4, to: 10 });
-      expect(commentTargetOf(editor, ydoc)).toBeNull();
+      expect(commentTargetOf(editor, ydoc)).toMatchObject({ blockId: id, row: 0, column: 0, start: 0, end: 6, text: "Edited", clamped: false });
       expect(getBlocks(ydoc)[0]?.id).toBe(id);
     } finally { editor.destroy(); ydoc.destroy(); }
   });
