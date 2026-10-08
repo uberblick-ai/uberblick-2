@@ -5,13 +5,12 @@
 
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
 import type { Hub, TokenClaims, TokenScope } from "@uberblick/hub";
 import {
   MAX_TOKEN_LIFETIME_SECONDS,
@@ -22,9 +21,6 @@ import {
 } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/hub/protocol";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
-import type { Io } from "../src/io.js";
-import type { Stop } from "../src/open.js";
-import { ensureBundle } from "../src/open.js";
 import { probeHub, probePort } from "../src/probes.js";
 import type { Sandbox } from "./helpers.js";
 import {
@@ -48,8 +44,6 @@ export const SECOND_REMOTE = "wss://second.example.ts.net/ws";
 export const hubs: Hub[] = [];
 export const listeners: { server: Server; sockets: Socket[] }[] = [];
 export const children: ChildProcess[] = [];
-/** {@link anotherRunBuilding} holders, so no build outlives the test that made it. */
-export const holders: (() => Promise<void>)[] = [];
 
 /**
  * Stop everything a test left running and remove its sandboxes. Every `ub
@@ -67,11 +61,6 @@ export async function cleanUp(): Promise<void> {
   for (const { server, sockets } of listeners.splice(0)) {
     for (const socket of sockets) socket.destroy();
     await new Promise<void>((done) => server.close(() => done()));
-  }
-  // Idempotent, so a test that finished its own holder pays nothing, and one
-  // that failed first still leaves no build running and no lock behind.
-  for (const finish of holders.splice(0)) {
-    await finish().catch(() => {});
   }
   removeTempDirs();
 }
@@ -178,146 +167,6 @@ export function fixtureBundle(box: Sandbox): string {
   return dir;
 }
 
-/** This checkout, which is where `ub open` runs `mise run build-web` (#475). */
-export const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..", "..", "..");
-
-export interface FakeTool {
-  /** The directory to put on PATH; every fake tool of one sandbox shares it. */
-  path: string;
-  /** One `<cwd> <args>` line per invocation. */
-  calls: () => string[];
-  /** What `HUB_AUTH_TOKEN` was for each invocation — `<unset>` when it was not. */
-  tokens: () => string[];
-}
-
-/**
- * A build command on PATH that records how it was called and behaves as it is
- * told: `FAKE_SLEEP` seconds of work, `FAKE_HOLD` a file to keep building until
- * somebody removes, `FAKE_STAMP_VERSION` stamped into `FAKE_STAMP_DIR`,
- * `FAKE_EXIT_CODE` to exit with, `FAKE_KILL_SELF` to die of a signal nobody here
- * sent. A real `mise run build-web` or `pnpm … build` here
- * would be a Vite build of the repository's own bundle — minutes, and a
- * checkout mutated by a test.
- *
- * `FAKE_BUSY_DIR` is the overlap sentinel: a directory only one build can hold,
- * created before the work and removed after it, so a second build running at
- * the same time exits 9 instead of quietly succeeding.
- */
-export function fakeTool(box: Sandbox, command: string): FakeTool {
-  const bin = join(box.cwd, "fake-bin");
-  mkdirSync(bin, { recursive: true });
-  const record = join(box.cwd, `${command}-calls.txt`);
-  const tokens = join(box.cwd, `${command}-tokens.txt`);
-  writeFileSync(
-    join(bin, command),
-    "#!/bin/sh\n" +
-      // The tests point PATH at this directory alone, to prove the build
-      // command is found there; the fixture still needs `mkdir` and `sleep`.
-      'PATH="$PATH:/bin:/usr/bin"\n' +
-      `printf '%s %s\\n' "$PWD" "$*" >> ${record}\n` +
-      `printf '%s\\n' "\${HUB_AUTH_TOKEN-<unset>}" >> ${tokens}\n` +
-      'if [ -n "$FAKE_KILL_SELF" ]; then kill -TERM $$; fi\n' +
-      'if [ -n "$FAKE_BUSY_DIR" ]; then mkdir "$FAKE_BUSY_DIR" || exit 9; fi\n' +
-      'if [ -n "$FAKE_HOLD" ]; then while [ -e "$FAKE_HOLD" ]; do sleep 0.05; done; fi\n' +
-      'if [ -n "$FAKE_SLEEP" ]; then sleep "$FAKE_SLEEP"; fi\n' +
-      'if [ -n "$FAKE_BUSY_DIR" ]; then rmdir "$FAKE_BUSY_DIR"; fi\n' +
-      'if [ -n "$FAKE_STAMP_VERSION" ]; then\n' +
-      '  mkdir -p "$FAKE_STAMP_DIR"\n' +
-      '  printf \'{"syncProtocolVersion":%s}\' "$FAKE_STAMP_VERSION" \\\n' +
-      '    > "$FAKE_STAMP_DIR/uberblick-build.json"\n' +
-      "fi\n" +
-      'if [ -z "$FAKE_EXIT_CODE" ]; then FAKE_EXIT_CODE=0; fi\n' +
-      'exit "$FAKE_EXIT_CODE"\n',
-    "utf8",
-  );
-  chmodSync(join(bin, command), 0o755);
-  const lines = (file: string): string[] =>
-    existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
-  return { path: bin, calls: () => lines(record), tokens: () => lines(tokens) };
-}
-
-export const fakeMise = (box: Sandbox): FakeTool => fakeTool(box, "mise");
-
-/** A {@link Stop} that never fires: the paths where no signal is involved. */
-export function calm(): Stop {
-  return { interrupted: () => false, signalled: new Promise<void>(() => {}) };
-}
-
-/** A {@link Stop} the test decides the moment of, standing in for Ctrl-C. */
-export function stoppable(): Stop & { stop: () => void } {
-  let seen = false;
-  let wake!: () => void;
-  const signalled = new Promise<void>((done) => {
-    wake = done;
-  });
-  return {
-    interrupted: () => seen,
-    signalled,
-    stop: () => {
-      seen = true;
-      wake();
-    },
-  };
-}
-
-/**
- * Another `ub open` really building `dir`: it holds the build lock from the
- * moment this resolves until `finish()` lets its build end, and leaves the
- * bundle `leaves` stamps, or nothing at all.
- *
- * Contention rather than a reconstructed lock path. A test that spells the file
- * name out asserts on the hash that produces it, so it fails changes that keep
- * exclusion and moves nothing — and it would still pass the mistake this lock
- * has already made once, of keying itself on something other than the output.
- * Two real runs over one directory can only agree by excluding each other.
- */
-export async function anotherRunBuilding(
-  dir: string,
-  leaves?: number,
-): Promise<{ finish: () => Promise<void> }> {
-  const box = sandbox();
-  const tool = fakeMise(box);
-  const hold = join(box.cwd, "still-building");
-  writeFileSync(hold, "", "utf8");
-  const run = ensureBundle(
-    { action: "serve", dir, ours: true, installed: false },
-    {
-      ...box.env,
-      PATH: tool.path,
-      FAKE_HOLD: hold,
-      ...(leaves === undefined
-        ? {}
-        : { FAKE_STAMP_DIR: dir, FAKE_STAMP_VERSION: String(leaves) }),
-    },
-    stderrIo(),
-    calm(),
-  );
-  const finish = async (): Promise<void> => {
-    rmSync(hold, { force: true });
-    await run;
-  };
-  holders.push(finish);
-  await waitUntil(`another run to start building ${dir}`, () => tool.calls().length === 1);
-  return { finish };
-}
-
-/**
- * An {@link Io} that collects stderr and refuses stdout: which stream a bundle
- * message lands on is the CLI contract's, not a detail.
- */
-export function stderrIo(): Io & { text: () => string } {
-  let text = "";
-  return {
-    out: () => {
-      throw new Error("a bundle message went to stdout, which carries the URL");
-    },
-    err: (chunk) => {
-      text += chunk;
-    },
-    text: () => text,
-  };
-}
-
 /** A `BROWSER` command that records the URL it was handed instead of opening it. */
 export function browserRecorder(box: Sandbox): { command: string; opened: string } {
   const opened = join(box.cwd, "opened.txt");
@@ -362,8 +211,9 @@ export async function open(
   box: Sandbox,
   args: string[],
   extraEnv: NodeJS.ProcessEnv = {},
+  cliBin = UB_BIN,
 ): Promise<Running> {
-  const child = spawn(process.execPath, [UB_BIN, "open", ...args], {
+  const child = spawn(process.execPath, [cliBin, "open", ...args], {
     cwd: box.cwd,
     env: { ...box.env, ...extraEnv },
   });

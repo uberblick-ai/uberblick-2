@@ -320,6 +320,7 @@ describe("the versioned install payload", () => {
     expect(run.status).toBe(1);
     expect(run.stdout).toBe("");
     expect(run.stderr).toContain("neither a Homebrew installation nor a checkout");
+    expect(run.stderr).toContain("only updates Homebrew installations");
     expect(run.stderr).toContain("brew install uberblick-ai/tap/uberblick");
   });
 
@@ -347,6 +348,7 @@ describe("the versioned install payload", () => {
     expect(run.status).toBe(1);
     expect(run.stdout).toBe("");
     expect(run.stderr).toContain("neither a Homebrew installation nor a checkout");
+    expect(run.stderr).toContain("only updates Homebrew installations");
     expect(existsSync(log)).toBe(false);
   });
 
