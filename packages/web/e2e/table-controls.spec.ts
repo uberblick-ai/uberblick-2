@@ -76,11 +76,16 @@ async function openTable(page: Page, headerOnly = false): Promise<Locator> {
 }
 
 async function minimumTargets(targets: Locator): Promise<void> {
-  const dimensions = await targets.evaluateAll((elements) => elements.map((element) => {
-    const bounds = element.getBoundingClientRect();
-    return { width: bounds.width, height: bounds.height };
-  }));
-  expect(dimensions.length).toBeGreaterThan(0);
+  // evaluateAll reads one snapshot without waiting, and controls re-render
+  // as the caret and geometry settle; retry until a target is present.
+  let dimensions: Array<{ width: number; height: number }> = [];
+  await expect.poll(async () => {
+    dimensions = await targets.evaluateAll((elements) => elements.map((element) => {
+      const bounds = element.getBoundingClientRect();
+      return { width: bounds.width, height: bounds.height };
+    }));
+    return dimensions.length;
+  }).toBeGreaterThan(0);
   // WebKit reports a 44px menu item as 43.999969px at fractional portal offsets.
   // Allow only coordinate precision loss, well below a layout pixel fraction.
   for (const size of dimensions) {
