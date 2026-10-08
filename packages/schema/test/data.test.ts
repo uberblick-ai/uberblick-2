@@ -75,8 +75,8 @@ describe("document-owned data", () => {
     [{ constructor: {} }, "/constructor"],
     [{ nested: ["Launch 😀".slice(0, 8)] }, "/nested/0"],
     [{ nested: ["\uDC00"] }, "/nested/0"],
-    [{ nested: { ["a/~\uD800"]: true } }, "/nested/a~1~0\uD800"],
-    [{ nested: { ["a/~\uDC00"]: true } }, "/nested/a~1~0\uDC00"],
+    [{ nested: { "a/~\uD800": true } }, "/nested/a~1~0\uD800"],
+    [{ nested: { "a/~\uDC00": true } }, "/nested/a~1~0\uDC00"],
   ])("refuses lossy record JSON before any write: %j", (value, path) => {
     const { doc, apply } = rig();
     apply([{ collection: "c", schema: SCHEMA, upsert: [{ id: "kept", value: {} }] }]);
@@ -93,7 +93,7 @@ describe("document-owned data", () => {
 
   it.each([
     [JSON.parse('{"version":1,"schema":{"type":"object","properties":{"__proto__":{"type":"string"}}}}'), "/schema/properties/__proto__"],
-    [{ version: 1, schema: { type: "object", properties: { ["\uD800"]: { type: "string" } } } }, "/schema/properties/\uD800"],
+    [{ version: 1, schema: { type: "object", properties: { "\uD800": { type: "string" } } } }, "/schema/properties/\uD800"],
     [{ version: 1, schema: { type: "object", properties: { text: { const: "\uDC00" } } } }, "/schema/properties/text/const"],
   ])("refuses lossy schema JSON before any write: %j", (schema, path) => {
     const { doc, apply } = rig();
@@ -113,7 +113,7 @@ describe("document-owned data", () => {
     const schema: CollectionSchema = { version: 1, schema: {
       type: "object",
       properties: {
-        prototype: { type: "object", properties: { constructor: { const: "__proto__" }, toString: { type: "string" } } },
+        prototype: { type: "object", properties: { constructor: { const: "__proto__" }, toString: { type: "string" as const } } },
         toString: { enum: ["__proto__"] },
         "😀": { type: "array", items: { type: "string" } },
       },

@@ -164,8 +164,8 @@ describe("plain canonical JSON", () => {
     [JSON.parse('{"nested":[{"__proto__":{"x":1}}]}'), "/nested/0/__proto__"],
     [{ nested: ["\uD800"] }, "/nested/0"],
     [{ nested: ["\uDC00"] }, "/nested/0"],
-    [{ nested: { ["a/~\uD800"]: true } }, "/nested/a~1~0\uD800"],
-    [{ nested: { ["a/~\uDC00"]: true } }, "/nested/a~1~0\uDC00"],
+    [{ nested: { "a/~\uD800": true } }, "/nested/a~1~0\uD800"],
+    [{ nested: { "a/~\uDC00": true } }, "/nested/a~1~0\uDC00"],
   ])("rejects JSON that Yjs cannot preserve: %j", (value, path) => {
     expect(failure(() => assertJSON(value))).toMatchObject({
       code: "data_invalid_input", details: { path },
