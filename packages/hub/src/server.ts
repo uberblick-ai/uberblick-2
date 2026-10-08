@@ -287,11 +287,10 @@ export async function createRoomAuthenticator(options: {
   protocolVersion: number;
   log: HubLogger;
 } & (
-  | { authSecret: string; servedWorkspace?: string; workspaceKeys?: never }
+  | { authSecret: string; workspaceKeys?: never }
   | {
       workspaceKeys: ReadonlyMap<string, string>;
       authSecret?: never;
-      servedWorkspace?: never;
     }
 )): Promise<RoomAuthenticator> {
   const rootKey = options.authSecret === undefined
@@ -393,12 +392,7 @@ export async function createRoomAuthenticator(options: {
       );
     }
 
-    if (
-      workspace === null ||
-      workspace !== claims.workspace ||
-      (options.servedWorkspace !== undefined &&
-        workspace !== options.servedWorkspace)
-    ) {
+    if (workspace === null || workspace !== claims.workspace) {
       options.log(
         rejected("workspace-mismatch", {
           typ: claims.typ,

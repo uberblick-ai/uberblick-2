@@ -38,6 +38,7 @@ import {
   endpointLabel,
   hubEndpoint,
   localServing,
+  servedWorkspaceNames,
 } from "../config.js";
 import type { HubEndpoint, LocalServing } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
@@ -723,7 +724,8 @@ export function App(): ReactElement {
    */
   const workspaces = workspaceList(configured, workspace);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
-  const workspaceNames = useWorkspaceNames(workspaces, workspaceUuid, catalog, identity, workspaceMenuOpen);
+  const workspaceNames = useWorkspaceNames(workspaces, workspaceUuid, catalog, identity, workspaceMenuOpen,
+    hubReady ? servedWorkspaceNames() : null);
   const onSwitchWorkspace = useCallback(
     // A workspace's list, not a document: two corpora share no uuid, so
     // carrying the open document across would be a link to nowhere.

@@ -1,5 +1,5 @@
 /** Several recorded replicas share one browser server, with separate authority and sync. */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { createHub, silentLogger } from "@uberblick/hub";
@@ -13,7 +13,7 @@ import { localBrowserKey } from "../src/browser-key.js";
 import { probePort } from "../src/probes.js";
 import { rememberWorkspaceBinding } from "../src/workspace-registry.js";
 import { pointAt, runUbAsync, waitUntil, type Sandbox } from "./helpers.js";
-import { authMessage, bearer, cleanUp, configured, FIRST_REMOTE, freePort, get, hubs, open,
+import { authMessage, bearer, cleanUp, configured, FIRST_REMOTE, freePort, get, hubs, open, openFails,
   openStore, SECRET, WORKSPACE, type Running } from "./open-fixtures.js";
 
 // Sorts before WORKSPACE: the startup binding must nevertheless remain first.
@@ -27,7 +27,7 @@ afterEach(cleanUp);
 
 interface BrowserConfig {
   workspaces: string[];
-  servedWorkspaces: Record<string, { browserKey: string; remoteHubUrl: string | null }>;
+  servedWorkspaces: Record<string, { name: string | null; browserKey: string; remoteHubUrl: string | null }>;
 }
 
 async function config(app: Running): Promise<BrowserConfig> {
@@ -94,6 +94,47 @@ async function headers(box: Sandbox, workspace: string) {
 }
 
 describe("ub open: this machine's workspaces", () => {
+  it("omits a secondary with a refused browser key while startup and healthy secondaries still serve", async () => {
+    const { box, env } = configured();
+    pointAt(box, FIRST_REMOTE);
+    await Promise.all([seed(box, WORKSPACE, "Primary"), seed(box, SECOND, "Refused key"), seed(box, LOCAL, "Healthy local")]);
+    await rememberWorkspaceBinding({ workspaceId: SECOND, hubUrl: FIRST_REMOTE }, box.env);
+    await rememberWorkspaceBinding({ workspaceId: LOCAL, hubUrl: null }, box.env);
+    const key = localBrowserKey(SECOND, box.env);
+    const path = join(box.configHome, "uberblick", "browser-keys", `${SECOND}.key`);
+    chmodSync(path, 0o644);
+    const app = await open(box, ["--port", String(await freePort())], env);
+    const tabs = await Promise.all([browser(app, box, WORKSPACE, directoryRoom(WORKSPACE)),
+      browser(app, box, LOCAL, directoryRoom(LOCAL))]);
+    try {
+      const document = await config(app);
+      expect(document.workspaces).toEqual([WORKSPACE, LOCAL]);
+      expect(document.servedWorkspaces[SECOND]).toBeUndefined();
+      expect(app.stderr()).toContain(`ub: warning: workspace ${SECOND} is unavailable: refusing local browser key`);
+      expect(app.stderr()).toContain("chmod 600");
+      expect(app.stderr()).not.toContain(key);
+      expect(readFileSync(path, "utf8")).toBe(`${key}\n`);
+      await waitUntil("startup and healthy secondary directories", () => tabs.every(tab => tab.provider.isSynced));
+      expect(tabs.map(tab => getDirectoryEntry(tab.document, DOC)?.title)).toEqual(["Primary", "Healthy local"]);
+      expect((await fetch(`${app.url}api/status`, { headers: await headers(box, WORKSPACE) })).status).toBe(200);
+      const omitted = await fetch(`${app.url}api/status`, { headers: bearer(await authMessage(key, "read-only", { workspace: SECOND })) });
+      expect(omitted.status).toBe(401);
+    } finally { for (const tab of tabs) tab.close(); expect((await app.interrupt()).status).toBe(0); }
+  });
+
+  it("still refuses startup when its own browser key is exposed", async () => {
+    const { box, env } = configured();
+    pointAt(box, FIRST_REMOTE);
+    const key = localBrowserKey(WORKSPACE, box.env);
+    const path = join(box.configHome, "uberblick", "browser-keys", `${WORKSPACE}.key`);
+    chmodSync(path, 0o644);
+    const refused = await openFails(box, ["--port", String(await freePort())], env);
+    expect(refused.status).toBe(1);
+    expect(refused.output).toContain(`refusing local browser key ${path}`);
+    expect(refused.output).not.toContain(key);
+    expect(readFileSync(path, "utf8")).toBe(`${key}\n`);
+  });
+
   it("offers only recorded replicas, keeps the startup workspace first and leaves project bindings alone", async () => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
@@ -109,9 +150,9 @@ describe("ub open: this machine's workspaces", () => {
       const document = await config(app);
       expect(document.workspaces).toEqual([WORKSPACE, SECOND, LOCAL]);
       expect(document.servedWorkspaces).toEqual({
-        [WORKSPACE]: { browserKey: localBrowserKey(WORKSPACE, box.env), remoteHubUrl: FIRST_REMOTE },
-        [SECOND]: { browserKey: localBrowserKey(SECOND, box.env), remoteHubUrl: secondaryHub },
-        [LOCAL]: { browserKey: localBrowserKey(LOCAL, box.env), remoteHubUrl: null },
+        [WORKSPACE]: { name: null, browserKey: localBrowserKey(WORKSPACE, box.env), remoteHubUrl: FIRST_REMOTE },
+        [SECOND]: { name: null, browserKey: localBrowserKey(SECOND, box.env), remoteHubUrl: secondaryHub },
+        [LOCAL]: { name: null, browserKey: localBrowserKey(LOCAL, box.env), remoteHubUrl: null },
       });
       const selected = await browser(app, box, SECOND, directoryRoom(SECOND));
       const local = await browser(app, box, LOCAL, directoryRoom(LOCAL));

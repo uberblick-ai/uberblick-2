@@ -59,7 +59,7 @@
  */
 
 import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
-import { parseWorkspaceId } from "@uberblick/schema";
+import { parseWorkspaceId, validateWorkspaceName } from "@uberblick/schema";
 
 // Injected as string literals at build time. Declared, never imported.
 declare const __RUNTIME_CONFIG_ONLY__: boolean;
@@ -126,6 +126,8 @@ export interface ClientConfig {
 
 export interface ServedWorkspace extends LocalServing {
   browserKey: string;
+  /** Name read from this machine's replica without taking its serving role. */
+  name: string | null;
 }
 
 /** The startup binding `ub open` keeps serving until it is restarted. */
@@ -375,10 +377,17 @@ function usableServedWorkspaces(
       browserKey: typeof entry.browserKey === "string" ? entry.browserKey.trim() : "",
       workspace: offered.get(uuid) ?? uuid,
       remoteHubUrl: remote?.url ?? null,
-      rebound,
+      rebound: rebound && uuid === parseWorkspaceId(workspaces.list[0]!).uuid,
+      name: usableWorkspaceName(entry.name),
     };
   }
   return { map, ...(invalid ? { rejected: "servedWorkspaces contains an unusable entry" } : {}) };
+}
+
+function usableWorkspaceName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try { return validateWorkspaceName(value); }
+  catch { return null; }
 }
 
 /**
@@ -705,6 +714,12 @@ export function localServing(workspace?: string): LocalServing | null {
   } catch {
     return null;
   }
+}
+
+/** Local menu labels require no room connection or replica startup. */
+export function servedWorkspaceNames(): ReadonlyMap<string, string | null> | null {
+  const workspaces = settled().servedWorkspaces;
+  return workspaces === undefined ? null : new Map(Object.entries(workspaces).map(([uuid, entry]) => [uuid, entry.name]));
 }
 
 /**

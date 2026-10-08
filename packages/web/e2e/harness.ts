@@ -110,11 +110,12 @@ async function startOpen(
   runDir: string,
   bundleDir: string,
   fixedPort?: number,
+  projectDir = runDir,
 ): Promise<{ child: ChildProcessWithoutNullStreams; appUrl: string }> {
   for (let attempt = 1; attempt <= OPEN_ATTEMPTS; attempt += 1) {
     const port = fixedPort ?? await freePort();
     const child = spawn(process.execPath, [UB, "open", "--no-browser", "--port", String(port)], {
-      cwd: runDir,
+      cwd: projectDir,
       env: openEnvironment(runDir, bundleDir),
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -196,6 +197,8 @@ export interface Harness {
   stopHub(): Promise<void>;
   /** Restart local serving on the same address after changing hub credentials. */
   restartOpen(options: { authenticated: boolean }): Promise<void>;
+  /** Serve the second project on another port using the same machine's replicas. */
+  startSecondOpen(): Promise<{ appUrl: string; stop(): Promise<void> }>;
   /** Change this computer's login while the same local serving process runs. */
   setStoredLogin(authenticated: boolean): void;
   /** Rebind project configuration without replacing the served workspace. */
@@ -357,6 +360,8 @@ export async function startHarness(options: {
   let hub: Hub | null = null;
   let secondHub: Hub | null = null;
   let open: ChildProcessWithoutNullStreams | null = null;
+  let secondOpen: ChildProcessWithoutNullStreams | null = null;
+  let secondProject: string | null = null;
 
   // One failure boundary for the whole bootstrap, the temp directory included:
   // a harness that did not finish starting must leave nothing behind — no
@@ -403,6 +408,7 @@ export async function startHarness(options: {
       // Use the real CLI to create a healthy on-machine replica before serving.
       // Its separate project leaves the startup project's binding untouched.
       const project = join(runDir, "second-project");
+      secondProject = project;
       mkdirSync(project);
       const created = spawnSync(process.execPath, [UB, "workspace", "create", "Second workspace"], {
         cwd: project, env: openEnvironment(runDir, bundleDir), encoding: "utf8", timeout: OPEN_READY_MS,
@@ -412,6 +418,8 @@ export async function startHarness(options: {
       secondWorkspace = binding.workspaceId;
       secondHub = await createHub({ ...config, databasePath: join(runDir, "second-hub.sqlite") }, { deviceCredentials: true });
       secondHubUrl = `ws://127.0.0.1:${secondHub.port}`;
+      writeFileSync(join(project, ".uberblick.json"),
+        `${JSON.stringify({ workspaceId: secondWorkspace, hubUrl: secondHubUrl }, null, 2)}\n`, { mode: 0o600 });
       const { principals, memberships, credentials: registry } = secondHub;
       if (principals === undefined || memberships === undefined || registry === undefined) throw new Error("Second hub needs device registries");
       const principal = principals.identify("4321", "second-person");
@@ -489,6 +497,19 @@ export async function startHarness(options: {
         const restarted = await startOpen(runDir, bundleDir, Number(new URL(appUrl).port));
         open = restarted.child;
       },
+      async startSecondOpen() {
+        if (secondProject === null) throw new Error("e2e: the fixture has no second project");
+        if (secondOpen !== null) throw new Error("e2e: the second project is already serving");
+        const serving = await startOpen(runDir, bundleDir, undefined, secondProject);
+        secondOpen = serving.child;
+        return {
+          appUrl: serving.appUrl,
+          async stop() {
+            if (secondOpen === serving.child) secondOpen = null;
+            await stopChild(serving.child);
+          },
+        };
+      },
       async stop() {
         // Every step is best-effort and the temp directory goes last, in a
         // `finally`: a hub or serving process that fails to shut down cleanly must
@@ -497,6 +518,9 @@ export async function startHarness(options: {
           const child = open;
           open = null;
           if (child !== null) await stopChild(child).catch(() => {});
+          const secondChild = secondOpen;
+          secondOpen = null;
+          if (secondChild !== null) await stopChild(secondChild).catch(() => {});
           await stopHub().catch(() => {});
           await secondHub?.stop().catch(() => {});
           secondHub = null;
@@ -507,6 +531,7 @@ export async function startHarness(options: {
     };
   } catch (error) {
     if (open !== null) await stopChild(open).catch(() => {});
+    if (secondOpen !== null) await stopChild(secondOpen).catch(() => {});
     await hub?.stop().catch(() => {});
     await secondHub?.stop().catch(() => {});
     rmSync(runDir, { recursive: true, force: true });

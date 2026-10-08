@@ -23,12 +23,49 @@ async function switchToSecond(page: Page, keyboard = false): Promise<void> {
   await expect(items.first()).toContainText(running.workspaceUuid.slice(0, 8));
   await expect(items.last()).toContainText("Second workspace");
   if (keyboard) {
+    await expect(items.first()).toBeFocused();
     await page.keyboard.press("End");
+    await expect(items.last()).toBeFocused();
     await page.keyboard.press("Enter");
   } else await items.last().click();
   await expect(page).toHaveURL(new URL(`/${running.secondWorkspace}`, running.appUrl).href);
   await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
 }
+
+test("opening the switcher leaves the other project's replica free to serve", async ({ page }) => {
+  test.setTimeout(90_000);
+  const fresh = await startHarness({ multiWorkspace: true });
+  try {
+    await page.goto(fresh.appUrl);
+    await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+    await page.locator(".ub-workspace").click();
+    const items = page.getByRole("menu").getByRole("menuitem");
+    await expect(items).toHaveCount(2);
+    await expect(items.last()).toContainText("Second workspace");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).toHaveCount(0);
+
+    const secondOpen = await fresh.startSecondOpen();
+    expect(secondOpen.appUrl).not.toBe(fresh.appUrl);
+    const secondPage = await page.context().newPage();
+    try {
+      await secondPage.goto(secondOpen.appUrl);
+      await expect(secondPage).toHaveURL(new URL(`/${fresh.secondWorkspace}`, secondOpen.appUrl).href);
+      await expect(secondPage.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+      await expect(secondPage.getByTestId("account-menu")).toContainText("@second-person");
+
+      const doc = await createDoc(page, docTitle("menu-leaves-startup-serving"), { pin: true });
+      await placeCaret(page);
+      await page.keyboard.type("startup still syncs");
+      await expect.poll(() => fresh.hubText(`${fresh.workspaceUuid}/${doc}`)).toBe("startup still syncs");
+    } finally {
+      await secondPage.close();
+      await secondOpen.stop();
+    }
+  } finally {
+    await fresh.stop();
+  }
+});
 
 for (const scheme of ["light", "dark"] as const) {
   test(`switching uses the selected replica, hub and account while another tab keeps syncing — ${scheme}`, async ({ browser }) => {
@@ -104,6 +141,7 @@ test("a secondary replica failure is shown on its pages and clears when switchin
   failure = true;
   await switchToSecond(page);
   await expect(page.locator(".ub-replica-unavailable")).toContainText("serving another ub open");
+  await expect(page.locator(".ub-replica-unavailable")).toHaveCSS("margin", "0px");
   failure = false;
   await page.locator(".ub-workspace").click();
   await page.getByRole("menu").getByRole("menuitem").first().click();

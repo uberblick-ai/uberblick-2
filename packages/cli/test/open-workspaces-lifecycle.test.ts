@@ -33,6 +33,7 @@ function destination(workspaceId: string): ServedWorkspace {
   return {
     workspace: workspaceId,
     browserKey: "unused-browser-key",
+    name: null,
     binding: { workspaceId, hubUrl: null },
     config: config(workspaceId),
   };

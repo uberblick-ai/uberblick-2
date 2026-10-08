@@ -130,9 +130,7 @@ async function fixture(options: {
   };
   const server = await createLocalBrowserServer({
     port,
-    ...(options.workspaces === undefined
-      ? { workspaceId: WORKSPACE, browserKey: TEST_BROWSER_KEY }
-      : { workspaces: options.workspaces }),
+    workspaces: options.workspaces ?? new Map([[WORKSPACE, TEST_BROWSER_KEY]]),
     ...(options.prepareRoom === undefined ? {} : { prepareRoom: options.prepareRoom }),
     expectedOrigin: origin,
     log: (record) => logs.push(record),

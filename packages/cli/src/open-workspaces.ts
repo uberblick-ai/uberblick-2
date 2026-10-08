@@ -16,6 +16,7 @@ import { listWorkspaces } from "./workspace.js";
 
 export interface ServedWorkspace {
   workspace: string;
+  name: string | null;
   browserKey: string;
   binding: ProjectBinding;
   config: McpConfig;
@@ -31,18 +32,29 @@ export function browserWorkspaces(
   startup: ProjectBinding,
   startupConfig: McpConfig,
   env: NodeJS.ProcessEnv,
+  warn: (message: string) => void,
 ): Map<string, ServedWorkspace> {
   const id = parseWorkspaceId(startup.workspaceId).uuid;
+  const entries = listWorkspaces({ env }).entries;
   const result = new Map<string, ServedWorkspace>([[id, {
     workspace: startup.workspaceId,
+    name: entries.find(entry => entry.uuid === id)?.name ?? null,
     browserKey: localBrowserKey(id, env),
     binding: startup,
     config: startupConfig,
   }]]);
-  for (const entry of listWorkspaces({ env }).entries) {
+  for (const entry of entries) {
     if (entry.uuid === id || !isFile(entry.databasePath)) continue;
     const hubUrl = readWorkspaceHub(entry.uuid, env);
     if (hubUrl === undefined) continue;
+    let browserKey: string;
+    try { browserKey = localBrowserKey(entry.uuid, env); }
+    catch (error) {
+      // A secondary's refused key must not stop a healthy startup workspace.
+      // The refusal names the repair but never the key's stored contents.
+      warn(`workspace ${entry.uuid} is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
     const selected: NodeJS.ProcessEnv = { ...env, UB_WORKSPACE_ID: entry.uuid, UB_HUB_URL: hubUrl ?? "local" };
     // The primary database override and legacy resolved selection cannot leak
     // into another destination. Resolve endpoint admission independently too.
@@ -54,7 +66,8 @@ export function browserWorkspaces(
     const { deviceLogin: _deviceLogin, ...localConfig } = config;
     result.set(entry.uuid, {
       workspace: entry.uuid,
-      browserKey: localBrowserKey(entry.uuid, env),
+      name: entry.name,
+      browserKey,
       binding: { workspaceId: entry.uuid, hubUrl },
       // Local-only is explicit, never an invitation to dial the default hub.
       config: hubUrl === null ? { ...localConfig, authSecret: null } : config,

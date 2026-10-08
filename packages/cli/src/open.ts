@@ -696,7 +696,7 @@ export function configDocument(
     remoteHubUrl: string;
     rebound: boolean;
     workspaces?: readonly string[];
-    servedWorkspaces?: Record<string, { browserKey: string; remoteHubUrl: string | null }>;
+    servedWorkspaces?: Record<string, { browserKey: string; remoteHubUrl: string | null; name: string | null }>;
   },
 ): string {
   return JSON.stringify({
@@ -818,6 +818,7 @@ function servingConfigSource(
     workspaces: [...workspaces.values()].map(entry => entry.workspace),
     servedWorkspaces: Object.fromEntries([...workspaces].map(([id, entry]) => [id, {
       browserKey: entry.browserKey,
+      name: entry.name,
       // The startup replica retains ensureHub's loopback behavior. Explicit
       // local-only secondaries have no upstream to name or start.
       remoteHubUrl: id === startupId ? binding.hubUrl : entry.binding.hubUrl,
@@ -1675,7 +1676,8 @@ export async function openCommand(
       const engine = await createMcpEngine(mcpConfig, { serving: true });
       owned.engine = engine;
       owned.engineMonitor = monitorEngine(engine);
-      const workspaces = browserWorkspaces(projectBinding, mcpConfig, startupEnv);
+      const workspaces = browserWorkspaces(projectBinding, mcpConfig, startupEnv,
+        message => io.err(`ub: warning: ${message}\n`));
       const authenticateApi = await createApiAuthenticator(workspaces);
       const document = servingConfigSource(
         startupEnv,

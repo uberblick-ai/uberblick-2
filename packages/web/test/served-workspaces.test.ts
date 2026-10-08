@@ -32,8 +32,8 @@ function servingDocument() {
     hubAuthToken: "legacy-first-key",
     remoteHubUrl: "wss://first.example/ws",
     servedWorkspaces: {
-      [FIRST]: { browserKey: "first-key", remoteHubUrl: "wss://first.example/ws" },
-      [SECOND]: { browserKey: "second-key", remoteHubUrl: null },
+      [FIRST]: { browserKey: "first-key", remoteHubUrl: "wss://first.example/ws", name: "Startup" },
+      [SECOND]: { browserKey: "second-key", remoteHubUrl: null, name: "Secondary" },
     },
   };
 }
@@ -69,6 +69,18 @@ it("denies unknown and malformed local entries without using the startup key or 
     expect(config.hubAuthToken(workspace)).toBe("");
     expect(config.localServing(workspace)).toBeNull();
   }
+});
+
+it("keeps a project rebound scoped to startup and reads local menu names without room admission", async () => {
+  const config = await configure({ ...servingDocument(), rebound: true });
+  expect(config.localServing(FIRST)?.rebound).toBe(true);
+  expect(config.localServing(SECOND)?.rebound).toBe(false);
+  expect(config.servedWorkspaceNames()).toEqual(new Map([[FIRST, "Startup"], [SECOND, "Secondary"]]));
+  const malformed = await configure({ ...servingDocument(), servedWorkspaces: {
+    [FIRST]: { browserKey: "first-key", remoteHubUrl: null, name: "  Startup  " },
+    [SECOND]: { browserKey: "second-key", remoteHubUrl: null, name: "bad\nname" },
+  } });
+  expect(malformed.servedWorkspaceNames()).toEqual(new Map([[FIRST, "Startup"], [SECOND, null]]));
 });
 
 it("retains the shared key for legacy multi-workspace development and strips all keys on remote pages", async () => {

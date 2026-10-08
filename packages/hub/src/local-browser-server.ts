@@ -127,9 +127,11 @@ export interface LocalRoomSlice {
   updates: readonly { seq: number; payload: Uint8Array }[];
 }
 
-interface LocalBrowserServerCallbacks {
+export interface LocalBrowserServerConfig {
   port: number;
   expectedOrigin: string;
+  /** Each local admission key admits only its workspace, never another store. */
+  workspaces: ReadonlyMap<string, string>;
   protocolVersion?: number;
   log?: HubLogger;
   /** Prepare an authenticated room's replica before reading its store. */
@@ -139,21 +141,6 @@ interface LocalBrowserServerCallbacks {
   awarenessForRoom(room: string): Awareness;
   onRequest(request: IncomingMessage, response: ServerResponse): void;
 }
-
-export type LocalBrowserServerConfig = LocalBrowserServerCallbacks & (
-  | {
-      workspaceId: string;
-      /** Independent local admission key; never an upstream secret. */
-      browserKey: string;
-      workspaces?: never;
-    }
-  | {
-      /** Each key admits only its workspace, never another served store. */
-      workspaces: ReadonlyMap<string, string>;
-      workspaceId?: never;
-      browserKey?: never;
-    }
-);
 
 export interface LocalBrowserServer {
   readonly port: number;
@@ -224,9 +211,7 @@ async function listen(server: Server<HubContext>): Promise<void> {
 export async function createLocalBrowserServer(
   config: LocalBrowserServerConfig,
 ): Promise<LocalBrowserServer> {
-  const workspaces = config.workspaces === undefined
-    ? new Map([[config.workspaceId, config.browserKey]])
-    : new Map(config.workspaces);
+  const workspaces = new Map(config.workspaces);
   if (workspaces.size === 0 || [...workspaces.values()].some((key) => key === "")) {
     throw new Error("createLocalBrowserServer: browserKey must not be empty");
   }

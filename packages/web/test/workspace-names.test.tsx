@@ -46,11 +46,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function Probe({ current, connection, menuOpen = false, onSwitch = () => {} }: {
+function Probe({ current, connection, menuOpen = false, onSwitch = () => {}, recordedNames = null }: {
   current: Workspace; connection: RoomConnection | null; menuOpen?: boolean;
   onSwitch?: (segment: string) => void;
+  recordedNames?: ReadonlyMap<string, string | null> | null;
 }) {
-  const names = useWorkspaceNames([ONE, TWO], current.uuid, connection, IDENTITY, menuOpen);
+  const names = useWorkspaceNames([ONE, TWO], current.uuid, connection, IDENTITY, menuOpen, recordedNames);
   return <WorkspaceSwitcher workspaces={[ONE, TWO]} current={current} names={names} onSwitch={onSwitch} />;
 }
 function mount(element: React.ReactElement): HTMLElement {
@@ -109,6 +110,22 @@ it("uses distinct neutral labels while names are absent or unreadable, including
     expect(entries().map((entry) => entry.textContent).join(" ")).not.toContain(workspace.uuid);
     expect(entries().map((entry) => entry.textContent).join(" ")).not.toContain(workspace.segment);
   }
+  one.ydoc.destroy();
+});
+
+it("labels a local menu without starting other replicas and retains names learned while viewing them", () => {
+  const one = room(ONE, "Live name");
+  const recordedNames = new Map([[ONE.uuid, "Startup snapshot"], [TWO.uuid, "Secondary snapshot"]]);
+  const host = mount(<Probe current={ONE} connection={one} menuOpen recordedNames={recordedNames} />);
+  open(host);
+  expect(entries().map(entry => entry.querySelector(".ub-menu-text")?.textContent))
+    .toEqual(["Live name", "Secondary snapshot"]);
+  expect(held.acquire).not.toHaveBeenCalled();
+  act(() => setWorkspaceName(one.ydoc, "Renamed while viewing"));
+  mount(<Probe current={TWO} connection={null} menuOpen recordedNames={recordedNames} />);
+  expect(entries().map(entry => entry.querySelector(".ub-menu-text")?.textContent))
+    .toEqual(["Renamed while viewing", "Secondary snapshot"]);
+  expect(held.acquire).not.toHaveBeenCalled();
   one.ydoc.destroy();
 });
 
