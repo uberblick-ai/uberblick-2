@@ -261,6 +261,9 @@ test("Tab selection is navigation, triple click selects one cell, and cross-cell
   await expect(second.locator('[data-comment-thread]')).toHaveCount(0);
   await expect(page.locator(".ub-thread-card")).toContainText("pha words suffix");
   await expect(page.locator(".ub-thread-card")).toContainText("Clamped cell discussion");
+  await expect(page.locator(".ub-thread-card .ub-thread")).toHaveAttribute("aria-current", "true");
+  const closeThreads = page.getByRole("button", { name: "Close threads", exact: true });
+  if (await closeThreads.isVisible()) await activate(closeThreads, info);
   await selectCell(first, 0, 5, "mouse");
   await expect(toolbar(page)).toBeVisible();
   await page.keyboard.press("ArrowRight");
