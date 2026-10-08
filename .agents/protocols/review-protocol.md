@@ -87,13 +87,17 @@ limitation.
 A visible edge case is accepted by default: a failure that needs an unlikely
 sequence (a race, two people acting at once, an odd input) and surfaces as an
 obvious bug to the person it affects, such as a duplicate row or an edit that
-vanishes in front of the person who made it. It is P3 at most, whatever
-guarantee the issue states. Name it as a known limit; it is not an owner
-question and never blocks, escalates or reopens settled work. If it happens in
-use, it is filed as a bug then. The test is whether accepting it saves a loop
-round or avoids edge-case code; when it does either, prefer the known limit over
-a fix or a question. A hidden bug or a loss nobody would notice is not one, nor
-is secret exposure or damage the product cannot repair.
+vanishes in front of the person who made it. Judge a sequence by its least
+visible supported outcome: if it can also lose work nobody sees, such as an
+offline edit dropped on reconnect or an agent's write, it is not one. Nor is a
+hidden bug, secret exposure or damage the product cannot repair.
+
+A visible edge case is P3 at most and a known limit, not an owner question; it
+never blocks, escalates or reopens settled work. The limit qualifies any
+guarantee the issue states: name it beside the criterion, and acceptance counts
+that criterion met except for the named limit. Prefer the known limit to a fix
+unless the fix is local and needs no edge-case code; the point is to save loop
+rounds and edge-case code. If it happens in use, it is filed as a bug then.
 
 A finding keeps its id across heads. Reopen a settled one only when changed
 code or new evidence invalidates how it was settled.

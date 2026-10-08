@@ -7,7 +7,8 @@ clarification and technical preparation stay in [issue-preparation.md](issue-pre
 
 Decide what the issue, settled decisions, adopted principles and repository
 policy already cover. Ask a person when the next step would change product
-direction, an adopted principle or guarantee, external resources or agent
+direction, an adopted principle or guarantee (a
+[visible edge case](review-protocol.md#findings) aside), external resources or agent
 authority; when the merge policy says tier 3; or when review stops converging.
 Material ambiguity about intent, scope or success that evidence and settled
 authorization cannot resolve also needs a person's answer.
@@ -20,7 +21,7 @@ All other boundary crossings follow the escalation rule here.
 
 Distinguish owner decisions from inferences and cite settled authority once.
 Authoring formats and user-visible limitations of durable content require an
-owner decision; rendering mechanics remain engineering choices within existing
+owner decision, except a [visible edge case](review-protocol.md#findings); rendering mechanics remain engineering choices within existing
 constraints. Before escalating replacement of an established primitive, identify
 it and the contract it would supply; custom application rendering alone does not
 establish such a replacement.
