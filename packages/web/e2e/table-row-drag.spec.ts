@@ -82,7 +82,8 @@ async function box(target: Locator): Promise<{ x: number; y: number; width: numb
 async function gap(table: Locator, boundary: number): Promise<{ x: number; y: number }> {
   const tableBox = await box(table);
   const row = await box(table.locator("tr").nth(boundary - 1));
-  return { x: tableBox.x + tableBox.width / 2, y: row.y + row.height - 1 };
+  // The first body gap is below the header; a point inside it must be rejected.
+  return { x: tableBox.x + tableBox.width / 2, y: row.y + row.height + (boundary === 1 ? 1 : -1) };
 }
 
 async function startMouse(page: Page, table: Locator, row = 1): Promise<void> {

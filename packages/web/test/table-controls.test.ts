@@ -1,4 +1,4 @@
-/** Structural actions use TableKit, shared row identity and independent undo. */
+/** Structural actions preserve shared row identity and independent undo. */
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { undo } from "y-prosemirror";

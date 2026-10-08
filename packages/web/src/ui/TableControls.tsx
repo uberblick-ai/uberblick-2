@@ -1,4 +1,4 @@
-/** Quiet table affordances; TableKit owns edits and Radix owns the row menus. */
+/** Quiet table affordances compose framework gestures and live shared edits. */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, RefObject } from "react";
 import type { Editor } from "@tiptap/core";
