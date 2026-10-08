@@ -67,6 +67,9 @@ test("a pointer selection on a decided record offers only Comment and keeps exis
   const uuid = await record(session(), "decided");
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { upstream: true });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+  await page.locator(".ub-tldr-body > p").click();
+  await expect(page.locator(".ub-tldr-form")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
   const paragraph = editor(page).locator(":scope > p").first();
   const box = await paragraph.boundingBox();
   if (box === null) throw new Error("e2e: prose block has no box");
@@ -163,6 +166,8 @@ test("touch selection on a decided record starts a thread and its highlight open
       : {},
   });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+  await page.locator(".ub-tldr-body > p").tap();
+  await expect(page.locator(".ub-tldr-form")).toHaveCount(0);
   const paragraph = editor(page).locator(":scope > p").first();
   await paragraph.tap();
   // The same native range setup used by touch-editor.spec stands in for iOS's
@@ -198,6 +203,30 @@ test("touch selection on a decided record starts a thread and its highlight open
   if (await close.isVisible()) await close.tap();
   await expect(highlight).toHaveAccessibleName("Comment thread");
   await expect(paragraph).toHaveText("Selected words remain readable after deciding.");
+});
+
+test("a live decision makes an already open TL;DR editor read-only without saving its draft", async ({ browser }) => {
+  const writer = session();
+  const uuid = await record(writer, "open");
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { upstream: true });
+  await page.getByRole("button", { name: "Edit TL;DR", exact: true }).click();
+  const summary = page.getByLabel(
+    "Write one or two plain-English sentences that help a reader understand this document.",
+  );
+  await expect(summary).toBeFocused();
+  await summary.fill("An unsaved draft must not change the approved line.");
+  await writer.call("set_status", { uuid, status: "decided" });
+  await expect(summary).toHaveAttribute("readonly", "");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Clear", exact: true })).toBeDisabled();
+  await summary.press("Enter");
+  await expect(summary).toHaveValue("An unsaved draft must not change the approved line.");
+  const saved = await writer.call<{ tldr: string | null }>("get_doc", { uuid });
+  expect(saved.tldr).toBe("Keep the approved wording.");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.locator(".ub-tldr-body > p").click();
+  await expect(page.locator(".ub-tldr-form")).toHaveCount(0);
+  await expect(page.locator(".ub-tldr-body > p")).toHaveText("Keep the approved wording.");
 });
 
 test("a live decision locks title, line, prose and tables without replacing the view or moving its scroll", async ({ browser }) => {

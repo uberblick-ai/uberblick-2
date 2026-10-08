@@ -158,6 +158,7 @@ function TldrCallout({
   onEditingChange: (editing: boolean) => void;
 }): ReactElement | null {
   const [draft, setDraft] = useState(tldr ?? "");
+  const initialDraft = useRef(tldr ?? "");
   const input = useRef<HTMLTextAreaElement | null>(null);
   const readOnly = archived || decided || !writable;
   const value = draft.trim();
@@ -169,6 +170,7 @@ function TldrCallout({
   useEffect(() => {
     if (!editing) {
       setDraft(tldr ?? "");
+      initialDraft.current = tldr ?? "";
     }
   }, [editing, tldr]);
 
@@ -211,6 +213,16 @@ function TldrCallout({
               if (value.length === 0 || tooLong) return;
               write(value);
             }}
+            onBlur={(event) => {
+              // Moving to Save, Cancel or Clear stays inside the editor.
+              if (event.currentTarget.contains(event.relatedTarget)) return;
+              if (draft === initialDraft.current) onEditingChange(false);
+            }}
+            onMouseDownCapture={(event) => {
+              // Safari blurs the field without focusing a clicked button.
+              // Keep the caret until its action runs, as typing shortcuts do.
+              if (event.target instanceof HTMLButtonElement) event.preventDefault();
+            }}
           >
             <label htmlFor="ub-tldr-input">
               Write one or two plain-English sentences that help a reader
@@ -229,6 +241,16 @@ function TldrCallout({
               }
               onChange={(event) => {
                 setDraft(event.target.value);
+              }}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  onEditingChange(false);
+                }
               }}
             />
             <div className="ub-tldr-form-meta">
@@ -274,7 +296,21 @@ function TldrCallout({
             </div>
           </form>
         ) : (
-          <p>{tldr}</p>
+          <p>
+            {readOnly ? tldr : (
+              <button
+                type="button"
+                className="block w-full border-0 p-0 bg-transparent text-left [font:inherit] [color:inherit] cursor-text"
+                aria-label="Edit TL;DR"
+                onClick={() => {
+                  if (archived || isDecided(connection) || !connection.status.writable) return;
+                  onEditingChange(true);
+                }}
+              >
+                {tldr}
+              </button>
+            )}
+          </p>
         )}
       </div>
     </section>

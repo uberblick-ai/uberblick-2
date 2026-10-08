@@ -71,13 +71,23 @@ test("two contexts typing into different ranges of one block converge byte-ident
   await expect.poll(() => blockText(b)).toBe(converged);
 });
 
-test("a TL;DR added, edited and cleared in one client follows in the other", async ({
+test("a TL;DR added from the menu and edited inline follows in the other client", { tag: "@webkit" }, async ({
   browser,
+  browserName,
 }) => {
   const title = docTitle("tldr");
-  const [a, b] = await Promise.all([openApp(browser), openApp(browser)]);
-  await createDoc(a, title, { pin: true });
-  await openDoc(b, title);
+  const a = await openApp(browser, "/", {
+    contextOptions: { colorScheme: "light" },
+    readySelector: ".ub-body",
+  });
+  if ((a.viewportSize()?.width ?? 1280) < 1280) {
+    await a.getByRole("button", { name: "Show document list", exact: true }).click();
+  }
+  await createDoc(a, title);
+  const b = await openApp(browser, new URL(a.url()).pathname, {
+    contextOptions: { colorScheme: "dark" },
+    readySelector: ".ub-editor .ProseMirror",
+  });
 
   await a.getByRole("button", { name: "Document actions" }).click();
   await a.getByRole("menuitem", { name: "Add TL;DR" }).click();
@@ -94,19 +104,116 @@ test("a TL;DR added, edited and cleared in one client follows in the other", asy
   await expect(calloutA).toContainText("TL;DR");
   await expect(calloutB).toContainText("A short summary for readers.");
 
-  await b.getByRole("button", { name: "Document actions" }).click();
-  await b.getByRole("menuitem", { name: "Edit TL;DR" }).click();
-  await b.getByLabel("Write one or two plain-English sentences that help a reader understand this document.").fill(
-    "Changed in the other tab.",
+  const summaryB = b.getByLabel(
+    "Write one or two plain-English sentences that help a reader understand this document.",
   );
-  await b.getByRole("button", { name: "Save", exact: true }).click();
+  const inlineB = calloutB.getByRole("button", { name: "Edit TL;DR", exact: true });
+  await inlineB.click();
+  await expect(summaryB).toBeFocused();
+  const caret = await summaryB.evaluate((element: HTMLTextAreaElement) => ({
+    start: element.selectionStart,
+    end: element.selectionEnd,
+    length: element.value.length,
+  }));
+  expect(caret.start).toBe(caret.end);
+  expect(caret.start).toBeGreaterThanOrEqual(0);
+  expect(caret.end).toBeLessThanOrEqual(caret.length);
+  await summaryB.fill("x".repeat(301));
+  await expect(calloutB.locator("#ub-tldr-count")).toBeVisible();
+  await expect(calloutB.locator("#ub-tldr-count")).toHaveText("301 / 300 characters");
+  await summaryB.press("Enter");
+  await expect(calloutB.getByRole("alert")).toHaveText("A TL;DR is at most 300 characters.");
+  await expect(summaryB).toHaveValue("x".repeat(301));
+  await expect(calloutA.locator(".ub-tldr-body > p")).toHaveText("A short summary for readers.");
+  await summaryB.fill("A short summary for readers.");
+  await summaryB.press("End");
+  await summaryB.press("Shift+Enter");
+  await b.keyboard.insertText("A second line.");
+  await expect(summaryB).toHaveValue("A short summary for readers.\nA second line.");
+  await expect(calloutA.locator(".ub-tldr-body > p")).toHaveText("A short summary for readers.");
+  await summaryB.fill("A short summary for readers.");
+  // Leaving an unchanged field closes it; a draft must stay local until saved.
+  await b.locator(".ub-title").click();
+  await expect(summaryB).toHaveCount(0);
+  await inlineB.focus();
+  await b.keyboard.press("Space");
+  await expect(summaryB).toBeFocused();
+  await summaryB.fill("Changed in the other tab.");
+  await b.locator(".ub-title").click();
+  await expect(summaryB).toHaveValue("Changed in the other tab.");
+  await expect(calloutA.locator(".ub-tldr-body > p")).toHaveText("A short summary for readers.");
+  await summaryB.press("Enter");
   await expect(calloutA).toContainText("Changed in the other tab.");
 
-  await a.getByRole("button", { name: "Document actions" }).click();
-  await a.getByRole("menuitem", { name: "Edit TL;DR" }).click();
+  // The native inline button keeps keyboard activation and the form's focus.
+  // Safari's Option-Tab includes buttons under its default Tab preference.
+  const nextControl = browserName === "webkit" ? "Alt+Tab" : "Tab";
+  const inlineA = calloutA.getByRole("button", { name: "Edit TL;DR", exact: true });
+  await a.locator(".ub-title").focus();
+  for (let count = 0; count < 20; count += 1) {
+    if (await inlineA.evaluate((element) => document.activeElement === element)) break;
+    await a.keyboard.press(nextControl);
+  }
+  await expect(inlineA).toBeFocused();
+  await a.keyboard.press("Enter");
+  await expect(summaryA).toBeFocused();
+  await summaryA.fill("Saved from the inline form.");
+  await a.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(calloutB).toContainText("Saved from the inline form.");
+  await inlineA.click();
   await a.getByRole("button", { name: "Clear" }).click();
   await expect(calloutA).toHaveCount(0);
   await expect(calloutB).toHaveCount(0);
+});
+
+test("tapping a TL;DR focuses its inline field, cancels drafts and clears the shared value", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const title = docTitle("tldr-touch");
+  const a = await openApp(browser, "/", {
+    readySelector: ".ub-body",
+    contextOptions: info.project.name === "chromium"
+      ? { hasTouch: true, viewport: { width: 390, height: 844 } }
+      : {},
+  });
+  if ((a.viewportSize()?.width ?? 1280) < 1280) {
+    await a.getByRole("button", { name: "Show document list", exact: true }).tap();
+  }
+  await createDoc(a, title);
+  const b = await openApp(browser, new URL(a.url()).pathname, {
+    readySelector: ".ub-editor .ProseMirror",
+  });
+  await a.getByRole("button", { name: "Document actions" }).tap();
+  await a.getByRole("menuitem", { name: "Add TL;DR" }).tap();
+  const summary = a.getByLabel(
+    "Write one or two plain-English sentences that help a reader understand this document.",
+  );
+  await summary.fill("A summary shared with readers.");
+  await a.getByRole("button", { name: "Save", exact: true }).tap();
+  const displayed = a.locator(".ub-tldr-body > p");
+  const remote = b.locator(".ub-tldr-body > p");
+  await expect(remote).toHaveText("A summary shared with readers.");
+
+  await a.getByRole("button", { name: "Edit TL;DR", exact: true }).tap();
+  await expect(summary).toBeFocused();
+  await summary.fill("A draft cancelled with Escape.");
+  await summary.press("Escape");
+  await expect(summary).toHaveCount(0);
+  await expect(displayed).toHaveText("A summary shared with readers.");
+  await expect(remote).toHaveText("A summary shared with readers.");
+
+  await a.getByRole("button", { name: "Edit TL;DR", exact: true }).tap();
+  await expect(summary).toBeFocused();
+  await summary.fill("A draft cancelled by tapping Cancel.");
+  await a.getByRole("button", { name: "Cancel", exact: true }).tap();
+  await expect(summary).toHaveCount(0);
+  await expect(displayed).toHaveText("A summary shared with readers.");
+  await expect(remote).toHaveText("A summary shared with readers.");
+
+  // WebKit can leave pointer-clicked buttons unfocused. Clear still has to
+  // receive a tap before an unchanged field's blur dismisses the form.
+  await a.getByRole("button", { name: "Edit TL;DR", exact: true }).tap();
+  await a.getByRole("button", { name: "Clear", exact: true }).tap();
+  await expect(a.locator(".ub-tldr")).toHaveCount(0);
+  await expect(b.locator(".ub-tldr")).toHaveCount(0);
 });
 
 test("the upstream fact recovers after an acknowledged typing burst", async ({

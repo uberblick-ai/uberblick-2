@@ -216,6 +216,9 @@ describe("decided decision records", () => {
     act(() => typeInto(title, "A wording fix"));
     expect(getMeta(ydoc).title).toBe("Chosen protocol");
     expect(host.querySelector(".ub-tldr-body > p")?.textContent).toBe("Keep one shared protocol.");
+    act(() => host.querySelector<HTMLElement>(".ub-tldr-body > p")?.click());
+    expect(screen.queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
+    expect(host.querySelector(".ub-tldr-form")).toBeNull();
 
     act(() => host.querySelector<HTMLButtonElement>('[aria-label="Edit tags"]')?.click());
     const tag = document.querySelector<HTMLButtonElement>('[role="option"]');
@@ -240,8 +243,7 @@ describe("decided decision records", () => {
     const prose = editorElement(host);
     const pane = host.querySelector<HTMLElement>(".ub-document-pane")!;
     pane.scrollTop = 173;
-    act(() => openActions(host));
-    act(() => menuItem("Edit TL;DR")?.click());
+    act(() => screen.getByRole("button", { name: "Edit TL;DR" }).click());
     const field = host.querySelector<HTMLTextAreaElement>("#ub-tldr-input")!;
     expect(field.readOnly).toBe(false);
     act(() => typeInto(field, "Uncommitted wording fix"));
@@ -256,7 +258,19 @@ describe("decided decision records", () => {
     act(() => typeInto(linkField!, "https://example.com/uncommitted"));
     const beforeText = textAt(ydoc).toDelta();
 
-    act(() => setStatus(peer, "decided"));
+    const updates = vi.fn();
+    ydoc.on("update", updates);
+    let updatesAtDecision = 0;
+    act(() => {
+      setStatus(peer, "decided");
+      updatesAtDecision = updates.mock.calls.length;
+      // Before React commits the read-only state, every write path must obey
+      // the decision metadata that is already in the shared document.
+      field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      host.querySelector<HTMLFormElement>(".ub-tldr-form")?.requestSubmit();
+      button(host, "Clear").click();
+    });
+    expect(updates).toHaveBeenCalledTimes(updatesAtDecision);
     expect(binding).toHaveBeenCalledOnce();
     expect(editorElement(host)).toBe(prose);
     expect(pane.scrollTop).toBe(173);
@@ -274,8 +288,10 @@ describe("decided decision records", () => {
     expect(button(composer, "Comment")).toBeDefined();
     expect(textAt(ydoc).toDelta()).toEqual(beforeText);
     act(() => typeInto(field, "Typed through the read-only field"));
+    act(() => field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
     act(() => host.querySelector<HTMLFormElement>(".ub-tldr-form")?.requestSubmit());
     expect(getMeta(ydoc).tldr).toBe("Keep one shared protocol.");
+    expect(updates).toHaveBeenCalledTimes(updatesAtDecision);
 
     for (const status of ["open", "rejected", "withdrawn"] as const) {
       act(() => setStatus(peer, status));
