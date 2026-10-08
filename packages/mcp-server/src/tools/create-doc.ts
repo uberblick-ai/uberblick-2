@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ToolError, guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolMode } from "../inputs.js";
 import { placeInGroup, requireGroup } from "../sidebar-tools.js";
 import type { SidebarPlacement } from "../sidebar-tools.js";
@@ -207,6 +208,7 @@ export function registerCreateDoc(server: McpServer, context: ToolContext): void
       // `{sidebar: {...}, pinned: true}` must be refused wherever the redundant
       // key sits, so the nested placement object is strict too — see
       // {@link sidebarPlacementArg}. The top level is strict like every tool's.
+      outputSchema: outputSchemas.create_doc,
       inputSchema: strictInput(
         {
           title: titleArg,

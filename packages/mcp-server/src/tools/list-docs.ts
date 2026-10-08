@@ -4,6 +4,7 @@ import type { DirectoryEntry } from "@uberblick/schema";
 import { z } from "zod";
 import { failureContract, guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import { pinnedUuids } from "../sidebar-tools.js";
 import { resolveTagFilter } from "../tag-catalog.js";
 import type { ToolContext } from "./context.js";
@@ -51,6 +52,7 @@ export function registerListDocs(server: McpServer, context: ToolContext): void 
         "\n\n" +
         DECISION_AUTHORITY +
         failureContract("list_docs"),
+      outputSchema: outputSchemas.list_docs,
       inputSchema: strictInput({
         tag: z.string().min(1).optional().describe("Only documents carrying this tag."),
         kind: documentKindArg.optional().describe("Only documents of this kind."),

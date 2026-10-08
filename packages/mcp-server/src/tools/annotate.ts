@@ -3,6 +3,7 @@ import { addComment, createAnnotation, setAnnotationResolved } from "@uberblick/
 import { z } from "zod";
 import { ToolError, guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolMode } from "../inputs.js";
 import type { ToolContext } from "./context.js";
 import { ARCHIVED_IS_READ_ONLY, SYNCED_IS_ACKNOWLEDGED } from "./descriptions.js";
@@ -73,6 +74,7 @@ export function registerAnnotate(server: McpServer, context: ToolContext): void 
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         toolContract("annotate"),
+      outputSchema: outputSchemas.annotate,
       inputSchema: strictInput(
         {
           uuid: uuidArg,

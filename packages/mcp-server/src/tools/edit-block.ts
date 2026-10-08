@@ -3,6 +3,7 @@ import { editBlock, getBlock } from "@uberblick/schema";
 import { z } from "zod";
 import { guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import {
   ARCHIVED_IS_READ_ONLY,
@@ -93,6 +94,7 @@ export function registerEditBlock(server: McpServer, context: ToolContext): void
         "\n\n" +
         TLDR_AFTER_CONTENT_CHANGE +
         toolContract("edit_block"),
+      outputSchema: outputSchemas.edit_block,
       inputSchema: strictInput({
         uuid: uuidArg,
         block_id: z.string().min(1),

@@ -3,6 +3,7 @@ import { getBlockRev, setInlineLink } from "@uberblick/schema";
 import { z } from "zod";
 import { guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import {
   ARCHIVED_IS_READ_ONLY,
@@ -42,6 +43,7 @@ export function registerLinkRange(server: McpServer, context: ToolContext): void
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         toolContract("link_range"),
+      outputSchema: outputSchemas.link_range,
       inputSchema: strictInput({
         uuid: uuidArg,
         block_id: z.string().min(1),

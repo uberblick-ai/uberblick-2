@@ -4,6 +4,7 @@ import type { DataOperation } from "@uberblick/schema";
 import { z } from "zod";
 import { guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import { ARCHIVED_IS_READ_ONLY, DECIDED_IS_READ_ONLY, SYNCED_IS_ACKNOWLEDGED } from "./descriptions.js";
 import { json } from "./helpers.js";
@@ -40,6 +41,7 @@ export function registerUpdateData(server: McpServer, context: ToolContext): voi
       "or new concurrency guarantee is introduced. Inspect with get_data; get_doc only summarizes data.\n\n" +
       DECIDED_IS_READ_ONLY + "\n\n" + ARCHIVED_IS_READ_ONLY + "\n\n" + SYNCED_IS_ACKNOWLEDGED +
       toolContract("update_data"),
+    outputSchema: outputSchemas.update_data,
     inputSchema: strictInput({ uuid: uuidArg, operations: z.array(operation) }),
   }, guarded("update_data", async ({ uuid, operations }) => {
     await replicas.settle();

@@ -256,6 +256,9 @@ export async function startServer(
     instance.connect(serverTransport),
     client.connect(clientTransport),
   ]);
+  // The SDK caches advertised output validators here. Every behavior test
+  // therefore checks the result contract a schema-aware client actually sees.
+  await client.listTools();
 
   const call = async (
     name: string,
