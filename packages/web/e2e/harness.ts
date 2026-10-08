@@ -245,14 +245,24 @@ export async function openUpstreamApp(
 }
 
 /**
+ * Caret keys under the host's native key bindings, which Playwright applies to
+ * desktop browsers. On macOS Home and End scroll the document, and Shift+Home
+ * and Shift+End select to its edges; Command+Arrow moves instead.
+ */
+const mac = process.platform === "darwin";
+export const keys = {
+  lineStart: mac ? "Meta+ArrowLeft" : "Home",
+  lineEnd: mac ? "Meta+ArrowRight" : "End",
+  documentStart: mac ? "Meta+ArrowUp" : "Control+Home",
+} as const;
+
+/**
  * Focus the editor and put its caret at one end of the first text line.
  *
  * ProseMirror groups nearby clicks into double and triple clicks even when a
  * driver issues each click separately. Reusing a coordinate to place a caret
  * can therefore select the whole block and make the next keystroke replace it.
  * Keyboard placement avoids that gesture state entirely.
- * Home and End cover different scopes on macOS and Linux, but every caller has
- * one single-line block, where the line, block and document edges coincide.
  */
 export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Promise<void> {
   const editor = page.locator(".ub-editor .ProseMirror");
@@ -279,7 +289,7 @@ export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Pro
           selection?.addRange(range);
         }, edge);
       } else {
-        await page.keyboard.press(edge === "start" ? "Home" : "End");
+        await page.keyboard.press(edge === "start" ? keys.lineStart : keys.lineEnd);
       }
       await page.evaluate(
         () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
