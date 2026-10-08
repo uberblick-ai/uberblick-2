@@ -78,6 +78,8 @@ export function createMcpServer(
         "Read with get_doc, which returns a `rev` per block, and write one block at a time with " +
         "edit_block, passing the old_text and rev you read. There is no whole-document write. " +
         "Discovery is list_docs and search; links and backlinks are by document UUID.\n\n" +
+        "get_doc summarizes structured data without schemas or records; use get_data for bounded deliberate reads " +
+        "and update_data for validated collection batches.\n\n" +
         GUIDANCE_INSTRUCTIONS + "\n\n" + FAILURE_INSTRUCTIONS,
     },
   );

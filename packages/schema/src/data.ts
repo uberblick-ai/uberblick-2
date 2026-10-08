@@ -113,6 +113,25 @@ export function hasDocData(doc: Y.Doc): boolean {
   return doc.getMap(DATA_KEY).size > 0;
 }
 
+/** Names and counts for ordinary reads, without inspecting any stored value. */
+export function summarizeDocData(doc: Y.Doc): { name: string; recordCount: number }[] | null {
+  const root = doc.getMap(DATA_KEY);
+  if (root.size === 0) return null;
+  const counts = new Map<string, number>();
+  for (const k of root.keys()) {
+    let tuple: DataKey;
+    try { tuple = parseKey(k); }
+    catch (error) {
+      if (!(error instanceof DataError)) throw error;
+      // Dedicated reads report unsupported keys; ordinary reads only advertise data.
+      continue;
+    }
+    counts.set(tuple[1], (counts.get(tuple[1]) ?? 0) + (tuple[0] === "record" ? 1 : 0));
+  }
+  return [...counts].sort(([a], [b]) => compareCodePoints(a, b))
+    .map(([name, recordCount]) => ({ name, recordCount }));
+}
+
 interface CollectionEntries {
   schema?: JSONValue;
   records: Map<string, JSONValue>;
