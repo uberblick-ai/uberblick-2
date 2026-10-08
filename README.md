@@ -324,7 +324,8 @@ Selection alone grants no access. Use an existing workspace with
 `ub workspace use <link>` after signing in to its hub; it requires no prior
 local workspace and never starts a sign-in itself.
 
-`ub workspace` prints the current binding and its source. `ub workspace list`
+`ub workspace` prints its help. `ub workspace status` shows the selected workspace,
+its source, replica storage and sync state. `ub workspace list`
 lists local workspace databases. Select a recorded replica with its id or a
 unique prefix; its hub comes from this machine's record. A link fetches and
 verifies the workspace before recording its hub and binding the project:
@@ -377,7 +378,8 @@ ub update          # update the Homebrew installation
 ub open            # serve the web app and a hub, and open the browser
 ub status          # workspace, hub, stored account, connection, pending work, last sync, local log, failures
 ub status --json   # full report, including account, rooms, configuration and storage paths
-ub workspace       # the workspace in force, and which layer chose it
+ub workspace       # print workspace help
+ub workspace status  # the workspace in force, its selection source, storage and sync state
 ub workspace list  # workspaces this machine has a database for
 ub workspace use <id-or-prefix>  # select a replica with its recorded hub
 ub workspace create "Project notes"

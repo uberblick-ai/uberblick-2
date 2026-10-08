@@ -19,8 +19,8 @@
 import { parseArgs } from "node:util";
 import { hubDatabasePath } from "@uberblick/hub/config";
 import { readDeviceLogin } from "@uberblick/hub/device-login";
-import { collectSyncStatus, createMcpServer } from "@uberblick/mcp-server";
-import type { McpConfig, SyncStatus } from "@uberblick/mcp-server";
+import { collectSyncStatus, createMcpServer, readWorkspaceName } from "@uberblick/mcp-server";
+import type { McpConfig, SyncStatus, UberblickMcpServer } from "@uberblick/mcp-server";
 import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
 import type { CredentialOrigin, Origin, ShadowedLayer } from "./config.js";
@@ -115,13 +115,36 @@ export const ORIGIN_LABELS: Record<Origin, string> = {
 };
 
 /** The live replica reading used by `ub status`. Always releases it. */
-export async function readSyncStatus(config: McpConfig): Promise<SyncStatus> {
+export async function readSyncStatus(
+  config: McpConfig,
+  inspect?: (replicas: UberblickMcpServer["replicas"]) => void,
+): Promise<SyncStatus> {
   const instance = createMcpServer(config);
   try {
-    return await collectSyncStatus(instance.replicas);
+    const status = await collectSyncStatus(instance.replicas);
+    inspect?.(instance.replicas);
+    return status;
   } finally {
     await instance.close();
   }
+}
+
+/**
+ * The full-replica acknowledgement rule used by the serving status reader.
+ * Counts alone miss attach drain and a peer clearing a shared pending marker
+ * before this replica has applied the store cut. Keep the cut and markers in
+ * one snapshot, using the server's public diagnostic primitives.
+ */
+export function workspaceCaughtUp(replicas: UberblickMcpServer["replicas"]): boolean {
+  const attached = replicas.attachedReplicas();
+  const snapshot = replicas.store.syncSnapshot(
+    attached.map(({ room, lastSeq }) => ({ room, throughSeq: lastSeq })),
+  );
+  return replicas.persistenceError() === null &&
+    replicas.sync.state().status === "connected" &&
+    !replicas.sync.isDraining() &&
+    snapshot.pendingRooms.length === 0 &&
+    attached.every(({ room }) => !snapshot.unappliedRooms.has(room) && replicas.isRoomQuiet(room));
 }
 
 export interface UnboundStatusReport {
@@ -137,11 +160,18 @@ export interface UnboundStatusReport {
 
 /**
  * Collect the report without printing it. Exported for tests.
- * accountOrigin is render metadata for device admission, excluded from JSON.
+ * Optional workspace name and acknowledgement metadata stay outside the JSON
+ * report. The workspace leaf also reads stored accounts for shared-secret hubs.
  */
 export async function statusReport(
-  options: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
-): Promise<{ report: StatusReport | UnboundStatusReport; warnings: string[]; accountOrigin?: string }> {
+  options: { env?: NodeJS.ProcessEnv; cwd?: string; workspaceStatus?: boolean } = {},
+): Promise<{
+  report: StatusReport | UnboundStatusReport;
+  warnings: string[];
+  accountOrigin?: string;
+  workspaceName?: string | null;
+  caughtUp?: boolean;
+}> {
   const resolved = resolveConfig(options);
   if (resolved.binding === null) {
     return { warnings: resolved.warnings, report: {
@@ -150,14 +180,20 @@ export async function statusReport(
     } };
   }
   const config = resolveMcpConfig(resolved.env);
-  const sync = await readSyncStatus(config);
+  let caughtUp = false;
+  const sync = await readSyncStatus(config, options.workspaceStatus === true
+    ? replicas => { caughtUp = workspaceCaughtUp(replicas); } : undefined);
   // Reuse the existing local presence read; the account never requests a login
   // or renewal. A refused connection still has an account if it is stored here.
-  const deviceLogin = config.deviceLogin === undefined
+  const deviceLogin = config.deviceLogin === undefined &&
+    !(options.workspaceStatus === true && resolved.binding.hubUrl !== null)
     ? undefined : readDeviceLogin(config.hubUrl, config.workspaceId, resolved.env);
   const accountOrigin = resolved.binding.hubUrl === null ? undefined : deviceLogin?.origin;
   return {
     warnings: resolved.warnings,
+    ...(options.workspaceStatus === true ? {
+      workspaceName: readWorkspaceName(config.databasePath, config.workspaceId), caughtUp,
+    } : {}),
     ...(accountOrigin === undefined ? {} : { accountOrigin }),
     report: {
       binding: resolved.binding,

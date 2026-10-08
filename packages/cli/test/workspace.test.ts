@@ -8,6 +8,7 @@ import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { resolveConfig } from "../src/config.js";
 import { readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
 import { removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
+import { fixture } from "./auth-fixtures.js";
 
 afterAll(removeTempDirs);
 const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
@@ -33,35 +34,103 @@ function withDatabase(box: Sandbox, uuid: string): void {
   writeFileSync(join(dir, `${uuid}.sqlite`), "", "utf8");
 }
 
-describe("ub workspace", () => {
+describe("ub workspace status", () => {
   it("shows the project binding from a descendant directory and its origin", () => {
     const box = sandbox();
     bind(box);
     const nested = join(box.cwd, "packages", "app");
     mkdirSync(nested, { recursive: true });
-    const shown = runUb(["workspace"], { ...box, cwd: nested });
+    const shown = runUb(["workspace", "status"], { ...box, cwd: nested });
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toContain(WORKSPACE);
-    expect(shown.stdout).toContain("project config");
+    expect(shown.stdout).toContain(`chosen by  project config in ${box.cwd}`);
+    expect(shown.stdout).not.toContain(`project config in ${nested}`);
     expect(shown.stdout).toContain(HUB);
   });
 
   it("ignores a legacy machine default without an explicit project binding", () => {
     const box = unboundSandbox({ userConfig: { workspace: WORKSPACE, hubUrl: HUB } });
-    const shown = runUb(["workspace"], box);
+    const shown = runUb(["workspace", "status"], box);
     expect(shown.status).toBe(1);
-    expect(shown.stderr).toContain("no workspace configured");
-    expect(shown.stderr).toContain("ub workspace use <link>");
+    expect(shown.stderr).toContain("No workspace selected");
+    expect(shown.stderr).toContain("ub workspace create <name>");
+    expect(shown.stdout).toBe("");
+    expect(existsSync(box.dataHome)).toBe(false);
   });
 
   it("reports a complete environment override", () => {
     const box = sandbox();
     bind(box);
-    const shown = runUb(["workspace"], box, { UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "local" });
+    const shown = runUb(["workspace", "status"], box, { UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "local" });
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toContain(OTHER);
     expect(shown.stdout).toContain("environment");
     expect(shown.stdout).toContain("local (this computer)");
+  });
+
+  it("shows a local name, canonical id, custom replica path and the doc's line order", () => {
+    const box = sandbox({ projectBinding: { workspaceId: `notes-${WORKSPACE}`, hubUrl: null } });
+    const databasePath = join(box.cwd, "custom.sqlite");
+    storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE, UBERBLICK_DB: databasePath }), "Project notes");
+    const shown = runUb(["workspace", "status"], box, { UBERBLICK_DB: databasePath });
+    expect(shown.status, shown.output).toBe(0);
+    expect(shown.stdout).toBe(
+      `workspace  Project notes\nid         ${WORKSPACE}\nhub        local (this computer)\n` +
+      `chosen by  project config in ${box.cwd}\nstored in  ${databasePath}\nsync       local only, no hub sync\n`,
+    );
+  });
+
+  it("still identifies a selected workspace whose replica has no name", () => {
+    const box = sandbox({ projectBinding: { workspaceId: `notes-${WORKSPACE}`, hubUrl: null } });
+    const shown = runUb(["workspace", "status"], box);
+    expect(shown.status, shown.output).toBe(0);
+    expect(shown.stdout).toContain(`workspace  notes-${WORKSPACE}\nid         ${WORKSPACE}\n`);
+  });
+
+  it.each([false, true])("reports the stored account for shared-secret admission: login present %s", (signedIn) => {
+    const endpoint = "ws://127.0.0.1:1";
+    const login = fixture([WORKSPACE]);
+    const box = sandbox({
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint },
+      credentials: { signingSecret: "synthetic-status-secret", ...(signedIn
+        ? { hubLogins: { "http://127.0.0.1:1": login } } : {}) },
+    });
+    const shown = runUb(["workspace", "status"], box);
+    expect(shown.status, shown.output).toBe(0);
+    const account = signedIn ? "@previous-user (GitHub)" : "not signed in, run ub auth login http://127.0.0.1:1";
+    expect(shown.stdout).toContain(`hub        ${endpoint}\naccount    ${account}\nchosen by  `);
+    expect(shown.stdout).not.toContain("up to date");
+    expect(shown.output).not.toContain("synthetic-status-secret");
+    expect(shown.output).not.toContain(login.credential.key);
+  });
+
+  it("reports a stored device login even when the hub cannot be reached", () => {
+    const login = fixture([WORKSPACE]);
+    const box = sandbox({
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: "wss://hub.example.test/ws" },
+      credentials: { hubLogins: { "https://hub.example.test": login } },
+    });
+    const shown = runUb(["workspace", "status"], box);
+    expect(shown.status, shown.output).toBe(0);
+    expect(shown.stdout).toContain("account    @previous-user (GitHub)\n");
+    expect(shown.stdout).not.toContain("up to date");
+  });
+
+  it("names pending rooms when the hub cannot acknowledge local changes", () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "ws://127.0.0.1:1" } });
+    storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), "Pending notes");
+    const shown = runUb(["workspace", "status"], box, { HUB_AUTH_TOKEN: "synthetic-pending-secret" });
+    expect(shown.status, shown.output).toBe(0);
+    expect(shown.stdout).toMatch(/sync\s+\d+ rooms? with unacknowledged local changes/);
+    expect(shown.stdout).not.toContain("up to date");
+  });
+
+  it.each([["--json"], ["extra"]])("refuses unsupported status arguments %j before opening anything", (args) => {
+    const box = unboundSandbox();
+    const shown = runUb(["workspace", "status", ...args], box);
+    expect(shown.status, shown.output).toBe(2);
+    expect(shown.stdout).toBe("");
+    expect(existsSync(box.dataHome)).toBe(false);
   });
 });
 

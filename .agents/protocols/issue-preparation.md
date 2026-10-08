@@ -49,6 +49,17 @@ normally; the implementer builds alongside it under
 [scheduling semantics](workflow.md#scheduling-semantics). Invent no dependency,
 scan no further and leave the other issue unedited.
 
+A prerequisite may live in another repository. GitHub accepts only issues as
+blockers, in any repository, and ub-agents waits on open blockers from other
+repositories. When the issue input names a blocker issue, or one is readable
+through the launcher, link it on the assigned issue with
+`gh issue edit <assigned issue> --add-blocked-by <blocker issue URL>` under
+[native relationships](../../.github/ISSUE_SPEC.md#relationships) and finish
+preparation normally. Edit no other issue or pull request. When the
+prerequisite is only a pull request with no issue, or the link is refused, stop
+with `needs-human` and ask a maintainer to link a blocker issue, naming the
+prerequisite.
+
 Keep investigation proportional. On resumption or relevant main changes, refresh
 only affected evidence, corpus sources and governing instructions; expand discovery
 only for newly exposed gaps. Do not require new planning artifacts. An unrelated

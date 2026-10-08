@@ -20,7 +20,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { HELP, MCP_HELP, runCli } from "../src/cli.js";
@@ -37,6 +37,7 @@ import { INIT_HELP, INIT_OPTIONS } from "../src/init.js";
 import { INSTALL_HELP, INSTALL_OPTIONS } from "../src/install.js";
 import { OPEN_HELP, OPEN_OPTIONS } from "../src/open.js";
 import { WORKSPACE_CREATE_HELP } from "../src/workspace-create.js";
+import { WORKSPACE_STATUS_HELP } from "../src/workspace-status.js";
 import {
   WORKSPACE_MEMBER_HELP,
   WORKSPACE_MEMBER_SUBCOMMAND_HELP,
@@ -54,7 +55,7 @@ import {
   WORKSPACE_USE_OPTIONS,
 } from "../src/workspace.js";
 import type { Run, Sandbox } from "./helpers.js";
-import { DEAD_HUB_URL, PACKAGE_ROOT, removeTempDirs, runUb, sandbox } from "./helpers.js";
+import { DEAD_HUB_URL, PACKAGE_ROOT, removeTempDirs, runUb, sandbox, unboundSandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -130,8 +131,9 @@ const PATHS: Path[] = [
     argv: ["workspace"],
     help: WORKSPACE_HELP,
     options: {},
-    children: ["create", "promote", "member", "list", "use"],
+    children: ["status", "create", "promote", "member", "list", "use"],
   },
+  { argv: ["workspace", "status"], help: WORKSPACE_STATUS_HELP, options: {} },
   { argv: ["workspace", "list"], help: WORKSPACE_LIST_HELP, options: WORKSPACE_LIST_OPTIONS },
   { argv: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: WORKSPACE_USE_OPTIONS },
   { argv: ["workspace", "create"], help: WORKSPACE_CREATE_HELP, options: {} },
@@ -462,6 +464,48 @@ describe("help before the work", () => {
       expect(run.stderr).toBe("");
       expect(run.stdout).toMatch(/^usage: ub/);
       expect(tree(box)).toEqual(before);
+    });
+  }
+});
+
+describe("bare command groups", () => {
+  const groups = PATHS.filter(path => path.children !== undefined);
+  for (const binding of ["none", "local", "hub", "malformed"] as const) {
+    it(`prints each group's help without acting with ${binding} binding`, () => {
+      const box = binding === "none" ? unboundSandbox() : sandbox({
+        projectBinding: { workspaceId: WORKSPACE, hubUrl: binding === "hub" ? DEAD_HUB_URL : null },
+        ...(binding === "malformed" ? { raw: { projectBinding: "{" } } : {}),
+      });
+      const preload = join(box.cwd, "inert.mjs");
+      writeFileSync(preload, `
+import fs from "node:fs";
+import net from "node:net";
+import childProcess from "node:child_process";
+import sqlite from "node:sqlite";
+import { syncBuiltinESMExports } from "node:module";
+const fail = () => { throw new Error("bare group must not act"); };
+const open = fs.openSync;
+fs.openSync = (path, ...args) => {
+  if (/\\.uberblick\\.json$|(?:config|credentials)\\.json$|\\.sqlite/.test(String(path))) fail();
+  return open(path, ...args);
+};
+fs.writeFileSync = fail;
+net.Socket.prototype.connect = fail;
+childProcess.spawn = fail;
+childProcess.spawnSync = fail;
+sqlite.DatabaseSync = fail;
+globalThis.fetch = fail;
+syncBuiltinESMExports();
+`);
+      const before = tree(box);
+      for (const group of groups) {
+        const run = runUb(group.argv, box, { NODE_OPTIONS: `--import=${preload}` });
+        expect(run.status, run.output).toBe(0);
+        expect(run.stdout).toBe(group.help);
+        expect(run.stderr).toBe("");
+      }
+      expect(tree(box)).toEqual(before);
+      expect(WORKSPACE_HELP).not.toContain("(none)");
     });
   }
 });

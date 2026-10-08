@@ -22,11 +22,12 @@ import type { Io } from "./io.js";
 import { processIo, shellArgument } from "./io.js";
 import { describeFsError } from "./safe-write.js";
 import { ORIGIN_LABELS } from "./status.js";
+import { workspaceStatusCommand } from "./workspace-status.js";
 
 export const WORKSPACE_HELP = `usage: ub workspace [command]
 
 commands:
-  (none)                      the workspace in force, and which layer chose it
+  status                      the workspace in use, its selection, storage and sync
   create <name>               create and select a separate local-only workspace
   promote <hub>               upload, verify and connect this local workspace
   member <command>            grant workspace access and manage members
@@ -143,39 +144,6 @@ function warn(io: Io, warnings: readonly string[]): void {
   for (const warning of warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }
-}
-
-function field(name: string, value: string): string {
-  return `${name.padEnd(14)}${value}\n`;
-}
-
-// --- ub workspace ----------------------------------------------------------
-
-function showWorkspace(io: Io): number {
-  const current = inForce();
-  warn(io, current.warnings);
-
-  if (current.configured === null || current.uuid === null) {
-    io.err(
-      "ub workspace: no workspace configured. There is no default — a guessed " +
-        "workspace would open a corpus nobody chose. Run `ub init` to create " +
-        "one, or `ub workspace use <id>` to select one this machine has recorded. " +
-        "Fetch a shared workspace with `ub workspace use <link>`.\n",
-    );
-    return 1;
-  }
-
-  let text = field(
-    "workspace",
-    `${current.configured} (${ORIGIN_LABELS[current.origin]})`,
-  );
-  // Only when the spelling hides it — the same rule `ub status` follows.
-  if (current.uuid !== current.configured) {
-    text += field("uuid", current.uuid);
-  }
-  text += field("hub", current.hubUrl ?? "local (this computer)");
-  io.out(text);
-  return 0;
 }
 
 // --- ub workspace list -----------------------------------------------------
@@ -470,6 +438,7 @@ export async function workspaceCommand(
   // command is still an unknown command, `--help` after it or not, which is what
   // the top level does too.
   const [sub, ...rest] = argv;
+  if (sub === "status") return workspaceStatusCommand(rest, io);
   if (sub === "create") return createWorkspaceCommand(rest, io);
   if (sub === "promote") return promoteWorkspaceCommand(rest, io);
   if (sub === "member") return workspaceMemberCommand(rest, io);
@@ -479,10 +448,7 @@ export async function workspaceCommand(
   if (sub === "use") {
     return await useCommand(rest, io);
   }
-  if (sub === undefined) {
-    return showWorkspace(io);
-  }
-  if (sub === "help" || sub === "--help" || sub === "-h") {
+  if (sub === undefined || sub === "help" || sub === "--help" || sub === "-h") {
     io.out(WORKSPACE_HELP);
     return 0;
   }
