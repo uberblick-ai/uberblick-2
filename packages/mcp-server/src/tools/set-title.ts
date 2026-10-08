@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { setTitle } from "@uberblick/schema";
 import { guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import {
   ARCHIVED_IS_READ_ONLY,
@@ -34,6 +35,7 @@ export function registerSetTitle(server: McpServer, context: ToolContext): void 
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         toolContract("set_title"),
+      outputSchema: outputSchemas.set_title,
       inputSchema: strictInput({ uuid: uuidArg, title: titleArg }),
     },
     guarded("set_title", async ({ uuid, title }) => {

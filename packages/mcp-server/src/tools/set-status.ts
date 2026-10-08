@@ -13,6 +13,7 @@ import type { DocumentKind, DocumentStatus } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError, guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import {
   ARCHIVED_IS_READ_ONLY,
@@ -60,6 +61,7 @@ export function registerSetStatus(server: McpServer, context: ToolContext): void
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         toolContract("set_status"),
+      outputSchema: outputSchemas.set_status,
       inputSchema: strictInput({
         uuid: uuidArg, status: documentStatusArg,
         answer: decisionAnswerArg.optional(),

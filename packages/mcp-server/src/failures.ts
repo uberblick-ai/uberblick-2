@@ -68,6 +68,7 @@ import {
   TableMappingRequiredError,
 } from "@uberblick/schema";
 import { log } from "./log.js";
+import { outputSchemas } from "./outputs.js";
 import { PersistenceError } from "./replica.js";
 
 /**
@@ -671,19 +672,28 @@ export function toFailure(tool: string, error: unknown): CallToolResult {
 }
 
 /**
- * Wrap a handler so every throw becomes a structured tool failure.
+ * Validate successful answers inside the failure boundary. The SDK's own
+ * output check runs later and produces a plain-text error without logging;
+ * a server-produced mismatch must instead use our text-only internal_error.
  *
  * The tool's own name is what tells the contract whether this call could have
  * written anything — the single fact a failure payload cannot work out for
  * itself, since the same `doc_not_found` is a read's dead end and a write's.
  */
 export function guarded<Args>(
-  tool: string,
+  tool: keyof typeof outputSchemas,
   handler: (args: Args) => Promise<CallToolResult>,
 ): (args: Args) => Promise<CallToolResult> {
   return async (args: Args) => {
     try {
-      return await handler(args);
+      const result = await handler(args);
+      if (!result.isError) {
+        const parsed = outputSchemas[tool].safeParse(result.structuredContent);
+        if (!parsed.success) {
+          throw new Error(`Output validation failed for ${tool}: ${parsed.error.message}`);
+        }
+      }
+      return result;
     } catch (error) {
       return toFailure(tool, error);
     }

@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { MAX_TLDR_LENGTH, setTldr } from "@uberblick/schema";
 import { guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import {
   ARCHIVED_IS_READ_ONLY,
@@ -31,6 +32,7 @@ export function registerSetTldr(server: McpServer, context: ToolContext): void {
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         toolContract("set_tldr"),
+      outputSchema: outputSchemas.set_tldr,
       inputSchema: strictInput({ uuid: uuidArg, tldr: tldrArg }),
     },
     guarded("set_tldr", async ({ uuid, tldr }) => {

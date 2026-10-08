@@ -3,6 +3,7 @@ import { resolveTagAssignments } from "@uberblick/schema";
 import { z } from "zod";
 import { failureContract, guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import { resolveTagFilter } from "../tag-catalog.js";
 import type { ToolContext } from "./context.js";
 import { json } from "./helpers.js";
@@ -29,6 +30,7 @@ export function registerSearch(server: McpServer, context: ToolContext): void {
         "restrict hits to that assignment; a value this catalog does not have is refused rather than answered with " +
         "no hits." +
         failureContract("search"),
+      outputSchema: outputSchemas.search,
       inputSchema: strictInput({
         query: z
           .string()
