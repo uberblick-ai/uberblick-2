@@ -24,9 +24,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, render } from "./react-render.js";
 import * as Y from "yjs";
 import {
   Awareness,
@@ -79,24 +77,16 @@ function installStorage(): void {
 
 interface View {
   host: HTMLElement;
-  root: Root;
   render: (element: ReactElement) => void;
   unmount: () => void;
 }
 
 function mount(element: ReactElement): View {
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  act(() => root.render(element));
+  const view = render(element);
   return {
-    host,
-    root,
-    render: (next) => act(() => root.render(next)),
-    unmount: () => {
-      act(() => root.unmount());
-      host.remove();
-    },
+    host: view.container,
+    render: view.rerender,
+    unmount: view.unmount,
   };
 }
 
@@ -114,8 +104,6 @@ beforeEach(() => {
   vi.stubGlobal("ResizeObserver", FakeResizeObserver);
   Element.prototype.scrollIntoView = function scrollIntoView() {};
   document.documentElement.removeAttribute("data-theme");
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
 });
 
 afterEach(() => {

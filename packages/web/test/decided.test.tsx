@@ -4,9 +4,7 @@
  * native pointer/touch selection belongs to the browser suite.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, renderSettled } from "./react-render.js";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -73,10 +71,8 @@ vi.mock("../src/collab/rooms.js", () => ({
   acquireRoom: (name: string) => ({ connection: room(name), release: () => {} }),
 }));
 const { App } = await import("../src/ui/App.js");
-let mounted: { root: Root; host: HTMLElement } | null = null;
 
 beforeEach(() => {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   Element.prototype.scrollIntoView = function scrollIntoView() {};
   const empty = new DOMRect();
   Range.prototype.getClientRects = () => [empty] as unknown as DOMRectList;
@@ -88,11 +84,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (mounted !== null) {
-    act(() => mounted?.root.unmount());
-    mounted.host.remove();
-    mounted = null;
-  }
   rooms.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -115,12 +106,7 @@ function stage(status: DecisionStatus = "decided"): Y.Doc {
 
 async function openApp(): Promise<HTMLElement> {
   window.history.replaceState(null, "", `/${WORKSPACE}/${UUID}`);
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => root.render(<App />));
-  return host;
+  return (await renderSettled(<App />)).container;
 }
 
 function editorElement(host: HTMLElement): HTMLElement {

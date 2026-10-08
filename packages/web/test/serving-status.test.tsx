@@ -1,8 +1,6 @@
 /** The `/api/status` room reading is current, calm and never guessed. */
 
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, render, type RenderResult } from "./react-render.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   DocumentSearchClient,
@@ -62,15 +60,11 @@ function Reading({
 
 function mount(api: DocumentSearchClient | null, room: string | null): {
   host: HTMLElement;
-  root: Root;
+  view: RenderResult;
 } {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  act(() => root.render(<Reading api={api} room={room} />));
-  return { host, root };
+  const view = render(<Reading api={api} room={room} />);
+  const host = view.container;
+  return { host, view };
 }
 
 async function flush(): Promise<void> {
@@ -83,7 +77,6 @@ async function flush(): Promise<void> {
 describe("the locally served room's upstream reading", () => {
   afterEach(() => {
     vi.useRealTimers();
-    document.body.replaceChildren();
   });
 
   it("ignores a late answer after the room changes", async () => {
@@ -97,9 +90,9 @@ describe("the locally served room's upstream reading", () => {
         .mockReturnValueOnce(b.promise)
         .mockResolvedValue(status(ROOM_B, false)),
     );
-    const { host, root } = mount(api, ROOM_A);
+    const { host, view } = mount(api, ROOM_A);
 
-    act(() => root.render(<Reading api={api} room={ROOM_B} />));
+    view.rerender(<Reading api={api} room={ROOM_B} />);
     await act(async () => a.resolve(status(ROOM_A, true)));
     expect(host.textContent).toBe("unknown");
 
@@ -109,7 +102,6 @@ describe("the locally served room's upstream reading", () => {
       vi.advanceTimersByTimeAsync(SERVING_STATUS_SETTLE_MS),
     );
     expect(host.textContent).toBe("no");
-    act(() => root.unmount());
   });
 
   it("blanks a previous success on failure, omission and serving-mode exit", async () => {
@@ -119,7 +111,7 @@ describe("the locally served room's upstream reading", () => {
       if (answer instanceof Error) throw answer;
       return answer;
     });
-    const { host, root } = mount(api, ROOM_A);
+    const { host, view } = mount(api, ROOM_A);
 
     await flush();
     await act(async () =>
@@ -134,16 +126,15 @@ describe("the locally served room's upstream reading", () => {
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(host.textContent).toBe("unknown");
 
-    act(() => root.render(<Reading api={null} room={ROOM_A} />));
+    view.rerender(<Reading api={null} room={ROOM_A} />);
     expect(host.textContent).toBe("unknown");
-    act(() => root.unmount());
   });
 
   it("does not adopt a contrary one-poll sample", async () => {
     vi.useFakeTimers();
     let hubAcked = true;
     const api = client(async () => status(ROOM_A, hubAcked));
-    const { host, root } = mount(api, ROOM_A);
+    const { host } = mount(api, ROOM_A);
 
     await flush();
     await act(async () =>
@@ -157,7 +148,6 @@ describe("the locally served room's upstream reading", () => {
     hubAcked = true;
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(host.textContent).toBe("yes");
-    act(() => root.unmount());
   });
 
   it("keeps the serving reason through blank room answers and replaces it on a successful poll", async () => {
@@ -170,7 +160,7 @@ describe("the locally served room's upstream reading", () => {
       if (answer instanceof Error) throw answer;
       return answer;
     });
-    const { host, root } = mount(api, ROOM_A);
+    const { host, view } = mount(api, ROOM_A);
     await flush();
     expect(host.textContent).toBe("unknown: no-hub-credentials");
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_SETTLE_MS));
@@ -183,7 +173,7 @@ describe("the locally served room's upstream reading", () => {
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(host.textContent).toBe("unknown: no-hub-credentials");
 
-    act(() => root.render(<Reading api={api} room={ROOM_B} />));
+    view.rerender(<Reading api={api} room={ROOM_B} />);
     expect(host.textContent).toBe("unknown: no-hub-credentials");
     answer = new Error("unreachable");
     await flush();
@@ -194,14 +184,13 @@ describe("the locally served room's upstream reading", () => {
     answer = status(ROOM_A, true);
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(host.textContent).toBe("unknown");
-    act(() => root.render(<Reading api={api} room={ROOM_A} />));
+    view.rerender(<Reading api={api} room={ROOM_A} />);
     await flush();
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_SETTLE_MS));
     expect(host.textContent).toBe("yes");
     answer = new Error("unreachable");
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(host.textContent).toBe("unknown");
-    act(() => root.unmount());
   });
 
   it("does not carry the serving reason into a different client", async () => {
@@ -211,12 +200,11 @@ describe("the locally served room's upstream reading", () => {
       notSharedReason: "no-hub-credentials",
     }));
     const next = client(async () => new Promise<DocumentSearchStatus>(() => {}));
-    const { host, root } = mount(api, ROOM_A);
+    const { host, view } = mount(api, ROOM_A);
     await flush();
     expect(host.textContent).toBe("unknown: no-hub-credentials");
-    act(() => root.render(<Reading api={next} room={ROOM_A} />));
+    view.rerender(<Reading api={next} room={ROOM_A} />);
     expect(host.textContent).toBe("unknown");
-    act(() => root.unmount());
   });
 
   it("expires a hung request, blanks the old fact and keeps polling", async () => {
@@ -229,7 +217,7 @@ describe("the locally served room's upstream reading", () => {
       if (calls === 3) return await recovered.promise;
       return status(ROOM_A, true);
     });
-    const { host, root } = mount(api, ROOM_A);
+    const { host } = mount(api, ROOM_A);
 
     await flush();
     await act(async () =>
@@ -248,6 +236,5 @@ describe("the locally served room's upstream reading", () => {
       vi.advanceTimersByTimeAsync(SERVING_STATUS_SETTLE_MS),
     );
     expect(host.textContent).toBe("yes");
-    act(() => root.unmount());
   });
 });

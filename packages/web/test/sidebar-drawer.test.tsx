@@ -4,9 +4,7 @@
  * Radix owns the modal's focus trap, Escape and outside dismissal.
  */
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, renderSettled, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -66,7 +64,7 @@ vi.mock("../src/collab/rooms.js", () => ({
 
 const { App } = await import("../src/ui/App.js");
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
+let mounted: RenderResult | null = null;
 let stored: Map<string, string>;
 let writes: string[];
 
@@ -96,8 +94,6 @@ function sidebarWidth(narrow: boolean): { change: (next: boolean) => Promise<voi
 }
 
 beforeEach(() => {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
   stored = new Map();
   writes = [];
   vi.stubGlobal("localStorage", {
@@ -133,15 +129,12 @@ beforeEach(() => {
 });
 
 function unmount(): void {
-  const open = mounted;
+  mounted?.unmount();
   mounted = null;
-  if (open === null) return;
-  act(() => open.root.unmount());
-  open.host.remove();
 }
 
 afterEach(() => {
-  unmount();
+  mounted = null;
   rooms.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -149,12 +142,8 @@ afterEach(() => {
 
 async function openApp(path = `/${WORKSPACE}/${ONE}`): Promise<HTMLElement> {
   window.history.replaceState(null, "", path);
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  await act(async () => root.render(<App />));
-  return host;
+  mounted = await renderSettled(<App />);
+  return mounted.container;
 }
 
 function drawer(): HTMLElement | null {

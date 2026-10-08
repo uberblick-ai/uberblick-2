@@ -1,5 +1,4 @@
-import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { act, render } from "./react-render.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AccountClient, AccountIdentity } from "../src/shell/account.js";
 import { useServingAccount } from "../src/ui/serving-account.js";
@@ -10,12 +9,8 @@ function Reading({ api }: { api: AccountClient | null }) {
   return <output>{account.state === "signed-in" ? account.handle : account.state}</output>;
 }
 function mount(api: AccountClient | null) {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  act(() => root.render(<Reading api={api} />));
-  return { host, root };
+  const view = render(<Reading api={api} />);
+  return { host: view.container, view };
 }
 async function flush() {
   await act(async () => { await Promise.resolve(); });
@@ -24,7 +19,6 @@ async function flush() {
 describe("the current served account", () => {
   afterEach(() => {
     vi.useRealTimers();
-    document.body.replaceChildren();
   });
 
   it("refreshes login/logout and blanks a previous handle on failure", async () => {
@@ -34,7 +28,7 @@ describe("the current served account", () => {
       if (answer instanceof Error) throw answer;
       return answer;
     };
-    const { host, root } = mount(api);
+    const { host, view } = mount(api);
     await flush();
     expect(host.textContent).toBe("octocat");
     answer = { state: "signed-out" };
@@ -46,20 +40,18 @@ describe("the current served account", () => {
     answer = new Error("request failed");
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(host.textContent).toBe("unavailable");
-    act(() => root.render(<Reading api={null} />));
+    view.rerender(<Reading api={null} />);
     expect(host.textContent).toBe("unavailable");
-    act(() => root.unmount());
   });
 
   it("ignores late answers from another serving client", async () => {
     let finish!: (account: AccountIdentity) => void;
     const api: AccountClient = () => new Promise(resolve => { finish = resolve; });
-    const { host, root } = mount(api);
-    act(() => root.render(<Reading api={async () => ({ state: "signed-out" })} />));
+    const { host, view } = mount(api);
+    view.rerender(<Reading api={async () => ({ state: "signed-out" })} />);
     await flush();
     await act(async () => finish({ state: "signed-in", handle: "wrong-hub" }));
     expect(host.textContent).toBe("signed-out");
-    act(() => root.unmount());
   });
 
   it("expires hung requests, aborts on unmount and resumes polling", async () => {
@@ -72,7 +64,7 @@ describe("the current served account", () => {
       if (calls === 2 || calls === 4) return await new Promise(() => {});
       return { state: "signed-in", handle: "octocat" };
     };
-    const { host, root } = mount(api);
+    const { host, view } = mount(api);
     await flush();
     expect(host.textContent).toBe("octocat");
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS + SERVING_STATUS_TIMEOUT_MS));
@@ -81,7 +73,7 @@ describe("the current served account", () => {
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(host.textContent).toBe("octocat");
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
-    act(() => root.unmount());
+    view.unmount();
     expect(signals[3]?.aborted).toBe(true);
   });
 });

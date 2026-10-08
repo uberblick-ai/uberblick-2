@@ -1,6 +1,6 @@
 /** Legacy normalization and the palette gate on the actual bound page. */
-import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { act, render } from "./react-render.js";
+import { onTestCleanup } from "./test-cleanup.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { appendBlock, editBlock, exportMarkdown, getBlocks, getBlocksFragment, getBlocksWithInline, initDoc, tableCellText, tableRows, writeGfmTable } from "@uberblick/schema";
@@ -16,12 +16,10 @@ const SOURCE = "| name | count |\n| --- | --- |\n| alpha | 1 |";
 const LIVE: RoomStatus = { connected: true, synced: true, writable: true,
   hasReceivedServerState: true, hasAnswered: true, storeRefused: false,
   unsyncedChanges: 0, protocolMismatch: null, authFailed: false, tokenMissing: false };
-const roots: Array<() => void> = [];
 beforeEach(() => {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   Element.prototype.scrollIntoView = function scrollIntoView() {};
 });
-afterEach(() => { for (const destroy of roots.splice(0)) destroy(); vi.restoreAllMocks(); });
+afterEach(() => { vi.restoreAllMocks(); });
 
 function legacy(id: string, source = SOURCE): Y.XmlElement {
   const block = new Y.XmlElement("table"); block.setAttribute("id", id);
@@ -39,12 +37,10 @@ function fixture(status = LIVE, ydoc = legacyDoc()) {
       listeners.add(listener); listener(connection.status); return () => { listeners.delete(listener); };
     },
   } as unknown as RoomConnection;
-  const host = document.createElement("div"); document.body.appendChild(host);
-  const root = createRoot(host);
-  roots.push(() => { act(() => root.unmount()); host.remove(); ydoc.destroy(); });
+  onTestCleanup(() => ydoc.destroy());
   const selectThread = () => {};
-  act(() => root.render(<EditorPane connection={connection} segment={WORKSPACE} presence={[]}
-    author="Reader" archived={false} docLinks={null} onRestore={null} onSelectThread={selectThread} />));
+  const { container: host } = render(<EditorPane connection={connection} segment={WORKSPACE} presence={[]}
+    author="Reader" archived={false} docLinks={null} onRestore={null} onSelectThread={selectThread} />);
   return { host, ydoc, connection, status(patch: Partial<RoomStatus>) {
     act(() => { Object.assign(connection.status, patch); for (const listener of listeners) listener(connection.status); });
   } };
@@ -277,7 +273,7 @@ it.each(["person", "agent"] as const)(
     // first-write snapshot. Its delayed update must survive the drawn merge.
     const delayed = new Y.Doc();
     Y.applyUpdate(delayed, bWrite);
-    roots.push(() => delayed.destroy());
+    onTestCleanup(() => delayed.destroy());
     const stale = getBlocks(delayed)[0]!.text;
     editBlock(delayed, id, stale, stale.replace(" | keep |", " later | keep |"));
     act(() => { Y.applyUpdate(a, Y.encodeStateAsUpdate(delayed)); Y.applyUpdate(b, Y.encodeStateAsUpdate(delayed)); });
@@ -365,7 +361,7 @@ it("shares a text type in every empty menu and Tab-created cell before their fir
   checkEmptyTexts();
 
   const replica = new Y.Doc(); Y.applyUpdate(replica, Y.encodeStateAsUpdate(ydoc));
-  roots.push(() => replica.destroy());
+  onTestCleanup(() => replica.destroy());
   expect(getBlocksFragment(replica).toJSON()).toEqual(getBlocksFragment(ydoc).toJSON());
   const remoteTable = getBlocksFragment(replica).get(0) as Y.XmlElement;
   for (const [rowIndex, row] of tableRows(table).entries()) for (const [cellIndex, cell] of row.entries()) {

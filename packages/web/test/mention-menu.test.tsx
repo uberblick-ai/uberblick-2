@@ -23,9 +23,8 @@
  * is `e2e/doc-link.spec.ts`.
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { describe, expect, it } from "vitest";
+import { act, render } from "./react-render.js";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -47,17 +46,13 @@ import {
 import type { MentionTrigger } from "../src/editor/mention-menu.js";
 import { MentionMenu } from "../src/ui/MentionMenu.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
+import { onTestCleanup } from "./test-cleanup.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 /** The document being written in — never offered as a target. */
 const DOC = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
 const HUB = "0189abcd-2222-4333-8444-555566667777";
 const BLOCKS = "3f7d1e88-1111-4222-9333-444455556666";
-
-beforeEach(() => {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-});
 
 /** A directory naming three documents, and a context over it. */
 function directory(): { ydoc: Y.Doc; context: DocLinkContext; opened: string[] } {
@@ -102,26 +97,25 @@ interface Mounted {
 function mountPicker(ydoc: Y.Doc, context: DocLinkContext): Mounted {
   const { editor, element } = mountEditor(ydoc, { docLinks: context });
   const frame = document.createElement("div");
+  onTestCleanup(() => frame.remove());
   document.body.appendChild(frame);
   frame.appendChild(element);
   const container = document.createElement("div");
   frame.appendChild(container);
-  const root = createRoot(container);
-  act(() => {
-    root.render(
-      <MentionMenu
-        editor={editor}
-        host={{ current: frame }}
-        docLinks={context}
-        openDocId={DOC}
-      />,
-    );
-  });
+  const view = render(
+    <MentionMenu
+      editor={editor}
+      host={{ current: frame }}
+      docLinks={context}
+      openDocId={DOC}
+    />,
+    { container },
+  );
 
   let menuMounted = true;
   const unmountMenu = (): void => {
     if (!menuMounted) return;
-    act(() => root.unmount());
+    view.unmount();
     menuMounted = false;
   };
   return {

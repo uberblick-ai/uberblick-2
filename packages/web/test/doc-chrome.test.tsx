@@ -6,9 +6,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { act, render, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -48,24 +46,17 @@ function fixture(): Fixture {
   return { ydoc, connection, blockIds };
 }
 
-function mount(fix: Fixture): { host: HTMLElement; root: Root } {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-    true;
-  const host = document.createElement("div");
-  document.body.appendChild(host);
-  const root = createRoot(host);
-  act(() =>
-    root.render(
-      <DocMetaLine
-        connection={fix.connection}
-        segment={WORKSPACE}
-        meta={getMeta(fix.ydoc)}
-        archived={false}
-        onTogglePin={() => {}}
-      />,
-    ),
+function mount(fix: Fixture): { host: HTMLElement; view: RenderResult } {
+  const view = render(
+    <DocMetaLine
+      connection={fix.connection}
+      segment={WORKSPACE}
+      meta={getMeta(fix.ydoc)}
+      archived={false}
+      onTogglePin={() => {}}
+    />,
   );
-  return { host, root };
+  return { host: view.container, view };
 }
 
 function text(host: HTMLElement, selector: string): string | null {
@@ -90,58 +81,48 @@ describe("the document identity line keeps its local controls", () => {
       },
     );
     Element.prototype.scrollIntoView = function scrollIntoView() {};
-    const { host, root } = mount(fixture());
-    try {
-      act(() => {
-        const trigger = host.querySelector<HTMLButtonElement>(".ub-actions-trigger");
-        trigger?.focus();
-        trigger?.dispatchEvent(
-          new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-        );
-      });
-      const unavailable = [
-        ...document.querySelectorAll<HTMLElement>(
-          "[data-slot=dropdown-menu-item]",
-        ),
-      ].find(
-        (item) =>
-          item.textContent ===
-          "Archive unavailable — the directory or sidebar room is not ready to write, or there is no live entry for this document",
+    const { host } = mount(fixture());
+    act(() => {
+      const trigger = host.querySelector<HTMLButtonElement>(".ub-actions-trigger");
+      trigger?.focus();
+      trigger?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
       );
-      expect(unavailable?.getAttribute("aria-disabled")).toBe("true");
-      expect(document.activeElement?.textContent).toBe("Pin to sidebar");
-      act(() => {
-        document.activeElement?.dispatchEvent(
-          new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
-        );
-        vi.runOnlyPendingTimers();
-      });
-      expect(document.activeElement).toBe(unavailable);
-      act(() => {
-        unavailable?.dispatchEvent(
-          new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-        );
-      });
-      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    });
+    const unavailable = [
+      ...document.querySelectorAll<HTMLElement>(
+        "[data-slot=dropdown-menu-item]",
+      ),
+    ].find(
+      (item) =>
+        item.textContent ===
+        "Archive unavailable — the directory or sidebar room is not ready to write, or there is no live entry for this document",
+    );
+    expect(unavailable?.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement?.textContent).toBe("Pin to sidebar");
+    act(() => {
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+      vi.runOnlyPendingTimers();
+    });
+    expect(document.activeElement).toBe(unavailable);
+    act(() => {
+      unavailable?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
   });
 
   it("does not derive navigation from tags and keeps the shortened identity", () => {
-    const { host, root } = mount(fixture());
-    try {
-      expect(text(host, ".ub-badge")).toBeNull();
-      expect(text(host, ".ub-doc-ids")).toMatch(
-        /^uuid 9f3c1a2b · rev [0-9a-f]{8}$/,
-      );
-      expect(host.querySelector(".ub-copy-link")).not.toBeNull();
-      expect(host.querySelector(".ub-actions-trigger")).not.toBeNull();
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    const { host } = mount(fixture());
+    expect(text(host, ".ub-badge")).toBeNull();
+    expect(text(host, ".ub-doc-ids")).toMatch(
+      /^uuid 9f3c1a2b · rev [0-9a-f]{8}$/,
+    );
+    expect(host.querySelector(".ub-copy-link")).not.toBeNull();
+    expect(host.querySelector(".ub-actions-trigger")).not.toBeNull();
   });
 
   it("names lifecycle records, omits ordinary documents and tolerates a mismatched status", () => {
@@ -154,8 +135,7 @@ describe("the document identity line keeps its local controls", () => {
         "Decision · open",
       );
     } finally {
-      act(() => mountedDecision.root.unmount());
-      mountedDecision.host.remove();
+      mountedDecision.view.unmount();
     }
 
     const mismatched = fixture();
@@ -165,33 +145,26 @@ describe("the document identity line keeps its local controls", () => {
     try {
       expect(text(mountedMismatch.host, ".ub-lifecycle-badge")).toBe("Product");
     } finally {
-      act(() => mountedMismatch.root.unmount());
-      mountedMismatch.host.remove();
+      mountedMismatch.view.unmount();
     }
 
     const ordinary = mount(fixture());
     try {
       expect(ordinary.host.querySelector(".ub-lifecycle-badge")).toBeNull();
     } finally {
-      act(() => ordinary.root.unmount());
-      ordinary.host.remove();
+      ordinary.view.unmount();
     }
   });
 
   it("moves the rev when a block's content changes", () => {
     const fix = fixture();
-    const { host, root } = mount(fix);
-    try {
-      const before = text(host, ".ub-doc-ids");
-      act(() => {
-        editBlock(fix.ydoc, fix.blockIds[0] ?? "", "first block", "first block!");
-      });
-      const after = text(host, ".ub-doc-ids");
-      expect(after).not.toBe(before);
-      expect(after).toMatch(/^uuid 9f3c1a2b · rev [0-9a-f]{8}$/);
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    const { host } = mount(fix);
+    const before = text(host, ".ub-doc-ids");
+    act(() => {
+      editBlock(fix.ydoc, fix.blockIds[0] ?? "", "first block", "first block!");
+    });
+    const after = text(host, ".ub-doc-ids");
+    expect(after).not.toBe(before);
+    expect(after).toMatch(/^uuid 9f3c1a2b · rev [0-9a-f]{8}$/);
   });
 });

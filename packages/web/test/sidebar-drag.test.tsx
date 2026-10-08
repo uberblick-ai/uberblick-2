@@ -1,8 +1,7 @@
 /** Sidebar visibility and room admission cancel previews without shared writes. */
+import { act, renderSettled } from "./react-render.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { act, useEffect } from "react";
-import { createRoot } from "react-dom/client";
-import type { Root } from "react-dom/client";
+import { useEffect } from "react";
 import { useDragDropManager } from "@dnd-kit/react";
 import type { DragDropManager } from "@dnd-kit/react";
 import { useSortable } from "@dnd-kit/react/sortable";
@@ -61,7 +60,6 @@ function Rows({ group, probe }: { group: string; probe: ProbeState }) {
   return <ul>{[ONE, TWO].map((uuid, index) => <Row key={uuid} uuid={uuid} index={index} group={group} probe={probe} />)}</ul>;
 }
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
 beforeEach(() => {
   vi.stubGlobal("IntersectionObserver", class {
     observe(): void {}
@@ -71,11 +69,6 @@ beforeEach(() => {
   Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => null });
 });
 afterEach(() => {
-  if (mounted !== null) {
-    act(() => mounted?.root.unmount());
-    mounted.host.remove();
-    mounted = null;
-  }
   Reflect.deleteProperty(document, "elementFromPoint");
   vi.unstubAllGlobals();
 });
@@ -83,7 +76,6 @@ afterEach(() => {
 it.each(["hidden", "read-only"] as const)(
   "cancels a preview when the sidebar becomes %s and refuses another pickup",
   async (change) => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const ydoc = new Y.Doc();
     const group = createGroup(ydoc, "Reading");
     pinDoc(ydoc, group, ONE);
@@ -103,16 +95,14 @@ it.each(["hidden", "read-only"] as const)(
     } as unknown as RoomConnection;
     const onDraggingChange = vi.fn();
     const probe: ProbeState = { manager: null, rows: new Map() };
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    mounted = { root, host };
-    const render = (active: boolean) => root.render(
+
+    const tree = (active: boolean) => (
       <SidebarDragProvider connection={connection} active={active} onDraggingChange={onDraggingChange}>
         <Rows group={group} probe={probe} />
-      </SidebarDragProvider>,
+      </SidebarDragProvider>
     );
-    await act(async () => render(true));
+    const view = await renderSettled(tree(true));
+    const host = view.container;
     const manager = probe.manager;
     if (manager === null) throw new Error("public drag manager was not mounted");
     const writes = vi.fn();
@@ -130,7 +120,7 @@ it.each(["hidden", "read-only"] as const)(
     expect(writes).not.toHaveBeenCalled();
 
     await act(async () => {
-      if (change === "hidden") render(false);
+      if (change === "hidden") view.rerender(tree(false));
       else {
         connection.status = { ...LIVE, writable: false };
         for (const listener of listeners) listener(connection.status);
