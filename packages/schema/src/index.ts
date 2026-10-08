@@ -9,7 +9,7 @@
  *                   single Y.XmlText, except tables containing TableKit rows,
  *                   cells and one paragraph per cell
  *                   (types: paragraph, heading, code, mermaid, list-item,
- *                   quote, table, terminal), formatted by the closed inline-mark set
+ *                   quote, table, terminal, chart), formatted by the closed inline-mark set
  *                   (bold, italic, strike, inlineCode, link, docLink) on
  *                   prose blocks and table cells
  *   - `annotations` Y.Map of one Y.Map per thread — anchor, resolved flag and

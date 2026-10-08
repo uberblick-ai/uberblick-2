@@ -1,5 +1,5 @@
 /**
- * The editor palette: eight block types, TableKit's row/cell nodes, seven marks.
+ * The editor palette: nine block types, TableKit's row/cell nodes, seven marks.
  *
  * The marks live in marks.ts — the six inline ones (`bold`, `italic`, `strike`,
  * `inlineCode`, `link`, `docLink`) plus the `comment` anchor defined below.
@@ -15,6 +15,7 @@
  *   <quote     id="…">        Y.XmlText
  *   <table     id="…">        tableRow > tableHeader|tableCell > paragraph > Y.XmlText
  *   <terminal  id="…">        Y.XmlText (a scripted terminal transcript)
+ *   <chart     id="…">        Y.XmlText (a versioned JSON mapping)
  *
  * A list is a *run* of adjacent `list-item` blocks, exactly as markdown means
  * it — no `bulletList` wrapper, no nested `listItem` tree. Stock Tiptap's list
@@ -47,7 +48,7 @@
  *    failure.
  *
  *    Prose blocks take `PROSE_MARKS` on top of that — the inline set. `code`,
- *    `mermaid` and `terminal` never do: their text is source, so
+ *    `mermaid`, `terminal` and `chart` never do: their text is source, so
  *    `comment` is the only mark they may hold, and an inline mark found inside
  *    one is foreign content the palette gate refuses to bind (see palette.ts).
  *    TableKit's cells each hold one paragraph, which allows those formatting
@@ -65,6 +66,8 @@ import {
 } from "./source-chrome.js";
 import { TableNodes } from "./table.js";
 import { terminalBlockView } from "./terminal.js";
+import type * as Y from "yjs";
+import { chartBlockView } from "./chart.js";
 
 /**
  * The stable block id, assigned by `BlockIds` (see block-ids.ts) and owned by
@@ -363,6 +366,27 @@ export const Terminal = Node.create({
   // so a newline in the transcript is a newline and never a new block.
 });
 
+/** The versioned JSON mapping is ordinary, annotation-capable source text. */
+export const ChartBlock = Node.create<{ ydoc: Y.Doc | null }>({
+  name: "chart",
+  group: "block",
+  content: "text*",
+  marks: COMMENT_MARK,
+  code: true,
+  defining: true,
+  whitespace: "pre",
+  addOptions() { return { ydoc: null }; },
+  addAttributes() { return { id: idAttribute }; },
+  parseHTML() {
+    return [{ tag: "div[data-block-type=chart]", preserveWhitespace: "full" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["div", mergeAttributes({ class: "ub-chart", "data-block-type": "chart" }, HTMLAttributes),
+      ["pre", { class: "ub-chart-source" }, 0]];
+  },
+  addNodeView() { return chartBlockView(this.options.ydoc); },
+});
+
 /**
  * The annotation anchor.
  *
@@ -432,6 +456,7 @@ export const paletteExtensions = [
   Quote,
   TableNodes,
   Terminal,
+  ChartBlock,
   CommentMark,
   ...inlineMarkExtensions,
 ];

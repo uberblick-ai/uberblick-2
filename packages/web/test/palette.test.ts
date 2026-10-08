@@ -42,6 +42,7 @@ import { mountEditor } from "./helpers.js";
 describe("the palette is exactly the schema's block types", () => {
   it("declares the schema's block nodes, seven marks, and nothing else", () => {
     expect(Object.keys(uberblickSchema.nodes).sort()).toEqual([
+      "chart",
       "code",
       "doc",
       "heading",
@@ -65,6 +66,7 @@ describe("the palette is exactly the schema's block types", () => {
       "quote",
       "table",
       "terminal",
+      "chart",
     ]);
     // The closed mark set: the schema package's six inline marks, plus the
     // annotation anchor.

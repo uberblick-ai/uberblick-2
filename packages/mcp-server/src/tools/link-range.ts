@@ -30,7 +30,7 @@ export function registerLinkRange(server: McpServer, context: ToolContext): void
         "`currentText` and `currentRev` to re-measure against. Indices are clamped to the text and swapped if " +
         "reversed; a range that clamps to nothing is refused.\n\n" +
         "A range that is already a reference is RETARGETED. A range that is already an external link is refused — " +
-        "one range cannot be both — and so is a code, mermaid, table or terminal block, which holds source text. " +
+        "one range cannot be both — and so is a code, mermaid, table, terminal or chart block, which holds source text. " +
         "The answer carries the target's current `title` for information; the label in the document is the text " +
         "you linked, and it does not follow a later rename.\n\n" +
         "The target must be a document this replica's directory knows, or the call refuses with " +
