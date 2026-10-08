@@ -306,14 +306,22 @@ test("a wide table moves the popup with the text and hides it beyond its own cli
   const cell = table.locator("th").nth(2);
   const wrapper = table.locator("..");
   await expect.poll(() => wrapper.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
-  await wrapper.evaluate((element) => {
-    const cell = element.querySelectorAll("th")[2];
-    if (cell === undefined) throw new Error("e2e: missing wide-table cell");
-    const bounds = element.getBoundingClientRect();
-    element.scrollLeft += cell.getBoundingClientRect().left - (bounds.left + bounds.width / 2);
-  });
   await selectCell(cell, 0, 5, "mouse");
+  // Centre the selected text, rather than the cell's left edge, so viewport
+  // collision handling does not shift the popup before the scrolling proof.
+  await wrapper.evaluate((element) => {
+    const range = document.getSelection()?.getRangeAt(0).getBoundingClientRect();
+    if (range === undefined) throw new Error("e2e: missing wide-table selection");
+    const bounds = element.getBoundingClientRect();
+    element.scrollLeft += range.left + range.width / 2 - (bounds.left + bounds.width / 2);
+  });
   await expect(toolbar(page)).toBeVisible();
+  await expect.poll(() => popup(page).evaluate((element) => {
+    const range = document.getSelection()?.getRangeAt(0).getBoundingClientRect();
+    if (range === undefined) throw new Error("e2e: missing wide-table selection");
+    const bounds = element.getBoundingClientRect();
+    return bounds.left + bounds.width / 2 - (range.left + range.width / 2);
+  })).toBeCloseTo(0, 0);
   const before = await popup(page).boundingBox();
   if (before === null) throw new Error("e2e: missing wide-table popup");
   await wrapper.evaluate((element) => { element.scrollLeft += 24; });
