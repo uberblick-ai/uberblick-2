@@ -46,7 +46,7 @@ that a suggested design works. Explicit constraints remain binding.
 
 Apply [library and custom-mechanism choices](../protocols/delivery-policy.md#library-and-custom-mechanism-choices)
 before building custom mechanisms, including web UI and parsers. Record required
-library or exception evidence in the PR; unresolved owner choices use the return
+library or exception evidence in the PR; unresolved maintainer choices use the return
 or escalation rule below.
 
 The least code that defends the issue's contract, inside its declared `Touches`
@@ -155,7 +155,7 @@ Resolve conflicts by merging the base into the assigned branch, never rebasing
 or force-pushing; the integrator makes no fix-up commits. Rerun affected and
 required final checks, verify merge readiness, then push and hand off the new
 SHA under the existing exact-head review and rounds rules. Use existing defer
-or human-decision routes for a failed check or unresolved owner choice.
+or human-decision routes for a failed check or unresolved maintainer choice.
 
 ## Boundaries
 

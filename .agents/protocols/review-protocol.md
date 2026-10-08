@@ -92,7 +92,7 @@ visible supported outcome: if it can also lose work nobody sees, such as an
 offline edit dropped on reconnect or an agent's write, it is not one. Nor is a
 hidden bug, secret exposure or damage the product cannot repair.
 
-A visible edge case is P3 at most and a known limit, not an owner question; it
+A visible edge case is P3 at most and a known limit, not a maintainer question; it
 never blocks, escalates or reopens settled work. The limit qualifies any
 guarantee the issue states: name it beside the criterion, and acceptance counts
 that criterion met except for the named limit. Prefer the known limit to a fix

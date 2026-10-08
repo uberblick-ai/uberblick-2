@@ -35,7 +35,7 @@ Never silently waive a serious finding.
 
 Unresolved product or authority choices use [.agents/protocols/human-decisions.md](../protocols/human-decisions.md),
 including who may do what, network exposure and external resources beyond settled
-owner authorization. Decided-record challenges follow its
+maintainer authorization. Decided-record challenges follow its
 [shared successor procedure](../protocols/human-decisions.md#challenge-a-decided-record).
 
 ## Outcomes and handoff

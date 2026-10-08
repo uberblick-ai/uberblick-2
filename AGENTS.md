@@ -11,11 +11,11 @@ These instructions apply to interactive sessions and delivery roles alike.
 - **Local protocols:** exact steps, permissions, records and operational gates.
 - **Code and tests:** implemented behavior. Comments explain nearby non-obvious
   constraints; they do not authorize product or process changes.
-- **GitHub:** authorized work scope, owner decisions, reviews and evidence.
+- **GitHub:** authorized work scope, maintainer decisions, reviews and evidence.
 
 A discrepancy is a gap to resolve, not permission to silently override another
 source. Distinguish implemented behavior from agreed future direction. Apply
-settled owner authorization without asking for it again; escalate only the
+settled maintainer authorization without asking for it again; escalate only the
 unresolved choice beyond that authorization.
 
 ## GitHub content from outside the team
@@ -53,6 +53,8 @@ permissions or policy.
   `@uberblick-ai/maintainers`, mentioned on a question when no other person is
   better placed to answer it. **Agents'
   account:** `uberblick-agent`; a comment from it is never a person's answer.
+- **Authority term:** In process files, `owner` means any maintainer with
+  maintain or admin access when naming who decides, approves or answers.
 - **Corpus context:** discover `ub` command intent through the current tag
   catalog and purpose-based search. These pages describe the intended state, so
   check the code for what ships. The corpus holds no agent workflow or
@@ -141,7 +143,7 @@ A pointer is a route to the source, not a substitute for reading it.
   GitHub items. Corpus edits
   must stay within recorded authorization: update descriptions of delivered
   behavior, but do not weaken a guarantee or expand agent authority through a
-  doc edit. An unsettled change to those commitments requires an owner decision.
+  doc edit. An unsettled change to those commitments requires a maintainer decision.
 
 When instructions come from a different checkout than the code being examined,
 identify both sources and revisions. Verify code and path claims at the stated
@@ -152,7 +154,7 @@ context when the assignment, governing decision or relevant source changes.
 
 ## Change instructions coherently
 
-Process changes use the repository review route unless the owner explicitly
+Process changes use the repository review route unless a maintainer explicitly
 requests an attended exception. Agent-authored process changes require one
 cross-runtime challenge before landing. Update callers when moving a protocol. Before
 landing, identify ready issues made stale by moved or contradicted instructions;

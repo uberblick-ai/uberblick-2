@@ -101,11 +101,11 @@ assumptions, overengineering and overtesting; gate work never substitutes for
 it.
 
 Copilot is optional ([owner decision](https://github.com/uberblick-ai/uberblick-2/issues/1217)).
-Reinstating its gate requires an explicit owner decision and a corresponding
+Reinstating its gate requires an explicit maintainer decision and a corresponding
 policy update. Do not request it automatically; request it only when a person
 asks. A missing, pending, stale-head or unavailable Copilot review never by
 itself defers, escalates or blocks integration, even if an older handoff calls
-it required. An explicit owner instruction to hold a merge still applies;
+it required. An explicit maintainer instruction to hold a merge still applies;
 requesting an optional review does not itself impose that hold.
 
 Record a refusal once using its existing review record, or a PR comment if
@@ -170,7 +170,7 @@ or scope: escalate again, naming the difference.
 Choose the simplest defensible mechanism, comparing existing primitives and
 libraries with custom code, including parsers and file-format handling. Consider
 the supported inputs, correctness burden and maintenance. If that choice needs
-a protected runtime dependency, seek the owner's answer early; bespoke code
+a protected runtime dependency, seek a maintainer's answer early; bespoke code
 must not be an approval workaround. Evidence supports a recommendation, not a
 new dependency exception.
 
@@ -181,8 +181,8 @@ by the governing guidance; if that guidance is missing, stop the dependent choic
 rather than assume an exception. Make a shape
 that needs a person's answer visible early and get the answer once.
 
-The tier-3 trigger list remains the owner-controlled autonomy boundary. Verify gates
-at the candidate SHA rather than relying on a session's assertion.
+The tier-3 trigger list remains the autonomy boundary controlled by maintainers.
+Verify gates at the candidate SHA rather than relying on a session's assertion.
 
 ### Batch merge reports
 
