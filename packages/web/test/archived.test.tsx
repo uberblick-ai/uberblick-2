@@ -26,6 +26,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, within } from "@testing-library/react";
 import { act, renderSettled, type RenderResult } from "./react-render.js";
 import type { ReactNode } from "react";
 import * as Y from "yjs";
@@ -214,20 +215,20 @@ function typeInto(input: HTMLInputElement | null, value: string): void {
 
 /** The bound editor's own element, or null when nothing is bound. */
 function prose(host: HTMLElement): HTMLElement | null {
-  return host.querySelector(".ub-editor .ProseMirror");
+  return within(host).queryByRole("textbox", { name: "Document content" });
 }
 
 function banner(host: HTMLElement): HTMLElement | null {
-  return host.querySelector(".ub-archived-banner");
+  return within(host).queryByText(/This document is tombstoned in the directory:/);
 }
 
 function restoreButton(host: HTMLElement): HTMLButtonElement | null {
-  return host.querySelector(".ub-archived-banner button");
+  return within(host).queryByRole<HTMLButtonElement>("button", { name: /^Restore(?: unavailable)?$/ });
 }
 
 function openActions(host: HTMLElement): void {
   act(() => {
-    const trigger = host.querySelector<HTMLButtonElement>(".ub-actions-trigger");
+    const trigger = within(host).getByRole("button", { name: "Document actions" });
     trigger?.focus();
     trigger?.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
@@ -236,9 +237,7 @@ function openActions(host: HTMLElement): void {
 }
 
 function action(label: string): HTMLElement | undefined {
-  return [
-    ...document.querySelectorAll<HTMLElement>("[data-slot=dropdown-menu-item]"),
-  ].find((item) => item.textContent === label);
+  return screen.queryByRole("menuitem", { name: label }) ?? undefined;
 }
 
 describe("an archived document is readable, says so, and offers one way back", () => {
@@ -272,9 +271,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(prose(host)?.getAttribute("contenteditable")).toBe("true");
     openActions(host);
     act(() => action("Archive document")?.click());
-    act(() => document.querySelector<HTMLButtonElement>(
-      '[data-slot=alert-dialog-action]',
-    )?.click());
+    act(() => screen.getByRole("button", { name: "Archive document" }).click());
     expect(getDirectoryEntry(directory, OTHER)?.deleted).toBe(true);
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
     expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
@@ -291,8 +288,8 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
     expect(banner(host)).not.toBeNull();
     expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
-    expect(host.querySelector<HTMLInputElement>(".ub-title")?.readOnly).toBe(true);
-    act(() => typeInto(host.querySelector<HTMLInputElement>(".ub-title"), "changed"));
+    expect(within(host).getByPlaceholderText<HTMLInputElement>("Untitled").readOnly).toBe(true);
+    act(() => typeInto(within(host).getByPlaceholderText<HTMLInputElement>("Untitled"), "changed"));
     expect(getMeta(ydoc).title).toBe("New lease");
     act(() => restoreButton(host)?.click());
     expect(banner(host)).toBeNull();
@@ -308,7 +305,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     pinDoc(sidebar, createGroup(sidebar, "Reading"), UUID);
 
     const host = await openApp(`/${WORKSPACE}/${UUID}`);
-    const trigger = host.querySelector<HTMLButtonElement>(".ub-actions-trigger");
+    const trigger = within(host).getByRole("button", { name: "Document actions" });
     expect(trigger?.getAttribute("aria-label")).toBe("Document actions");
 
     openActions(host);
@@ -320,18 +317,16 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
 
     act(() => trigger?.click());
-    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(screen.queryAllByRole("alertdialog", { hidden: true })).toHaveLength(0);
     openActions(host);
     act(() => action("Archive document")?.click());
-    const dialog = document.querySelector('[role="alertdialog"]');
+    const dialog = screen.getByRole("alertdialog", { name: "Archive Retired protocol?" });
     expect(dialog?.textContent).toContain("Archive Retired protocol?");
     expect(dialog?.textContent).toContain("read-only");
     expect(dialog?.textContent).toContain("Restore");
 
     act(() => {
-      [...(dialog?.querySelectorAll("button") ?? [])]
-        .find((button) => button.textContent === "Cancel")
-        ?.click();
+      within(dialog).getByRole("button", { name: "Cancel" }).click();
     });
     // Dialog restores its trigger after the content's unmount autofocus runs.
     await act(async () => {
@@ -343,12 +338,10 @@ describe("an archived document is readable, says so, and offers one way back", (
     openActions(host);
     act(() => action("Archive document")?.click());
     act(() => {
-      document
-        .querySelector<HTMLButtonElement>('[data-slot=alert-dialog-action]')
-        ?.click();
+      screen.getByRole("button", { name: "Archive document" }).click();
     });
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
-    expect(host.querySelector(".ub-actions-trigger")).toBeNull();
+    expect(within(host).queryByRole("button", { name: "Document actions" })).toBeNull();
     expect(document.activeElement).toBe(restoreButton(host));
     // The archive took the pin with it (#957): a document that has left every
     // other listing is not an entry point, so it leaves the sidebar too.
@@ -361,7 +354,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     // tombstone only: coming back is not being an entry point again, and
     // re-pinning stays the reader's deliberate act.
     expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
-    const title = host.querySelector<HTMLInputElement>(".ub-title");
+    const title = within(host).getByPlaceholderText<HTMLInputElement>("Untitled");
     title?.focus();
     act(() => tombstoneDirectoryEntry(directory, UUID));
     expect(document.activeElement).toBe(title);
@@ -397,11 +390,7 @@ describe("an archived document is readable, says so, and offers one way back", (
       const host = await openApp(`/${WORKSPACE}/${UUID}`);
       openActions(host);
       expect(action("Archive document")).toBeUndefined();
-      const unavailable = [
-        ...document.querySelectorAll<HTMLElement>(
-          "[data-slot=dropdown-menu-item]",
-        ),
-      ].find((item) => item.textContent?.startsWith("Archive unavailable"));
+      const unavailable = screen.getByRole("menuitem", { name: /^Archive unavailable/ });
       expect(unavailable?.getAttribute("aria-disabled")).toBe("true");
 
       // Saying so in place means saying so instead of doing it: no
@@ -412,7 +401,7 @@ describe("an archived document is readable, says so, and offers one way back", (
           new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
         );
       });
-      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(screen.queryAllByRole("alertdialog", { hidden: true })).toHaveLength(0);
       expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
       expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
     });
@@ -438,18 +427,16 @@ describe("an archived document is readable, says so, and offers one way back", (
       const host = await openApp(`/${WORKSPACE}/${UUID}`);
       openActions(host);
       act(() => action("Archive document")?.click());
-      expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+      expect(screen.queryByRole("alertdialog", { name: "Archive Retired protocol?" })).not.toBeNull();
 
       emitStatus(roomName, { writable: false });
       act(() => {
-        document
-          .querySelector<HTMLButtonElement>('[data-slot=alert-dialog-action]')
-          ?.click();
+        screen.getByRole("button", { name: "Archive document" }).click();
       });
 
       // In place: the confirmation is still there, and it now explains itself
       // instead of pretending the archive happened.
-      const dialog = document.querySelector('[role="alertdialog"]');
+      const dialog = screen.getByRole("alertdialog", { name: "Archive Retired protocol?" });
       expect(dialog?.textContent).toContain("Archive unavailable");
       expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
       expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
@@ -457,9 +444,7 @@ describe("an archived document is readable, says so, and offers one way back", (
       // And it goes back to being the archive it was once the room returns.
       emitStatus(roomName, { writable: true });
       act(() => {
-        document
-          .querySelector<HTMLButtonElement>('[data-slot=alert-dialog-action]')
-          ?.click();
+        within(dialog).getByRole("button", { name: "Archive document" }).click();
       });
       expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
       expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
@@ -475,11 +460,11 @@ describe("an archived document is readable, says so, and offers one way back", (
     tombstoneDirectoryEntry(directory, UUID);
     const host = await openApp(`/${WORKSPACE}/${UUID}`);
 
-    expect(host.querySelector(".ub-restore-unavailable")).toBeNull();
+    expect(within(host).queryByText("Restore is unavailable while the directory is not ready to write.")).toBeNull();
     for (const connected of [true, false]) {
       emitStatus(directoryName, { writable: false, connected });
       expect(restoreButton(host)?.disabled).toBe(true);
-      expect(host.querySelector(".ub-restore-unavailable")?.textContent).toContain(
+      expect(within(host).getByText("Restore is unavailable while the directory is not ready to write.").textContent).toContain(
         "Restore is unavailable while the directory is not ready to write.",
       );
       act(() => restoreButton(host)?.click());
@@ -488,7 +473,7 @@ describe("an archived document is readable, says so, and offers one way back", (
 
     emitStatus(directoryName, { writable: true, connected: true });
     expect(restoreButton(host)?.disabled).toBe(false);
-    expect(host.querySelector(".ub-restore-unavailable")).toBeNull();
+    expect(within(host).queryByText("Restore is unavailable while the directory is not ready to write.")).toBeNull();
   });
 
   it("follows the directory tombstone in both directions, under an open pane", async () => {
@@ -516,8 +501,10 @@ describe("an archived document is readable, says so, and offers one way back", (
     // Read-only, and no chrome left that would write around it.
     expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
     expect(prose(host)?.getAttribute("aria-readonly")).toBe("true");
-    expect(host.querySelector<HTMLInputElement>(".ub-title")?.readOnly).toBe(true);
-    expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
+    expect(within(host).getByPlaceholderText<HTMLInputElement>("Untitled").readOnly).toBe(true);
+    // Caret chrome is layout-hidden in jsdom. Label queries preserve the proof
+    // that the control is mounted only while editing is allowed.
+    expect(within(host).queryByLabelText("Insert block below")).toBeNull();
 
     // ---- Restore is the one action, and it is a real restore ----
     act(() => restoreButton(host)?.click());
@@ -525,8 +512,8 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(banner(host)).toBeNull();
     expect(prose(host)?.getAttribute("contenteditable")).toBe("true");
     expect(prose(host)?.getAttribute("aria-readonly")).toBe("false");
-    expect(host.querySelector<HTMLInputElement>(".ub-title")?.readOnly).toBe(false);
-    expect(host.querySelector('[aria-label="Insert block below"]')).not.toBeNull();
+    expect(within(host).getByPlaceholderText<HTMLInputElement>("Untitled").readOnly).toBe(false);
+    expect(within(host).queryByLabelText("Insert block below")).not.toBeNull();
     // Lifted on the *other* client too, which is what "reappears in listings"
     // means: the second replica lists it again without asking for it.
     expect(getDirectoryEntry(peer, UUID)?.deleted).toBeUndefined();
@@ -541,12 +528,12 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(prose(host)).toBe(bound);
     expect(bound?.getAttribute("contenteditable")).toBe("false");
     expect(bound?.getAttribute("aria-readonly")).toBe("true");
-    expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
+    expect(within(host).queryByLabelText("Insert block below")).toBeNull();
 
     // The title's *write* is guarded, not just its field. `readOnly` is a
     // statement to the browser about typing; a change event that reaches the
     // handler by another route must still not reach the document.
-    const title = host.querySelector<HTMLInputElement>(".ub-title");
+    const title = within(host).getByPlaceholderText<HTMLInputElement>("Untitled");
     act(() => typeInto(title, "typed anyway"));
     expect(getMeta(ydoc).title).toBe("Retired protocol");
   });
@@ -616,8 +603,12 @@ describe("starting a thread requires a writable document", () => {
       act(() => editor.commands.setTextSelection({ from: 1, to: 12 }));
       expect(editor.state.selection.empty).toBe(false);
       expect(editor.state.doc.textBetween(1, 12)).toBe("still every");
+      // The portal wrapper has no accessible handle; this same structural query
+      // must find it after writing is restored below.
       expect(document.querySelector('[data-slot="selection-composer"]')).toBeNull();
-      expect(document.querySelector('button[aria-label="Comment"]')).toBeNull();
+      // Floating controls lack measurable geometry in jsdom; query the label
+      // so this checks mounting rather than computed visibility.
+      expect(screen.queryByLabelText("Comment")).toBeNull();
       expect(listAnnotations(ydoc)).toEqual([]);
       expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
 
@@ -626,15 +617,18 @@ describe("starting a thread requires a writable document", () => {
         if (cause === "archived") restoreButton(host)?.click();
         else emitStatus(docRoom, { writable: true });
       });
-      const comment = document.querySelector<HTMLButtonElement>(
-        '[data-slot="selection-composer"] button[aria-label="Comment"]',
-      );
+      const composer = document.querySelector<HTMLElement>('[data-slot="selection-composer"]');
+      expect(composer).not.toBeNull();
+      const comment = screen.getByLabelText<HTMLButtonElement>("Comment");
+      expect(composer?.contains(comment)).toBe(true);
       expect(comment?.textContent).toBe("Comment");
       act(() => comment?.click());
-      expect(document.querySelector('[data-slot="selection-excerpt"]')?.textContent).toBe(
+      expect(within(composer as HTMLElement).getByText("still every").textContent).toBe(
         "still every",
       );
-      expect(document.querySelector('[data-slot="selection-composer"] textarea')).not.toBeNull();
+      const field = within(composer as HTMLElement).getByPlaceholderText(/^Comment as /);
+      expect(field).not.toBeNull();
+      expect(field).toBeInstanceOf(HTMLTextAreaElement);
       expect(listAnnotations(ydoc)).toEqual([]);
       expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
     });

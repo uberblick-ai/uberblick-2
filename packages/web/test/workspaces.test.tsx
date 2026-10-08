@@ -24,6 +24,7 @@
  */
 
 import { describe, expect, it, beforeEach, vi } from "vitest";
+import { screen, within } from "@testing-library/react";
 import { act, render } from "./react-render.js";
 import type { ReactElement } from "react";
 import { WorkspaceSwitcher } from "../src/ui/WorkspaceSwitcher.js";
@@ -105,7 +106,7 @@ function Probe({ configured }: { configured: readonly string[] }): ReactElement 
 
 /** The sidebar's header control — what the reader sees before opening it. */
 function trigger(host: HTMLElement): HTMLButtonElement {
-  return host.querySelector<HTMLButtonElement>(".ub-workspace") as HTMLButtonElement;
+  return within(host).getByRole<HTMLButtonElement>("button", { name: /^(Uberblick|Product Research)$/ });
 }
 
 /**
@@ -125,14 +126,13 @@ function open(host: HTMLElement): void {
 
 /** The menu is portalled to <body>, so it is read from the document. */
 function items(): HTMLElement[] {
-  return [...document.querySelectorAll<HTMLElement>("[data-slot=dropdown-menu-item]")];
+  return within(screen.getByRole("menu")).getAllByRole("menuitem");
 }
 
 /** The workspace rows the menu offers, in order — management is not a workspace. */
 function offered(): string[] {
   return items()
-    .filter((item) => item.querySelector(".ub-menu-text") !== null)
-    .map((item) => item.querySelector(".ub-menu-text")?.textContent ?? "");
+    .map((item) => within(item).getByText(/^(Uberblick|Product Research)$/).textContent ?? "");
 }
 
 /** jsdom has neither, and Radix's floating surface uses both. */
@@ -161,7 +161,7 @@ describe("switching workspace is navigating to it", () => {
     expect(items()[1]?.hasAttribute("aria-current")).toBe(false);
 
     act(() => {
-      items().find((item) => item.textContent === "Product Research")?.click();
+      within(screen.getByRole("menu")).getByRole("menuitem", { name: "Product Research" }).click();
     });
 
     // The address moved, and it is the *list* of the other workspace — not the

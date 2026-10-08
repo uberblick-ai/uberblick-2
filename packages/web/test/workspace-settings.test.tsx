@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
+import { screen, within } from "@testing-library/react";
 import { act, renderSettled, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
 import {
@@ -147,12 +148,11 @@ function peerOf(local: Y.Doc): Y.Doc {
 
 function facts(host: HTMLElement): Map<string, string> {
   return new Map(
-    [...host.querySelectorAll<HTMLElement>("[data-settings-facts] > div")].map(
-      (row) => [
-        row.querySelector("dt")?.textContent ?? "",
-        row.querySelector("dd")?.textContent ?? "",
-      ],
-    ),
+    within(host).getAllByRole("term").map((term) => [
+      term.textContent ?? "",
+      // A definition-list row has no role; its term identifies the paired fact.
+      within(term.parentElement as HTMLElement).getByRole("definition").textContent ?? "",
+    ]),
   );
 }
 
@@ -245,8 +245,8 @@ it("waits for server state, seeds once, and keeps a retired-only reading offline
   const host = await mountTags(room.connection);
 
   expect(host.textContent).toContain("Waiting for the tag catalog");
-  expect(host.querySelector("input")).toBeNull();
-  expect(host.querySelector("[data-tag-list]")).toBeNull();
+  expect(within(host).queryByRole("textbox", { name: "Create a tag" })).toBeNull();
+  expect(within(host).queryAllByRole("list")).toHaveLength(0);
 
   room.update({
     connected: true,
@@ -257,8 +257,10 @@ it("waits for server state, seeds once, and keeps a retired-only reading offline
   });
   await act(async () => {});
   expect(
-    [...host.querySelectorAll("#ub-active-tags + [data-tag-list] > li")].map(
-      (row) => row.firstElementChild?.textContent,
+    within(within(host).getByRole("region", { name: "Active" })).getAllByRole("listitem").map(
+      // The tag is repeated in the button's screen-reader text; the row's
+      // visible label precedes that second occurrence.
+      (row) => within(row).getAllByText(/^[a-z0-9-]+$/)[0]?.textContent,
     ),
   ).toEqual(EXAMPLE_TAGS.map((entry) => entry.name));
 
@@ -269,20 +271,20 @@ it("waits for server state, seeds once, and keeps a retired-only reading offline
   });
   expect(host.textContent).toContain("No active tags.");
   expect(
-    host.querySelectorAll("#ub-retired-tags + [data-tag-list] > li"),
+    within(within(host).getByRole("region", { name: "Retired" })).getAllByRole("listitem"),
   ).toHaveLength(EXAMPLE_TAGS.length);
 
   room.update({ connected: false, synced: false, writable: false });
   expect(host.textContent).not.toContain("Waiting for the tag catalog");
   expect(host.textContent).toContain("Tag changes are unavailable");
-  const controls = [...host.querySelectorAll<HTMLButtonElement>("button")];
+  const controls = within(host).getAllByRole<HTMLButtonElement>("button");
   expect(controls).toHaveLength(EXAMPLE_TAGS.length + 1);
   expect(controls.every((button) => button.disabled)).toBe(true);
-  expect(host.querySelector<HTMLInputElement>("input")?.disabled).toBe(true);
+  expect(within(host).getByRole<HTMLInputElement>("textbox", { name: "Create a tag" }).disabled).toBe(true);
 
   room.update({ connected: true, synced: true, writable: true });
   expect(
-    [...host.querySelectorAll<HTMLButtonElement>("[data-tag-list] button")].every(
+    within(within(host).getByRole("region", { name: "Retired" })).getAllByRole<HTMLButtonElement>("button", { name: /^Restore/ }).every(
       (button) => !button.disabled,
     ),
   ).toBe(true);
@@ -295,17 +297,14 @@ it("validates unique names and converges create, retire, and restore with a peer
   const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
   const peer = peerOf(room.connection.ydoc);
   const host = await mountTags(room.connection);
-  const input = host.querySelector<HTMLInputElement>("#ub-new-tag");
-  const submit = host.querySelector<HTMLButtonElement>(
-    "form button[type=submit]",
-  );
-  if (input === null || submit === null) throw new Error("the create form is missing");
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Create a tag" });
+  const submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Create" });
 
   act(() => {
     typeInto(input, "Needs spaces");
     submit.click();
   });
-  expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+  expect(within(host).getByRole("alert").textContent).toBe(
     "Use 1–30 lowercase letters or numbers, separated by single hyphens.",
   );
 
@@ -313,7 +312,7 @@ it("validates unique names and converges create, retire, and restore with a peer
     typeInto(input, "auth");
     submit.click();
   });
-  expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+  expect(within(host).getByRole("alert").textContent).toBe(
     "“auth” is already an active tag.",
   );
 
@@ -324,10 +323,7 @@ it("validates unique names and converges create, retire, and restore with a peer
   const created = listTagCatalog(peer).find((entry) => entry.name === "product");
   expect(created).toMatchObject({ name: "product", state: "active" });
 
-  const productRow = [...host.querySelectorAll("[data-tag-list] li")].find(
-    (row) => row.firstElementChild?.textContent === "product",
-  );
-  act(() => productRow?.querySelector<HTMLButtonElement>("button")?.click());
+  act(() => within(within(host).getByRole("region", { name: "Active" })).getByRole<HTMLButtonElement>("button", { name: /^Retire\s*product$/ }).click());
   expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)?.state).toBe(
     "retired",
   );
@@ -336,14 +332,11 @@ it("validates unique names and converges create, retire, and restore with a peer
     typeInto(input, "product");
     submit.click();
   });
-  expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+  expect(within(host).getByRole("alert").textContent).toBe(
     "“product” is retired. Restore it from the retired list.",
   );
 
-  const retiredProduct = [...host.querySelectorAll("[data-tag-list] li")].find(
-    (row) => row.firstElementChild?.textContent === "product",
-  );
-  act(() => retiredProduct?.querySelector<HTMLButtonElement>("button")?.click());
+  act(() => within(within(host).getByRole("region", { name: "Retired" })).getByRole<HTMLButtonElement>("button", { name: /^Restore\s*product$/ }).click());
   expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)?.state).toBe(
     "active",
   );
@@ -356,11 +349,8 @@ it("validates unique names and converges create, retire, and restore with a peer
 
 /** The Retire or Restore control of one entry, by its accessible name. */
 function lifecycle(host: HTMLElement, name: string): HTMLButtonElement {
-  const control = [
-    ...host.querySelectorAll<HTMLButtonElement>("[data-tag-list] button"),
-  ].find((button) => button.textContent === name);
-  if (control === undefined) throw new Error(`no “${name}” control`);
-  return control;
+  // Without the Tailwind stylesheet, jsdom joins the sr-only tag to the verb.
+  return within(host).getByRole<HTMLButtonElement>("button", { name: new RegExp(`^${name.replace(" ", "\\s*")}$`) });
 }
 
 /** Activate a control the way a keyboard does: on the focused element. */
@@ -438,14 +428,14 @@ it("renames only shared workspace state and refuses invalid drafts without chang
   createTagCatalogEntry(settings.connection.ydoc, "product");
   const catalog = listTagCatalog(settings.connection.ydoc);
   const host = await mount(directory.connection, ENDPOINT, settings.connection);
-  const input = host.querySelector<HTMLInputElement>("#ub-workspace-name") as HTMLInputElement;
-  const submit = host.querySelector<HTMLButtonElement>("form button[type=submit]") as HTMLButtonElement;
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Workspace name" });
+  const submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Save" });
   expect(input.value).toBe("Current name");
 
   for (const invalid of ["   ", "x".repeat(65), "Control\u0007name", "Format\u200bname"]) {
     act(() => typeInto(input, invalid));
     act(() => submit.click());
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain("1–64 characters after trimming");
+    expect(within(host).getByRole("alert").textContent).toContain("1–64 characters after trimming");
     expect(getWorkspaceName(settings.connection.ydoc)).toBe("Current name");
   }
   act(() => typeInto(input, "  Product Research  "));
@@ -462,8 +452,8 @@ it("follows shared names while pristine and preserves an edited rename draft", a
   const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
   const peer = peerOf(settings.connection.ydoc);
   const host = await mount(null, ENDPOINT, settings.connection);
-  const input = host.querySelector<HTMLInputElement>("#ub-workspace-name") as HTMLInputElement;
-  const submit = host.querySelector<HTMLButtonElement>("form button[type=submit]") as HTMLButtonElement;
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Workspace name" });
+  const submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Save" });
   expect(input.value).toBe("");
 
   act(() => setWorkspaceName(peer, "Arriving name"));
@@ -490,9 +480,10 @@ it("waits for settings state and refuses renaming when its room cannot write", a
   const settings = statusRoom({ ...SYNCED, hasReceivedServerState: false }, settingsRoom(WORKSPACE.uuid));
   setWorkspaceName(settings.connection.ydoc, "Existing name");
   const host = await mount(null, ENDPOINT, settings.connection);
-  const input = host.querySelector<HTMLInputElement>("#ub-workspace-name") as HTMLInputElement;
-  const form = host.querySelector<HTMLFormElement>("form") as HTMLFormElement;
-  const button = form.querySelector<HTMLButtonElement>("button") as HTMLButtonElement;
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Workspace name" });
+  // Use the input's native form relationship to force submit while disabled.
+  const form = input.form as HTMLFormElement;
+  const button = within(host).getByRole<HTMLButtonElement>("button", { name: "Save" });
   expect(input.disabled).toBe(true);
   expect(button.disabled).toBe(true);
   expect(input.value).toBe("");
@@ -584,22 +575,18 @@ async function mountAccess(local = true, catalogConnection: RoomConnection | nul
   return mounted.container;
 }
 
-function accessButton(host: ParentNode, label: string): HTMLButtonElement {
-  const button = [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) =>
-    item.getAttribute("aria-label") === label || item.textContent === label);
-  if (button === undefined) throw new Error(`missing button: ${label}`);
-  return button;
+function accessButton(host: HTMLElement, label: string): HTMLButtonElement {
+  return within(host).getByRole<HTMLButtonElement>("button", { name: label });
 }
-async function clickAccess(host: ParentNode, label: string): Promise<void> {
+async function clickAccess(host: HTMLElement, label: string): Promise<void> {
   await act(async () => accessButton(host, label).click());
 }
 async function lookUp(host: HTMLElement, handle = "old-agent-login"): Promise<void> {
-  act(() => typeInto(host.querySelector<HTMLInputElement>("#ub-github-account") as HTMLInputElement, handle));
+  act(() => typeInto(within(host).getByRole<HTMLInputElement>("textbox", { name: "GitHub account" }), handle));
   await clickAccess(host, "Look up account");
 }
-function selectAccess(host: ParentNode, label: string, value: AccessRole): void {
-  const select = host.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`);
-  if (select === null) throw new Error(`missing select: ${label}`);
+function selectAccess(host: HTMLElement, label: string, value: AccessRole): void {
+  const select = within(host).getByRole<HTMLSelectElement>("combobox", { name: label });
   act(() => { select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); });
 }
 
@@ -612,12 +599,12 @@ it("confirms the hub-resolved login and account ID before the default member gra
   await lookUp(host);
   expect(host.textContent).toContain("current-agent-login (GitHub account 9001)");
   expect(hub.calls.some(({ action }) => action.operation === "grant-member")).toBe(false);
-  expect(host.querySelector<HTMLSelectElement>('select[aria-label="Role for new account"]')?.value).toBe("member");
+  expect(within(host).getByRole<HTMLSelectElement>("combobox", { name: "Role for new account" }).value).toBe("member");
   await clickAccess(host, "Confirm and add account");
   expect(hub.calls.find(({ action }) => action.operation === "grant-member")?.action).toEqual({
     operation: "grant-member", workspaceId: WORKSPACE.uuid, githubAccountId: "9001", role: "member",
   });
-  expect(host.querySelector('table[aria-label="Members"]')?.textContent).toContain("current-agent-login");
+  expect(within(host).getByRole("table", { name: "Members" }).textContent).toContain("current-agent-login");
   expect(host.textContent).toContain("current-agent-login added as member.");
   expect(hub.calls.filter(({ action }) => action.operation === "list-members")).toHaveLength(2);
   expect(Y.encodeStateAsUpdate(catalog.connection.ydoc)).toEqual(before);
@@ -637,7 +624,7 @@ it("requires an explicit admin choice and shows a concurrent existing grant with
   expect(host.textContent).toContain("current-agent-login is already a member as member.");
   await lookUp(host);
   expect(host.textContent).toContain("Already a member as member.");
-  expect([...host.querySelectorAll("button")].some((button) => button.textContent === "Confirm and add account")).toBe(false);
+  expect(within(host).queryByRole("button", { name: "Confirm and add account" })).toBeNull();
 });
 
 it.each([ ["account-not-found", "No such GitHub account"], ["lookup-unavailable", "lookup is unavailable"] ])(
@@ -647,7 +634,7 @@ it.each([ ["account-not-found", "No such GitHub account"], ["lookup-unavailable"
     await lookUp(host);
     expect(host.textContent).toContain(message);
     expect(hub.calls.some(({ action }) => action.operation === "grant-member")).toBe(false);
-    expect(host.querySelector('select[aria-label="Role for new account"]')).toBeNull();
+    expect(within(host).queryByRole("combobox", { name: "Role for new account" })).toBeNull();
   },
 );
 
@@ -657,25 +644,25 @@ it.each(["@octocat", "https://github.com/octocat", "octo cat"])(
     hub.setOverride((action) => action.operation === "resolve-account"
       ? new Response(JSON.stringify({ status: "invalid-request" }), { status: 400 }) : null);
     await lookUp(host, handle);
-    expect(host.querySelector('[role="alert"]')?.textContent).toBe("Enter a GitHub handle, without @, a link or spaces.");
+    expect(within(host).getByRole("alert").textContent).toBe("Enter a GitHub handle, without @, a link or spaces.");
     expect(host.textContent).not.toContain("The hub cannot be reached");
-    expect(host.querySelector('table[aria-label="Members"]')?.textContent).toContain(ADMIN.githubUsername);
+    expect(within(host).getByRole("table", { name: "Members" }).textContent).toContain(ADMIN.githubUsername);
     expect(hub.calls.filter(({ action }) => action.operation === "list-members")).toHaveLength(1);
     expect(hub.calls.some(({ action }) => action.operation === "grant-member")).toBe(false);
-    expect(host.querySelector('select[aria-label="Role for new account"]')).toBeNull();
+    expect(within(host).queryByRole("combobox", { name: "Role for new account" })).toBeNull();
   },
 );
 
 it("offers members only their role and own devices with sign-in times and this-computer marker", async () => {
   const hub = accessHub({ role: "member" }); const host = await mountAccess();
   expect(host.textContent).toContain("Your role: member.");
-  expect(host.querySelector('table[aria-label="Members"]')).toBeNull();
-  expect(host.querySelector("#ub-github-account")).toBeNull();
+  expect(within(host).queryByRole("table", { name: "Members" })).toBeNull();
+  expect(within(host).queryByRole("textbox", { name: "GitHub account" })).toBeNull();
   expect(hub.calls.some(({ action }) => action.operation === "list-members")).toBe(false);
-  const table = host.querySelector('table[aria-label="Your devices"]');
-  expect(table?.querySelectorAll("tbody tr")).toHaveLength(2);
+  const table = within(host).getByRole("table", { name: "Your devices" });
+  expect(within(table).getAllByRole("row").slice(1)).toHaveLength(2);
   expect(table?.textContent).toContain("This computer");
-  expect(table?.querySelector("time")?.getAttribute("datetime")).toBe("2026-10-05T10:00:00.000Z");
+  expect(within(table).getByText(new Date(Date.UTC(2026, 9, 5, 10)).toLocaleString()).getAttribute("datetime")).toBe("2026-10-05T10:00:00.000Z");
   expect(table?.textContent).not.toContain("another-person");
 });
 
@@ -685,13 +672,13 @@ it("keeps account-scoped own-device revocation available after a forbidden role 
   expect(accessButton(host, "Revoke device other-own-device").disabled).toBe(false);
   await clickAccess(host, "Revoke device other-own-device");
   expect(hub.calls.some(({ action }) => action.operation === "revoke-device")).toBe(false);
-  const dialog = document.querySelector('[role="alertdialog"]');
+  const dialog = screen.getByRole("alertdialog", { name: "Revoke device?" });
   expect(dialog?.textContent).toContain("This one device of yours loses access to this hub");
   expect(dialog?.textContent).toContain("Documents already downloaded stay where they are");
   expect(dialog?.textContent).not.toContain("every device");
-  await clickAccess(dialog as Element, "Revoke device");
+  await clickAccess(dialog, "Revoke device");
   expect(hub.calls.find(({ action }) => action.operation === "revoke-device")?.action).toEqual({ operation: "revoke-device", deviceId: "other-own-device" });
-  expect(host.querySelector('table[aria-label="Your devices"]')?.textContent).not.toContain("other-own-device");
+  expect(within(host).getByRole("table", { name: "Your devices" }).textContent).not.toContain("other-own-device");
 });
 
 it("shows a hub role-change refusal and keeps the hub's unchanged role", async () => {
@@ -700,22 +687,23 @@ it("shows a hub role-change refusal and keeps the hub's unchanged role", async (
   selectAccess(host, `Role for ${ADMIN.githubUsername}`, "member");
   await clickAccess(host, `Save role for ${ADMIN.githubUsername}`);
   expect(host.textContent).toContain("The hub refused this change: the last admin cannot be removed or demoted.");
-  expect(host.querySelector('table[aria-label="Members"] tbody tr td')?.textContent).toBe("admin");
-  expect(host.querySelector<HTMLSelectElement>(`select[aria-label="Role for ${ADMIN.githubUsername}"]`)?.value).toBe("admin");
+  const members = within(within(host).getByRole("table", { name: "Members" }));
+  expect(within(members.getAllByRole("row")[1] as HTMLElement).getAllByRole("cell")[0]?.textContent).toBe("admin");
+  expect(within(host).getByRole<HTMLSelectElement>("combobox", { name: `Role for ${ADMIN.githubUsername}` }).value).toBe("admin");
   expect(host.textContent).not.toContain("role changed to member");
 });
 
 it("confirms member removal on every device, then preserves acknowledged self-removal after access is forbidden", async () => {
   const hub = accessHub(); const host = await mountAccess();
   await clickAccess(host, `Remove ${ADMIN.githubUsername}`);
-  const dialog = document.querySelector('[role="alertdialog"]');
+  const dialog = screen.getByRole("alertdialog", { name: `Remove ${ADMIN.githubUsername}?` });
   expect(dialog?.textContent).toContain("This person loses this workspace on every device");
   expect(dialog?.textContent).toContain("Documents already downloaded stay where they are");
   expect(hub.calls.some(({ action }) => action.operation === "remove-member")).toBe(false);
-  await clickAccess(dialog as Element, "Remove member");
+  await clickAccess(dialog, "Remove member");
   expect(host.textContent).toContain("signed-in-admin removed from this workspace.");
   expect(host.textContent).toContain("The hub refused access");
-  expect(host.querySelector('table[aria-label="Members"]')).toBeNull();
+  expect(within(host).queryByRole("table", { name: "Members" })).toBeNull();
   expect(accessButton(host, "Revoke device current-device").disabled).toBe(false);
 });
 
@@ -726,14 +714,14 @@ it("acknowledges applied closure failure for this-computer revocation despite si
     hub.revokeCurrent(); return { status: "closure-failed", applied: true, hub: ACCESS_HUB };
   });
   await clickAccess(host, "Revoke device current-device");
-  const dialog = document.querySelector('[role="alertdialog"]');
+  const dialog = screen.getByRole("alertdialog", { name: "Revoke this computer?" });
   expect(dialog?.textContent).toContain("sync with the hub stops until ub auth login https://hub.example.test is run again");
-  await clickAccess(dialog as Element, "Revoke device");
+  await clickAccess(dialog, "Revoke device");
   expect(host.textContent).toContain("This computer was revoked.");
   expect(host.textContent).toContain("The change was applied");
   expect(host.textContent).toContain("Sign-in is required");
-  expect([...host.querySelectorAll('[role="status"]')].some((item) => item.textContent?.includes("This computer was revoked"))).toBe(true);
-  expect(host.querySelector('table[aria-label="Your devices"]')).toBeNull();
+  expect(within(host).getAllByRole("status").some((item) => item.textContent?.includes("This computer was revoked"))).toBe(true);
+  expect(within(host).queryByRole("table", { name: "Your devices" })).toBeNull();
 });
 
 it.each([
@@ -745,15 +733,15 @@ it.each([
 ])("offers no changes in %s and gives a recovery step", async (status, message, step) => {
   accessHub({ status }); const host = await mountAccess();
   expect(host.textContent).toContain(message); expect(host.textContent).toContain(step);
-  expect(host.querySelector("table")).toBeNull();
-  expect(host.querySelector("input")).toBeNull();
-  expect([...host.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Refresh access"]);
+  expect(within(host).queryAllByRole("table")).toHaveLength(0);
+  expect(within(host).queryAllByRole("textbox")).toHaveLength(0);
+  expect(within(host).getAllByRole("button").map((button) => button.textContent)).toEqual(["Refresh access"]);
 });
 
 it("does not call the local management route from a direct-served page", async () => {
   const hub = accessHub(); const host = await mountAccess(false);
   expect(host.textContent).toContain("Run ub open in its project");
-  expect(hub.calls).toHaveLength(0); expect(host.querySelector("button")).toBeNull();
+  expect(hub.calls).toHaveLength(0); expect(within(host).queryAllByRole("button")).toHaveLength(0);
 });
 
 it("accepts the served workspace's decorated segment and makes new live reads on every visit", async () => {

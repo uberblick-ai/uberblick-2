@@ -1,6 +1,7 @@
 /** New-document creation crosses both the directory and new room admission gates. */
 
 import { act, renderSettled } from "./react-render.js";
+import { within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import {
@@ -94,9 +95,7 @@ afterEach(() => {
 it("writes neither room until the new room is admitted", async () => {
   const { container: host } = await renderSettled(<App />);
 
-  const create = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-    (button) => button.textContent?.includes("new doc"),
-  );
+  const create = within(host).getByRole<HTMLButtonElement>("button", { name: "+ new doc" });
   expect(create?.disabled).toBe(false);
   await act(async () => create?.click());
 
@@ -123,9 +122,7 @@ it("writes neither room until the new room is admitted", async () => {
 it("cancels a deferred create when the reader leaves its room", async () => {
   const { container: host } = await renderSettled(<App />);
 
-  const create = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-    (button) => button.textContent?.includes("new doc"),
-  );
+  const create = within(host).getByRole<HTMLButtonElement>("button", { name: "+ new doc" });
   await act(async () => create?.click());
   const pending = [...rooms.values()].find(
     ({ connection }) =>
@@ -137,7 +134,7 @@ it("cancels a deferred create when the reader leaves its room", async () => {
   const uuid = parseRoom(pending.connection.room).uuid;
 
   await act(async () =>
-    host.querySelector<HTMLButtonElement>(".ub-all-open-entry")?.click(),
+    within(host).getByRole("button", { name: "All docs" }).click(),
   );
   await act(async () => {
     update(pending, { connected: true, synced: true, writable: true });
@@ -156,9 +153,7 @@ it.each(["document", "directory"] as const)(
   async (refused) => {
     const { container: host } = await renderSettled(<App />);
 
-    const create = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent?.includes("new doc"),
-    );
+    const create = within(host).getByRole<HTMLButtonElement>("button", { name: "+ new doc" });
     await act(async () => create?.click());
     const directory = room(directoryRoom(WORKSPACE));
     const pending = [...rooms.values()].find(

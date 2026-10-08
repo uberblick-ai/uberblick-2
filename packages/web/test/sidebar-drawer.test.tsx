@@ -4,6 +4,7 @@
  * Radix owns the modal's focus trap, Escape and outside dismissal.
  */
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { screen, within } from "@testing-library/react";
 import { act, renderSettled, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
 import {
@@ -147,19 +148,19 @@ async function openApp(path = `/${WORKSPACE}/${ONE}`): Promise<HTMLElement> {
 }
 
 function drawer(): HTMLElement | null {
-  return document.querySelector<HTMLElement>('[role="dialog"][data-slot="sheet-content"]');
+  // A portaled workspace menu temporarily hides the drawer's dialog role.
+  // Its title still identifies the mounted boundary, including during menus.
+  return screen.queryByText("Sidebar")?.closest<HTMLElement>('[role="dialog"]') ?? null;
 }
 
 function labelledButton(label: string): HTMLButtonElement {
-  const button = document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-  if (button === null) throw new Error(`Missing ${label} control`);
-  return button;
+  return screen.getByRole<HTMLButtonElement>("button", { name: label });
 }
 
-function sidebarButton(selector: string): HTMLButtonElement {
-  const button = drawer()?.querySelector<HTMLButtonElement>(selector);
-  if (button === null || button === undefined) throw new Error(`Missing sidebar ${selector}`);
-  return button;
+function sidebarButton(name: string): HTMLButtonElement {
+  const sidebar = drawer();
+  if (sidebar === null) throw new Error("Missing sidebar drawer");
+  return within(sidebar).getByRole<HTMLButtonElement>("button", { name });
 }
 
 async function settleFocus(): Promise<void> {
@@ -179,7 +180,7 @@ async function openDrawer(settings = false): Promise<void> {
 }
 
 async function openWorkspaceMenu(): Promise<void> {
-  const button = sidebarButton(".ub-workspace");
+  const button = sidebarButton(`Unnamed workspace · ${WORKSPACE.slice(0, 8)}`);
   await act(async () => {
     button.focus();
     button.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -188,10 +189,7 @@ async function openWorkspaceMenu(): Promise<void> {
 }
 
 function menuItem(text: string): HTMLElement {
-  const item = [...document.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-item"]')]
-    .find((candidate) => candidate.textContent === text);
-  if (item === undefined) throw new Error(`Missing menu item ${text}`);
-  return item;
+  return screen.getByRole("menuitem", { name: text });
 }
 
 it("keeps the drawer unsaved and closed on load and narrowing with desktop collapse saved", async () => {
@@ -203,7 +201,7 @@ it("keeps the drawer unsaved and closed on load and narrowing with desktop colla
   expect(labelledButton("Show document list")).not.toBeNull();
 
   await openDrawer();
-  expect(drawer()?.querySelector('nav[aria-label="Documents"]')?.hasAttribute("inert"))
+  expect(within(drawer() as HTMLElement).getByRole("navigation", { name: "Documents" }).hasAttribute("inert"))
     .toBe(false);
   await click(labelledButton("Close document list"));
   expect(drawer()).toBeNull();
@@ -213,6 +211,8 @@ it("keeps the drawer unsaved and closed on load and narrowing with desktop colla
   await openDrawer();
   await width.change(false);
   expect(drawer()).toBeNull();
+  // This unnamed layout wrapper exposes desktop state independently of the
+  // mobile dialog; data-state is the contract being asserted.
   expect(host.querySelector('[data-slot="sidebar-wrapper"]')?.getAttribute("data-state"))
     .toBe(preference === "true" ? "collapsed" : "expanded");
   await width.change(true);
@@ -221,14 +221,14 @@ it("keeps the drawer unsaved and closed on load and narrowing with desktop colla
   unmount();
   host = await openApp();
   expect(drawer()).toBeNull();
-  expect(host.querySelector('button[aria-label="Show document list"]')).not.toBeNull();
+  expect(within(host).getByRole("button", { name: "Show document list" })).not.toBeNull();
   expect(stored.get(COLLAPSED_KEY)).toBe(preference);
   expect(writes).not.toContain(COLLAPSED_KEY);
 });
 
 const destinations = [
-  { choice: "another document", selector: `.ub-group-body button[title="Editing"]`, path: `/${WORKSPACE}/${TWO}` },
-  { choice: "Workspace settings", selector: ".ub-settings-entry", path: `/${WORKSPACE}/settings` },
+  { choice: "another document", name: "Editing", path: `/${WORKSPACE}/${TWO}` },
+  { choice: "Workspace settings", name: "Workspace settings", path: `/${WORKSPACE}/settings` },
   { choice: "another workspace", menu: `Unnamed workspace · ${OTHER_WORKSPACE.slice(0, 8)}`, path: `/${OTHER_WORKSPACE}` },
 ];
 
@@ -236,8 +236,10 @@ it("retires each outgoing drawer pane from interaction and assistive navigation"
   await openApp();
 
   function expectMode(settings: boolean): void {
-    const documentsPane = drawer()?.querySelector<HTMLElement>(".ub-document-sidebar");
-    const settingsPane = drawer()?.querySelector<HTMLElement>(".ub-settings-sidebar");
+    // A label query also finds the retired navigation whose role/name is
+    // suppressed by aria-hidden; this asserts mounted boundary state.
+    const documentsPane = within(drawer() as HTMLElement).getByLabelText("Documents");
+    const settingsPane = within(drawer() as HTMLElement).getByLabelText("Workspace settings");
     for (const [pane, retired] of [[documentsPane, settings], [settingsPane, !settings]] as const) {
       expect(pane).not.toBeNull();
       expect(pane?.hasAttribute("inert")).toBe(retired);
@@ -247,10 +249,10 @@ it("retires each outgoing drawer pane from interaction and assistive navigation"
 
   await openDrawer();
   expectMode(false);
-  await click(sidebarButton(".ub-settings-entry"));
+  await click(sidebarButton("Workspace settings"));
   await openDrawer(true);
   expectMode(true);
-  await click(sidebarButton(".ub-settings-back"));
+  await click(sidebarButton(`Back to Unnamed workspace · ${WORKSPACE.slice(0, 8)}`));
   await openDrawer();
   expectMode(false);
 });
@@ -264,7 +266,7 @@ it.each(destinations)("closes and restores focus after choosing $choice", async 
     await openWorkspaceMenu();
     await click(menuItem(destination.menu));
   } else {
-    await click(sidebarButton(destination.selector));
+    await click(sidebarButton(destination.name));
   }
 
   expect(drawer()).toBeNull();
@@ -280,9 +282,8 @@ it.each(destinations)("closes and restores focus after choosing $choice", async 
 it("leaves composing Escape after compositionend (Safari) to the group-name field", async () => {
   await openApp();
   await openDrawer();
-  await click(sidebarButton(".ub-group-add"));
-  const field = drawer()?.querySelector<HTMLInputElement>(".ub-group-rename");
-  if (field === null || field === undefined) throw new Error("Missing group-name field");
+  await click(sidebarButton("+ group"));
+  const field = within(drawer() as HTMLElement).getByRole<HTMLInputElement>("textbox", { name: "Group name" });
   const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
   const groups = readSidebar(sidebar);
   field.value = "日本語";
@@ -293,7 +294,7 @@ it("leaves composing Escape after compositionend (Safari) to the group-name fiel
       key: "Escape", bubbles: true, cancelable: true, isComposing: false, keyCode: 229,
     }));
   });
-  expect(drawer()?.querySelector(".ub-group-rename")).toBe(field);
+  expect(within(drawer() as HTMLElement).getByRole("textbox", { name: "Group name" })).toBe(field);
   expect(field.value).toBe("日本語");
   expect(document.activeElement).toBe(field);
   expect(readSidebar(sidebar)).toEqual(groups);
@@ -304,6 +305,6 @@ it("leaves composing Escape after compositionend (Safari) to the group-name fiel
     key: "Escape", bubbles: true, cancelable: true,
   })));
   expect(drawer()).not.toBeNull();
-  expect(drawer()?.querySelector(".ub-group-rename")).toBeNull();
+  expect(within(drawer() as HTMLElement).queryByRole("textbox", { name: "Group name" })).toBeNull();
   expect(readSidebar(sidebar)).toEqual(groups.slice(0, -1));
 });
