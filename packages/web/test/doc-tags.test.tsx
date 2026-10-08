@@ -199,7 +199,8 @@ describe("the document tag picker", () => {
     const host = await openApp();
 
     expect(picker(host)?.textContent).toContain("sync");
-    expect(within(picker(host)!).getAllByText("sync")).toHaveLength(1);
+    // Pill wrappers have no role/name; count all of them, including unexpected labels.
+    expect(host.querySelectorAll(".ub-tag")).toHaveLength(1);
     expect(within(host).queryByRole("button", { name: "Remove tag sync" })).toBeNull();
     expect(within(host).queryByText(/^(?:Product|Decision)(?: · .+)?$/)).toBeNull();
     // With no group tag on this fixture, neither lifecycle nor group badges
@@ -379,7 +380,8 @@ describe("the document tag picker", () => {
     expect(within(host).getByText("legacy (retired)").textContent).toContain("legacy (retired)");
     expect(within(host).getByText("sync").textContent).toContain("sync");
     // The same pills as the writable header draws, and nothing to open.
-    expect(within(host).getAllByText(/^(?:legacy \(retired\)|sync)$/)).toHaveLength(2);
+    // Pill wrappers have no role/name; count all of them, including unexpected labels.
+    expect(host.querySelectorAll(".ub-tag")).toHaveLength(2);
     expect(picker(host)).toBeNull();
     expect(host.querySelector(".ub-tag-chevron")).toBeNull();
     expect(screen.queryByRole("option")).toBeNull();

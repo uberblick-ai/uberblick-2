@@ -24,10 +24,11 @@ it("closes when the last eligible heading disappears and stays closed when it re
   expect(screen.queryByRole("menu", { name: "Contents 1" })?.textContent).toContain("Install");
 
   await act(async () => setBlockLevel(ydoc, heading, 3));
-  expect(within(host).queryByRole("button", { name: "Contents 1" })).toBeNull();
-  expect(screen.queryByRole("menu", { name: "Contents 1" })).toBeNull();
+  // Nothing stays mounted, even with a changed name or hidden from view.
+  expect(within(host).queryByRole("button", { hidden: true })).toBeNull();
+  expect(screen.queryByRole("menu", { hidden: true })).toBeNull();
 
   await act(async () => setBlockLevel(ydoc, heading, 2));
   expect(within(host).queryByRole("button", { name: "Contents 1" })?.textContent).toContain("Contents 1");
-  expect(screen.queryByRole("menu", { name: "Contents 1" })).toBeNull();
+  expect(screen.queryByRole("menu", { hidden: true })).toBeNull();
 });

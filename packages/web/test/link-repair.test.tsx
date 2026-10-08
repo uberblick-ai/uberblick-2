@@ -315,7 +315,7 @@ function stageTableConflicts(): { ydoc: Y.Doc; first: Y.XmlText; second: Y.XmlTe
 
 function repairButtons(host: HTMLElement): HTMLButtonElement[] {
   const repair = repairOffer(host);
-  return repair === null ? [] : within(repair).getAllByRole<HTMLButtonElement>("button", { name: /^Keep the (document|link):/ });
+  return repair === null ? [] : within(repair).getAllByRole<HTMLButtonElement>("button", { hidden: true });
 }
 
 function buttonSaying(host: HTMLElement, text: string): HTMLButtonElement | null {

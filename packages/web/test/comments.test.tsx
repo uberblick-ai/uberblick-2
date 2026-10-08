@@ -994,7 +994,7 @@ describe("the table-cell selection toolbar", () => {
     try {
       selectCell(decided.editor, 0, 0, 5);
       expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).toBeNull();
-      expect(screen.queryByRole<HTMLButtonElement>("button", { name: "Comment" })?.textContent).toBe("Comment");
+      expect(within(commentComposer()).getAllByRole("button", { hidden: true })[0]?.textContent).toBe("Comment");
       decided.open();
       decided.type("Still discussable");
       decided.submit();
