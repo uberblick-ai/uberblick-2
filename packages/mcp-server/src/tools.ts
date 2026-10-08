@@ -1,7 +1,7 @@
 /**
  * The v0 MCP tool set.
  *
- * Twenty-seven tools and no more: list_tags, create_doc, get_doc, list_docs, search,
+ * Twenty-nine tools and no more: list_tags, create_doc, get_doc, get_data, update_data, list_docs, search,
  * backlinks, find_decisions, edit_block, insert_block, delete_block, set_tags, set_links,
  * set_title, set_description, set_tldr, set_status, set_changelog_suggestion,
  * archive_doc,
@@ -9,7 +9,7 @@
  * export_markdown, sync_status, the four sidebar tools registered from
  * ./sidebar-tools.ts — get_sidebar, pin_doc, unpin_doc, sidebar_group. There is
  * deliberately no whole-document write — every
- * content change names one block — no markdown-import tool, because markdown
+ * prose change names one block and data changes use validated collection operations — no markdown-import tool, because markdown
  * is an export format, and no hard delete: archive_doc tombstones the
  * directory stub and leaves every byte of the document where it was. An
  * archived document is read-only rather than gone — every mutator goes through
@@ -43,6 +43,8 @@ import { json } from "./tools/helpers.js";
 import { registerListTags } from "./tools/list-tags.js";
 import { registerCreateDoc } from "./tools/create-doc.js";
 import { registerGetDoc } from "./tools/get-doc.js";
+import { registerGetData } from "./tools/get-data.js";
+import { registerUpdateData } from "./tools/update-data.js";
 import { registerListDocs } from "./tools/list-docs.js";
 import { registerSearch } from "./tools/search.js";
 import { registerBacklinks } from "./tools/backlinks.js";
@@ -74,6 +76,8 @@ export function registerTools(
   registerListTags(server, context);
   registerCreateDoc(server, context);
   registerGetDoc(server, context);
+  registerGetData(server, context);
+  registerUpdateData(server, context);
   registerListDocs(server, context);
   registerSearch(server, context);
   registerBacklinks(server, context);

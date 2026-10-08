@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { getMeta, listAnnotations, readDecisions } from "@uberblick/schema";
+import { getMeta, listAnnotations, readDecisions, summarizeDocData } from "@uberblick/schema";
 import { failureContract, guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
 import type { ToolContext } from "./context.js";
@@ -30,6 +30,8 @@ export function registerGetDoc(server: McpServer, context: ToolContext): void {
         "has written one — its blocks " +
         "and its annotation threads. Lifecycle documents include `kind` and their compatible `status`; ordinary " +
         "documents omit both. " +
+        "When structured data exists, `data` lists collection names and record counts and names `get_data` " +
+        "for deliberate reads. It contains no schemas or record values; documents without data omit it. " +
         LIFECYCLE_RECORDS_STATE +
         "\n\n" +
         DECISION_EDGES +
@@ -53,6 +55,7 @@ export function registerGetDoc(server: McpServer, context: ToolContext): void {
       await replicas.settle();
       const replica = requireDoc(uuid);
       const meta = getMeta(replica.doc);
+      const collections = summarizeDocData(replica.doc);
       const result = json({
         ...meta,
         ...decisionAuthorityJson(replica),
@@ -64,6 +67,7 @@ export function registerGetDoc(server: McpServer, context: ToolContext): void {
         annotations: listAnnotations(replica.doc).map((annotation) =>
           annotationJson(replica, annotation),
         ),
+        ...(collections === null ? {} : { data: { collections, readWith: "get_data" } }),
       });
       briefing.recordRead(uuid);
       return result;

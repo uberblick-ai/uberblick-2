@@ -96,6 +96,7 @@ const EXPECTED: Record<
   { recoveryClass: string | null; detail: string[] }
 > = {
   data_invalid_input: { recoveryClass: "manual", detail: ["collection", "recordId"] },
+  data_collection_not_found: { recoveryClass: "reread", detail: ["uuid", "collection"] },
   data_schema_invalid: { recoveryClass: "manual", detail: ["collection", "path"] },
   data_record_invalid: { recoveryClass: "manual", detail: ["collection", "recordId", "path"] },
   data_limit_exceeded: {
@@ -228,6 +229,7 @@ describe("the failure contract", () => {
     };
 
     record((await rig.call("get_doc", { uuid: randomUUID() })).payload);
+    record((await rig.call("get_data", { uuid: doc.uuid, collection: "missing" })).payload);
     record((await rig.call("find_decisions", { github_ref: "#1" })).payload);
     record((await rig.call("insert_block", {
       uuid: doc.uuid, type: "table", text: "not a GFM table",

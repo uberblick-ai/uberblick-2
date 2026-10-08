@@ -127,6 +127,7 @@ export const DOCUMENT_MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "restore_doc",
   "annotate",
   "link_range",
+  "update_data",
 ]);
 
 export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
@@ -144,6 +145,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
 export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "list_tags",
   "get_doc",
+  "get_data",
   "list_docs",
   "search",
   "backlinks",
@@ -168,6 +170,10 @@ interface Recovery {
  * the call that finishes it — but never contradict the class.
  */
 const RECOVERIES: Record<string, Recovery> = {
+  data_collection_not_found: {
+    recoveryClass: "reread",
+    guidance: "Call get_data with this uuid and no collection to read the collection summary, then choose an existing collection.",
+  },
   data_invalid_input: {
     recoveryClass: "manual",
     guidance:

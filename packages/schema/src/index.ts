@@ -51,7 +51,7 @@ export {
 } from "./doc.js";
 export type { InitDocOptions } from "./doc.js";
 export {
-  DATA_KEY, DATA_LIMITS, applyDocData, getDocDataEntries, hasDocData, readDocData,
+  DATA_KEY, DATA_LIMITS, applyDocData, getDocDataEntries, hasDocData, readDocData, summarizeDocData,
 } from "./data.js";
 export type { DataCollection, DataIssue, DataOperation, DataRecord, DocData } from "./data.js";
 export { DataError, canonicalJson, compareCodePoints, validateCollectionSchema, validateDataRecord } from "./data-schema.js";
