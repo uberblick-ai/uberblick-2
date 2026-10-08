@@ -30,7 +30,9 @@ Classify each finding:
   meaning-preserving issue edit. Apply a correctable P3 to the body yourself
   and note it in the verdict; the preparer applies a correctable P1 or P2;
 - `owner-boundary` — product or agent authority, safety, or the fundamental
-  work shape needs a person's decision; escalate it yourself.
+  work shape needs a person's decision; escalate it yourself. A
+  [visible edge case](review-protocol.md#findings) is never one: add it to the
+  body as a known limit and continue.
 
 Make no other issue edit, and do not turn implementation preferences into
 requirements.

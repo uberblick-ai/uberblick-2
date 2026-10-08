@@ -34,7 +34,8 @@ delivery policy.
 Preserve confirmed scope and essential guarantees. Unresolved intent or a product,
 guarantee, resource or agent-authority choice beyond settled authorization needs
 human clarification. Authoring formats and user-visible limits of durable content
-are owner choices. Stop dependent work and continue independent work. Silence
+are owner choices, except a
+[visible edge case](../protocols/review-protocol.md#findings). Stop dependent work and continue independent work. Silence
 and agent assertions are not approval; reuse settled human answers. Other
 role-specific stops remain unchanged.
 

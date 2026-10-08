@@ -84,6 +84,21 @@ limitation.
 - **P2:** another concrete defect in supported usage.
 - **P3:** minor or theoretical impact.
 
+A visible edge case is accepted by default: a failure that needs an unlikely
+sequence (a race, two people acting at once, an odd input) and surfaces as an
+obvious bug to the person it affects, such as a duplicate row or an edit that
+vanishes in front of the person who made it. Judge a sequence by its least
+visible supported outcome: if it can also lose work nobody sees, such as an
+offline edit dropped on reconnect or an agent's write, it is not one. Nor is a
+hidden bug, secret exposure or damage the product cannot repair.
+
+A visible edge case is P3 at most and a known limit, not an owner question; it
+never blocks, escalates or reopens settled work. The limit qualifies any
+guarantee the issue states: name it beside the criterion, and acceptance counts
+that criterion met except for the named limit. Prefer the known limit to a fix
+unless the fix is local and needs no edge-case code; the point is to save loop
+rounds and edge-case code. If it happens in use, it is filed as a bug then.
+
 A finding keeps its id across heads. Reopen a settled one only when changed
 code or new evidence invalidates how it was settled.
 
@@ -122,7 +137,7 @@ with evidence: the finding is wrong; its impact is theoretical because no
 current supported-usage failure is established; it lies outside the supported
 usage model; or, for a non-blocking P2, it is deferred to a linked issue with
 the accepted risk stated. Never defer or accept data loss, security exposure or
-a violated invariant.
+a violated invariant, except a [visible edge case](#findings).
 
 The author cannot settle a finding alone; the corrections review does. A P3
 that is neither corrected nor answered is accepted debt. A concrete bug
