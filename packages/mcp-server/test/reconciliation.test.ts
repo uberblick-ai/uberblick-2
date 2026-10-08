@@ -538,7 +538,7 @@ describe("a repair that originated on the other client", () => {
     // the tombstone: no resurrection by a repairer that has seen it. Repair by
     // a replica that has NOT seen it is deliberately outside this claim — two
     // concurrent whole-entry writes to one directory key are last-write-wins by
-    // Yjs' own ordering, which `ARCHIVE_IS_LAST_WRITE_WINS` in `../src/tools.ts`
+    // Yjs' own ordering, which `ARCHIVE_IS_LAST_WRITE_WINS` in `../src/tools/descriptions.ts`
     // states to agents, so there is nothing here to assert either way.
     await here.ok("archive_doc", { uuid });
     await waitUntil("the tombstone to reach the other client", () =>
