@@ -360,6 +360,8 @@ function usableServedWorkspaces(
     return { map, rejected: "servedWorkspaces is not a usable local-serving map" };
   }
   const offered = new Map(workspaces.list.map((segment) => [parseWorkspaceId(segment).uuid, segment]));
+  const startup = workspaces.list[0];
+  const startupUuid = startup === undefined ? null : parseWorkspaceId(startup).uuid;
   let invalid = false;
   for (const [uuid, entryValue] of Object.entries(value)) {
     if (!offered.has(uuid) || entryValue === null || typeof entryValue !== "object" || Array.isArray(entryValue)) {
@@ -377,7 +379,7 @@ function usableServedWorkspaces(
       browserKey: typeof entry.browserKey === "string" ? entry.browserKey.trim() : "",
       workspace: offered.get(uuid) ?? uuid,
       remoteHubUrl: remote?.url ?? null,
-      rebound: rebound && uuid === parseWorkspaceId(workspaces.list[0]!).uuid,
+      rebound: rebound && uuid === startupUuid,
       name: usableWorkspaceName(entry.name),
     };
   }
