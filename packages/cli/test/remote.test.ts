@@ -479,7 +479,7 @@ describe("workspace join configuration", () => {
   it("rejects obsolete partial environment selection rather than silently ignoring it", async () => {
     const original = { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL };
     const box = sandbox({ projectBinding: original });
-    for (const command of [["workspace"], ["status", "--json"]]) {
+    for (const command of [["workspace", "status"], ["status", "--json"]]) {
       const run = await runUbAsync(command, box, { HUB_URL: "ws://127.0.0.1:9999" });
       expect(run.status).toBe(1);
       expect(run.stderr).toContain("Legacy WORKSPACE_ID / HUB_URL");
@@ -749,7 +749,7 @@ describe("ub workspace join", () => {
     // and the workspace persisted is the one it named.
     expect(persistedHubUrl(box)).toBe(url(remote));
     expect(readConfigFile(box, "config.json").workspaceId).toBe(WORKSPACE);
-    expect((await runUbAsync(["workspace"], box)).stdout).toContain(WORKSPACE);
+    expect((await runUbAsync(["workspace", "status"], box)).stdout).toContain(WORKSPACE);
     // The credential that reached the remote is this machine's now. Still
     // owner-only afterwards.
     expect(storedSecret(box)).toBe(OTHER_SECRET);
@@ -1148,7 +1148,7 @@ describe("ub workspace join", () => {
     expect(run.stdout).toContain("joined 1 document");
     // Switched to the joined one…
     expect(readConfigFile(box, "config.json").workspaceId).toBe(WORKSPACE);
-    expect((await runUbAsync(["workspace"], box)).stdout).toContain(WORKSPACE);
+    expect((await runUbAsync(["workspace", "status"], box)).stdout).toContain(WORKSPACE);
     // …and told where the other one went, because it did not go anywhere.
     expect(run.stdout).toContain(mine);
     expect(run.stdout).toContain("previous workspace and its documents remain unchanged");

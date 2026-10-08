@@ -167,8 +167,7 @@ describe("ub open: this machine's workspaces", () => {
       expect((await get(app.url)).status).toBe(200);
       expect((await config(app)).workspaces[0]).toBe(WORKSPACE);
       expect(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).toBe(binding);
-      // The existing CLI spells its binding reading `ub workspace` (without a subcommand).
-      const status = await runUbAsync(["workspace"], box);
+      const status = await runUbAsync(["workspace", "status"], box);
       expect(status.status, status.output).toBe(0);
       expect(status.stdout).toContain(WORKSPACE);
       expect(status.stdout).not.toContain(SECOND);

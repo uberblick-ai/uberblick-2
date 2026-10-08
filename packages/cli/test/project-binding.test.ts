@@ -92,10 +92,11 @@ describe("atomic project bindings", () => {
     const box = sandbox({ projectBinding: { workspaceId: second, hubUrl: "https://project.example.test" } });
     await rememberWorkspaceBinding({ workspaceId: first, hubUrl }, box.env);
     for (const id of [first, `notes-${first}`]) {
-      const run = runUb(["workspace"], box, { UB_WORKSPACE_ID: id });
+      const run = runUb(["workspace", "status"], box, { UB_WORKSPACE_ID: id });
       expect(run.status, run.output).toBe(0);
-      expect(run.stdout).toContain(id);
-      expect(run.stdout).toContain(hubUrl ?? "local (this computer)");
+      expect(run.stdout).toContain(first);
+      expect(run.stdout).toContain(hubUrl ?? "local");
+      expect(run.stdout).toMatch(/^chosen by\s+environment$/m);
       const child = runUb(["env", "--", process.execPath, "-e",
         "process.stdout.write(JSON.stringify([process.env.UB_WORKSPACE_ID,process.env.UB_HUB_URL]))"], box, { UB_WORKSPACE_ID: id });
       expect(child.status, child.output).toBe(0);
@@ -116,7 +117,7 @@ describe("atomic project bindings", () => {
 
   it.each([first, `notes-${first}`])("refuses an unknown id-only override instead of inferring local or using the project hub: %s", (id) => {
     const box = sandbox({ projectBinding: { workspaceId: first, hubUrl: "https://project.example.test" } });
-    const run = runUb(["workspace"], box, { UB_WORKSPACE_ID: id });
+    const run = runUb(["workspace", "status"], box, { UB_WORKSPACE_ID: id });
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("Add UB_HUB_URL (a hub address, or local)");
     expect(run.stderr).toContain("ub workspace join <workspace-url>");
@@ -127,7 +128,7 @@ describe("atomic project bindings", () => {
     const box = sandbox();
     await rememberWorkspaceBinding({ workspaceId: first, hubUrl: null }, box.env);
     const before = readFileSync(workspaceRegistryPath(box.env));
-    const run = runUb(["workspace"], box, { UB_WORKSPACE_ID: first, UB_HUB_URL: "https://explicit.example.test" });
+    const run = runUb(["workspace", "status"], box, { UB_WORKSPACE_ID: first, UB_HUB_URL: "https://explicit.example.test" });
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).toContain("wss://explicit.example.test/ws");
     expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(before);
