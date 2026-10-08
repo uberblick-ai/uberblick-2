@@ -16,13 +16,13 @@
 2. **Define success.** Set the smallest useful scope and measurable or observable
    success. Within delegated choices, choose the narrowest solution; widen only
    for evidenced necessity, such as an inseparable guarantee. Exclude optional
-   extras. Preserve explicit requested outcomes unless settled owner authorization
+   extras. Preserve explicit requested outcomes unless settled maintainer authorization
    permits deferral or removal; another issue alone is not that authorization.
    Cite agreed allocation and retain real prerequisites when avoiding duplicate work.
 3. **Resolve.** Resolve factual gaps from evidence; never invent intent or treat
    silence, agent assertions or an invitation to object as approval. Reuse settled
    authorization regardless of issue origin. If intake and live corpus already
-   expose an owner choice affecting scope, split or criteria, ask under
+   expose a maintainer choice affecting scope, split or criteria, ask under
    [human-decisions.md](human-decisions.md) before drafting the dependent contract.
    Stop dependent work, continue independent work and gather evidence needed for
    the question; code grounding may reveal further questions later. Missing
@@ -99,7 +99,7 @@ PR reviews, gates and merge rules remain under [delivery-policy.md](delivery-pol
 1. **Review.** A challenged issue receives one independently dispatched review on
    another runtime under
    [the issue-review contract](issue-review.md#reviewing-an-issue-contract),
-   including finding classification and reviewer escalation of owner boundaries.
+   including finding classification and reviewer escalation of maintainer boundaries.
    A clean review permits `ready`; no second preparation review.
 2. **Correct.** Apply correctable findings, refresh affected grounding and perform
    the final recheck, then finish `ready`. Explain rejected findings. A disagreement
@@ -109,7 +109,7 @@ PR reviews, gates and merge rules remain under [delivery-policy.md](delivery-pol
    completed classification and review evidence; perform grounding/classification
    not yet done after an early clarification pause. A second consecutive return
    without an intervening human answer finishes `needs-human`; an answer resets
-   the count. New owner boundaries escalate immediately.
+   the count. New maintainer boundaries escalate immediately.
 
 ## Recheck, then decide
 

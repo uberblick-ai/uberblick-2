@@ -19,9 +19,9 @@ For implementation within an already approved issue that meets an open
 decision, follow [the implementer's bounded exception](../roles/implementer.md#build-on-an-open-decision).
 All other boundary crossings follow the escalation rule here.
 
-Distinguish owner decisions from inferences and cite settled authority once.
-Authoring formats and user-visible limitations of durable content require an
-owner decision, except a [visible edge case](review-protocol.md#findings); rendering mechanics remain engineering choices within existing
+Distinguish maintainer decisions from inferences and cite settled authority once.
+Authoring formats and user-visible limitations of durable content require a
+maintainer decision, except a [visible edge case](review-protocol.md#findings); rendering mechanics remain engineering choices within existing
 constraints. Before escalating replacement of an established primitive, identify
 it and the contract it would supply; custom application rendering alone does not
 establish such a replacement.

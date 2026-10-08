@@ -16,11 +16,11 @@ and unnecessary complexity. When warranted, offer materially better or smaller
 alternatives with evidence and meaningful tradeoffs; do not force alternatives.
 
 Apply [library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices);
-an unresolved protected dependency choice is an owner boundary.
+an unresolved protected dependency choice is a maintainer boundary.
 
 Honor settled authorization. New evidence may justify recommending a change
 to settled intent or decisions, never silently redefining them or reflexively
-reopening them. Changed outcomes or guarantees and unresolved owner choices use
+reopening them. Changed outcomes or guarantees and unresolved maintainer choices use
 [human-decisions.md](human-decisions.md), including its
 [decided-record procedure](human-decisions.md#challenge-a-decided-record) where applicable.
 

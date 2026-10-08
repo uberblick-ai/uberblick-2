@@ -32,7 +32,7 @@ and has a parseable `Cursor` block. Read the newest valid report:
 - if a valid report is less than seven days old, return `Audit not due` with its
   URL and stop without posting.
 
-A baseline with a later owner reply containing exactly `Baseline: rejected` is
+A baseline with a later maintainer reply containing exactly `Baseline: rejected` is
 not valid for cadence or cursor purposes. The next run is a fresh baseline, not
 an incremental continuation.
 

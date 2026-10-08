@@ -129,11 +129,11 @@ rules above. Put necessary extended supporting evidence in clearly labelled
 scope, acceptance criteria, essential constraints and unresolved decisions visible;
 never hide requirements in collapsed content.
 
-Preserve authorized outcomes, the owner's reasoning and constraints, essential
+Preserve authorized outcomes, the maintainer's reasoning and constraints, essential
 guarantees and delegated engineering choices; do not add convenient extras.
 Use evidence for factual gaps and make engineering choices within scope, never
 inventing product intent. Apply [settled authority](../AGENTS.md#find-the-right-authority)
-and escalate only [unresolved owner choices](../.agents/protocols/human-decisions.md).
+and escalate only [unresolved maintainer choices](../.agents/protocols/human-decisions.md).
 Missing references grant no permission; merge tiers grant no additional design authority.
 
 - **Mechanism belongs in a document, not an issue.** When the corpus is
