@@ -1,4 +1,4 @@
-/** Table controls compose TableKit commands over the live shared row. */
+/** Table controls act on the live shared row, with independent undo steps. */
 import type { Editor } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import * as Y from "yjs";
@@ -58,7 +58,7 @@ export function tableRowTargets(editor: Editor, tableId: string): TableRowTarget
 export function resolveTableRow(editor: Editor, target: TableRowTarget): ResolvedTableRow | null {
   if (!editor.isEditable || sharedTable(editor, target.tableId) !== target.table) return null;
   const found = findBlockById(editor.state.doc, target.tableId);
-  if (found === null || !isOrdinaryTable(found.node)) return null;
+  if (found === null || !isOrdinaryTable(found.node) || target.table.length !== found.node.childCount) return null;
   // A position or relative position can land on the row that moved into a
   // deletion's gap. Membership of the original shared row cannot do that.
   const rowIndex = target.table.toArray().indexOf(target.row);
@@ -66,6 +66,35 @@ export function resolveTableRow(editor: Editor, target: TableRowTarget): Resolve
   let rowPos = found.pos + 1;
   for (let index = 0; index < rowIndex; index += 1) rowPos += found.node.child(index).nodeSize;
   return { ...found, rowIndex, rowPos };
+}
+
+/**
+ * Move to a gap in the current table (1 is below the header; length is last).
+ * Only the source row is replaced: a PM-level reorder would rewrite every row
+ * it passes through y-prosemirror's same-type node matching. Cloning retains
+ * formatting and comment marks, with the owner-accepted delete/copy merge limits.
+ */
+export function moveTableRow(editor: Editor, target: TableRowTarget, gap: number): boolean {
+  const live = resolveTableRow(editor, target);
+  if (live === null || live.rowIndex === 0 || !Number.isInteger(gap) || gap < 1 || gap > live.node.childCount) return false;
+  // Both gaps bordering the source have the same order after removing it.
+  if (gap === live.rowIndex || gap === live.rowIndex + 1) return false;
+  const doc = target.table.doc;
+  if (doc === null) return false;
+  const copy = target.row.clone();
+  const destination = gap > live.rowIndex ? gap - 1 : gap;
+  endUndoCapture(editor.state);
+  doc.transact(() => {
+    target.table.delete(live.rowIndex, 1);
+    target.table.insert(destination, [copy]);
+  }, ySyncPluginKey);
+  endUndoCapture(editor.state);
+
+  // The binding restores a selection relative to the deleted source, which
+  // cannot follow its copy. Resolve the new identity after its synchronous sync.
+  const moved = resolveTableRow(editor, { ...target, row: copy });
+  if (moved !== null) editor.commands.setTextSelection(moved.rowPos + 3);
+  return true;
 }
 
 /** One normal shared edit, bounded by undo capture on both sides. */
