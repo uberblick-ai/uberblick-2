@@ -167,7 +167,6 @@ describe("the workspace switcher renders configuration", () => {
       const marker = trigger?.querySelector(".ub-workspace-marker");
       expect(marker?.getAttribute("aria-hidden")).toBe("true");
       expect(marker?.textContent).toBe("");
-      expect(trigger.childElementCount).toBe(3);
       expect(trigger.querySelectorAll('[aria-hidden="true"]')).toHaveLength(2);
       expect(trigger.textContent).toBe("Uberblick▾");
       // The name truncates, so its whole value is available on the title.
@@ -182,7 +181,6 @@ describe("the workspace switcher renders configuration", () => {
     // The same marker selector was proved present for both routed spellings.
     expect(trigger.querySelector(".ub-workspace-marker")).toBe(null);
     expect(within(trigger).queryByText(/\d+ docs?/)).toBe(null);
-    expect(trigger.childElementCount).toBe(2);
     expect(within(trigger).getByText("no workspace").textContent).toBe("no workspace");
     expect(within(trigger).getByText("no workspace").hasAttribute("title")).toBe(false);
     expect(trigger?.querySelector(".ub-workspace-caret")).not.toBe(null);

@@ -437,7 +437,7 @@ describe("choosing the order", () => {
     expect(table.querySelectorAll('tbody th[scope="row"]')).toHaveLength(3);
     expect(within(table).getAllByRole("columnheader", { hidden: true })).toHaveLength(3);
     expect(within(table).getAllByRole("rowheader", { hidden: true })).toHaveLength(3);
-    expect(within(host).queryByRole("combobox", { hidden: true })).toBeNull();
+    expect(within(host).queryByRole("group", { name: "Order", hidden: true })).toBeNull();
 
     const title = heading(host, "Title");
     const changed = heading(host, "Last changed");
