@@ -21,9 +21,11 @@ import {
   INTERNAL_ERROR_MESSAGE,
   MUTATING_TOOLS,
   READ_ONLY_TOOLS,
+  guarded,
   hydrationRecovery,
   toFailure,
 } from "../src/failures.js";
+import { ServerWork } from "../src/server-work.js";
 import { MirrorStore } from "../src/store.js";
 import type { SearchHit } from "../src/store.js";
 import {
@@ -95,6 +97,7 @@ const EXPECTED: Record<
   string,
   { recoveryClass: string | null; detail: string[] }
 > = {
+  server_shutting_down: { recoveryClass: "manual", detail: [] },
   data_invalid_input: { recoveryClass: "manual", detail: ["collection", "recordId"] },
   data_collection_not_found: { recoveryClass: "reread", detail: ["uuid", "collection"] },
   data_schema_invalid: { recoveryClass: "manual", detail: ["collection", "path"] },
@@ -493,6 +496,14 @@ describe("the failure contract", () => {
         })
       ).payload,
     );
+
+    // Admission refusal uses the same failure floor, before the handler runs.
+    const stopped = new ServerWork();
+    stopped.stop();
+    const refused = await guarded("set_title", async () => {
+      throw new Error("A refused handler must not run.");
+    }, stopped)({});
+    record(JSON.parse((refused.content[0] as { text: string }).text));
 
     // Every code the code itself knows about was triggered above.
     expect([...failures.keys()].sort()).toEqual([...FAILURE_CODES].sort());
