@@ -6,6 +6,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { screen, within } from "@testing-library/react";
 import { act, render, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
 import {
@@ -59,9 +60,11 @@ function mount(fix: Fixture): { host: HTMLElement; view: RenderResult } {
   return { host: view.container, view };
 }
 
-function text(host: HTMLElement, selector: string): string | null {
-  const found = host.querySelector(selector);
-  return found === null ? null : (found.textContent ?? "").replace(/\s+/g, " ").trim();
+function identityText(host: HTMLElement): string {
+  const rev = within(host).getByText(/^· rev [0-9a-f]{8}$/);
+  // The identity grouping has no role or name; keep its entire text so extra
+  // full-address or revision text cannot hide between the visible fragments.
+  return (rev.parentElement?.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
 describe("the document identity line keeps its local controls", () => {
@@ -83,21 +86,15 @@ describe("the document identity line keeps its local controls", () => {
     Element.prototype.scrollIntoView = function scrollIntoView() {};
     const { host } = mount(fixture());
     act(() => {
-      const trigger = host.querySelector<HTMLButtonElement>(".ub-actions-trigger");
+      const trigger = within(host).getByRole("button", { name: "Document actions" });
       trigger?.focus();
       trigger?.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
       );
     });
-    const unavailable = [
-      ...document.querySelectorAll<HTMLElement>(
-        "[data-slot=dropdown-menu-item]",
-      ),
-    ].find(
-      (item) =>
-        item.textContent ===
-        "Archive unavailable — the directory or sidebar room is not ready to write, or there is no live entry for this document",
-    );
+    const unavailable = screen.getByRole("menuitem", {
+      name: "Archive unavailable — the directory or sidebar room is not ready to write, or there is no live entry for this document",
+    });
     expect(unavailable?.getAttribute("aria-disabled")).toBe("true");
     expect(document.activeElement?.textContent).toBe("Pin to sidebar");
     act(() => {
@@ -112,17 +109,19 @@ describe("the document identity line keeps its local controls", () => {
         new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
       );
     });
-    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(screen.queryByRole("alertdialog", { name: /Archive/ })).toBeNull();
   });
 
   it("does not derive navigation from tags and keeps the shortened identity", () => {
     const { host } = mount(fixture());
-    expect(text(host, ".ub-badge")).toBeNull();
-    expect(text(host, ".ub-doc-ids")).toMatch(
+    expect(within(host).queryByText(/^(?:Product|Decision)(?: · .+)?$/)).toBeNull();
+    // The legacy group badge for this fixture's feature tag is gone too.
+    expect(within(host).queryByText("Features")).toBeNull();
+    expect(identityText(host)).toMatch(
       /^uuid 9f3c1a2b · rev [0-9a-f]{8}$/,
     );
-    expect(host.querySelector(".ub-copy-link")).not.toBeNull();
-    expect(host.querySelector(".ub-actions-trigger")).not.toBeNull();
+    expect(within(host).getByRole("button", { name: /copies the canonical document URL/ })).not.toBeNull();
+    expect(within(host).getByRole("button", { name: "Document actions" })).not.toBeNull();
   });
 
   it("names lifecycle records, omits ordinary documents and tolerates a mismatched status", () => {
@@ -131,7 +130,7 @@ describe("the document identity line keeps its local controls", () => {
     setStatus(decision.ydoc, "open");
     const mountedDecision = mount(decision);
     try {
-      expect(text(mountedDecision.host, ".ub-lifecycle-badge")).toBe(
+      expect(within(mountedDecision.host).getByText("Decision · open").textContent).toBe(
         "Decision · open",
       );
     } finally {
@@ -143,14 +142,14 @@ describe("the document identity line keeps its local controls", () => {
     getMetaMap(mismatched.ydoc).set("status", "open");
     const mountedMismatch = mount(mismatched);
     try {
-      expect(text(mountedMismatch.host, ".ub-lifecycle-badge")).toBe("Product");
+      expect(within(mountedMismatch.host).getByText("Product").textContent).toBe("Product");
     } finally {
       mountedMismatch.view.unmount();
     }
 
     const ordinary = mount(fixture());
     try {
-      expect(ordinary.host.querySelector(".ub-lifecycle-badge")).toBeNull();
+      expect(within(ordinary.host).queryByText(/^(?:Product|Decision)(?: · .+)?$/)).toBeNull();
     } finally {
       ordinary.view.unmount();
     }
@@ -159,11 +158,11 @@ describe("the document identity line keeps its local controls", () => {
   it("moves the rev when a block's content changes", () => {
     const fix = fixture();
     const { host } = mount(fix);
-    const before = text(host, ".ub-doc-ids");
+    const before = identityText(host);
     act(() => {
       editBlock(fix.ydoc, fix.blockIds[0] ?? "", "first block", "first block!");
     });
-    const after = text(host, ".ub-doc-ids");
+    const after = identityText(host);
     expect(after).not.toBe(before);
     expect(after).toMatch(/^uuid 9f3c1a2b · rev [0-9a-f]{8}$/);
   });

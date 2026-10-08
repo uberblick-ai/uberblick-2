@@ -44,6 +44,7 @@ describe("external link URL safety", () => {
     const updates = vi.fn();
     ydoc.on("update", updates);
     try {
+      // The mark class distinguishes external links from document references.
       const anchor = element.querySelector<HTMLAnchorElement>("a.ub-link");
       expect(anchor).not.toBeNull();
       const before = snapshotFragment(ydoc);

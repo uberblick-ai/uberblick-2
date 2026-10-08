@@ -24,6 +24,7 @@
  */
 
 import { act, render } from "./react-render.js";
+import { within } from "@testing-library/react";
 import { afterEach, describe, expect, it, beforeEach } from "vitest";
 import type { ReactElement } from "react";
 import * as Y from "yjs";
@@ -264,7 +265,7 @@ describe("the URL and the app are two-way bound", () => {
     const view = render(<Probe to={`/${WS}/${UUID}`} />);
     const host = view.container;
     const probe = (): HTMLButtonElement =>
-      host.querySelector<HTMLButtonElement>(".probe") as HTMLButtonElement;
+      within(host).getByRole<HTMLButtonElement>("button", { name: /^\// });
     const shown = (): string => probe().textContent ?? "";
 
     expect(shown()).toBe(`/${WS}`);
@@ -365,8 +366,8 @@ describe("a fresh deep link does not open a writable empty replica", () => {
 
     // The stub is not a licence to edit: binding here would put blocks and
     // metadata into a replica the real document is about to merge into.
-    expect(host.querySelector(".ub-notice")?.textContent).toContain("Waiting for sync");
-    expect(host.querySelector(".ub-editor")).toBeNull();
+    expect(notice(host)?.textContent).toContain("Waiting for sync");
+    expect(within(host).queryByRole("textbox", { name: "Document content" })).toBeNull();
 
     // AC3 is about the document page, and this screen is one — it is this
     // document's address, showing why it is not here yet. The control moved to
@@ -374,7 +375,7 @@ describe("a fresh deep link does not open a writable empty replica", () => {
     // here too; a link is *more* worth sending from a document that has not
     // arrived, and the address bar is not a keyboard-reachable control
     // (Codex round 1).
-    const copy = host.querySelector(".ub-copy-link");
+    const copy = within(host).getByRole("button", { name: `Copy link — copies the canonical document URL for ${WS}/${UUID}` });
     expect(copy?.textContent).toBe("Copy link");
     expect(copy?.getAttribute("aria-label")).toBe(
       `Copy link — copies the canonical document URL for ${WS}/${UUID}`,
@@ -388,8 +389,8 @@ describe("a fresh deep link does not open a writable empty replica", () => {
     });
 
     // Resolved live, with nothing polled and nothing reloaded.
-    expect(host.querySelector(".ub-notice")).toBeNull();
-    expect(host.querySelector(".ub-editor")).not.toBeNull();
+    expect(notice(host)).toBeNull();
+    expect(within(host).queryByRole("textbox", { name: "Document content" })).not.toBeNull();
   });
 });
 
@@ -460,16 +461,16 @@ describe("a room that has not answered is not a different document (#161)", () =
     const { connection, answer } = openingConnection(`${WS}/${UUID}`);
     const { host } = mountLinked(connection, UUID);
 
-    expect(host.querySelector(".ub-notice")).toBeNull();
-    expect(host.querySelector(".ub-editor")).toBeNull();
+    expect(notice(host)).toBeNull();
+    expect(within(host).queryByRole("textbox", { name: "Document content" })).toBeNull();
 
     // The server answers with the document that was there all along.
     const stored = new Y.Doc();
     initDoc(stored, { uuid: UUID, title: "Annotations" });
     act(() => answer(stored));
 
-    expect(host.querySelector(".ub-notice")).toBeNull();
-    expect(host.querySelector(".ub-editor")).not.toBeNull();
+    expect(notice(host)).toBeNull();
+    expect(within(host).queryByRole("textbox", { name: "Document content" })).not.toBeNull();
   });
 
   it("waits once the server has answered and the document is not in the room", () => {
@@ -479,14 +480,14 @@ describe("a room that has not answered is not a different document (#161)", () =
     const { connection, answer } = openingConnection(`${WS}/${UUID}`);
     const { host } = mountLinked(connection, UUID);
 
-    expect(host.querySelector(".ub-notice")).toBeNull();
+    expect(notice(host)).toBeNull();
 
     act(() => answer());
 
-    expect(host.querySelector(".ub-notice")?.textContent).toContain(
+    expect(notice(host)?.textContent).toContain(
       "Waiting for sync",
     );
-    expect(host.querySelector(".ub-editor")).toBeNull();
+    expect(within(host).queryByRole("textbox", { name: "Document content" })).toBeNull();
   });
 });
 
@@ -525,6 +526,11 @@ function stubConnection(room: string): RoomConnection {
   } as unknown as RoomConnection;
 }
 
+/** Find the notice through its visible lead, then read the complete sentence. */
+function notice(host: HTMLElement): HTMLElement | null {
+  return within(host).queryByText(/^(Waiting for sync\.|No workspace\.|Not a document link\.)$/)?.parentElement ?? null;
+}
+
 /**
  * The text `RoutePane` shows for a route, whitespace collapsed.
  *
@@ -547,7 +553,7 @@ function paneText(target: Route, docMeta: DocMeta | null): string {
     />,
   );
   const host = view.container;
-  const text = host.querySelector(".ub-notice")?.textContent ?? "";
+  const text = notice(host)?.textContent ?? "";
 
   return text.replace(/\s+/g, " ").trim();
 }
@@ -626,15 +632,15 @@ async function clickCopy(
   );
   const host = view.container;
 
-  const button = host.querySelector<HTMLButtonElement>(".ub-copy-link");
+  const button = within(host).getByRole<HTMLButtonElement>("button", { name: `uuid ${UUID.slice(0, 8)} — copies the canonical document URL for ${segment}/${UUID}` });
   const label = button?.textContent ?? "";
   const ariaLabel = button?.getAttribute("aria-label") ?? "";
   const revisionIsInsideControl =
-    button?.contains(host.querySelector(".ub-doc-rev")) ?? false;
+    button.contains(within(host).getByText(/· rev /));
   await act(async () => {
     button?.click();
   });
-  const said = host.querySelector(".ub-copied")?.textContent ?? "";
+  const said = within(button.parentElement!).getByRole("status").textContent ?? "";
 
   return { label, ariaLabel, said, revisionIsInsideControl };
 }

@@ -22,6 +22,7 @@
  */
 
 import { act, render } from "./react-render.js";
+import { screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useLayoutEffect } from "react";
 import * as Y from "yjs";
@@ -129,32 +130,30 @@ describe("the compact collaborator cluster", () => {
     const activate = vi.fn();
     const view = render(<PeerCluster presence={peers(5)} onActivate={activate} />);
     const host = view.container;
-    const visible = host.querySelectorAll<HTMLButtonElement>(
-      ".ub-peers > .ub-peer-control[data-peer-id]",
-    );
+    const visible = within(host).getAllByRole<HTMLButtonElement>("button", { name: /^Peer \d+ ·/ });
     expect(visible).toHaveLength(3);
     expect(visible[0]?.getAttribute("aria-label")).toContain("Peer 1 · person");
-    expect(visible[0]?.querySelector(".ub-avatar")?.textContent).toBe("P");
+    expect(within(visible[0]!).getByText("P").textContent).toBe("P");
 
-    const more = host.querySelector<HTMLButtonElement>(".ub-peer-more");
+    const more = within(host).getByRole<HTMLButtonElement>("button", { name: "2 more active collaborators" });
     expect(more?.textContent).toBe("+2");
     expect(more?.getAttribute("aria-label")).toBe(
       "2 more active collaborators",
     );
     act(() => more?.click());
 
-    const rows = document.querySelectorAll<HTMLButtonElement>(
-      ".ub-peer-overflow-row",
-    );
+    const overflow = screen.getByRole("dialog", { name: "More active collaborators" });
+    const rows = within(overflow).getAllByRole<HTMLButtonElement>("button", { name: /^Peer \d+ ·/ });
     expect(rows).toHaveLength(2);
     expect(rows[0]?.textContent).toContain("Peer 4");
     expect(rows[0]?.textContent).toContain("agent");
+    // The decorative initial and robot badge have no accessible name.
     expect(rows[0]?.querySelector(".ub-avatar")?.textContent).toBe("P🤖");
     act(() => rows[0]?.click());
     expect(activate).toHaveBeenCalledWith(
       expect.objectContaining({ clientId: 4, blockId: "block-4" }),
     );
-    expect(document.querySelector(".ub-peer-overflow")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "More active collaborators" })).toBeNull();
   });
 
   it("leaves outside focus alone and recovers after live removal", async () => {
@@ -171,40 +170,38 @@ describe("the compact collaborator cluster", () => {
     const draw = (sessions: readonly RemotePresence[]): void => {
       view.rerender(tree(sessions));
     };
-    const more = host.querySelector<HTMLButtonElement>(".ub-peer-more");
+    const more = within(host).getByRole<HTMLButtonElement>("button", { name: "1 more active collaborator" });
     act(() => more?.click());
-    expect(document.querySelector(".ub-peer-overflow")).not.toBeNull();
+    expect(screen.queryByRole("dialog", { name: "More active collaborators" })).not.toBeNull();
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-    const sync = host.querySelector<HTMLButtonElement>(".ub-status-sync");
+    const sync = within(host).getByRole<HTMLButtonElement>("button", { name: "Sync details" });
     act(() => {
       sync?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
       sync?.click();
       sync?.focus();
     });
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-    expect(document.querySelector(".ub-peer-overflow")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "More active collaborators" })).toBeNull();
     expect(document.activeElement).toBe(sync);
 
     act(() => more?.focus());
     draw(peers(3));
     expect(document.activeElement).toBe(
-      host.querySelector('[data-peer-id="1"]'),
+      within(host).getByRole("button", { name: "Peer 1 · person · editing block 1" }),
     );
 
     draw(peers(4));
-    const restoredMore = host.querySelector<HTMLButtonElement>(".ub-peer-more");
+    const restoredMore = within(host).getByRole<HTMLButtonElement>("button", { name: "1 more active collaborator" });
     act(() => restoredMore?.click());
-    const nextRow = document.querySelector<HTMLButtonElement>(
-      '.ub-peer-overflow-row[data-peer-id="4"]',
-    );
+    const nextRow = within(screen.getByRole("dialog", { name: "More active collaborators" })).getByRole<HTMLButtonElement>("button", { name: `Peer 4 · agent · ${SESSION} · editing block 4` });
     act(() => nextRow?.focus());
     draw([peers(4)[0]!, peers(4)[2]!, peers(4)[3]!]);
     expect(document.activeElement).toBe(
-      host.querySelector('[data-peer-id="4"]'),
+      within(host).getByRole("button", { name: `Peer 4 · agent · ${SESSION} · editing block 4` }),
     );
 
     draw([]);
-    expect(document.activeElement).toBe(host.querySelector(".ub-status-sync"));
+    expect(document.activeElement).toBe(within(host).getByRole("button", { name: "Sync details" }));
   });
 });
 
@@ -310,8 +307,9 @@ describe("the strip follows a marker that arrives late", () => {
       );
     };
     const control = (): HTMLElement | null =>
-      host.querySelector<HTMLElement>(".ub-peers .ub-peer-control");
+      within(host).queryByRole("button", { name: /^(Claude Code|Ben) ·/ });
     const avatar = (): HTMLElement | null =>
+      // The decorative avatar's colour and glyph are separate styling contracts.
       control()?.querySelector<HTMLElement>(".ub-avatar") ?? null;
 
     // The ordinary first instant: a `user` and no claim about what it is. Under
@@ -367,7 +365,7 @@ describe("the strip's first frame after a document opens", () => {
     const onFrame = (): void => {
       frames.push(
         Array.from(
-          host.querySelectorAll<HTMLElement>(".ub-peers .ub-peer-control"),
+          within(host).queryAllByRole("button", { name: /^.+ · (person|agent)( ·|$)/ }),
           (control) => control.getAttribute("aria-label") ?? "",
         ),
       );

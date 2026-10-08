@@ -19,6 +19,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "./react-render.js";
+import { within } from "@testing-library/react";
 import type { ComponentProps, ReactElement } from "react";
 import * as Y from "yjs";
 import {
@@ -42,7 +43,6 @@ import {
   commentTimestamp,
   focusThread,
   observeThreads,
-  threadCardId,
   threadIdFromTarget,
   threadsFromDoc,
 } from "../src/ui/threads.js";
@@ -374,11 +374,19 @@ describe("the rail renders its cards", () => {
   }
 
   function cards(host: HTMLElement): HTMLButtonElement[] {
-    return [...host.querySelectorAll<HTMLButtonElement>(".ub-thread")];
+    return within(within(host).getByRole("region", { name: "Threads" }))
+      .getAllByRole<HTMLButtonElement>("button", { name: /^Paragraph \d/ });
   }
 
-  function text(card: Element, selector: string): string | null {
-    return card.querySelector(selector)?.textContent ?? null;
+  function text(card: HTMLElement, value: string | RegExp): string | null {
+    return within(card).queryByText(value)?.textContent ?? null;
+  }
+
+  /** Each comment's time scopes its author and body, including unexpected comments. */
+  function commentTexts(card: HTMLElement, expected: RegExp): (string | null)[] {
+    return within(card).getAllByRole("time").map((time) =>
+      within(time.parentElement!.parentElement!).getByText(expected).textContent,
+    );
   }
 
   it("shows the excerpt, the block reference, the comments and the reply count", () => {
@@ -389,16 +397,16 @@ describe("the rail renders its cards", () => {
     const view = renderRail(ydoc);
     const card = cards(view.host)[0];
     expect(card).toBeDefined();
-    expect(text(card!, ".ub-thread-excerpt")).toBe("quick brown");
-    expect(text(card!, ".ub-thread-ref")).toBe("Paragraph 2");
+    expect(text(card!, "quick brown")).toBe("quick brown");
+    expect(text(card!, "Paragraph 2")).toBe("Paragraph 2");
     expect(
-      [...card!.querySelectorAll(".ub-thread-author")].map((el) => el.textContent),
+      commentTexts(card!, /^(ben|agent-a)$/),
     ).toEqual(["ben", "agent-a"]);
     expect(
-      [...card!.querySelectorAll(".ub-thread-text")].map((el) => el.textContent),
+      commentTexts(card!, /^(why quick\?|no idea)$/),
     ).toEqual(["why quick?", "no idea"]);
-    expect(text(card!, ".ub-thread-replies")).toBe("1 reply");
-    expect(card!.querySelector(".ub-chip-orphaned")).toBeNull();
+    expect(text(card!, "1 reply")).toBe("1 reply");
+    expect(within(card!).queryByText("orphaned")).toBeNull();
     view.unmount();
   });
 
@@ -422,12 +430,12 @@ describe("the rail renders its cards", () => {
       const rail = renderRail(ydoc);
       try {
         const labels = (): string[] =>
-          [...rail.host.querySelectorAll(".ub-thread-byline time")].map(
+          within(cards(rail.host)[0]!).getAllByRole("time").map(
             (time) => time.textContent ?? "",
           );
         expect(labels()).toEqual(["1 minute ago", "just now"]);
         expect(
-          [...rail.host.querySelectorAll(".ub-thread-byline time")].every(
+          within(cards(rail.host)[0]!).getAllByRole("time").every(
             (time) =>
               time.getAttribute("dateTime") !== null &&
               time.getAttribute("title") !== null,
@@ -458,9 +466,7 @@ describe("the rail renders its cards", () => {
     const thread = createAnnotation(local, blocks[1]!, 4, 15, "ben", "why quick?");
     const view = renderRail(local);
     expect(
-      [...cards(view.host)[0]!.querySelectorAll(".ub-thread-text")].map(
-        (el) => el.textContent,
-      ),
+      commentTexts(cards(view.host)[0]!, /^why quick\?$/),
     ).toEqual(["why quick?"]);
 
     await act(async () => {
@@ -471,9 +477,9 @@ describe("the rail renders its cards", () => {
 
     const card = cards(view.host)[0];
     expect(
-      [...card!.querySelectorAll(".ub-thread-text")].map((el) => el.textContent),
+      commentTexts(card!, /^(why quick\?|no idea)$/),
     ).toEqual(["why quick?", "no idea"]);
-    expect(text(card!, ".ub-thread-replies")).toBe("1 reply");
+    expect(text(card!, "1 reply")).toBe("1 reply");
     view.unmount();
   });
 
@@ -508,7 +514,8 @@ describe("the rail renders its cards", () => {
     const thread = createAnnotation(ydoc, blocks[1]!, 4, 15, "ben", "why?");
     // Mounted with nothing focused, the way the rail is when the reader arrives.
     const view = renderRail(ydoc);
-    const card = view.host.querySelector(`#${CSS.escape(threadCardId(thread.id))}`);
+    const control = within(view.host).getByRole("button", { name: /quick brown.*why\?/ });
+    const card = within(view.host).getAllByRole("listitem").find((item) => item.contains(control))!;
     expect(card).not.toBeNull();
     expect(scrolled).toEqual([]);
 
@@ -541,10 +548,11 @@ describe("the rail renders its cards", () => {
       // still renders, but the requested card cannot be scrolled or focused.
       expect(scrolled).toEqual([]);
       view.rerender(tree(threadsFromDoc(ydoc)));
-      const card = view.container.querySelector(`#${CSS.escape(threadCardId(thread.id))}`);
+      const control = within(view.container).getByRole("button", { name: /jumps.*New card/ });
+      const card = within(view.container).getAllByRole("listitem").find((item) => item.contains(control))!;
       expect(card).not.toBeNull();
       expect(scrolled).toEqual([card]);
-      if (viaKeyboard) expect(document.activeElement).toBe(card!.querySelector("button"));
+      if (viaKeyboard) expect(document.activeElement).toBe(control);
       addComment(ydoc, thread.id, "Reader", "Later reply");
       view.rerender(tree(threadsFromDoc(ydoc)));
       expect(scrolled).toEqual([card]);
@@ -559,11 +567,11 @@ describe("the rail renders its cards", () => {
 
     const view = renderRail(ydoc);
     const card = cards(view.host)[0];
-    expect(text(card!, ".ub-chip-orphaned")).toBe("orphaned");
-    expect(text(card!, ".ub-thread-text")).toBe("why quick?");
+    expect(text(card!, "orphaned")).toBe("orphaned");
+    expect(text(card!, "why quick?")).toBe("why quick?");
     // No quote to show, and the card says where the range was instead.
-    expect(card!.querySelector(".ub-thread-excerpt")).toBeNull();
-    expect(text(card!, ".ub-thread-gone")).toContain("Paragraph 2");
+    expect(within(card!).queryByText("quick brown")).toBeNull();
+    expect(text(card!, "annotated range deleted from Paragraph 2")).toContain("Paragraph 2");
     view.unmount();
   });
 });
@@ -599,7 +607,7 @@ describe("a highlight and its card focus each other", () => {
       expect(threadIdFromTarget(target)).toBe(thread.id);
 
       // A click that landed outside every highlight focuses nothing.
-      expect(threadIdFromTarget(element.querySelector(".ub-heading"))).toBeNull();
+      expect(threadIdFromTarget(within(element).getByRole("heading", { name: "Sync" }))).toBeNull();
       expect(threadIdFromTarget(null)).toBeNull();
     } finally {
       editor.destroy();
@@ -627,7 +635,9 @@ describe("a highlight and its card focus each other", () => {
     );
     const host = view.container;
     try {
-      act(() => host.querySelector<HTMLButtonElement>(".ub-thread")!.click());
+      // The orphaned-case absence below uses this same mark-contract query.
+      expect(element.querySelector("[data-comment-thread]")).not.toBeNull();
+      act(() => within(host).getByRole<HTMLButtonElement>("button", { name: /quick brown.*why\?/ }).click());
 
       expect(focus).toEqual([thread.id]);
       const highlight = element.querySelector<HTMLElement>(
@@ -663,7 +673,7 @@ describe("a highlight and its card focus each other", () => {
     );
     const host = view.container;
     try {
-      act(() => host.querySelector<HTMLButtonElement>(".ub-thread")!.click());
+      act(() => within(host).getByRole<HTMLButtonElement>("button", { name: /orphaned.*why\?/ }).click());
 
       // Nothing to flash, nothing to scroll to — and no crash.
       expect(element.querySelector("[data-comment-thread]")).toBeNull();

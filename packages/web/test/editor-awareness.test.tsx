@@ -1,5 +1,6 @@
 /** The editor reads mention names, while its parent reads caret locations. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { within } from "@testing-library/react";
 import { act, render, type RenderResult } from "./react-render.js";
 import type { ReactElement } from "react";
 import * as Y from "yjs";
@@ -115,7 +116,7 @@ describe("the bound editor's awareness reading", () => {
         onSelectThread={selectThread} />;
     }
     const host = mount(<Shell />);
-    expect(host.querySelector(".ProseMirror")).not.toBeNull();
+    expect(within(host).queryByRole("textbox", { name: "Document content" })).not.toBeNull();
     expect(presence[0]?.block).toBe(1);
     expect(composerRenders.mock.lastCall?.[0].mentions).toEqual(["Peer"]);
     const before = editorRenders.mock.calls.length;

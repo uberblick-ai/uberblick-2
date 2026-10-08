@@ -1,6 +1,7 @@
 /** The catalog-backed tag picker in the document identity line (#509). */
 
 import { act, renderSettled, type RenderResult } from "./react-render.js";
+import { screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
@@ -172,19 +173,23 @@ function press(
 }
 
 function picker(host: HTMLElement): HTMLButtonElement | null {
-  return host.querySelector<HTMLButtonElement>('button[aria-label="Edit tags"]');
+  return within(host).queryByRole<HTMLButtonElement>("button", { name: "Edit tags" });
 }
 
 function search(): HTMLInputElement | null {
-  return document.querySelector<HTMLInputElement>('input[aria-label="Search tags"]');
+  return screen.queryByRole<HTMLInputElement>("searchbox", { name: "Search tags" });
 }
 
 function options(): HTMLButtonElement[] {
-  return [...document.querySelectorAll<HTMLButtonElement>(".ub-tag-option")];
+  const list = screen.queryByRole("listbox", { name: "Available tags" });
+  return list === null ? [] : within(list).queryAllByRole<HTMLButtonElement>("option");
 }
 
 function option(name: string): HTMLButtonElement | undefined {
-  return options().find((candidate) => candidate.textContent?.includes(name));
+  const list = screen.queryByRole("listbox", { name: "Available tags" });
+  return list === null ? undefined : within(list).queryByRole<HTMLButtonElement>("option", {
+    name: name === "legacy" ? /^legacy\s*retired$/ : name,
+  }) ?? undefined;
 }
 
 describe("the document tag picker", () => {
@@ -194,10 +199,16 @@ describe("the document tag picker", () => {
     const host = await openApp();
 
     expect(picker(host)?.textContent).toContain("sync");
+    // Pill wrappers have no role/name; count all of them, including unexpected labels.
     expect(host.querySelectorAll(".ub-tag")).toHaveLength(1);
-    expect(host.querySelector(".ub-tag-x")).toBeNull();
-    expect(host.querySelector(".ub-lifecycle-badge")).toBeNull();
-    expect(host.querySelector(".ub-badge")).toBeNull();
+    expect(within(host).queryByRole("button", { name: "Remove tag sync" })).toBeNull();
+    expect(within(host).queryByText(/^(?:Product|Decision)(?: · .+)?$/)).toBeNull();
+    // With no group tag on this fixture, neither lifecycle nor group badges
+    // have any visible label to draw.
+    expect(within(host).queryByText(/^(?:Product|Decision|Features)(?: · .+)?$/)).toBeNull();
+    // The decorative chevron has no accessible handle; witness its presence
+    // with the same query used by the read-only absence assertions below.
+    expect(host.querySelector(".ub-tag-chevron")).not.toBeNull();
 
     click(picker(host));
     // Three entries is below the threshold, so the panel is a list and nothing
@@ -223,6 +234,7 @@ describe("the document tag picker", () => {
     click(picker(host));
     expect(options()).toHaveLength(10);
     expect(document.activeElement).toBe(search());
+    // The search icon is decorative and aria-hidden.
     expect(document.querySelector(".ub-tag-search-icon")).not.toBeNull();
 
     // Composition keystrokes are not navigation; a real ArrowDown enters the list.
@@ -239,7 +251,7 @@ describe("the document tag picker", () => {
     ]);
     act(() => typeInto(search(), "missing"));
     expect(options()).toEqual([]);
-    expect(document.querySelector(".ub-tag-empty")?.textContent).toBe(
+    expect(screen.getByText("No matching tags.").textContent).toBe(
       "No matching tags.",
     );
 
@@ -269,7 +281,7 @@ describe("the document tag picker", () => {
     const host = await openApp();
     expect(picker(host)?.textContent).toContain("Add tags");
     click(picker(host));
-    expect(document.querySelector(".ub-tag-empty")?.textContent).toBe(
+    expect(screen.getByText("No tags available.").textContent).toBe(
       "No tags available.",
     );
     // Nothing in the panel can take the keyboard, so the trigger keeps it
@@ -283,7 +295,7 @@ describe("the document tag picker", () => {
     const waiting = documentFixture();
     waiting.catalog.status.hasReceivedServerState = false;
     const waitingHost = await openApp();
-    expect(waitingHost.querySelector(".ub-tags")?.textContent).toContain(
+    expect(within(waitingHost).getByText("Loading tags…").textContent).toContain(
       "Loading tags…",
     );
     expect(picker(waitingHost)).toBeNull();
@@ -354,7 +366,7 @@ describe("the document tag picker", () => {
     expect(getMeta(fix.document.ydoc).tags).toContain(TAGS.mcp);
 
     await act(async () => press(document.activeElement, "Escape"));
-    expect(document.querySelector(".ub-tag-picker-panel")).toBeNull();
+    expect(screen.queryByRole("listbox", { name: "Available tags" })).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
 
@@ -365,13 +377,14 @@ describe("the document tag picker", () => {
     tombstoneDirectoryEntry(fix.directory.ydoc, UUID);
     const host = await openApp();
 
-    expect(host.querySelector(".ub-tags")?.textContent).toContain("legacy (retired)");
-    expect(host.querySelector(".ub-tags")?.textContent).toContain("sync");
+    expect(within(host).getByText("legacy (retired)").textContent).toContain("legacy (retired)");
+    expect(within(host).getByText("sync").textContent).toContain("sync");
     // The same pills as the writable header draws, and nothing to open.
+    // Pill wrappers have no role/name; count all of them, including unexpected labels.
     expect(host.querySelectorAll(".ub-tag")).toHaveLength(2);
     expect(picker(host)).toBeNull();
     expect(host.querySelector(".ub-tag-chevron")).toBeNull();
-    expect(document.querySelector(".ub-tag-option")).toBeNull();
+    expect(screen.queryByRole("option")).toBeNull();
   });
 
   it("leaves a read-only header with no tags non-interactive", async () => {
@@ -381,7 +394,7 @@ describe("the document tag picker", () => {
     const host = await openApp();
 
     // No "Add tags" fallback and no chevron: an edit this header would refuse.
-    expect(host.querySelector(".ub-tags")?.textContent).toBe("No tags");
+    expect(within(host).getByText("No tags").textContent).toBe("No tags");
     expect(host.querySelector(".ub-tag-chevron")).toBeNull();
     expect(picker(host)).toBeNull();
   });

@@ -10,6 +10,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { act, render } from "./react-render.js";
+import { screen, within } from "@testing-library/react";
 import type { ComponentProps, ReactElement } from "react";
 import * as Y from "yjs";
 import {
@@ -169,7 +170,6 @@ function mountComposer(
   open: () => void;
   type: (text: string) => void;
   submit: () => void;
-  query: <T extends Element>(selector: string) => T | null;
   unmount: () => void;
 } {
   const { editor, element } = mountEditor(ydoc);
@@ -188,14 +188,12 @@ function mountComposer(
     />,
     { container: frame },
   );
-  const query = <T extends Element>(selector: string): T | null =>
-    document.querySelector<T>(selector);
   return {
     editor,
     created,
-    open: () => act(() => query<HTMLButtonElement>("[data-slot=\"selection-composer\"] button[aria-label=\"Comment\"], [data-slot=\"selection-composer\"] > button")?.click()),
+    open: () => act(() => screen.getByRole<HTMLButtonElement>("button", { name: /^Comment(?: on .+)?$/ }).click()),
     type: (text: string) => {
-      const field = query<HTMLTextAreaElement>(".ub-comment-input");
+      const field = screen.queryByPlaceholderText<HTMLTextAreaElement>(/^Comment as /);
       if (field === null) throw new Error("no composer field");
       act(() => {
         // React listens for `input`, and setting `.value` skips its tracker.
@@ -208,12 +206,8 @@ function mountComposer(
     },
     submit: () =>
       act(() => {
-        const buttons = [
-          ...document.querySelectorAll<HTMLButtonElement>(".ub-composer .ub-comment-buttons button"),
-        ];
-        buttons.at(-1)?.click();
+        screen.getByRole<HTMLButtonElement>("button", { name: "Comment" }).click();
       }),
-    query,
     unmount: () => {
       view.unmount();
       editor.destroy();
@@ -327,23 +321,28 @@ describe("the selection a thread anchors to", () => {
   });
 });
 
-/** A toolbar button by its stable accessible name. */
-function tool(
-  view: ReturnType<typeof mountComposer>,
-  label: string,
-): HTMLButtonElement {
-  const found = [
-    ...document.querySelectorAll<HTMLButtonElement>("[data-selection-tool]"),
-  ].find((button) => button.getAttribute("aria-label") === label);
-  if (found === undefined || !view.query("[data-slot=\"selection-composer\"]")?.contains(found)) {
-    throw new Error(`no selection tool ${label}`);
-  }
-  return found;
+/** The unnamed portal frame has no accessible handle, across its three modes. */
+function querySelectionComposer(): HTMLElement | null {
+  // Positive assertions below exercise this same query before hiding the frame.
+  // Checking the frame also catches an empty mounted composer, in any mode.
+  return document.querySelector<HTMLElement>('[data-slot="selection-composer"]');
+}
+
+/** Scope quoted prose and clamp text to the portal, away from the editor. */
+function commentComposer(): HTMLElement {
+  const composer = querySelectionComposer();
+  if (composer === null) throw new Error("no selection composer");
+  return composer;
+}
+
+function tool(label: string): HTMLButtonElement {
+  return within(screen.getByRole("toolbar", { name: "Text formatting and comment" }))
+    .getByRole<HTMLButtonElement>("button", { name: label });
 }
 
 /** Change the link field through the browser event React listens to. */
-function linkValue(view: ReturnType<typeof mountComposer>, value: string): void {
-  const field = view.query<HTMLInputElement>("[aria-label=\"External link URL\"]");
+function linkValue(value: string): void {
+  const field = screen.queryByRole<HTMLInputElement>("textbox", { name: "External link URL" });
   if (field === null) throw new Error("no external link field");
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
@@ -360,23 +359,23 @@ describe("the prose selection toolbar", () => {
     const view = mountComposer(ydoc);
     try {
       select(view.editor, 1, 4, 9);
-      expect(tool(view, "Bold").getAttribute("aria-pressed")).toBe("false");
+      expect(tool("Bold").getAttribute("aria-pressed")).toBe("false");
       const selected = {
         from: view.editor.state.selection.from,
         to: view.editor.state.selection.to,
       };
-      act(() => tool(view, "Bold").click());
-      expect(tool(view, "Bold").getAttribute("aria-pressed")).toBe("true");
+      act(() => tool("Bold").click());
+      expect(tool("Bold").getAttribute("aria-pressed")).toBe("true");
       expect(view.editor.state.selection).toMatchObject(selected);
 
       // Extend from "quick" to "quick brown": one run carries bold and one
       // does not, so the button says mixed. Activating mixed applies it all.
       select(view.editor, 1, 4, 15);
-      expect(tool(view, "Bold").getAttribute("aria-pressed")).toBe("mixed");
-      act(() => tool(view, "Bold").click());
-      act(() => tool(view, "Italic").click());
-      expect(tool(view, "Bold").getAttribute("aria-pressed")).toBe("true");
-      expect(tool(view, "Italic").getAttribute("aria-pressed")).toBe("true");
+      expect(tool("Bold").getAttribute("aria-pressed")).toBe("mixed");
+      act(() => tool("Bold").click());
+      act(() => tool("Italic").click());
+      expect(tool("Bold").getAttribute("aria-pressed")).toBe("true");
+      expect(tool("Italic").getAttribute("aria-pressed")).toBe("true");
 
       const marked = snapshotFragment(ydoc)[1]?.delta.find(
         (run) => run.insert === "quick brown",
@@ -384,7 +383,7 @@ describe("the prose selection toolbar", () => {
       expect(marked?.attributes).toMatchObject({ bold: {}, italic: {} });
 
       // A full-state click removes only its own mark.
-      act(() => tool(view, "Bold").click());
+      act(() => tool("Bold").click());
       const italic = snapshotFragment(ydoc)[1]?.delta.find(
         (run) => run.insert === "quick brown",
       );
@@ -405,7 +404,7 @@ describe("the prose selection toolbar", () => {
       });
       select(view.editor, 1, 4, 15);
       // No timer or test-owned stopCapturing: the command owns the boundary.
-      act(() => tool(view, "Inline code").click());
+      act(() => tool("Inline code").click());
 
       act(() => {
         expect(view.editor.commands.keyboardShortcut("Mod-z")).toBe(true);
@@ -434,18 +433,18 @@ describe("the prose selection toolbar", () => {
     const view = mountComposer(ydoc);
     try {
       select(view.editor, 1, 4, 15);
-      act(() => tool(view, "Bold").click());
-      expect(tool(view, "External link").getAttribute("aria-pressed")).toBeNull();
-      act(() => tool(view, "External link").click());
-      linkValue(view, "mailto:ben@example.com");
-      act(() => view.query<HTMLButtonElement>("[type=\"submit\"]")?.click());
-      expect(view.query("[role=\"alert\"]")?.textContent).toContain("http");
+      act(() => tool("Bold").click());
+      expect(tool("External link").getAttribute("aria-pressed")).toBeNull();
+      act(() => tool("External link").click());
+      linkValue("mailto:ben@example.com");
+      act(() => screen.queryByRole<HTMLButtonElement>("button", { name: "Apply" })?.click());
+      expect(screen.queryByRole("alert")?.textContent).toContain("http");
       expect(snapshotFragment(ydoc)[1]?.delta).not.toContainEqual(
         expect.objectContaining({ attributes: expect.objectContaining({ link: {} }) }),
       );
 
-      linkValue(view, "https://example.com/first");
-      act(() => view.query<HTMLButtonElement>("[type=\"submit\"]")?.click());
+      linkValue("https://example.com/first");
+      act(() => screen.queryByRole<HTMLButtonElement>("button", { name: "Apply" })?.click());
       const linked = snapshotFragment(ydoc)[1]?.delta.find(
         (run) => run.insert === "quick brown",
       );
@@ -454,14 +453,13 @@ describe("the prose selection toolbar", () => {
         link: { href: "https://example.com/first" },
       });
 
-      act(() => tool(view, "External link").click());
-      expect(view.query<HTMLInputElement>("[aria-label=\"External link URL\"]")?.value).toBe(
+      act(() => tool("External link").click());
+      expect(screen.queryByRole<HTMLInputElement>("textbox", { name: "External link URL" })?.value).toBe(
         "https://example.com/first",
       );
-      linkValue(view, "https://example.com/cancelled");
+      linkValue("https://example.com/cancelled");
       act(() =>
-        view
-          .query<HTMLButtonElement>("[aria-label=\"External link\"] button[type=button]")
+        within(screen.getByRole("form", { name: "External link" })).queryByRole<HTMLButtonElement>("button", { name: "Cancel" })
           ?.click(),
       );
       expect(snapshotFragment(ydoc)[1]?.delta).toEqual(
@@ -475,9 +473,9 @@ describe("the prose selection toolbar", () => {
         ]),
       );
 
-      act(() => tool(view, "External link").click());
-      linkValue(view, "https://example.com/edited");
-      act(() => view.query<HTMLButtonElement>("[type=\"submit\"]")?.click());
+      act(() => tool("External link").click());
+      linkValue("https://example.com/edited");
+      act(() => screen.queryByRole<HTMLButtonElement>("button", { name: "Apply" })?.click());
       expect(
         snapshotFragment(ydoc)[1]?.delta.find(
           (run) => run.insert === "quick brown",
@@ -496,10 +494,10 @@ describe("the prose selection toolbar", () => {
           ),
         );
       });
-      act(() => tool(view, "External link").click());
-      linkValue(view, "https://example.com/replacement");
-      act(() => view.query<HTMLButtonElement>("[type=\"submit\"]")?.click());
-      expect(view.query("[role=\"alert\"]")?.textContent).toContain(
+      act(() => tool("External link").click());
+      linkValue("https://example.com/replacement");
+      act(() => screen.queryByRole<HTMLButtonElement>("button", { name: "Apply" })?.click());
+      expect(screen.queryByRole("alert")?.textContent).toContain(
         "document link",
       );
       expect(
@@ -520,14 +518,14 @@ describe("the prose selection toolbar", () => {
     const view = mountComposer(ydoc);
     try {
       select(view.editor, 1, 20, 6, 2);
-      expect(view.query("[role=\"toolbar\"]")).toBeNull();
-      expect(view.query("[data-slot=\"selection-composer\"] button[aria-label=\"Comment\"], [data-slot=\"selection-composer\"] > button")?.textContent).toBe(
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).toBeNull();
+      expect(screen.queryByRole<HTMLButtonElement>("button", { name: /^Comment(?: on .+)?$/ })?.textContent).toBe(
         "Comment on Paragraph 2",
       );
 
       select(view.editor, 3, 0, 5);
-      expect(view.query("[role=\"toolbar\"]")).toBeNull();
-      expect(view.query("[data-slot=\"selection-composer\"] button[aria-label=\"Comment\"], [data-slot=\"selection-composer\"] > button")?.textContent).toBe(
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).toBeNull();
+      expect(screen.queryByRole<HTMLButtonElement>("button", { name: /^Comment(?: on .+)?$/ })?.textContent).toBe(
         "Comment on Code block 4",
       );
     } finally {
@@ -540,17 +538,17 @@ describe("the prose selection toolbar", () => {
     const view = mountComposer(ydoc);
     try {
       select(view.editor, 1, 4, 15);
-      act(() => tool(view, "External link").click());
-      linkValue(view, "https://example.com/pending");
-      expect(view.query('[aria-label="External link URL"]')).not.toBeNull();
+      act(() => tool("External link").click());
+      linkValue("https://example.com/pending");
+      expect(screen.queryByRole<HTMLInputElement>("textbox", { name: "External link URL" })).not.toBeNull();
 
       select(view.editor, 1, 20, 6, 2);
-      expect(view.query('[aria-label="External link URL"]')).toBeNull();
-      expect(view.query('[role="toolbar"]')).toBeNull();
+      expect(screen.queryByRole<HTMLInputElement>("textbox", { name: "External link URL" })).toBeNull();
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).toBeNull();
 
       select(view.editor, 1, 4, 15);
-      expect(view.query('[role="toolbar"]')).not.toBeNull();
-      expect(view.query('[aria-label="External link URL"]')).toBeNull();
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).not.toBeNull();
+      expect(screen.queryByRole<HTMLInputElement>("textbox", { name: "External link URL" })).toBeNull();
     } finally {
       view.unmount();
     }
@@ -561,11 +559,12 @@ describe("the prose selection toolbar", () => {
     const view = mountComposer(ydoc);
     try {
       select(view.editor, 1, 4, 15);
-      expect(view.query("[role=\"toolbar\"]")).not.toBeNull();
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).not.toBeNull();
       view.open();
-      expect(view.query(".ub-comment-form")).not.toBeNull();
+      // The form's unnamed div groups its field and actions; it has no role/name.
+      expect(commentComposer().querySelector(".ub-comment-form")).not.toBeNull();
       act(() => {
-        view.query<HTMLTextAreaElement>("textarea")?.dispatchEvent(
+        screen.queryByPlaceholderText<HTMLTextAreaElement>(/^Comment as /)?.dispatchEvent(
           new KeyboardEvent("keydown", {
             key: "Escape",
             bubbles: true,
@@ -573,7 +572,7 @@ describe("the prose selection toolbar", () => {
           }),
         );
       });
-      expect(view.query("[role=\"toolbar\"]")).not.toBeNull();
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).not.toBeNull();
       expect(view.editor.state.selection.empty).toBe(false);
 
       act(() => {
@@ -585,28 +584,28 @@ describe("the prose selection toolbar", () => {
           }),
         );
       });
-      expect(view.query(".ub-composer")).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
       expect(view.editor.state.selection.empty).toBe(false);
 
       // A transaction at the dismissed range must not reopen it; only a new
       // selection ends the dismissal.
       act(() => view.editor.view.dispatch(view.editor.state.tr));
-      expect(view.query(".ub-composer")).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
 
       select(view.editor, 1, 20, 25);
-      expect(view.query('[role="toolbar"]')).not.toBeNull();
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).not.toBeNull();
       act(() => {
         view.editor.view.dom.dispatchEvent(
           new CompositionEvent("compositionstart", { bubbles: true }),
         );
       });
-      expect(view.query(".ub-composer")).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
       act(() => {
         view.editor.view.dom.dispatchEvent(
           new CompositionEvent("compositionend", { bubbles: true }),
         );
       });
-      expect(view.query("[role=\"toolbar\"]")).not.toBeNull();
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).not.toBeNull();
       expect(view.editor.state.selection.empty).toBe(false);
     } finally {
       view.unmount();
@@ -668,9 +667,10 @@ describe("the table-cell selection toolbar", () => {
     try {
       const before = getBlocks(ydoc)[0]!;
       selectCell(view.editor, index, 0, 5);
-      expect([...document.querySelectorAll('[data-selection-tool]')].at(-1)?.textContent).toBe("Comment");
+      expect(within(screen.getByRole("toolbar", { name: "Text formatting and comment" }))
+        .getAllByRole("button").at(-1)?.textContent).toBe("Comment");
       view.open();
-      expect(view.query('[data-slot="selection-excerpt"]')?.textContent).toBe(index === 0 ? "Alpha" : "Gamma");
+      expect(within(commentComposer()).queryByText(index === 0 ? "Alpha" : "Gamma")?.textContent).toBe(index === 0 ? "Alpha" : "Gamma");
       view.type("Discuss these characters");
       view.submit();
       expect(view.created).toHaveLength(1);
@@ -751,7 +751,7 @@ describe("the table-cell selection toolbar", () => {
         CellSelection.create(editor.state.doc, positions[0]!.pos),
       )));
       expect(cellTextTargetOf(editor)).toMatchObject({ start: 0, end: 10, text: "Alpha beta" });
-      act(() => tool(view, "Bold").click());
+      act(() => tool("Bold").click());
       expect(editor.state.selection).toBeInstanceOf(CellSelection);
       expect(cellDeltas(ydoc)[0]).toEqual([{ insert: "Alpha beta", attributes: { bold: {} } }]);
       expect(cellDeltas(ydoc)[2]).toEqual([{ insert: "Gamma delta" }]);
@@ -762,11 +762,11 @@ describe("the table-cell selection toolbar", () => {
       expect(multi.$from.node(3)).toBe(multi.$to.node(3));
       act(() => editor.view.dispatch(editor.state.tr.setSelection(multi)));
       expect(cellTextTargetOf(editor)).toBeNull();
-      expect(view.query('[role="toolbar"]')).toBeNull();
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).toBeNull();
       expect(commentTargetOf(editor, ydoc)).toMatchObject({ row: 0, column: 0, text: "Alpha beta", clamped: true });
       view.open();
-      expect(view.query('[data-slot="selection-clamp"]')?.textContent).toBe("first cell only");
-      expect(view.query('[data-slot="selection-excerpt"]')?.textContent).toBe("Alpha beta");
+      expect(within(commentComposer()).queryByText(/first (?:cell|block) only/)?.textContent).toBe("first cell only");
+      expect(within(commentComposer()).queryByText("Alpha beta")?.textContent).toBe("Alpha beta");
       key(editor, "Escape");
 
       for (const [from, to] of [
@@ -778,7 +778,7 @@ describe("the table-cell selection toolbar", () => {
           TextSelection.create(editor.state.doc, from!, to!),
         )));
         expect(cellTextTargetOf(editor)).toBeNull();
-        expect(view.query('[role="toolbar"]')).toBeNull();
+        expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).toBeNull();
         expect(commentTargetOf(editor, ydoc)).toMatchObject({
           column: 0, start: 2, clamped: true,
           text: from === positions[2]!.start + 2 ? "mma delta" : "pha beta",
@@ -797,14 +797,14 @@ describe("the table-cell selection toolbar", () => {
     try {
       const before = cellDeltas(ydoc);
       selectCell(view.editor, index, 0, 5);
-      expect(view.query('[role="toolbar"]')?.getAttribute("aria-label")).toBe("Text formatting and comment");
-      expect(view.query('[aria-label="Comment"]')).not.toBeNull();
-      expect([...document.querySelectorAll("[data-selection-tool]")]).toHaveLength(6);
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })?.getAttribute("aria-label")).toBe("Text formatting and comment");
+      expect(screen.queryByRole("button", { name: "Comment" })).not.toBeNull();
+      expect(within(screen.getByRole("toolbar", { name: "Text formatting and comment" })).getAllByRole("button")).toHaveLength(6);
       const selection = { from: view.editor.state.selection.from, to: view.editor.state.selection.to };
       for (const label of flags) {
-        expect(tool(view, label).getAttribute("aria-pressed")).toBe("false");
-        act(() => tool(view, label).click());
-        expect(tool(view, label).getAttribute("aria-pressed")).toBe("true");
+        expect(tool(label).getAttribute("aria-pressed")).toBe("false");
+        act(() => tool(label).click());
+        expect(tool(label).getAttribute("aria-pressed")).toBe("true");
         expect(view.editor.state.selection).toMatchObject(selection);
       }
       expect(cellDeltas(remote)[index]).toEqual([
@@ -819,12 +819,12 @@ describe("the table-cell selection toolbar", () => {
       expect(getBlocks(remote)[0]!.text).toContain(index === 0 ? "***~~`Alpha`~~*** beta" : "***~~`Gamma`~~*** delta");
 
       selectCell(view.editor, index, 0, cells(view.editor)[index]!.length);
-      for (const label of flags) expect(tool(view, label).getAttribute("aria-pressed")).toBe("mixed");
-      act(() => tool(view, "Bold").click());
-      expect(tool(view, "Bold").getAttribute("aria-pressed")).toBe("true");
-      expect(tool(view, "Italic").getAttribute("aria-pressed")).toBe("mixed");
-      act(() => tool(view, "Bold").click());
-      expect(tool(view, "Bold").getAttribute("aria-pressed")).toBe("false");
+      for (const label of flags) expect(tool(label).getAttribute("aria-pressed")).toBe("mixed");
+      act(() => tool("Bold").click());
+      expect(tool("Bold").getAttribute("aria-pressed")).toBe("true");
+      expect(tool("Italic").getAttribute("aria-pressed")).toBe("mixed");
+      act(() => tool("Bold").click());
+      expect(tool("Bold").getAttribute("aria-pressed")).toBe("false");
       expect(cellDeltas(remote)[index]?.[0]?.attributes).toEqual({ italic: {}, strike: {}, inlineCode: {} });
     } finally {
       view.unmount();
@@ -838,24 +838,24 @@ describe("the table-cell selection toolbar", () => {
     const view = mountComposer(ydoc);
     try {
       selectCell(view.editor, 2, 0, 5);
-      act(() => tool(view, "Bold").click());
-      act(() => tool(view, "External link").click());
+      act(() => tool("Bold").click());
+      act(() => tool("External link").click());
       for (const invalid of ["https://", "mailto:ben@example.com"]) {
-        linkValue(view, invalid);
-        act(() => view.query<HTMLButtonElement>('[type="submit"]')?.click());
-        expect(view.query('[role="alert"]')?.textContent).toContain("http");
+        linkValue(invalid);
+        act(() => screen.queryByRole<HTMLButtonElement>("button", { name: "Apply" })?.click());
+        expect(screen.queryByRole("alert")?.textContent).toContain("http");
         expect(cellDeltas(ydoc)[2]?.[0]?.attributes).toEqual({ bold: {} });
       }
-      linkValue(view, "https://example.com/cell");
-      act(() => view.query<HTMLButtonElement>('[type="submit"]')?.click());
+      linkValue("https://example.com/cell");
+      act(() => screen.queryByRole<HTMLButtonElement>("button", { name: "Apply" })?.click());
       expect(cellDeltas(ydoc)[2]?.[0]?.attributes).toEqual({
         bold: {},
         link: { href: "https://example.com/cell" },
       });
-      act(() => tool(view, "External link").click());
-      expect(view.query<HTMLInputElement>('[aria-label="External link URL"]')?.value).toBe("https://example.com/cell");
-      linkValue(view, "http://example.com/edited");
-      act(() => view.query<HTMLButtonElement>('[type="submit"]')?.click());
+      act(() => tool("External link").click());
+      expect(screen.queryByRole<HTMLInputElement>("textbox", { name: "External link URL" })?.value).toBe("https://example.com/cell");
+      linkValue("http://example.com/edited");
+      act(() => screen.queryByRole<HTMLButtonElement>("button", { name: "Apply" })?.click());
       expect(cellDeltas(ydoc)[2]?.[0]?.attributes).toMatchObject({ link: { href: "http://example.com/edited" } });
 
       const target = cells(view.editor)[2]!;
@@ -865,10 +865,10 @@ describe("the table-cell selection toolbar", () => {
         view.editor.state.schema.marks.docLink!.create({ docId: "11111111-2222-3333-4444-555555555555" }),
       )));
       const before = cellDeltas(ydoc);
-      act(() => tool(view, "External link").click());
-      linkValue(view, "https://example.com/replacement");
-      act(() => view.query<HTMLButtonElement>('[type="submit"]')?.click());
-      expect(view.query('[role="alert"]')?.textContent).toContain("document link");
+      act(() => tool("External link").click());
+      linkValue("https://example.com/replacement");
+      act(() => screen.queryByRole<HTMLButtonElement>("button", { name: "Apply" })?.click());
+      expect(screen.queryByRole("alert")?.textContent).toContain("document link");
       expect(cellDeltas(ydoc)).toEqual(before);
     } finally {
       view.unmount();
@@ -884,8 +884,8 @@ describe("the table-cell selection toolbar", () => {
       selectCell(view.editor, 0, 10, 10);
       act(() => view.editor.commands.insertContent("!"));
       selectCell(view.editor, 0, 0, 5);
-      act(() => tool(view, "Bold").click());
-      act(() => tool(view, "Italic").click());
+      act(() => tool("Bold").click());
+      act(() => tool("Italic").click());
       selectCell(view.editor, 0, 11, 11);
       act(() => view.editor.commands.insertContent("?"));
 
@@ -909,59 +909,59 @@ describe("the table-cell selection toolbar", () => {
     const ydoc = tableDoc();
     const view = mountComposer(ydoc);
     try {
-      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
       selectCell(view.editor, 0, 0, 0);
-      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
       selectCell(view.editor, 0, 0, 5);
       for (const [shortcut, label] of [
         ["Mod-b", "Bold"], ["Mod-i", "Italic"],
         ["Mod-Shift-s", "Strikethrough"], ["Mod-e", "Inline code"],
       ]) {
         act(() => { expect(view.editor.commands.keyboardShortcut(shortcut!)).toBe(true); });
-        expect(tool(view, label!).getAttribute("aria-pressed")).toBe("true");
+        expect(tool(label!).getAttribute("aria-pressed")).toBe("true");
       }
       key(view.editor, "Tab");
       expect(view.editor.state.selection.empty).toBe(false);
       expect(view.editor.state.doc.textBetween(view.editor.state.selection.from, view.editor.state.selection.to)).toBe("Neighbour");
-      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
       // Touching a scrollport is pending input, not a new selection. Neither
       // an unchanged transaction nor a document edit may revive Tab's range.
       act(() => view.editor.view.dom.dispatchEvent(new Event("pointerdown", { bubbles: true })));
       act(() => view.editor.view.dispatch(view.editor.state.tr));
-      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
       const neighbour = cells(view.editor)[1]!;
       act(() => view.editor.view.dispatch(view.editor.state.tr.addMark(
         neighbour.start, neighbour.start + 1,
         view.editor.state.schema.marks.italic!.create(),
       )));
-      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
       key(view.editor, "Tab", true);
       expect(view.editor.state.doc.textBetween(view.editor.state.selection.from, view.editor.state.selection.to)).toBe("Alpha beta");
-      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
 
       // A deliberate new selection ends the navigation suppression.
       act(() => view.editor.view.dom.dispatchEvent(new Event("pointerdown", { bubbles: true })));
       selectCell(view.editor, 0, 1, 5);
-      expect(view.query('[role="toolbar"]')).not.toBeNull();
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).not.toBeNull();
       const positions = cells(view.editor);
       act(() => view.editor.view.dispatch(view.editor.state.tr.setSelection(
         CellSelection.create(view.editor.state.doc, positions[0]!.pos, positions[1]!.pos),
       )));
-      expect(view.query('[data-slot="selection-composer"]')).not.toBeNull();
-      expect(view.query('[role="toolbar"]')).toBeNull();
+      expect(querySelectionComposer()).not.toBeNull();
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).toBeNull();
       act(() => view.editor.view.dispatch(view.editor.state.tr.setSelection(
         TextSelection.create(view.editor.state.doc, positions[0]!.start + 1, positions[1]!.start + 2),
       )));
-      expect(view.query('[data-slot="selection-composer"]')).not.toBeNull();
-      expect(view.query('[role="toolbar"]')).toBeNull();
+      expect(querySelectionComposer()).not.toBeNull();
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).toBeNull();
 
       selectCell(view.editor, 2, 0, 5);
       act(() => view.editor.view.dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
-      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
       act(() => view.editor.view.dom.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })));
-      expect(view.query('[role="toolbar"]')).not.toBeNull();
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).not.toBeNull();
       selectCell(view.editor, 2, 5, 5);
-      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
     } finally {
       view.unmount();
       ydoc.destroy();
@@ -975,16 +975,16 @@ describe("the table-cell selection toolbar", () => {
       selectCell(view.editor, 0, 0, 5);
       key(view.editor, "Escape");
       expect(view.editor.state.selection.empty).toBe(false);
-      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
       act(() => view.editor.view.dispatch(view.editor.state.tr));
-      expect(view.query('[data-slot="selection-composer"]')).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
       // Same offsets and table id, a different cell: Escape must not leak.
       selectCell(view.editor, 2, 0, 5);
-      expect(view.query('[role="toolbar"]')).not.toBeNull();
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).not.toBeNull();
       act(() => view.editor.setEditable(false));
       selectCell(view.editor, 2, 1, 5);
-      expect(view.query('[data-slot="selection-composer"]')).not.toBeNull();
-      expect(view.query('[role="toolbar"]')).toBeNull();
+      expect(querySelectionComposer()).not.toBeNull();
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).toBeNull();
       expect(getBlocks(ydoc)[0]!.text).toBe(source);
     } finally {
       view.unmount();
@@ -993,8 +993,8 @@ describe("the table-cell selection toolbar", () => {
     const decided = mountComposer(ydoc, { contentReadOnly: true });
     try {
       selectCell(decided.editor, 0, 0, 5);
-      expect(decided.query('[role="toolbar"]')).toBeNull();
-      expect(decided.query<HTMLButtonElement>('[data-selection-tool]')?.textContent).toBe("Comment");
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).toBeNull();
+      expect(within(commentComposer()).getAllByRole("button", { hidden: true })[0]?.textContent).toBe("Comment");
       decided.open();
       decided.type("Still discussable");
       decided.submit();
@@ -1017,11 +1017,11 @@ describe("starting a thread from the prose", () => {
       select(view.editor, 1, 4, 15);
       view.open();
       view.type("日本語のコメント");
-      const field = view.query<HTMLTextAreaElement>(".ub-comment-input")!;
+      const field = screen.getByPlaceholderText<HTMLTextAreaElement>(/^Comment as /);
 
       composingKey(field, "Enter", true);
       expect(listAnnotations(ydoc)).toEqual([]);
-      expect(view.query(".ub-comment-input")).toBe(field);
+      expect(screen.queryByPlaceholderText<HTMLTextAreaElement>(/^Comment as /)).toBe(field);
       expect(field.value).toBe("日本語のコメント");
       expect(document.activeElement).toBe(field);
 
@@ -1029,14 +1029,14 @@ describe("starting a thread from the prose", () => {
         key: "Enter", shiftKey: true, bubbles: true, cancelable: true,
       })));
       expect(listAnnotations(ydoc)).toEqual([]);
-      expect(view.query(".ub-comment-input")).toBe(field);
+      expect(screen.queryByPlaceholderText<HTMLTextAreaElement>(/^Comment as /)).toBe(field);
 
       act(() => field.dispatchEvent(new KeyboardEvent("keydown", {
         key: "Enter", bubbles: true, cancelable: true,
       })));
       expect(listAnnotations(ydoc)).toHaveLength(1);
       expect(listAnnotations(ydoc)[0]?.comments[0]?.text).toBe("日本語のコメント");
-      expect(view.query(".ub-comment-input")).toBeNull();
+      expect(screen.queryByPlaceholderText<HTMLTextAreaElement>(/^Comment as /)).toBeNull();
     } finally {
       view.unmount();
     }
@@ -1049,12 +1049,12 @@ describe("starting a thread from the prose", () => {
       select(view.editor, 1, 4, 15);
       view.open();
       view.type("日本語のコメント");
-      const field = view.query<HTMLTextAreaElement>(".ub-comment-input")!;
+      const field = screen.getByPlaceholderText<HTMLTextAreaElement>(/^Comment as /);
 
       // Dispatch through the composer frame, whose capture listener sees
       // Escape before the field's own handler can preserve the draft.
       composingKey(field, "Escape", false);
-      expect(view.query(".ub-comment-input")).toBe(field);
+      expect(screen.queryByPlaceholderText<HTMLTextAreaElement>(/^Comment as /)).toBe(field);
       expect(field.value).toBe("日本語のコメント");
       expect(document.activeElement).toBe(field);
       expect(listAnnotations(ydoc)).toEqual([]);
@@ -1062,8 +1062,8 @@ describe("starting a thread from the prose", () => {
       act(() => field.dispatchEvent(new KeyboardEvent("keydown", {
         key: "Escape", bubbles: true, cancelable: true,
       })));
-      expect(view.query(".ub-comment-input")).toBeNull();
-      expect(view.query("[role=\"toolbar\"]")).not.toBeNull();
+      expect(screen.queryByPlaceholderText<HTMLTextAreaElement>(/^Comment as /)).toBeNull();
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).not.toBeNull();
     } finally {
       view.unmount();
     }
@@ -1075,15 +1075,15 @@ describe("starting a thread from the prose", () => {
     const view = mountComposer(ydoc, { author: "ben" });
     try {
       // No selection, no composer.
-      expect(view.query(".ub-composer")).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
 
       select(view.editor, 1, 4, 15);
-      expect(view.query("[role=\"toolbar\"]")).not.toBeNull();
-      expect(view.query("[data-slot=\"selection-composer\"] button[aria-label=\"Comment\"], [data-slot=\"selection-composer\"] > button")?.textContent).toBe("Comment");
+      expect(screen.queryByRole("toolbar", { name: "Text formatting and comment" })).not.toBeNull();
+      expect(screen.queryByRole<HTMLButtonElement>("button", { name: /^Comment(?: on .+)?$/ })?.textContent).toBe("Comment");
 
       view.open();
       // The card quotes exactly the range the mark will cover.
-      expect(view.query('[data-slot="selection-excerpt"]')?.textContent).toBe("quick brown");
+      expect(within(commentComposer()).queryByText("quick brown")?.textContent).toBe("quick brown");
       view.type("why quick?");
       view.submit();
 
@@ -1121,16 +1121,16 @@ describe("starting a thread from the prose", () => {
       view.submit();
 
       expect(listAnnotations(ydoc)).toHaveLength(1);
-      expect(view.query(".ub-comment-error")?.textContent).toContain(
+      expect(within(commentComposer()).queryByText(/already part of another thread/)?.textContent).toContain(
         "already part of another thread",
       );
-      expect(view.query<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe(
+      expect(screen.queryByPlaceholderText<HTMLTextAreaElement>(/^Comment as /)?.value).toBe(
         "mine too",
       );
 
       // Aim at a free range and the refusal no longer applies…
       select(view.editor, 1, 20, 25);
-      expect(view.query(".ub-comment-error")).toBeNull();
+      expect(within(commentComposer()).queryByText(/already part of another thread/)).toBeNull();
       // …and the same text, never retyped, lands there.
       view.submit();
       expect(
@@ -1158,11 +1158,11 @@ describe("starting a thread from the prose", () => {
       // and quoted text exactly as they were.
       select(view.editor, 1, 20, PARAGRAPH.length);
       view.open();
-      expect(view.query('[data-slot="selection-clamp"]')).toBeNull();
+      expect(within(commentComposer()).queryByText(/first (?:cell|block) only/)).toBeNull();
 
       select(view.editor, 1, 20, 6, 2);
-      expect(view.query('[data-slot="selection-clamp"]')?.textContent).toBe("first block only");
-      expect(view.query('[data-slot="selection-excerpt"]')?.textContent).toBe("jumps.");
+      expect(within(commentComposer()).queryByText(/first (?:cell|block) only/)?.textContent).toBe("first block only");
+      expect(within(commentComposer()).queryByText("jumps.")?.textContent).toBe("jumps.");
 
       view.type("the tail only");
       view.submit();
@@ -1201,11 +1201,11 @@ describe("starting a thread from the prose", () => {
       });
 
       // Still open, still holding what was typed…
-      expect(view.query<HTMLTextAreaElement>(".ub-comment-input")?.value).toBe(
+      expect(screen.queryByPlaceholderText<HTMLTextAreaElement>(/^Comment as /)?.value).toBe(
         "why quick?",
       );
       // …and quoting the same words at their new offsets.
-      expect(view.query('[data-slot="selection-excerpt"]')?.textContent).toBe("quick brown");
+      expect(within(commentComposer()).queryByText("quick brown")?.textContent).toBe("quick brown");
 
       view.submit();
       const [thread] = listAnnotations(ydoc);
@@ -1225,7 +1225,7 @@ describe("starting a thread from the prose", () => {
       select(view.editor, 1, 4, 15);
       view.open();
       view.type("look at this");
-      act(() => view.query<HTMLButtonElement>(".ub-mention")?.click());
+      act(() => within(commentComposer()).queryByRole<HTMLButtonElement>("button", { name: "@agent-a" })?.click());
       view.submit();
 
       expect(listAnnotations(ydoc)[0]?.comments[0]?.text).toBe(
@@ -1246,7 +1246,7 @@ describe("the rail writes back", () => {
     author = "ben",
   ): {
     cards: () => HTMLElement[];
-    card: (threadId: string) => HTMLElement;
+    card: (excerpt: string) => HTMLElement;
     count: () => string | null;
     resolvedCss: () => string;
     type: (text: string) => Promise<void>;
@@ -1261,22 +1261,24 @@ describe("the rail writes back", () => {
       />,
     );
     const host = view.container;
-    const cards = (): HTMLElement[] => [
-      ...host.querySelectorAll<HTMLElement>(".ub-thread-card"),
-    ];
+    const region = (): HTMLElement => within(host).getByRole("region", { name: "Threads" });
+    const cards = (): HTMLElement[] => within(region()).getAllByRole("listitem");
     return {
       cards,
-      card: (threadId) => {
-        const found = cards().find((card) => card.id === `ub-thread-${threadId}`);
-        if (found === undefined) throw new Error(`no card for ${threadId}`);
+      card: (excerpt) => {
+        const control = within(region()).getByRole("button", { name: new RegExp(excerpt) });
+        const found = cards().find((card) => card.contains(control));
+        if (found === undefined) throw new Error(`no card quoting ${excerpt}`);
         return found;
       },
-      count: () => host.querySelector(".ub-rail-head .ub-muted")?.textContent ?? null,
+      count: () => within(within(region()).getByText("Threads", { exact: true }))
+        .getByText(/^\d+$/).textContent,
       resolvedCss: () =>
+        // This generated stylesheet, rather than a visible control, is the contract.
         host.querySelector("[data-resolved-highlights]")?.textContent ?? "",
       type: (text) =>
         settle(() => {
-          const field = host.querySelector<HTMLTextAreaElement>(".ub-comment-input");
+          const field = within(region()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…");
           if (field === null) throw new Error("no reply field");
           // React listens for `input`, and setting `.value` skips its tracker.
           Object.getOwnPropertyDescriptor(
@@ -1293,20 +1295,17 @@ describe("the rail writes back", () => {
 
   /** The button in a card's action row whose label is `label`. */
   function action(card: HTMLElement, label: string): HTMLButtonElement {
-    const found = [
-      ...card.querySelectorAll<HTMLButtonElement>(".ub-thread-actions button"),
-    ].find((button) => button.textContent === label);
-    if (found === undefined) throw new Error(`no ${label} button`);
-    return found;
+    return within(card).getByRole<HTMLButtonElement>("button", { name: label });
   }
 
-  /** Submit the reply form open on a card — the last of its buttons. */
+  /** Submit the visible reply form on this card. */
   function submitReply(card: HTMLElement): void {
-    const buttons = [
-      ...card.querySelectorAll<HTMLButtonElement>(".ub-comment-buttons button"),
-    ];
-    if (buttons.length === 0) throw new Error("no reply form");
-    buttons.at(-1)?.click();
+    within(card).getByPlaceholderText("Reply…");
+    action(card, "Reply").click();
+  }
+
+  function threadButton(card: HTMLElement): HTMLButtonElement {
+    return within(card).getByRole<HTMLButtonElement>("button", { name: /^Paragraph \d/ });
   }
 
   it("appends a reply authored by this client, live to a second client", async () => {
@@ -1328,10 +1327,10 @@ describe("the rail writes back", () => {
         },
       ]);
       // The form closes, and the card shows the reply it just wrote.
-      expect(view.cards()[0]?.querySelector(".ub-comment-input")).toBeNull();
+      expect(within(view.cards()[0]!).queryByPlaceholderText("Reply…")).toBeNull();
       expect(
-        [...view.cards()[0]!.querySelectorAll(".ub-thread-text")].map(
-          (element) => element.textContent,
+        within(view.cards()[0]!).getAllByRole("time").map(
+          (time) => within(time.parentElement!.parentElement!).getByText(/^(why\?|because it is a pangram)$/).textContent,
         ),
       ).toEqual(["why?", "because it is a pangram"]);
     } finally {
@@ -1351,24 +1350,24 @@ describe("the rail writes back", () => {
     const view = renderRail(ydoc);
     try {
       await settle(() => action(view.cards()[0]!, "Reply").click());
-      expect(view.cards()[0]?.querySelector(".ub-comment-input")).not.toBeNull();
+      expect(within(view.cards()[0]!).queryByPlaceholderText("Reply…")).not.toBeNull();
 
       await settle(() => setAnnotationResolved(remote, thread.id, true));
-      expect(view.cards()[0]?.querySelector(".ub-comment-input")).toBeNull();
+      expect(within(view.cards()[0]!).queryByPlaceholderText("Reply…")).toBeNull();
 
       // Expanding the resolved card shows the conversation, and no form.
       await settle(() =>
-        view.cards()[0]?.querySelector<HTMLButtonElement>(".ub-thread")?.click(),
+        threadButton(view.cards()[0]!).click(),
       );
-      expect(view.cards()[0]?.querySelector(".ub-thread-text")?.textContent).toBe(
+      expect(within(view.cards()[0]!).queryByText("why?")?.textContent).toBe(
         "why?",
       );
-      expect(view.cards()[0]?.querySelector(".ub-comment-input")).toBeNull();
+      expect(within(view.cards()[0]!).queryByPlaceholderText("Reply…")).toBeNull();
 
       // Reopened by that same client: the reply was let go, not merely hidden,
       // so the form does not come back — and does not steal the caret with it.
       await settle(() => setAnnotationResolved(remote, thread.id, false));
-      expect(view.cards()[0]?.querySelector(".ub-comment-input")).toBeNull();
+      expect(within(view.cards()[0]!).queryByPlaceholderText("Reply…")).toBeNull();
     } finally {
       view.unmount();
     }
@@ -1397,7 +1396,7 @@ describe("the rail writes back", () => {
       // handled against the render that still shows an open thread.
       await settle(() => {
         setAnnotationResolved(remote, thread.id, true);
-        submitReply(view.card(thread.id));
+        submitReply(view.card("quick brown"));
       });
 
       // Nothing was appended, on either replica…
@@ -1405,19 +1404,19 @@ describe("the rail writes back", () => {
       expect(getAnnotation(ydoc, thread.id)?.comments).toHaveLength(1);
       // …and the card says why, on the card rather than in a form that is gone.
       expect(
-        view.card(thread.id).querySelector(".ub-comment-error")?.textContent,
+        within(view.card("quick brown")).queryByText("This thread was resolved while you wrote — reopen it to reply.")?.textContent,
       ).toBe("This thread was resolved while you wrote — reopen it to reply.");
-      expect(view.card(thread.id).querySelector(".ub-comment-input")).toBeNull();
+      expect(within(view.card("quick brown")).queryByPlaceholderText("Reply…")).toBeNull();
 
       // The message is about a thread that reads as resolved, and whoever
       // settled it can reopen it from anywhere. Nobody clicks anything here:
       // the reopen arrives from the other replica and the message goes with the
       // state that justified it.
       await settle(() => setAnnotationResolved(remote, thread.id, false));
-      expect(view.card(thread.id).querySelector(".ub-comment-error")).toBeNull();
-      await settle(() => action(view.card(thread.id), "Reply").click());
+      expect(within(view.card("quick brown")).queryByText("This thread was resolved while you wrote — reopen it to reply.")).toBeNull();
+      await settle(() => action(view.card("quick brown"), "Reply").click());
       await view.type("because it is a pangram");
-      await settle(() => submitReply(view.card(thread.id)));
+      await settle(() => submitReply(view.card("quick brown")));
       expect(getAnnotation(remote, thread.id)?.comments).toHaveLength(2);
     } finally {
       view.unmount();
@@ -1448,18 +1447,16 @@ describe("the rail writes back", () => {
       expect(view.cards()).toHaveLength(2);
       const resolved = view
         .cards()
-        .find((card) => card.querySelector(".ub-thread-resolved"));
-      expect(resolved?.querySelector(".ub-chip")?.textContent).toBe("resolved");
+        .find((card) => within(card).queryByText("resolved"));
+      expect(within(resolved!).queryByText("resolved")?.textContent).toBe("resolved");
       // Collapsed, but expandable — the conversation is not lost.
-      expect(resolved?.querySelector(".ub-thread-text")).toBeNull();
+      expect(within(resolved!).queryByText("why?")).toBeNull();
       await settle(() =>
-        resolved?.querySelector<HTMLButtonElement>(".ub-thread")?.click(),
+        threadButton(resolved!).click(),
       );
       expect(
-        view
-          .cards()
-          .find((card) => card.querySelector(".ub-thread-resolved"))
-          ?.querySelector(".ub-thread-text")?.textContent,
+        within(view.cards().find((card) => within(card).queryByText("resolved"))!)
+          .queryByText("why?")?.textContent,
       ).toBe("why?");
 
       // The highlight in the prose fades: still there, no amber ground.
@@ -1472,7 +1469,7 @@ describe("the rail writes back", () => {
       // …and reopening puts it back in the count.
       const reopen = view
         .cards()
-        .find((card) => card.querySelector(".ub-thread-resolved"))!;
+        .find((card) => within(card).queryByText("resolved"))!;
       await settle(() => action(reopen, "Reopen").click());
       expect(getAnnotation(remote, thread.id)?.resolved).toBe(false);
       expect(view.count()).toBe("2");
