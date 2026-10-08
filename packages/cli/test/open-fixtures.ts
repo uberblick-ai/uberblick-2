@@ -585,14 +585,16 @@ export function servingDocumentOf(
   workspace: string,
   secret: string,
   rebound = false,
+  otherWorkspaces: Record<string, { browserKey: string; remoteHubUrl: string | null }> = {},
 ): string {
   const hubUrl = appUrl.replace(/^http:/, "ws:").replace(/\/$/, "");
   return JSON.stringify({
     hubUrl,
-    workspaces: [workspace],
+    workspaces: [workspace, ...Object.keys(otherWorkspaces)],
     hubAuthToken: secret,
     remoteHubUrl,
     ...(rebound ? { rebound: true } : {}),
+    servedWorkspaces: { [workspace]: { browserKey: secret, remoteHubUrl }, ...otherWorkspaces },
   });
 }
 

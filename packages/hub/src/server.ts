@@ -277,19 +277,31 @@ export type RoomAuthenticator = (
 /**
  * Build the hub's room-authentication boundary for any Hocuspocus server.
  *
- * `ub open` serves rooms from one workspace-local store, so it supplies
- * `servedWorkspace`; the ordinary hub omits it and may admit any workspace
- * whose room and signed claim agree. Everything else — query-token refusal,
+ * `ub open` supplies keys scoped to its served workspace-local stores; the
+ * ordinary hub uses one root key and may admit any workspace whose room and
+ * signed claim agree. Everything else — query-token refusal,
  * protocol envelope, signature and lifetime checks, read-only scope and log
  * vocabulary — is deliberately one implementation.
  */
 export async function createRoomAuthenticator(options: {
-  authSecret: string;
   protocolVersion: number;
   log: HubLogger;
-  servedWorkspace?: string;
-}): Promise<RoomAuthenticator> {
-  const rootKey = await importRootSecret(options.authSecret);
+} & (
+  | { authSecret: string; servedWorkspace?: string; workspaceKeys?: never }
+  | {
+      workspaceKeys: ReadonlyMap<string, string>;
+      authSecret?: never;
+      servedWorkspace?: never;
+    }
+)): Promise<RoomAuthenticator> {
+  const rootKey = options.authSecret === undefined
+    ? undefined
+    : await importRootSecret(options.authSecret);
+  const workspaceKeys = options.workspaceKeys === undefined
+    ? undefined
+    : new Map(await Promise.all([...options.workspaceKeys].map(
+        async ([workspace, secret]) => [workspace, await importRootSecret(secret)] as const,
+      )));
 
   return async ({
     token,
@@ -349,7 +361,17 @@ export async function createRoomAuthenticator(options: {
       );
     }
 
-    const inspected = await inspectToken(rootKey, envelope.token);
+    const workspace = roomWorkspace(documentName);
+    // Select by the requested room, never by an unverified token claim. A
+    // served workspace's key cannot mint admission to a different store.
+    const verificationKey = workspaceKeys === undefined
+      ? rootKey
+      : workspace === null ? undefined : workspaceKeys.get(workspace);
+    if (verificationKey === undefined) {
+      options.log(rejected("workspace-mismatch"));
+      throw new AuthError("workspace-mismatch", "room is outside the served workspaces");
+    }
+    const inspected = await inspectToken(verificationKey, envelope.token);
     if ("failure" in inspected) {
       options.log(rejected(inspected.failure, tokenFields(inspected.identity)));
       throw new AuthError(
@@ -371,7 +393,6 @@ export async function createRoomAuthenticator(options: {
       );
     }
 
-    const workspace = roomWorkspace(documentName);
     if (
       workspace === null ||
       workspace !== claims.workspace ||

@@ -343,7 +343,8 @@ export function StatusLine({
   const raw = rawSyncState(status);
   const state = useCalmSyncState(raw, connection);
   const reading = statusReading(status, state ?? raw);
-  const facts = documentSyncFacts(status, state, reading, hubAcked, notSharedReason);
+  const localWorkspace = endpoint?.url === "local";
+  const facts = documentSyncFacts(status, state, reading, hubAcked, notSharedReason, localWorkspace);
   const saveNote =
     !status.writable && reading.detail === null ? (
       <span className="ub-muted ub-not-saved">not saved</span>
@@ -375,7 +376,7 @@ export function StatusLine({
       </span>
     </span>
   );
-  const hubFact = facts.twoFact ? (
+  const hubFact = facts.twoFact && !localWorkspace ? (
     <span className="inline-flex items-center gap-2">
       {mark(facts.hubTone)}
       <span className="ub-status-word ub-status-word--hub">{facts.hub}</span>

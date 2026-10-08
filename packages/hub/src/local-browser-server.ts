@@ -12,6 +12,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import type { WebSocketLike } from "@hocuspocus/server";
 import { Server } from "@hocuspocus/server";
+import { parseRoom } from "@uberblick/schema";
 import {
   messageYjsSyncStep1,
   messageYjsSyncStep2,
@@ -126,24 +127,38 @@ export interface LocalRoomSlice {
   updates: readonly { seq: number; payload: Uint8Array }[];
 }
 
-export interface LocalBrowserServerConfig {
+interface LocalBrowserServerCallbacks {
   port: number;
-  workspaceId: string;
-  /** Independent local admission key; never the replica's upstream secret. */
-  browserKey: string;
   expectedOrigin: string;
   protocolVersion?: number;
   log?: HubLogger;
+  /** Prepare an authenticated room's replica before reading its store. */
+  prepareRoom?(room: string): Promise<void>;
   readRoom(room: string, afterSeq: number): LocalRoomSlice;
   appendUpdate(room: string, payload: Uint8Array): void;
   awarenessForRoom(room: string): Awareness;
   onRequest(request: IncomingMessage, response: ServerResponse): void;
 }
 
+export type LocalBrowserServerConfig = LocalBrowserServerCallbacks & (
+  | {
+      workspaceId: string;
+      /** Independent local admission key; never an upstream secret. */
+      browserKey: string;
+      workspaces?: never;
+    }
+  | {
+      /** Each key admits only its workspace, never another served store. */
+      workspaces: ReadonlyMap<string, string>;
+      workspaceId?: never;
+      browserKey?: never;
+    }
+);
+
 export interface LocalBrowserServer {
   readonly port: number;
-  /** Apply each loaded room's unseen store tail and broadcast real changes. */
-  refresh(): void;
+  /** Replay loaded stores, optionally only those of the named workspace. */
+  refresh(workspaceId?: string): void;
   stop(): Promise<void>;
 }
 
@@ -203,13 +218,16 @@ async function listen(server: Server<HubContext>): Promise<void> {
 }
 
 /**
- * Start the authenticated loopback server after its caller's replica is ready.
+ * Start the authenticated loopback server for its caller's local replicas.
  * The HTTP callback lets the same port serve the web bundle and websocket.
  */
 export async function createLocalBrowserServer(
   config: LocalBrowserServerConfig,
 ): Promise<LocalBrowserServer> {
-  if (config.browserKey === "") {
+  const workspaces = config.workspaces === undefined
+    ? new Map([[config.workspaceId, config.browserKey]])
+    : new Map(config.workspaces);
+  if (workspaces.size === 0 || [...workspaces.values()].some((key) => key === "")) {
     throw new Error("createLocalBrowserServer: browserKey must not be empty");
   }
   const protocolVersion = config.protocolVersion ?? SYNC_PROTOCOL_VERSION;
@@ -220,14 +238,14 @@ export async function createLocalBrowserServer(
   }
   const log = config.log ?? stderrLogger;
   const authenticate = await createRoomAuthenticator({
-    authSecret: config.browserKey,
+    workspaceKeys: workspaces,
     protocolVersion,
     log,
-    servedWorkspace: config.workspaceId,
   });
   const upgradedSockets = new Set<Duplex>();
   const awarenessBridges = new Map<string, () => void>();
   const appliedThrough = new WeakMap<Y.Doc, number>();
+  const retryRooms = new Set<string>();
 
   const server = new Server<HubContext>({
     port: config.port,
@@ -256,7 +274,24 @@ export async function createLocalBrowserServer(
       socket.once("close", () => upgradedSockets.delete(socket));
     },
 
-    onAuthenticate: authenticate,
+    async onAuthenticate(payload) {
+      const context = await authenticate(payload);
+      try {
+        // Loaded documents skip onLoadDocument for subsequent tabs. Check the
+        // replica for each authenticated connection as well as its first one.
+        await config.prepareRoom?.(payload.documentName);
+      } catch (error) {
+        const reason = isBusy(error) ? STORE_BUSY_REASON : STORE_REFUSED_REASON;
+        log({
+          event: "ub-open.store.refused",
+          room: payload.documentName,
+          cause: reason,
+          error: String(error),
+        });
+        throw refused(reason, error);
+      }
+      return context;
+    },
 
     async onLoadDocument({ document, documentName }) {
       try {
@@ -281,17 +316,17 @@ export async function createLocalBrowserServer(
           cause: reason,
           error: String(error),
         });
-        // Hocuspocus creates the room's Connection only after this hook
-        // succeeds, so no per-room close exists yet to carry `reason` to the
-        // browser. Keep the structured terminal log honest and let the load
-        // fail plainly; accepted raw sockets remain owned for shutdown below.
-        throw error;
+        // There is no room Connection until loading succeeds. Hocuspocus
+        // carries this reason in its per-document permission-denied response,
+        // leaving other rooms on the same socket intact.
+        throw refused(reason, error);
       }
     },
 
     async afterUnloadDocument({ documentName }) {
       awarenessBridges.get(documentName)?.();
       awarenessBridges.delete(documentName);
+      retryRooms.delete(documentName);
     },
 
     async beforeSync({ connection, documentName, type, payload }) {
@@ -340,11 +375,11 @@ export async function createLocalBrowserServer(
 
   let retryTimer: NodeJS.Timeout | null = null;
   let stopped = false;
-  const refresh = (): void => {
+  const refresh = (workspaceId?: string): void => {
     if (stopped) return;
 
-    let retry = false;
     for (const [room, document] of server.hocuspocus.documents) {
+      if (workspaceId !== undefined && parseRoom(room).workspaceId !== workspaceId) continue;
       const afterSeq = appliedThrough.get(document);
       if (afterSeq === undefined) continue;
       try {
@@ -357,23 +392,37 @@ export async function createLocalBrowserServer(
             REPLAY_ORIGIN,
           ),
         );
+        retryRooms.delete(room);
       } catch (error) {
-        retry = true;
+        const busy = isBusy(error);
+        if (busy) retryRooms.add(room);
+        else retryRooms.delete(room);
         log({
           event: "ub-open.store.refused",
           room,
-          cause: isBusy(error) ? STORE_BUSY_REASON : STORE_REFUSED_REASON,
+          cause: busy ? STORE_BUSY_REASON : STORE_REFUSED_REASON,
           error: String(error),
         });
+        if (!busy) {
+          // A failed replica must no longer serve its stale in-memory rooms.
+          // Close document connections, rather than their shared websocket.
+          appliedThrough.delete(document);
+          for (const connection of document.getConnections()) {
+            connection.close({ code: REFUSAL_CODE, reason: STORE_REFUSED_REASON });
+          }
+        }
       }
     }
 
-    if (retry && retryTimer === null) {
+    if (retryRooms.size > 0 && retryTimer === null) {
       retryTimer = setTimeout(() => {
         retryTimer = null;
-        refresh();
+        // A scoped API replay must not later turn into an unscoped retry.
+        for (const workspace of new Set([...retryRooms].map((room) => parseRoom(room).workspaceId))) {
+          refresh(workspace);
+        }
       }, REPLAY_RETRY_MS);
-    } else if (!retry && retryTimer !== null) {
+    } else if (retryRooms.size === 0 && retryTimer !== null) {
       clearTimeout(retryTimer);
       retryTimer = null;
     }

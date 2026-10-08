@@ -51,4 +51,14 @@ describe("local status answers", () => {
         .rejects.toThrow("malformed status answer");
     }
   });
+
+  it.each(["replica-held", "replica-quarantined", "replica-failed"])(
+    "retains a workspace-local unavailable reading: %s", async (reason) => {
+      const fetchImpl = vi.fn(async () => Response.json({ error: "replica_unavailable", reason }, { status: 503 }));
+      await expect(createDocumentSearchClient("workspace", "browser", fetchImpl as typeof fetch)
+        .status(new AbortController().signal)).resolves.toEqual({
+          caughtUp: false, rooms: {}, notSharedReason: null, replicaUnavailable: reason,
+        });
+    },
+  );
 });

@@ -98,6 +98,12 @@ const SIDEBAR_COLLAPSED_KEY = "uberblick.sidebar.collapsed";
 /** Exact complement of Tailwind xl, including fractional CSS widths. */
 const NARROW_LAYOUT_QUERY = "(width < 80rem)";
 
+const REPLICA_UNAVAILABLE_DETAIL = {
+  "replica-held": "This workspace’s replica is serving another ub open. Stop that run, then restart this ub open to view it here.",
+  "replica-quarantined": "This workspace’s replica is quarantined. Run ub doctor in a project bound to this workspace and follow its recovery steps.",
+  "replica-failed": "This workspace’s replica could not be served. Run ub doctor in a project bound to this workspace and follow its recovery steps.",
+};
+
 /** The frozen serving process is still useful; this notice only names its binding. */
 export function ReboundNotice({
   serving,
@@ -105,7 +111,7 @@ export function ReboundNotice({
   serving: LocalServing | null;
 }): ReactElement | null {
   if (serving?.rebound !== true) return null;
-  const remoteHub = endpointLabel(serving.remoteHubUrl);
+  const remoteHub = serving.remoteHubUrl === null ? "local workspace" : endpointLabel(serving.remoteHubUrl);
   if (remoteHub === null) return null;
   return (
     <p className="ub-rebound-notice" role="status">
@@ -349,7 +355,13 @@ export function App(): ReactElement {
   // re-renders this component with them.
   const hubReady = useHubEndpoint();
   const configured = hubReady ? configuredWorkspaces() : [];
-  const serving = hubReady ? localServing() : null;
+  const startupServing = hubReady ? localServing() : null;
+  /** The one that answers `/`, the address that names no workspace. */
+  const defaultWorkspace = configured[0] ?? null;
+  const route = parseRoute(path, defaultWorkspace);
+  const workspace = route.kind === "no-workspace" ? null : route.workspace;
+  const workspaceUuid = workspace?.uuid ?? null;
+  const serving = hubReady && workspaceUuid !== null ? localServing(workspaceUuid) : null;
   const remoteSignIn = hubReady && browserSignInRequired();
   const roomReady = hubReady && !remoteSignIn;
   /** Which hub the room providers dial. */
@@ -365,17 +377,12 @@ export function App(): ReactElement {
         ? null
         : serving === null
           ? endpoint
-          : { url: endpointLabel(serving.remoteHubUrl), source: "document" },
+          : { url: serving.remoteHubUrl === null ? "local" : endpointLabel(serving.remoteHubUrl), source: "document" },
     [endpoint, hubReady, serving],
   );
-  /** The one that answers `/`, the address that names no workspace. */
-  const defaultWorkspace = configured[0] ?? null;
-  const route = parseRoute(path, defaultWorkspace);
   // The address names the workspace — this client is configured for none and
   // cannot enumerate them. Null only where the address named none it could use,
   // and then there are no rooms to join at all.
-  const workspace = route.kind === "no-workspace" ? null : route.workspace;
-  const workspaceUuid = workspace?.uuid ?? null;
   const documentSearch = useMemo(
     () =>
       !hubReady
@@ -595,7 +602,7 @@ export function App(): ReactElement {
   );
   const servingStatus = useServingRoomStatus(
     documentSearch,
-    chromeRoom?.room ?? null,
+    chromeRoom?.room ?? directory?.room ?? null,
   );
   /**
    * Who else is in that room, read *here* and handed to every reader of it. The
@@ -953,7 +960,12 @@ export function App(): ReactElement {
 
   return (
     <main className="ub-app flex h-dvh flex-col">
-      <ReboundNotice serving={serving} />
+      <ReboundNotice serving={startupServing} />
+      {servingStatus?.replicaUnavailable && (
+        <p className="ub-replica-unavailable" role="status">
+          {REPLICA_UNAVAILABLE_DETAIL[servingStatus.replicaUnavailable]}
+        </p>
+      )}
       <SidebarProvider
         open={!collapsed}
         narrow={narrowSidebar}
