@@ -120,7 +120,7 @@ describe("atomic project bindings", () => {
     const run = runUb(["workspace", "status"], box, { UB_WORKSPACE_ID: id });
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("Add UB_HUB_URL (a hub address, or local)");
-    expect(run.stderr).toContain("ub workspace join <workspace-url>");
+    expect(run.stderr).toContain("ub workspace use <link>");
     expect(readWorkspaceHub(first, box.env)).toBeUndefined();
   });
 

@@ -36,7 +36,6 @@ import { ENV_HELP } from "../src/env.js";
 import { INIT_HELP, INIT_OPTIONS } from "../src/init.js";
 import { INSTALL_HELP, INSTALL_OPTIONS } from "../src/install.js";
 import { OPEN_HELP, OPEN_OPTIONS } from "../src/open.js";
-import { WORKSPACE_JOIN_HELP, WORKSPACE_JOIN_OPTIONS } from "../src/remote.js";
 import { WORKSPACE_CREATE_HELP } from "../src/workspace-create.js";
 import { WORKSPACE_STATUS_HELP } from "../src/workspace-status.js";
 import {
@@ -53,6 +52,7 @@ import {
   WORKSPACE_LIST_HELP,
   WORKSPACE_LIST_OPTIONS,
   WORKSPACE_USE_HELP,
+  WORKSPACE_USE_OPTIONS,
 } from "../src/workspace.js";
 import type { Run, Sandbox } from "./helpers.js";
 import { DEAD_HUB_URL, PACKAGE_ROOT, removeTempDirs, runUb, sandbox, unboundSandbox } from "./helpers.js";
@@ -131,14 +131,13 @@ const PATHS: Path[] = [
     argv: ["workspace"],
     help: WORKSPACE_HELP,
     options: {},
-    children: ["status", "create", "promote", "join", "member", "list", "use"],
+    children: ["status", "create", "promote", "member", "list", "use"],
   },
   { argv: ["workspace", "status"], help: WORKSPACE_STATUS_HELP, options: {} },
   { argv: ["workspace", "list"], help: WORKSPACE_LIST_HELP, options: WORKSPACE_LIST_OPTIONS },
-  { argv: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: {} },
+  { argv: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: WORKSPACE_USE_OPTIONS },
   { argv: ["workspace", "create"], help: WORKSPACE_CREATE_HELP, options: {} },
   { argv: ["workspace", "promote"], help: WORKSPACE_PROMOTE_HELP, options: {} },
-  { argv: ["workspace", "join"], help: WORKSPACE_JOIN_HELP, options: WORKSPACE_JOIN_OPTIONS },
   {
     argv: ["workspace", "member"],
     help: WORKSPACE_MEMBER_HELP,
@@ -310,8 +309,8 @@ describe("every human-facing command path", () => {
     expect(WORKSPACE_USE_HELP).toMatch(/<slug>-<uuid>.*prefix/s);
   });
 
-  it("explains join's verification scope and its limits in help", () => {
-    const help = WORKSPACE_JOIN_HELP.replace(/\s+/g, " ");
+  it("explains link use's verification scope and its limits in help", () => {
+    const help = WORKSPACE_USE_HELP.replace(/\s+/g, " ");
     expect(help).toContain("hub acknowledged the writes, then a fresh client read the full directory back");
     expect(help).toContain("compared every document's directory entry");
     expect(help).toContain("Every archived document's content is read back, plus one live document's content");
@@ -327,11 +326,20 @@ describe("every human-facing command path", () => {
     expect(unknownClient.status).toBe(2);
     expect(unknownClient.stderr).toMatch(/unknown client/);
 
-    expect(WORKSPACE_HELP).toContain("join <connection-url>");
-    expect(WORKSPACE_JOIN_HELP).toMatch(/usage: ub workspace join <url-with-workspace-id>/);
-    const missingUrl = await dispatch(["workspace", "join"]);
-    expect(missingUrl.status).toBe(2);
-    expect(missingUrl.stderr).toContain("expected exactly one <url-with-workspace-id>");
+    expect(WORKSPACE_HELP).toContain("use <link|id>");
+    expect(WORKSPACE_USE_HELP).toMatch(/usage: ub workspace use <link\|id>/);
+    const missingTarget = await dispatch(["workspace", "use"]);
+    expect(missingTarget.status).toBe(2);
+    expect(missingTarget.stdout).toBe("");
+    expect(missingTarget.stderr).toContain("expected exactly one workspace link or id");
+  });
+
+  it("removes join from the command surface", async () => {
+    expect(WORKSPACE_HELP).not.toMatch(/\bjoin\b/);
+    const removed = await dispatch(["workspace", "join"]);
+    expect(removed.status).toBe(2);
+    expect(removed.stdout).toBe("");
+    expect(removed.stderr).toContain("unknown command");
   });
 
   it("describes init's MCP option as print-only", () => {
@@ -437,7 +445,7 @@ describe("help before the work", () => {
   const inert: string[][] = [
     ["init", "--mcp", "--no-mcp", "--help"],
     ["open", "--port", "0", "-h"],
-    ["workspace", "join", "ws://example.invalid:1234", "-h"],
+    ["workspace", "use", "ws://example.invalid:1234", "-h"],
     ["auth", "login", "--help"],
     ["auth", "logout", "--all-devices", "--help"],
     ["mcp", "install", "claude", "--help"],

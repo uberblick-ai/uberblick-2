@@ -110,7 +110,7 @@ for (const endpoint of ["ws://localhost:8080/ws", "wss://remote.example/ws"]) {
       await expect(page.getByRole("heading", { name: "This hub is unclaimed", exact: true })).toBeVisible();
       const commands = page.getByRole("region", { name: "Hub setup guide" }).locator("li code");
       await expect(commands).toHaveText([
-        `ub auth login '${appUrl}'`, `ub workspace join '${appUrl}/<workspace-id>'`, "ub open",
+        `ub auth login '${appUrl}'`, `ub workspace use '${appUrl}/<workspace-id>'`, "ub open",
       ]);
       // Long origins and the placeholder must wrap and remain native
       // selectable text.

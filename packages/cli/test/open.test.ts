@@ -237,7 +237,7 @@ describe("ub open", () => {
       servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, localBrowserKey(WORKSPACE, box.env)),
     );
 
-    // `ub workspace join` completes while this `ub open` keeps running.
+    // `ub workspace use` completes while this `ub open` keeps running.
     rebind(box, {
       hubUrl: SECOND_REMOTE,
       workspace: REBOUND_WORKSPACE,

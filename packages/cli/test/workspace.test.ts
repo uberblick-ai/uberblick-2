@@ -291,7 +291,7 @@ describe("ub workspace use", () => {
       UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "wss://override.example.test/ws",
     });
     expect(run.status, run.output).toBe(1);
-    expect(run.stderr).toContain("ub workspace join <workspace-url>");
+    expect(run.stderr).toContain("ub workspace use <link>");
     expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
   });
 
@@ -301,7 +301,7 @@ describe("ub workspace use", () => {
     withDatabase(box, OTHER);
     const run = runUb(["workspace", "use", OTHER], box);
     expect(run.status).toBe(1);
-    expect(run.stderr).toContain("ub workspace join <workspace-url>");
+    expect(run.stderr).toContain("ub workspace use <link>");
     expect(run.stderr).toContain(`UB_WORKSPACE_ID=${OTHER} UB_HUB_URL=local ub mcp serve`);
     expect(run.stderr).toContain("set `UB_HUB_URL=<hub>` for a hub replica");
     expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
@@ -328,6 +328,12 @@ describe("ub workspace use", () => {
     const run = runUb(["workspace", "use", `docs-${WORKSPACE}`], box);
     expect(run.status, run.output).toBe(0);
     expect(binding(box)).toEqual({ workspaceId: `docs-${WORKSPACE}`, hubUrl: HUB });
+    expect(run.stdout).toBe(
+      `using      docs-${WORKSPACE} (https://hub.example.test)\n` +
+      `wrote      ${join(box.cwd, ".uberblick.json")}\n`,
+    );
+    expect(run.stdout).not.toContain("previous");
+    expect(run.stdout).not.toContain("switch back with:");
   });
 
   it("uses a recorded local workspace even without a database", () => {
@@ -336,7 +342,78 @@ describe("ub workspace use", () => {
     const run = runUb(["workspace", "use", UNRELATED.slice(0, 8)], box);
     expect(run.status, run.output).toBe(0);
     expect(binding(box)).toEqual({ workspaceId: UNRELATED, hubUrl: null });
+    expect(run.stdout).toBe(
+      `using      ${UNRELATED} (local)\nwrote      ${join(box.cwd, ".uberblick.json")}\n`,
+    );
+    expect(run.stderr).toBe("");
   });
+
+  it("prints the named selections and an id command that restores the previous binding", () => {
+    const box = sandbox();
+    bind(box);
+    record(box, OTHER, null);
+    storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), "Project notes");
+    storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: OTHER }), "Research notes");
+
+    const selected = runUb(["workspace", "use", OTHER.slice(0, 8)], box);
+    expect(selected.status, selected.output).toBe(0);
+    expect(selected.stdout).toBe(
+      `using      Research notes (${OTHER}, local)\n` +
+      `wrote      ${join(box.cwd, ".uberblick.json")}\n` +
+      `previous   Project notes (${WORKSPACE}, https://hub.example.test)\n` +
+      `switch back with: ub workspace use ${WORKSPACE}\n`,
+    );
+    expect(selected.stderr).toBe("");
+    // Publication fills the previous binding's missing record before choosing
+    // the command. Running exactly what it printed restores the entire pair.
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(HUB);
+    const registryBeforeRecovery = readFileSync(workspaceRegistryPath(box.env));
+    const command = selected.stdout.split("switch back with: ub ")[1]?.trim();
+    expect(command).toBeDefined();
+    const recovered = runUb(command!.split(" "), box);
+    expect(recovered.status, recovered.output).toBe(0);
+    expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
+    expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(registryBeforeRecovery);
+  });
+
+  it("writes the nearest binding and reports that path from a descendant directory", () => {
+    const box = sandbox();
+    bind(box, WORKSPACE, null);
+    record(box, OTHER, null);
+    const nested = join(box.cwd, "packages", "app");
+    mkdirSync(nested, { recursive: true });
+    const selected = runUb(["workspace", "use", OTHER], { ...box, cwd: nested });
+    expect(selected.status, selected.output).toBe(0);
+    expect(binding(box)).toEqual({ workspaceId: OTHER, hubUrl: null });
+    expect(selected.stdout).toBe(
+      `using      ${OTHER} (local)\n` +
+      `wrote      ${join(box.cwd, ".uberblick.json")}\n` +
+      `previous   ${WORKSPACE} (local)\n` +
+      `switch back with: ub workspace use ${WORKSPACE}\n`,
+    );
+    expect(existsSync(join(nested, ".uberblick.json"))).toBe(false);
+  });
+
+  it.each(["unbound", "different", "unchanged"])(
+    "reports only the binding and actual previous binding as JSON when %s",
+    (selection) => {
+      const box = unboundSandbox();
+      const previous = selection === "unbound" ? null : {
+        workspaceId: selection === "unchanged" ? OTHER : WORKSPACE,
+        hubUrl: selection === "unchanged" ? null : HUB,
+      };
+      if (previous !== null) bind(box, previous.workspaceId, previous.hubUrl);
+      record(box, OTHER, null);
+      const selected = runUb(["workspace", "use", OTHER, "--json"], box);
+      expect(selected.status, selected.output).toBe(0);
+      expect(JSON.parse(selected.stdout)).toEqual({
+        binding: { workspaceId: OTHER, hubUrl: null },
+        previous,
+      });
+      expect(selected.stderr).toBe("");
+      expect(binding(box)).toEqual({ workspaceId: OTHER, hubUrl: null });
+    },
+  );
 
   it("resolves unique prefixes and refuses ambiguous, missing, and invalid IDs without changing selection", () => {
     const box = unboundSandbox();
@@ -345,11 +422,21 @@ describe("ub workspace use", () => {
       record(box, id, null);
     }
     expect(runUb(["workspace", "use", "b7c"], box).status).toBe(0);
+    const bindingBefore = readFileSync(join(box.cwd, ".uberblick.json"));
+    const registryBefore = readFileSync(workspaceRegistryPath(box.env));
     for (const [id, message] of [["4d8e", "matches 2"], ["ffff", "no workspace"], ["my-notes", "not a workspace id"]]) {
       const run = runUb(["workspace", "use", id!], box);
       expect(run.status).toBe(2);
+      expect(run.stdout).toBe("");
       expect(run.stderr).toContain(message);
+      if (id === "4d8e") {
+        expect(run.stderr).toContain(WORKSPACE);
+        expect(run.stderr).toContain(OTHER);
+      }
+      if (id === "ffff") expect(run.stderr).toContain("ub workspace use <link>");
       expect(binding(box).workspaceId).toBe(UNRELATED);
+      expect(readFileSync(join(box.cwd, ".uberblick.json"))).toEqual(bindingBefore);
+      expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(registryBefore);
     }
   });
 
@@ -406,20 +493,49 @@ describe("ub workspace use", () => {
     const box = unboundSandbox();
     const run = runUb(["workspace", "use", WORKSPACE], box);
     expect(run.status).toBe(1);
-    expect(run.stderr).toContain("ub workspace join <workspace-url>");
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("ub workspace use <link>");
     expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
     expect(existsSync(box.configHome)).toBe(false);
     expect(existsSync(box.dataHome)).toBe(false);
   });
 
-  it("preserves the previous binding's differing record when switching away", () => {
-    const box = sandbox();
-    bind(box);
-    record(box, WORKSPACE, "wss://remembered.example.test/ws");
-    record(box, OTHER, null);
-    expect(runUb(["workspace", "use", OTHER], box).status).toBe(0);
-    expect(readWorkspaceHub(WORKSPACE, box.env)).toBe("wss://remembered.example.test/ws");
-    expect(runUb(["workspace", "use", WORKSPACE], box).status).toBe(0);
-    expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: "wss://remembered.example.test/ws" });
-  });
+  it.each(["different workspace", "same workspace"])(
+    "prints the previous hub's link when its recorded hub differs for the %s",
+    (selection) => {
+      const box = sandbox();
+      bind(box);
+      record(box, WORKSPACE, "wss://remembered.example.test/ws");
+      record(box, OTHER, null);
+      const selected = runUb(["workspace", "use", selection === "same workspace" ? WORKSPACE : OTHER], box);
+      expect(selected.status, selected.output).toBe(0);
+      expect(selected.stdout).toContain(`previous   ${WORKSPACE} (https://hub.example.test)\n`);
+      expect(selected.stdout).toContain(`switch back with: ub workspace use ${HUB}/${WORKSPACE}\n`);
+      expect(selected.stdout).not.toContain(`switch back with: ub workspace use ${WORKSPACE}\n`);
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe("wss://remembered.example.test/ws");
+      // An id selects what this machine recorded; it cannot replace that record
+      // with the former project's hub. Recovery must fetch the printed link.
+      expect(runUb(["workspace", "use", WORKSPACE], box).status).toBe(0);
+      expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: "wss://remembered.example.test/ws" });
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe("wss://remembered.example.test/ws");
+    },
+  );
+
+  it.each(["different workspace", "same workspace"])(
+    "prints a local session override when the previous local binding is recorded on a hub for the %s",
+    (selection) => {
+      const box = sandbox();
+      bind(box, WORKSPACE, null);
+      record(box, WORKSPACE, HUB);
+      record(box, OTHER, null);
+      const selected = runUb(["workspace", "use", selection === "same workspace" ? WORKSPACE : OTHER], box);
+      expect(selected.status, selected.output).toBe(0);
+      expect(selected.stdout).toContain(`previous   ${WORKSPACE} (local)\n`);
+      expect(selected.stdout).toContain(
+        `Switch back for this session: UB_WORKSPACE_ID=${WORKSPACE} UB_HUB_URL=local ub open\n`,
+      );
+      expect(selected.stdout).not.toContain("switch back with:");
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(HUB);
+    },
+  );
 });

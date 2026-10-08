@@ -1,7 +1,7 @@
 /**
  * The two halves of a one-time bridge between a workspace and a hub.
  *
- * `ub workspace join` is the one command that composes both: it reads the remote
+ * `ub workspace use <link>` is the one command that composes both: it reads the remote
  * as a fresh client, refuses what it cannot verify, and only then attaches this
  * machine's replica to it. Each half is also used alone — `ub doctor`'s hub
  * probe inspects, `ub init`'s starter seed syncs. They live here because they
@@ -581,7 +581,7 @@ function readCorpus(replicas: Replicas): Corpus {
  * This has no direction of its own, because attaching a replica to a hub
  * reconciles the two: a populated mirror against an empty hub uploads, an empty
  * mirror against a populated hub downloads, and two populated sides merge as
- * CRDTs with neither discarded. `ub workspace join` can attach an existing
+ * CRDTs with neither discarded. `ub workspace use <link>` can attach an existing
  * replica; `ub workspace promote` first reserves an empty destination. What is
  * being reconciled is established by the caller, before this is called,
  * rather than inferred here from which side happens to be empty.

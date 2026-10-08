@@ -156,6 +156,7 @@ describe("confirmed grants", () => {
     expect(remote.hub.memberships!.roleFor(WORKSPACE, target.id)).toBe(role ?? "member");
     expect(run.stdout).toContain(LOGIN);
     expect(run.stdout).toContain(ACCOUNT);
+    expect(run.stdout).toContain(`Access is discovered on sign-in or credential renewal; select the workspace explicitly with \`ub workspace use ${remote.origin}/${WORKSPACE}\`.\n`);
     expect(binding(remote.box)).toBe(original);
     expect(remote.github.calls.filter(url => url.includes("github.com/login/"))).toEqual([]);
     publicOutput(run, remote);
@@ -447,13 +448,13 @@ describe("stored device renewal and hub failures", () => {
     } finally { unsubscribe(); }
   });
 
-  it("lets a previously signed-in granted account join through renewal without new GitHub approval", async () => {
+  it("lets a previously signed-in granted account use a link through renewal without new GitHub approval", async () => {
     const remote = await administrator([WORKSPACE, OTHER_WORKSPACE], true);
     const identity = remote.hub.principals!.identify(ACCOUNT, LOGIN);
     const issued = remote.hub.credentials!.issue({ principalId: identity.id, deviceId: randomUUID(), workspaces: [] });
     const other = sandbox({ projectBinding: { workspaceId: OTHER_WORKSPACE, hubUrl: null } });
     // The rig's HTTP front records management requests; the real hub also
-    // serves the WebSocket connection that join needs.
+    // serves the WebSocket connection that fetching the link needs.
     const joinOrigin = `http://127.0.0.1:${remote.hub.port}`;
     writeHubAdmission(`ws://127.0.0.1:${remote.hub.port}/ws`, true, other.env);
     await writeHubLogin(joinOrigin, { identity,
@@ -464,7 +465,7 @@ describe("stored device renewal and hub failures", () => {
     expect(granted.status, granted.output).toBe(0);
     expect(binding(remote.box)).toBe(beforeAdmin);
     expect(binding(other)).toBe(beforeOther);
-    const joined = await runUbAsync(["workspace", "join", `${joinOrigin}/${WORKSPACE}`], other);
+    const joined = await runUbAsync(["workspace", "use", `${joinOrigin}/${WORKSPACE}`], other);
     expect(joined.status, joined.output).toBe(0);
     expect(JSON.parse(binding(other)).workspaceId).toBe(WORKSPACE);
     const renewed = savedLogin(other, joinOrigin);

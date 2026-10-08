@@ -237,7 +237,7 @@ describe("ub doctor", () => {
     expect(check(checks, "workspace").status).toBe("fail");
     expect(check(checks, "workspace").fix).toMatch(/ub init/);
     expect(check(checks, "workspace").fix).toMatch(/ub workspace use/);
-    expect(check(checks, "workspace").fix).toMatch(/ub workspace join/);
+    expect(check(checks, "workspace").fix).toMatch(/ub workspace use/);
     expect(check(checks, "workspace").reason).toContain(".uberblick.json");
     expect(ok).toBe(false);
   });
@@ -414,7 +414,7 @@ describe("ub doctor", () => {
     expect(local.reason).toContain(`127.0.0.1:${port}`);
     expect(local.reason).toMatch(/not an uberblick hub/);
     expect(local.fix).toMatch(/PORT/);
-    expect(local.fix).toMatch(/ub workspace join/);
+    expect(local.fix).toMatch(/ub workspace use/);
   });
 
   it("skips an occupied local hub port when no signing secret can identify it", async () => {
@@ -454,7 +454,7 @@ describe("ub doctor", () => {
     expect(local.reason).toContain(String(port));
     expect(local.reason).toContain("1");
     expect(local.fix).toMatch(/PORT/);
-    expect(local.fix).toMatch(/ub workspace join/);
+    expect(local.fix).toMatch(/ub workspace use/);
   });
 
   it.each(["http://127.0.0.1:1234", "ftp://127.0.0.1:1234"])("fails a local endpoint that is not a websocket URL: %s", async endpoint => {

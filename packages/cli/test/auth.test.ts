@@ -287,7 +287,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(stored.credential.record.workspaces).toHaveLength(1);
     expect(workspace).toMatch(/^[0-9a-f-]{36}$/);
     expect(workspace).not.toBe(WORKSPACE);
-    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes its admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${workspace}), you are admin\navailable workspaces:\n  ${workspace} | Default workspace\nUse it here: ub workspace join ${remote.origin.replace("http:", "ws:")}/ws/${workspace}\n`);
+    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes its admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${workspace}), you are admin\navailable workspaces:\n  ${workspace} | Default workspace\nUse it here: ub workspace use ${remote.origin.replace("http:", "ws:")}/ws/${workspace}\n`);
     expect(login.stderr).toBe("");
     expect(readFileSync(configPath(box))).toEqual(binding);
     expect(remote.requests[0]).toMatchObject({ path: "/auth/claim-state", method: "GET", body: {} });
@@ -325,7 +325,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
       ? { UB_WORKSPACE_ID: workspace, UB_HUB_URL: binding.hubUrl } : {});
     expect(login.status, login.stderr).toBe(0);
     expect(login.stdout).toContain(`claimed    default workspace (${WORKSPACE}), you are admin\n`);
-    const action = login.stdout.match(/^Use it here: ub workspace join (.+)$/m);
+    const action = login.stdout.match(/^Use it here: ub workspace use (.+)$/m);
     expect(action !== null).toBe(next);
     if (action !== null) expect(parseJoinTarget(action[1]!)).toEqual({ endpoint, workspace: WORKSPACE });
     expect(login.stdout).not.toContain("ub open");
@@ -338,12 +338,12 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const box = unboundSandbox();
     const login = await runUbAsync(["auth", "login", endpoint], box);
     expect(login.status, login.stderr).toBe(0);
-    const link = login.stdout.match(/^Use it here: ub workspace join (.+)$/m)?.[1];
+    const link = login.stdout.match(/^Use it here: ub workspace use (.+)$/m)?.[1];
     expect(link).toBeDefined();
     const workspace = savedLogin(box, authenticationOrigin(endpoint)).credential.record.workspaces[0];
     expect(parseJoinTarget(link!)).toEqual({ endpoint, workspace });
     expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
-    const joined = await runUbAsync(["workspace", "join", link!], box);
+    const joined = await runUbAsync(["workspace", "use", link!], box);
     expect(joined.status, joined.stderr).toBe(0);
     expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8"))).toEqual({ workspaceId: workspace, hubUrl: endpoint });
   });
@@ -356,7 +356,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const box = sandbox({ projectBinding: { workspaceId: OTHER_WORKSPACE, hubUrl: endpoint } });
     const login = await runUbAsync(["auth", "login"], box);
     expect(login.status, login.stderr).toBe(0);
-    expect(login.stdout).toContain(`Use it here: ub workspace join ${endpoint}/${WORKSPACE}\n`);
+    expect(login.stdout).toContain(`Use it here: ub workspace use ${endpoint}/${WORKSPACE}\n`);
   });
 
   it("keeps shell-sensitive endpoint paths in one literal operand when the claim command is pasted", async () => {
@@ -370,7 +370,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(command).toBeDefined();
     const pasted = spawnSync("/bin/sh", ["-c", `ub() { printf '%s\\n' "$@"; }\n${command}`], { encoding: "utf8", timeout: 5_000 });
     expect(pasted.status, pasted.stderr).toBe(0);
-    expect(pasted.stdout).toBe(`workspace\njoin\n${endpoint}/${WORKSPACE}\n`);
+    expect(pasted.stdout).toBe(`workspace\nuse\n${endpoint}/${WORKSPACE}\n`);
     expect(parseJoinTarget(pasted.stdout.trim().split("\n")[2]!)).toEqual({ endpoint, workspace: WORKSPACE });
   });
 

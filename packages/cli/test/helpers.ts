@@ -289,7 +289,7 @@ export function runUb(
 /**
  * Which `ub` command a run was, for a diagnostic — the subcommand path only.
  *
- * Never the whole argument list: `ub workspace join` takes a URL, and the URLs the
+ * Never the whole argument list: `ub workspace use` accepts a URL, and the URLs the
  * remote suite feeds it carry passwords and tokens on purpose. A message that
  * echoed argv would print one into CI output the first time a machine was slow,
  * which is the leak those very tests exist to forbid.

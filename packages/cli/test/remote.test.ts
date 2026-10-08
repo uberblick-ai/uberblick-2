@@ -1,7 +1,7 @@
 /**
- * Workspace joining — endpoint configuration and verified joining end to end.
+ * Workspace use from links — endpoint configuration and verified fetches end to end.
  *
- * Every join test runs a real hub on an ephemeral port with its own SQLite
+ * Every fetch test runs a real hub on an ephemeral port with its own SQLite
  * database, and a real mirror in a throwaway XDG home. That is the whole point:
  * the properties worth defending here are about what is actually on the far side
  * and what is actually on disk when a command exits, and neither survives being
@@ -18,6 +18,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
 } from "node:fs";
@@ -50,8 +51,10 @@ import {
   getMeta,
   initDoc,
   roomForDoc,
+  setWorkspaceName,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
+  settingsRoom,
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { afterEach, describe, expect, it } from "vitest";
@@ -61,7 +64,6 @@ import { resolveProjectBinding } from "../src/project-binding.js";
 import { readWorkspaceHub, rememberWorkspaceBindings } from "../src/workspace-registry.js";
 import {
   DEAD_HUB_URL,
-  pointAt,
   removeTempDirs,
   runUbAsync,
   sandbox,
@@ -73,7 +75,7 @@ const OTHER_SECRET = "a-different-secret-the-remote-was-deployed-with";
 const WORKSPACE = "b7c3d914-5a20-4e6f-8d13-9f04a2c68e75";
 
 /**
- * One `workspace join` can spend 20 s reading the directory, 50 s moving the
+ * One `workspace use <link>` can spend 20 s reading the directory, 50 s moving the
  * mirror (connect plus three sync waits), and another 35 s verifying it: 105 s
  * in capped, named waits. Ten seconds above that ceiling keeps a child-process
  * timeout from replacing the condition the command itself can name.
@@ -221,6 +223,12 @@ async function webDoc(
   return uuid;
 }
 
+async function webName(hub: Hub, name: string, secret = SECRET): Promise<void> {
+  const room = await openRoom(hub, settingsRoom(WORKSPACE), secret);
+  setWorkspaceName(room.doc, name);
+  await room.done();
+}
+
 /** Put a tombstone in a hub's directory without ever creating its document room. */
 async function webTombstone(
   hub: Hub,
@@ -359,8 +367,8 @@ function storedSecret(box: Sandbox): unknown {
   return readConfigFile(box, "credentials.json").signingSecret;
 }
 
-describe("workspace join configuration", () => {
-  // One normalizer for `ub workspace join` and `ub init` alike (#436): the host
+describe("workspace link configuration", () => {
+  // One normalizer for `ub workspace use` and `ub init` alike (#436): the host
   // `tailscale status` prints and the address a browser hands back both name
   // the deployment's endpoint, and an endpoint somebody typed in full is what
   // they meant — including a plain hub, which has no path at all.
@@ -454,7 +462,7 @@ describe("workspace join configuration", () => {
   ])("refuses %s", async (endpoint, because) => {
     const box = sandbox();
     const run = await runUbAsync(
-      ["workspace", "join", `${endpoint}/${WORKSPACE}`],
+      ["workspace", "use", `${endpoint}/${WORKSPACE}`],
       box,
     );
     expect(run.status).toBe(2);
@@ -547,7 +555,7 @@ describe("workspace join configuration", () => {
   });
 });
 
-describe("ub workspace join", () => {
+describe("ub workspace use <link>", () => {
   it("retains both Docker endpoints after logout and selects either with complete environment pins", async () => {
     const box = sandbox({ credentials: { signingSecret: SECRET } });
     const dirs = [join(box.cwd, "first-hub"), join(box.cwd, "second-hub")] as const;
@@ -558,7 +566,7 @@ describe("ub workspace join", () => {
       for (const hub of [first, second]) {
         hub.grant(WORKSPACE);
         await writeHubLogin(hub.origin, hub.issue({ workspaces: [WORKSPACE] }), box.env);
-        const joined = await runUbAsync(["workspace", "join", `${hub.url}/ws/${WORKSPACE}`], box);
+        const joined = await runUbAsync(["workspace", "use", `${hub.url}/ws/${WORKSPACE}`], box);
         expect(joined.status, joined.output).toBe(0);
         await removeHubLogin(hub.origin, box.env);
       }
@@ -576,27 +584,49 @@ describe("ub workspace join", () => {
   });
 
   it("joins a loopback deployment using its origin login, persists device admission and keeps an old local secret", async () => {
-    const box = sandbox({ credentials: { signingSecret: SECRET } });
-    const remote = await startDeviceSyncHub({ directory: box.cwd });
+    const remote = await startDeviceSyncHub({ directory: sandbox().cwd });
+    const target = `${remote.url}/custom-proxy-path/${WORKSPACE}`;
+    const box = sandbox({ credentials: { signingSecret: SECRET },
+      userConfig: { hubAdmissions: { [`${remote.url}/custom-proxy-path`]: "device" } },
+    });
+    const previous = readConfigFile(box, "config.json");
+    const bindingBefore = readFileSync(join(box.cwd, ".uberblick.json"));
+    const credentialsBefore = readFileSync(join(box.configHome, "uberblick", "credentials.json"));
+    const admissionBefore = readFileSync(join(box.configHome, "uberblick", "config.json"));
     try {
       remote.grant(WORKSPACE);
-      const target = `${remote.url}/custom-proxy-path/${WORKSPACE}`;
-      const beforeLogin = await runUbAsync(["workspace", "join", target], box);
+      const beforeLogin = await runUbAsync(["workspace", "use", target], box);
       expect(beforeLogin.status).toBe(1);
+      expect(beforeLogin.stdout).toBe("");
+      expect(beforeLogin.stderr).toContain(`error: you are not signed in to ${remote.origin}`);
+      expect(beforeLogin.stderr).toContain("nothing was fetched");
+      expect(beforeLogin.stderr).toContain("binding is unchanged");
       expect(beforeLogin.stderr).toContain(`ub auth login ${remote.origin}`);
+      expect(beforeLogin.stderr).toContain(`ub workspace use ${target}`);
       expect(beforeLogin.stderr).not.toContain("secret is wrong");
       expect(beforeLogin.stderr).not.toContain("HUB_AUTH_TOKEN");
       expect(beforeLogin.stderr).not.toContain("make them equal");
-      expect(existsSync(join(box.configHome, "uberblick", "config.json"))).toBe(false);
+      expect(readFileSync(join(box.configHome, "uberblick", "config.json"))).toEqual(admissionBefore);
       expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
+      expect(readFileSync(join(box.cwd, ".uberblick.json"))).toEqual(bindingBefore);
+      expect(readFileSync(join(box.configHome, "uberblick", "credentials.json"))).toEqual(credentialsBefore);
+      expect(existsSync(box.dataHome) ? readdirSync(box.dataHome) : []).toEqual([]);
+      expect(remote.authentications).toEqual([]);
+      expect(remote.renewalCount).toBe(0);
       await writeHubLogin(remote.origin, remote.issue({ workspaces: [WORKSPACE] }), box.env);
-      const joined = await runUbAsync(["workspace", "join", target], box);
+      const joined = await runUbAsync(["workspace", "use", target], box);
       expect(joined.status, joined.output).toBe(0);
-      expect(joined.stdout).toContain(`directory verified on ${remote.url}/custom-proxy-path`);
-      expect(joined.stdout).toContain(WORKSPACE);
-      expect(joined.stdout).toContain(`Binding written: ${join(box.cwd, ".uberblick.json")}`);
-      expect(joined.stdout).toContain("This workspace is empty.");
-      expect(joined.stdout).toContain("Verification does not establish hub disk durability or convergence of other clients.");
+      expect(joined.stdout.split("\n")).toEqual([
+        `fetched    ${WORKSPACE} from ${remote.origin}/custom-proxy-path: 0 documents, 0 archived`,
+        `using      ${WORKSPACE} (${remote.origin}/custom-proxy-path)`,
+        `wrote      ${join(box.cwd, ".uberblick.json")}`,
+        `previous   ${previous.workspaceId} (local)`,
+        `switch back with: ub workspace use ${previous.workspaceId}`,
+        "open it with: ub open",
+        "",
+      ]);
+      expect(joined.stderr.trim().split("\n").filter(Boolean)).toHaveLength(1);
+      expect(joined.output).not.toContain("[yjs]");
       expect(joined.stdout).not.toContain(join(box.configHome, "uberblick", "config.json"));
       expect(joined.stdout).not.toContain("ub auth login");
       expect(joined.stdout).not.toContain("ub mcp serve");
@@ -632,57 +662,168 @@ describe("ub workspace join", () => {
     return joinUrl(hub);
   }
 
+  it("prints only the named fetched result and one progress line despite library output", async () => {
+    const hub = await startHub();
+    await webName(hub, "Shared workspace");
+    const uuid = await webDoc(hub, "Shared note");
+    const box = unboundSandbox({ credentials: { signingSecret: SECRET } });
+    // Any networking dependency can log through console. Emit deterministic
+    // library noise at the same socket seam without replacing the real fetch.
+    const preload = "import {Socket} from 'node:net'; const original = Socket.prototype.connect; Socket.prototype.connect = function (...args) { console.log('[yjs] Changed the client-id because another client seems to be using it.'); console.warn('dependency warning'); console.error('dependency error'); return original.apply(this, args); };";
+    const run = await runUbAsync(["workspace", "use", localJoinUrl(hub, box, SECRET)], box, {
+      NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(preload)}`,
+    });
+    expect(run.status, run.output).toBe(0);
+    expect(run.stdout.split("\n")).toEqual([
+      `fetched    Shared workspace from http://127.0.0.1:${hub.port}: 1 document, 0 archived`,
+      `using      Shared workspace (${WORKSPACE}, http://127.0.0.1:${hub.port})`,
+      `wrote      ${join(box.cwd, ".uberblick.json")}`,
+      "open it with: ub open",
+      "",
+    ]);
+    expect(run.stderr.trim().split("\n")).toEqual([
+      `ub workspace: fetching http://127.0.0.1:${hub.port}…`,
+    ]);
+    expect(run.output).not.toContain(uuid);
+    expect(run.output).not.toContain("Shared note");
+    expect(run.output).not.toContain("dependency");
+    expect(run.output).not.toContain("[yjs]");
+  });
+
+  it("prints only JSON with the written binding, previous binding and fetched documents", async () => {
+    const hub = await startHub();
+    const uuid = await webDoc(hub, "JSON note");
+    const previous = { workspaceId: "ce1f08b6-3462-439c-b23d-6f9bdb8bbf74", hubUrl: null };
+    const box = sandbox({ projectBinding: previous, credentials: { signingSecret: SECRET } });
+    const run = await runUbAsync(["workspace", "use", localJoinUrl(hub, box, SECRET), "--json"], box);
+    expect(run.status, run.output).toBe(0);
+    const result = JSON.parse(run.stdout);
+    expect(Object.keys(result).sort()).toEqual(["binding", "documents", "previous"]);
+    expect(result.binding).toEqual({ workspaceId: WORKSPACE, hubUrl: url(hub) });
+    expect(result.previous).toEqual(previous);
+    expect(result.documents).toEqual([expect.objectContaining({ uuid, title: "JSON note" })]);
+    expect(run.stdout).not.toContain("fetched    ");
+    expect(run.stdout).not.toContain("using      ");
+    expect(run.stderr.trim().split("\n")).toHaveLength(1);
+    expect(run.output).not.toMatch(TOKEN_SHAPE);
+  });
+
+  it("adds the document list, verification scope and configuration paths when verbose", async () => {
+    const hub = await startHub();
+    const uuid = await webDoc(hub, "Verbose note");
+    const box = unboundSandbox({ credentials: { signingSecret: SECRET } });
+    const run = await runUbAsync(["workspace", "use", localJoinUrl(hub, box, SECRET), "--verbose"], box);
+    expect(run.status, run.output).toBe(0);
+    expect(run.stdout).toContain("fetched    ");
+    expect(run.stdout).toContain(uuid);
+    expect(run.stdout).toContain("Verbose note");
+    expect(run.stdout).toContain("a fresh client read the full directory");
+    expect(run.stdout).toContain("Verification does not establish hub disk durability or convergence of other clients.");
+    expect(run.stdout).toContain(join(box.cwd, ".uberblick.json"));
+    expect(run.stdout).toContain(join(box.configHome, "uberblick", "workspaces.json"));
+    expect(run.stdout).not.toContain("ub auth login");
+    expect(run.output).not.toContain("[yjs]");
+  });
+
+  it.each([WORKSPACE, "ce1f08b6-3462-439c-b23d-6f9bdb8bbf74"])(
+    "runs the printed link to restore the previous workspace and hub (%s)",
+    async (previousId) => {
+      const previousHub = await startHub();
+      const nextHub = await startHub();
+      const previous = { workspaceId: previousId, hubUrl: url(previousHub) };
+      const box = sandbox({ projectBinding: previous, credentials: { signingSecret: SECRET } });
+      // An id would select this differing record instead of the old project
+      // hub. A verified link fetch is the existing way to restore that pair.
+      rememberWorkspaceBindings([{ workspaceId: previousId, hubUrl: url(nextHub) }], box.env);
+      const selected = await runUbAsync(["workspace", "use", joinUrl(nextHub)], box);
+      expect(selected.status, selected.output).toBe(0);
+      const command = selected.stdout.match(/^switch back with: (.+)$/m)?.[1];
+      expect(command).toBeDefined();
+      const target = command!.slice("ub workspace use ".length);
+      expect(parseJoinTarget(target)).toEqual({ endpoint: url(previousHub), workspace: previousId });
+      expect(readWorkspaceHub(previousId, box.env)).toBe(url(nextHub));
+      const restored = await runUbAsync(["workspace", "use", target], box);
+      expect(restored.status, restored.output).toBe(0);
+      expect(readConfigFile(box, "config.json")).toEqual(previous);
+      expect(readWorkspaceHub(previousId, box.env)).toBe(url(previousHub));
+    },
+  );
+
+  it("writes the nearest project binding when a link is used from a child directory", async () => {
+    const hub = await startHub();
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const bindingPath = join(box.cwd, ".uberblick.json");
+    const nested = join(box.cwd, "nested", "project");
+    mkdirSync(nested, { recursive: true });
+    const run = await runUbAsync(["workspace", "use", joinUrl(hub)], { ...box, cwd: nested });
+    expect(run.status, run.output).toBe(0);
+    expect(run.stdout).toContain(`wrote      ${bindingPath}\n`);
+    expect(JSON.parse(readFileSync(bindingPath, "utf8"))).toEqual({ workspaceId: WORKSPACE, hubUrl: url(hub) });
+    expect(existsSync(join(nested, ".uberblick.json"))).toBe(false);
+  });
+
   it.each([
     ["no prior binding", "none", false, false],
     ["the same complete binding", "same", false, false],
     ["the same workspace at another hub", "remote", true, true],
     ["the same local-only workspace", "local", true, false],
-    ["another workspace at another hub", "other", true, false],
+    ["another workspace with its previous hub recorded", "other", true, false],
+    ["another workspace with another hub recorded", "other-remote", true, false],
+    ["another local-only workspace with a hub recorded", "other-local", true, false],
   ] as const)("reports only applicable recovery after joining from %s", async (_name, prior, changed, snapshot) => {
     const hub = await startHub(SECRET);
     const previousHub = "wss://previous.invalid/custom-path";
     const otherWorkspace = "ce1f08b6-3462-439c-b23d-6f9bdb8bbf74";
-    const previousId = prior === "other" ? otherWorkspace : WORKSPACE;
-    const previousEndpoint = prior === "local" ? null : prior === "same" ? url(hub) : previousHub;
+    const previousId = prior.startsWith("other") ? otherWorkspace : WORKSPACE;
+    const previousEndpoint = prior === "local" || prior === "other-local" ? null : prior === "same" ? url(hub) : previousHub;
     const box = prior === "none"
       ? unboundSandbox({ credentials: { signingSecret: SECRET } })
       : sandbox({ projectBinding: { workspaceId: previousId, hubUrl: previousEndpoint }, credentials: { signingSecret: SECRET } });
-    const run = await runUbAsync(["workspace", "join", localJoinUrl(hub, box, SECRET)], box);
+    if (prior === "other-remote" || prior === "other-local") {
+      rememberWorkspaceBindings([{ workspaceId: previousId, hubUrl: "wss://recorded.invalid/ws" }], box.env);
+    }
+    const run = await runUbAsync(["workspace", "use", localJoinUrl(hub, box, SECRET)], box);
     expect(run.status, run.output).toBe(0);
-    expect(run.stdout).toContain("joined 0 documents");
-    expect(run.stdout).toContain("This workspace is empty.");
-    expect(run.stdout.includes("Previous workspace:")).toBe(changed);
-    expect(run.stdout.includes("Switch back")).toBe(changed);
-    expect(run.stdout.includes("The verified snapshot was taken at")).toBe(snapshot);
-    expect(run.stdout.includes("Close other clients before relying on it.")).toBe(snapshot);
-    if (changed) expect(run.stdout).toContain(`Previous workspace: ${previousId} at ${previousEndpoint ?? "local-only"}.`);
-    if (prior === "remote") {
-      const command = `ub workspace join ${previousHub}/${WORKSPACE}`;
-      expect(run.stdout).toContain(`Switch back: ${command}`);
-      expect(parseJoinTarget(command.slice("ub workspace join ".length))).toEqual({ endpoint: previousHub, workspace: WORKSPACE });
-      expect(run.stdout).not.toContain("documents remain unchanged");
+    expect(run.stdout).toContain(`fetched    ${WORKSPACE} from http://127.0.0.1:${hub.port}: 0 documents, 0 archived\n`);
+    expect(run.stdout.includes("previous   ")).toBe(changed);
+    expect(run.stderr.includes("The verified snapshot was taken at")).toBe(snapshot);
+    expect(run.stderr.includes("Close other clients before relying on it.")).toBe(snapshot);
+    expect(run.stdout).not.toContain("The verified snapshot");
+    if (changed) expect(run.stdout).toContain(`previous   ${previousId} (${previousEndpoint === null ? "local" : previousEndpoint.replace(/^ws/, "http")})`);
+    if (prior === "remote" || prior === "other-remote") {
+      const command = `ub workspace use ${previousHub}/${previousId}`;
+      expect(run.stdout).toContain(`switch back with: ${command}`);
+      expect(parseJoinTarget(command.slice("ub workspace use ".length))).toEqual({ endpoint: previousHub, workspace: previousId });
     }
-    if (prior === "local") {
-      expect(run.stdout).toContain(`Switch back for this session: UB_WORKSPACE_ID=${WORKSPACE} UB_HUB_URL=local ub open`);
-      expect(resolveProjectBinding({ cwd: box.cwd, env: { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" } }).binding)
-        .toEqual({ workspaceId: WORKSPACE, hubUrl: null });
+    if (prior === "local" || prior === "other-local") {
+      expect(run.stdout).toContain(`Switch back for this session: UB_WORKSPACE_ID=${previousId} UB_HUB_URL=local ub open`);
+      expect(run.stdout).not.toContain("switch back with:");
+      expect(resolveProjectBinding({ cwd: box.cwd, env: { UB_WORKSPACE_ID: previousId, UB_HUB_URL: "local" } }).binding)
+        .toEqual({ workspaceId: previousId, hubUrl: null });
     }
-    if (prior === "other") expect(run.stdout).toContain(`Switch back: ub workspace use ${otherWorkspace}`);
+    if (prior === "other") expect(run.stdout).toContain(`switch back with: ub workspace use ${otherWorkspace}`);
+    if (!changed) expect(run.stdout).not.toContain("switch back");
   });
 
-  it("preserves the environment override warning and bases the snapshot warning on the binding in force", async () => {
+  it.each([false, true])("keeps environment and snapshot warnings on stderr (json: %s)", async (json) => {
     const hub = await startHub(SECRET);
     const previousHub = "wss://previous.invalid/ws";
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: url(hub) }, credentials: { signingSecret: SECRET } });
-    const run = await runUbAsync(["workspace", "join", localJoinUrl(hub, box, SECRET)], box, {
+    const run = await runUbAsync(["workspace", "use", localJoinUrl(hub, box, SECRET), ...(json ? ["--json"] : [])], box, {
       UB_WORKSPACE_ID: WORKSPACE,
       UB_HUB_URL: previousHub,
     });
     expect(run.status, run.output).toBe(0);
-    expect(run.stdout).not.toContain("Previous workspace:");
-    expect(run.stdout).toContain("Close other clients before relying on it.");
+    expect(run.stdout).not.toContain("previous   ");
+    expect(run.stderr).toContain("Close other clients before relying on it.");
+    expect(run.stdout).not.toContain("Close other clients");
     expect(run.stderr).toContain(`${WORKSPACE} at ${previousHub}`);
     expect(run.stderr).toContain("takes precedence over the binding just written");
+    if (json) expect(JSON.parse(run.stdout)).toMatchObject({
+      binding: { workspaceId: WORKSPACE, hubUrl: url(hub) },
+      previous: { workspaceId: WORKSPACE, hubUrl: url(hub) },
+      documents: [],
+    });
     expect(readConfigFile(box, "config.json")).toEqual({ workspaceId: WORKSPACE, hubUrl: url(hub) });
   });
 
@@ -690,7 +831,7 @@ describe("ub workspace join", () => {
     const hub = await startHub(SECRET);
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     rememberWorkspaceBindings([{ workspaceId: WORKSPACE, hubUrl: null }], box.env);
-    const joined = await runUbAsync(["workspace", "join", localJoinUrl(hub, box, SECRET)], box);
+    const joined = await runUbAsync(["workspace", "use", localJoinUrl(hub, box, SECRET)], box);
     expect(joined.status, joined.output).toBe(0);
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(url(hub));
     const selected = await runUbAsync(["workspace", "use", WORKSPACE], box);
@@ -713,7 +854,7 @@ describe("ub workspace join", () => {
       return created.uuid as string;
     });
     const storeBefore = readFileSync(join(box.configHome, "uberblick", "credentials.json"));
-    const joined = await runUbAsync(["workspace", "join", joinUrl(hub)], box);
+    const joined = await runUbAsync(["workspace", "use", joinUrl(hub)], box);
     expect(joined.status, joined.stderr).toBe(0);
     expect(persistedHubUrl(box)).toBe(url(hub));
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(url(hub));
@@ -737,13 +878,13 @@ describe("ub workspace join", () => {
     const run = await runUbAsync(
       [
         "workspace",
-        "join",
+        "use",
         localJoinUrl(remote, box, OTHER_SECRET),
       ],
       box,
     );
     expect(run.status).toBe(0);
-    expect(run.stdout).toContain("joined 2 documents");
+    expect(run.stdout).toContain(": 2 documents, 0 archived");
 
     // The id came off the URL: the endpoint persisted is the URL without it,
     // and the workspace persisted is the one it named.
@@ -799,14 +940,14 @@ describe("ub workspace join", () => {
     const moved = await runUbAsync(
       [
         "workspace",
-        "join",
+        "use",
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
     );
     expect(moved.status).toBe(0);
-    expect(moved.stdout).toContain("1 archived document moved and verified");
-    expect(moved.stdout).not.toContain("joined 0 documents");
+    expect(moved.stdout).toContain(": 1 document, 1 archived");
+    expect(moved.stdout).not.toContain(": 0 documents");
     expect(moved.stdout).not.toContain("content is not moved");
 
     // A different sandbox has no access to the first machine's update log. Its
@@ -815,15 +956,14 @@ describe("ub workspace join", () => {
     const joined = await runUbAsync(
       [
         "workspace",
-        "join",
+        "use",
         localJoinUrl(remote, fresh, OTHER_SECRET),
       ],
       fresh,
     );
     expect(joined.status).toBe(0);
-    expect(joined.stderr).toContain("hydrating 1 document");
-    expect(joined.stderr).not.toContain("hydrating 0 documents");
-    expect(joined.stdout).toContain("1 archived document moved and verified");
+    expect(joined.stderr.trim().split("\n")).toHaveLength(1);
+    expect(joined.stdout).toContain(": 1 document, 1 archived");
     expect(joined.stdout).not.toContain("holds nothing yet");
 
     const restored = await withMcp(
@@ -865,19 +1005,19 @@ describe("ub workspace join", () => {
     const moved = await runUbAsync(
       [
         "workspace",
-        "join",
+        "use",
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
     );
     expect(moved.status).toBe(0);
-    expect(moved.stdout).toContain("1 archived document moved and verified");
+    expect(moved.stdout).toContain(": 1 document, 1 archived");
 
     const fresh = sandbox();
     const joined = await runUbAsync(
       [
         "workspace",
-        "join",
+        "use",
         localJoinUrl(remote, fresh, OTHER_SECRET),
       ],
       fresh,
@@ -917,13 +1057,13 @@ describe("ub workspace join", () => {
     const run = await runUbAsync(
       [
         "workspace",
-        "join",
+        "use",
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
     );
     expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout).toContain("joined 1 document — directory verified");
+    expect(run.stdout).toContain(": 1 document, 0 archived");
     expect(persistedHubUrl(local)).toBe(url(remote));
     expect(readConfigFile(local, "config.json").workspaceId).toBe(WORKSPACE);
 
@@ -973,7 +1113,7 @@ describe("ub workspace join", () => {
     const run = await runUbAsync(
       [
         "workspace",
-        "join",
+        "use",
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
@@ -1005,47 +1145,71 @@ describe("ub workspace join", () => {
     const run = await runUbAsync(
       [
         "workspace",
-        "join",
+        "use",
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
     );
     expect(run.status).toBe(1);
-    expect(run.stderr).toContain(`ub workspace join ${url(source)}/${WORKSPACE}`);
+    expect(run.stderr).toContain(`ub workspace use ${url(source)}/${WORKSPACE}`);
     expect(run.stderr).toContain("another replica that still holds the content");
     expect(run.stderr).not.toContain("Rerun to finish");
     expect(run.stdout).not.toContain("moved and verified");
     expect(readConfigFile(local, "config.json")).toEqual({ workspaceId: WORKSPACE, hubUrl: url(source) });
   });
 
-  it("offers a local retry when the hub stops after preflight", async () => {
+  it.each([
+    ["fetch", 2],
+    ["verification", 3],
+  ] as const)("persists no binding or hub record when the hub stops during %s", async (phase, failedConnection) => {
     const local = sandbox();
     const remote = await startHub(OTHER_SECRET);
+    const sockets = new Set<Socket>();
+    let connections = 0;
     let stopping: Promise<void> | undefined;
-
-    const run = await runUbAsync(
-      [
-        "workspace",
-        "join",
-        localJoinUrl(remote, local, OTHER_SECRET),
-      ],
-      local,
-      {},
-      25_000,
-      (stderr) => {
-        if (stopping === undefined && stderr.includes("hydrating 0 documents")) {
+    const proxy = createServer((socket) => {
+      sockets.add(socket);
+      socket.on("error", () => {});
+      socket.on("close", () => sockets.delete(socket));
+      connections += 1;
+      // Preflight, hydration and verification each open a fresh WebSocket.
+      // Fail the selected phase without relying on CLI detail output, which is
+      // deliberately hidden unless requested.
+      if (connections >= failedConnection) {
+        socket.destroy();
+        if (stopping === undefined) {
           stopping = remote.stop();
         }
-      },
-    );
-    if (stopping !== undefined) await stopping;
-
-    expect(run.status).toBe(1);
-    expect(run.stderr).toContain("Rerun this command on this machine");
-    expect(run.stderr).not.toContain("missing content");
-    expect(existsSync(join(local.configHome, "uberblick", "config.json"))).toBe(
-      false,
-    );
+        return;
+      }
+      const upstream = createConnection({ host: "127.0.0.1", port: remote.port });
+      sockets.add(upstream);
+      upstream.on("error", () => socket.destroy());
+      upstream.on("close", () => sockets.delete(upstream));
+      socket.on("close", () => upstream.destroy());
+      socket.pipe(upstream).pipe(socket);
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = proxy.address();
+      if (address === null || typeof address === "string") throw new Error("missing proxy port");
+      const target = `ws://127.0.0.1:${address.port}/${WORKSPACE}`;
+      const run = await runUbAsync(["workspace", "use", target], local, { HUB_AUTH_TOKEN: OTHER_SECRET });
+      if (stopping !== undefined) await stopping;
+      expect(connections).toBeGreaterThanOrEqual(failedConnection);
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain(phase === "fetch"
+        ? "What did arrive is in the local update log already"
+        : "can finish verification");
+      expect(run.stderr).toContain(`ub workspace use ${target}`);
+      expect(run.stderr).not.toContain("missing content");
+      expect(readWorkspaceHub(WORKSPACE, local.env)).toBeUndefined();
+      expect(existsSync(join(local.configHome, "uberblick", "config.json"))).toBe(false);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+      if (stopping !== undefined) await stopping;
+    }
   });
 
   /**
@@ -1060,7 +1224,7 @@ describe("ub workspace join", () => {
 
     const args = [
       "workspace",
-      "join",
+      "use",
       localJoinUrl(remote, local, OTHER_SECRET),
     ];
     const deadline = Date.now() + LARGE_CORPUS_JOIN_RECOVERY_TIMEOUT_MS;
@@ -1085,14 +1249,14 @@ describe("ub workspace join", () => {
       /has not acknowledged \d+ rooms?, so this sync did not finish inside its time limit:/.test(
         run.stderr,
       ) &&
-      run.stderr.includes("Rerun this command on this machine once");
+      run.stderr.includes("Run again: ub workspace use ");
     if (instructedRerun) {
       run = await runAttempt();
     }
 
     expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout).toContain(`joined ${count} documents — directory verified`);
-    expect(run.stdout).toContain("Verification does not establish hub disk durability or convergence of other clients.");
+    expect(run.stdout).toContain(`: ${count} documents, 0 archived`);
+    expect(run.stdout).not.toContain("Verification does not establish hub disk durability or convergence of other clients.");
     expect(run.stdout).not.toContain("one live document's content");
     expect(run.stdout).not.toContain("a fresh client read\nthem back");
     expect(persistedHubUrl(local)).toBe(url(remote));
@@ -1122,15 +1286,10 @@ describe("ub workspace join", () => {
     const remote = await startHub(OTHER_SECRET);
     const theirs = await webDoc(remote, "Shared note", OTHER_SECRET);
 
-    // A machine that has already been set up: `ub init` generated a workspace
-    // of its own and seeded the starter documents into it, locally, and was
-    // pointed at an endpoint afterwards — the dead one standing in for the
-    // local hub that is not running. In that order because the two halves are
-    // ordered in life too: a machine bound to a hub is one `ub init` expects to
-    // hold that hub's credential and to reach it (#436).
+    // A machine that already has its own local-only workspace and starter
+    // documents. The link must switch the project without changing that corpus.
     const box = unboundSandbox({ credentials: { signingSecret: SECRET } });
     expect((await runUbAsync(["init", "--yes"], box)).status).toBe(0);
-    pointAt(box, DEAD_HUB_URL);
     const mine = readConfigFile(box, "config.json").workspaceId as string;
     expect(mine).not.toBe(WORKSPACE);
     const seeded = await readMirror(box, mine);
@@ -1139,23 +1298,22 @@ describe("ub workspace join", () => {
     const run = await runUbAsync(
       [
         "workspace",
-        "join",
+        "use",
         localJoinUrl(remote, box, OTHER_SECRET),
       ],
       box,
     );
     expect(run.status).toBe(0);
-    expect(run.stdout).toContain("joined 1 document");
+    expect(run.stdout).toContain(": 1 document, 0 archived");
     // Switched to the joined one…
     expect(readConfigFile(box, "config.json").workspaceId).toBe(WORKSPACE);
     expect((await runUbAsync(["workspace", "status"], box)).stdout).toContain(WORKSPACE);
     // …and told where the other one went, because it did not go anywhere.
     expect(run.stdout).toContain(mine);
-    expect(run.stdout).toContain("previous workspace and its documents remain unchanged");
+    expect(run.stdout).toContain("previous   ");
     expect(run.stdout).toContain(`ub workspace use ${mine}\n`);
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(url(remote));
-    // Passive replacement preserves the local record established by init,
-    // even though somebody has since edited the old project file's endpoint.
+    // Passive replacement preserves the local record established by init.
     expect(readWorkspaceHub(mine, box.env)).toBeNull();
     const restored = await runUbAsync(["workspace", "use", mine], box);
     expect(restored.status, restored.output).toBe(0);
@@ -1208,12 +1366,12 @@ describe("ub workspace join", () => {
     ["ws://127.0.0.1:9999/ws", "is not a workspace id"],
   ])("refuses %s and writes nothing", async (target, because) => {
     const box = unboundSandbox();
-    const run = await runUbAsync(["workspace", "join", target], box);
+    const run = await runUbAsync(["workspace", "use", target], box);
     expect(run.status).toBe(2);
     expect(run.stderr).toContain(because);
     // The expected form, in the refusal itself.
     expect(run.stderr).toContain("wss://hub.example.ts.net/ws/<workspace-id>");
-    expect(run.stderr).toContain("usage: ub workspace join <url-with-workspace-id>");
+    expect(run.stderr).toContain("Run again: ub workspace use <link>");
     expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
     expect(existsSync(join(box.configHome, "uberblick", "config.json"))).toBe(false);
     expect(existsSync(join(box.configHome, "uberblick", "credentials.json"))).toBe(
@@ -1228,12 +1386,15 @@ describe("ub workspace join", () => {
     });
 
     const run = await runUbAsync(
-      ["workspace", "join", `${DEAD_HUB_URL}/${WORKSPACE}`],
+      ["workspace", "use", `${DEAD_HUB_URL}/${WORKSPACE}`],
       box,
     );
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("did not answer");
-    expect(run.stderr.match(/retrying once/g)).toHaveLength(1);
+    expect(run.stderr).not.toContain("retrying once");
+    expect(run.stderr).toContain(`Run again: ub workspace use ${DEAD_HUB_URL}/${WORKSPACE}`);
+    expect(run.stdout).toBe("");
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
     expect(persistedHubUrl(box)).toBe("ws://127.0.0.1:2");
   });
 
@@ -1262,8 +1423,9 @@ describe("ub workspace join", () => {
       if (address === null || typeof address === "string") throw new Error("missing proxy port");
       const box = sandbox({ credentials: { signingSecret: SECRET } });
       const target = `ws://127.0.0.1:${address.port}`;
-      const run = await runUbAsync(["workspace", "join", `${target}/${WORKSPACE}`], box);
-      expect(run.stderr.match(/retrying once/g)).toHaveLength(1);
+      const run = await runUbAsync(["workspace", "use", `${target}/${WORKSPACE}`], box);
+      expect(connections).toBeGreaterThan(1);
+      expect(run.stderr).not.toContain("retrying once");
       expect(run.output).not.toContain(SECRET);
       expect(run.output).not.toMatch(TOKEN_SHAPE);
       if (recover) {
@@ -1294,7 +1456,7 @@ describe("ub workspace join", () => {
       credentials: { signingSecret: SECRET },
     });
 
-    const run = await runUbAsync(["workspace", "join", joinUrl(remote)], box);
+    const run = await runUbAsync(["workspace", "use", joinUrl(remote)], box);
 
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("different sync protocol");
@@ -1320,7 +1482,7 @@ describe("ub workspace join", () => {
       credentials: { signingSecret: SECRET },
     });
 
-    const run = await runUbAsync(["workspace", "join", joinUrl(remote)], box);
+    const run = await runUbAsync(["workspace", "use", joinUrl(remote)], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("rejected the credential");
     expect(run.stderr).not.toContain("retrying once");
@@ -1340,7 +1502,7 @@ describe("ub workspace join", () => {
     const remote = await startHub(OTHER_SECRET);
     const box = unboundSandbox();
 
-    const run = await runUbAsync(["workspace", "join", joinUrl(remote)], box);
+    const run = await runUbAsync(["workspace", "use", joinUrl(remote)], box);
 
     expect(run.stderr).not.toContain("running local-only");
     expect(run.status).toBe(1);
@@ -1348,7 +1510,8 @@ describe("ub workspace join", () => {
     expect(run.stderr).not.toContain("no signing secret is configured");
     expect(run.stderr).not.toContain("--secret-file");
     expect(run.stderr).not.toContain("remote signing secret (");
-    expect(run.stderr).toContain("Nothing was written");
+    expect(run.stderr).toContain("nothing was fetched");
+    expect(run.stderr).toContain(`ub workspace use ${joinUrl(remote)}`);
     expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
     expect(existsSync(join(box.configHome, "uberblick", "config.json"))).toBe(false);
     expect(existsSync(join(box.configHome, "uberblick", "credentials.json"))).toBe(

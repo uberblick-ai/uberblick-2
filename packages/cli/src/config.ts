@@ -253,7 +253,7 @@ export function writeHubAdmission(
  * Read `config.json` for editing rather than for resolution.
  *
  * `ub init` has to preserve what it did not ask about — a `hubUrl` from
- * `ub workspace join`, a field a later version writes — so it gets the raw object
+ * `ub workspace use`, a field a later version writes — so it gets the raw object
  * back as well as the fields it understands. Resolution stays in
  * {@link resolveConfig}, which needs origins and per-layer labels this does not.
  */

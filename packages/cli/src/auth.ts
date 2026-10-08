@@ -507,7 +507,7 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
       if (nextAction && claimedWorkspaceId !== undefined &&
           (!selection.bound || selection.workspace === undefined ||
             parseWorkspaceId(selection.workspace).uuid !== claimedWorkspaceId)) {
-        io.out(`Use it here: ub workspace join ${shellArgument(`${selection.endpoint}/${claimedWorkspaceId}`)}\n`);
+        io.out(`Use it here: ub workspace use ${shellArgument(`${selection.endpoint}/${claimedWorkspaceId}`)}\n`);
       }
       return 0;
     }

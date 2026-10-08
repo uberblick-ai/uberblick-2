@@ -187,7 +187,7 @@ Neither reading says the secret is wrong.
 An upgraded machine that has not signed in keeps its local documents and
 unacknowledged edits. MCP and `ub open` serve them and report **not shared with
 hub**, with `ub auth login` as the action. After sign-in with workspace access,
-those pending edits reach the hub using the existing binding; do not re-join,
+those pending edits reach the hub using the existing binding; do not fetch again,
 re-create or discard them. Missing membership names the administrator and
 renewal detects a later grant with the existing login.
 
@@ -339,7 +339,7 @@ corpus workspace UUID. After approval:
 
 ```bash
 candidate_workspace='<uuid-reported-by-this-login>'
-candidate_ub workspace join "ws://candidate-hub:1234/$candidate_workspace"
+candidate_ub workspace use "ws://candidate-hub:1234/$candidate_workspace"
 candidate_ub auth status ws://candidate-hub:1234
 candidate_ub status --json
 ```
@@ -356,7 +356,7 @@ volume:
 ```bash
 candidate_client="$candidate_reader"
 candidate_ub auth login ws://candidate-hub:1234
-candidate_ub workspace join "ws://candidate-hub:1234/$candidate_workspace"
+candidate_ub workspace use "ws://candidate-hub:1234/$candidate_workspace"
 candidate_ub status --json
 ```
 
@@ -649,7 +649,7 @@ It does not sign a browser in.
 Use the configured `LOOPBACK_PORT` if different. For a private Tailscale route,
 use `ub auth login https://<WEB_HOST>` from a computer on that tailnet; existing
 settings use `https://<TAILSCALE_HOST>`. The [endpoint table below](#choose-how-clients-reach-the-hub)
-gives each route's login and join commands. Include `http://` for loopback:
+gives each route's login and use commands. Include `http://` for loopback:
 a bare `localhost:8080` is interpreted as an HTTPS endpoint.
 
 A deployed hub creates exactly one default workspace only when its database
@@ -719,7 +719,7 @@ later sign-ins grant no membership.
 Remote hubs require these credentials for live sync and re-check membership.
 Revocation or membership removal closes existing sessions. MCP and `ub open`
 keep their downloaded documents and pending edits locally; sign-in or restored
-membership resumes sharing without re-joining. Loopback-only hubs retain local
+membership resumes sharing without fetching again. Loopback-only hubs retain local
 signing-secret admission and need no GitHub, membership or login.
 
 ### Manage members and devices
@@ -995,9 +995,9 @@ All three routes enforce the same device credentials and workspace membership.
 
 | Route | Network settings in `.env` | Sign in | Bind to the existing workspace |
 | --- | --- | --- | --- |
-| Same computer, default | None; optional `LOOPBACK_PORT=8080` | `ub auth login http://localhost:8080` | `ub workspace join ws://localhost:8080/ws/<WORKSPACE_ID>` |
-| HTTPS with public DNS | `WEB_HOST=hub.example.com`; optional `HTTPS_BIND_IP=<host-ipv4>` | `ub auth login https://hub.example.com` | `ub workspace join wss://hub.example.com/ws/<WORKSPACE_ID>` |
-| HTTPS with Tailscale, Linux only | `WEB_HOST=machine.tailnet.ts.net`, `TAILSCALE_IP=<tailscale-ipv4>` | `ub auth login https://machine.tailnet.ts.net` | `ub workspace join wss://machine.tailnet.ts.net/ws/<WORKSPACE_ID>` |
+| Same computer, default | None; optional `LOOPBACK_PORT=8080` | `ub auth login http://localhost:8080` | `ub workspace use ws://localhost:8080/ws/<WORKSPACE_ID>` |
+| HTTPS with public DNS | `WEB_HOST=hub.example.com`; optional `HTTPS_BIND_IP=<host-ipv4>` | `ub auth login https://hub.example.com` | `ub workspace use wss://hub.example.com/ws/<WORKSPACE_ID>` |
+| HTTPS with Tailscale, Linux only | `WEB_HOST=machine.tailnet.ts.net`, `TAILSCALE_IP=<tailscale-ipv4>` | `ub auth login https://machine.tailnet.ts.net` | `ub workspace use wss://machine.tailnet.ts.net/ws/<WORKSPACE_ID>` |
 
 Use the UUID reported by the claim or first-admin setup. Use the selected port
 in both loopback commands. The client's origin must be spelled consistently:
@@ -1052,7 +1052,7 @@ docker compose -f docker-compose.yml -f remote.https.yml -f remote.tailscale.yml
 
 Switching routes keeps the same `uberblick-remote` project and `hub-data`,
 `caddy-data` and `caddy-config` volumes, including the claim and certificate
-state. Clients sign in at the new origin and join the same workspace UUID;
+state. Clients sign in at the new origin and use a link with the same workspace UUID;
 no device key is copied. A claim made on loopback remains claimed after wider
 exposure. Never pass `--volumes` to `down` or rename the project.
 
@@ -1098,11 +1098,11 @@ backup, and otherwise a job for `sh bin/remote-compose.sh logs hub`.
 
 Then open the selected site origin. On a claimable fresh hub it shows
 **This hub is unclaimed** and guides the first administrator through
-`ub auth login`, `ub workspace join` with the default workspace UUID reported by
+`ub auth login`, `ub workspace use <link>` with the default workspace UUID reported by
 that login, and `ub open` on their computer. An open page rechecks claim state
 after each 15-second pause until claiming closes. A closed claim says only that
 the hub can no longer be claimed; an existing installation sealed without a
-claim gives the same answer. Members sign in, join their workspace unless
+claim gives the same answer. Members sign in, use their workspace link unless
 already bound to it, and use `ub open`. This browser is never signed in by those
 steps. A failed, timed-out or incompatible claim-state read says setup state
 could not be confirmed; an unclaimed hub unable to accept a claim says GitHub
@@ -1144,7 +1144,7 @@ local replica; its page and loopback development do not show the setup guide.
 
 Choose an HTTPS route reachable from computers A and B; a private tailnet is
 recommended. Before starting, run `ub auth login https://<WEB_HOST>` and
-`ub workspace join wss://<WEB_HOST>/ws/<WORKSPACE_ID>` on each (use the legacy
+`ub workspace use wss://<WEB_HOST>/ws/<WORKSPACE_ID>` on each (use the legacy
 `TAILSCALE_HOST` for an existing deployment). Then run `ub open`, choose the same document, and give each browser a
 distinct awareness name/color if prompted.
 
@@ -1329,8 +1329,8 @@ Promotion grants this account the new workspace's sole initial admin membership,
 then renews its device credential, uploads documents (including archived
 content), name and sidebar, and verifies the copy with a fresh authenticated
 client. It preserves the UUID and CRDT history. Only after verification does it
-bind the project to the hub; no separate join or host command is needed.
-Promotion prints the complete connection URL for joining on another machine.
+bind the project to the hub; no separate use or host command is needed.
+Promotion prints the complete connection link for use on another machine.
 
 A destination with documents or memberships is refused. The exception is the
 same recorded promotion attempt: after a failure or interruption, rerun the
@@ -1356,40 +1356,73 @@ use of a local-only workspace requires neither login nor promotion.
 
 A fresh release hub creates its default workspace and changes no client binding.
 Claiming it through `ub auth login` also leaves the binding unchanged. Each computer
-that will use an existing workspace joins it explicitly. These commands run on
+that will use an existing workspace selects it explicitly. These commands run on
 the computer using the workspace, which can also be the Docker host for the
 default loopback route. The deployment and operator scripts run on the host.
 
-There is one verb for joining a workspace that exists, and it is the same on
+There is one verb for using a workspace that exists, and it is the same on
 every machine:
 
 ```sh
 ub auth login http://localhost:8080
-ub workspace join ws://localhost:8080/ws/<WORKSPACE_ID>
+ub workspace use ws://localhost:8080/ws/<WORKSPACE_ID>
 ```
 
 These are the default same-computer commands. For HTTPS, use
 `ub auth login https://<WEB_HOST>` and
-`ub workspace join wss://<WEB_HOST>/ws/<WORKSPACE_ID>`; the
+`ub workspace use wss://<WEB_HOST>/ws/<WORKSPACE_ID>`; the
 [route table](#choose-how-clients-reach-the-hub) includes the legacy Tailscale
 route and configurable loopback port. The URL is the endpoint with the
 workspace id as its last path segment. Sign in first; no `ub init`,
 `--workspace` or clone is needed. The id is what a second machine has to be told, because a workspace id is
-a uuid: a machine that invented its own would join the hub and find nothing of
+a uuid: a machine that invented its own would connect to the hub and find nothing of
 yours there, the rooms being keyed by a different id. Carrying it in the URL is
 what makes that one string, and one paste, rather than two.
 
-`join` binds this machine to the workspace the URL names **whatever is here
-already**, pulls the whole remote directory and every live and archived document
+`use <link>` binds this project to the workspace the link names **whatever is here
+already**. It needs a stored sign-in for that hub, except for a loopback development
+hub reached with this machine's local signing secret. Without a sign-in it fetches
+and writes nothing and prints `ub auth login <hub>` followed by the same use command.
+It pulls the whole remote directory and every live and archived document
 room into the local update log for it, then has a fresh client verify the full
 directory, every archived room and one sampled live room. Only then does it
-persist the endpoint and the binding. It seeds nothing into a joined workspace:
+persist the hub record and the binding. It seeds nothing into a fetched workspace:
 the documents come off the wire. An unreachable or auth-rejecting remote writes
-nothing at all.
+nothing at all. A failed verification also leaves the hub record and binding unchanged.
+
+The default result is short; example values vary with the workspace and project:
+
+```text
+fetched    Uberblick from https://hub.uberblick.ai: 10 documents, 1 archived
+using      Uberblick (722007fa-8921-45ee-a580-e20311030fef, https://hub.uberblick.ai)
+wrote      ~/Projects/project/.uberblick.json
+previous   My Workspace (b3eea2f9-a8dc-40f2-a3d9-b27742620b1f, local)
+switch back with: ub workspace use b3eea2f9
+open it with: ub open
+```
+
+The previous selection and recovery line appear only when the binding changed.
+Fetching shows at most one progress line on stderr, replaced by the result on a
+terminal. Library messages do not reach the terminal. `--verbose` adds the document
+list, verification details and configuration paths. `--json` prints only an object
+on stdout with the binding written, previous binding and fetched documents;
+progress and warnings stay on stderr.
+
+Verification means the hub acknowledged the writes, then a fresh client read the
+full directory back and compared every document's directory entry. Every archived
+document's content is read back, plus one live document's content. It does not
+establish that the hub flushed the writes to disk or that other clients have
+converged. When the same workspace was previously bound to another hub, a warning
+on stderr says later writes to that previous hub are outside the verified snapshot.
 
 A machine that already had a workspace of its own keeps it. It is not merged and
 not moved: `ub workspace list` shows both, and
-`ub workspace use <id> --hub <url|local>` selects the previous complete binding.
+`ub workspace use <id-or-prefix>` selects a recorded replica using its recorded hub.
+The printed switch-back command uses an id when that record matches the previous
+binding's hub. Otherwise, a previous remote binding needs its hub's link and the
+same sign-in and verification steps. A previous local binding with a remote hub
+record can only be restored for a session through the printed environment override.
+Selecting an id never replaces a hub record.
 Other projects retain their bindings. Access still requires current membership.
 
 A URL with no workspace id, or with something that is not one, is refused before
@@ -1398,8 +1431,8 @@ anything is written, and the refusal names the form.
 `ub init <hub-origin> --workspace <uuid>` also authenticates with this hub's
 stored login before writing, and requires workspace access. Without an existing
 workspace or `--workspace`, its new random UUID has no membership and is refused. It never overwrites an existing endpoint;
-use `ub workspace join` to move a binding. No signing secret grants remote access.
-For an existing workspace, use the join route above and keep its UUID.
+use `ub workspace use <link>` to move a binding. No signing secret grants remote access.
+For an existing workspace, use the link route above and keep its UUID.
 
 To edit this workspace in a browser on the computer, run `ub open`. It serves
 the machine's local replica, uses the stored login for upstream sync, and gives
@@ -1427,5 +1460,5 @@ host-loopback route.
 
 Archived documents move with their content and stay archived until restored.
 Merging two independently populated workspaces is not supported: the URL says
-which workspace `join` is about — that one's two replicas reconcile as CRDTs,
+which workspace `use <link>` fetches — that one's two replicas reconcile as CRDTs,
 and the others on the machine are left alone.

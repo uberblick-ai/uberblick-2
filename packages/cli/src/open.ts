@@ -13,7 +13,7 @@
  * Four decisions are load-bearing:
  *
  * 1. **It starts a hub only when it has to.** A hub answering at the configured
- *    endpoint — a remote one after `ub workspace join`, or one somebody started
+ *    endpoint — a remote one after `ub workspace use`, or one somebody started
  *    with `mise run hub` — is used as it is, and Ctrl-C leaves it running. Only
  *    a *local* endpoint with nothing answering gets a hub of our own, started
  *    in this process with {@link createHub} so that stopping it is the same
@@ -401,7 +401,7 @@ function sameBinding(left: Binding, right: Binding): boolean {
  * with what it resolved written over the process's own, so a `WORKSPACE_ID` or
  * `HUB_AUTH_TOKEN` that came from a file arrives back looking exactly like an
  * environment pin. Feeding that back in would freeze the first resolution's
- * file values into apparent permanent overrides, and no later `ub workspace join`
+ * file values into apparent permanent overrides, and no later `ub workspace use`
  * would ever be seen again — the refresh would resolve, and resolve the same
  * answer forever. Passing the original environment keeps the precedence honest:
  * a genuine pin still wins every time, and a file value stays a file value.
@@ -420,7 +420,7 @@ function resolvedConfigDocument(resolved: ReturnType<typeof resolveConfig>): str
  * The per-request source of the unbound configuration document. It refreshes
  * the hub endpoint and publishes no workspace or browser key.
  *
- * `ub init`, `ub workspace join` and `ub workspace use` publish configuration
+ * `ub init` and `ub workspace use` publish configuration
  * files as separate atomic writes, holding `.init.lock` across the publication.
  * Each file is therefore whole whenever it is read. This source uses the same
  * lock so its resolution sees a completed configuration publication.

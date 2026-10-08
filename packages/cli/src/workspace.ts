@@ -2,7 +2,8 @@
 
 import { createWorkspaceCommand } from "./workspace-create.js";
 import { promoteWorkspaceCommand } from "./workspace-promote.js";
-import { joinCommand } from "./remote.js";
+import { parseJoinTarget, useRemoteWorkspace } from "./remote.js";
+import { useBindingLines } from "./workspace-use-output.js";
 
 import { readdirSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -11,14 +12,14 @@ import { defaultDatabasePath, readWorkspaceName, usesDeviceLogin } from "@uberbl
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";
 import { migrateHubAdmissions, resolveConfig, writeHubAdmission } from "./config.js";
-import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
-import { readWorkspaceHub, recordedWorkspaceIds } from "./workspace-registry.js";
+import { type ProjectBinding, resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
+import { readWorkspaceHub, recordedWorkspaceIds, workspaceRegistryPath } from "./workspace-registry.js";
 import { takeHelp } from "./help.js";
 import { workspaceMemberCommand } from "./workspace-member.js";
 import type { InitLock } from "./init-lock.js";
 import { acquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
-import { processIo } from "./io.js";
+import { processIo, shellArgument } from "./io.js";
 import { describeFsError } from "./safe-write.js";
 import { ORIGIN_LABELS } from "./status.js";
 import { workspaceStatusCommand } from "./workspace-status.js";
@@ -29,10 +30,9 @@ commands:
   status                      the workspace in use, its selection, storage and sync
   create <name>               create and select a separate local-only workspace
   promote <hub>               upload, verify and connect this local workspace
-  join <connection-url>       join an existing hub workspace
   member <command>            grant workspace access and manage members
   list [--json]               workspaces this machine has a database for
-  use <id>                    select a recorded workspace in this project
+  use <link|id>               fetch a shared workspace or select a recorded one
 
 options:
   -h, --help             show this help; after a command, that command's help
@@ -146,10 +146,6 @@ function warn(io: Io, warnings: readonly string[]): void {
   }
 }
 
-function field(name: string, value: string): string {
-  return `${name.padEnd(14)}${value}\n`;
-}
-
 // --- ub workspace list -----------------------------------------------------
 
 /** Exported so the help below can be checked against the parser it describes. */
@@ -257,7 +253,7 @@ export function resolveWorkspaceId(
       error:
         `no workspace on this machine starts with ${JSON.stringify(raw)}. ` +
         "`ub workspace list` shows replicas; fetch a shared workspace with " +
-        "`ub workspace join <workspace-url>`",
+        "`ub workspace use <link>`",
     };
   }
   return {
@@ -267,46 +263,85 @@ export function resolveWorkspaceId(
   };
 }
 
-export const WORKSPACE_USE_HELP = `usage: ub workspace use <id>
+export const WORKSPACE_USE_OPTIONS = {
+  verbose: { type: "boolean", default: false },
+  json: { type: "boolean", default: false },
+} as const;
 
-Select a workspace and hub together in the nearest .uberblick.json, or create
-one in the current directory. Terminal commands and project MCP sessions use it.
+export const WORKSPACE_USE_HELP = `usage: ub workspace use <link|id> [--verbose] [--json]
+
+Bind this project to a workspace in the nearest .uberblick.json, or create one
+in the current directory. Terminal commands and project MCP sessions use it.
 
 operands:
+  <link>            a hub link with the workspace id as its last path segment,
+                    such as https://hub.example.test/<workspace-id>, a bare
+                    hub.example.test/<workspace-id>, or ws(s)://endpoint/<id>.
+                    Browser document URLs are not workspace links.
   <id>              a workspace <uuid>, a decorated <slug>-<uuid>, or a unique
                     prefix of a recorded UUID
 
 options:
+  --verbose         add fetched documents, verification details and config paths
+  --json            only JSON on stdout: binding, previous binding and fetched documents
   -h, --help        show this help
 
-Uses the hub this machine recorded for the workspace, or local. An unknown
-workspace must first be fetched with \`ub workspace join <workspace-url>\`.
-This command moves no documents and verifies no membership.
-UB_WORKSPACE_ID environment overrides still take priority.
+A link requires a stored sign-in from \`ub auth login <hub>\` first. This command
+never starts sign-in. A loopback development hub with this machine's local
+signing secret keeps that admission and needs no sign-in.
+It fetches and reconciles this workspace's replica, verifies it, records its hub
+and only then writes the project binding. It never merges two workspaces.
+
+Verification means the hub acknowledged the writes, then a fresh client read
+the full directory back and compared every document's directory entry. Every
+archived document's content is read back, plus one live document's content when
+the workspace has any. It does not establish that the hub flushed the writes to
+disk or that other clients have converged. Later writes to an old hub are outside
+the verified snapshot.
+
+An id uses the hub this machine recorded for the workspace, or local; it moves
+no documents, verifies no membership and never replaces that hub record.
+An unknown workspace must first be fetched with \`ub workspace use <link>\`.
+UB_WORKSPACE_ID and UB_HUB_URL environment overrides still take priority.
 `;
 
 async function useCommand(argv: string[], io: Io): Promise<number> {
   if (takeHelp(argv, io, WORKSPACE_USE_HELP)) return 0;
 
   let raw: string | undefined;
+  let json = false;
+  let verbose = false;
   try {
-    const { positionals } = parseArgs({
+    const { positionals, values } = parseArgs({
       args: argv,
-      options: {},
+      options: WORKSPACE_USE_OPTIONS,
       allowPositionals: true,
     });
     if (positionals.length !== 1) {
-      throw new Error("expected exactly one workspace id");
+      throw new Error("expected exactly one workspace link or id");
     }
     raw = positionals[0];
+    json = values.json;
+    verbose = values.verbose;
   } catch (error) {
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
-    io.err("usage: ub workspace use <id>\n");
+    io.err("usage: ub workspace use <link|id> [--verbose] [--json]\n");
     return 2;
   }
   if (raw === undefined) {
-    io.err("usage: ub workspace use <id>\n");
+    io.err("usage: ub workspace use <link|id> [--verbose] [--json]\n");
     return 2;
+  }
+
+  if (raw.includes("/")) {
+    let target: ReturnType<typeof parseJoinTarget>;
+    try { target = parseJoinTarget(raw); }
+    catch (error) {
+      // The URL parser deliberately does not echo potentially secret operands.
+      io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\nusage: ub workspace use <link|id> [--verbose] [--json]\nRun again: ub workspace use <link>\n`);
+      return 2;
+    }
+    return useRemoteWorkspace(target, `ub workspace use ${shellArgument(raw)}`, io, { json, verbose });
   }
 
   let entries: Pick<WorkspaceEntry, "uuid">[];
@@ -322,6 +357,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   const resolved = resolveWorkspaceId(raw, entries);
   if ("error" in resolved) {
     io.err(`ub workspace use: ${resolved.error}\n`);
+    io.err("usage: ub workspace use <link|id> [--verbose] [--json]\n");
     return 2;
   }
   const id = resolved.id;
@@ -330,13 +366,16 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   if (hub === undefined) {
     io.err(
       "ub workspace use: this machine has no hub record for that workspace. " +
-      "Fetch a shared workspace with `ub workspace join <workspace-url>`. " +
+      "Fetch a shared workspace with `ub workspace use <link>`. " +
       `To register an existing local replica, serve it once with \`UB_WORKSPACE_ID=${id} UB_HUB_URL=local ub mcp serve\`; ` +
       "set `UB_HUB_URL=<hub>` for a hub replica.\n",
     );
     return 1;
   }
   let path: string;
+  let previous: ProjectBinding | null;
+  let text: string;
+  let written: string[];
 
   let lock: InitLock;
   try {
@@ -347,15 +386,19 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   }
 
   try {
+    previous = resolveProjectBinding({ env: {} }).binding;
     // A promotion/fetch may have finished while this command waited for the lock.
     hub = readWorkspaceHub(id);
-    if (hub === undefined) throw new Error("workspace record disappeared; fetch it with `ub workspace join <workspace-url>`");
+    if (hub === undefined) throw new Error("workspace record disappeared; fetch it with `ub workspace use <link>`");
     // Preserve endpoint metadata before the user removes obsolete selection keys.
     const admission = hub !== null && usesDeviceLogin(hub, { ...process.env, HUB_ADMISSION: undefined })
       ? writeHubAdmission(hub, true)
       : migrateHubAdmissions();
     warn(io, admission.warnings);
+    const registersPrevious = previous !== null && readWorkspaceHub(previous.workspaceId) === undefined;
     path = writeProjectBinding({ workspaceId: id, hubUrl: hub });
+    written = [...admission.written, ...(registersPrevious ? [workspaceRegistryPath()] : []), path];
+    text = useBindingLines({ workspaceId: id, hubUrl: hub }, previous, path);
   } catch (error) {
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
@@ -363,14 +406,12 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     lock.release();
   }
 
-  const { uuid } = parseWorkspaceId(id);
-  let text = field("workspace", id);
-  if (uuid !== id) {
-    text += field("uuid", uuid);
+  if (json) {
+    io.out(`${JSON.stringify({ binding: { workspaceId: id, hubUrl: hub }, previous }, null, 2)}\n`);
+  } else {
+    if (verbose) text += `\nConfiguration files written:\n${written.map(file => `  ${file}\n`).join("")}`;
+    io.out(text);
   }
-  text += field("hub", hub ?? "local (this computer)");
-  text += field("config", path);
-  io.out(text);
 
   // Written, and possibly overruled: a higher layer means this file changed
   // nothing anyone will observe, and printing the binding without saying so
@@ -400,7 +441,6 @@ export async function workspaceCommand(
   if (sub === "status") return workspaceStatusCommand(rest, io);
   if (sub === "create") return createWorkspaceCommand(rest, io);
   if (sub === "promote") return promoteWorkspaceCommand(rest, io);
-  if (sub === "join") return joinCommand(rest, io);
   if (sub === "member") return workspaceMemberCommand(rest, io);
   if (sub === "list") {
     return listCommand(rest, io);

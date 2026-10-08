@@ -25,7 +25,7 @@ export interface ResolvedBinding {
 }
 
 export const NO_BINDING = "No workspace selected. Add a .uberblick.json binding, run `ub init` for a local workspace, " +
-  "`ub workspace join <workspace-url>` to fetch from a hub, or set UB_WORKSPACE_ID (add UB_HUB_URL with a hub address or local until this machine has its record).";
+  "`ub workspace use <link>` to fetch from a hub, or set UB_WORKSPACE_ID (add UB_HUB_URL with a hub address or local until this machine has its record).";
 
 /** Find the nearest entry, including a broken symlink: invalid files must fail. */
 export function findProjectConfig(cwd = process.cwd()): string | null {
@@ -99,7 +99,7 @@ export function resolveProjectBinding(options: BindingOptions = {}): ResolvedBin
       // project file. Machine knowledge always comes from this process's roots.
       const recorded = readWorkspaceHub(workspaceId);
       if (recorded === undefined) {
-        throw new Error("This machine has no hub record for UB_WORKSPACE_ID. Add UB_HUB_URL (a hub address, or local), or fetch the workspace with `ub workspace join <workspace-url>`.");
+        throw new Error("This machine has no hub record for UB_WORKSPACE_ID. Add UB_HUB_URL (a hub address, or local), or fetch the workspace with `ub workspace use <link>`.");
       }
       hubUrl = recorded;
     }
