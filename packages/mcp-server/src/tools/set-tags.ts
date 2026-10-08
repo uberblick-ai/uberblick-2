@@ -3,6 +3,7 @@ import { assignDocumentTags } from "@uberblick/schema";
 import { z } from "zod";
 import { guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import { resolveTagSelectors } from "../tag-catalog.js";
 import type { ToolContext } from "./context.js";
 import { ARCHIVED_IS_READ_ONLY, SYNCED_IS_ACKNOWLEDGED } from "./descriptions.js";
@@ -35,6 +36,7 @@ export function registerSetTags(server: McpServer, context: ToolContext): void {
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         toolContract("set_tags"),
+      outputSchema: outputSchemas.set_tags,
       inputSchema: strictInput({ uuid: uuidArg, tags: z.array(z.string().min(1)) }),
     },
     guarded("set_tags", async ({ uuid, tags }) => {

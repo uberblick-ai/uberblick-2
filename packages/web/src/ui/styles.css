@@ -346,7 +346,6 @@ body {
 .ub-mention,
 .ub-tags:not(.ub-tag-picker-trigger),
 .ub-tool,
-.ub-lang,
 .ub-tldr-form textarea,
 .ub-docs-search,
 .ub-docs-open {
@@ -599,7 +598,7 @@ body {
   border-radius: 999px;
 }
 
-.ub-code[data-language]:not([data-language=""])::before,
+.ub-code-caption,
 .ub-mermaid::before,
 .ub-terminal::before {
   font-size: 0.7rem;
@@ -853,13 +852,6 @@ h1.ub-heading {
   display: inline-flex;
 }
 
-.ub-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  margin-bottom: 0.5rem;
-}
-
 .ub-tool {
   font-size: 0.75rem;
   padding: 0.15rem 0.45rem;
@@ -873,7 +865,6 @@ h1.ub-heading {
   color: var(--foreground);
 }
 
-.ub-lang,
 .ub-tldr-form textarea,
 .ub-docs-search {
   border-radius: var(--radius-sm);
@@ -881,15 +872,8 @@ h1.ub-heading {
   color: var(--foreground);
 }
 
-.ub-lang,
 .ub-tldr-form textarea {
   border: 1px solid var(--input);
-}
-
-.ub-lang {
-  font-size: 0.75rem;
-  width: 7rem;
-  padding: 0.15rem 0.35rem;
 }
 
 .ub-editor .tiptap {
@@ -1220,21 +1204,48 @@ h3.ub-heading {
   margin: 0.7em 0;
 }
 
-/* Reserve the copy row even without a language. Its caption reads
-   data-language in a pseudo-element so it stays outside editable content. */
+/* Reserve the header even without a language. Caption and copy stay outside
+   the horizontally scrolling source. */
 .ub-code {
   position: relative;
   padding-top: 1.6rem;
 }
 
-.ub-code[data-language]:not([data-language=""])::before {
-  content: attr(data-language);
+.ub-code-caption {
   position: absolute;
-  top: 0.3rem;
+  top: 0.15rem;
   left: 0.75rem;
+  max-width: calc(100% - 7rem);
+  font-size: 0.7rem;
   letter-spacing: 0.04em;
   user-select: none;
   pointer-events: none;
+}
+
+.ub-code-caption,
+.ub-code .ub-copy {
+  line-height: 1.5;
+}
+
+.ub-code-language-trigger {
+  pointer-events: auto;
+}
+
+.ub-code-caption-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ub-code-caption:has(.ub-code-language-trigger) > .ub-code-caption-text {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  /* Only the active picker needs a touch target clear of the editable source. */
+  .ub-code:has(.ub-code-language-trigger) {
+    padding-top: 3rem;
+  }
 }
 
 .ub-code .hljs-comment,

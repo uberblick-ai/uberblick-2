@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { failureContract, guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import { activeTagCatalog, tagCatalogComplete } from "../tag-catalog.js";
 import type { ToolContext } from "./context.js";
 import { json } from "./helpers.js";
@@ -21,6 +22,7 @@ export function registerListTags(server: McpServer, context: ToolContext): void 
         "entries, and a tag value this replica has never seen is refused rather than assigned. `hub` says where that " +
         "connection stands." +
         failureContract("list_tags"),
+      outputSchema: outputSchemas.list_tags,
       inputSchema: strictInput({}),
     },
     guarded("list_tags", async () => {

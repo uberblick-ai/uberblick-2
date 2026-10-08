@@ -40,6 +40,7 @@ import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError, failureContract, guarded } from "./failures.js";
 import { strictInput } from "./inputs.js";
+import { outputSchemas } from "./outputs.js";
 import type { ToolMode } from "./inputs.js";
 import type { Replica, Replicas } from "./replica.js";
 
@@ -55,7 +56,7 @@ export interface SidebarToolContext {
   requireStub(uuid: string): DirectoryEntry;
   /** `{applied, synced, hub}` for a write that just landed. */
   durability(replica: Replica): Record<string, unknown>;
-  json(payload: unknown): CallToolResult;
+  json(payload: object): CallToolResult;
 }
 
 /** How a pinned uuid resolves against the directory. */
@@ -252,6 +253,7 @@ export function registerSidebarTools(
         "Unpinned documents are simply not entry points.\n\n" +
         SIDEBAR_SHAPE +
         failureContract("get_sidebar"),
+      outputSchema: outputSchemas.get_sidebar,
       inputSchema: strictInput({}),
     },
     guarded("get_sidebar", async () => {
@@ -277,6 +279,7 @@ export function registerSidebarTools(
         "positions in the target group after the document has been taken out of it.\n\n" +
         SIDEBAR_SHAPE +
         failureContract("pin_doc"),
+      outputSchema: outputSchemas.pin_doc,
       inputSchema: strictInput({
         uuid: z.uuid().describe("Document UUID."),
         group: groupArg,
@@ -318,6 +321,7 @@ export function registerSidebarTools(
         "one place to remove it from. `unpinned` is false when the document was not pinned to begin with.\n\n" +
         SIDEBAR_SHAPE +
         failureContract("unpin_doc"),
+      outputSchema: outputSchemas.unpin_doc,
       inputSchema: strictInput({
         // No directory check: a pin whose document nothing can resolve is
         // exactly the one that most needs removing.
@@ -354,6 +358,7 @@ export function registerSidebarTools(
         "group comes into being with something in it rather than empty.\n\n" +
         SIDEBAR_SHAPE +
         failureContract("sidebar_group"),
+      outputSchema: outputSchemas.sidebar_group,
       inputSchema: strictInput(
         {
           action: z

@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getMeta, listAnnotations, readDecisions, summarizeDocData } from "@uberblick/schema";
 import { failureContract, guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import { DECISION_AUTHORITY, DECISION_EDGES, LIFECYCLE_RECORDS_STATE } from "./descriptions.js";
 import { json } from "./helpers.js";
@@ -49,6 +50,7 @@ export function registerGetDoc(server: McpServer, context: ToolContext): void {
         "starts a ten-minute lease; expiry requires fresh reads. This best-effort memory never fails the read " +
         "or writes usage to a room or update log, and is lost on restart." +
         failureContract("get_doc"),
+      outputSchema: outputSchemas.get_doc,
       inputSchema: strictInput({ uuid: uuidArg }),
     },
     guarded("get_doc", async ({ uuid }) => {

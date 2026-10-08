@@ -3,6 +3,7 @@ import { exportMarkdown } from "@uberblick/schema";
 import { z } from "zod";
 import { failureContract, guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import { json } from "./helpers.js";
 import { uuidArg } from "./schemas.js";
@@ -21,6 +22,7 @@ export function registerExportMarkdown(server: McpServer, context: ToolContext):
         "Structured document data is omitted; documents holding data include an omission notice. " +
         "Export only: markdown is never the storage format, and there is no import tool." +
         failureContract("export_markdown"),
+      outputSchema: outputSchemas.export_markdown,
       inputSchema: strictInput({
         uuid: uuidArg,
         frontmatter: z

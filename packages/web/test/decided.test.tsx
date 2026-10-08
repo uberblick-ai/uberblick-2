@@ -5,6 +5,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderSettled } from "./react-render.js";
+import { screen } from "@testing-library/react";
+import type { Editor } from "@tiptap/core";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -153,6 +155,47 @@ function card(host: HTMLElement, id: string): HTMLElement {
 }
 
 describe("decided decision records", () => {
+  it("shows a code caption without a language control when first opened decided", async () => {
+    const ydoc = stage();
+    appendBlock(ydoc, { type: "code", text: "const answer = 42;", language: "ts" });
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+    const host = await openApp();
+    const editor: Editor | null = binding.mock.results[0]?.value.editor ?? null;
+    if (editor == null) throw new Error("fixture document did not bind");
+    act(() => editor.commands.setTextSelection(editor.state.doc.child(0).nodeSize + 3));
+    expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("ts");
+    expect(screen.queryByRole("button", { name: "Code language" })).toBeNull();
+    expect(editorElement(host).getAttribute("contenteditable")).toBe("false");
+  });
+
+  it("keeps code language as a caption and removes an open picker when the record becomes decided", async () => {
+    const ydoc = stage("open");
+    const id = appendBlock(ydoc, { type: "code", text: "const answer = 42;", language: "ts" });
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+    peer.on("update", (update: Uint8Array) => Y.applyUpdate(ydoc, update));
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+    const host = await openApp();
+    const editor: Editor | null = binding.mock.results[0]?.value.editor ?? null;
+    if (editor == null) throw new Error("fixture document did not bind");
+    let pos = 0;
+    editor.state.doc.forEach((node, offset) => { if (node.attrs.id === id) pos = offset; });
+    act(() => editor.commands.setTextSelection(pos + 3));
+    const control = screen.getByRole("button", { name: "Code language" });
+    expect(host.querySelector(".ub-code-caption")?.contains(control)).toBe(true);
+    await act(async () => control.click());
+    expect(screen.getByRole("combobox", { name: "Search languages" })).not.toBeNull();
+
+    await act(async () => setStatus(peer, "decided"));
+    expect(screen.queryByRole("button", { name: "Code language" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Search languages" })).toBeNull();
+    expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("ts");
+    expect(getBlocks(ydoc).find((node) => node.id === id)?.language).toBe("ts");
+    expect(editorElement(host).getAttribute("contenteditable")).toBe("false");
+    expect(host.querySelector(".ub-toolbar")).toBeNull();
+    peer.destroy();
+  });
+
   it("binds read-only immediately, guards the title, and keeps tags, pin and archive available", async () => {
     const ydoc = stage();
     const originalBind = guardedBinding.bindGuardedEditor;

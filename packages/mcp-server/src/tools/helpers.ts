@@ -2,9 +2,10 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ToolError } from "../failures.js";
 import type { Replica, Replicas } from "../replica.js";
 
-export function json(payload: unknown): CallToolResult {
+export function json(payload: object): CallToolResult {
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    structuredContent: { ...payload },
   };
 }
 

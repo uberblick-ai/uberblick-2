@@ -3,6 +3,7 @@ import { BLOCK_TYPES, getBlock, insertBlock } from "@uberblick/schema";
 import { z } from "zod";
 import { guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import {
   ARCHIVED_IS_READ_ONLY,
@@ -52,6 +53,7 @@ export function registerInsertBlock(server: McpServer, context: ToolContext): vo
         "\n\n" +
         TLDR_AFTER_CONTENT_CHANGE +
         toolContract("insert_block"),
+      outputSchema: outputSchemas.insert_block,
       inputSchema: strictInput({
         uuid: uuidArg,
         after_block_id: z

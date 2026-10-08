@@ -3,6 +3,7 @@ import { setLinks } from "@uberblick/schema";
 import { z } from "zod";
 import { guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import { ARCHIVED_IS_READ_ONLY, DECISION_EDGES, SYNCED_IS_ACKNOWLEDGED } from "./descriptions.js";
 import { json } from "./helpers.js";
@@ -28,6 +29,7 @@ export function registerSetLinks(server: McpServer, context: ToolContext): void 
         "\n\n" +
         SYNCED_IS_ACKNOWLEDGED +
         toolContract("set_links"),
+      outputSchema: outputSchemas.set_links,
       inputSchema: strictInput({ uuid: uuidArg, links: z.array(linkArg) }),
     },
     guarded("set_links", async ({ uuid, links }) => {

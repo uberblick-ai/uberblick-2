@@ -137,11 +137,13 @@ export interface SourceBlockChrome {
   content: () => HTMLElement;
   /** Node attributes to mirror onto the root, on create and on every update. */
   sync: (node: PMNode, root: HTMLElement) => void;
+  /** Optional passive caption and mount point for the writable language picker. */
+  caption?: (node: PMNode) => string;
 }
 
 /**
- * A NodeView for a source-text block: the block as `renderHTML` draws it, plus
- * a copy button.
+ * A NodeView for a source-text block: its editable source plus copy and an
+ * optional language caption, all chrome outside contentDOM.
  */
 export function sourceBlockView(chrome: SourceBlockChrome): NodeViewRenderer {
   return ({ node }: NodeViewRendererProps): NodeView => {
@@ -149,6 +151,16 @@ export function sourceBlockView(chrome: SourceBlockChrome): NodeViewRenderer {
     const dom = chrome.root();
     const contentDOM = chrome.content();
     const button = copyButton(() => current.textContent);
+    const caption = chrome.caption === undefined ? null : document.createElement("span");
+    const captionText = caption === null ? null : document.createElement("span");
+    if (caption !== null && captionText !== null) {
+      caption.className = "ub-code-caption";
+      caption.contentEditable = "false";
+      captionText.className = "ub-code-caption-text";
+      captionText.textContent = chrome.caption?.(current) ?? "";
+      caption.append(captionText);
+      dom.append(caption);
+    }
     dom.append(button.element, contentDOM);
     chrome.sync(current, dom);
 
@@ -165,24 +177,26 @@ export function sourceBlockView(chrome: SourceBlockChrome): NodeViewRenderer {
         if (contentDOM.parentNode !== dom) return false;
         current = updated;
         chrome.sync(current, dom);
+        const label = chrome.caption?.(current) ?? "";
+        if (captionText !== null && captionText.textContent !== label) captionText.textContent = label;
         return true;
       },
-      // Only the button's own events. A click anywhere else in the block —
+      // Only the chrome's own events. A click anywhere else in the block —
       // including the padding around the text — must still place the caret.
       stopEvent: (event: Event): boolean =>
-        event.target instanceof Node && button.element.contains(event.target),
-      // The label swap, and nothing else. Anything wider than this is a trap:
+        event.target instanceof Node && (button.element.contains(event.target) || caption?.contains(event.target) === true),
+      // The copy label and caption/picker, and nothing else. Anything wider is a trap:
       // ignoring a mutation ProseMirror needed to see stops it repairing the
       // block's DOM at all, and the view then drifts silently away from the
       // document — every later keystroke lands on screen and nowhere else.
       ignoreMutation: (mutation: { target: Node }): boolean =>
-        button.element.contains(mutation.target),
+        button.element.contains(mutation.target) || caption?.contains(mutation.target) === true,
       destroy: button.destroy,
     };
   };
 }
 
-/** `<pre class="ub-code" data-language="…"><button …><code>…</code></pre>` */
+/** A code panel with a caption slot, copy button and scrolling source. */
 export const codeBlockChrome: SourceBlockChrome = {
   root: () => {
     const pre = document.createElement("pre");
@@ -190,6 +204,7 @@ export const codeBlockChrome: SourceBlockChrome = {
     return pre;
   },
   content: () => document.createElement("code"),
+  caption: (node) => typeof node.attrs.language === "string" ? node.attrs.language : "",
   sync: (node, root) => {
     mirrorAttribute(root, "id", node.attrs.id);
     mirrorAttribute(root, "data-language", node.attrs.language);

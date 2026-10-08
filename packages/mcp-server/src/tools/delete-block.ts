@@ -3,6 +3,7 @@ import { deleteBlock } from "@uberblick/schema";
 import { z } from "zod";
 import { guarded } from "../failures.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import {
   ARCHIVED_IS_READ_ONLY,
@@ -31,6 +32,7 @@ export function registerDeleteBlock(server: McpServer, context: ToolContext): vo
         "\n\n" +
         TLDR_AFTER_CONTENT_CHANGE +
         toolContract("delete_block"),
+      outputSchema: outputSchemas.delete_block,
       inputSchema: strictInput({ uuid: uuidArg, block_id: z.string().min(1) }),
     },
     guarded("delete_block", async ({ uuid, block_id }) => {

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { ToolError, failureContract, guarded } from "../failures.js";
 import { githubReference } from "../github-reference.js";
 import { strictInput } from "../inputs.js";
+import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "./context.js";
 import { json } from "./helpers.js";
 
@@ -31,6 +32,7 @@ export function registerFindDecisions(server: McpServer, context: ToolContext): 
         "ascending. There is no pagination or truncation; an empty array means no indexed live decision links " +
         "this item, not proof that the replica is complete." +
         failureContract("find_decisions"),
+      outputSchema: outputSchemas.find_decisions,
       inputSchema: strictInput({
         github_ref: z.string().describe("One GitHub issue or pull request, as owner/repo#n or its github.com URL."),
       }),
