@@ -53,7 +53,7 @@ const FIRST_GROUP_NAME = "Pinned";
 /** What `+ group` creates, before the reader types over it. */
 const NEW_GROUP_NAME = "New group";
 
-const GROUP_ACTION_CLASSES = "ub-group-act flex-none border-0 bg-transparent cursor-pointer rounded-(--radius-sm) px-[0.3rem] py-[0.15rem] font-[inherit] text-[0.75rem]/[inherit] [font-weight:inherit] [font-style:inherit] text-(--sidebar-muted-foreground) opacity-0 [@media(hover:none)]:opacity-100 [@media(hover:hover)]:[.ub-group-head:hover_&]:opacity-100 [.ub-group-head:focus-within_&]:opacity-100 hover:text-foreground hover:bg-sidebar-accent transition-opacity duration-[120ms] ease-[ease] motion-reduce:transition-none";
+const GROUP_ACTION_CLASSES = "ub-group-act flex-none min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 border-0 bg-transparent cursor-pointer rounded-(--radius-sm) px-[0.3rem] py-[0.15rem] font-[inherit] text-[0.75rem]/[inherit] [font-weight:inherit] [font-style:inherit] text-(--sidebar-muted-foreground) opacity-0 [@media(hover:none)]:opacity-100 [@media(hover:hover)]:[.ub-group-head:hover_&]:opacity-100 [.ub-group-head:focus-within_&]:opacity-100 hover:text-foreground hover:bg-sidebar-accent transition-opacity duration-[120ms] ease-[ease] motion-reduce:transition-none";
 
 // Both modes share a grid cell; only each mode's middle content scrolls.
 const SIDEBAR_PANE_CLASSES = "ub-sidebar-pane [grid-area:1/1] min-w-0 min-h-0 flex flex-col transition-[transform,opacity] duration-[180ms] ease-[ease] motion-reduce:transition-none motion-reduce:duration-0 [&[inert]]:pointer-events-none [&[inert]_*]:pointer-events-none";

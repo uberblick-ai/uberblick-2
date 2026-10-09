@@ -5,7 +5,7 @@ export const toolHelpDetails = {
   create_doc:
     "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
     "search. Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
-    "Optional `tldr` supplies the decision line before a decided record freezes it, under set_tldr rules and " +
+    "Optional `tldr` supplies the decision line before a decided record freezes it, under set_metadata rules and " +
     "limit. When the call seeds at least one block and stays editable, its answer carries the non-blocking " +
     "TL;DR review reminder; a metadata-only create carries no such reminder.\n\n" +
     "`tags` is a complete assignment set of active catalog ids or exact active names. Names are selectors; " +
@@ -13,7 +13,7 @@ export const toolHelpDetails = {
     "retired selection refuses the whole call before a document exists; list_tags is the active vocabulary.\n\n" +
     "A `title` and a `description` are both REQUIRED here and the call fails without either, creating " +
     "nothing. A title cannot be empty or whitespace: an untitled document cannot be picked out of a listing, " +
-    "and set_title is the repair for the untitled ones the web UI creates.\n\n" +
+    "and set_metadata with `title` is the repair for the untitled ones the web UI creates.\n\n" +
     "Pass `kind` to create a lifecycle document. Its `status` defaults to that kind's first state; `status` " +
     "without `kind`, or a status owned by the other kind, is refused before a document is created. A decision " +
     "may pass `governs`, the UUID of a live, hydrated requirement in this replica. The decision stores " +
@@ -88,8 +88,8 @@ export const toolHelpDetails = {
     "synced.\n\n" +
     "`description` is the document's own one-or-two-sentence description, cached in the stub so this listing " +
     "answers with it without opening a single room — read it before deciding what to get_doc. It is null for " +
-    "a document nobody has described yet; documents created in the web UI start that way, and set_description " +
-    "fixes one.\n\n" +
+    "a document nobody has described yet; documents created in the web UI start that way, and set_metadata " +
+    "with `description` fixes one.\n\n" +
     "`pinned` says whether the sidebar carries the document as an entry point — derived from the sidebar doc, " +
     "read with get_sidebar. Unpinned documents are fully alive; the flag separates entry points from the long " +
     "tail.\n\n" +
@@ -213,25 +213,31 @@ export const toolHelpDetails = {
     "omit pageSize from new mappings. Unknown mapping keys and options are invalid. Both views only " +
     "read their document's collection and contain no record values; use update_data to write records. Invalid mappings stay " +
     "editable source and show a problem message. Every block has one text an agent can edit.",
-  set_changelog_suggestion:
-    "Record one sentence of draft release-note copy for the work this document describes — what a reader of a " +
-    "changelog would want to know, in simple English about the user-visible outcome. Write it when delivered " +
-    "work makes you update the document; nothing generates, publishes or asks for one, and nothing renders it " +
-    "yet.\n\n" +
-    "It is document metadata beside the description, not prose in the document: writing it leaves the title, " +
-    "description, tags, links, kind and status exactly where they were, and get_doc answers with it as " +
-    "`changelogSuggestion`.\n\n" +
-    "Three states, and they are different answers. No `changelogSuggestion` at all means nobody has written " +
-    "one. `null` means this work deliberately needs no user-facing entry — say it, so an internal-only change " +
-    "does not read as unfinished. A non-empty string is the suggestion itself. The empty string — or any " +
-    "string that is only whitespace, since the argument is trimmed first — is not a fourth state: it takes " +
-    "the stored value back to the first one.\n\n" +
-    "That clear is the one answer whose concurrency guarantee is weaker, and it is local: it takes back only " +
-    "the value this replica has already seen, so a concurrent `null` or sentence from another writer outlives " +
-    "it and the field converges on theirs. Writing `null` or a sentence competes normally — concurrent " +
-    "writers converge on one of the two. If a clear must stick, read the document back with get_doc.\n\n" +
-    "The directory stub does not cache it and the search index does not carry it, so list_docs and search " +
-    "neither answer with it nor match on it.",
+  set_metadata:
+    "Update one or more of `title`, `description`, `tldr`, `tags` and curated `links` together. At least one " +
+    "must be named, and undeclared fields are refused. Each field keeps its own type and limit; a field " +
+    "refusal writes none of the named fields and adds `field` to its existing error. Document-level " +
+    "refusals keep their usual shape.\n\n" +
+    "A title is replaced wholesale without changing the document UUID, so links, backlinks and annotations " +
+    "survive a rename. Title and description are trimmed and cannot be empty or cleared; replace a " +
+    "description you dislike with a better one. The directory caches both and follows in the same call, " +
+    "so list_docs and search answer with their new values; backlinks also returns the description.\n\n" +
+    "The person-facing TL;DR is independent of the agent-facing description. Empty, whitespace-only and " +
+    "overlong TL;DR values are refused; use null to clear it. Decision stubs cache it as the decision line, " +
+    "while ordinary document stubs, search and Markdown do not carry it.\n\n" +
+    "Tags replace the assignment set with catalog ids or exact active names; names resolve to canonical ids " +
+    "before storage. Already assigned retired or unresolved ids may be preserved or removed, but cannot be " +
+    "newly added. Invalid values produce `invalid_tag_assignment` with `field: \"tags\"` before the document, " +
+    "directory or index changes.\n\n" +
+    "Links replace the curated UUID array and update backlinks. A newly added target unknown to this " +
+    "replica's directory produces `doclink_target_not_known_locally` with `field: \"links\"`; archived " +
+    "targets are accepted and an existing curated target can be retained unchanged. Passing get_doc's " +
+    "effective links back stores derived governs and supersedes UUIDs in the curated array too; get_doc " +
+    "deduplicates the resulting edges. Empty arrays clear tags or curated links.\n\n" +
+    "A decided record refuses title or tldr with `decision_read_only` and the refused field, but accepts " +
+    "description, tags and links. An archived document refuses all five. A success returns uuid and all " +
+    "five fields as get_doc would read them, including unchanged values, plus shared write durability and " +
+    "applicable description or tag hints; it carries no `tldrHint`.",
   archive_doc:
     "Hide a document: tombstones its directory stub, so it leaves list_docs and the search index. This is not " +
     "erasure and not a delete. Every block, mark and annotation stays exactly where it was: get_doc still " +
@@ -304,7 +310,7 @@ export const toolHelpDetails = {
     "text you linked, and it does not follow a later rename.\n\n" +
     "The target must be a document this replica's directory knows, or the call refuses with " +
     "`doclink_target_not_known_locally` and writes nothing. An archived target is accepted.\n\n" +
-    "The edge shows up in backlinks without touching `meta.links`, which stays the curated doc-level list set_links owns.",
+    "The edge shows up in backlinks without touching `meta.links`, which stays the curated doc-level list set_metadata owns.",
   sync_status:
     "What this replica holds and what the hub has acknowledged.\n\n" +
     "`hub.status` distinguishes `hub-down`, a retryable connection or renewal failure, from `auth-failed`, an " +

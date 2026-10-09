@@ -368,7 +368,7 @@ export const DEAD_HUB_URL = "ws://127.0.0.1:1";
  * worker.
  */
 export const TEST_PORTS = { first: 20_000, count: 12_000, perWorker: 100 };
-let portCursor = 0;
+let portCursor = Math.floor(Math.random() * TEST_PORTS.perWorker);
 
 /**
  * A loopback port nothing is listening on, for a test to hand to `ub`.
@@ -378,8 +378,8 @@ let portCursor = 0;
  * too. On a busy host one of them can take it before the `ub` under test binds
  * it, and `ub open` rightly refuses an occupied port (#1216). Only explicit
  * picks land below that range. Each worker walks its own slice, rotated by an
- * offset drawn once per run, so one suite's workers never pick alike and a
- * second suite on the host would have to probe the same port at the same time.
+ * offset drawn once per run, so one suite's workers never pick alike. A random
+ * starting step per file scatters picks between suites sharing the host.
  */
 export async function freePort(): Promise<number> {
   const worker = Number(process.env.VITEST_POOL_ID ?? "1");

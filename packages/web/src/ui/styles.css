@@ -445,12 +445,6 @@ body {
   text-align: left;
 }
 
-.ub-copied {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .ub-user-panel {
   display: grid;
   gap: 0.6rem;
@@ -722,53 +716,16 @@ h1.ub-heading {
   background: var(--destructive);
 }
 
-/* Anchor the confirmation to the copy control's own wrapper. */
 .ub-copy-wrap {
-  position: relative;
   display: inline-flex;
   flex: none;
 }
 
-/* Stretch the identity copy control to the row's reserved target height;
-   its confirmation uses the lower half without covering machine facts. */
-.ub-copy-identity {
-  align-self: stretch;
-}
-
-/* Keep confirmations out of flow and inside the control, clear of pane
-   clipping, the title and adjacent facts. Empty confirmations paint no box;
-   the identity variant uses the target's lower half. */
-.ub-copied {
-  position: absolute;
-  inset: 0;
-  border-radius: var(--radius-sm);
-  background: var(--secondary);
-  color: var(--secondary-foreground);
-  padding: 0.15rem;
-  font-size: 0.65rem;
-  line-height: 1.1;
-  text-align: center;
-  pointer-events: none;
-}
-
-.ub-copied:empty {
-  display: none;
-}
-
 .ub-title,
-.ub-copy-identity .ub-copied,
 .ub-terminal-toggle,
 .ub-copy,
 .ub-docs-open {
   background: none;
-}
-
-.ub-copy-identity .ub-copied {
-  inset: auto 0 0;
-  border-radius: 0;
-  font-size: 0.6rem;
-  line-height: 1;
-  white-space: nowrap;
 }
 
 /* Small identity initials and overflow counts keep their heavier UI weight. */
@@ -1104,10 +1061,15 @@ h3.ub-heading {
   text-align: left;
   vertical-align: top;
   white-space: pre-wrap;
-  max-width: 32rem;
   overflow-wrap: break-word;
 }
-.ub-data-table th { background: var(--muted); font-weight: 600; color: var(--foreground); }
+/* A block inside the native cell enforces the bound; max-width on td does not. */
+.ub-data-cell { max-width: 32rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Keep long columns readable without forcing their full intrinsic width. */
+.ub-data-cell[data-wrap="long"] { min-width: 12ch; }
+.ub-data-cell[data-wrap="short"] { max-width: none; white-space: pre; }
+.ub-data-cell[data-wrap="scalar"] { max-width: none; white-space: nowrap; }
+.ub-data-table th { max-width: 32rem; background: var(--muted); font-weight: 600; color: var(--foreground); }
 .ub-data-table td { color: var(--prose-text); }
 .ub-data-table td[data-state="absent"], .ub-data-table td[data-state="null"], .ub-data-table td[data-state="invalid"] {
   color: var(--muted-foreground);
@@ -1856,6 +1818,12 @@ h3.ub-heading {
   width: 19ch;
 }
 
+/* Inline not-saved only accompanies ordinary sync words. Reserve their
+   longest reading, rather than refusal words, to keep presence in the pane. */
+.ub-status-word--unsaved {
+  width: 9ch;
+}
+
 /* A lit quarter of the warning ring rotates in the fixed status-mark slot. */
 .ub-spinner {
   width: 0.7rem;
@@ -1893,9 +1861,6 @@ h3.ub-heading {
    on hover or keyboard focus. */
 .ub-copy {
   right: 0.4rem;
-  /* Reserve "copied" and "failed" plus padding and tracking inside this
-     border-box width, so confirmation never resizes the control. */
-  min-width: 8ch;
   color: var(--muted-foreground);
   transition:
     opacity 120ms ease,
@@ -1964,6 +1929,13 @@ h3.ub-heading {
 .ub-docs {
   --docs-pin: 1.75rem;
   gap: 0.5rem;
+}
+
+/* Reserve the shared icon target's full width inside the fixed-layout table. */
+@media (any-pointer: coarse) {
+  .ub-docs {
+    --docs-pin: 2.75rem;
+  }
 }
 
 .ub-docs-heading {

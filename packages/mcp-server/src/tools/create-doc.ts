@@ -254,7 +254,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
           : {}),
         ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
       });
-      // The same schema-owned catalog boundary set_tags uses. Validation
+      // The same schema-owned catalog boundary set_metadata uses. Validation
       // already ran before identity allocation; this writes the canonical
       // assignment representation inside the document's one update.
       assignDocumentTags(replica.doc, tagCatalog(), tagIds);

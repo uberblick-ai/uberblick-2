@@ -77,7 +77,7 @@ describe("the update log", () => {
         ],
       });
       uuid = doc.uuid;
-      await first.ok("set_links", { uuid, links: [] });
+      await first.ok("set_metadata", { uuid, links: [] });
     } finally {
       await first.close();
     }

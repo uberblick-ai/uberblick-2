@@ -189,7 +189,7 @@ describe("the chart's derived lifecycle", () => {
     editor.destroy(); doc.destroy(); directory.destroy();
   });
 
-  it("uses calendar labels on date scales while retaining the full accessible date", () => {
+  it("uses observation labels on date scales while retaining the full accessible date", () => {
     const doc = new Y.Doc(), directory = new Y.Doc();
     initDoc(doc, { uuid: "calendar-chart", title: "Calendar" });
     appendBlock(doc, { type: "chart", text: JSON.stringify({ version: 1, type: "line", collection: "trend", x: { field: "day", type: "date", label: "Day" }, y: [{ field: "value" }] }) });
@@ -207,9 +207,51 @@ describe("the chart's derived lifecycle", () => {
     options.scales.x.afterBuildTicks(scale);
     expect(options.scales.x.title.display).toBe(false);
     expect(options.scales.x.ticks.maxRotation).toBe(0);
-    expect(options.scales.x.ticks.callback(scale.ticks[0]?.value ?? NaN)).toContain("2026");
+    expect(scale.ticks.map(tick => tick.value)).toEqual([Date.parse("2026-10-07"), Date.parse("2026-10-09")]);
+    expect(options.scales.x.ticks.callback(scale.ticks[0]?.value ?? NaN)).toEqual(["Oct 7"]);
     expect(editor.view.dom.querySelector(".ub-chart-description")?.textContent).toContain("Oct 7, 2026");
     editor.destroy(); doc.destroy(); directory.destroy();
+  });
+  it.each(["gap", "connect"])("labels only distinct plotted x values under %s without changing series points", (missing) => {
+    for (const type of ["number", "date"] as const) {
+      const x = (value: number): number | string => type === "number" ? value : `2026-10-0${value}`;
+      const doc = new Y.Doc(), directory = new Y.Doc();
+      initDoc(doc, { uuid: "observation-chart", title: "Observations" });
+      appendBlock(doc, { type: "chart", text: JSON.stringify({ version: 1, type: "line", collection: "trend", missing,
+        x: { field: "x", type, label: "Observation" }, y: [{ field: "a" }, { field: "b" }] }) });
+      applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, upsert: [
+        { id: "first", value: { x: x(1), a: 3 } },
+        { id: "tied", value: { x: x(1), b: 4 } },
+        { id: "absent", value: { x: x(2) } },
+        { id: "null", value: { x: x(3), a: null, b: null } },
+        { id: "invalid", value: { x: x(4), a: "wrong" } },
+        { id: "last", value: { x: x(7), a: 7, b: 8 } },
+      ] }]);
+      const { editor } = mountEditor(doc);
+      flush();
+      const instance = charts.instances.at(-1);
+      if (!instance) throw new Error("Chart did not draw");
+      const data = JSON.stringify(instance.data);
+      const options = instance.options as { scales: { x: {
+        min: number; max: number; title: { display: boolean; text: string };
+        afterBuildTicks: (scale: unknown) => void; afterFit: (scale: unknown) => void;
+        ticks: { callback: (value: number) => unknown; autoSkip: boolean; maxRotation: number };
+      } } };
+      const { min, max } = options.scales.x;
+      const scale = { min, max, width: 800, ticks: [] as { value: number }[],
+        chart: { ctx: { save() {}, restore() {}, font: "", measureText: (text: string) => ({ width: text.length * 6 }) } } };
+      options.scales.x.afterBuildTicks(scale);
+      expect(scale.ticks.map(tick => tick.value)).toEqual([min, max]);
+      expect(options.scales.x.ticks.callback(min)).toEqual([type === "number" ? "1" : "Oct 1"]);
+      expect(options.scales.x.title).toMatchObject({ display: type === "number", text: "Observation" });
+      expect(options.scales.x.ticks).toMatchObject({ autoSkip: false, maxRotation: 0 });
+      scale.width = 5;
+      options.scales.x.afterFit(scale);
+      expect(scale.ticks.map(tick => tick.value)).toEqual([min]);
+      expect(JSON.stringify(instance.data)).toBe(data);
+      expect(options.scales.x).toMatchObject({ min, max });
+      editor.destroy(); doc.destroy(); directory.destroy();
+    }
   });
   it("shows a shared reader failure in every view and recovers on a valid update without writes", () => {
     const { doc, directory } = fixture();

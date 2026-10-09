@@ -15,17 +15,25 @@ export function NotificationToaster(): ReactElement {
   return createPortal(
     <Toaster
       theme={appearance}
-      position="top-right"
+      position="bottom-right"
       duration={TRANSIENT_DURATION}
       hotkey={["shiftKey", "F8"]}
       customAriaLabel="Notifications (Shift+F8)"
       closeButton
       // Sonner's default cap also hides old notices after keyboard expansion.
       // Keep all active conditions reachable through the native scroll/Tab route.
+      // Expanded bottom stacks need in-flow boxes for Safari to count upward
+      // overflow. Relative placement cancels the primitive's translation offset;
+      // its transforms, gestures, focus and timers stay with Sonner.
       visibleToasts={Infinity}
-      offset={{ top: "max(16px, env(safe-area-inset-top))", right: "max(16px, env(safe-area-inset-right))" }}
-      mobileOffset={{ top: "max(16px, env(safe-area-inset-top))", right: "max(16px, env(safe-area-inset-right))", left: "max(16px, env(safe-area-inset-left))" }}
-      className="[font-family:var(--font-sans)]! w-(--width)! h-[calc(100dvh-max(16px,env(safe-area-inset-top))-max(16px,env(safe-area-inset-bottom)))] overflow-x-hidden overflow-y-auto pointer-events-none [&>[data-sonner-toast]]:pointer-events-auto"
+      offset={{ bottom: "max(16px, env(safe-area-inset-bottom))", right: "max(16px, env(safe-area-inset-right))" }}
+      mobileOffset={{ bottom: "max(16px, env(safe-area-inset-bottom))", right: "max(16px, env(safe-area-inset-right))", left: "max(16px, env(safe-area-inset-left))" }}
+      className={[
+        "[font-family:var(--font-sans)]! w-(--width)! h-[calc(100dvh-max(16px,env(safe-area-inset-top))-max(16px,env(safe-area-inset-bottom)))]",
+        "flex flex-col-reverse gap-(--gap) overflow-x-hidden overflow-y-auto pointer-events-none [&>[data-sonner-toast]]:pointer-events-auto",
+        "[&>[data-sonner-toast][data-expanded=true][data-removed=false]]:relative! [&>[data-sonner-toast][data-expanded=true][data-removed=false]]:shrink-0",
+        "[&>[data-sonner-toast][data-expanded=true][data-removed=false]]:bottom-[calc(-1*var(--offset))]!",
+      ].join(" ")}
       style={{
         "--width": "min(356px, calc(100vw - max(16px, env(safe-area-inset-left)) - max(16px, env(safe-area-inset-right))))",
         "--normal-bg": "var(--card)",

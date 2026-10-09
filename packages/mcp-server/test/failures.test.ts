@@ -19,6 +19,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   FAILURE_CODES,
   INTERNAL_ERROR_MESSAGE,
+  PERSISTENCE_ERROR_MESSAGE,
   MUTATING_TOOLS,
   READ_ONLY_TOOLS,
   hydrationRecovery,
@@ -401,7 +402,7 @@ describe("the failure contract", () => {
       answer: { who: "A member", when: "2026-10-04T12:00:00Z", where: "A team discussion." },
     })).payload);
     record((await rig.call("set_status", { uuid: firstDecision.uuid, status: "open" })).payload);
-    record((await rig.call("set_title", { uuid: firstDecision.uuid, title: "Frozen" })).payload);
+    record((await rig.call("set_metadata", { uuid: firstDecision.uuid, title: "Frozen" })).payload);
     record(
       (
         await rig.call("create_doc", {
@@ -425,12 +426,12 @@ describe("the failure contract", () => {
     const archived = await seeded(rig);
     await rig.ok("archive_doc", { uuid: archived.uuid });
     record(
-      (await rig.call("set_title", { uuid: archived.uuid, title: "Nope" }))
+      (await rig.call("set_metadata", { uuid: archived.uuid, title: "Nope" }))
         .payload,
     );
     record(
       (
-        await rig.call("set_tags", {
+        await rig.call("set_metadata", {
           uuid: doc.uuid,
           tags: ["not-in-catalog"],
         })
@@ -490,7 +491,7 @@ describe("the failure contract", () => {
 
     const guidanceTag = createTagCatalogEntry(rig.instance.replicas.settings().doc, "guidance");
     setTags(rig.instance.replicas.replica(doc.uuid).doc, [guidanceTag.id]);
-    record((await rig.call("set_title", { uuid: doc.uuid, title: "Unbriefed" })).payload);
+    record((await rig.call("set_metadata", { uuid: doc.uuid, title: "Unbriefed" })).payload);
 
     // A handler that threw something nobody mapped, and a refused log write:
     // both need their own server, so they get one.
@@ -504,7 +505,7 @@ describe("the failure contract", () => {
     failing.store.failing = true;
     record(
       (
-        await failing.rig.call("set_title", {
+        await failing.rig.call("set_metadata", {
           uuid: victim.uuid,
           title: "Refused",
         })
@@ -512,7 +513,7 @@ describe("the failure contract", () => {
     );
 
     // Admission refusals use the same failure floor as every other tool error.
-    record(toFailure("set_title", new ServerShuttingDownError()).payload);
+    record(toFailure("set_metadata", new ServerShuttingDownError()).payload);
 
     // Every code the code itself knows about was triggered above.
     expect([...failures.keys()].sort()).toEqual([...FAILURE_CODES].sort());
@@ -559,7 +560,7 @@ describe("the failure contract", () => {
   it("says a failed write changed nothing, and invents nothing for a read", async () => {
     const rig = await localRig();
 
-    const write = await rig.call("set_title", {
+    const write = await rig.call("set_metadata", {
       uuid: randomUUID(),
       title: "Nowhere",
     });
@@ -581,16 +582,20 @@ describe("the failure contract", () => {
     const failing = await rigWith((path) => new FailingStore(path, WORKSPACE));
     const doc = await seeded(failing.rig);
     failing.store.failing = true;
-    const refusedWrite = await failing.rig.call("set_title", {
+    const refusedWrite = await failing.rig.call("set_metadata", {
       uuid: doc.uuid,
       title: "Refused",
     });
     expect(refusedWrite.payload.error).toBe("persistence_failed");
+    expect(refusedWrite.payload.message).toBe(PERSISTENCE_ERROR_MESSAGE);
+    expect(JSON.stringify(refusedWrite.payload)).not.toContain("simulated disk failure");
     expect(refusedWrite.payload.applied).toBe(false);
     expect(refusedWrite.payload.partial).toBe(false);
 
     const blockedRead = await failing.rig.call("get_doc", { uuid: doc.uuid });
     expect(blockedRead.payload.error).toBe("persistence_failed");
+    expect(blockedRead.payload.message).toBe(PERSISTENCE_ERROR_MESSAGE);
+    expect(JSON.stringify(blockedRead.payload)).not.toContain("simulated disk failure");
     expect(blockedRead.payload.room).toBeTruthy();
     expect(blockedRead.payload.recoveryClass).toBe("manual");
     expect(blockedRead.payload.applied).toBeUndefined();

@@ -326,13 +326,13 @@ describe("the derived index", () => {
     ).toEqual([doc.uuid]);
   });
 
-  it("follows set_links in both directions", async () => {
+  it("follows set_metadata in both directions", async () => {
     const rig = await localRig();
     const source = await rig.ok("create_doc", { title: "Source", description: "A test document." });
     const target = await rig.ok("create_doc", { title: "Target", description: "A test document." });
     const other = await rig.ok("create_doc", { title: "Other", description: "A test document." });
 
-    await rig.ok("set_links", {
+    await rig.ok("set_metadata", {
       uuid: source.uuid,
       links: [target.uuid],
     });
@@ -342,7 +342,7 @@ describe("the derived index", () => {
       { uuid: source.uuid, title: "Source", description: "A test document." },
     ]);
 
-    await rig.ok("set_links", { uuid: source.uuid, links: [other.uuid] });
+    await rig.ok("set_metadata", { uuid: source.uuid, links: [other.uuid] });
     expect((await rig.ok("backlinks", { uuid: target.uuid })).backlinks).toEqual(
       [],
     );
@@ -379,7 +379,7 @@ describe("the derived index", () => {
     ).toEqual([
       { uuid: source.uuid, title: "Source", description: "A test document." },
     ]);
-    // The union is derived. `meta.links` stays the curated list set_links owns.
+    // The union is derived. `meta.links` stays the curated list set_metadata owns.
     expect((await rig.ok("get_doc", { uuid: source.uuid })).links).toEqual([]);
 
     // A document referring to itself is not an edge…
@@ -448,7 +448,7 @@ describe("the derived index", () => {
       blocks: [{ type: "paragraph", text: "pangolin" }],
     });
     const target = await rig.ok("create_doc", { title: "Pointed at", description: "A test document." });
-    await rig.ok("set_links", { uuid: doc.uuid, links: [target.uuid] });
+    await rig.ok("set_metadata", { uuid: doc.uuid, links: [target.uuid] });
 
     // Asserted against the store, not through the tools: a tool call settles
     // first, and settling reindexes whatever it replays out of the log.
@@ -503,7 +503,7 @@ describe("the derived index", () => {
     ]);
 
     // Retagging is reflected, so the packed column is not a stale cache.
-    await rig.ok("set_tags", { uuid: doc.uuid, tags: ["mcp"] });
+    await rig.ok("set_metadata", { uuid: doc.uuid, tags: ["mcp"] });
     expect((await rig.ok("search", { query: "quokka" })).hits[0].tags).toEqual([
       {
         id: "00000000-0000-4000-8000-000000000003",
@@ -521,7 +521,7 @@ describe("the derived index", () => {
       blocks: [{ type: "paragraph", text: "bilby" }],
     });
 
-    await rig.ok("set_tags", {
+    await rig.ok("set_metadata", {
       uuid: doc.uuid,
       tags: ["permissions", "auth", "sync"],
     });
@@ -595,7 +595,7 @@ describe("identity at the boundary", () => {
     // A path was already refused; an arbitrary string is the same violation,
     // and either one persists a target nothing can ever resolve.
     for (const link of ["docs/some-title", "abc", "Link Target"]) {
-      const refused = await rig.call("set_links", {
+      const refused = await rig.call("set_metadata", {
         uuid: doc.uuid,
         links: [link],
       });
@@ -603,7 +603,7 @@ describe("identity at the boundary", () => {
     }
 
     const target = await rig.ok("create_doc", { title: "Real target", description: "A test document." });
-    const accepted = await rig.ok("set_links", {
+    const accepted = await rig.ok("set_metadata", {
       uuid: doc.uuid,
       links: [target.uuid],
     });

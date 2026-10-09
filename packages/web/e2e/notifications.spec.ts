@@ -241,8 +241,11 @@ test("changed sticky content published during dismissal animation survives the o
   await expect(notice(page, "Second failure")).toHaveCount(1);
 });
 
-test("native keyboard entry and final dismissal restore origin focus without taking editor chords", async ({ browser }) => {
+test("native keyboard entry and final dismissal restore origin focus without taking editor chords @webkit", async ({ browser, browserName }) => {
   const page = await openFixture(browser);
+  // Safari's native all-controls traversal uses Option+Tab.
+  const nextControl = browserName === "webkit" ? "Alt+Tab" : "Tab";
+  const previousControl = browserName === "webkit" ? "Alt+Shift+Tab" : "Shift+Tab";
   const origin = page.getByRole("textbox", { name: "Origin control" });
   await publish(page, "sticky", { key: "keyboard", severity: "info", message: "Keyboard notice" });
   await origin.focus();
@@ -253,16 +256,16 @@ test("native keyboard entry and final dismissal restore origin focus without tak
   await page.keyboard.press("Shift+F8");
   await expect(page.locator("[data-sonner-toaster]")).toBeFocused();
   // Sonner's first Tab reaches the toast; the second reaches its close button.
-  await page.keyboard.press("Tab");
+  await page.keyboard.press(nextControl);
   await expect(notice(page, "Keyboard notice")).toBeFocused();
-  await page.keyboard.press("Tab");
+  await page.keyboard.press(nextControl);
   await expect(notice(page, "Keyboard notice").getByRole("button")).toBeFocused();
-  await page.keyboard.press("Shift+Tab");
-  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press(previousControl);
+  await page.keyboard.press(previousControl);
   await expect(origin).toBeFocused();
   await page.keyboard.press("Shift+F8");
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Tab");
+  await page.keyboard.press(nextControl);
+  await page.keyboard.press(nextControl);
   await page.keyboard.press("Enter");
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
   await expect(origin).toBeFocused();
@@ -356,7 +359,7 @@ for (const appearance of ["light", "dark"] as const) {
   }
 }
 
-test("an active sticky notice stays reachable through a burst of transients in a narrow viewport", async ({ browser }) => {
+test("an active sticky notice stays reachable through a burst of transients in a narrow viewport @webkit", async ({ browser, browserName }) => {
   const page = await openFixture(browser, { width: 375, height: 400, clock: true });
   await publish(page, "sticky", { key: "ongoing", severity: "error", message: "Ongoing failure" });
   for (let index = 0; index < 18; index += 1) {
@@ -366,16 +369,28 @@ test("an active sticky notice stays reachable through a burst of transients in a
   await page.keyboard.press("Shift+F8");
   const sticky = notice(page, "Ongoing failure");
   await expect(sticky).toHaveAttribute("data-expanded", "true");
-  await page.waitForTimeout(500);
+  // Flush and finish native expansion before focus scrolls to a notice. A
+  // wall-clock delay can leave WebKit scrolling to the pre-transition box.
+  await page.locator("[data-sonner-toaster]").evaluate(async (element) => {
+    await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished));
+  });
   // Keyboard traversal must reach the older condition without a history UI.
-  for (let index = 0; index < 37; index += 1) await page.keyboard.press("Tab");
+  const nextControl = browserName === "webkit" ? "Alt+Tab" : "Tab";
+  for (let index = 0; index < 37; index += 1) await page.keyboard.press(nextControl);
   await expect(sticky).toBeFocused();
-  expect(await sticky.evaluate((element) => {
+  const painted = await sticky.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     const list = element.closest("[data-sonner-toaster]");
     const listBounds = list?.getBoundingClientRect();
-    return listBounds !== undefined && bounds.top >= listBounds.top && bounds.bottom <= innerHeight && bounds.right <= innerWidth;
-  })).toBe(true);
+    return {
+      withinViewport: listBounds !== undefined && bounds.top >= listBounds.top - 1 && bounds.bottom <= innerHeight && bounds.right <= innerWidth,
+      receivesPointer: element.contains(document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)),
+      top: bounds.top, listTop: listBounds?.top, bottom: bounds.bottom,
+      position: getComputedStyle(element).position, offset: getComputedStyle(element).bottom,
+      scrollTop: list?.scrollTop, scrollHeight: list?.scrollHeight,
+    };
+  });
+  expect(painted).toMatchObject({ withinViewport: true, receivesPointer: true });
   await page.clock.runFor(20_000);
   await expect(sticky).toHaveAttribute("data-removed", "false");
   await page.keyboard.press("Escape");

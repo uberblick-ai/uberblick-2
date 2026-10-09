@@ -226,6 +226,8 @@ describe("a create that only half landed", () => {
       ],
     });
     expect(refused.payload.error).toBe("persistence_failed");
+    expect(refused.payload.message).toContain("create_doc stopped part-way");
+    expect(JSON.stringify(refused.payload)).not.toContain("simulated disk failure");
     const uuid = refused.payload.uuid;
 
     // On disk: the document's room, and a directory that never heard of it.
@@ -262,6 +264,63 @@ describe("a create that only half landed", () => {
 });
 
 describe("a lifecycle update that only half landed", () => {
+  it("names the refused document room and leaves both durable lifecycle records unchanged", async () => {
+    const databasePath = tempDatabasePath();
+    const store = failingStore(databasePath);
+    const rig = await server(databasePath, store);
+    const created = await rig.ok("create_doc", {
+      title: "Unadopted document",
+      description: DESCRIPTION,
+    });
+
+    const room = `${WORKSPACE}/${created.uuid}`;
+    store.failRoom = failedRoom => failedRoom === room;
+    store.failing = true;
+    const refused = await rig.call("set_status", {
+      uuid: created.uuid,
+      status: "planned",
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.payload).toMatchObject({
+      error: "persistence_failed",
+      uuid: created.uuid,
+      kind: "requirement",
+      status: "planned",
+      applied: false,
+      partial: false,
+      synced: false,
+      rolledBack: false,
+      completed: [],
+      failed: { purpose: "document", room },
+      room,
+      recoveryClass: "manual",
+    });
+    expect(refused.payload.completed).toEqual([]);
+    expect(refused.payload.message).toContain("set_status stopped part-way");
+    expect(JSON.stringify(refused.payload)).not.toContain("simulated disk failure");
+    expect(refused.payload.recovery).toContain("Restart the MCP server");
+    expect(refused.payload.recovery).toContain("re-read the document");
+
+    await stop(rig);
+    store.failing = false;
+    const durableDocument = getMeta(fromLog(databasePath, room));
+    const durableStub = getDirectoryEntry(
+      fromLog(databasePath, `${WORKSPACE}/_directory`),
+      created.uuid,
+    );
+    expect(durableDocument).not.toHaveProperty("kind");
+    expect(durableDocument).not.toHaveProperty("status");
+    expect(durableStub).not.toHaveProperty("kind");
+    expect(durableStub).not.toHaveProperty("status");
+
+    const restarted = await server(databasePath);
+    expect(await restarted.ok("get_doc", { uuid: created.uuid })).not.toHaveProperty("kind");
+    expect(await listed(restarted, created.uuid)).not.toHaveProperty("kind");
+    expect(await restarted.ok("set_status", { uuid: created.uuid, status: "planned" })).toMatchObject({
+      kind: "requirement", status: "planned", applied: true,
+    });
+  });
+
   it("names the durable document room and repairs its stale stub after restart", async () => {
     const databasePath = tempDatabasePath();
     const store = failingStore(databasePath);
@@ -277,6 +336,7 @@ describe("a lifecycle update that only half landed", () => {
       uuid: created.uuid,
       status: "planned",
     });
+    expect(refused.isError).toBe(true);
     expect(refused.payload).toMatchObject({
       error: "persistence_failed",
       uuid: created.uuid,
@@ -294,7 +354,14 @@ describe("a lifecycle update that only half landed", () => {
         },
       ],
       failed: { purpose: "directory", room: `${WORKSPACE}/_directory` },
+      room: `${WORKSPACE}/_directory`,
+      recoveryClass: "manual",
     });
+    expect(refused.payload.completed).toEqual([
+      { purpose: "document", room: `${WORKSPACE}/${created.uuid}`, applied: true },
+    ]);
+    expect(refused.payload.message).toContain("set_status stopped part-way");
+    expect(JSON.stringify(refused.payload)).not.toContain("simulated disk failure");
     expect(refused.payload.recovery).toContain("do not repeat set_status");
 
     await stop(rig);
@@ -334,7 +401,7 @@ describe("a rename that only half landed", () => {
 
     store.failRoom = (room) => room === `${WORKSPACE}/_directory`;
     store.failing = true;
-    const refused = await rig.call("set_title", {
+    const refused = await rig.call("set_metadata", {
       uuid: created.uuid,
       title: "New name",
     });
@@ -411,7 +478,7 @@ describe("a rename that only half landed", () => {
 
     // The next write to the document is what heals it — the "repaired on write"
     // half of the rule, in that direction only.
-    await rig.ok("set_description", {
+    await rig.ok("set_metadata", {
       uuid: created.uuid,
       description: "Described after the stub ran ahead.",
     });

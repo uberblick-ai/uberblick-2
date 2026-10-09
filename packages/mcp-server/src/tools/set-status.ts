@@ -5,6 +5,7 @@ import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
 import { decisionAnswerArg, documentStatusArg, uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
+import { roomStages } from "./helpers.js";
 
 function kindForStatus(status: DocumentStatus): DocumentKind {
   return REQUIREMENT_STATUSES.some((candidate) => candidate === status)
@@ -62,47 +63,39 @@ export const setStatusOperation = documentOperation("set_status", inputSchema, (
     }
   }
 
-  replica.doc.transact(() => {
-    if (stored.kind === undefined) {
-      // Adoption is unconditional on the tolerant read. Clear any hidden,
-      // incompatible raw pair before writing the derived legal pair; the
-      // outer transaction keeps the replacement in one logged update.
-      setKind(replica.doc, "");
-      setKind(replica.doc, kind);
-    }
-    setStatus(replica.doc, status);
-    if (kind === "decision") {
-      if (answer !== undefined) recordAnswer(replica, answer);
-      else if (status === "decided" && stored.status !== "decided") getMetaMap(replica.doc).set("agentStance", true);
-      if (status === "rejected") getMetaMap(replica.doc).set("rejectionReason", reason);
-    }
+  const directory = replicas.directory();
+  const { stage } = roomStages(
+    replicas,
+    "set_status",
+    uuid,
+    room => room === replica.room ? "document" : room === directory.room ? "directory" : "other",
+    (_purpose, failedAt) => failedAt === "directory"
+      ? "Restart the MCP server. The document lifecycle is already durable; the next settle repairs the " +
+        "directory stub from it, so do not repeat set_status before re-reading."
+      : failedAt === "document"
+        ? "Restart the MCP server, then re-read the document before calling set_status again. " +
+          "The lifecycle update did not reach the document's update log."
+        : "Restart the MCP server, then re-read the document with get_doc and its directory stub with list_docs " +
+          "before calling set_status again: another room's write failed while this call ran.",
+    { kind, status },
+  );
+  stage("document", replica, () => {
+    replica.doc.transact(() => {
+      if (stored.kind === undefined) {
+        // Adoption is unconditional on the tolerant read. Clear any hidden,
+        // incompatible raw pair before writing the derived legal pair; the
+        // outer transaction keeps the replacement in one logged update.
+        setKind(replica.doc, "");
+        setKind(replica.doc, kind);
+      }
+      setStatus(replica.doc, status);
+      if (kind === "decision") {
+        if (answer !== undefined) recordAnswer(replica, answer);
+        else if (status === "decided" && stored.status !== "decided") getMetaMap(replica.doc).set("agentStance", true);
+        if (status === "rejected") getMetaMap(replica.doc).set("rejectionReason", reason);
+      }
+    });
   });
-
-  const failure = replicas.persistenceError();
-  if (failure !== null && failure.room === replicas.directory().room) {
-    throw new ToolError(
-      "persistence_failed",
-      `The lifecycle update is durable in ${replica.room}, but its directory stub could not be updated: ${failure.message}`,
-      {
-        uuid,
-        kind,
-        status,
-        applied: false,
-        partial: true,
-        synced: false,
-        rolledBack: false,
-        completed: [
-          { purpose: "document", room: replica.room, applied: true },
-        ],
-        failed: { purpose: "directory", room: failure.room },
-        room: failure.room,
-        recoveryClass: "manual",
-        recovery:
-          "Restart the MCP server. The document lifecycle is already durable; the next settle repairs the " +
-          "directory stub from it, so do not repeat set_status before re-reading.",
-      },
-    );
-  }
 
   return { uuid, kind, status, ...decisionAuthorityJson(replica), };
 });

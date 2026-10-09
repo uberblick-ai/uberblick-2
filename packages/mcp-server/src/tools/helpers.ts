@@ -72,6 +72,7 @@ export function roomStages(
   uuid: string,
   purposeOf: (room: string) => string,
   recoveryFor: (stagePurpose: string, failedPurpose: string) => string,
+  extra?: Record<string, unknown>,
 ): {
   completed: { purpose: string; room: string }[];
   stage: (purpose: string, target: Replica, write: () => void) => void;
@@ -97,11 +98,12 @@ export function roomStages(
       message:
         `The update log refused the write to ${failure.room}, so ${tool} stopped part-way. ` +
         "Nothing was rolled back: the rooms in `completed` are durable and the rooms after " +
-        `the failure were never written. Cause: ${failure.message}`,
+        "the failure were never written.",
       uuid,
       completed,
       failed: { purpose: failedAt, room: failure.room },
       recovery: recoveryFor(purpose, failedAt),
+      ...(extra === undefined ? {} : { extra }),
     });
   };
   return { completed, stage };

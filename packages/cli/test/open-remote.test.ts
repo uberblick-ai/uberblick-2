@@ -57,9 +57,10 @@ afterEach(cleanUp);
 /**
  * #752's budget: an MCP write reaches a served tab within 250 ms at p95.
  *
- * A round is 20 samples. One stall on a host shared with other suites can
+ * A round is 20 samples. Transient stalls on a host shared with other suites can
  * spoil a round without the product being slow, so a missed round is retaken,
- * up to three times. A real regression misses every round.
+ * up to three times. A slowdown affecting most writes misses every round;
+ * intermittent regressions are less likely to fail with these retakes.
  */
 async function expectP95Within250ms(
   label: string,

@@ -35,12 +35,14 @@ describe("continuous native table rendering", () => {
     document.body.append(view.element);
     view.render(ready([record("a", 1), record("b", 2)]));
     const original = rows(view);
-    const untouchedText = original[0]?.cells[0]?.firstChild;
+    const untouchedContent = original[0]?.cells[0]?.firstChild;
+    const untouchedText = untouchedContent?.firstChild;
     const link = original[1]?.querySelector("a");
     link?.focus();
     view.render(ready([record("a", 1), record("b", 9)], { ...config, columns: config.columns.map(column => ({ ...column })) }));
     expect(rows(view)).toEqual(original);
-    expect(original[0]?.cells[0]?.firstChild).toBe(untouchedText);
+    expect(original[0]?.cells[0]?.firstChild).toBe(untouchedContent);
+    expect(original[0]?.cells[0]?.firstChild?.firstChild).toBe(untouchedText);
     expect(original[1]?.cells[0]?.textContent).toBe("9");
     expect(original[1]?.querySelector("a")).toBe(link);
     expect(document.activeElement).toBe(link);

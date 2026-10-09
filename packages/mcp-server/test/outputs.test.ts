@@ -86,12 +86,11 @@ describe("successful MCP output contracts", () => {
     await success("search", { query: "Output contract" });
     await success("find_decisions", { github_ref: "uberblick-ai/uberblick-2#1429" });
     await success("backlinks", { uuid });
-    await success("set_title", { uuid, title: "Output contract renamed" });
-    await success("set_description", { uuid, description: "The renamed contract fixture." });
-    await success("set_tldr", { uuid, tldr: "All advertised tool answers are checked." });
-    await success("set_tags", { uuid, tags: tags.tags.slice(0, 1).map((tag: { id: string }) => tag.id) });
-    await success("set_links", { uuid, links: [target.uuid] });
-    await success("set_changelog_suggestion", { uuid, suggestion: null });
+    await success("set_metadata", {
+      uuid, title: "Output contract renamed", description: "The renamed contract fixture.",
+      tldr: "All advertised tool answers are checked.",
+      tags: tags.tags.slice(0, 1).map((tag: { id: string }) => tag.id), links: [target.uuid],
+    });
     await success("set_status", { uuid, status: "draft" });
     const edited = await success("edit_block", {
       uuid, block_id: created.blocks[0].id, old_text: "first paragraph", new_text: "edited paragraph",
@@ -134,7 +133,7 @@ describe("successful MCP output contracts", () => {
     const uuid = randomUUID();
     for (const [name, args, writes] of [
       ["get_doc", { uuid }, false],
-      ["set_title", { uuid, title: "Missing" }, true],
+      ["set_metadata", { uuid, title: "Missing" }, true],
     ] as const) {
       const result = await rig.client.callTool({ name, arguments: args }) as CallToolResult;
       expect(result.isError).toBe(true);

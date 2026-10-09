@@ -1,12 +1,4 @@
-/**
- * The status line's sync-backlog label.
- *
- * `sync_status` reports a count of unsynced *rooms*; this reports a count of
- * provider sync *messages* awaiting acknowledgement. Both used to read
- * "pending", which made two correct numbers look like a contradiction during an
- * outage. The rendered wording is the fix, so it is what the test pins — down to
- * the unit, because the honest unit here is messages and not updates.
- */
+/** Compact document status: facts stay here, recovery and counts have details. */
 
 import { act, render } from "./react-render.js";
 import { within } from "@testing-library/react";
@@ -70,13 +62,10 @@ function label(
   return text?.replace(/\s+/g, " ").trim() ?? null;
 }
 
-describe("the status line names the unit of its backlog count", () => {
-  it("reads in sync messages, not the bare word pending", () => {
-    expect(label(38)).toBe("38 sync messages unacked");
-    expect(label(1)).toBe("1 sync message unacked");
-  });
-
-  it("says nothing when everything is acknowledged", () => {
+describe("the backlog stays out of the compact status line", () => {
+  it("never renders a count, including while messages await acknowledgement", () => {
+    expect(label(38)).toBeNull();
+    expect(label(1)).toBeNull();
     expect(label(0)).toBeNull();
   });
 });
@@ -90,10 +79,10 @@ describe("an unwritable document", () => {
     expect(line({ writable: false })).toContain("not saved");
   });
 
-  it("names a sticky store refusal and its recovery", () => {
+  it("keeps a store refusal compact", () => {
     const refused = line({ writable: false, storeRefused: true });
     expect(refused).toContain("edit refused");
-    expect(refused).toContain(STORE_REFUSED);
+    expect(refused).not.toContain(STORE_REFUSED);
   });
 });
 
@@ -162,30 +151,31 @@ describe("the selected document's edit freshness", () => {
     }
   });
 
-  it("waits for the sync word and follows a refusal's explanation", () => {
+  it("waits for the sync word and follows a compact refusal", () => {
     const stamp = Date.now();
     expect(updatedReading(stamp, { connected: true, synced: true }).line).toBe("");
     expect(updatedReading(stamp, { authFailed: true }).line).toMatch(
-      /^not authorized.*hub rejected.*secret is wrong.*hub is older.*· last updated just now$/,
+      /^not authorized\s*· last updated just now$/,
     );
   });
 });
 
 describe("a hub that refuses this page", () => {
-  it("says an update is needed, and which side needs it", () => {
+  it("keeps the update-required word without its recovery sentence", () => {
     // A reading of its own, not a fourth sync state: the other three describe a
     // connection that works or is coming back, and this one describes a page
     // that will not sync again until somebody updates something. Both integers
-    // are shown because "which side" is the only actionable part.
+    // belong to the notice and Sync details, rather than the compact header.
     const older = line({ protocolMismatch: { hub: 2, client: 1 } });
     expect(older).toContain("update required");
-    expect(older).toContain("this app is older than the hub");
-    expect(older).toContain("(app 1, hub 2)");
-    expect(older).toContain("not saved");
+    expect(older).not.toContain("this app is older than the hub");
+    expect(older).not.toContain("(app 1, hub 2)");
+    expect(older).not.toContain("not saved");
 
     const newer = line({ protocolMismatch: { hub: 1, client: 2 } });
-    expect(newer).toContain("the hub is older than this app");
-    expect(newer).toContain("(app 2, hub 1)");
+    expect(newer).toContain("update required");
+    expect(newer).not.toContain("the hub is older than this app");
+    expect(newer).not.toContain("(app 2, hub 1)");
 
     // Neither reading appears without its refusal, whichever sync state the
     // room is in — they replace the line, so a false positive hides the truth.
@@ -194,13 +184,14 @@ describe("a hub that refuses this page", () => {
     expect(line({})).not.toContain(AUTH_REJECTED);
   });
 
-  it("names both causes when the refusal was not a version mismatch", () => {
+  it("keeps an authorization refusal without its recovery sentence", () => {
     // An older hub cannot read our envelope and answers exactly as a wrong
     // secret does, so this is the one direction nothing can detect: the copy
     // names both causes rather than guessing, and it is composed locally —
     // the hub's own words never reach the line.
-    expect(line({ authFailed: true })).toContain(AUTH_REJECTED);
-    expect(line({ authFailed: true })).toContain("not saved");
+    expect(line({ authFailed: true })).toContain("not authorized");
+    expect(line({ authFailed: true })).not.toContain(AUTH_REJECTED);
+    expect(line({ authFailed: true })).not.toContain("not saved");
   });
 });
 
@@ -214,31 +205,29 @@ describe("an app served without a token", () => {
     // the whole subject, so there is nothing remote to echo.
     const missing = line({ tokenMissing: true });
     expect(missing).toContain("no hub token");
-    expect(missing).toContain(TOKEN_MISSING);
+    expect(missing).not.toContain(TOKEN_MISSING);
     expect(missing).not.toContain(AUTH_REJECTED);
-    expect(missing).toContain("not saved");
+    expect(missing).not.toContain("not saved");
 
     // It outranks a refusal left over from before the secret went missing, and
     // it never appears without one.
-    expect(line({ tokenMissing: true, authFailed: true })).toContain(TOKEN_MISSING);
+    expect(line({ tokenMissing: true, authFailed: true })).toContain("no hub token");
     expect(line({ connected: true, synced: true })).not.toContain(TOKEN_MISSING);
   });
 });
 
 /**
- * The badge is hidden while the indicator reads "synced" (#76), which is only
- * safe because a backlog is itself what stops the state being `synced`. The trap
+ * A backlog is itself what stops the state being `synced`. The trap
  * is `provider.isSynced`: the initial handshake raises it and nothing ever
  * lowers it, so a room with writes stranded at the hub keeps reporting
  * `synced: true` — and reading that flag alone would leave the line showing a
- * green dot and no badge for as long as the outage lasted.
+ * green dot for as long as the outage lasted.
  *
- * This has to be asserted on the *settled* line. Every mount starts at
- * "offline" and debounces towards the truth, so a line read before the window
- * is up shows the badge whatever the derivation does — which is exactly how a
- * broken derivation slips past an unsettled assertion.
+ * This has to be asserted on the *settled* line. Each source starts with an
+ * empty slot and earns its reading, so a line read before the window
+ * is up cannot establish what the persistent backlog will report.
  */
-describe("a backlog is delayed by the calm treatment, never hidden by it", () => {
+describe("a backlog keeps the settled status busy without a header count", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -271,7 +260,7 @@ describe("a backlog is delayed by the calm treatment, never hidden by it", () =>
   it("reports a backlog the provider's synced flag has stopped tracking", () => {
     expect(settledLine({ connected: true, synced: true })).toEqual({
       word: "syncing…",
-      badge: "4 sync messages unacked",
+      badge: null,
     });
   });
 
@@ -372,13 +361,13 @@ describe("the locally served document's two sync facts", () => {
     return answer;
   }
 
-  it("keeps edits saved here while naming device recovery and later clears it", () => {
+  it("keeps edits saved here while keeping device recovery out of the header", () => {
     const signIn = localLine(false, {}, "sign-in-required");
     expect(signIn.words).toEqual(["saved here", "not shared with hub"]);
-    expect(signIn.text).toContain("ub auth login");
+    expect(signIn.text).not.toContain("ub auth login");
     const noAccess = localLine(false, {}, "no-workspace-access");
     expect(noAccess.words).toEqual(["saved here", "not shared with hub"]);
-    expect(noAccess.text).toContain("administrator");
+    expect(noAccess.text).not.toContain("administrator");
     expect(localLine(true).words).toEqual(["saved here", "synced with hub"]);
   });
 
@@ -418,14 +407,13 @@ describe("the locally served document's two sync facts", () => {
     expect(refused.label).toBe("Sync details — no hub token");
   });
 
-  it("names local-only saving and its cause without claiming hub acknowledgement", () => {
+  it("names local-only saving without inline recovery or hub acknowledgement", () => {
     const localOnly = localLine(false, {}, "no-hub-credentials");
     expect(localOnly.words).toEqual(["saved here", "not shared with hub"]);
-    expect(localOnly.text).toContain("this machine has no credentials for its hub");
-    expect(localOnly.label).toContain("this machine has no credentials for its hub");
+    expect(localOnly.text).not.toContain("this machine has no credentials for its hub");
     const blank = localLine(null, {}, "no-hub-credentials");
     expect(blank.words).toEqual(["saved here", ""]);
-    expect(blank.text).toContain("this machine has no credentials for its hub");
+    expect(blank.text).not.toContain("this machine has no credentials for its hub");
     expect(localLine(false, { storeRefused: true }, "no-hub-credentials").words).toEqual(["edit refused"]);
     expect(localLine(false, { writable: false }, "no-hub-credentials").text).not.toContain("credentials");
   });

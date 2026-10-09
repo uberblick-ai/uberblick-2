@@ -98,7 +98,7 @@ describe("the index derivation cut", () => {
       tags: ["auth"],
       blocks: [{ type: "paragraph", text: "searchable pangolin" }],
     });
-    await first.ok("set_links", {
+    await first.ok("set_metadata", {
       uuid: created.uuid,
       links: [target.uuid],
     });

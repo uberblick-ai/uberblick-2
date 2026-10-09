@@ -15,6 +15,7 @@ import {
 } from "@uberblick/schema";
 import type { DocMeta, TagAssignment, TagCatalogEntry } from "@uberblick/schema";
 import { writeToClipboard } from "../editor/source-chrome.js";
+import { notifyTransient } from "../notifications.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useDocRev, useRoomStatus } from "./hooks.js";
 import { LifecycleBadge } from "./LifecycleBadge.js";
@@ -292,11 +293,6 @@ function TagStrip({
   );
 }
 
-/** How long the copy confirmation stays up, in milliseconds. */
-const COPIED_MS = 1_500;
-
-type CopyResult = "idle" | "copied" | "failed";
-
 /**
  * Copy this document's shareable link (#68).
  *
@@ -336,15 +332,8 @@ export function CopyLink({
   segment: string;
   shortUuid?: string;
 }): ReactElement {
-  const [result, setResult] = useState<CopyResult>("idle");
   const label = shortUuid === undefined ? "Copy link" : `uuid ${shortUuid}`;
   const identity = shortUuid !== undefined;
-
-  useEffect(() => {
-    if (result === "idle") return;
-    const timer = setTimeout(() => setResult("idle"), COPIED_MS);
-    return () => clearTimeout(timer);
-  }, [result]);
 
   // The one address this button is about: what it copies, and what it says it
   // copies. Two derivations of that would be two chances for them to disagree.
@@ -352,11 +341,15 @@ export function CopyLink({
 
   const copy = async (): Promise<void> => {
     const ok = await writeToClipboard(shareUrl(address, window.location.origin));
-    setResult(ok ? "copied" : "failed");
+    notifyTransient({
+      key: "clipboard",
+      message: ok ? "URL copied to clipboard" : "Copy failed",
+      severity: ok ? "success" : "error",
+    });
   };
 
   return (
-    <span className={`ub-copy-wrap${identity ? " ub-copy-identity" : ""}`}>
+    <span className="ub-copy-wrap">
       <button
         type="button"
         className={`ub-copy-link inline-flex min-h-11 cursor-pointer items-center border-0 bg-transparent px-[0.15rem] py-0 [font:inherit] text-(--muted-foreground) hover:text-(--foreground) hover:underline focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 ${identity ? "min-w-[12em] justify-start" : "min-w-[max(2.75rem,6em)] justify-center"}`}
@@ -369,12 +362,6 @@ export function CopyLink({
       >
         {label}
       </button>
-      {/* Rendered always, empty when idle: `role="status"` only announces
-          changes to a region the reader was already in. */}
-      <span className="ub-copied" role="status">
-        {result !== "idle" &&
-          (result === "copied" ? "URL copied to clipboard" : "Copy failed")}
-      </span>
     </span>
   );
 }

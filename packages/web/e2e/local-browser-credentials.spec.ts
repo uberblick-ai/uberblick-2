@@ -42,7 +42,7 @@ test("local-only edits survive a restart and reach the hub after authentication 
   const pageInstance = await page.evaluate(() => performance.timeOrigin);
   const saved = page.locator(".ub-status-word--saved");
   const shared = page.locator(".ub-status-word--hub");
-  const reason = page.locator(".ub-status").getByText("this machine has no credentials for its hub", { exact: true });
+  const reason = page.locator("[data-sonner-toast]").filter({ has: page.locator("[data-description]", { hasText: "this machine has no credentials for its hub" }) });
   await expect(shared).toHaveText("synced with hub");
   const authenticatedGeometry = await statusGeometry(page);
 
@@ -50,7 +50,8 @@ test("local-only edits survive a restart and reach the hub after authentication 
   await expect(saved).toHaveText("saved here");
   await expect(shared).toHaveText("not shared with hub");
   await expect(reason).toBeVisible();
-  await expect(reason).toHaveText("this machine has no credentials for its hub");
+  await expect(reason).toHaveAttribute("data-type", "warning");
+  await expect(page.locator(".ub-status")).not.toContainText("this machine has no credentials for its hub");
   await expect(page.getByTestId("account-menu")).toContainText("Account unavailable");
   expect(await statusGeometry(page)).toEqual(authenticatedGeometry);
   for (const width of [320]) {
@@ -110,13 +111,13 @@ test("local-only status answers leave the readings and prose in place", async ({
   await seed.close();
   await harness().restartOpen({ authenticated: false });
 
-  for (const width of [1280, 320]) {
+  for (const width of [1280, 820, 320]) {
     // Withhold usable API answers until after the local room has settled. A
     // fresh page has no earlier serving reason to keep through this blank.
     let blankAnswers = true;
     let failNext = false;
     const page = await openApp(browser, paths[0], {
-      contextOptions: { viewport: { width, height: 844 }, reducedMotion: "reduce" },
+      contextOptions: { viewport: { width, height: 844 }, hasTouch: width === 820, reducedMotion: "reduce" },
       readySelector: ".ub-editor .ProseMirror",
       beforeNavigate: async (opening) => {
         await opening.route("**/api/status", async (route) => {
@@ -132,50 +133,76 @@ test("local-only status answers leave the readings and prose in place", async ({
     const pageInstance = await page.evaluate(() => performance.timeOrigin);
     const saved = page.locator(".ub-status-word--saved");
     const shared = page.locator(".ub-status-word--hub");
-    const reason = page.locator(".ub-status").getByText("this machine has no credentials for its hub", { exact: true });
+    const reason = page.locator("[data-sonner-toast]").filter({ has: page.locator("[data-description]", { hasText: "this machine has no credentials for its hub" }) });
     await expect(saved).toHaveText("saved here");
     await expect(shared).toHaveText("");
-    await expect(reason).toBeHidden();
+    await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
     const beforeFirstAnswer = await statusGeometry(page);
     blankAnswers = false;
     await expect(reason).toBeVisible();
     expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
     await expect(shared).toHaveText("not shared with hub");
+    await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
     expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
 
     for (const title of [titles[1], titles[0]]) {
       blankAnswers = true;
-      if (width < 768) {
-        await page.getByRole("button", { name: "Show document list", exact: true }).click();
+      if (width < 1280) {
+        await page.getByRole("button", { name: "Show document list", exact: true }).focus();
+        await page.keyboard.press("Enter");
       }
       await openDoc(page, title);
       await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
       await expect(saved).toHaveText("saved here");
       await expect(shared).toHaveText("");
-      await expect(reason).toBeVisible();
+      await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
       expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
       blankAnswers = false;
       await expect(shared).toHaveText("not shared with hub");
+      await expect(reason).toBeVisible();
+      await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
       expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
     }
 
     failNext = true;
     await expect(shared).toHaveText("");
-    await expect(reason).toBeVisible();
+    await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
     expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
     await expect(shared).toHaveText("not shared with hub");
+    await expect(reason).toBeVisible();
+    await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
     expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
     expect(await page.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
+    // Keyboard navigation leaves the recovery notice undismissed; entering
+    // Settings must resolve it when the document header unmounts.
+    if (width < 1280) {
+      await page.getByRole("button", { name: "Show document list", exact: true }).focus();
+      await page.keyboard.press("Enter");
+    }
+    const settings = page.getByRole("button", { name: "Workspace settings", exact: true });
+    if (width === 320) {
+      // The temporary lower-right corner covers this narrow sidebar footer.
+      // Keep the notice active through native keyboard navigation so leaving
+      // the document still has to resolve it. Desktop/iPad retain pointer proof.
+      await settings.focus();
+      await page.keyboard.press("Enter");
+    } else {
+      await settings.click();
+    }
+    await expect(page.locator(".ub-status")).toHaveCount(0);
+    await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
     await page.close();
   }
 });
 
 
-test("device recovery readings keep local editing usable on the open page", async ({ browser }) => {
+for (const appearance of ["light", "dark"] as const) {
+test(`device recovery notices preserve local editing and native tablet touch controls — ${appearance}`, async ({ browser }) => {
   test.setTimeout(90_000);
   await harness().restartOpen({ authenticated: true });
-  let notSharedReason: "sign-in-required" | "no-workspace-access" | null = null;
+  let notSharedReason: "no-hub-credentials" | "sign-in-required" | "no-workspace-access" | "credential-store" | "renewal-unavailable" | null = null;
   const page = await openApp(browser, "/", {
+    contextOptions: { viewport: { width: 820, height: 1180 }, hasTouch: true, colorScheme: appearance },
     readySelector: ".ub-docs-heading",
     beforeNavigate: async (opening) => {
       await opening.route("**/api/status", async (route) => {
@@ -201,6 +228,7 @@ test("device recovery readings keep local editing usable on the open page", asyn
   const saved = page.locator(".ub-status-word--saved");
   const shared = page.locator(".ub-status-word--hub");
   await expect(shared).toHaveText("synced with hub");
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
   // A new document clears this marker; pagehide also catches a departure
   // followed by restoration from the back/forward cache. Clock readings vary.
   const samePageMarker = "__uberblickDeviceRecoveryPage";
@@ -215,15 +243,42 @@ test("device recovery readings keep local editing usable on the open page", asyn
   notSharedReason = "sign-in-required";
   await expect(saved).toHaveText("saved here");
   await expect(shared).toHaveText("not shared with hub");
-  await expect(page.locator(".ub-status").getByText(/run ub auth login/)).toBeInViewport();
+  const notices = page.locator("[data-sonner-toast]");
+  await expect(notices).toHaveCount(1);
+  await expect(notices).toHaveAttribute("data-type", "warning");
+  await expect(notices).toContainText(/run ub auth login/);
+  await expect(notices).toBeInViewport();
+  await expect(page.locator(".ub-status")).not.toContainText(/run ub auth login/);
+  // The tablet uses the primitive's native close control. Dismissing the
+  // notice leaves the unresolved compact fact and its recovery discoverable.
+  await notices.getByRole("button", { name: "Dismiss notification" }).tap();
+  await expect(notices).toHaveCount(0);
+  await expect(shared).toHaveText("not shared with hub");
+  await page.getByRole("button", { name: /^Sync details/ }).tap();
+  await expect(page.locator('.ub-sync-fact:has(dt:text-is("Reason")) dd')).toContainText(/run ub auth login/);
+  await page.keyboard.press("Escape");
   await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   await placeCaret(page);
   await page.keyboard.type("; edited while sign-in is required");
   await expect(saved).toHaveText("saved here");
+  await expect(notices).toHaveCount(0);
 
   notSharedReason = "no-workspace-access";
-  await expect(page.locator(".ub-status").getByText(/ask its administrator for membership/)).toBeInViewport();
+  await expect(notices).toHaveCount(1);
+  await expect(notices).toContainText(/ask its administrator for membership/);
+  await expect(notices).toBeInViewport();
   await expect(saved).toHaveText("saved here");
+  await expect(shared).toHaveText("not shared with hub");
+  await page.locator(".ub-title").focus();
+  await page.keyboard.press("Shift+F8");
+  await expect(page.locator("[data-sonner-toaster]")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(notices).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(notices.getByRole("button", { name: "Dismiss notification" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(notices).toHaveCount(0);
+  await expect(page.locator(".ub-title")).toBeFocused();
   await expect(shared).toHaveText("not shared with hub");
   await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   await placeCaret(page);
@@ -232,11 +287,37 @@ test("device recovery readings keep local editing usable on the open page", asyn
   await expect.poll(() => documentText(page))
     .toBe("kept here; edited while sign-in is required; edited while membership is refused");
 
+  for (const [cause, recovery] of [
+    ["no-hub-credentials", "this machine has no credentials for its hub"],
+    ["credential-store", "this machine cannot read its login — run ub auth status and follow its credential-store recovery"],
+    ["renewal-unavailable", "this hub cannot renew the login — ask its operator to configure sign-in"],
+  ] as const) {
+    notSharedReason = cause;
+    await expect(notices).toHaveCount(1);
+    await expect(notices).toContainText(recovery);
+    await expect(notices).toHaveAttribute("data-type", "warning");
+    await expect(shared).toHaveText("not shared with hub");
+    await expect(saved).toHaveText("saved here");
+    await expect(page.locator(".ub-status")).not.toContainText(recovery);
+    await page.getByRole("button", { name: /^Sync details/ }).tap();
+    await expect(page.locator('.ub-sync-fact:has(dt:text-is("Reason")) dd')).toHaveText(recovery);
+    await page.keyboard.press("Escape");
+    if (cause === "no-hub-credentials") {
+      await page.evaluate(() => {
+        (window as unknown as { statusCauseNotice: Element | null }).statusCauseNotice = document.querySelector("[data-sonner-toast]");
+      });
+    } else {
+      expect(await page.evaluate(() => document.querySelector("[data-sonner-toast]") ===
+        (window as unknown as { statusCauseNotice: Element | null }).statusCauseNotice), "a changed cause updates its existing notice").toBe(true);
+    }
+  }
+
   notSharedReason = null;
   await expect(shared).toHaveText("synced with hub");
-  await expect(page.locator(".ub-status").getByText(/ask its administrator for membership/)).toHaveCount(0);
+  await expect(notices).toHaveCount(0);
   expect(await page.evaluate(
     (key) => (window as unknown as Record<string, unknown>)[key] === true,
     samePageMarker,
   )).toBe(true);
 });
+}

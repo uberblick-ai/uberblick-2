@@ -85,7 +85,7 @@ describe("the workspace tag catalog", () => {
       hub: { status: "disabled" },
     });
     expect(created.tagHint).toContain("list_tags");
-    expect(created.tagHint).toContain("set_tags");
+    expect(created.tagHint).toContain("set_metadata");
 
     const inserted = await rig.ok("insert_block", {
       uuid: created.uuid,
@@ -98,7 +98,7 @@ describe("the workspace tag catalog", () => {
       hub: { status: "disabled" },
     });
     expect(inserted.tagHint).toContain("list_tags");
-    expect(inserted.tagHint).toContain("set_tags");
+    expect(inserted.tagHint).toContain("set_metadata");
     expect(
       (await rig.ok("get_doc", { uuid: created.uuid })).blocks,
     ).toContainEqual(
@@ -350,7 +350,7 @@ describe("the workspace tag catalog", () => {
       retiredAuth,
     ]);
 
-    const preserved = await rig.ok("set_tags", {
+    const preserved = await rig.ok("set_metadata", {
       uuid: keeper.uuid,
       tags: [AUTH.id, "mcp"],
     });
@@ -361,7 +361,7 @@ describe("the workspace tag catalog", () => {
       ]);
     }
     expect(
-      (await rig.ok("set_tags", { uuid: keeper.uuid, tags: [MCP.id] })).tags,
+      (await rig.ok("set_metadata", { uuid: keeper.uuid, tags: [MCP.id] })).tags,
     ).toEqual([MCP]);
 
     // An identity assigned by a client whose catalog this replica has not
@@ -373,7 +373,7 @@ describe("the workspace tag catalog", () => {
       OFF_CATALOG,
     ]);
     expect(
-      (await rig.ok("set_tags", { uuid: keeper.uuid, tags: [OFF_CATALOG] }))
+      (await rig.ok("set_metadata", { uuid: keeper.uuid, tags: [OFF_CATALOG] }))
         .tags,
     ).toEqual([unresolved]);
 
@@ -383,7 +383,7 @@ describe("the workspace tag catalog", () => {
       target.uuid,
     );
     const beforeIndex = rig.instance.store.search("armadillo", 10);
-    const refused = await rig.call("set_tags", {
+    const refused = await rig.call("set_metadata", {
       uuid: target.uuid,
       tags: ["missing", AUTH.id, AUTH.name, "also-missing", OFF_CATALOG],
     });
@@ -391,6 +391,7 @@ describe("the workspace tag catalog", () => {
     expect(refused.isError).toBe(true);
     expect(refused.payload).toMatchObject({
       error: "invalid_tag_assignment",
+      field: "tags",
       applied: false,
       partial: false,
       // The unresolved identity the keeper preserves is still unknown here:

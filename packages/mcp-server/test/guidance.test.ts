@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
+import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   createTagCatalogEntry, retireTagCatalogEntry, restoreTagCatalogEntry,
   setTags, setTitle, tombstoneDirectoryEntry, upsertDirectoryEntry,
 } from "@uberblick/schema";
-import { DOCUMENT_MUTATING_TOOLS } from "../src/failures.js";
-import { removeTempDirs, startServer, testConfig } from "./helpers.js";
+import { DOCUMENT_MUTATING_TOOLS, PERSISTENCE_ERROR_MESSAGE } from "../src/failures.js";
+import { INTERNAL_RESOURCE_ERROR_MESSAGE } from "../src/resource-adapter.js";
+import { FailingStore, removeTempDirs, startServer, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
@@ -53,11 +55,8 @@ it("refuses every document mutation before logging, teaches recovery, and leaves
     edit_block: { uuid, block_id: block.id, old_text: block.text, new_text: "Changed", rev: block.rev },
     insert_block: { uuid, type: "paragraph", text: "Changed" },
     delete_block: { uuid, block_id: block.id },
-    set_tags: { uuid, tags: [] }, set_links: { uuid, links: [] },
-    set_title: { uuid, title: "Changed" }, set_description: { uuid, description: "Changed" },
-    set_tldr: { uuid, tldr: "Changed" }, set_status: { uuid, status: "planned" },
+    set_metadata: { uuid, title: "Changed" }, set_status: { uuid, status: "planned" },
     update_data: { uuid, operations: [] },
-    set_changelog_suggestion: { uuid, suggestion: "Changed" },
     archive_doc: { uuid: first.uuid }, restore_doc: { uuid: archived.uuid },
     annotate: { uuid, block_id: block.id, start: 0, end: 4, text: "Comment" },
     link_range: { uuid, block_id: block.id, start: 0, end: 4, doc_id: first.uuid, rev: block.rev },
@@ -86,12 +85,12 @@ it("refuses every document mutation before logging, teaches recovery, and leaves
   await rig.ok("unpin_doc", { uuid });
   const beforeReads = rig.instance.store.logSize();
   await rig.ok("get_doc", { uuid: first.uuid });
-  expect((await rig.call("set_title", calls.set_title)).payload.unread).toEqual([
+  expect((await rig.call("set_metadata", calls.set_metadata)).payload.unread).toEqual([
     { uuid: second.uuid, title: "Tagging guidance" },
   ]);
   await rig.ok("get_doc", { uuid: second.uuid });
   expect(rig.instance.store.logSize()).toBe(beforeReads);
-  expect(await rig.ok("set_title", calls.set_title)).toMatchObject({ applied: true, tagHint: expect.any(String) });
+  expect(await rig.ok("set_metadata", calls.set_metadata)).toMatchObject({ applied: true, tagHint: expect.any(String) });
   expect((await rig.ok("get_doc", { uuid })).title).toBe("Changed");
 });
 
@@ -108,33 +107,33 @@ it("keeps a lease through guidance changes, expires without wall-clock sleeps, a
   await rig.ok("get_doc", { uuid: first.uuid }); // A reread must not extend the lease.
   setTags(rig.instance.replicas.replica(next.uuid).doc, [marker]);
   now += 299_999;
-  await rig.ok("set_title", { uuid: first.uuid, title: "Changed in lease" });
+  await rig.ok("set_metadata", { uuid: first.uuid, title: "Changed in lease" });
   now += 1;
-  const refusal = await rig.call("set_title", { uuid: first.uuid, title: "After expiry" });
+  const refusal = await rig.call("set_metadata", { uuid: first.uuid, title: "After expiry" });
   expect(refusal.payload.unread.map((item: { uuid: string }) => item.uuid).sort()).toEqual([first.uuid, next.uuid].sort());
   // A read stops counting once its document leaves the guidance set, so re-marking makes it unread again.
   await rig.ok("get_doc", { uuid: first.uuid });
   setTags(rig.instance.replicas.replica(first.uuid).doc, []);
-  expect((await rig.call("set_title", { uuid: first.uuid, title: "While unmarked" })).payload.unread)
+  expect((await rig.call("set_metadata", { uuid: first.uuid, title: "While unmarked" })).payload.unread)
     .toEqual([{ uuid: next.uuid, title: "Next" }]);
   setTitle(rig.instance.replicas.replica(first.uuid).doc, "Revised while unmarked");
   setTags(rig.instance.replicas.replica(first.uuid).doc, [marker]);
-  const remarked = await rig.call("set_title", { uuid: first.uuid, title: "After remarking" });
+  const remarked = await rig.call("set_metadata", { uuid: first.uuid, title: "After remarking" });
   expect(remarked.payload.unread.map((item: { uuid: string }) => item.uuid).sort()).toEqual([first.uuid, next.uuid].sort());
   await rig.ok("get_doc", { uuid: next.uuid });
-  expect((await rig.call("set_title", { uuid: first.uuid, title: "Only next read" })).payload.unread)
+  expect((await rig.call("set_metadata", { uuid: first.uuid, title: "Only next read" })).payload.unread)
     .toEqual([{ uuid: first.uuid, title: "Revised while unmarked" }]);
   await rig.ok("get_doc", { uuid: first.uuid });
   now += 600_000; // Drop the lease that completed and continue from the expired state above.
   await rig.ok("get_doc", { uuid: first.uuid });
   // Curation removes the last unread guide: the next write completes briefing.
   setTags(rig.instance.replicas.replica(next.uuid).doc, []);
-  await rig.ok("set_title", { uuid: first.uuid, title: "Briefed again" });
+  await rig.ok("set_metadata", { uuid: first.uuid, title: "Briefed again" });
   setTags(rig.instance.replicas.replica(next.uuid).doc, [marker]);
-  await rig.ok("set_title", { uuid: first.uuid, title: "Still briefed" });
+  await rig.ok("set_metadata", { uuid: first.uuid, title: "Still briefed" });
   await rig.close();
   const restarted = await local(config);
-  expect((await restarted.call("set_title", { uuid: first.uuid, title: "Restarted" })).payload.error).toBe("guidance_required");
+  expect((await restarted.call("set_metadata", { uuid: first.uuid, title: "Restarted" })).payload.error).toBe("guidance_required");
 });
 
 it("lists and serves current guidance independently of leases and stale cached tags", async () => {
@@ -151,7 +150,7 @@ it("lists and serves current guidance independently of leases and stale cached t
   const size = rig.instance.store.logSize();
   expect((await rig.client.readResource({ uri: `uberblick://doc/${first.uuid}` })).contents[0]).toMatchObject({ text: expect.stringContaining("Read before writing.") });
   expect(rig.instance.store.logSize()).toBe(size);
-  expect((await rig.call("set_title", { uuid: next.uuid, title: "Refused" })).payload.error).toBe("guidance_required");
+  expect((await rig.call("set_metadata", { uuid: next.uuid, title: "Refused" })).payload.error).toBe("guidance_required");
   await rig.ok("get_doc", { uuid: first.uuid });
   setTags(replicas.replica(next.uuid).doc, [marker]);
   setTitle(replicas.replica(next.uuid).doc, "Current title");
@@ -166,16 +165,76 @@ it("lists and serves current guidance independently of leases and stale cached t
   expect((await guidanceResources(rig)).resources).toHaveLength(1);
 });
 
+it("returns the same safe quarantine sentence for guidance list/read and tools after a refused append", async () => {
+  const config = testConfig();
+  const store = new FailingStore(config.databasePath, config.workspaceId);
+  const rig = await startServer(config, store);
+  rigs.push(rig);
+  const guide = await doc(rig, "Guide");
+  mark(rig, guide.uuid);
+  await rig.ok("get_doc", { uuid: guide.uuid });
+  const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+  store.failing = true;
+  const refused = await rig.call("set_metadata", { uuid: guide.uuid, title: "Refused" });
+  expect(refused.payload.message).toBe(
+    "The replica refused a write to its update log; check sync_status and restart the MCP server.",
+  );
+  expect(refused).toMatchObject({ isError: true, payload: {
+    error: "persistence_failed", message: PERSISTENCE_ERROR_MESSAGE,
+    applied: false, partial: false, synced: false,
+  } });
+
+  // Through a real MCP client: the client adds this prefix to the wire's fixed sentence.
+  for (const result of [
+    () => rig.client.readResource({ uri: `uberblick://doc/${guide.uuid}` }),
+    () => rig.client.listResources(),
+  ]) {
+    await expect(result()).rejects.toMatchObject({
+      code: ErrorCode.InternalError,
+      message: `MCP error ${ErrorCode.InternalError}: ${PERSISTENCE_ERROR_MESSAGE}`,
+      data: undefined,
+    });
+  }
+  const blockedRead = await rig.call("get_doc", { uuid: guide.uuid });
+  expect(blockedRead.payload.message).toBe(PERSISTENCE_ERROR_MESSAGE);
+  expect(JSON.stringify([refused.payload, blockedRead.payload])).not.toContain("simulated disk failure");
+  const diagnostic = await rig.ok("sync_status");
+  expect(diagnostic.persistence.message).toContain("simulated disk failure");
+  const log = stderr.mock.calls.flat().join("\n");
+  expect(log).toContain("failed to append to the update log");
+  expect(log).toContain("simulated disk failure");
+});
+
+it.each(["list", "read"] as const)("sanitizes an unexpected guidance %s exception and logs its cause", async (route) => {
+  const rig = await local();
+  const guide = await doc(rig, "Guide");
+  mark(rig, guide.uuid);
+  const original = new Error("private database path and SQL");
+  const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.spyOn(rig.instance.replicas, "refresh").mockImplementation(() => { throw original; });
+  const result = route === "list"
+    ? rig.client.listResources()
+    : rig.client.readResource({ uri: `uberblick://doc/${guide.uuid}` });
+  await expect(result).rejects.toMatchObject({
+    code: ErrorCode.InternalError,
+    message: `MCP error ${ErrorCode.InternalError}: ${INTERNAL_RESOURCE_ERROR_MESSAGE}`,
+    data: undefined,
+  });
+  const log = stderr.mock.calls.flat().join("\n");
+  expect(log).toContain("resource call failed");
+  expect(log).toContain(original.stack);
+});
+
 it("is inert for absent or retired markers and for archived or unhydrated guidance", async () => {
   const rig = await local();
   const guide = await doc(rig, "Guide");
   const replicas = rig.instance.replicas;
   // An assignment may arrive before its catalog identity.
   setTags(replicas.replica(guide.uuid).doc, [marker]);
-  await rig.ok("set_title", { uuid: guide.uuid, title: "Absent marker" });
+  await rig.ok("set_metadata", { uuid: guide.uuid, title: "Absent marker" });
   mark(rig, guide.uuid);
   retireTagCatalogEntry(replicas.settings().doc, marker);
-  await rig.ok("set_title", { uuid: guide.uuid, title: "Retired marker" });
+  await rig.ok("set_metadata", { uuid: guide.uuid, title: "Retired marker" });
   restoreTagCatalogEntry(replicas.settings().doc, marker);
   tombstoneDirectoryEntry(replicas.directory().doc, guide.uuid);
   upsertDirectoryEntry(replicas.directory().doc, { uuid: randomUUID(), title: "Not hydrated", tags: [marker] });

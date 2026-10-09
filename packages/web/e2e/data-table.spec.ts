@@ -97,6 +97,20 @@ async function cellStyle(cell: Locator): Promise<Record<string, string>> {
   });
 }
 
+/** Measure text nodes rather than wrapper rectangles, including preserved newlines. */
+async function cellLines(cells: Locator): Promise<number[]> {
+  return cells.evaluateAll((elements) => elements.map((element) => {
+    const tops = new Set<number>();
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text !== null; text = walker.nextNode()) {
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      for (const rect of range.getClientRects()) if (rect.width > 0 && rect.height > 0) tops.add(Math.round(rect.top));
+    }
+    return tops.size;
+  }));
+}
+
 /**
  * Instrument the existing y-sync document, never a production test hook. The
  * data reader enumerates the complete map once through entries(); its wrapper
@@ -479,6 +493,140 @@ test("a generated table wider than the document keeps horizontal scrolling insid
   await page.mouse.wheel(500, 0);
   await expect.poll(() => scroll.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
   await expect(page.locator(".ub-table-controls, .ub-table-control")).toHaveCount(0);
+});
+
+test("Recent days dates and fifteen number columns keep compact rows at laptop and iPad widths", async ({ browser }, info) => {
+  const session = writer();
+  // The live delivery report's column shape; records remain synthetic.
+  const numbers = [
+    { field: "deliveries", label: "Deliveries" }, { field: "autonomous", label: "Autonomous" },
+    { field: "autonomous_pct", label: "Autonomous share", unit: "%", decimals: 0 },
+    { field: "wasted_runs", label: "Wasted runs" }, { field: "wasted_pct", label: "Wasted share", unit: "%", decimals: 0 },
+    { field: "human_stops", label: "Human stops" }, { field: "human_wait_h", label: "Human wait", unit: "h", decimals: 1 },
+    { field: "loop_cycle_h_median", label: "Cycle", unit: "h", decimals: 1 },
+    { field: "run_h_median", label: "Run time", unit: "h", decimals: 1 },
+    { field: "denial_pct", label: "Runs with denials", unit: "%", decimals: 0 },
+    { field: "issues_opened", label: "Issues opened" }, { field: "backlog", label: "Actionable queue" },
+    { field: "waiting_to_start", label: "Waiting to start" }, { field: "open_issues", label: "Open issues" },
+    { field: "machines", label: "Machines" },
+  ];
+  const uuid = await tableDoc(session, "Compact Recent days", {
+    version: 1, type: "table", collection: "measurements", title: "Recent days",
+    columns: [{ field: "day", label: "Day", format: "date" }, ...numbers.map(column => ({ ...column, format: "number" }))],
+  });
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA,
+    replaceRecords: [8, 9].map(day => ({ id: String(day), value: {
+      day: `2026-10-0${day}`, ...Object.fromEntries(numbers.map(({ field }, index) => [field, field === "run_h_median" ? 1_234_567_890_123.5 : index + day + 0.5])),
+    } })),
+  }] });
+  for (const width of [1280, 820]) {
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      contextOptions: { locale: "en-US", viewport: { width, height: 1000 } },
+    });
+    const table = page.getByRole("table", { name: "Recent days", exact: true });
+    const cells = table.locator("tbody td");
+    await expect(cells).toHaveCount(32);
+    await expect(cells.first()).toHaveText("Oct 8, 2026");
+    await expect(cells.nth(3)).toHaveText("11 %");
+    await expect(cells.nth(7)).toHaveText("14.5 h");
+    await expect(cells.nth(9)).toHaveText("1,234,567,890,123.5 h");
+    expect(await cellLines(cells)).toEqual(Array.from({ length: 32 }, () => 1));
+    const scroll = page.locator(".ub-table-scroll");
+    expect(await scroll.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await scroll.hover();
+    await page.mouse.wheel(500, 0);
+    await expect.poll(() => scroll.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+    await scroll.evaluate(element => { element.scrollLeft = 0; });
+    const screenshot = info.outputPath(`recent-days-${width}.png`);
+    await page.screenshot({ path: screenshot, fullPage: true });
+    await info.attach(`recent-days-${width}`, { path: screenshot, contentType: "image/png" });
+  }
+});
+
+test("short values stay together and long text, markers and links wrap completely inside bounded cells", async ({ browser }, info) => {
+  const session = writer();
+  const longText = `${"unbroken".repeat(100)}  kept   spaces\n${"long words ".repeat(100)}`;
+  const longInvalid = "x".repeat(800);
+  const longUrl = `https://example.invalid/${"path".repeat(200)}`;
+  const mapping = {
+    version: 1, type: "table", collection: "measurements", title: "Bounded values",
+    columns: [
+      { field: "name", label: "Name" }, { field: "status", label: "Status" },
+      { field: "issue", label: "Issue" }, { field: "detail", label: "Detail" },
+      { field: "invalid", label: "Invalid number", format: "number" }, { field: "url", label: "Evidence", format: "link" },
+    ],
+  };
+  const uuid = await tableDoc(session, "Bounded generated values", mapping);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
+    { id: "a", value: { name: "A name with 20 chars", status: "Needs review", issue: "ub-agents #190", detail: longText, invalid: longInvalid, url: longUrl } },
+    { id: "b", value: { name: "Two  spaces", status: null, issue: "#1498", detail: "First\nSecond", invalid: "bad" } },
+  ] }] });
+  for (const width of [1280, 820, 390]) {
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      contextOptions: { viewport: { width, height: 1000 } },
+    });
+    await page.context().route("https://example.invalid/**", route => route.fulfill({ contentType: "text/html", body: "<p>Evidence</p>" }));
+    const table = page.getByRole("table", { name: "Bounded values", exact: true });
+    await expect(table.locator("tbody tr")).toHaveCount(2);
+    const first = table.locator("tbody tr").first().locator("td");
+    const second = table.locator("tbody tr").nth(1).locator("td");
+    expect(await cellLines(first)).toEqual([1, 1, 1, expect.any(Number), expect.any(Number), expect.any(Number)]);
+    expect(await cellLines(second)).toEqual([1, 1, 1, 2, 1, 1]);
+    expect(await second.nth(0).textContent()).toBe("Two  spaces");
+    expect(await second.nth(3).textContent()).toBe("First\nSecond");
+    await expect(second.nth(5)).toHaveText("Absent");
+    await expect(second.nth(4)).toHaveAttribute("data-state", "invalid");
+    for (const [index, text] of [[3, longText], [4, `Invalid: ${longInvalid}`], [5, longUrl]] as const) {
+      const cell = first.nth(index);
+      expect(await cell.textContent()).toBe(text);
+      expect((await cellLines(cell))[0]).toBeGreaterThan(1);
+      const geometry = await cell.evaluate(element => {
+        const content = element.firstElementChild;
+        if (content === null) throw new Error("missing cell content");
+        const cell = element.getBoundingClientRect();
+        const bounds = content.getBoundingClientRect();
+        const range = document.createRange();
+        range.selectNodeContents(content.querySelector("a") ?? content);
+        return {
+          width: bounds.width, limit: 32 * Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+          contained: Array.from(range.getClientRects()).every(rect => rect.left >= cell.left && rect.right <= cell.right),
+          noOverflow: content.scrollWidth <= content.clientWidth + 1,
+        };
+      });
+      expect(geometry.width).toBeLessThanOrEqual(geometry.limit + 1);
+      expect(geometry.contained).toBe(true);
+      expect(geometry.noOverflow).toBe(true);
+    }
+    const link = table.getByRole("link");
+    await expect(link).toHaveCount(1);
+    await expect(link).toHaveAttribute("href", longUrl);
+    await link.focus();
+    const [popup] = await Promise.all([page.context().waitForEvent("page"), page.keyboard.press("Enter")]);
+    await expect(popup).toHaveURL(longUrl);
+    await popup.close();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await table.locator("th").first().scrollIntoViewIfNeeded();
+    const screenshot = info.outputPath(`bounded-values-${width}.png`);
+    await page.screenshot({ path: screenshot, fullPage: true });
+    await info.attach(`bounded-values-${width}`, { path: screenshot, contentType: "image/png" });
+    if (width === 1280) {
+      // Plenty of available space must still cap long content at 32rem, even
+      // though the single-column table itself fills the reading measure.
+      await editMapping(session, uuid, JSON.stringify({ ...mapping, columns: [{ field: "url", format: "link" }] }));
+      await expect(table.locator("th")).toHaveCount(1);
+      const bounds = await table.locator("tbody td").first().evaluate(element => ({
+        cell: element.getBoundingClientRect().width,
+        content: element.firstElementChild?.getBoundingClientRect().width ?? 0,
+        limit: 32 * Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+      }));
+      expect(bounds.cell).toBeGreaterThan(bounds.limit);
+      expect(Math.abs(bounds.content - bounds.limit)).toBeLessThanOrEqual(1);
+      expect((await cellLines(table.locator("tbody td").first()))[0]).toBeGreaterThan(1);
+      await editMapping(session, uuid, JSON.stringify(mapping));
+      await expect(table.locator("th")).toHaveCount(6);
+    }
+  }
 });
 
 test("legacy page sizes keep all rows and source remains reachable without hover", async ({ browser }) => {

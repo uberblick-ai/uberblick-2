@@ -5,6 +5,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { FAILURE_INSTRUCTIONS, READ_ONLY_TOOLS } from "../src/failures.js";
 import { GUIDANCE_INSTRUCTIONS } from "../src/briefing.js";
 import { toolHelpEntries } from "../src/help-examples.js";
+import { HelpCatalog } from "../src/help.js";
+import { log } from "../src/log.js";
+import { INTERNAL_RESOURCE_ERROR_MESSAGE } from "../src/resource-adapter.js";
 import {
   FailingStore, removeTempDirs, startServer, TEST_SECRET, testConfig,
 } from "./helpers.js";
@@ -53,6 +56,7 @@ it("lists every concept and registered tool once, with the same Markdown through
     const help = await rig.ok("get_help", { topic: id });
     expect(help).toMatchObject({ topic: id, title, description, uri, text: expect.any(String) });
     expect(help.text.length).toBeGreaterThan(0);
+    expect(help.text, id).not.toMatch(/set_(title|description|tldr|tags|links|changelog_suggestion)\b/);
     expect((await rig.client.readResource({ uri })).contents).toEqual([
       { uri, mimeType: "text/markdown", text: help.text },
     ]);
@@ -72,8 +76,29 @@ it("refuses unknown topics through the tool failure contract and the resource-no
   expect(READ_ONLY_TOOLS.has("get_help")).toBe(true);
   const uri = `uberblick://help/${topic}`;
   await expect(rig.client.readResource({ uri })).rejects.toMatchObject({
-    code: -32002, data: { uri }, message: expect.stringContaining(uri),
+    code: -32002, data: { uri }, message: `MCP error -32002: MCP error -32002: Resource not found: ${uri}`,
   });
+});
+
+it.each(["list", "read"] as const)("contains an unexpected help resource %s failure and logs its original cause", async (route) => {
+  const rig = await local();
+  const cause = new Error("Private database path: /private/workspace.sqlite; SELECT secret FROM records");
+  const reported = vi.spyOn(log, "error");
+  const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.spyOn(HelpCatalog.prototype, route === "list" ? "list" : "get").mockImplementation(() => {
+    throw cause;
+  });
+
+  const response = route === "list"
+    ? rig.client.listResources()
+    : rig.client.readResource({ uri: "uberblick://help/orientation" });
+  await expect(response).rejects.toMatchObject({
+    code: -32603,
+    message: `MCP error -32603: ${INTERNAL_RESOURCE_ERROR_MESSAGE}`,
+    data: undefined,
+  });
+  expect(reported).toHaveBeenCalledWith("resource call failed", cause);
+  expect(stderr).toHaveBeenCalledWith(expect.stringContaining(cause.stack!));
 });
 
 it("renders each tool's actual full description and schemas, with an accepted example and owning-topic links", async () => {
@@ -102,7 +127,7 @@ it("renders each tool's actual full description and schemas, with an accepted ex
     expect(index, tool.name).toContain(`uberblick://help/${tool.name}`);
   }
   for (const [tool, topic] of [
-    ["set_tags", "workspaces"], ["set_title", "workspaces"], ["get_sidebar", "workspaces"],
+    ["set_metadata", "workspaces"], ["get_sidebar", "workspaces"],
     ["edit_block", "lifecycle"], ["archive_doc", "lifecycle"], ["set_status", "lifecycle"],
     ["get_data", "data"], ["update_data", "data"], ["export_markdown", "markdown"],
   ]) {
@@ -183,7 +208,7 @@ it("keeps every topic workspace-independent and reads help without settling or o
   });
   const tag = createTagCatalogEntry(workspace.instance.replicas.settings().doc, "guidance");
   setTags(workspace.instance.replicas.replica(doc.uuid).doc, [tag.id]);
-  expect((await workspace.call("set_title", { uuid: doc.uuid, title: "Blocked" })).payload.error)
+  expect((await workspace.call("set_metadata", { uuid: doc.uuid, title: "Blocked" })).payload.error)
     .toBe("guidance_required");
   const before = workspace.instance.store.logSize();
   const catalog = await empty.ok("get_help");
@@ -219,7 +244,7 @@ it("keeps help readable after a persistence failure quarantines ordinary replica
   const catalog = await rig.ok("get_help");
   const doc = await rig.ok("create_doc", { title: "Persistence fixture", description: "A refused write." });
   store.failing = true;
-  expect((await rig.call("set_title", { uuid: doc.uuid, title: "Refused" })).payload.error)
+  expect((await rig.call("set_metadata", { uuid: doc.uuid, title: "Refused" })).payload.error)
     .toBe("persistence_failed");
   expect((await rig.call("get_doc", { uuid: doc.uuid })).payload.error).toBe("persistence_failed");
   expect(await rig.ok("get_help")).toEqual(catalog);

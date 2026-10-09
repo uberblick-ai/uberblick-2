@@ -440,7 +440,6 @@ export const terminalBlockView: NodeViewRenderer = ({
       copy.element.contains(mutation.target),
     destroy: () => {
       stop();
-      copy.destroy();
       watcher?.disconnect();
       motion?.removeEventListener("change", onMotionChange);
       editor.off("selectionUpdate", onSelection);
