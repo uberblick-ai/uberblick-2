@@ -13,9 +13,10 @@ A pull request a reviewer approved or an implementer sent to integration.
 
 Run every gate `.agents/protocols/delivery-policy.md` requires at the SHA the
 merge will use, following `.agents/protocols/integration.md`: the immutable
-review, the merged-tree gate when the base moved, the acceptance criteria, the
-declared `Touches` footprint and no unanswered remarks. Run independent
-mechanical gates concurrently where the runtime allows.
+review, the merged-tree gate whenever the head does not contain freshly fetched
+`origin/main`, the acceptance criteria, the declared `Touches` footprint and no
+unanswered remarks. Run independent mechanical gates concurrently where the
+runtime allows.
 
 During web UI acceptance, apply
 [library and custom-mechanism choices](../protocols/delivery-policy.md#library-and-custom-mechanism-choices)

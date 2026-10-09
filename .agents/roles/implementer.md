@@ -27,8 +27,8 @@ inspect the code and Pointers it depends on.
   on its branch and hand it off. Any other open pull request that closes this
   issue is not yours to replace: escalate, naming it.
 - An open pull request that edits the same files is not a block: record it
-  in Pointers and build; whichever lands second merges the base
-  ([scheduling rules](../protocols/workflow.md#scheduling-semantics)).
+  in Pointers and build under the
+  [scheduling rules](../protocols/workflow.md#scheduling-semantics).
 - A contract prepared more than six days ago is checked before it is built: the
   `ready` label or the preparer's handoff dates it. Check that its Pointers
   still resolve at that base, that the code it targets still behaves as the body
@@ -152,10 +152,15 @@ Before handing off an issue implementation or PR revision as `review` or
 `integrate`, fetch `origin/main` and run `git merge-tree --write-tree origin/main HEAD`.
 Exit 0 is clean, 1 means conflicts, and other errors mean the check failed.
 Resolve conflicts by merging the base into the assigned branch, never rebasing
-or force-pushing; the integrator makes no fix-up commits. Rerun affected and
-required final checks, verify merge readiness, then push and hand off the new
-SHA under the existing exact-head review and rounds rules. Use existing defer
-or human-decision routes for a failed check or unresolved maintainer choice.
+or force-pushing; the integrator makes no fix-up commits. When repairing a
+concrete integration defect named by the integrator's `changes`, the implementer
+may use the same non-rewriting merge of `main` if the fix needs it. A base
+advance alone leaves a clean head unchanged for the
+[integrator's merged-tree gate](../protocols/integration.md#gate-mechanics).
+After a repair, rerun affected and required final checks, verify merge readiness,
+then push and hand off the new SHA under the existing exact-head review and
+rounds rules. Use existing defer or human-decision routes for a failed check or
+unresolved maintainer choice.
 
 ## Boundaries
 

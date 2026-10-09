@@ -40,9 +40,12 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   timings. A Copilot review is already its own record. Any new commit on the
   branch invalidates test, typecheck and immutable-review evidence: re-run
   those gates at the new `headRefOid`.
-- **Merged-tree gate.** An advance of the base ref after the exact-head gates
-  fires a separate gate, whether or not the two diffs appear to touch the same
-  files. Fetch the current base and PR head, use `git merge-tree --write-tree
+- **Merged-tree gate.** Whenever the unchanged PR head does not contain freshly
+  fetched `origin/main`, run this separate gate, including at pickup in every
+  integration run and after a later base advance, regardless of file overlap.
+  Fetch the current base and PR head.
+  Check containment with `git merge-base --is-ancestor <base-sha> <head-sha>`.
+  Use `git merge-tree --write-tree
   <base-sha> <head-sha>` and `git commit-tree <tree> -p <base-sha> -p
   <head-sha>` to make the prospective two-parent merge commit, and hold that
   throwaway commit on a private ref for the gate's lifetime. From the required
@@ -51,7 +54,13 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   merge commit. Record both the merge commit and the base-ref SHA, then remove
   the temporary ref and worktree. Never push either. `merge-tree` reporting
   textual mergeability never substitutes for the suite on the tree that will
-  ship.
+  ship. Return actual conflicts or concrete integration defects through the
+  [integrator's `changes` route](../roles/integrator.md#boundaries), naming what
+  needs repair; classify check failures using the base comparison and CI
+  escalation above. A clean, passing combined result continues through the
+  remaining gates on the unchanged PR head. A base advance alone causes no
+  branch change, implementer handoff, new implementation or agent-review cycle,
+  or review-count restart.
 - Evaluate acceptance criteria against candidate contents at the recorded head,
   never the trusted runner's base checkout. A criterion needing runtime
   evidence is not a static pass. Check an acceptance box on a linked issue only
@@ -106,11 +115,13 @@ recorded gate SHA — `gh pr merge <n> --match-head-commit <gate-sha> …` — s
 commit landing after the last check fails the merge instead of riding stale
 evidence; comparing `gh pr view <n> --json headRefOid` beforehand is for the
 report, not the guarantee. Freshness covers the base too, but GitHub provides
-no merge argument that binds it: immediately before merging, fetch the base ref
-and compare it with the base SHA named by the latest gate evidence. If it moved
-after the exact-head gates, or after a prior merged-tree gate, run the
-merged-tree gate against the new base and recheck again; every observed move
-repeats that gate, without a file-overlap shortcut. Only then invoke the merge.
+no merge argument that binds it: immediately before merging, fetch the base ref.
+If the recorded head does not contain that base, require passing merged-tree
+evidence for that exact head and base SHA; the exact-head gate's base-freshness
+point alone does not satisfy this. After this current-base validation, re-fetch
+and compare against the base just validated; any further observed move repeats
+this check and the applicable merged-tree gate, without a file-overlap shortcut
+or restarting review of an unchanged head. Only then invoke the merge.
 `--match-head-commit` still protects only the PR head, so this immediate
 fetch-and-recheck is an honest best-effort base guard, not a claim that another
 merge cannot land before GitHub executes the command. Either an observed base
@@ -127,8 +138,8 @@ or restart another session's development processes.
 **Housekeeping, last** (owner direction, 2026-09-01). On every durable outcome —
 merge or escalation — once the probes on the retained review image are done,
 run `sh bin/housekeeping.sh` with every review SHA this run built — each
-exact head it gated and each merged-tree commit from an observed base advance —
-from the same freshly fetched base-ref checkout used for the container review,
+exact head it gated and each merged-tree commit — from the same freshly fetched
+base-ref checkout used for the container review,
 and record a concise summary on the PR. Besides the named review images, the
 command removes review images older than 24 hours and dangling images. It prunes
 build cache older than a week, for a free-space floor (`HOUSEKEEPING_MIN_FREE`,

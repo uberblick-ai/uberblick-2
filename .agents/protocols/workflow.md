@@ -49,10 +49,13 @@ at every stage: no preparation, review or implementation starts until blockers
 close. Sub-issue status itself never affects eligibility.
 
 File overlap never serializes work, including `schema`. Record an overlapping
-open PR in Pointers and build; whichever lands second merges the base and
-reruns every exact-head gate. Only a semantic
-prerequisite, functionality another issue supplies, blocks. Schema risk uses
-those reviews and gates, not package locks.
+open PR in Pointers and build. An overlapping PR landing first does not by itself
+require the later PR to incorporate `main`: the integrator validates its unchanged
+head under the [merged-tree gate](integration.md#gate-mechanics). Conflicts and
+concrete integration defects use the
+[implementer's repair rule](../roles/implementer.md#handoff-merge-readiness).
+Only a semantic prerequisite, functionality another issue supplies, blocks.
+Schema risk uses those reviews and gates, not package locks.
 
 ### Priority
 
