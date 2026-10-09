@@ -120,7 +120,7 @@ async function statusGeometry(page: Page) {
     // The last-edit text deliberately truncates; measure its clipping box.
     if (cluster !== null && intersects(updated, cluster)) problems.push("last edit: collides with presence");
     if (cluster !== null && (cluster.left < paneBox.left - 0.5 || cluster.right > paneBox.right + 0.5)) {
-      problems.push("presence: escapes the document pane");
+      problems.push(`presence: escapes the document pane (${cluster.left}..${cluster.right} vs ${paneBox.left}..${paneBox.right})`);
     }
     for (const note of notes) {
       if (note.rect.left < paneBox.left - 0.5 || note.rect.right > paneBox.right + 0.5) problems.push(`${note.text}: escapes the pane`);
@@ -248,6 +248,10 @@ for (const upstream of [true, false]) {
       // paragraph selection, so move to the document start before using it.
       if (browserName === "chromium") {
         await editor(page).focus();
+        // Let ProseMirror's scheduled focus restoration finish before moving
+        // to the first block; otherwise it can restore the old paragraph after
+        // documentStart, leaving placeCaret on the wrong block indefinitely.
+        await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
         await page.keyboard.press(keys.documentStart);
       }
       await placeCaret(page);
@@ -362,6 +366,18 @@ for (const upstream of [true, false]) {
           const waitingPeers = waiting.locator(".ub-waiting-meta .ub-peers");
           await expect(waitingPeers).toBeAttached();
           expect(await waitingPeers.evaluate((node) => node.getBoundingClientRect().width), "empty presence does not reserve a gap on the waiting screen").toBe(0);
+          // Keep this app alive: closing the browser cannot prove that leaving
+          // the waiting header resolves the notice it owns.
+          const pageInstance = await waiting.evaluate(() => performance.timeOrigin);
+          const showList = waiting.getByRole("button", { name: "Show document list", exact: true });
+          if (await showList.isVisible()) {
+            await showList.focus();
+            await waiting.keyboard.press("Enter");
+          }
+          await waiting.getByRole("button", { name: "Workspace settings", exact: true }).click();
+          await expect(waiting.locator(".ub-status")).toHaveCount(0);
+          await expect(waiting.locator("[data-sonner-toast]")).toHaveCount(0);
+          expect(await waiting.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
         } finally {
           await waiting.context().close();
         }

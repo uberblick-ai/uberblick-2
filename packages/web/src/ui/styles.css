@@ -1808,6 +1808,12 @@ h3.ub-heading {
   width: 19ch;
 }
 
+/* Inline not-saved only accompanies ordinary sync words. Reserve their
+   longest reading, rather than refusal words, to keep presence in the pane. */
+.ub-status-word--unsaved {
+  width: 9ch;
+}
+
 /* A lit quarter of the warning ring rotates in the fixed status-mark slot. */
 .ub-spinner {
   width: 0.7rem;

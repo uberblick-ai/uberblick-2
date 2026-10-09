@@ -324,8 +324,8 @@ function TldrCallout({
  *
  * 1. The state is debounced (`useCalmSyncState`) — the truth is unchanged, the
  *    redraw cadence is.
- * 2. The mark and the word each sit in a fixed-width slot, so swapping the dot
- *    for the spinner and "synced" for "syncing…" moves nothing to their right.
+ * 2. Each composition reserves the mark and its longest word. Inline not-saved
+ *    uses the ordinary words' shorter slot; refusals keep their wider one.
  * 3. Recovery sentences live in shared sticky notices and Sync details, so
  *    appearing problems need no reserved bands below the compact row.
  *
@@ -404,7 +404,7 @@ export function StatusLine({
     <span className="inline-flex flex-none items-center gap-2">
       {mark(facts.primaryTone)}
       <span
-        className={`ub-status-word${facts.twoFact ? " ub-status-word--saved" : ""}`}
+        className={`ub-status-word${facts.twoFact ? " ub-status-word--saved" : saveNote !== null ? " ub-status-word--unsaved" : ""}`}
       >
         {facts.primary}
       </span>
