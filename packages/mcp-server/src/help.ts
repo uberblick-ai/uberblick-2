@@ -17,7 +17,7 @@ export function helpUri(topic: string): string {
 }
 
 function jsonBlock(value: unknown): string {
-  return "```json\n" + JSON.stringify(value, null, 2) + "\n```";
+  return `\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``;
 }
 
 export class HelpCatalog {
@@ -43,7 +43,8 @@ export class HelpCatalog {
         `\n\n## Output\n\n${jsonBlock(tool.outputSchema)}` +
         `\n\n## Related\n\n${related}\n`,
     });
-    const index = this.topics.get("tools")!;
+    const index = this.topics.get("tools");
+    if (index === undefined) throw new Error("The help catalog must include the tool index.");
     this.topics.set("tools", {
       ...index,
       text: "# Tool index\n\nRegistered tool names are per-tool help topic ids. Read their help for the complete contract.\n\n" +
