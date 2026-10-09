@@ -23,6 +23,8 @@ import { chartChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js
 import { prepareTable, tableDiagnosticsText } from "./table-data.js";
 import { dataTableView } from "./table-view.js";
 import { bindDocView } from "./view-bindings.js";
+import { calendarTicks } from "./chart-ticks.js";
+import { chartAxes, chartPointRadius, formatChartTick } from "./chart-presentation.js";
 
 // Both axes are linear. Epoch milliseconds plus Intl date labels require no
 // date adapter. No auto registry, decimator, transform or chart plugin package.
@@ -51,7 +53,8 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     const openButton = document.createElement("button");
     openButton.className = "ub-chart-open";
     openButton.type = "button";
-    openButton.textContent = "Open chart source";
+    openButton.textContent = "source";
+    openButton.setAttribute("aria-label", "Open chart source");
     const screen = document.createElement("div");
     screen.className = "ub-chart-screen";
     const canvas = document.createElement("canvas");
@@ -98,7 +101,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           dirty = false;
         }
         const result = prepared;
-        openButton.textContent = tableSource ? "Open table source" : "Open chart source";
+        openButton.setAttribute("aria-label", tableSource ? "Open table source" : "Open chart source");
         panel.dataset.state = result.status;
         if (result.status !== "ready") {
           table.render(result);
@@ -134,52 +137,79 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         const dark = document.documentElement.dataset.theme === "dark" ||
           (document.documentElement.dataset.theme !== "light" && appearance?.matches === true);
         const palette = dark ? DARK : LIGHT;
-        const labels = config.y.map(series => `${series.label || series.field}${series.unit ? ` (${series.unit})` : ""}`);
-        const commonUnit = config.y.every(series => series.unit === config.y[0]?.unit) ? config.y[0]?.unit : undefined;
-        const numeric = (value: number): string => `${formatChartNumber(value)}${commonUnit ? ` ${commonUnit}` : ""}`;
-        const day = 86_400_000;
-        // Use the library's tick-step option to keep longer date ranges on UTC
-        // days. Intraday plots retain time labels; record x values stay exact.
-        const dailyTicks = config.x.type === "date" && result.lastX - result.firstX >= day;
+        const axes = chartAxes(config.y);
+        const font = { family: colors.fontFamily, size: 11 };
+        const dateLabels = new Map<number, string[]>();
+        // Equal explicit limits leave a zero range in Chart.js. Only this
+        // degenerate case gets a small range, placing its point in the middle.
+        const padding = config.x.type === "date" ? 30_000 : Math.max(1, Math.abs(result.firstX) * Number.EPSILON * 4);
+        const min = result.firstX === result.lastX ? Math.max(-Number.MAX_VALUE, result.firstX - padding) : result.firstX;
+        const max = result.firstX === result.lastX ? Math.min(Number.MAX_VALUE, result.lastX + padding) : result.lastX;
         const configuration: ChartConfiguration<"line", Point[]> = {
           type: "line",
-          data: { datasets: result.series.map((series, index) => ({
-            label: labels[index] ?? series.label,
-            data: series.points.map(({ x, y }) => ({ x, y })),
-            borderColor: palette[index],
-            backgroundColor: palette[index],
-            borderWidth: 2,
-            pointRadius: result.plottedCount > 500 ? 0 : 2,
-            pointHitRadius: 6,
-            spanGaps: false,
-          })) },
+          data: { datasets: result.series.map((series, index) => {
+            const plottedValues = series.points.filter(point => point.y !== null).length;
+            return {
+              label: axes.legendLabels[index] ?? series.label,
+              yAxisID: axes.seriesAxes[index],
+              data: series.points.map(({ x, y }) => ({ x, y })),
+              borderColor: palette[index],
+              backgroundColor: palette[index],
+              borderWidth: 2,
+              pointRadius: context => chartPointRadius(series.points, context.dataIndex, plottedValues),
+              pointHoverRadius: 4,
+              pointHitRadius: 6,
+              spanGaps: false,
+            };
+          }) },
           options: {
             animation: false,
             responsive: true,
             maintainAspectRatio: false,
             parsing: false,
             color: colors.color,
-            interaction: { mode: "nearest", intersect: false },
+            font,
+            interaction: { mode: "nearest", axis: "x", intersect: false },
             scales: {
               x: {
                 type: "linear",
-                title: { display: true, text: config.x.label || config.x.field, color: colors.color },
+                min, max,
+                title: { display: config.x.type === "number", text: config.x.label || config.x.field, color: colors.color, font },
+                ...(config.x.type === "date" ? { afterBuildTicks: (scale) => {
+                  const ctx = scale.chart.ctx;
+                  ctx.save();
+                  ctx.font = `${font.size}px ${font.family}`;
+                  const ticks = calendarTicks(scale.min, scale.max, scale.width, label => ctx.measureText(label).width);
+                  ctx.restore();
+                  dateLabels.clear();
+                  for (const tick of ticks) dateLabels.set(tick.value, tick.label);
+                  scale.ticks = ticks.map(({ value }) => ({ value }));
+                } } : {}),
                 ticks: {
-                  color: colors.color, maxTicksLimit: 8,
-                  ...(dailyTicks ? { stepSize: Math.max(1, Math.ceil((result.lastX - result.firstX) / day / 7)) * day } : {}),
-                  callback: value => formatChartX(Number(value), config.x.type),
+                  color: colors.color, font, maxTicksLimit: 8,
+                  autoSkip: config.x.type !== "date", minRotation: 0, maxRotation: 0,
+                  callback: value => dateLabels.get(Number(value)) ?? formatChartX(Number(value), config.x.type),
                 },
-                grid: { color: colors.borderTopColor },
+                grid: { display: false },
+                border: { display: false },
               },
               y: {
                 type: "linear",
-                title: { display: true, text: labels.join(", "), color: colors.color },
-                ticks: { color: colors.color, callback: value => numeric(Number(value)) },
+                ticks: { color: colors.color, font, maxTicksLimit: 6, callback: value => formatChartTick(Number(value), axes.leftUnit) },
                 grid: { color: colors.borderTopColor },
+                border: { display: false },
               },
+              ...(axes.rightUnit !== undefined ? { yRight: {
+                type: "linear" as const, position: "right" as const,
+                ticks: { color: colors.color, font, maxTicksLimit: 6, callback: (value: string | number) => formatChartTick(Number(value), axes.rightUnit ?? "") },
+                grid: { drawOnChartArea: false },
+                border: { display: false },
+              } } : {}),
             },
             plugins: {
-              legend: { display: result.series.length > 1, labels: { color: colors.color } },
+              legend: { display: true, position: "bottom", align: "start", labels: {
+                color: colors.color, font, usePointStyle: true, pointStyle: "line", boxWidth: 20, boxHeight: 8,
+              } },
               tooltip: { callbacks: {
                 title: items => items[0]?.parsed.x == null ? "" : formatChartX(items[0].parsed.x, config.x.type),
                 label: item => {
@@ -213,6 +243,9 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     appearance?.addEventListener("change", schedule);
     const theme = new MutationObserver(schedule);
     theme.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    // Canvas does not repaint when the editor's self-hosted font finishes.
+    // Reuse the shared frame and snapshot; a removed view schedules nothing.
+    void document.fonts?.ready.then(schedule);
 
     const open = (event: Event): void => {
       event.preventDefault();

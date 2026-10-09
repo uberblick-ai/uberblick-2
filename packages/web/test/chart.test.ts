@@ -6,6 +6,7 @@ import {
 } from "@uberblick/schema";
 import { mountEditor, typeText } from "./helpers.js";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
+import type { ChartConfiguration } from "chart.js";
 
 const charts = vi.hoisted(() => ({ instances: [] as Array<{ data: unknown; options: unknown; updates: number; destroyed: boolean }> }));
 vi.mock("@uberblick/schema", async (importOriginal) => {
@@ -61,6 +62,56 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("the chart's derived lifecycle", () => {
+  it("wires compact axes, shared x hover and a bottom legend, including one series and a single x", () => {
+    const { doc, directory, id } = fixture();
+    const { editor } = mountEditor(doc);
+    flush();
+    const instance = charts.instances[0];
+    if (instance === undefined) throw new Error("Chart did not draw");
+    const options = instance.options as NonNullable<ChartConfiguration<"line">["options"]>;
+    expect(options.interaction).toMatchObject({ mode: "nearest", axis: "x", intersect: false });
+    expect(options.plugins?.legend).toMatchObject({ display: true, position: "bottom", align: "start", labels: { pointStyle: "line", usePointStyle: true } });
+    expect(options.scales?.x).toMatchObject({ min: 0, max: 2, title: { display: true, text: "day" }, grid: { display: false }, border: { display: false } });
+    expect(options.scales?.y).not.toHaveProperty("title");
+    expect(options.scales?.y?.ticks).toMatchObject({ maxTicksLimit: 6 });
+    expect(editor.view.dom.querySelector(".ub-chart-diagnostics")?.hasAttribute("hidden")).toBe(true);
+    const source = editor.view.dom.querySelector(".ub-chart-open");
+    expect(source?.textContent).toBe("source");
+    expect(source?.getAttribute("aria-label")).toBe("Open chart source");
+    const data = instance.data as ChartConfiguration<"line">["data"];
+    expect(data.datasets[0]).toMatchObject({ label: "Delivery", yAxisID: "y", pointHoverRadius: 4 });
+    editBlock(doc, id, mapping, JSON.stringify({ ...JSON.parse(mapping), y: [{ field: "value", unit: "%" }, { field: "value", unit: "ms" }] }));
+    applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "b", value: { day: 3, value: 7 } }] }]);
+    flush();
+    const next = instance.options as typeof options;
+    expect(next.scales?.x).toMatchObject({ min: 1, max: 3 });
+    expect(next.scales?.yRight).toMatchObject({ type: "linear", position: "right", grid: { drawOnChartArea: false }, border: { display: false } });
+    expect((instance.data as typeof data).datasets.map(series => series.yAxisID)).toEqual(["y", "yRight"]);
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
+  it("uses calendar labels on date scales while retaining the full accessible date", () => {
+    const doc = new Y.Doc(), directory = new Y.Doc();
+    initDoc(doc, { uuid: "calendar-chart", title: "Calendar" });
+    appendBlock(doc, { type: "chart", text: JSON.stringify({ version: 1, type: "line", collection: "trend", x: { field: "day", type: "date", label: "Day" }, y: [{ field: "value" }] }) });
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, upsert: [
+      { id: "a", value: { day: "2026-10-07", value: 3 } },
+      { id: "b", value: { day: "2026-10-09", value: 7 } },
+    ] }]);
+    const { editor } = mountEditor(doc);
+    flush();
+    const options = charts.instances[0]?.options as { scales: { x: {
+      title: { display: boolean }; afterBuildTicks: (scale: unknown) => void;
+      ticks: { callback: (value: number) => unknown; maxRotation: number };
+    } } };
+    const scale = { min: Date.parse("2026-10-07"), max: Date.parse("2026-10-09"), width: 600, ticks: [] as { value: number }[], chart: { ctx: { save() {}, restore() {}, font: "", measureText: (text: string) => ({ width: text.length * 6 }) } } };
+    options.scales.x.afterBuildTicks(scale);
+    expect(options.scales.x.title.display).toBe(false);
+    expect(options.scales.x.ticks.maxRotation).toBe(0);
+    expect(options.scales.x.ticks.callback(scale.ticks[0]?.value ?? NaN)).toContain("2026");
+    expect(editor.view.dom.querySelector(".ub-chart-description")?.textContent).toContain("Oct 7, 2026");
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
   it("shows a shared reader failure in every view and recovers on a valid update without writes", () => {
     const { doc, directory } = fixture();
     appendBlock(doc, { type: "chart", text: tableMapping });

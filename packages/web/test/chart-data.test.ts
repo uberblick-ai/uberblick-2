@@ -33,6 +33,14 @@ function ready(data: DocData, config = mapping): ChartReady {
 }
 
 describe("chart mapping", () => {
+  it("hides the not-plotted line for complete plots and empty collections, but keeps omitted values", () => {
+    const { data } = fixture([{ id: "a", value: { x: 1, y: 2 } }]);
+    expect(chartDiagnosticsText(ready(data))).toBe("");
+    const empty = fixture([]).data;
+    expect(chartDiagnosticsText(prepareChart(JSON.stringify(mapping), empty))).toBe("");
+    const partial = ready(data, { ...mapping, y: [...mapping.y, { field: "absent", label: "Sparse" }] });
+    expect(chartDiagnosticsText(partial)).toBe("0 records not plotted. Omitted series values: Sparse: 1 absent or null.");
+  });
   it("holds only the versioned mapping, with a detached gap default", () => {
     const source = JSON.stringify({
       version: 1, type: "line", collection: "observations", x: { field: "x", type: "date", label: "Day" },
