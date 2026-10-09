@@ -1931,6 +1931,13 @@ h3.ub-heading {
   gap: 0.5rem;
 }
 
+/* Reserve the shared icon target's full width inside the fixed-layout table. */
+@media (any-pointer: coarse) {
+  .ub-docs {
+    --docs-pin: 2.75rem;
+  }
+}
+
 .ub-docs-heading {
   font-size: 1.4rem;
   margin: 0;
