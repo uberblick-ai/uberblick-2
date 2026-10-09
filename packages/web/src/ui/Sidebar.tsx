@@ -60,7 +60,7 @@ const SIDEBAR_PANE_CLASSES = "ub-sidebar-pane [grid-area:1/1] min-w-0 min-h-0 fl
 
 // Native buttons have no preflight reset. Keep their inherited type and focus
 // ring while Tailwind gates hover by the primary input's capability.
-const SIDEBAR_ROW_CLASSES = "flex min-h-8.5 items-center gap-2 rounded-[0.42rem] border border-solid border-transparent bg-transparent px-2 py-1.5 text-left text-sm/[inherit] font-[inherit] text-(--sidebar-row-foreground) cursor-pointer enabled:not-aria-disabled:hover:bg-(--sidebar-accent) enabled:not-aria-disabled:hover:text-sidebar-foreground";
+const SIDEBAR_ROW_CLASSES = "flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 items-center gap-2 rounded-[0.42rem] border border-solid border-transparent bg-transparent px-2 py-1.5 text-left text-sm/[inherit] font-[inherit] text-(--sidebar-row-foreground) cursor-pointer enabled:not-aria-disabled:hover:bg-(--sidebar-accent) enabled:not-aria-disabled:hover:text-sidebar-foreground";
 const SIDEBAR_NAV_CLASSES = `${SIDEBAR_ROW_CLASSES} w-full aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium`;
 
 /** Per-group collapse preference, persisted per browser like the sidebar's own. */
@@ -830,7 +830,7 @@ function GroupSection({
           <button
             type="button"
             {...rowClickGuard}
-            className="ub-group-toggle flex flex-1 min-w-0 items-center gap-1 rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 text-left font-[inherit] text-[11px] font-medium tracking-[0.12em] uppercase text-(--sidebar-group-label) cursor-pointer select-none [-webkit-touch-callout:none] hover:text-sidebar-foreground"
+            className="ub-group-toggle flex flex-1 min-w-0 min-h-6 [@media(any-pointer:coarse)]:min-h-11 items-center gap-1 rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 text-left font-[inherit] text-[11px] font-medium tracking-[0.12em] uppercase text-(--sidebar-group-label) cursor-pointer select-none [-webkit-touch-callout:none] hover:text-sidebar-foreground"
             ref={sortable.handleRef}
             aria-describedby={ydoc === null ? undefined : instructions}
             aria-expanded={!collapsed}
@@ -935,7 +935,7 @@ function PinnedRow({ uuid, index, group, entry, selected, onSelect, disabled }: 
     <li className="ub-pin-row flex items-center data-[drop-target=true]:bg-(--sidebar-accent)" ref={sortable.ref} data-drop-target={sortable.isDropTarget && !sortable.isDragSource}>
       <button type="button" aria-current={uuid === selected ? "page" : undefined}
         {...rowClickGuard}
-        className="flex flex-1 min-w-0 w-full min-h-8.5 items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] text-sm text-(--sidebar-row-foreground) cursor-pointer select-none [-webkit-touch-callout:none] hover:bg-(--sidebar-accent) hover:text-sidebar-foreground aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium"
+        className="flex flex-1 min-w-0 w-full min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] text-sm text-(--sidebar-row-foreground) cursor-pointer select-none [-webkit-touch-callout:none] hover:bg-(--sidebar-accent) hover:text-sidebar-foreground aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium"
         ref={sortable.handleRef} aria-describedby={disabled ? undefined : instructions}
         onClick={() => onSelect(uuid)} title={pinTitle(uuid, entry)}>
         <DocumentIcon />
@@ -983,7 +983,7 @@ function PinLabel({
  * The same four things {@link PinLabel} draws, as the one string a `title`
  * attribute can carry.
  *
- * The row is 34px and ellipsises anything longer than the column (#481), which
+ * The row ellipsises anything longer than the column (#481), which
  * is the right geometry but left the name unrecoverable: the tooltip offered
  * the uuid, so a clipped title could be read nowhere at all. Here the stub is
  * the whole uuid rather than the eight characters the row shows, because the
