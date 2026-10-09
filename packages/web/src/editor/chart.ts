@@ -11,7 +11,7 @@ import type { NodeView } from "@tiptap/pm/view";
 import {
   Chart, LineController, LineElement, PointElement, LinearScale, Legend, Tooltip,
 } from "chart.js";
-import type { ChartConfiguration } from "chart.js";
+import type { ChartConfiguration, Scale } from "chart.js";
 import { COMMENT_MARK } from "@uberblick/schema";
 import type { DocData } from "@uberblick/schema";
 import type * as Y from "yjs";
@@ -23,7 +23,7 @@ import { chartChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js
 import { prepareTable, tableDiagnosticsText } from "./table-data.js";
 import { dataTableView } from "./table-view.js";
 import { bindDocView } from "./view-bindings.js";
-import { calendarTicks } from "./chart-ticks.js";
+import { observationEndpoints, observationTicks } from "./chart-ticks.js";
 import { chartAxes, chartPointRadius, formatChartTick } from "./chart-presentation.js";
 
 // Both axes are linear. Epoch milliseconds plus Intl date labels require no
@@ -158,7 +158,23 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         const beginAtZero = (axis: "y" | "yRight"): boolean => !result.series.some((series, index) =>
           axes.seriesAxes[index] === axis && series.points.some(point => point.y !== null && point.y < 0));
         const font = { family: colors.fontFamily, size: 11 };
-        const dateLabels = new Map<number, string[]>();
+        const xValues = [...new Set(result.series.flatMap(series =>
+          series.points.filter(point => point.y !== null).map(point => point.x)))].sort((a, b) => a - b);
+        const xLabels = new Map<number, string[]>();
+        const setTicks = (scale: Scale, ticks: ReturnType<typeof observationTicks>): void => {
+          xLabels.clear();
+          for (const tick of ticks) xLabels.set(tick.value, tick.label);
+          scale.ticks = ticks;
+        };
+        const selectTicks = (scale: Scale): void => {
+          const ctx = scale.chart.ctx;
+          ctx.save();
+          ctx.font = `${font.size}px ${font.family}`;
+          const ticks = observationTicks(xValues, config.x.type, scale.min, scale.max, scale.width,
+            label => ctx.measureText(label).width);
+          ctx.restore();
+          setTicks(scale, ticks);
+        };
         // Equal explicit limits leave a zero range in Chart.js. Only this
         // degenerate case gets a small range, placing its point in the middle.
         const padding = config.x.type === "date" ? 30_000 : Math.max(1, Math.abs(result.firstX) * Number.EPSILON * 4);
@@ -194,20 +210,14 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
                 type: "linear",
                 min, max,
                 title: { display: config.x.type === "number", text: config.x.label || config.x.field, color: colors.color, font },
-                ...(config.x.type === "date" ? { afterBuildTicks: (scale) => {
-                  const ctx = scale.chart.ctx;
-                  ctx.save();
-                  ctx.font = `${font.size}px ${font.family}`;
-                  const ticks = calendarTicks(scale.min, scale.max, scale.width, label => ctx.measureText(label).width);
-                  ctx.restore();
-                  dateLabels.clear();
-                  for (const tick of ticks) dateLabels.set(tick.value, tick.label);
-                  scale.ticks = ticks.map(({ value }) => ({ value }));
-                } } : {}),
+                // Reserve both endpoints even if crowding will omit one, so
+                // the fitted selection cannot introduce an unpadded end label.
+                afterBuildTicks: scale => setTicks(scale, observationEndpoints(xValues, config.x.type)),
+                afterFit: selectTicks,
                 ticks: {
-                  color: colors.color, font, maxTicksLimit: 8,
-                  autoSkip: config.x.type !== "date", minRotation: 0, maxRotation: 0,
-                  callback: value => dateLabels.get(Number(value)) ?? formatChartX(Number(value), config.x.type),
+                  color: colors.color, font,
+                  autoSkip: false, minRotation: 0, maxRotation: 0,
+                  callback: value => xLabels.get(Number(value)),
                 },
                 grid: { display: false },
                 border: { display: false },

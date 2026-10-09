@@ -1,108 +1,136 @@
 import { describe, expect, it } from "vitest";
-import { calendarTicks } from "../src/editor/chart-ticks.js";
+import { chartDate } from "../src/editor/chart-data.js";
+import { observationEndpoints, observationTicks } from "../src/editor/chart-ticks.js";
 
 const epoch = (date: string): number => Date.parse(date);
 const measure = (text: string): number => text.length * 6;
-const ticks = (min: string, max: string, width = 500) => calendarTicks(epoch(min), epoch(max), width, measure, "en-US");
+const dates = (values: string[], width = 800) => {
+  const xs = values.map(epoch);
+  return observationTicks(xs, "date", xs[0] ?? 0, xs.at(-1) ?? 0, width, measure, "en-US");
+};
 
-describe("calendar date ticks", () => {
-  it("uses the smallest measured minute step and UTC context without seconds", () => {
-    const result = ticks("2026-10-07T09:01:30Z", "2026-10-07T09:08:00Z", 800);
-    expect(result.map(({ value }) => new Date(value).getUTCMinutes())).toEqual([2, 3, 4, 5, 6, 7, 8]);
-    expect(result[0]?.label).toEqual(["09:02", "Oct 7", "2026", "UTC"]);
-    expect(result[1]?.label).toEqual(["09:03"]);
-    expect(result.every(({ value }) => value % 60_000 === 0)).toBe(true);
+describe("observation ticks", () => {
+  it("labels every daily observation compactly without inventing intermediate ticks", () => {
+    const values = Array.from({ length: 7 }, (_, index) => `2026-10-0${index + 1}T09:30:00Z`);
+    const result = dates(values);
+    expect(result.map(tick => tick.value)).toEqual(values.map(epoch));
+    expect(result.map(tick => tick.label)).toEqual(values.map((_, index) => [`Oct ${index + 1}`]));
+    const german = observationTicks(values.map(epoch), "date", epoch(values[0] as string), epoch(values[6] as string), 800, measure, "de-DE");
+    expect(german[0]?.label).toEqual([new Intl.DateTimeFormat("de-DE", { timeZone: "UTC", month: "short", day: "numeric" }).format(epoch(values[0] as string))]);
   });
 
-  it("moves through hours, day and year context at UTC boundaries", () => {
-    const hourly = ticks("2026-10-07T09:00:00Z", "2026-10-07T15:00:00Z", 450);
-    expect(hourly.map(({ value }) => new Date(value).getUTCHours())).toEqual([9, 10, 11, 12, 13, 14, 15]);
-    const midnight = ticks("2026-12-31T23:00:00Z", "2027-01-01T03:00:00Z", 800);
-    expect(midnight.find(({ value }) => value === epoch("2027-01-01T00:00:00Z"))?.label).toEqual(["00:00", "Jan 1", "2027"]);
-    expect(midnight.flatMap(({ label }) => label).filter((line) => line === "UTC")).toHaveLength(1);
+  it("adds year context only for multiple UTC years, including years before 100", () => {
+    expect(dates(["2026-12-30", "2026-12-31", "2027-01-01", "2027-01-02"]).map(tick => tick.label))
+      .toEqual([["Dec 30", "2026"], ["Dec 31"], ["Jan 1", "2027"], ["Jan 2"]]);
+    expect(dates(["0099-12-31", "0100-01-01"]).map(tick => tick.label))
+      .toEqual([["Dec 31", "99"], ["Jan 1", "100"]]);
+    expect(dates(["0000-12-31", "0001-01-01"])[0]?.label).toEqual(["Dec 31", "1 BC"]);
   });
 
-  it("uses UTC midnight day ticks, including the leap day", () => {
-    const result = ticks("2024-02-28T00:00:00Z", "2024-03-02T00:00:00Z", 250);
-    expect(result.map(({ value }) => new Date(value).toISOString())).toEqual([
-      "2024-02-28T00:00:00.000Z", "2024-02-29T00:00:00.000Z",
-      "2024-03-01T00:00:00.000Z", "2024-03-02T00:00:00.000Z",
-    ]);
-    expect(result.map(({ label }) => label)).toEqual([["Feb 28", "2024"], ["Feb 29"], ["Mar 1"], ["Mar 2"]]);
+  it("uses time only for distinct same-day x values, with day changes and UTC once", () => {
+    const result = dates(["2026-10-07T09:00:00Z", "2026-10-07T10:00:00Z", "2026-10-08T10:00:00Z"]);
+    expect(result.map(tick => tick.label)).toEqual([["09:00", "Oct 7", "UTC"], ["10:00"], ["10:00", "Oct 8"]]);
+    expect(dates(["2026-12-31T22:00:00Z", "2026-12-31T23:00:00Z", "2027-01-01T00:00:00Z"]).map(tick => tick.label))
+      .toEqual([["22:00", "Dec 31", "2026", "UTC"], ["23:00"], ["00:00", "Jan 1", "2027"]]);
+    expect(dates(["2026-10-07T09:00:01Z", "2026-10-07T09:00:02Z"]).map(tick => tick.label[0]))
+      .toEqual(["09:00", "09:00:02"]);
+    expect(dates(["2026-10-07T09:00:00.100Z", "2026-10-07T09:00:00.200Z"]).map(tick => tick.label[0]))
+      .toEqual(["09:00", "09:00:00.2"]);
   });
 
-  it("aligns weeks to Mondays rather than epoch weekdays", () => {
-    const result = ticks("2026-01-01T00:00:00Z", "2026-03-01T00:00:00Z", 500);
-    expect(result.length).toBeGreaterThan(4);
-    expect(result.every(({ value }) => new Date(value).getUTCDay() === 1)).toBe(true);
-    expect(result[0]?.value).toBe(epoch("2026-01-05T00:00:00Z"));
-    expect((result[1]?.value ?? 0) - (result[0]?.value ?? 0)).toBe(7 * 86_400_000);
-  });
-
-  it("uses months then quarter boundaries when month labels no longer fit", () => {
-    const monthly = ticks("2026-01-01T00:00:00Z", "2026-12-31T00:00:00Z", 600);
-    expect(monthly.map(({ value }) => new Date(value).getUTCMonth())).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
-    expect(monthly[0]?.label).toEqual(["Jan", "2026"]);
-    const quarters = ticks("2026-01-01T00:00:00Z", "2026-12-31T00:00:00Z", 280);
-    expect(quarters.map(({ value }) => new Date(value).getUTCMonth())).toEqual([0, 3, 6, 9]);
-    expect(quarters.map(({ label }) => label)).toEqual([["Jan", "2026"], ["Apr"], ["Jul"], ["Oct"]]);
-  });
-
-  it("uses nonduplicated years and bounded nice multi-year steps", () => {
-    const years = ticks("2020-01-01T00:00:00Z", "2034-01-01T00:00:00Z", 600);
-    expect(years.map(({ label }) => label)).toEqual(Array.from({ length: 15 }, (_, index) => [(2020 + index).toString()]));
-    const millennia = ticks("0000-01-01T00:00:00Z", "9999-12-31T00:00:00Z", 300);
-    expect(millennia.map(({ value }) => new Date(value).getUTCFullYear())).toEqual([0, 2000, 4000, 6000, 8000]);
-    expect(millennia[0]?.label).toEqual(["1 BC"]);
-  });
-
-  it("rejects impossibly dense long-range candidates before measuring their labels", () => {
-    let measurements = 0;
-    const result = calendarTicks(epoch("0000-01-01T00:00:00Z"), epoch("9999-12-31T00:00:00Z"), 300, (text) => {
-      measurements++;
-      return measure(text);
-    }, "en-US");
-    expect(result.map(({ value }) => new Date(value).getUTCFullYear())).toEqual([0, 2000, 4000, 6000, 8000]);
-    expect(measurements).toBeLessThanOrEqual(80);
-  });
-
-  it("preserves early years and boundaries before the epoch", () => {
-    const years = ticks("0099-01-01T00:00:00Z", "0101-01-01T00:00:00Z", 150);
-    expect(years.map(({ value }) => new Date(value).getUTCFullYear())).toEqual([99, 100, 101]);
-    const negative = ticks("1969-12-31T23:56:30Z", "1969-12-31T23:59:00Z", 500);
-    expect(negative.map(({ value }) => new Date(value).getUTCMinutes())).toEqual([57, 58, 59]);
-  });
-
-  it("fits measured multiline widths without rotating and coarsens with available width", () => {
-    const min = epoch("2026-01-01T00:00:00Z");
-    const max = epoch("2026-01-15T00:00:00Z");
-    const narrow = calendarTicks(min, max, 240, measure, "en-US");
-    const wide = calendarTicks(min, max, 1_000, measure, "en-US");
-    expect(narrow.length).toBeLessThan(wide.length);
-    for (let index = 1; index < narrow.length; index++) {
-      const previous = narrow[index - 1];
-      const current = narrow[index];
-      if (previous === undefined || current === undefined) throw new Error("Missing ticks");
-      const separation = (current.value - previous.value) / (max - min) * 240;
-      const previousWidth = Math.max(...previous.label.map(measure));
-      const currentWidth = Math.max(...current.label.map(measure));
-      expect(separation).toBeGreaterThanOrEqual((previousWidth + currentWidth) / 2 + 12);
+  it("distinguishes retained fractional observations without binary tails or second rollover", () => {
+    for (const { xs, last } of [
+      { xs: [0.1, 0.2], last: "00:00:00.0002" },
+      { xs: [-0.6, -0.2], last: "23:59:59.9998" },
+      { xs: [1_000.1, 1_000.2], last: "00:00:01.0002" },
+    ]) {
+      const result = observationTicks(xs, "date", xs[0] as number, xs[1] as number, 800, measure, "en-US");
+      expect(result).toHaveLength(2);
+      expect(new Set(result.map(tick => tick.label[0])).size).toBe(2);
+      expect(result[1]?.label[0]).toBe(last);
+      expect(result[0]?.label).toContain(xs[0] as number < 0 ? "Dec 31" : "Jan 1");
     }
-    const largeFont = calendarTicks(min, max, 1_000, (text) => measure(text) * 2, "en-US");
-    expect(largeFont.length).toBeLessThan(wide.length);
+    const xs = ["2026-10-07T04:00:00.131676Z", "2026-10-07T04:00:00.131677Z"].map(value => chartDate(value) as number);
+    expect(observationTicks(xs, "date", xs[0] as number, xs[1] as number, 800, measure, "en-US").map(tick => tick.label[0]))
+      .toEqual(["04:00", "04:00:00.131677"]);
+    expect(observationTicks(xs, "date", xs[0] as number, xs[1] as number, 800, measure, "de-DE")[1]?.label[0])
+      .toBe("04:00:00,131677");
   });
 
-  it("never invents unaligned ticks for sub-minute or equal-x ranges and refuses invalid ranges", () => {
-    const min = epoch("2026-10-07T09:01:12Z");
-    expect(calendarTicks(min, min + 1_000, 300, measure, "en-US")).toEqual([]);
-    expect(calendarTicks(min, min, 300, measure, "en-US")).toEqual([]);
-    const boundary = epoch("2026-10-07T09:02:00Z");
-    expect(calendarTicks(min, boundary, 300, measure, "en-US")).toEqual([
-      { value: boundary, label: ["09:02", "Oct 7", "2026", "UTC"] },
-    ]);
-    expect(calendarTicks(boundary, boundary, 300, measure, "en-US")).toHaveLength(1);
-    expect(calendarTicks(Number.NaN, min, 300, measure)).toEqual([]);
-    expect(calendarTicks(min, min - 1, 300, measure)).toEqual([]);
-    expect(calendarTicks(0, 9e15, 300, measure)).toEqual([]);
+  it("keeps hourly labels compact when an omitted close pair needs finer precision", () => {
+    for (const fraction of ["131", "131676"]) {
+      for (const closeSecond of ["00.331", "20.131"]) {
+        const xs = [
+          ...Array.from({ length: 24 }, (_, hour) => chartDate(`2026-10-07T${String(hour).padStart(2, "0")}:00:00.${fraction}Z`) as number),
+          chartDate(`2026-10-07T13:00:${closeSecond}Z`) as number,
+        ].sort((a, b) => a - b);
+        const result = observationTicks(xs, "date", xs[0] as number, xs.at(-1) as number, 900, measure, "en-US");
+        expect(result).toHaveLength(24);
+        expect(result.map(tick => tick.label[0])).toEqual(Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}:00`));
+      }
+    }
+  });
+
+  it("reserves endpoints with full-data context and enough width for final fractional labels", () => {
+    const xs = ["2026-12-31T22:00:00Z", "2026-12-31T23:00:00Z", "2027-01-01T00:00:00.100Z", "2027-01-01T00:00:00.200Z"].map(epoch);
+    const endpoints = observationEndpoints(xs, "date", "en-US");
+    expect(endpoints.map(tick => tick.value)).toEqual([xs[0], xs.at(-1)]);
+    expect(endpoints.map(tick => tick.label)).toEqual([["22:00", "Dec 31", "2026", "UTC"], ["00:00:00.2", "Jan 1", "2027", "UTC"]]);
+    const selected = observationTicks(xs, "date", xs[0] as number, xs.at(-1) as number, 100_000, measure, "en-US");
+    expect(Math.max(...(endpoints[1]?.label ?? []).map(measure))).toBeGreaterThanOrEqual(Math.max(...(selected.at(-1)?.label ?? []).map(measure)));
+  });
+
+  it("keeps irregular numeric observations and enough precision for adjacent doubles", () => {
+    for (const xs of [[1, 2, 7, 7.5, 40], [1, 1 + Number.EPSILON], [1e-20, 1.0000000000000001e-20]]) {
+      const result = observationTicks(xs, "number", xs[0] as number, xs.at(-1) as number, 10_000, measure, "en-US");
+      expect(result.map(tick => tick.value)).toEqual(xs);
+      expect(new Set(result.map(tick => tick.label[0])).size).toBe(xs.length);
+    }
+  });
+
+  it("omits only overlapping labels, without imposing extra spacing", () => {
+    const xs = [1, 2, 7, 7.5, 40];
+    const result = observationTicks(xs, "number", 1, 40, 360, measure, "en-US");
+    for (let index = 1; index < result.length; index++) {
+      const previous = result[index - 1];
+      const current = result[index];
+      if (!previous || !current) throw new Error("Missing ticks");
+      expect((current.value - previous.value) / 39 * 360)
+        .toBeGreaterThanOrEqual((measure(previous.label[0] as string) + measure(current.label[0] as string)) / 2);
+    }
+    for (const omitted of xs.filter(x => !result.some(tick => tick.value === x))) {
+      expect(result.some(tick => Math.abs(omitted - tick.value) / 39 * 360 <
+        (measure(String(omitted)) + measure(tick.label[0] as string)) / 2)).toBe(true);
+    }
+    expect(observationTicks([1, 2], "number", 1, 2, 7, measure, "en-US")).toHaveLength(2);
+  });
+
+  it("preserves context relative to retained labels after skipping a day and year boundary", () => {
+    const result = dates(["2026-12-31T22:00:00Z", "2026-12-31T23:59:00Z", "2027-01-01T00:00:00Z", "2027-01-01T02:00:00Z"], 65);
+    expect(result.map(tick => tick.label)).toEqual([["22:00", "Dec 31", "2026", "UTC"], ["02:00", "Jan 1", "2027"]]);
+  });
+
+  it("keeps single x labels and handles the 5,000-record bound with one measured pass", () => {
+    expect(dates(["2026-10-07T09:30:00Z"])).toEqual([{ value: epoch("2026-10-07T09:30:00Z"), label: ["Oct 7"] }]);
+    expect(observationTicks([7.5], "number", 6.5, 8.5, 360, measure, "en-US")).toEqual([{ value: 7.5, label: ["7.5"] }]);
+    for (const count of [365, 5_000]) {
+      const xs = Array.from({ length: count }, (_, index) => epoch("2026-01-01") + index * 86_400_000);
+      let measurements = 0;
+      const result = observationTicks(xs, "date", xs[0] as number, xs.at(-1) as number, 360, text => {
+        measurements++;
+        return measure(text);
+      }, "en-US");
+      expect(result.length).toBeGreaterThan(1);
+      expect(result.length).toBeLessThan(20);
+      expect(measurements).toBeLessThanOrEqual(xs.length * 2);
+      expect(result.every(tick => xs.includes(tick.value))).toBe(true);
+      for (let index = 1; index < result.length; index++) {
+        const previous = result[index - 1], current = result[index];
+        if (!previous || !current) throw new Error("Missing ticks");
+        expect((current.value - previous.value) / ((xs.at(-1) as number) - (xs[0] as number)) * 360)
+          .toBeGreaterThanOrEqual((Math.max(...previous.label.map(measure)) + Math.max(...current.label.map(measure))) / 2);
+      }
+    }
+    expect(observationTicks([], "number", 0, 1, 360, measure)).toEqual([]);
   });
 });
