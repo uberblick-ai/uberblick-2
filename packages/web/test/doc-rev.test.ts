@@ -31,6 +31,7 @@ import {
   initDoc,
   repairDuplicateBlocks,
   setBlockType,
+  type TableMapping,
 } from "@uberblick/schema";
 import { observeDocRev } from "../src/ui/doc-chrome.js";
 
@@ -43,11 +44,13 @@ interface Fixture {
 }
 
 /** Two blocks, observed, with the seeding pass already accounted for. */
-function fixture(): Fixture {
+function fixture(
+  bravoBlock: Parameters<typeof appendBlock>[1] = { type: "paragraph", text: "bravo" },
+): Fixture {
   const ydoc = new Y.Doc();
   initDoc(ydoc, { uuid: "11111111-1111-4111-8111-111111111111", title: "Revs" });
   const alpha = appendBlock(ydoc, { type: "paragraph", text: "alpha, at length" });
-  const bravo = appendBlock(ydoc, { type: "paragraph", text: "bravo" });
+  const bravo = appendBlock(ydoc, bravoBlock);
   const revs: string[] = [];
   const stop = observeDocRev(ydoc, (rev) => revs.push(rev));
   vi.mocked(getBlocks).mockClear();
@@ -56,6 +59,42 @@ function fixture(): Fixture {
 }
 
 describe("the document rev is recomputed incrementally", () => {
+  const tableText = "| Name | State |\n| --- | --- |\n| Alpha | Ready |";
+  const tableEdits: Array<{ name: string; text: string; tableMapping?: TableMapping }> = [
+    { name: "cell text", text: tableText.replace("Alpha", "Alpine") },
+    { name: "cell formatting", text: tableText.replace("Alpha", "**Alpha**") },
+    {
+      name: "column insertion",
+      text: "| Name | Added | State |\n| --- | --- | --- |\n| Alpha | New | Ready |",
+      tableMapping: { rows: [0, 1], columns: [0, null, 1] },
+    },
+    {
+      name: "column deletion",
+      text: "| State |\n| --- |\n| Ready |",
+      tableMapping: { rows: [0, 1], columns: [1] },
+    },
+  ];
+
+  it.each(tableEdits)("refreshes the table rev after $name with one block read", ({ text, tableMapping }) => {
+    const fix = fixture({ type: "table", text: tableText });
+    try {
+      editBlock(fix.ydoc, fix.bravo, tableText, text, tableMapping === undefined ? {} : { tableMapping });
+
+      expect(fix.revs).toHaveLength(2);
+      expect(fix.revs[1]).not.toBe(fix.revs[0]);
+      expect(vi.mocked(getBlocks)).not.toHaveBeenCalled();
+      expect(vi.mocked(getBlock).mock.calls.map((call) => call[1])).toEqual([fix.bravo]);
+
+      // The independent seeding read comes after the bounded-work assertions.
+      const fresh: string[] = [];
+      const stopFresh = observeDocRev(fix.ydoc, (rev) => fresh.push(rev));
+      stopFresh();
+      expect(fresh).toEqual([fix.revs[1]]);
+    } finally {
+      fix.stop();
+    }
+  });
+
   it("re-reads only the block an edit landed in", () => {
     const fix = fixture();
     try {

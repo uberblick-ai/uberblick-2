@@ -199,11 +199,21 @@ export function samePresence(
 /** How much of the document rev the meta line shows. */
 const REV_LENGTH = 8;
 
-/** The block element an event happened in, or null when it happened above one. */
-function blockElementOf(target: Y.AbstractType<unknown>): Y.XmlElement | null {
-  if (target instanceof Y.XmlElement) return target;
-  const parent = target.parent;
-  return parent instanceof Y.XmlElement ? parent : null;
+/** The top-level block containing an event, or null for a fragment event. */
+function blockElementOf(
+  target: Y.AbstractType<unknown>,
+  fragment: Y.XmlFragment,
+): Y.XmlElement | null {
+  // Deep events name the changed type, including table cell text and rows.
+  // The cache owns the fragment's direct children, not those nested elements.
+  let current: Y.AbstractType<unknown> | null = target;
+  while (current !== null) {
+    if (current.parent === fragment) {
+      return current instanceof Y.XmlElement ? current : null;
+    }
+    current = current.parent;
+  }
+  return null;
 }
 
 /**
@@ -265,7 +275,7 @@ export function observeDocRev(ydoc: Y.Doc, emit: (rev: string) => void): () => v
 
   const onChange = (events: Array<Y.YEvent<Y.AbstractType<unknown>>>): void => {
     for (const event of events) {
-      const element = blockElementOf(event.target);
+      const element = blockElementOf(event.target, fragment);
       if (element !== null) revs.delete(element);
     }
     emit(fold());
