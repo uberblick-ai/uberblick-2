@@ -945,7 +945,7 @@ describe("ub workspace use <link>", () => {
       ],
       local,
     );
-    expect(moved.status).toBe(0);
+    expect(moved.status, moved.output).toBe(0);
     expect(moved.stdout).toContain(": 1 document, 1 archived");
     expect(moved.stdout).not.toContain(": 0 documents");
     expect(moved.stdout).not.toContain("content is not moved");
@@ -961,7 +961,7 @@ describe("ub workspace use <link>", () => {
       ],
       fresh,
     );
-    expect(joined.status).toBe(0);
+    expect(joined.status, joined.output).toBe(0);
     expect(joined.stderr.trim().split("\n")).toHaveLength(1);
     expect(joined.stdout).toContain(": 1 document, 1 archived");
     expect(joined.stdout).not.toContain("holds nothing yet");
@@ -1010,7 +1010,7 @@ describe("ub workspace use <link>", () => {
       ],
       local,
     );
-    expect(moved.status).toBe(0);
+    expect(moved.status, moved.output).toBe(0);
     expect(moved.stdout).toContain(": 1 document, 1 archived");
 
     const fresh = sandbox();
@@ -1022,7 +1022,7 @@ describe("ub workspace use <link>", () => {
       ],
       fresh,
     );
-    expect(joined.status).toBe(0);
+    expect(joined.status, joined.output).toBe(0);
     const restored = await withMcp(
       fresh,
       { WORKSPACE_ID: WORKSPACE },

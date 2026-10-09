@@ -23,6 +23,7 @@ import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   REPO_ROOT,
+  freePort,
   pointAt,
   removeTempDirs,
   sandbox,
@@ -132,18 +133,6 @@ function failedMcpStart(root = payload) {
   // this reaches the installed server's logger through the public command.
   box.env.UBERBLICK_DB = box.cwd;
   return runPayload(box, ["mcp", "serve"], { root });
-}
-
-async function freePort(): Promise<number> {
-  const { createServer } = await import("node:net");
-  const server = createServer();
-  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("could not reserve a port");
-  }
-  await new Promise<void>((done) => server.close(() => done()));
-  return address.port;
 }
 
 beforeAll(() => {

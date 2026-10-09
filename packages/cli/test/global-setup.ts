@@ -37,9 +37,12 @@
  */
 
 import { build } from "esbuild";
-import { BUILT_UB, PACKAGE_ROOT } from "./helpers.js";
+import type { TestProject } from "vitest/node";
+import { BUILT_UB, PACKAGE_ROOT, TEST_PORTS } from "./helpers.js";
 
-export default async function setup(): Promise<void> {
+export default async function setup(project: TestProject): Promise<void> {
+  // One rotation per run, shared by its workers: see `freePort`.
+  project.provide("testPortOffset", Math.floor(Math.random() * TEST_PORTS.count));
   await build({
     entryPoints: [`${PACKAGE_ROOT}/src/main.ts`],
     outfile: BUILT_UB,
