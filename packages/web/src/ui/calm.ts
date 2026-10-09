@@ -41,8 +41,8 @@ export const SETTLE_MS: Readonly<Record<SyncState, number>> = {
  * `provider.isSynced` means "the initial handshake completed", and it is never
  * lowered again — queuing an unacknowledged message does not reset it. Reading
  * the flag alone would therefore call a room with writes stranded at the hub
- * "synced" forever, and #76 suppresses the backlog badge in that state, so the
- * two together would hide the outage outright rather than merely calming it.
+ * "synced" forever, hiding the outage rather than merely calming it. The
+ * compact status word reports busy work; Sync details carries its count.
  * The backlog is the other half of the truth, so it is the other half of the
  * condition.
  */
@@ -54,9 +54,8 @@ export function rawSyncState(status: RoomStatus): SyncState {
 /**
  * The backlog, in the unit the provider actually counts.
  *
- * One wording, in one place, because two surfaces say it — the status line
- * under the title and the sync panel — and `sync_status` reports a count of
- * unsynced *rooms* under a similar name. Two numbers labelled "pending" invite
+ * The sync panel names the count's unit because `sync_status` reports a count
+ * of unsynced *rooms* under a similar name. Two numbers labelled "pending" invite
  * the question of which one is lying.
  *
  * The unit is provider sync messages awaiting the hub's acknowledgement, not
