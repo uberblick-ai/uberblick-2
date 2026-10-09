@@ -125,6 +125,70 @@ describe("the chart's derived lifecycle", () => {
     editor.destroy(); doc.destroy(); directory.destroy();
   });
 
+  it("recomputes the zero baseline from every series assigned to each value axis", () => {
+    const { doc, directory, id } = fixture();
+    const sharedMapping = JSON.stringify({ ...JSON.parse(mapping), y: [
+      { field: "value", unit: "requests" }, { field: "secondary", unit: "requests" }, { field: "right", unit: "%" },
+    ] });
+    editBlock(doc, id, mapping, sharedMapping);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } },
+      replaceRecords: [{ id: "a", value: { day: 1, value: 30, secondary: 36, right: -40 } }],
+    }]);
+    const { editor } = mountEditor(doc);
+    flush();
+    const instance = charts.instances[0];
+    if (instance === undefined) throw new Error("Chart did not draw");
+    expect(instance.options).toMatchObject({ scales: { y: { beginAtZero: true }, yRight: { beginAtZero: false } } });
+
+    applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "a", value: { day: 1, value: 30, secondary: -5, right: 36 } }] }]);
+    flush();
+    expect(instance.options).toMatchObject({ scales: { y: { beginAtZero: false }, yRight: { beginAtZero: true } } });
+
+    const threeUnitMapping = JSON.stringify({ ...JSON.parse(mapping), y: [
+      { field: "value", unit: "requests" }, { field: "secondary", unit: "ms" }, { field: "right", unit: "%" },
+    ] });
+    editBlock(doc, id, sharedMapping, threeUnitMapping);
+    flush();
+    expect(instance.options).toMatchObject({ scales: { y: { beginAtZero: false } } });
+    expect((instance.options as NonNullable<ChartConfiguration<"line">["options"]>).scales).not.toHaveProperty("yRight");
+
+    editBlock(doc, id, threeUnitMapping, JSON.stringify({ ...JSON.parse(mapping), y: [
+      { field: "value", unit: "requests" }, { field: "right", unit: "%" },
+    ] }));
+    flush();
+    expect(instance.options).toMatchObject({ scales: { y: { beginAtZero: true }, yRight: { beginAtZero: true } } });
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
+  it("uses only plotted values for the baseline, ignoring null gaps and negative records rejected by x or schema", () => {
+    const doc = new Y.Doc(), directory = new Y.Doc();
+    initDoc(doc, { uuid: "filtered-baseline", title: "Filtered baseline" });
+    appendBlock(doc, { type: "chart", text: JSON.stringify({ version: 1, type: "line", collection: "trend",
+      x: { field: "day", type: "date" }, y: [{ field: "value", unit: "requests" }, { field: "secondary", unit: "requests" }],
+    }) });
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object", properties: {
+      day: { type: "string" }, value: { type: ["number", "null"] }, secondary: { type: ["number", "null"] }, marker: { type: "string" },
+    } } }, upsert: [
+      { id: "first", value: { day: "2026-01-01", value: 30, secondary: null } },
+      { id: "gap", value: { day: "2026-01-02", value: null, secondary: 36 } },
+      { id: "invalid-x", value: { day: "2026-02-31", value: -40, secondary: -40 } },
+    ] }]);
+    // A merged peer record can violate the schema despite valid local writes.
+    doc.getMap("data").set(JSON.stringify(["record", "trend", "invalid-schema"]), {
+      day: "2026-01-03", value: -50, secondary: -50, marker: 42,
+    });
+    const { editor } = mountEditor(doc);
+    flush();
+    const instance = charts.instances[0];
+    if (instance === undefined) throw new Error("Chart did not draw");
+    expect(instance.options).toMatchObject({ scales: { y: { beginAtZero: true } } });
+    expect((instance.data as { datasets: { data: { y: number | null }[] }[] }).datasets.map(series => series.data.map(point => point.y)))
+      .toEqual([[30, null], [null, 36]]);
+    expect(editor.view.dom.querySelector(".ub-chart-diagnostics")?.textContent).toContain("1 invalid under the collection schema");
+    expect(editor.view.dom.querySelector(".ub-chart-diagnostics")?.textContent).toContain("1 wrong-type or invalid x");
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
   it("uses calendar labels on date scales while retaining the full accessible date", () => {
     const doc = new Y.Doc(), directory = new Y.Doc();
     initDoc(doc, { uuid: "calendar-chart", title: "Calendar" });
