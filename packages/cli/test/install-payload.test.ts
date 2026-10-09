@@ -16,7 +16,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
@@ -40,6 +40,7 @@ const extracted = join(scratch, "extracted");
 const nodeBin = join(scratch, "node-bin");
 const archive = join(output, `uberblick-${VERSION}.tar.gz`);
 const payload = join(extracted, `uberblick-${VERSION}`);
+const mcpMapPath = "packages/cli/lib/mcp.mjs.map";
 
 afterAll(() => {
   rmSync(scratch, { recursive: true, force: true });
@@ -118,6 +119,21 @@ function treeDigest(root: string): string {
   return hash.digest("hex");
 }
 
+function sourceLine(path: string, statement: string): number {
+  const lines = readFileSync(join(REPO_ROOT, path), "utf8").split("\n");
+  const index = lines.findIndex((line) => line.includes(statement));
+  expect(index, `${path} contains the failing call site`).toBeGreaterThanOrEqual(0);
+  return index + 1;
+}
+
+function failedMcpStart(root = payload) {
+  const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+  // SQLite cannot open a directory. The binding passes the CLI's checks, so
+  // this reaches the installed server's logger through the public command.
+  box.env.UBERBLICK_DB = box.cwd;
+  return runPayload(box, ["mcp", "serve"], { root });
+}
+
 async function freePort(): Promise<number> {
   const { createServer } = await import("node:net");
   const server = createServer();
@@ -193,6 +209,65 @@ describe("the versioned install payload", () => {
     expect(invalid.stderr).toContain("0.0.0 is not a release");
   });
 
+  it("ships only the MCP map with portable source paths and no builder paths", () => {
+    const files = filesBelow(payload);
+    expect(files.filter((path) => path.endsWith(".map")).map((path) => relative(payload, path)))
+      .toEqual([mcpMapPath]);
+    for (const file of files) {
+      const content = lstatSync(file).isSymbolicLink()
+        ? readlinkSync(file)
+        : readFileSync(file, "utf8");
+      for (const builderPath of [REPO_ROOT, scratch, join(tmpdir(), "uberblick-install-payload-")]) {
+        expect(content.includes(builderPath), `${relative(payload, file)} contains no builder path`).toBe(false);
+      }
+    }
+    const map = JSON.parse(readFileSync(join(payload, mcpMapPath), "utf8")) as {
+      sources: string[];
+      sourceRoot?: string;
+    };
+    expect(map.sources).toContain("packages/mcp-server/src/main.ts");
+    for (const source of [...map.sources, ...(map.sourceRoot ? [map.sourceRoot] : [])]) {
+      expect(isAbsolute(source), source).toBe(false);
+      expect(source, "source paths are portable repository paths").not.toMatch(/^[A-Za-z]:|\\|(?:^|\/)\.\.(?:\/|$)/);
+    }
+  });
+
+  it("maps logged installed MCP errors to the original TypeScript lines on stderr", () => {
+    const failed = failedMcpStart();
+    expect(failed.status, failed.stderr).toBe(1);
+    expect(failed.stdout).toBe("");
+    expect(failed.stderr).toContain("failed to start");
+    expect(failed.stderr).toContain("Error: unable to open database file");
+    for (const [path, statement] of [
+      ["packages/mcp-server/src/store.ts", "this.db = new DatabaseSync(databasePath)"],
+      ["packages/mcp-server/src/server.ts", "store: MirrorStore = new MirrorStore("],
+      ["packages/mcp-server/src/main.ts", "const instance = createMcpServer(config)"],
+      ["packages/mcp-server/src/main.ts", "main().catch("],
+    ] as const) {
+      expect(failed.stderr).toContain(`${path}:${sourceLine(path, statement)}:`);
+    }
+    expect(failed.stderr).not.toMatch(/mcp\.mjs:\d+:\d+/);
+    expect(failed.stderr).not.toContain(REPO_ROOT);
+  });
+
+  it.each([
+    ["missing", (path: string) => rmSync(path)],
+    ["unreadable", (path: string) => { rmSync(path); mkdirSync(path); }],
+    ["malformed", (path: string) => writeFileSync(path, "not a source map\n", "utf8")],
+  ])("preserves the original logged MCP error when its map is %s", (name, breakMap) => {
+    const broken = join(scratch, `broken-mcp-map-${name}`);
+    cpSync(payload, broken, { recursive: true });
+    breakMap(join(broken, mcpMapPath));
+    const failed = failedMcpStart(broken);
+    expect(failed.status, failed.stderr).toBe(1);
+    expect(failed.stdout).toBe("");
+    expect(failed.stderr).toContain("failed to start");
+    expect(failed.stderr).toContain("Error: unable to open database file");
+    expect(failed.stderr).toMatch(/mcp\.mjs:\d+:\d+/);
+    expect(failed.stderr).not.toMatch(/packages\/mcp-server\/src\/[^\s]+\.ts:\d+/);
+    expect(failed.stderr).not.toMatch(/ENOENT|EISDIR|SyntaxError/);
+  });
+
   it("runs workspace create, status, MCP and the packaged web app with only Node on PATH", async () => {
     const box = unboundSandbox();
     const initialPayload = treeDigest(payload);
@@ -207,7 +282,6 @@ describe("the versioned install payload", () => {
     ).toBe(VERSION);
     const help = runPayload(box, ["--help"]);
     expect(help.status, help.stderr).toBe(0);
-    expect(filesBelow(payload).some((path) => path.endsWith(".map"))).toBe(false);
 
     const created = runPayload(box, ["workspace", "create", "Payload proof"]);
     expect(created.status, created.stderr).toBe(0);

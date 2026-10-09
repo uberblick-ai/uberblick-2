@@ -6,13 +6,14 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readFileSync,
 	renameSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -51,7 +52,7 @@ function assertWebBundle(dir) {
 	}
 }
 
-async function bundle(entryPoint, outfile) {
+async function bundle(entryPoint, outfile, sourceMap = false) {
 	await build({
 		entryPoints: [entryPoint],
 		outfile,
@@ -60,8 +61,23 @@ async function bundle(entryPoint, outfile) {
 		format: "esm",
 		target: "node26",
 		minify: true,
-		sourcemap: false,
+		sourcemap: sourceMap ? "linked" : false,
+		sourcesContent: false,
 	});
+	if (sourceMap) {
+		const mapPath = `${outfile}.map`;
+		const map = JSON.parse(readFileSync(mapPath, "utf8"));
+		// esbuild relativizes sources against the temporary payload directory.
+		// Publish repository paths instead, never the builder's checkout path.
+		map.sources = map.sources.map((source) => {
+			const path = relative(REPOSITORY_ROOT, resolve(dirname(outfile), source));
+			if (path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) {
+				fail("MCP source map contains a source outside the repository");
+			}
+			return path.split(sep).join("/");
+		});
+		writeFileSync(mapPath, `${JSON.stringify(map)}\n`, "utf8");
+	}
 }
 
 async function main() {
@@ -106,6 +122,7 @@ async function main() {
 			bundle(
 				join(REPOSITORY_ROOT, "packages", "mcp-server", "src", "main.ts"),
 				join(cli, "lib", "mcp.mjs"),
+				true,
 			),
 		]);
 
