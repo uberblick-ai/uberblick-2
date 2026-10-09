@@ -977,16 +977,6 @@
           ],
           "description": "Person-facing document summary or decision line; null when unwritten."
         },
-        "changelogSuggestion": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "tags": {
           "type": "array",
           "items": {

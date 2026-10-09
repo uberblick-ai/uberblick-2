@@ -247,7 +247,6 @@ export const outputSchemas = {
     title: z.string(),
     description,
     tldr,
-    changelogSuggestion: z.string().nullable().optional(),
     tags,
     links: z.array(z.string()),
     ...lifecycle,

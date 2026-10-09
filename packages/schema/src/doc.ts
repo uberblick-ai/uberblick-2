@@ -225,7 +225,6 @@ export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
     description:
       typeof description === "string" && description !== "" ? description : null,
     tldr: typeof tldr === "string" && tldr !== "" ? tldr : null,
-    ...readChangelogSuggestion(meta.get("changelogSuggestion")),
     ...lifecycle,
     ...(supersedes === undefined ? {} : { supersedes }),
     ...(governs === null ? {} : { governs }),
@@ -253,24 +252,6 @@ function readSupersedes(
   return supersedes === canonicalDocumentUuid(documentUuid)
     ? undefined
     : supersedes;
-}
-
-/**
- * The three states of {@link DocMeta.changelogSuggestion}, read tolerantly.
- *
- * One key carries all three, so concurrent writers converge on one state rather
- * than on an invalid pair. Stored null is the deliberate "no user-facing entry";
- * a non-empty string is the suggestion; anything else — no key at all, or a
- * value only a foreign writer could have left — is nobody having written one.
- */
-function readChangelogSuggestion(
-  value: unknown,
-): { changelogSuggestion?: string | null } {
-  if (value === null) return { changelogSuggestion: null };
-  if (typeof value === "string" && value !== "") {
-    return { changelogSuggestion: value };
-  }
-  return {};
 }
 
 export function setTitle(ydoc: Y.Doc, title: string): void {
@@ -310,32 +291,6 @@ export function setTldr(ydoc: Y.Doc, tldr: string | null): void {
   const meta = getMetaMap(ydoc);
   ydoc.transact(() => {
     meta.set("tldr", tldr);
-  });
-}
-
-/**
- * Write the changelog suggestion, or clear it back to absent.
- *
- * `null` is the deliberate decision that this work needs no user-facing entry,
- * and is stored as null. The empty string removes the key instead, so the field
- * reads as nobody having written one rather than as that decision — the two are
- * different answers and only the key distinguishes them.
- *
- * Length is not enforced here, exactly as it is not for a description: the write
- * boundary checks it against {@link MAX_DESCRIPTION_LENGTH}. The directory stub
- * does not cache the field, so nothing follows this write.
- */
-export function setChangelogSuggestion(
-  ydoc: Y.Doc,
-  suggestion: string | null,
-): void {
-  const meta = getMetaMap(ydoc);
-  ydoc.transact(() => {
-    if (suggestion === "") {
-      meta.delete("changelogSuggestion");
-    } else {
-      meta.set("changelogSuggestion", suggestion);
-    }
   });
 }
 

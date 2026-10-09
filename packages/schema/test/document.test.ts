@@ -19,7 +19,6 @@ import {
   insertBlock,
   setBlockLanguage,
   setBlockLevel,
-  setChangelogSuggestion,
   setDescription,
   setKind,
   setLinks,
@@ -28,6 +27,7 @@ import {
   setTldr,
   setTitle,
 } from "../src/index.js";
+import { syncDocs } from "./helpers.js";
 
 const UUID = "11111111-1111-4111-8111-111111111111";
 
@@ -123,83 +123,64 @@ describe("document round-trip", () => {
     expect(getMetaMap(doc).get("tldr")).toBeNull();
   });
 
-  it("keeps the changelog suggestion's three states apart", () => {
-    const doc = seeded();
-    // Nobody has written one: the key is absent, not null. Collapsing the two
-    // would make every internal-only change look unfinished.
-    expect(getMeta(doc)).not.toHaveProperty("changelogSuggestion");
+  it.each(["A legacy release note.", null])(
+    "ignores a stored legacy changelog value %j without writing",
+    (legacy) => {
+      const doc = seeded();
+      const expected = getMeta(doc);
+      const meta = getMetaMap(doc);
+      meta.set("changelogSuggestion", legacy);
+      let updates = 0;
+      doc.on("update", () => {
+        updates += 1;
+      });
 
-    setChangelogSuggestion(doc, "Documents now carry a changelog suggestion.");
-    expect(getMeta(doc).changelogSuggestion).toBe(
-      "Documents now carry a changelog suggestion.",
-    );
+      expect(getMeta(doc)).toEqual(expected);
+      expect(getMeta(doc)).not.toHaveProperty("changelogSuggestion");
+      expect(meta.get("changelogSuggestion")).toBe(legacy);
+      expect(updates).toBe(0);
+      doc.destroy();
+    },
+  );
 
-    // The deliberate decision that this work needs no user-facing entry.
-    setChangelogSuggestion(doc, null);
-    expect(getMeta(doc).changelogSuggestion).toBeNull();
-
-    // And back to nobody having written one, with the key gone rather than
-    // blank — otherwise a clear would read as that decision.
-    setChangelogSuggestion(doc, "");
-    expect(getMeta(doc)).not.toHaveProperty("changelogSuggestion");
-    expect(getMetaMap(doc).has("changelogSuggestion")).toBe(false);
-  });
-
-  it("lets a concurrent changelog write outlive a clear, in both merge orders", () => {
-    // Clearing deletes the key, which reaches only the value the clearing
-    // replica has already seen — so the other writer's state survives, and the
-    // three states are not equally durable. Both `DocMeta.changelogSuggestion`
-    // and set_changelog_suggestion say so; this is what they say it about.
-    for (const concurrent of ["A later sentence.", null]) {
+  it.each(["A legacy release note.", null])(
+    "preserves a stored legacy changelog value %j through metadata writes and sync",
+    (legacy) => {
       const a = seeded();
-      setChangelogSuggestion(a, "The stored suggestion.");
+      getMetaMap(a).set("changelogSuggestion", legacy);
       const b = new Y.Doc();
-      Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+      syncDocs(a, b);
 
-      setChangelogSuggestion(a, "");
-      setChangelogSuggestion(b, concurrent);
-      const updateA = Y.encodeStateAsUpdate(a);
-      const updateB = Y.encodeStateAsUpdate(b);
-      Y.applyUpdate(a, updateB);
-      Y.applyUpdate(b, updateA);
+      initDoc(a, {
+        uuid: UUID,
+        title: "Block model, revised",
+        tags: ["schema", "keystone"],
+      });
+      setDescription(a, "Rewritten discovery copy.");
+      setTldr(b, "A quick summary for a person.");
+      setKind(b, "decision");
+      setStatus(b, "open");
+      const target = "22222222-2222-4222-8222-222222222222";
+      setLinks(b, [target]);
+      syncDocs(a, b);
 
       for (const replica of [a, b]) {
-        expect(getMeta(replica).changelogSuggestion).toBe(concurrent);
+        expect(getMeta(replica)).toEqual({
+          uuid: UUID,
+          title: "Block model, revised",
+          tags: ["keystone", "schema"],
+          description: "Rewritten discovery copy.",
+          tldr: "A quick summary for a person.",
+          kind: "decision",
+          status: "open",
+          topic: UUID,
+          links: [target],
+        });
+        expect(getMetaMap(replica).get("changelogSuggestion")).toBe(legacy);
+        replica.destroy();
       }
-    }
-  });
-
-  it("holds the changelog suggestion beside the other metadata, not instead of it", () => {
-    const doc = seeded();
-    setDescription(doc, "What this document is for.");
-    setKind(doc, "decision");
-    setStatus(doc, "open");
-    const target = "22222222-2222-4222-8222-222222222222";
-    setLinks(doc, [target]);
-
-    setChangelogSuggestion(doc, "Nothing a user can see changed here.");
-    expect(getMeta(doc)).toEqual({
-      uuid: UUID,
-      title: "Block model",
-      tags: ["schema"],
-      description: "What this document is for.",
-      tldr: null,
-      changelogSuggestion: "Nothing a user can see changed here.",
-      kind: "decision",
-      status: "open",
-      topic: UUID,
-      links: [target],
-    });
-
-    // And the traffic runs the other way too: a metadata write is not a
-    // wholesale replacement of `meta`.
-    setTitle(doc, "Block model, revised");
-    setTags(doc, ["schema", "keystone"]);
-    setDescription(doc, "Rewritten.");
-    expect(getMeta(doc).changelogSuggestion).toBe(
-      "Nothing a user can see changed here.",
-    );
-  });
+    },
+  );
 
   it("writes every legal kind/status pair and refuses every illegal one", () => {
     const legal = [

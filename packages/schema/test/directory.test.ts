@@ -678,7 +678,6 @@ describe("directory stub metadata divergence", () => {
           ...meta,
           links: [GAMMA],
           tldr: "A summary for readers.",
-          changelogSuggestion: "A release note.",
           supersedes: GAMMA,
         },
       ),
