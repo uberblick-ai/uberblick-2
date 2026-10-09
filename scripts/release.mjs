@@ -127,7 +127,7 @@ function command(command, args, options = {}) {
 
 export function productionServices({ root = ROOT, command: execute = command } = {}) {
   const run = (cmd, args, options = {}) => execute(cmd, args, { cwd: root, ...options });
-  const api = (path, jq) => JSON.parse(run("gh", ["api", path, "--paginate", "--slurp", ...(jq ? ["--jq", jq] : [])]));
+  const api = (path) => JSON.parse(run("gh", ["api", path, "--paginate", "--slurp"]));
   return {
     head: async () => run("git", ["rev-parse", "HEAD"]),
     fetchMain: async () => {
@@ -159,8 +159,9 @@ export function productionServices({ root = ROOT, command: execute = command } =
       const prs = new Map();
       for (const commit of commits) {
         // Filter before text reaches this process, just as AGENTS.md requires.
-        const matches = api(`repos/${REPOSITORY}/commits/${commit}/pulls?per_page=100`,
-          'flatten | map(select(.merged_at != null and .base.ref == "main" and (.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR" or .user.login == "copilot-pull-request-reviewer"))) | map({number,title,merge_commit_sha})');
+        const matches = run("gh", ["api", `repos/${REPOSITORY}/commits/${commit}/pulls?per_page=100`, "--paginate", "--jq",
+          '.[] | select(.merged_at != null and .base.ref == "main" and (.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR" or .user.login == "copilot-pull-request-reviewer")) | {number,title,merge_commit_sha} | @json'])
+          .split("\n").filter(Boolean).map((line) => JSON.parse(line));
         for (const pr of matches) if (commits.includes(pr.merge_commit_sha)) prs.set(pr.number, pr);
       }
       return [...prs.values()].sort((a, b) => a.number - b.number);

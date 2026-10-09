@@ -26,11 +26,13 @@ a partial release by moving tags. Delivery roles have no release authority.
    unreadable mandatory input prevents release. Do not reset a dirty checkout.
 
 2. Read the candidate's latest `signoff` commit status, not a PR head's status
-   and not an older success. The status list is newest first; filter by exact
-   context before selecting the latest. For example, substitute the full SHA:
+   and not an older success. Filter by exact context before selecting the
+   latest across all emitted JSON lines: newest `created_at`, then largest
+   `id` for a tie. No emitted line means no signoff. For example, substitute
+   the full SHA:
 
    ```sh
-   gh api --paginate --slurp repos/uberblick-ai/uberblick-2/commits/CANDIDATE_SHA/statuses --jq 'add | map(select(.context == "signoff")) | sort_by(.created_at, .id) | last | {state, created_at, target_url, description}'
+   gh api --paginate 'repos/uberblick-ai/uberblick-2/commits/CANDIDATE_SHA/statuses?per_page=100' --jq '.[] | select(.context == "signoff") | {id, state, created_at, target_url, description} | @json'
    ```
 
    When no signoff exists, run `mise run ci CANDIDATE_SHA` from an unmodified
@@ -51,7 +53,7 @@ a partial release by moving tags. Delivery roles have no release authority.
    Filter GitHub text to trusted authors in the command, before reading it:
 
    ```sh
-   gh api --paginate --slurp 'repos/uberblick-ai/uberblick-2/pulls?state=open&per_page=100' --jq 'add | map(select((.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR" or .user.login == "copilot-pull-request-reviewer") and any(.labels[]; .name == "ready-to-merge" or .name == "needs-review"))) | map({number, title, html_url, draft, head_sha: .head.sha, labels: [.labels[].name]})'
+   gh api --paginate 'repos/uberblick-ai/uberblick-2/pulls?state=open&per_page=100' --jq '.[] | select((.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR" or .user.login == "copilot-pull-request-reviewer") and any(.labels[]; .name == "ready-to-merge" or .name == "needs-review")) | {number, title, html_url, draft, head_sha: .head.sha, labels: [.labels[].name]} | @json'
    ```
 
    Apply the same author filter to associated PRs and tracking issues before
@@ -132,10 +134,11 @@ temporary Compose project is unique; do not reuse an existing deployment's
 project name or directory. Check REMOTE.md's Docker Engine/Compose floors
 first. Use this fresh empty Docker credential directory for **both** pulls;
 do not log in or copy a credential configuration.
-Preserve the current local daemon's Unix-socket endpoint before replacing
-`DOCKER_CONFIG`; Docker Desktop, OrbStack and Colima may select it through a
-named context. Reject remote/TLS endpoints for this local smoke check and
-never copy context credentials into the anonymous directory.
+Preserve the current local daemon's Unix-socket endpoint before the anonymous
+pulls; Docker Desktop, OrbStack and Colima may select it through a named context.
+Keep the normal Docker configuration for other commands so Compose remains
+discoverable. Reject remote/TLS endpoints for this local smoke check and never
+copy context credentials into the anonymous directory.
 
 ```bash
 set -euo pipefail
@@ -158,7 +161,6 @@ release_root=$(mktemp -d "${TMPDIR:-/tmp}/uberblick-release-smoke.XXXXXXXX")
 release_project=$(basename "$release_root" | tr '[:upper:].' '[:lower:]-')
 release_extract="$release_project-extract"
 mkdir "$release_root/docker-config" "$release_root/host"
-export DOCKER_CONFIG="$release_root/docker-config"
 unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES
 unset COMPOSE_DISABLE_ENV_FILE WEB_HOST HTTPS_BIND_IP TAILSCALE_HOST TAILSCALE_IP
 unset WEB_HUB_URL WEB_WORKSPACES LOOPBACK_PORT HUB_AUTH_TOKEN HUB_GITHUB_CLIENT_ID
@@ -212,7 +214,7 @@ for release_image in hub hub-web; do
       continue
     fi
   fi
-  if ! docker pull --platform linux/amd64 "$release_ref"; then
+  if ! docker --config "$release_root/docker-config" pull --platform linux/amd64 "$release_ref"; then
     printf 'Anonymous pull failed: %s; check its GHCR Package settings visibility.\n' "$release_ref" >&2
     release_pull_failed=1
     continue

@@ -102,11 +102,22 @@ test("notes query each range commit's associated PRs and keep only merges in tha
     }
     assert.equal(cmd, "gh");
     queries.push(args);
-    assert.ok(args.includes("--paginate") && args.includes("--slurp"));
-    assert.match(args[args.indexOf("--jq") + 1], /author_association/);
-    return JSON.stringify([{ number: 7, title: "Feature", merge_commit_sha: "merge-a" },
-      { number: 8, title: "Older associated merge", merge_commit_sha: "before-range" }]);
+    assert.ok(args.includes("--paginate") && args.includes("--jq"));
+    assert.equal(args.includes("--slurp"), false, "gh rejects --slurp combined with --jq");
+    const query = args[args.indexOf("--jq") + 1];
+    assert.match(query, /author_association/);
+    assert.match(query, /\| @json$/);
+    if (args[1].includes("direct-b")) return "";
+    const matches = args[1].includes("merge-a")
+      ? [{ number: 7, title: "Feature\nwith a newline", merge_commit_sha: "merge-a" },
+        { number: 8, title: "Older associated merge", merge_commit_sha: "before-range" }]
+      : [{ number: 7, title: "Feature\nwith a newline", merge_commit_sha: "merge-a" },
+        { number: 9, title: "Fix", merge_commit_sha: "merge-c" }];
+    return matches.map((pr) => JSON.stringify(pr)).join("\n");
   } });
-  assert.deepEqual(await services.mergedPrs("v0.4.0", "candidate"), [{ number: 7, title: "Feature", merge_commit_sha: "merge-a" }]);
+  assert.deepEqual(await services.mergedPrs("v0.4.0", "candidate"), [
+    { number: 7, title: "Feature\nwith a newline", merge_commit_sha: "merge-a" },
+    { number: 9, title: "Fix", merge_commit_sha: "merge-c" },
+  ]);
   assert.equal(queries.length, 3);
 });
