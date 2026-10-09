@@ -2011,6 +2011,18 @@ function copyNotice(page: Page, message: string): Locator {
   });
 }
 
+/** Wait for native dismissal before inspecting the replacement's content. */
+async function activateCopy(page: Page, control: Locator, keyboard = false): Promise<void> {
+  const previous = (await page.locator("[data-sonner-toast]").elementHandles())[0];
+  if (keyboard) await control.press("Enter");
+  else await control.click();
+  if (previous !== undefined) {
+    await expect.poll(() => previous.evaluate((element) => element.isConnected)).toBe(false);
+    await previous.dispose();
+  }
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
+}
+
 type ClipboardMode = "modern" | "missing" | "refused" | "failed";
 
 /** Observe copied text at the browser APIs; the product keeps its real helper. */
@@ -2088,52 +2100,43 @@ for (const scheme of ["light", "dark"] as const) {
       const link = page.locator(".ub-doc-meta .ub-copy-link");
       const canonicalUrl = new URL(`/${harness().workspace}/${uuid}`, harness().appUrl).href;
       await expect(link).toHaveAccessibleName(`uuid ${uuid.slice(0, 8)} — copies the canonical document URL for ${harness().workspace}/${uuid}`);
-      await link.click();
+      await activateCopy(page, link);
       await expect(copyNotice(page, "URL copied to clipboard")).toHaveAttribute("data-type", "success");
-      const firstNotice = await copyNotice(page, "URL copied to clipboard").elementHandle();
-      if (firstNotice === null) throw new Error("e2e: no first copy notice");
-      await link.press("Enter");
-      await expect(page.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
-      await expect.poll(() => copyNotice(page, "URL copied to clipboard").evaluate((element, original) => element !== original, firstNotice)).toBe(true);
-      await firstNotice.dispose();
+      await activateCopy(page, link, true);
+      await expect(copyNotice(page, "URL copied to clipboard")).toHaveAttribute("data-type", "success");
       expect(await copiedTexts(page)).toEqual([canonicalUrl, canonicalUrl]);
       await expect(page.locator(".ub-copied")).toHaveCount(0);
 
       await placeCaret(page);
       await page.keyboard.insertText("Keep caret selection");
       for (let step = 0; step < 4; step += 1) await page.keyboard.press("Shift+ArrowLeft");
+      await expect.poll(async () => {
+        const selection = await editorSelection(page);
+        return selection.to - selection.from;
+      }).toBe(4);
       const selected = await editorSelection(page);
       expect(selected.focused).toBe(true);
       expect(selected.from).not.toBe(selected.to);
       for (const [selector, , text] of sources) {
         const copy = page.locator(selector).getByRole("button", { name: "copy", exact: true });
-        await copy.click();
+        await activateCopy(page, copy);
         await expect(copyNotice(page, "Copied to clipboard")).toHaveAttribute("data-type", "success");
         await expect(copy).toHaveText("copy");
         expect((await copiedTexts(page)).at(-1)).toBe(text);
         expect(await editorSelection(page)).toEqual(selected);
         await expect(page.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
       }
-      const sourceNotice = await copyNotice(page, "Copied to clipboard").elementHandle();
-      if (sourceNotice === null) throw new Error("e2e: no source copy notice");
       const codeCopy = page.locator(".ub-code .ub-copy");
-      await codeCopy.click();
-      await expect(page.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
-      await expect.poll(() => copyNotice(page, "Copied to clipboard").evaluate((element, original) => element !== original, sourceNotice)).toBe(true);
-      await sourceNotice.dispose();
-      const repeatedSourceNotice = await copyNotice(page, "Copied to clipboard").elementHandle();
-      if (repeatedSourceNotice === null) throw new Error("e2e: no repeated source notice");
-      await codeCopy.click();
-      await expect(page.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
-      await expect.poll(() => copyNotice(page, "Copied to clipboard").evaluate((element, original) => element !== original, repeatedSourceNotice)).toBe(true);
-      await repeatedSourceNotice.dispose();
+      await activateCopy(page, codeCopy);
+      await activateCopy(page, codeCopy);
+      await expect(copyNotice(page, "Copied to clipboard")).toHaveAttribute("data-type", "success");
       expect(await editorSelection(page)).toEqual(selected);
       // Each missing or refused modern API still succeeds through selection,
       // without moving the editor's caret or keeping a second notice.
       for (const mode of ["missing", "refused", "failed"] as const) {
         await clipboardMode(page, mode);
         const copy = page.locator(".ub-code .ub-copy");
-        await copy.click();
+        await activateCopy(page, copy);
         await expect(copyNotice(page, mode === "failed" ? "Copy failed" : "Copied to clipboard")).toHaveAttribute("data-type", mode === "failed" ? "error" : "success");
         expect(await copiedTexts(page)).toEqual(mode === "failed" ? [] : [sources[0][2]]);
         expect(await editorSelection(page)).toEqual(selected);
@@ -2152,12 +2155,12 @@ for (const scheme of ["light", "dark"] as const) {
     const bounds = await waitingCopy.boundingBox();
     expect(bounds?.width).toBeGreaterThanOrEqual(44);
     expect(bounds?.height).toBeGreaterThanOrEqual(44);
-    await waitingCopy.click();
+    await activateCopy(waiting, waitingCopy);
     await expect(copyNotice(waiting, "URL copied to clipboard")).toHaveAttribute("data-type", "success");
     expect(await copiedTexts(waiting)).toEqual([new URL(`/${harness().workspace}/${waitingId}`, harness().appUrl).href]);
     await expect(waiting.locator(".ub-copied")).toHaveCount(0);
     await clipboardMode(waiting, "failed");
-    await waitingCopy.press("Enter");
+    await activateCopy(waiting, waitingCopy, true);
     await expect(copyNotice(waiting, "Copy failed")).toHaveAttribute("data-type", "error");
     await expect(waiting.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
   });
