@@ -49,6 +49,65 @@ async function ownTreatment(control: Locator) {
   });
 }
 
+async function expectTargetGeometry(page: Page, coarse: boolean, kind: "group" | "pin"): Promise<void> {
+  expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(coarse);
+  const floor = coarse ? 44 : 24;
+  const geometry = await page.locator(kind === "group" ? ".ub-group-act" : ".ub-docs-pin").evaluateAll((controls) =>
+    controls.map((control) => {
+      const box = control.getBoundingClientRect();
+      const container = control.closest(".ub-group-head, .ub-docs-pin-cell");
+      const parent = container?.getBoundingClientRect();
+      const previous = control.classList.contains("ub-group-act")
+        ? control.previousElementSibling : container?.previousElementSibling;
+      const row = control.closest(".ub-docs-row")?.getBoundingClientRect();
+      return {
+        name: control.getAttribute("aria-label"),
+        pin: control.classList.contains("ub-docs-pin"),
+        width: box.width,
+        height: box.height,
+        contained: parent !== undefined && box.left >= parent.left - 0.5
+          && box.right <= parent.right + 0.5 && box.top >= parent.top - 0.5
+          && box.bottom <= parent.bottom + 0.5,
+        separated: previous !== null && previous !== undefined
+          && previous.getBoundingClientRect().right <= box.left + 0.5,
+        parentWidth: parent?.width,
+        rowHeight: row?.height,
+        openHeight: control.closest(".ub-docs-row")?.querySelector(".ub-docs-open")?.getBoundingClientRect().height,
+        headerHeight: control.closest(".ub-group-head")?.getBoundingClientRect().height,
+        toggleHeight: control.closest(".ub-group-head")?.querySelector(".ub-group-toggle")?.getBoundingClientRect().height,
+      };
+    }),
+  );
+  expect(geometry.length).toBeGreaterThan(0);
+  for (const control of geometry) {
+    expect(control.width, `${control.name} width`).toBeGreaterThanOrEqual(floor);
+    expect(control.height, `${control.name} height`).toBeGreaterThanOrEqual(floor);
+    expect(control.contained, `${control.name} inside its header or cell`).toBe(true);
+    expect(control.separated, `${control.name} clear of its neighbour`).toBe(true);
+    if (control.pin && !coarse) {
+      expect(control.width).toBe(24);
+      expect(control.height).toBe(24);
+      expect(control.parentWidth).toBe(28);
+    }
+    if (control.pin && !coarse) {
+      // Existing inline-button baselines differ between engines on touch;
+      // desktop rows must still take their height from the document title.
+      expect(control.rowHeight).toBeLessThanOrEqual((control.openHeight ?? 0) + 0.5);
+    }
+    if (!control.pin) {
+      expect(control.headerHeight).toBeLessThanOrEqual(Math.max(control.toggleHeight ?? 0, floor) + 0.5);
+    }
+  }
+  // The outer sidebar also contains a translated, inactive settings pane.
+  const container = page.locator(kind === "group" ? ".ub-sidebar-pane:not([inert]) [data-slot=sidebar-content]" : ".ub-docs-table");
+  expect(await container.evaluate((node) => node.scrollWidth <= Math.ceil(node.getBoundingClientRect().width)), "no horizontal overflow").toBe(true);
+  if (kind === "pin") expect(await page.locator(".ub-docs-table").evaluate((table) => {
+    const box = table.getBoundingClientRect();
+    const pane = table.closest(".ub-docs")?.getBoundingClientRect();
+    return pane !== undefined && box.left >= pane.left - 0.5 && box.right <= pane.right + 0.5;
+  }), "table fits its pane").toBe(true);
+}
+
 async function expectInsideViewport(control: Locator): Promise<void> {
   await expect(control).toBeVisible();
   await expect.poll(() => control.evaluate((node) => {
@@ -106,6 +165,28 @@ test("pointer rows retain their rest, hover and focus reveal, and deletion resto
   await rest(page);
   await expect(unpinned).toHaveCSS("opacity", "0");
 
+  await expectTargetGeometry(page, false, "group");
+  await expectTargetGeometry(page, false, "pin");
+
+  await unpinned.locator("xpath=ancestor::tr").locator(".ub-docs-open").focus();
+  await page.keyboard.press("Tab");
+  await expect(unpinned).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(unpinned).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Space");
+  await expect(unpinned).toHaveAttribute("aria-pressed", "false");
+  await heading.getByRole("button", { name: "Reading", exact: true }).focus();
+  await page.keyboard.press("Tab");
+  const rename = heading.getByRole("button", { name: "Rename group Reading", exact: true });
+  await expect(rename).toBeFocused();
+  expect(await rename.evaluate((node) => getComputedStyle(node).outlineStyle)).not.toBe("none");
+  await page.keyboard.press("Tab");
+  await expect(heading.getByRole("button", { name: "Delete group Reading", exact: true })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("textbox", { name: "Group name" })).toBeFocused();
+  await page.keyboard.press("Escape");
+
   await heading.hover();
   await heading.getByRole("button", { name: "Delete group Reading", exact: true }).click();
   const confirmation = page.getByRole("alertdialog");
@@ -120,6 +201,7 @@ test("touch rows expose their actions without sticky hover, and Cancel and Delet
   const page = await devicePage(browser, info, true);
   expect(await page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true);
   await seed(page);
+  await expectTargetGeometry(page, true, "group");
   for (const action of await page.locator(".ub-group-act").all()) {
     await expect(action).toHaveCSS("opacity", "1");
   }
@@ -165,6 +247,7 @@ test("touch rows expose their actions without sticky hover, and Cancel and Delet
   await page.getByRole("button", { name: "All docs", exact: true }).tap();
   const pins = page.locator(".ub-docs-pin");
   await expect(pins).toHaveCount(2);
+  await expectTargetGeometry(page, true, "pin");
   for (const control of await pins.all()) await expect(control).toHaveCSS("opacity", "1");
   await expect(pin(page, "Pinned reference")).toHaveAttribute("aria-pressed", "true");
   const unpinned = pin(page, "Loose note");
@@ -177,6 +260,16 @@ test("touch rows expose their actions without sticky hover, and Cancel and Delet
   await expect(unpinned).toHaveAttribute("aria-pressed", "false");
   await expect(unpinned).toHaveCSS("opacity", "1");
   expect(await ownTreatment(unpinned)).toEqual(pinRest);
+});
+
+test("coarse-pointer tablet targets fit beside long group names and inside document rows", async ({ browser }, info) => {
+  const page = await devicePage(browser, info, true);
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await seed(page);
+  await addGroup(page, "A long reading group name that truncates beside the actions");
+  await expectTargetGeometry(page, true, "group");
+  await page.getByRole("button", { name: "All docs", exact: true }).tap();
+  await expectTargetGeometry(page, true, "pin");
 });
 
 test("a Delete group confirmation refuses in place after sidebar readiness is lost in the drawer", async ({ browser }, info) => {
