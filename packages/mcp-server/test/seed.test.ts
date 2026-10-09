@@ -1,7 +1,7 @@
 /**
  * The markdown template import — contract level.
  *
- * This path is private: `ub init` writes the two starter templates that ship in
+ * This path is private: `ub workspace create` writes the two starter templates that ship in
  * `@uberblick/cli` through it, and nothing else does. Its job is that a
  * template becomes a discoverable document and then stops being a template — a
  * second run writes nothing, the link graph is real, and a live edit is never
@@ -142,7 +142,7 @@ afterAll(() => {
 
 describe("seed import", () => {
   // Identity comes from the file and is never invented: a generated uuid would
-  // make every `ub init` write the starter documents again, as new ones.
+  // make every `ub workspace create` write the starter documents again, as new ones.
   it("refuses a template without identity rather than inventing one", () => {
     const nameless = tempDir();
     writeFileSync(
@@ -488,7 +488,7 @@ describe("seed import", () => {
 });
 
 /**
- * The starter sidebar an `ub init` asks {@link importSeedDir} for.
+ * The starter sidebar an `ub workspace create` asks {@link importSeedDir} for.
  *
  * The CLI owns the real one and proves the whole path end to end; this suite
  * owns the boundary the CLI cannot reach from outside, which is what happens
@@ -547,7 +547,7 @@ describe("starter sidebar seed", () => {
 
   // The failure this defends against is the one a local-only eligibility read
   // cannot see: a replica bound to a workspace it has never synced — `ub
-  // workspace use <id>` then `ub init`, or a database restored from a backup —
+  // workspace use <id>` then `ub workspace create`, or a database restored from a backup —
   // reads an empty directory and would seed a starter corpus, and a starter
   // sidebar group, into somebody's real one.
   it("writes nothing into a workspace the hub says is already in use", async () => {

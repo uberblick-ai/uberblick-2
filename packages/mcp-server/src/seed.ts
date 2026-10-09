@@ -26,8 +26,7 @@
  *    written again, not even when the template has changed. After the first
  *    write the document belongs to whoever edits it, and this reader cannot
  *    tell an edited template from an edited *document* — so it does not guess,
- *    and a re-run cannot clobber real work. That is also what makes `ub init`
- *    idempotent.
+ *    and a repeated import cannot clobber real work.
  * 4. **A document it must not write is skipped, not written.** Two cases: a uuid
  *    the directory knows whose room has not reached this replica (writing it
  *    would put a second copy of every block into a room that already has one),
@@ -45,7 +44,7 @@
  *
  * {@link importSeedDir} takes an optional {@link StarterSeed} on top of that,
  * because a seeded workspace is a *first-open state* rather than a set of
- * rooms: `ub init` owns the starter sidebar group and writes it here, through
+ * rooms: `ub workspace create` owns the starter sidebar group and writes it here, through
  * this same replica set and this same log, so the pins exist whether or not an
  * MCP server ever starts. Tags never derive or modify that explicit curation.
  */
@@ -371,7 +370,7 @@ export async function importSeedDocs(
  * #210: two concurrent creates of one id are two writes of one key, so one
  * nested map wins whole and the loser's pins go with it. That is safe *here*
  * because every writer of this group writes exactly the same name and the same
- * pins — `ub init` seeds one fixed starter layout, and its runs are serialised
+ * pins — `ub workspace create` seeds one fixed starter layout, and its runs are serialised
  * on one machine by the seed lock.
  */
 export interface StarterSeed {
@@ -389,12 +388,9 @@ export interface StarterSeed {
  *
  * The check is *here*, after hydration and before the first write, because
  * eligibility read anywhere earlier is eligibility read from the wrong replica.
- * `ub init` does ask the same question locally first — cheaply, without a hub —
- * but a local answer is only ever about what this machine has downloaded. A
- * replica bound to a workspace it has never synced (`ub workspace use <id>`
- * followed by `ub init`, or a database restored from a backup) reads an empty
- * directory and would otherwise write starter documents, and a starter sidebar
- * group, into somebody's real corpus.
+ * A local answer is only ever about what this machine has downloaded. An
+ * importer pointed at a replica it has never synced can read an empty directory
+ * and would otherwise write a starter layout into somebody's real corpus.
  *
  * Tombstones count. An archived document is a document this workspace has had,
  * and it is the same evidence a live one is: this workspace is somebody's.
@@ -461,7 +457,7 @@ async function seedSidebar(
  * close both handles again.
  *
  * The lifecycle is the reason this exists — a caller that is not a process
- * dedicated to importing (`ub init` seeding a new workspace's starter
+ * dedicated to importing (`ub workspace create` seeding a new workspace's starter
  * documents) must not leave a SQLite handle and a hub connection open behind
  * it. `hub` is the sync layer's status at the end, reported after the replicas
  * are gone.
@@ -497,7 +493,7 @@ export async function importSeedDir(
       // for every attached room to go quiet, the directory included, and skips
       // the wait entirely when the hub is unreachable. A second `waitForQuiet`
       // here would buy nothing and would repeat the full connect timeout
-      // offline, with `ub init`'s seed lock held. It also throws on a poisoned
+      // offline, with `ub workspace create`'s seed lock held. It also throws on a poisoned
       // replica before returning, so health is asserted before this reads
       // anything.
       await replicas.settle();

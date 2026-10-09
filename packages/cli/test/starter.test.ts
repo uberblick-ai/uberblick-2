@@ -1,5 +1,5 @@
 /**
- * The starter corpus: what `ub init` leaves in a workspace it just created.
+ * The starter corpus: what `ub workspace create` leaves in a workspace it just created.
  *
  * The writer is the real binary in a throwaway XDG home; the readers are two,
  * deliberately. An in-process MCP server over the same database with no secret
@@ -7,13 +7,13 @@
  * document an ordinary MCP client can list, read and export, and it has to
  * happen offline, which is the only state a machine being initialised is
  * reliably in. The sidebar is read straight out of the update log instead,
- * without constructing a server at all: a broken `ub init` must not pass
+ * without constructing a server at all: a broken `ub workspace create` must not pass
  * because a later reader repaired or reinterpreted its output, and the web
  * client is usually the first thing a new user opens.
  */
 
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -33,8 +33,6 @@ import {
   readSidebar,
   roomForDoc,
   sidebarRoom,
-  tombstoneDirectoryEntry,
-  upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { SidebarGroup } from "@uberblick/schema";
 import * as Y from "yjs";
@@ -61,7 +59,7 @@ function sandbox(files?: SandboxFiles): Sandbox {
   return hubless(anySandbox(files));
 }
 
-/** Starter creation also covers the first binding written by init. */
+/** Starter creation also covers the first binding written by create. */
 function unboundSandbox(files?: SandboxFiles): Sandbox {
   return hubless(anyUnboundSandbox(files));
 }
@@ -89,24 +87,12 @@ const PINS = TEMPLATES.map((template) => template.uuid);
 
 let box: Sandbox;
 
-/** A workspace id for the half-seeded case, which starts from a config file. */
-const HALF_WORKSPACE = "5f2b7c48-9d31-4a6e-8c05-3e7a1b9d4f62";
-
-/** And one for a workspace that is already somebody's. */
-const OWNED_WORKSPACE = "b7e9c130-6a48-4f21-9d3c-8e05a2b6f741";
-
-/** A non-starter document known only by its archived directory stub. */
-const OWNED_ARCHIVE = "a98a269e-749c-402e-8776-648b78154d79";
-
-/** One for a workspace whose documents landed but whose sidebar did not. */
-const UNPINNED_WORKSPACE = "c4a1e582-70b3-4d9f-8a26-1fb3d0c95e84";
-
 /** And one seeded straight through the importer, to write into. */
 const DESCRIBED_WORKSPACE = "9d3b6f27-1c84-4a05-b7e9-2f61c8d05a3b";
 
-/** `ub init` on a machine with no hub and nothing to install. */
-function init(target: Sandbox = box): Run {
-  const run = runUb(["init", "--yes", "--no-mcp"], target);
+/** `ub workspace create` on a machine with no hub and nothing to install. */
+function create(target: Sandbox = box): Run {
+  const run = runUb(["workspace", "create", "Starter workspace"], target);
   expect(run.status, run.output).toBe(0);
   return run;
 }
@@ -123,7 +109,7 @@ function workspace(target: Sandbox = box): string {
  * mirror read-only, applies what the log holds for the room to a bare Y.Doc,
  * and hands it back to be read with the same schema functions every client
  * uses. That is the state a first-ever web client would sync down, which is
- * exactly what `ub init` has to have written by the time it returns — and it is
+ * exactly what `ub workspace create` has to have written by the time it returns — and it is
  * the only reading that cannot be flattered by a later server's repairs.
  */
 function replayRoom(
@@ -165,7 +151,7 @@ function sidebarFromLog(target: Sandbox = box): {
   return { groups: readSidebar(doc), seeded: isSidebarSeeded(doc) };
 }
 
-/** Call MCP tools against the workspace `ub init` wrote, local-only. */
+/** Call MCP tools against the workspace `ub workspace create` wrote, local-only. */
 async function withTools<T>(
   fn: (call: (name: string, args?: Record<string, unknown>) => Promise<any>) => Promise<T>,
   target: Sandbox = box,
@@ -197,12 +183,12 @@ async function withTools<T>(
 
 beforeAll(() => {
   box = unboundSandbox();
-  init();
+  create();
 });
 
 it("pins both starter documents into the Überblick group, in order", () => {
   // Read from the update log, with no MCP server ever constructed against this
-  // workspace: `ub init` itself has to leave the pins durable, because the web
+  // workspace: `ub workspace create` itself has to leave the pins durable, because the web
   // client is the first thing a new user opens and it runs no migration.
   const sidebar = sidebarFromLog();
   expect(sidebar.groups).toHaveLength(1);
@@ -246,7 +232,7 @@ it("seeds exactly two untagged starter documents, with their uuids and links", a
 
 it("describes both starter documents, in the document and in the stub", () => {
   // What this pins is the observable contract: from the log alone, both
-  // documents and both stubs are described by the time `ub init` returns.
+  // documents and both stubs are described by the time `ub workspace create` returns.
   // It does not pin which writer put the description in the stub — the seed's
   // own `upsertDirectoryEntry` and `Replicas.repairStub`, which reconciles a
   // stub from `meta.description`, both run inside that one process, and this
@@ -321,7 +307,7 @@ it("refuses a template that carries no description", () => {
 
 it("is adopted by an MCP server started afterwards, with no second group", async () => {
   // The sidebar is explicit seed state, not a projection of document tags. A
-  // later MCP process adopts the group exactly as `ub init` wrote it.
+  // later MCP process adopts the group exactly as `ub workspace create` wrote it.
   await withTools(async (call) => {
     const { groups } = await call("get_sidebar");
     expect(groups).toHaveLength(1);
@@ -347,242 +333,49 @@ it("exports both starter documents back to the markdown they came from", async (
   });
 });
 
-it("seeds nothing on a second run: no duplicate document, group or pin", async () => {
-  const before = await withTools(async (call) =>
-    call("get_doc", { uuid: uuidOf(TEMPLATES[0]!.file) }),
-  );
-  init();
-  expect(sidebarFromLog().groups).toEqual([
+it("creates a complete new workspace on every run and leaves the old one unchanged", async () => {
+  const rerun = unboundSandbox();
+  create(rerun);
+  const previous = workspace(rerun);
+  const before = await withTools(call => call("get_doc", { uuid: PINS[0]! }), rerun);
+  create(rerun);
+  const next = workspace(rerun);
+  expect(next).not.toBe(previous);
+  expect(sidebarFromLog(rerun).groups).toEqual([
     { id: STARTER_GROUP_ID, name: STARTER_GROUP_NAME, docs: PINS },
   ]);
-  await withTools(async (call) => {
-    const { docs } = await call("list_docs");
-    expect(docs).toHaveLength(2);
-    const after = await call("get_doc", { uuid: uuidOf(TEMPLATES[0]!.file) });
+  expect(runUb(["workspace", "use", previous], rerun).status).toBe(0);
+  await withTools(async call => {
+    const after = await call("get_doc", { uuid: PINS[0]! });
     expect(after.blocks).toEqual(before.blocks);
-  });
+  }, rerun);
 });
 
-it("finishes a workspace whose seed stopped after the first document", async () => {
-  // The state a refused log write leaves behind — one starter document here,
-  // the other missing, and no sidebar — reached through the importer itself
-  // rather than by crashing one: what matters is that `ub init` reads what is
-  // missing instead of remembering that it once ran.
-  const half = sandbox({ projectBinding: { workspaceId: HALF_WORKSPACE, hubUrl: null } });
-  const partial = join(half.cwd, "one-template");
-  const first = TEMPLATES[0]!.file;
-  mkdirSync(partial, { recursive: true });
-  copyFileSync(join(PACKAGE_ROOT, "templates", first), join(partial, first));
-  await importSeedDir(
-    partial,
-    resolveMcpConfig({ WORKSPACE_ID: HALF_WORKSPACE, XDG_DATA_HOME: half.dataHome }),
-  );
-  // Half a starter corpus is not a layout to declare: nothing was pinned and
-  // the sidebar was left unseeded, so the next run still owns it.
-  expect(sidebarFromLog(half)).toEqual({ groups: [], seeded: false });
-
-  init(half);
-
-  expect(sidebarFromLog(half).groups).toEqual([
-    { id: STARTER_GROUP_ID, name: STARTER_GROUP_NAME, docs: PINS },
-  ]);
-  await withTools(async (call) => {
-    const { docs } = await call("list_docs");
-    expect(docs.map((doc: { title: string }) => doc.title)).toEqual([
-      "How to Use It",
-      "Welcome to Überblick",
-    ]);
-    // The document that was already here is untouched: the importer never
-    // rewrites a uuid it finds, so finishing the seed cannot duplicate a block.
-    const welcome = await call("get_doc", { uuid: uuidOf(first) });
-    const source = importMarkdown(
-      readFileSync(join(PACKAGE_ROOT, "templates", first), "utf8"),
-    );
-    expect(welcome.blocks).toHaveLength(source.blocks.length);
-  }, half);
-});
-
-it("repairs an unseeded sidebar in a workspace holding only the starter documents", async () => {
-  // Both documents landed, the pins never did — the workspace a `ub init` from
-  // before this feature leaves behind, and the one an init interrupted between
-  // the two writes leaves behind. The next run finishes the layout.
-  const unpinned = sandbox({ projectBinding: { workspaceId: UNPINNED_WORKSPACE, hubUrl: null } });
-  await importSeedDir(
-    join(PACKAGE_ROOT, "templates"),
-    resolveMcpConfig({
-      WORKSPACE_ID: UNPINNED_WORKSPACE,
-      XDG_DATA_HOME: unpinned.dataHome,
-    }),
-  );
-  expect(sidebarFromLog(unpinned)).toEqual({ groups: [], seeded: false });
-
-  init(unpinned);
-
-  expect(sidebarFromLog(unpinned).groups).toEqual([
-    { id: STARTER_GROUP_ID, name: STARTER_GROUP_NAME, docs: PINS },
-  ]);
-});
-
-it("leaves sidebar curation alone once it exists", async () => {
-  // The pins are the user's from the moment they land. A renamed group, a
-  // reordered one, an unpinned document — every later `ub init` has to read
-  // that as state it must not touch, and the seed marker is what says so even
-  // after the group itself is deleted.
-  const curated = sandbox();
-  init(curated);
-  await withTools(async (call) => {
-    await call("sidebar_group", {
-      action: "rename",
-      group: STARTER_GROUP_ID,
-      name: "Mine",
-    });
-    await call("unpin_doc", { uuid: PINS[1]! });
-  }, curated);
-
-  init(curated);
-
-  expect(sidebarFromLog(curated).groups).toEqual([
-    { id: STARTER_GROUP_ID, name: "Mine", docs: [PINS[0]!] },
-  ]);
-
-  // And the harder half: a sidebar emptied on purpose stays empty, because the
-  // marker outlives the groups it stood for.
-  await withTools(async (call) => {
-    await call("sidebar_group", { action: "delete", group: STARTER_GROUP_ID });
-  }, curated);
-
-  init(curated);
-
-  expect(sidebarFromLog(curated)).toEqual({ groups: [], seeded: true });
-});
-
-it("adds nothing to a workspace that already holds other documents", async () => {
-  // The upgrade case, and the joined-workspace case: a corpus that is already
-  // somebody's is not one to write starter documents into, however little of
-  // the starter corpus it happens to hold.
-  const owned = sandbox({ projectBinding: { workspaceId: OWNED_WORKSPACE, hubUrl: null } });
-  await withTools(
-    async (call) =>
-      call("create_doc", {
-        title: "Real work",
-        description: "A test document.",
-      }),
-    owned,
-  );
-
-  init(owned);
-
-  // Read before any MCP server touches this workspace again: the sidebar is a
-  // seed too, and it must not be written into somebody else's workspace either.
-  expect(sidebarFromLog(owned)).toEqual({ groups: [], seeded: false });
-  await withTools(async (call) => {
-    const { docs } = await call("list_docs");
-    expect(docs.map((doc: { title: string }) => doc.title)).toEqual(["Real work"]);
-  }, owned);
-});
-
-it("adds nothing when an archived stub has no document room", async () => {
-  // A different replica can deliver a tombstone without ever having attached
-  // the archived room. The stub is still evidence that this workspace belongs
-  // to somebody, so `ub init` must not seed starter documents into it.
-  const owned = sandbox({ projectBinding: { workspaceId: OWNED_WORKSPACE, hubUrl: null } });
-  const config = resolveMcpConfig({
-    WORKSPACE_ID: OWNED_WORKSPACE,
-    XDG_DATA_HOME: owned.dataHome,
-  });
-  const instance = createMcpServer(config);
-  const directory = new Y.Doc();
-  try {
-    upsertDirectoryEntry(directory, {
-      uuid: OWNED_ARCHIVE,
-      title: "Archived elsewhere",
-      tags: [],
-    });
-    tombstoneDirectoryEntry(directory, OWNED_ARCHIVE);
-    instance.store.appendUpdate(
-      directoryRoom(OWNED_WORKSPACE),
-      Y.encodeStateAsUpdate(directory),
-      "local",
-    );
-  } finally {
-    directory.destroy();
-    await instance.close();
-  }
-
-  const run = init(owned);
-
-  expect(run.output).not.toContain("starter documents");
-  expect(sidebarFromLog(owned)).toEqual({ groups: [], seeded: false });
-  expect(getDirectoryEntry(replayRoom(directoryRoom, owned), OWNED_ARCHIVE)).toMatchObject(
-    { deleted: true, title: "Archived elsewhere" },
-  );
-});
-
-it("leaves an archived starter document archived, and re-pins nothing", async () => {
-  // A tombstone is sticky, so a document the user threw away must not read as
-  // "missing" — re-seeding it would be refused every time and complained about
-  // every time. Uses the workspace the first cases seeded.
-  await withTools(async (call) =>
-    call("archive_doc", { uuid: uuidOf(TEMPLATES[0]!.file) }),
-  );
-  // Read after the archive, not before it: archiving unpins (#957), so what
-  // `ub init` must leave alone is the sidebar the throwing-away left behind.
-  const before = sidebarFromLog();
-
-  const run = init();
-
-  // Nothing was attempted at all: no import to refuse, so no warning about a
-  // document the importer had to skip and none about an incomplete seed.
-  expect(run.output).not.toContain("skipping a seed document");
-  expect(run.output).not.toContain("starter documents");
-  // The sidebar is what the archive left: `ub init` is not a repair crew for a
-  // workspace that already has its layout, and a starter document the user
-  // threw away does not come back as an entry point.
-  expect(sidebarFromLog()).toEqual(before);
-  await withTools(async (call) => {
-    const { docs } = await call("list_docs");
-    expect(docs.map((doc: { title: string }) => doc.title)).toEqual([
-      "How to Use It",
-    ]);
-    const all = await call("list_docs", { include_deleted: true });
-    expect(all.docs).toHaveLength(2);
-  });
-});
-
-it("does not duplicate a document when two ub init runs race", async () => {
-  // Deciding what to write by reading the workspace is only safe while nothing
-  // else can write between the two, which is what the init lock is for here:
-  // without it both runs read an empty workspace and both write Welcome into
-  // the same room, where Yjs merges two copies of every block.
+it("seeds two complete new workspaces when creates race", async () => {
   const race = unboundSandbox();
   const runs = await Promise.all([
-    runUbAsync(["init", "--yes", "--no-mcp"], race),
-    runUbAsync(["init", "--yes", "--no-mcp"], race),
+    runUbAsync(["workspace", "create", "First"], race),
+    runUbAsync(["workspace", "create", "Second"], race),
   ]);
-  // Both still succeed: the loser leaves the documents to the run that holds
-  // the seed lock rather than failing over a lock it has no stake in.
-  expect(runs.map((run) => run.status)).toEqual([0, 0]);
-
-  // One group, not two: the starter group's id is a fixed constant, so two
-  // runs that both got that far would write the same group rather than a
-  // second one beside it.
-  expect(sidebarFromLog(race).groups).toEqual([
-    { id: STARTER_GROUP_ID, name: STARTER_GROUP_NAME, docs: PINS },
-  ]);
-  await withTools(async (call) => {
-    const { docs } = await call("list_docs");
-    expect(docs.map((doc: { title: string }) => doc.title)).toEqual([
-      "How to Use It",
-      "Welcome to Überblick",
+  expect(runs.map(run => run.status), runs.map(run => run.output).join("\n")).toEqual([0, 0]);
+  const ids = runs.map(run => run.stdout.match(/\(([0-9a-f-]{36})\)/)?.[1]);
+  expect(new Set(ids).size).toBe(2);
+  for (const id of ids) {
+    expect(id).toBeDefined();
+    expect(runUb(["workspace", "use", id!], race).status).toBe(0);
+    expect(sidebarFromLog(race).groups).toEqual([
+      { id: STARTER_GROUP_ID, name: STARTER_GROUP_NAME, docs: PINS },
     ]);
-    for (const template of TEMPLATES) {
-      const source = importMarkdown(
-        readFileSync(join(PACKAGE_ROOT, "templates", template.file), "utf8"),
-      );
-      const doc = await call("get_doc", { uuid: source.uuid });
-      expect(doc.blocks).toHaveLength(source.blocks.length);
-    }
-  }, race);
+    await withTools(async call => {
+      const { docs } = await call("list_docs");
+      expect(docs).toHaveLength(2);
+      for (const template of TEMPLATES) {
+        const source = importMarkdown(readFileSync(join(PACKAGE_ROOT, "templates", template.file), "utf8"));
+        const doc = await call("get_doc", { uuid: source.uuid });
+        expect(doc.blocks).toHaveLength(source.blocks.length);
+      }
+    }, race);
+  }
 });
 
 /**
@@ -639,7 +432,7 @@ it("ships exactly the approved starter copy, frontmatter included", () => {
 });
 
 it("ships the templates inside the package", () => {
-  // The packing manifest, not the checkout: a template `ub init` can only find
+  // The packing manifest, not the checkout: a template `ub workspace create` can only find
   // by walking up to a repository would be missing from every install.
   const packed = JSON.parse(
     execFileSync("npm", ["pack", "--dry-run", "--json"], {
@@ -654,12 +447,3 @@ it("ships the templates inside the package", () => {
     expect(paths).toContain(`templates/${template.file}`);
   }
 });
-
-/** The identity a template carries, which is what makes a re-run idempotent. */
-function uuidOf(file: string): string {
-  const source = importMarkdown(
-    readFileSync(join(PACKAGE_ROOT, "templates", file), "utf8"),
-  );
-  if (source.uuid === undefined) throw new Error(`${file}: no uuid`);
-  return source.uuid;
-}

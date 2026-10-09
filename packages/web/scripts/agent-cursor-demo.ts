@@ -179,7 +179,7 @@ async function resolveUuid(argv: string[]): Promise<string> {
 async function main(): Promise<void> {
   if (HUB_AUTH_TOKEN === "") {
     throw new Error(
-      "No loopback signing secret is available — run `ub init` for local setup; use `ub open` for remote work.",
+      "No loopback signing secret is available — run `ub open` for local setup; use `ub auth login` for remote work.",
     );
   }
 

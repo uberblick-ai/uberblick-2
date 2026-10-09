@@ -1375,8 +1375,7 @@ These are the default same-computer commands. For HTTPS, use
 `ub workspace use wss://<WEB_HOST>/ws/<WORKSPACE_ID>`; the
 [route table](#choose-how-clients-reach-the-hub) includes the legacy Tailscale
 route and configurable loopback port. The URL is the endpoint with the
-workspace id as its last path segment. Sign in first; no `ub init`,
-`--workspace` or clone is needed. The id is what a second machine has to be told, because a workspace id is
+workspace id as its last path segment. Sign in first, then use the link. The id is what a second machine has to be told, because a workspace id is
 a uuid: a machine that invented its own would connect to the hub and find nothing of
 yours there, the rooms being keyed by a different id. Carrying it in the URL is
 what makes that one string, and one paste, rather than two.
@@ -1431,11 +1430,9 @@ Other projects retain their bindings. Access still requires current membership.
 A URL with no workspace id, or with something that is not one, is refused before
 anything is written, and the refusal names the form.
 
-`ub init <hub-origin> --workspace <uuid>` also authenticates with this hub's
-stored login before writing, and requires workspace access. Without an existing
-workspace or `--workspace`, its new random UUID has no membership and is refused. It never overwrites an existing endpoint;
-use `ub workspace use <link>` to move a binding. No signing secret grants remote access.
-For an existing workspace, use the link route above and keep its UUID.
+To move a binding to this hub, use `ub workspace use <link>` with the existing
+workspace's UUID and a stored login that permits access. Creating a local
+workspace grants no remote membership, and no signing secret grants remote access.
 
 To edit this workspace in a browser on the computer, run `ub open`. It serves
 the machine's local replica, uses the stored login for upstream sync, and gives

@@ -4,7 +4,7 @@ import type * as Y from "yjs";
 export const WORKSPACE_SETTINGS_KEY = "workspace-settings";
 export const MAX_WORKSPACE_NAME_LENGTH = 64;
 
-// Matches ub init's display-name rule, including Unicode character counting.
+// Count Unicode characters rather than UTF-16 code units.
 const NAME_PATTERN = /^[^\p{Cc}\p{Cf}]{1,64}$/u;
 
 /** Normalize before writing; an invalid answer never changes shared state. */

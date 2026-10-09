@@ -29,13 +29,13 @@ Start in a new directory, outside a source checkout or another bound project:
 ```sh
 mkdir uberblick-notes
 cd uberblick-notes
-ub init --yes --no-mcp
+ub workspace create "My Workspace"
 ub open
 ```
 
-`ub init` creates a local workspace with starter documents and writes
-`.uberblick.json` for this directory. In the current release, it also creates
-the local signing secret needed to start the hub.
+`ub workspace create` creates a local workspace with starter documents, writes
+`.uberblick.json` for this directory, and creates the local signing secret
+needed to start the hub when none is already supplied.
 
 `ub open` opens the editor in your browser and keeps running in this terminal.
 Edits are saved locally first. Keep it running while you use the editor or

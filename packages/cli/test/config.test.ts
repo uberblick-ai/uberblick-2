@@ -178,8 +178,8 @@ describe("resolveConfig", () => {
     const warning = refused.warnings.join("\n");
     // Both facts and the fix: the mode, that the secret went unused, the chmod.
     expect(warning).toMatch(/refusing .*credentials\.json: mode 0644/);
-    expect(warning).toMatch(/not used/);
-    expect(warning).toMatch(/chmod 600 .*credentials\.json/);
+    expect(warning).toMatch(/secret may have leaked/);
+    expect(warning).toMatch(/delete .*credentials\.json/);
     // The secret itself is in no warning, and in nothing handed to the server.
     expect(warning).not.toContain(secret);
     expect(refused.env.HUB_AUTH_TOKEN).toBeUndefined();
@@ -236,7 +236,7 @@ describe("resolveConfig", () => {
     // secret, and equality is what keeps it that way: a length, a prefix or a
     // digest added later fails here rather than shipping. The path is the one
     // interpolation, and it comes from the resolver so the two cannot drift.
-    // `ub init`'s own refusal ends the same way, so they tell one story.
+    // `ub workspace create`'s own refusal ends the same way, so they tell one story.
     expect(resolved.warnings).toEqual([
       "HUB_AUTH_TOKEN in the environment is in force; " +
         `${credentialsPath(box.env)} holds a different signing secret — ` +
@@ -253,7 +253,7 @@ describe("resolveConfig", () => {
     ]);
 
     // Equal layers are not a conflict — the common case of `fnox exec` handing
-    // over the very secret `ub init` wrote.
+    // over the very secret `ub workspace create` wrote.
     const agreeing = resolveConfig({
       cwd: box.cwd,
       env: { ...box.env, HUB_AUTH_TOKEN: SECRET_ON_FILE },
@@ -265,7 +265,7 @@ describe("resolveConfig", () => {
 
 describe("claimSigningSecret", () => {
   it("lets the first caller win, and every later one adopt", () => {
-    // The concurrency contract, without the timing: two fresh `ub init`s each
+    // The concurrency contract, without the timing: two fresh `ub workspace create`s each
     // generate a candidate, and only one of them may become the secret. A
     // second value replacing the first would strand every client — the hub, the
     // web bundle, the MCP servers — that already holds it.

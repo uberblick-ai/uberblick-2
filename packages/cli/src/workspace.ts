@@ -196,7 +196,7 @@ function listCommand(argv: string[], io: Io): number {
     return 0;
   }
   if (entries.length === 0) {
-    io.out("no workspaces on this machine — run `ub init` to create one\n");
+    io.out("no workspaces on this machine — run `ub workspace create <name>` to create one\n");
     return 0;
   }
   let text = "";

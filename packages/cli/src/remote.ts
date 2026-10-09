@@ -86,21 +86,6 @@ function hubProblem(url: string, hub: HubState): string {
   return `${url} did not answer`;
 }
 
-/**
- * Dial a hub as a client would and say why it cannot be used, or null when it
- * can. It writes no documents or binding; renewing login may update its store.
- *
- * `ub init <hub-url>` asks this before it writes a line of configuration, so
- * that a machine is never bound to an endpoint that would refuse it — and asks
- * it through {@link corpusProblem}, the same verdict `use <link>` uses, so that
- * nothing answered, a refused credential, a protocol skew and a hub that
- * accepts the socket without ever serving its directory are worded once for
- * both verbs.
- */
-export async function remoteProblem(config: McpConfig): Promise<string | null> {
-  return corpusProblem(config.hubUrl, await inspectRemote(config));
-}
-
 interface Bridge {
   base: McpConfig;
   /** The environment `base` was resolved from — the ceiling travels with it. */

@@ -236,5 +236,6 @@ export function chartDiagnosticsText(chart: ChartProjection): string {
     ...(series.missing > 0 ? [`${series.label}: ${series.missing} absent or null`] : []),
     ...(series.invalid > 0 ? [`${series.label}: ${series.invalid} wrong-type`] : []),
   ]).join("; ");
+  if ((chart.notPlotted ?? 0) === 0 && omitted === "" && values === "") return "";
   return `${chart.notPlotted ?? 0} records not plotted${omitted ? ` (${omitted})` : ""}.${values ? ` Omitted series values: ${values}.` : ""}`;
 }

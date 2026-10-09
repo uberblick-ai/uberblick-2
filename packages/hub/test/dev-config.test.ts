@@ -1,6 +1,6 @@
 /** Exercise the checkout preload and the release entry as real hub processes. */
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -155,11 +155,31 @@ it.each(["exposed", "device"] as const)("refuses the %s signing-secret path befo
   const box = fixture({ exposed: kind === "exposed", device: kind === "device" });
   if (kind === "device") box.env.HUB_AUTH_TOKEN = OVERRIDE_SECRET;
   const hub = start(checkoutArgs(), box);
+  const before = readFileSync(box.credentials);
   expect(await hub.closed).toBe(1);
   expect(hub.stderr()).not.toContain('"event":"hub.listen"');
-  expect(hub.stderr()).toContain(kind === "exposed" ? "chmod 600" : "HUB_AUTH_TOKEN");
+  expect(hub.stderr()).toContain(kind === "exposed" ? "secret may have leaked" : "HUB_AUTH_TOKEN");
+  if (kind === "exposed") {
+    expect(hub.stderr()).toContain("restart running agents");
+    expect(hub.stderr()).toContain("ub auth login");
+    expect(hub.stderr()).not.toContain("chmod 600");
+    expect(statSync(box.credentials).mode & 0o777).toBe(0o644);
+  }
+  expect(readFileSync(box.credentials)).toEqual(before);
   expect(hub.stdout() + hub.stderr()).not.toContain(STORED_SECRET);
   expect(hub.stdout() + hub.stderr()).not.toContain(OVERRIDE_SECRET);
+});
+
+it("refuses a fresh local binding without generating a secret or listening", async () => {
+  const box = fixture();
+  rmSync(box.credentials);
+  const hub = start(checkoutArgs(), box);
+  expect(await hub.closed).toBe(1);
+  expect(hub.stderr()).not.toContain('"event":"hub.listen"');
+  expect(hub.stderr()).toContain("ub workspace create <name>");
+  expect(hub.stderr()).toContain("ub open");
+  expect(hub.stderr()).toContain("export HUB_AUTH_TOKEN");
+  expect(existsSync(box.credentials)).toBe(false);
 });
 
 it.each([

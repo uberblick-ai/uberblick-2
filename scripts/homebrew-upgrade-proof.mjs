@@ -77,7 +77,7 @@ const userEnv = {
 	XDG_DATA_HOME: dataHome,
 	PATH: `${brewPrefix}/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
 };
-for (const key of ["HUB_AUTH_TOKEN", "HUB_DB_PATH", "HUB_URL", "UBERBLICK_DB", "WORKSPACE_ID", "WORKSPACES"]) {
+for (const key of ["HUB_AUTH_TOKEN", "HUB_DB_PATH", "HUB_URL", "UB_HUB_URL", "UB_WORKSPACE_ID", "UBERBLICK_DB", "WORKSPACE_ID", "WORKSPACES"]) {
 	delete userEnv[key];
 }
 
@@ -127,7 +127,7 @@ try {
 	expect(ub(["--version"]) === installedVersion, "the installed formula reported the wrong version");
 
 	// What the person has before the upgrade: a workspace and a document in it.
-	ub(["init", "--yes", "--no-mcp"]);
+	ub(["workspace", "create", "Upgrade proof"]);
 	const before = JSON.parse(ub(["status", "--json"]));
 	const uuid = await withMcpSession(
 		{ cwd, env: userEnv, clientName: "homebrew-upgrade-proof", clientVersion: installedVersion },

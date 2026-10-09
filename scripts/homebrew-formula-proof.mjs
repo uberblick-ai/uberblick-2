@@ -158,7 +158,7 @@ const proofEnv = {
   XDG_DATA_HOME: dataHome,
   PATH: `${foreignBin}:${brewPrefix}/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
 };
-for (const key of ["HUB_AUTH_TOKEN", "HUB_DB_PATH", "HUB_URL", "UBERBLICK_DB", "WORKSPACE_ID", "WORKSPACES"]) {
+for (const key of ["HUB_AUTH_TOKEN", "HUB_DB_PATH", "HUB_URL", "UB_HUB_URL", "UB_WORKSPACE_ID", "UBERBLICK_DB", "WORKSPACE_ID", "WORKSPACES"]) {
   delete proofEnv[key];
 }
 
@@ -175,9 +175,9 @@ try {
     run("uberblick", ["--version"]) === expectedVersion,
     "uberblick reported the wrong version",
   );
-  const initialized = run("ub", ["init", "--yes", "--no-mcp"]);
-  expect(initialized.includes("ub open"), "installed init gave no ub open next step");
-  expect(!/mise run|pnpm/.test(initialized), "installed init mentioned contributor tooling");
+  const created = run("ub", ["workspace", "create", "Formula proof"]);
+  expect(created.includes("ub open"), "installed workspace create gave no ub open next step");
+  expect(!/mise run|pnpm/.test(created), "installed workspace create mentioned contributor tooling");
   const status = JSON.parse(run("ub", ["status", "--json"]));
   expect(status.version === expectedVersion, "installed status reported the wrong version");
   await listDocsOverStdio();

@@ -181,7 +181,7 @@ export function resolveHubConfig(
   if (isLoopbackHost(address) && (authSecret === undefined || authSecret === "")) {
     throw new Error(
       "HUB_AUTH_TOKEN is not set. It is the HMAC secret hub tokens are signed with; " +
-        "set it explicitly, or use `mise run hub` with this machine's private credentials.json.",
+        "run `ub workspace create <name>` or `ub open` to create this machine's local secret, or export HUB_AUTH_TOKEN.",
     );
   }
 

@@ -97,7 +97,7 @@ describe("the resolved roots", () => {
   it("stays owner-only when the hub is the first writer", async () => {
     // Whoever creates the tree decides what it is: `mkdirSync` applies its mode
     // only to directories it creates, so an `uberblick/` made at the umask by
-    // the hub would still be group-readable when `ub init` later writes
+    // the hub would still be group-readable when `ub workspace create` later writes
     // credentials.json into it with `mode: 0o700`.
     const root = home();
     const env = homeEnv(root);

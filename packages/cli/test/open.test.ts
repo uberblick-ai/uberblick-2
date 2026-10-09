@@ -493,6 +493,7 @@ describe("ub open", () => {
     { name: "unstamped", index: true, protocol: null },
   ])("refuses its $name default bundle before starting a hub, without building", async ({ index, protocol }) => {
     const { box, env } = configured();
+    rmSync(join(configDir(box), "credentials.json"));
     const hubPort = await freePort();
     const webPort = await freePort();
     pointAt(box, `ws://127.0.0.1:${hubPort}`);
@@ -537,6 +538,7 @@ describe("ub open", () => {
     expect((await probePort("127.0.0.1", hubPort)).state).toBe("free");
     expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
     expect(existsSync(join(box.cwd, "started-hub.sqlite"))).toBe(false);
+    expect(existsSync(join(configDir(box), "credentials.json"))).toBe(false);
     expect(existsSync(box.dataHome)).toBe(false);
     expect(existsSync(join(bundle, "index.html"))).toBe(index);
     if (index) {
@@ -614,12 +616,15 @@ describe("ub open", () => {
 
   it.each(["0.0.0.0", "127.attacker.example"])("serves locally without starting a hub at remote endpoint %s", async host => {
     const { box, env } = configured();
+    const credentials = join(configDir(box), "credentials.json");
+    rmSync(credentials);
     const port = await freePort();
     const endpoint = `ws://${host}:${port}`;
     pointAt(box, endpoint);
     const app = await open(box, ["--port", String(await freePort())], env);
     try {
       expect(app.stdout()).toContain("remote — nothing started here");
+      expect(existsSync(credentials)).toBe(false);
       expect((await probePort("127.0.0.1", port)).state).toBe("free");
       const document = await (await get(`${app.url}uberblick-config.json`)).json() as { hubUrl: string; remoteHubUrl: string };
       expect(document).toMatchObject({ remoteHubUrl: endpoint });

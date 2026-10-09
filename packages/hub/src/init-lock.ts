@@ -1,19 +1,16 @@
 /**
- * The lock `ub init` holds while it writes.
+ * The shared machine-configuration writer lock.
  *
- * Two files have to agree when this command finishes: the signing secret in
- * `credentials.json` and the workspace in `config.json`. Atomic publication
- * makes each of them individually safe to write while somebody reads it, but it
- * cannot make the *pair* consistent — two inits can still interleave so that one
- * run's workspace ends up beside another run's secret. A lock around the whole
- * write phase is the one mechanism that covers every branch, including the
- * read-modify-write of a `credentials.json` that already carries other keys.
+ * Atomic publication keeps each file safe for readers, while this lock protects
+ * read-modify-write operations from one another. Secret creators, device-login
+ * writers and workspace-record writers all hold it while changing the files
+ * beside `credentials.json`, preserving unrelated keys and the winning secret.
  *
  * It is a lock file, not a lock service: `open(O_CREAT|O_EXCL)` on
  * `.init.lock` beside `credentials.json`, in whichever config root the storage
  * layout resolved to, and two rules keep that honest.
  *
- * **It is bounded.** Waiting stops after {@link WAIT_TIMEOUT_MS} and `ub init`
+ * **It is bounded.** Waiting stops after {@link WAIT_TIMEOUT_MS} and the caller
  * says what is in the way rather than hanging on a terminal nobody is watching.
  * The write phase is a handful of file operations, so anything approaching that
  * bound is a wedged or dead process, not contention.
@@ -21,11 +18,9 @@
  * The starter-document seed needs the same mutual exclusion for a different
  * reason — it reads the workspace to decide what to write, and two runs reading
  * before either writes would write the same documents twice — but it takes
- * seconds rather than milliseconds, so it takes a lock of its own
- * ({@link seedLockPath}) and never blocks anybody's file writing behind a hub
- * connection. Its caller does not wait for it either: a run that finds it held
- * has nothing to add, because whoever holds it is writing exactly those
- * documents.
+ * seconds rather than milliseconds, so it has its own lock
+ * ({@link seedLockPath}). Workspace creation waits for that lock and writes its
+ * new replica offline before publishing the project binding.
  *
  * **Only its creator removes it.** There is no automatic takeover of an old
  * lock, and that is a deliberate reversal: an expiry rule needs a second
@@ -44,7 +39,7 @@
  * somebody else then took.
  *
  * The atomic publications underneath stay exactly as they were. This lock makes
- * the common case orderly; they are what keeps a writer that is not `ub init` at
+ * the common case orderly; they are what keeps a writer without this lock at
  * all from tearing a file in half.
  */
 
@@ -68,7 +63,7 @@ const LOCK_FILE = ".init.lock";
 const SEED_LOCK_FILE = ".seed.lock";
 
 /**
- * How long to wait for another `ub init` before giving up.
+ * How long to wait for another configuration writer before giving up.
  *
  * Deliberately outside `budget.ts`'s test ceiling. That ceiling shortens
  * terminal probes, where expiry is a permitted answer. This one waits for a live
@@ -185,7 +180,7 @@ export interface LockOptions {
   path?: string;
   /** How long to wait for a holder before giving up. Zero tries exactly once. */
   waitMs?: number;
-  /** The command to retry; omitted callers retain the init diagnostic. */
+  /** The command to retry; omitted callers name ub open. */
   command?: string;
   /**
    * Called once, when this process has found the lock held and is about to
@@ -246,7 +241,7 @@ function tryAcquirePath(path: string): InitLock | null {
     path,
     // The only `unlink` of a lock anywhere in this CLI, and it releases the
     // file this process created rather than whatever holds the name by then:
-    // if somebody deletes the lock mid-run and another `ub init` takes it,
+    // if somebody deletes the lock mid-run and another writer takes it,
     // the name is theirs and this must not touch it.
     //
     // Unlink first, close second. While the descriptor is open the file it
@@ -316,10 +311,9 @@ export async function acquireInitLock(
     }
 
     if (Date.now() >= deadline) {
-      const holder = options.command === undefined ? "another `ub init`" : "another configuration writer";
       throw new LockWaitTimeoutError(
-        `${holder} is holding ${path} (${describeAge(path)}). Wait ` +
-          `for it to finish and run \`${options.command ?? "ub init"}\` again — or, if nothing is ` +
+        `another configuration writer is holding ${path} (${describeAge(path)}). Wait ` +
+          `for it to finish and run \`${options.command ?? "ub open"}\` again — or, if nothing is ` +
           `running, remove it: rm -- ${shellQuote(path)}`,
       );
     }

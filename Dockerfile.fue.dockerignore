@@ -2,7 +2,7 @@
 #
 # BuildKit prefers `<dockerfile>.dockerignore` over the context's `.dockerignore`
 # when it exists, so this file — not the review runner's — is what `mise run fue`
-# uses. It is stricter for one reason: everything `ub init` is supposed to
+# uses. It is stricter for one reason: everything `ub workspace create` is supposed to
 # create must be absent, or the proof passes on state a new user does not have.
 #
 # `fnox.toml` is NOT excluded. It is committed, age-encrypted, and a new user

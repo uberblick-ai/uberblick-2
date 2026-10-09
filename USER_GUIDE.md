@@ -101,11 +101,14 @@ ub open
 ```
 
 Creation needs no hub or login. It generates a fresh UUID, stores the supplied
-name, seeds the same starter documents and sidebar group as `ub init`, and
-selects it in the current directory's `.uberblick.json`. An ancestor project's
-binding, other workspaces, stored logins and existing MCP registrations are
-unchanged. `ub init` remains first-time setup; in v0.4.0, creation alone does
-not make the local signing secret that `ub open` needs to start a hub.
+name, seeds the starter documents and sidebar group, and selects it in the
+current directory's `.uberblick.json` only after the seed succeeds. It also
+creates an owner-only local signing secret when none is already supplied, so
+agents started before `ub open` can sync with the hub it later starts. An
+ancestor project's binding, other workspaces, stored logins and existing MCP
+registrations are unchanged. A failed create leaves the previous binding
+unchanged; re-running makes a complete new workspace and leaves any partial
+replica alone.
 
 `ub workspace` prints its help. `ub workspace status` shows the selected workspace,
 its source, replica storage and sync state. `ub workspace list`
@@ -135,8 +138,7 @@ overwrites its configuration; use the vendor's management command to replace it.
 Homebrew installs both `ub` and `uberblick` on PATH. The user commands include:
 
 ```sh
-ub init            # identity, workspace, signing secret
-ub init <hub-url> --workspace <uuid>  # seed a workspace the stored login permits
+ub auth login      # sign in to the project's hub
 ub update          # update the Homebrew installation
 ub open            # serve the web app and a hub, and open the browser
 ub status          # workspace, hub, account, connection, pending work, last sync, local log, failures
@@ -152,18 +154,13 @@ ub mcp install claude  # register Uberblick with an MCP client
 ub mcp serve       # the stdio entry point for an MCP client
 ```
 
-Every question `ub init` asks has a flag (`--name`, `--color`, `--workspace`,
-`--yes`), and a non-interactive stdin takes the defaults rather than blocking,
-so it needs no TTY. Given a hub — `ub init hub.example.ts.net`, or the `wss://…`
-endpoint in full — it initializes the selected workspace on that hub: it dials
-and authenticates before writing anything, stores the endpoint, and the starter
-documents are there by the time it returns. For remote authentication, workspace
-access and switching an existing hub binding, see
+No CLI command asks for a display name or colour. Creating or selecting a
+workspace leaves existing presence settings alone. To join a workspace whose
+binding is already committed, run `ub auth login`; to join one shared as a
+link, sign in and run `ub workspace use <link>`. For remote authentication,
+workspace access and switching an existing hub binding, see
 [REMOTE.md](REMOTE.md#binding-a-computer-to-this-hubs-workspace).
-`--mcp` ends by printing the snippet and destination that `ub mcp install --print`
-prints; `--no-mcp` suppresses that hint. A bootstrap never registers a server
-with somebody's agent on its own, even with a vendor CLI installed: running
-`claude mcp add` is `ub mcp install`, asked for on purpose.
+Registering an agent remains an explicit `ub mcp install` step.
 
 ## Configuration
 
@@ -202,8 +199,9 @@ A hub address is normalized to its sync endpoint; a workspace ID can have a
 display slug, but only its UUID identifies data. The file contains no credentials
 and may be committed when its selection is appropriate for everyone using the
 project. `ub status` shows the workspace, hub and selection source.
-`ub init` and `ub workspace use` update the nearest project file, or create one
-in the current directory.
+`ub workspace use` updates the nearest project file, or creates one in the
+current directory. `ub workspace create` always writes in the current directory,
+leaving an ancestor binding alone.
 
 **Migration:** legacy `WORKSPACE_ID` / `HUB_URL` inputs and workspace/endpoint
 fields in the user's `config.json` no longer select a workspace. Legacy environment
@@ -213,8 +211,6 @@ credentials, identity and document databases remain untouched. Add an explicit
 project file with the existing workspace and hub, or set both new environment
 variables. Existing MCP entries must be updated to include both variables;
 installation reports conflicting entries without overwriting them.
-Plain `ub init` refuses an unbound project with legacy machine selection rather
-than creating a different workspace. Explicitly select the intended pair first.
 Before removing old settings, run `ub workspace use <workspace-id> --hub <hub-url|local>`
 once. It preserves the old endpoint's device-admission mode in private,
 endpoint-keyed metadata, including when the new project uses a different hub.
@@ -222,7 +218,7 @@ After giving existing projects their bindings, finish migration by removing only
 the obsolete `workspace` and `hubUrl` keys from
 `$XDG_CONFIG_HOME/uberblick/config.json` (normally
 `~/.config/uberblick/config.json`). Keep other fields, `credentials.json`, project
-files and databases. New unbound directories can then use `ub init` to create a
+files and databases. New unbound directories can then use `ub workspace create <name>` to create a
 fresh workspace, including starter documents; existing project bindings remain.
 Temporary environment overrides are never implicitly saved by setup commands.
 
@@ -233,10 +229,20 @@ stored local development signing secret; remote sync resolves its saved login
 from the private store. Remote login renewal, revocation and browser credential
 isolation are described in [REMOTE.md](REMOTE.md#binding-a-computer-to-this-hubs-workspace).
 
+`ub open` creates a missing signing secret only for a local workspace whose hub
+it starts here. A remote hub, including a device-authenticated hub on localhost,
+needs no local secret. Neither command replaces a secret already on file or
+supplied through `HUB_AUTH_TOKEN`. A credentials file readable by others is
+refused because its secret may have leaked: delete the file, run `ub open` to
+make a new one, then restart running agents. If the file held hub logins, sign
+in again with `ub auth login`. `ub workspace create` still creates its workspace
+in this state, but makes no secret. Neither command changes the exposed file's
+permissions or contents.
+
 ## Where your files live
 
 **One layout, on every platform**, resolved rather than configured, and nothing
-in it for you to create: `ub init` makes the directories it needs. There is no
+in it for you to create: `ub workspace create` makes the directories it needs. There is no
 workspace directory to make — a workspace is a UUID, and its replica is a file
 named after the bare UUID, so a display slug does not select another file.
 

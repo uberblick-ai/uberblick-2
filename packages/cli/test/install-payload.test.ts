@@ -193,7 +193,7 @@ describe("the versioned install payload", () => {
     expect(invalid.stderr).toContain("0.0.0 is not a release");
   });
 
-  it("runs init, status, MCP and the packaged web app with only Node on PATH", async () => {
+  it("runs workspace create, status, MCP and the packaged web app with only Node on PATH", async () => {
     const box = unboundSandbox();
     const initialPayload = treeDigest(payload);
 
@@ -209,10 +209,10 @@ describe("the versioned install payload", () => {
     expect(help.status, help.stderr).toBe(0);
     expect(filesBelow(payload).some((path) => path.endsWith(".map"))).toBe(false);
 
-    const initialized = runPayload(box, ["init", "--yes", "--no-mcp"]);
-    expect(initialized.status, initialized.stderr).toBe(0);
-    expect(initialized.stdout).toContain("ub open");
-    expect(initialized.stdout).not.toMatch(/mise run|pnpm/);
+    const created = runPayload(box, ["workspace", "create", "Payload proof"]);
+    expect(created.status, created.stderr).toBe(0);
+    expect(created.stdout).toContain("ub open");
+    expect(created.stdout).not.toMatch(/mise run|pnpm/);
 
     const status = runPayload(box, ["status", "--json"]);
     expect(status.status, status.stderr).toBe(0);

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { defaultDatabasePath, storeWorkspaceName } from "@uberblick/mcp-server";
 import { validateWorkspaceName } from "@uberblick/schema";
+import { ensureLocalSigningSecret, SigningSecretExposureError } from "./config.js";
 import { resolveMcpConfig } from "./budget.js";
 import { takeHelp } from "./help.js";
 import { acquireInitLock, seedLockPath } from "./init-lock.js";
@@ -55,11 +56,19 @@ export async function createWorkspaceCommand(argv: string[], io: Io): Promise<nu
   const path = join(process.cwd(), PROJECT_CONFIG_FILE);
   let previous: ProjectBinding | null = null;
   try {
-    const lock = await acquireInitLock();
+    const lock = await acquireInitLock(process.env, { command: "ub workspace create" });
     try {
       // Reject an invalid target before creating a replica. An ancestor binding
       // is not this new project's target and is left alone.
       if (findProjectConfig() === path) previous = resolveProjectBinding({ env: {} }).binding;
+      try {
+        ensureLocalSigningSecret(process.env);
+      } catch (error) {
+        // Offline workspace creation remains useful even when this computer's
+        // secret must be replaced. Never repair or overwrite the exposed file.
+        if (!(error instanceof SigningSecretExposureError)) throw error;
+        io.err(`ub workspace create: ${error.message}.\n`);
+      }
       const env = { ...process.env, WORKSPACE_ID: uuid, UB_WORKSPACE_ID: uuid, UB_HUB_URL: "local", HUB_URL: undefined,
         HUB_AUTH_TOKEN: undefined, HUB_ADMISSION: undefined,
         UBERBLICK_DB: defaultDatabasePath(uuid, process.env) };
@@ -67,8 +76,8 @@ export async function createWorkspaceCommand(argv: string[], io: Io): Promise<nu
       const { deviceLogin: _deviceLogin, ...base } = resolveMcpConfig(env);
       const config = { ...base, authSecret: null };
       // The explicit config prevents even an existing login for localhost from
-      // making creation dial a hub. The seed uses the same lock as ub init.
-      const seedLock = await acquireInitLock(process.env, { path: seedLockPath() });
+      // making creation dial a hub. The seed has its own shared writer lock.
+      const seedLock = await acquireInitLock(process.env, { path: seedLockPath(), command: "ub workspace create" });
       try {
         storeWorkspaceName(config, name);
         await seedStarterDocs(env, config);

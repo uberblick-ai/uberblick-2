@@ -49,7 +49,7 @@ import type { McpConfig } from "@uberblick/mcp-server";
 import { inspectExistingStore } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "./budget.js";
 import type { ResolvedConfig } from "./config.js";
-import { readCredentials, resolveConfig, requireBinding } from "./config.js";
+import { exposedSigningSecretRemedy, readCredentials, resolveConfig, requireBinding } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
@@ -111,14 +111,14 @@ function skipped(name: string, reason: string): Check {
 }
 
 const WORKSPACE_REMEDY =
-  "`ub init` creates a workspace; `ub workspace use <hub>/<workspace-id>` binds " +
+  "`ub workspace create <name>` creates a workspace; `ub workspace use <hub>/<workspace-id>` binds " +
   "this project to one that already exists; `ub workspace use <id>` adopts one " +
   "this machine already has";
 
 /**
  * The hub's bind address and the endpoint the clients dial are two settings, and
  * only one of them is an environment variable: the endpoint lives in this
- * machine's config, written by `ub init` or `ub workspace use`.
+ * machine's config, written by `ub workspace create` or `ub workspace use`.
  */
 const PORT_REMEDY =
   "the hub binds HUB_HOST:PORT — set PORT to the port the configured endpoint dials, or point this machine at the hub you meant with `ub workspace use <endpoint>/<workspace-id>`";
@@ -441,7 +441,7 @@ async function localHubListenerCheck(
     return fail(
       name,
       `refusing ${credentials.path}: mode ${modeOf(credentials.path)} lets other users read the hub signing secret, so it was not used`,
-      `chmod 600 ${credentials.path}`,
+      exposedSigningSecretRemedy(credentials.path),
     );
   }
   if (endpoint === null || !["ws:", "wss:"].includes(new URL(config.hubUrl).protocol)) {
@@ -483,7 +483,7 @@ async function localHubListenerCheck(
   const probe = await probePort(endpoint.host, endpoint.port);
   if (probe.state === "free") {
     if (config.authSecret === null) {
-      return skipped(name, `${address} is not running; no signing secret in force — hub sync is disabled, and every MCP tool still works; \`ub init\` writes a local development signing secret`);
+      return skipped(name, `${address} is not running; no signing secret in force — hub sync is disabled, and every MCP tool still works; \`ub open\` creates a local signing secret`);
     }
     // Reuse the starter's refusal so a skip never promises a hub it cannot start.
     const refusal = whyNotStartable(config.hubUrl, new URL(config.hubUrl));

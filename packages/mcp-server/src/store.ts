@@ -527,7 +527,7 @@ export class MirrorStore {
     this.databasePath = databasePath;
     // Owner-only: this replica holds the whole corpus, and it is as often as
     // not the first thing to create the user's data tree — a directory left at
-    // the umask here is one `ub init` then writes credentials.json into.
+    // the umask here is one `ub workspace create` then writes credentials.json into.
     const durable = databasePath !== ":memory:";
     const fresh = durable && !existsSync(databasePath);
     if (durable) {
