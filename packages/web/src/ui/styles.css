@@ -1285,7 +1285,7 @@ h3.ub-heading {
    the horizontally scrolling source. */
 .ub-code {
   position: relative;
-  padding-top: 1.6rem;
+  padding-top: 1.7rem;
 }
 
 .ub-code-caption {
@@ -1316,13 +1316,6 @@ h3.ub-heading {
 
 .ub-code-caption:has(.ub-code-language-trigger) > .ub-code-caption-text {
   display: none;
-}
-
-@media (pointer: coarse) {
-  /* Only the active picker needs a touch target clear of the editable source. */
-  .ub-code:has(.ub-code-language-trigger) {
-    padding-top: 3rem;
-  }
 }
 
 .ub-code .hljs-comment,
@@ -1378,6 +1371,7 @@ h3.ub-heading {
 .ub-terminal::before {
   display: block;
   margin-bottom: 0.2rem;
+  padding-right: 7rem;
 }
 
 .ub-mermaid::before {
@@ -1406,7 +1400,7 @@ h3.ub-heading {
   display: none;
   border-radius: var(--radius-sm);
   background: var(--terminal-screen);
-  padding: 1.6rem 0.9rem 0.75rem;
+  padding: 1.7rem 0.9rem 0.75rem;
   cursor: text;
 }
 
@@ -1450,12 +1444,46 @@ h3.ub-heading {
   user-select: none;
 }
 
+/* Apply the shared target floors only to these source controls. Chart copy
+   shares .ub-copy but keeps its own compact chrome. */
+.ub-code > .ub-copy,
+.ub-mermaid > .ub-copy,
+.ub-terminal > .ub-copy {
+  min-height: 1.5rem;
+  min-width: max(1.5rem, 8ch);
+}
+
+@media (any-pointer: coarse) {
+  .ub-code,
+  .ub-terminal-screen {
+    padding-top: 3rem;
+  }
+
+  .ub-mermaid::before,
+  .ub-terminal::before {
+    min-height: 3rem;
+  }
+
+  .ub-code > .ub-copy,
+  .ub-mermaid > .ub-copy,
+  .ub-terminal > .ub-copy {
+    min-height: 2.75rem;
+    min-width: max(2.75rem, 8ch);
+  }
+
+  .ub-terminal > .ub-terminal-toggle {
+    min-height: 2.75rem;
+    min-width: max(2.75rem, 6ch);
+  }
+}
+
 /* The screen controls use local fixed dark inks: root light-dark() tokens
    resolve before inheritance. */
 .ub-terminal-toggle {
   display: none;
   left: 0.4rem;
-  min-width: 6ch;
+  min-height: 1.5rem;
+  min-width: max(1.5rem, 6ch);
   color: var(--terminal-control-ink);
 }
 
@@ -1985,7 +2013,6 @@ h3.ub-heading {
 
 .ub-docs-open {
   display: flex;
-  min-width: 0;
   align-items: baseline;
   gap: 0.5rem;
   padding: 0.4rem;
