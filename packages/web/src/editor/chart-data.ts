@@ -180,17 +180,36 @@ export function prepareChart(source: string, data: DocData | null): ChartProject
   return parsed.ok ? projectChart(parsed.config, data) : { status: "invalid-configuration", message: parsed.message };
 }
 
+export function chartNumberFormatter(locale?: string): (value: number) => string {
+  return new Intl.NumberFormat(locale, { maximumSignificantDigits: 12 }).format;
+}
+
+/** A full table needs at most four date shapes, rather than one Intl instance per cell. */
+export function chartDateFormatter(locale?: string): (value: number) => string {
+  const dates = new Map<number, Intl.DateTimeFormat>();
+  return (value) => {
+    const date = new Date(value);
+    const era = date.getUTCFullYear() <= 0;
+    const intraday = value % DAY !== 0;
+    const key = Number(era) + 2 * Number(intraday);
+    let formatter = dates.get(key);
+    if (formatter === undefined) {
+      formatter = new Intl.DateTimeFormat(locale, {
+        timeZone: "UTC", year: "numeric", month: "short", day: "numeric",
+        ...(era ? { era: "short" } as const : {}),
+        ...(intraday ? { hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short" } as const : {}),
+      });
+      dates.set(key, formatter);
+    }
+    return formatter.format(date);
+  };
+}
+
 export function formatChartNumber(value: number, locale?: string): string {
-  return new Intl.NumberFormat(locale, { maximumSignificantDigits: 12 }).format(value);
+  return chartNumberFormatter(locale)(value);
 }
 export function formatChartX(value: number, type: ChartConfig["x"]["type"], locale?: string): string {
-  if (type === "number") return formatChartNumber(value, locale);
-  const date = new Date(value);
-  return new Intl.DateTimeFormat(locale, {
-    timeZone: "UTC", year: "numeric", month: "short", day: "numeric",
-    ...(date.getUTCFullYear() <= 0 ? { era: "short" } as const : {}),
-    ...(value % DAY === 0 ? {} : { hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short" } as const),
-  }).format(date);
+  return type === "number" ? formatChartNumber(value, locale) : chartDateFormatter(locale)(value);
 }
 export function chartAccessibleName(config: ChartConfig): string {
   return config.title || `Line chart of ${config.y.map((series) => series.label || series.field).join(", ")} by ${config.x.label || config.x.field}`;

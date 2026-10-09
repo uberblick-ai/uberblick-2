@@ -3,7 +3,7 @@ import * as Y from "yjs";
 import { applyDocData, DATA_KEY, DATA_LIMITS, getDocDataEntries, initDoc, readDocData } from "@uberblick/schema";
 import type { CollectionSchema, DataRecord, DocData, JSONValue } from "@uberblick/schema";
 import { formatChartNumber, formatChartX, parseChartConfig } from "../src/editor/chart-data.js";
-import { formatTableCell, parseTableConfig, prepareTable, tableAccessibleName, tableDiagnosticsText } from "../src/editor/table-data.js";
+import { formatTableCell, parseTableConfig, prepareTable, tableAccessibleName, tableCellFormatter, tableDiagnosticsText } from "../src/editor/table-data.js";
 import type { TableColumnMapping, TableConfig, TableReady } from "../src/editor/table-data.js";
 
 const mapping: TableConfig = {
@@ -102,6 +102,17 @@ describe("table cell values", () => {
     expect(formatTableCell({ field: "day", format: "date" }, value, "en-US").text).toBe(formatChartX(Date.parse("2026-10-08T00:00:00Z"), "date", "en-US"));
     expect(formatTableCell({ field: "instant", format: "date" }, value, "de-DE").text).toBe(formatChartX(Date.parse("2026-10-08T10:30:00Z"), "date", "de-DE"));
     expect(formatTableCell({ field: "value", format: "number", decimals: 10 }, { id: "zero", value: { value: 0 } }, "en-US").text).toBe("0.0000000000");
+  });
+
+  it.each(["en-US", "de-DE"])("keeps every date shape's chart semantics when reusing a %s column formatter", (locale) => {
+    const format = tableCellFormatter({ field: "day", format: "date" }, locale);
+    for (const day of ["2026-10-08", "2026-10-08T12:30:00+02:00", "0000-10-08", "0000-10-08T12:30:00Z", "2026-10-09"]) {
+      expect(format({ id: day, value: { day } }).text).toBe(formatChartX(Date.parse(day), "date", locale));
+    }
+    const number = tableCellFormatter({ field: "value", format: "number", decimals: 2, unit: "%" }, locale);
+    for (const value of [0, 1234.567, -1.234]) {
+      expect(number({ id: String(value), value: { value } })).toEqual(formatTableCell({ field: "value", format: "number", decimals: 2, unit: "%" }, { id: String(value), value: { value } }, locale));
+    }
   });
 
   it.each(["text", "number", "date", "link"] as const)("distinguishes absent and null for %s", (format) => {

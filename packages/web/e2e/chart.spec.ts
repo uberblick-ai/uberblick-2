@@ -464,7 +464,13 @@ test("calendar ink, independent unit axes and nearest-x tooltips keep sparse and
     columns: [{ field: "day" }, { field: "latency", format: "number" }] }));
   await expect(page.getByRole("table")).toBeVisible();
   await expect(page.locator(".ub-chart-title")).toBeHidden();
-  await expectCornerControls(page, "Open table source");
+  await page.locator(".ub-chart").hover();
+  const tableSource = page.getByRole("button", { name: "Open table source", exact: true });
+  await expect(tableSource).toHaveCSS("opacity", "1");
+  const tableBox = await page.getByRole("table").boundingBox();
+  const sourceBox = await tableSource.boundingBox();
+  if (tableBox === null || sourceBox === null) throw new Error("e2e: table footer source has no box");
+  expect(sourceBox.y).toBeGreaterThanOrEqual(tableBox.y + tableBox.height);
   await editMapping(session, uuid, JSON.stringify({ ...MAPPING, title: "" }));
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [] }] });
   await expect(page.locator(".ub-chart-message")).toContainText("No plottable records");

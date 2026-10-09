@@ -427,7 +427,7 @@ describe("the slash menu", () => {
       expect(blocks[0]).toMatchObject({ id: ids[0], type: "chart" });
       expect(JSON.parse(blocks[0]!.text)).toEqual({
         version: 1, type: "table", collection: "records",
-        columns: [{ field: "value", format: "text" }], pageSize: 25,
+        columns: [{ field: "value", format: "text" }],
       });
       expect(mounted.editor.state.selection.$head.parent.type.name).toBe("chart");
       act(() => { expect(mounted.editor.commands.keyboardShortcut("Mod-z")).toBe(true); });
@@ -943,7 +943,7 @@ describe("the gutter menu", () => {
       if (label === "Data table") {
         expect(JSON.parse(blocks[1]!.text)).toEqual({
           version: 1, type: "table", collection: "records",
-          columns: [{ field: "value", format: "text" }], pageSize: 25,
+          columns: [{ field: "value", format: "text" }],
         });
       } else expect(blocks[1]!.text).toBe("");
       expect(mounted.editor.state.selection.$head.parent.type.name).toBe("chart");

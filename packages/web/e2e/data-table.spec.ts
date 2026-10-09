@@ -87,6 +87,16 @@ async function expectPopup(page: Page, activate: () => Promise<unknown>): Promis
   } finally { await popup.close(); await page.bringToFront(); }
 }
 
+async function cellStyle(cell: Locator): Promise<Record<string, string>> {
+  return cell.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return Object.fromEntries([
+      "border-top", "border-right", "border-bottom", "border-left", "padding",
+      "font-size", "font-weight", "color", "background-color",
+    ].map((property) => [property, style.getPropertyValue(property)]));
+  });
+}
+
 /**
  * Instrument the existing y-sync document, never a production test hook. The
  * data reader enumerates the complete map once through entries(); its wrapper
@@ -194,10 +204,32 @@ async function installProbe(page: Page, uuid: string, tables = 0, charts = 0): P
   }, { targetUuid: uuid, tableCount: tables, chartCount: charts });
 }
 
-test("table insertion, source, native paging and isolated links work by pointer and keyboard in both appearances", async ({ browser }, info) => {
+async function expectClearTableActions(block: Locator): Promise<void> {
+  const geometry = await block.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const table = element.querySelector(".ub-data-table")?.getBoundingClientRect();
+    const notice = element.querySelector(".ub-chart-notice");
+    const range = document.createRange();
+    if (notice !== null) range.selectNodeContents(notice);
+    const text = Array.from(range.getClientRects());
+    return Array.from(element.querySelectorAll(".ub-chart-open, .ub-copy")).map((action) => {
+      const rect = action.getBoundingClientRect();
+      return {
+        belowTable: table !== undefined && rect.top >= table.bottom,
+        withinBlock: rect.left >= bounds.left && rect.right <= bounds.right,
+        overlapsFootnote: text.some(line => rect.left < line.right && rect.right > line.left && rect.top < line.bottom && rect.bottom > line.top),
+      };
+    });
+  });
+  expect(geometry).toEqual(Array.from({ length: 2 }, () => ({ belowTable: true, withinBlock: true, overlapsFootnote: false })));
+}
+
+test("all rows read like an ordinary table with secondary source and isolated links in both appearances", async ({ browser }, info) => {
   const session = writer();
   for (const appearance of ["light", "dark"] as const) {
-    const page = await openApp(browser, "/", { contextOptions: { colorScheme: appearance, locale: "en-US" } });
+    const page = await openApp(browser, "/", {
+      contextOptions: { colorScheme: appearance, locale: "en-US", viewport: { width: 1280, height: 1000 } },
+    });
     await page.context().route("https://example.invalid/**", (route) => route.fulfill({ contentType: "text/html", body: "<p>Evidence</p>" }));
     await expect(page.locator(".ub-list-head")).toBeVisible();
     const uuid = await createDoc(page, `Data table source ${appearance}`);
@@ -209,6 +241,7 @@ test("table insertion, source, native paging and isolated links work by pointer 
     await page.getByRole("option", { name: "Data table", exact: true }).click();
     const source = page.locator(".ub-chart-source");
     await expect(source).toBeVisible();
+    expect(await source.textContent()).not.toContain("pageSize");
     await source.click();
     await source.evaluate((element) => {
       const range = document.createRange(); range.selectNodeContents(element);
@@ -219,6 +252,15 @@ test("table insertion, source, native paging and isolated links work by pointer 
       try { return (await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text; }
       catch (error) { if (error instanceof Error && /doc_not_hydrated|doc_not_found/.test(error.message)) return null; throw error; }
     }).toBe(JSON.stringify(MAPPING));
+    const doc = await session.call<DocPayload>("get_doc", { uuid });
+    const paragraph = doc.blocks.find((block) => block.type === "paragraph");
+    const chart = doc.blocks.find((block) => block.type === "chart");
+    if (paragraph === undefined || chart === undefined) throw new Error("e2e: table comparison blocks are missing");
+    await session.call("insert_block", { uuid, after_block_id: paragraph.id, type: "heading", level: 2, text: "Changelog" });
+    await session.call("insert_block", {
+      uuid, after_block_id: chart.id, type: "table",
+      text: "| Name | Autonomous | Day | Evidence |\n| --- | --- | --- | --- |\n| Ordinary table | 12.50 % | Jan 1, 2026 | Evidence |",
+    });
     await measurements(session, uuid);
     await editor(page).locator(":scope > p").first().click();
     const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
@@ -227,84 +269,136 @@ test("table insertion, source, native paging and isolated links work by pointer 
     await expect(table.getByRole("columnheader")).toHaveText(["Name", "Autonomous", "Day", "Evidence"]);
     await expect(table.getByRole("cell", { name: "<strong>kept as text</strong>", exact: true })).toBeVisible();
     await expect(table.locator("strong, script, style")).toHaveCount(0);
-    await expect(table.locator("tbody tr")).toHaveCount(2);
+    await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
     await expect(table.locator("tbody tr").first()).toContainText("12.50 %");
     await expect(table.locator("tbody tr").first()).toContainText("Jan 1, 2026");
     await expect(table.locator("tbody tr").nth(1)).toContainText(/absent/i);
-    await expect(page.locator(".ub-table-range")).toHaveText("Records 1–2 of 6");
+    await expect(page.locator(".ub-table-range, .ub-table-pager")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^(Previous|Next) page$/ })).toHaveCount(0);
     expect(await table.ariaSnapshot()).toContain('table "Delivery evidence"');
+    const block = page.locator(".ub-chart[data-view='table']");
+    const panel = block.locator(".ub-chart-panel");
+    const ordinary = page.locator(".ub-table");
+    await expect(ordinary).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Changelog", exact: true })).toBeVisible();
+    await expect(block.locator(".ub-chart-title")).toBeHidden();
+    expect(await block.evaluate((element) => getComputedStyle(element, "::before").content)).toBe("none");
+    await expect(panel).toHaveCSS("padding", "0px");
+    await expect(panel).toHaveCSS("border-width", "0px");
+    await expect(panel).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    expect(await cellStyle(table.locator("th").first())).toEqual(await cellStyle(ordinary.locator("th").first()));
+    expect(await cellStyle(table.locator("td").first())).toEqual(await cellStyle(ordinary.locator("td").first()));
+    const headerLines = await table.getByRole("columnheader", { name: "Autonomous", exact: true }).evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return Array.from(range.getClientRects()).filter(rect => rect.width > 0 && rect.height > 0).length;
+    });
+    expect(headerLines).toBe(1);
+    const generatedWidth = await table.evaluate((element) => element.getBoundingClientRect().width);
+    const contentWidth = await editor(page).evaluate((element) => element.clientWidth);
+    expect(Math.abs(generatedWidth - contentWidth)).toBeLessThanOrEqual(2);
+    await expect(block.locator(".ub-table-controls, .ub-table-control, [contenteditable='true']")).toHaveCount(0);
+    const notice = block.locator(".ub-chart-notice");
+    await expect(notice).toHaveText("Generated from document data · read-only");
+    const tableBounds = await table.boundingBox();
+    const noticeBounds = await notice.boundingBox();
+    expect(tableBounds).not.toBeNull();
+    expect(noticeBounds).not.toBeNull();
+    if (tableBounds !== null && noticeBounds !== null) {
+      expect(noticeBounds.y - tableBounds.y - tableBounds.height).toBeGreaterThanOrEqual(0);
+      expect(noticeBounds.y - tableBounds.y - tableBounds.height).toBeLessThanOrEqual(12);
+    }
+    const markers = table.locator("td[data-state='absent'], td[data-state='null'], td[data-state='invalid']");
+    expect(await markers.count()).toBeGreaterThan(0);
+    const muted = await notice.evaluate((element) => getComputedStyle(element).color);
+    for (const marker of await markers.all()) await expect(marker).toHaveCSS("color", muted);
     const before = await session.call("get_data", { uuid });
     const link = table.getByRole("link", { name: TARGET, exact: true });
     await expectPopup(page, () => link.click());
     await editor(page).locator(":scope > p").first().click();
     await tabTo(page, link);
     await expectPopup(page, () => page.keyboard.press("Enter"));
-    const next = page.getByRole("button", { name: "Next page", exact: true });
-    await next.click();
-    await expect(page.locator(".ub-table-range")).toHaveText("Records 3–4 of 6");
-    await expect(table.locator("tbody tr").first()).toContainText(/null/i);
-    await expect(table.locator("tbody tr").nth(1)).toContainText(/invalid/i);
+    await expect(table.locator("tbody tr").nth(2)).toContainText(/null/i);
+    await expect(table.locator("tbody tr").nth(3)).toContainText(/invalid/i);
     await expect(table).toContainText("2026-02-31");
     await expect(table).toContainText("javascript:alert(1)");
-    await expect(table.getByRole("link")).toHaveCount(0);
-    await tabTo(page, next);
-    await page.keyboard.press("Enter");
-    await expect(page.locator(".ub-table-range")).toHaveText("Records 5–6 of 6");
     await expect(table).toContainText('{"compact":true}');
     await expect(table).toContainText("data:text/html,<script>alert(1)</script>");
     await expect(table).toContainText("/relative");
-    await expect(table.getByRole("link")).toHaveCount(0);
-    await expect(next).toBeDisabled();
-    const previous = page.getByRole("button", { name: "Previous page", exact: true });
-    await tabTo(page, previous);
-    await page.keyboard.press("Enter");
-    await expect(page.locator(".ub-table-range")).toHaveText("Records 3–4 of 6");
+    await expect(table.getByRole("link")).toHaveCount(1);
     const openSource = page.getByRole("button", { name: "Open table source", exact: true });
+    const copy = block.getByRole("button", { name: "copy", exact: true });
+    await editor(page).locator(":scope > p").first().click();
+    await expect(openSource).toHaveCSS("opacity", "0");
+    await expect(copy).toHaveCSS("opacity", "0");
+    const restingBounds = await table.boundingBox();
+    await block.hover();
+    await expect(openSource).toHaveCSS("opacity", "1");
+    await expect(copy).toHaveCSS("opacity", "1");
+    expect(await table.boundingBox()).toEqual(restingBounds);
+    await expectClearTableActions(block);
     await openSource.click();
     await expect(source).toBeVisible();
+    await expect(copy).toBeVisible();
+    await editor(page).locator(":scope > p").first().click();
+    await tabTo(page, openSource);
+    await expect(openSource).toHaveCSS("opacity", "1");
+    await expect(copy).toHaveCSS("opacity", "1");
+    expect(await table.boundingBox()).toEqual(restingBounds);
+    await expectClearTableActions(block);
+    await tabTo(page, copy);
+    await expect(copy).toBeFocused();
+    await expect(copy).toHaveCSS("opacity", "1");
     await editor(page).locator(":scope > p").first().click();
     await tabTo(page, openSource);
     await page.keyboard.press("Enter");
     await expect(source).toBeVisible();
     await editor(page).locator(":scope > p").first().click();
     await expect(table).toBeVisible();
-    for (const reading of await renderedText(page, ".ub-chart-panel")) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
-    for (const state of await page.locator(".ub-chart-message, .ub-chart-diagnostics, .ub-table-range").all()) {
+    await expect(openSource).toHaveCSS("opacity", "0");
+    await expect(copy).toHaveCSS("opacity", "0");
+    const footnoteReadings = await renderedText(page, ".ub-chart-notice");
+    expect(footnoteReadings.length).toBeGreaterThan(0);
+    for (const reading of footnoteReadings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+    for (const state of await page.locator(".ub-chart-message, .ub-chart-diagnostics, .ub-chart-notice").all()) {
       await expect(state).not.toHaveAttribute("aria-live", /.*/);
     }
     const screenshot = info.outputPath(`data-table-${appearance}.png`);
-    await page.screenshot({ path: screenshot });
+    await page.keyboard.press("ArrowRight");
+    await page.screenshot({ path: screenshot, fullPage: true });
     await info.attach(`data-table-${appearance}`, { path: screenshot, contentType: "image/png" });
     expect(await session.call("get_data", { uuid })).toEqual(before);
     expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(MAPPING));
   }
 });
 
-test("MCP data and mapping updates preserve pages, clamp deletions and survive reload and reopen", async ({ browser }) => {
+test("MCP data and mapping updates keep all rows and sort across reload and reopen", async ({ browser }) => {
   const session = writer();
   const uuid = await tableDoc(session, "Live data table");
   await measurements(session, uuid);
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { beforeNavigate: (loading) => installProbe(loading, uuid) });
   const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
   await expect(table).toBeVisible();
-  await page.getByRole("button", { name: "Next page", exact: true }).click();
+  await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
   let navigations = 0;
   page.on("framenavigated", (frame) => { if (frame === page.mainFrame()) navigations += 1; });
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [{ id: "d", value: { name: "Arriving update", value: 42, day: "2026-01-04", url: TARGET } }] }] });
   await expect(table).toContainText("Arriving update");
-  await expect(page.locator(".ub-table-range")).toHaveText("Records 3–4 of 6");
+  await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
   const beforeMapping = await session.call("get_data", { uuid });
-  const updated = { ...MAPPING, title: "Live evidence", columns: MAPPING.columns.map((column) => column.field === "name" ? { ...column, label: "Observation" } : column) };
+  const updated = { ...MAPPING, title: "Live evidence", pageSize: 5, sort: { field: "value", direction: "desc" },
+    columns: MAPPING.columns.map((column) => column.field === "name" ? { ...column, label: "Observation" } : column) };
   await editMapping(session, uuid, JSON.stringify(updated));
   const renamed = page.getByRole("table", { name: "Live evidence", exact: true });
   await expect(renamed.getByRole("columnheader", { name: "Observation", exact: true })).toBeVisible();
+  await expect(renamed.locator("tbody tr")).toHaveCount(RECORDS.length);
+  await expect(renamed.locator("tbody tr").first()).toContainText("Arriving update");
   expect(await session.call("get_data", { uuid })).toEqual(beforeMapping);
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [{ id: "d", value: { name: "Later update", value: 43, day: "2026-01-04", url: TARGET } }] }] });
   await expect(renamed).toContainText("Later update");
-  await page.getByRole("button", { name: "Next page", exact: true }).click();
-  await expect(page.locator(".ub-table-range")).toHaveText("Records 5–6 of 6");
+  await expect(renamed.locator("tbody tr").first()).toContainText("Later update");
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", deleteRecords: ["e", "f"] }] });
-  await expect(page.locator(".ub-table-range")).toHaveText("Records 3–4 of 4");
+  await expect(renamed.locator("tbody tr")).toHaveCount(4);
   await expect(renamed).toContainText("Later update");
   expect(navigations).toBe(0);
   expect(await page.evaluate(() => (window as unknown as { tableProbe: { localUpdates: number } }).tableProbe.localUpdates)).toBe(0);
@@ -316,16 +410,16 @@ test("MCP data and mapping updates preserve pages, clamp deletions and survive r
   await expect.poll(() => renamed.evaluate((element) => getComputedStyle(element.querySelector("td") ?? element).color)).not.toBe(lightInk);
   await page.reload();
   await expect(renamed).toBeVisible();
-  await expect(page.locator(".ub-table-range")).toHaveText("Records 1–2 of 4");
+  await expect(renamed.locator("tbody tr")).toHaveCount(4);
+  await expect(renamed.locator("tbody tr").first()).toContainText("Later update");
   const reopened = await openApp(browser, `/${harness().workspace}/${uuid}`);
   await expect(reopened.getByRole("table", { name: "Live evidence", exact: true })).toBeVisible();
-  await expect(reopened.locator(".ub-table-range")).toHaveText("Records 1–2 of 4");
-  await reopened.getByRole("button", { name: "Next page", exact: true }).click();
+  await expect(reopened.locator(".ub-data-table tbody tr")).toHaveCount(4);
   await expect(reopened.getByRole("table", { name: "Live evidence", exact: true })).toContainText("Later update");
   expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(updated));
 });
 
-test("problem states recover without editing stored values and decided or archived tables remain pageable", async ({ browser }) => {
+test("problem states recover without editing stored values and decided or archived tables keep every row", async ({ browser }) => {
   const session = writer();
   const uuid = await tableDoc(session, "Table states", MAPPING, true);
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
@@ -338,22 +432,82 @@ test("problem states recover without editing stored values and decided or archiv
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [] }] });
   await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "no-records");
   await measurements(session, uuid);
+  const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
+  await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
   const stored = await session.call<DocPayload>("get_doc", { uuid });
   const data = await session.call("get_data", { uuid });
   await session.call("set_status", { uuid, status: "decided" });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-  await page.getByRole("button", { name: "Next page", exact: true }).click();
-  await expect(page.locator(".ub-table-range")).toHaveText("Records 3–4 of 6");
+  await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
+  const openSource = page.getByRole("button", { name: "Open table source", exact: true });
+  await page.locator(".ub-chart").hover();
+  await openSource.click();
+  await expect(page.locator(".ub-chart-source")).toBeVisible();
+  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+  await editor(page).locator(":scope > p").first().click();
   await expect(editMapping(session, uuid, "{}")).rejects.toThrow(/decision_read_only/);
   await session.call("archive_doc", { uuid });
+  // Read-only selection is not an editing caret; reopen the reading view before
+  // proving the archived document's secondary keyboard source action.
+  await page.reload();
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-  const previous = page.getByRole("button", { name: "Previous page", exact: true });
-  await tabTo(page, previous);
+  await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
+  await tabTo(page, openSource);
   await page.keyboard.press("Enter");
-  await expect(page.locator(".ub-table-range")).toHaveText("Records 1–2 of 6");
+  await expect(page.locator(".ub-chart-source")).toBeVisible();
   await expect(editMapping(session, uuid, "{}")).rejects.toThrow(/doc_archived/);
   expect((await session.call<DocPayload>("get_doc", { uuid })).blocks).toEqual(stored.blocks);
   expect(await session.call("get_data", { uuid })).toEqual(data);
+});
+
+test("a generated table wider than the document keeps horizontal scrolling inside its block", async ({ browser }) => {
+  const session = writer();
+  const uuid = await tableDoc(session, "Wide generated table", {
+    version: 1, type: "table", collection: "measurements", title: "Wide observations",
+    columns: Array.from({ length: 30 }, (_, index) => ({ field: "name", label: `Column ${index}` })),
+  });
+  await measurements(session, uuid);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    contextOptions: { viewport: { width: 800, height: 900 } },
+  });
+  const table = page.getByRole("table", { name: "Wide observations", exact: true });
+  await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
+  const scroll = page.locator(".ub-table-scroll");
+  expect(await scroll.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await scroll.hover();
+  await page.mouse.wheel(500, 0);
+  await expect.poll(() => scroll.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  await expect(page.locator(".ub-table-controls, .ub-table-control")).toHaveCount(0);
+});
+
+test("legacy page sizes keep all rows and source remains reachable without hover", async ({ browser }) => {
+  const session = writer();
+  const { title: _title, ...withoutTitle } = MAPPING;
+  const uuid = await tableDoc(session, "No-hover generated table", { ...withoutTitle, pageSize: 7 });
+  await measurements(session, uuid);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    contextOptions: { hasTouch: true, viewport: { width: 1280, height: 900 } },
+  });
+  expect(await page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true);
+  const table = page.getByRole("table", { name: "Data table of measurements", exact: true });
+  await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
+  await editMapping(session, uuid, JSON.stringify({ ...withoutTitle, pageSize: 5 }));
+  await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
+  const openSource = page.getByRole("button", { name: "Open table source", exact: true });
+  await expect(openSource).toBeVisible();
+  expect(Number(await openSource.evaluate((element) => getComputedStyle(element).opacity))).toBeGreaterThan(0);
+  const block = page.locator(".ub-chart[data-view='table']");
+  await expectClearTableActions(block);
+  await page.setViewportSize({ width: 390, height: 900 });
+  await expectClearTableActions(block);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await openSource.tap();
+  await expect(page.locator(".ub-chart-source")).toBeVisible();
+  await editor(page).locator(":scope > p").first().tap();
+  await expect(table).toBeVisible();
+  await expect(page.locator(".ub-chart-title")).toBeHidden();
+  await expect(page.locator(".ub-table-controls, .ub-table-control, .ub-table-range, .ub-table-pager")).toHaveCount(0);
 });
 
 interface Timings {
@@ -408,15 +562,14 @@ async function workload(session: McpSession, mixed: boolean): Promise<{ uuid: st
 }
 
 async function timingEvidence(page: Page, session: McpSession, uuid: string, mixed: boolean, bytes: number): Promise<Timings> {
-  await expect(page.locator(".ub-data-table")).toHaveCount(mixed ? 10 : 1);
+  await expect(page.locator(".ub-data-table")).toHaveCount(mixed ? 10 : 1, { timeout: mixed ? 60_000 : 20_000 });
   await expect(page.locator(".ub-chart-panel[data-state='ready']")).toHaveCount(mixed ? 20 : 1);
   await expect.poll(() => page.evaluate(() => (window as unknown as { tableProbe: { first: number | null } }).tableProbe.first)).not.toBeNull();
   const initial = await page.evaluate(() => (window as unknown as { tableProbe: { first: number; availableEntries: number } }).tableProbe);
   expect(initial.availableEntries).toBe(4402);
-  await expect(page.locator(".ub-data-table").first().locator("tbody tr")).toHaveCount(25);
+  for (const table of await page.locator(".ub-data-table").all()) await expect(table.locator("tbody tr")).toHaveCount(4035);
   await expect(page.locator(".ub-data-table").first().getByRole("columnheader")).toHaveCount(10);
-  const firstScroll = page.locator(".ub-table-scroll").first();
-  expect(await firstScroll.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  expect(await page.locator(".ub-table-scroll").first().evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   for (let iteration = 0; iteration < 10; iteration += 1) {
     const value = 900 + iteration;
@@ -448,6 +601,7 @@ async function publishTimings(info: TestInfo, result: Timings, label: string): P
   writeFileSync(evidence, `${JSON.stringify(record, null, 2)}\n`);
   await info.attach(`data-table-timing-${label}`, { path: evidence, contentType: "application/json" });
   if (process.env.UB_CHART_TIMING_BUDGETS !== "1") return;
+  // The measured full 4,035-row table still fits the existing first-render budget.
   if (label === "single") expect(result.first).toBeLessThanOrEqual(500);
   expect(median).toBeLessThanOrEqual(label === "single" ? 250 : 500);
 }
