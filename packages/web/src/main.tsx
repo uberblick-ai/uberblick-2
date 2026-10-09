@@ -17,6 +17,7 @@
 import { createRoot } from "react-dom/client";
 import { resolveClientConfig } from "./config.js";
 import { App } from "./ui/App.js";
+import { NotificationToaster } from "./ui/shadcn/sonner.js";
 import { applyStoredAppearance } from "./ui/theme.js";
 import "./ui/styles.css";
 // Tailwind styles shadcn and product UI over the tokens above. Web UI system
@@ -41,4 +42,4 @@ void resolveClientConfig();
 // attribute is still correct if that snippet never ran.
 applyStoredAppearance();
 
-createRoot(container).render(<App />);
+createRoot(container).render(<><App /><NotificationToaster /></>);
