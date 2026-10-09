@@ -239,16 +239,20 @@ for (const hasTouch of [false, true]) {
       const close = sheet.getByRole("button", { name: "Close threads", exact: true });
       await expect(sheet).toBeVisible();
       const geometry = await sheet.evaluate((node) => {
-        const button = node.querySelector<HTMLElement>('[data-slot="sheet-close"]')!;
-        const glyph = button.querySelector("svg")!;
-        const card = node.querySelector<HTMLElement>(".ub-thread")!;
+        const button = node.querySelector<HTMLElement>('[data-slot="sheet-close"]');
+        const glyph = button?.querySelector("svg");
+        const card = node.querySelector<HTMLElement>(".ub-thread");
+        const scroll = node.querySelector(".ub-threads")?.parentElement;
+        if (button === null || glyph === undefined || glyph === null || card === null || scroll === undefined || scroll === null) {
+          throw new Error("e2e: thread target fixture needs a close glyph, card and scroll container");
+        }
         return {
           coarse: matchMedia("(any-pointer: coarse)").matches,
           sheet: node.getBoundingClientRect().toJSON(),
           close: button.getBoundingClientRect().toJSON(),
           glyph: glyph.getBoundingClientRect().toJSON(),
           card: card.getBoundingClientRect().toJSON(),
-          scrollTop: node.querySelector(".ub-threads")!.parentElement!.scrollTop,
+          scrollTop: scroll.scrollTop,
           otherControls: Array.from(node.querySelectorAll<HTMLElement>("button:not([data-slot=sheet-close]), textarea")).map((control) => control.getBoundingClientRect().toJSON()),
         };
       });
