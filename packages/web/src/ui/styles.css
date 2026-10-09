@@ -1104,10 +1104,15 @@ h3.ub-heading {
   text-align: left;
   vertical-align: top;
   white-space: pre-wrap;
-  max-width: 32rem;
   overflow-wrap: break-word;
 }
-.ub-data-table th { background: var(--muted); font-weight: 600; color: var(--foreground); }
+/* A block inside the native cell enforces the bound; max-width on td does not. */
+.ub-data-cell { max-width: 32rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Keep long columns readable without forcing their full intrinsic width. */
+.ub-data-cell[data-wrap="long"] { min-width: 12ch; }
+.ub-data-cell[data-wrap="short"] { max-width: none; white-space: pre; }
+.ub-data-cell[data-wrap="scalar"] { max-width: none; white-space: nowrap; }
+.ub-data-table th { max-width: 32rem; background: var(--muted); font-weight: 600; color: var(--foreground); }
 .ub-data-table td { color: var(--prose-text); }
 .ub-data-table td[data-state="absent"], .ub-data-table td[data-state="null"], .ub-data-table td[data-state="invalid"] {
   color: var(--muted-foreground);
