@@ -954,7 +954,7 @@ test("document actions stay reachable, close with the route, and archive into Re
   await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
 
   const trigger = page.getByRole("button", { name: "Document actions" });
-  const uuid = page.locator(".ub-copy-identity .ub-copy-link");
+  const uuid = page.locator(".ub-doc-meta .ub-copy-link");
   const title = page.locator(".ub-title");
   for (const [name, control] of [
     ["title", title],
@@ -985,8 +985,8 @@ test("document actions stay reachable, close with the route, and archive into Re
   }
 
   await uuid.click();
-  await expect(page.locator(".ub-copied")).toHaveText("URL copied to clipboard");
-
+  await expect(copyNotice(page, "URL copied to clipboard")).toBeVisible();
+  // Copy feedback leaves the document actions immediately reachable.
   await trigger.click();
   await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
   await trigger.click();
@@ -2003,95 +2003,217 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
     expect(scrolled.takesTheTitle).toBe(false);
   }
 
-  // The identity confirmation uses the target's lower half: it neither moves
-  // nor intersects the uuid, revision, title or actions when it appears.
-  await page.setViewportSize({ width: 375, height: 620 });
-  await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
-  await page.locator(".ub-body").evaluate(async (body) => {
-    await Promise.all(
-      body.getAnimations({ subtree: true }).map((animation) =>
-        animation.finished.catch(() => undefined),
-      ),
-    );
-  });
-  const headerRects = (): Promise<Record<string, DOMRect>> =>
-    page.evaluate(() => {
-      const selectors = {
-        uuid: ".ub-copy-link",
-        revision: ".ub-doc-rev",
-        title: ".ub-title",
-        actions: ".ub-actions-trigger",
-      } as const;
-      return Object.fromEntries(
-        Object.entries(selectors).map(([name, selector]) => {
-          const element = document.querySelector(selector);
-          if (element === null) throw new Error(`e2e: missing ${selector}`);
-          return [name, element.getBoundingClientRect().toJSON()];
-        }),
-      );
-    });
-  const beforeCopy = await headerRects();
-  await page.locator(".ub-copy-link").click();
-  await expect(page.locator(".ub-copied")).toHaveText("URL copied to clipboard");
-  expect(await headerRects()).toEqual(beforeCopy);
-  expect(
-    await page.evaluate(() => {
-      const rangeFor = (selector: string): DOMRect => {
-        const element = document.querySelector(selector);
-        if (element === null) throw new Error(`e2e: missing ${selector}`);
-        const range = document.createRange();
-        range.selectNodeContents(element);
-        return range.getBoundingClientRect();
-      };
-      const feedback = rangeFor(".ub-copied");
-      const separatedFrom = [
-        rangeFor(".ub-copy-link"),
-        rangeFor(".ub-doc-rev"),
-        document.querySelector(".ub-title")?.getBoundingClientRect(),
-        document.querySelector(".ub-actions-trigger")?.getBoundingClientRect(),
-      ];
-      return separatedFrom.every(
-        (box) =>
-          box !== undefined &&
-          (feedback.right <= box.left ||
-            feedback.left >= box.right ||
-            feedback.bottom <= box.top ||
-            feedback.top >= box.bottom),
-      );
-    }),
-  ).toBe(true);
-
-  // The waiting screen still carries the explicit text control. Its feedback
-  // remains inside that button because there is no hydrated identity to hide.
-  const confirmationIsContained = async (open: Page): Promise<boolean> => {
-    await open.locator(".ub-copy-link").click();
-    await expect(open.locator(".ub-copied")).toHaveText("URL copied to clipboard");
-    return open.evaluate(() => {
-      const control = document.querySelector(".ub-copy-link");
-      const note = document.querySelector(".ub-copied");
-      if (control === null || note === null) throw new Error("e2e: no control");
-      const box = control.getBoundingClientRect();
-      const range = document.createRange();
-      range.selectNodeContents(note);
-      const shown = range.getBoundingClientRect();
-      return (
-        shown.left >= box.left - 0.5 &&
-        shown.right <= box.right + 0.5 &&
-        shown.top >= box.top - 0.5 &&
-        shown.bottom <= box.bottom + 0.5
-      );
-    });
-  };
-
-  const waiting = await openAppearanceApp(
-    browser,
-    "light",
-    `/${harness().workspace}/${randomUUID()}`,
-  );
-  await expect(waiting.locator(".ub-notice")).toContainText("Waiting for sync");
-  expect.soft(await confirmationIsContained(waiting)).toBe(true);
 });
+
+function copyNotice(page: Page, message: string): Locator {
+  return page.locator("[data-sonner-toast]:not([data-removed=true])").filter({
+    has: page.locator("[data-description]", { hasText: new RegExp(`^${message}$`) }),
+  });
+}
+
+/** Observe painted placement and hit targets while feedback remains visible. */
+async function expectCopyNoticeLeavesHeaderUsable(page: Page, message: string): Promise<void> {
+  const notice = copyNotice(page, message);
+  await expect.poll(() => notice.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return {
+      withinViewport: box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight,
+      lowerRight: box.left > innerWidth / 2 && box.top > innerHeight / 2,
+      receivesPointer: element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)),
+    };
+  })).toEqual({ withinViewport: true, lowerRight: true, receivesPointer: true });
+  for (const control of [page.locator(".ub-doc-meta .ub-copy-link"), page.getByRole("button", { name: "Document actions" })]) {
+    expect(await control.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+    })).toBe(true);
+  }
+}
+
+/** Wait for native dismissal before inspecting the replacement's content. */
+async function activateCopy(page: Page, control: Locator, keyboard = false): Promise<void> {
+  const previous = (await page.locator("[data-sonner-toast]").elementHandles())[0];
+  if (keyboard) await control.press("Enter");
+  else await control.click();
+  if (previous !== undefined) {
+    await expect.poll(() => previous.evaluate((element) => element.isConnected)).toBe(false);
+    await previous.dispose();
+  }
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
+}
+
+type ClipboardMode = "modern" | "missing" | "refused" | "failed";
+
+/** Observe copied text at the browser APIs; the product keeps its real helper. */
+async function clipboardMode(page: Page, mode: ClipboardMode): Promise<void> {
+  await page.evaluate((mode) => {
+    const writes: string[] = [];
+    (window as unknown as { copiedTexts: string[] }).copiedTexts = writes;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: mode === "missing" ? undefined : {
+        writeText: async (text: string) => {
+          if (mode !== "modern") throw new Error("clipboard refused");
+          writes.push(text);
+        },
+      },
+    });
+    document.execCommand = (command: string): boolean => {
+      if (command !== "copy" || mode === "failed") return false;
+      const selected = document.activeElement;
+      if (!(selected instanceof HTMLTextAreaElement)) throw new Error("no fallback selection");
+      writes.push(selected.value);
+      return true;
+    };
+  }, mode);
+}
+
+function copiedTexts(page: Page): Promise<string[]> {
+  return page.evaluate(() => (window as unknown as { copiedTexts: string[] }).copiedTexts);
+}
+
+/** Both the native range and ProseMirror selection survive a source-copy click. */
+function editorSelection(page: Page) {
+  return editor(page).evaluate((element) => {
+    const mounted = element as HTMLElement & { editor: { state: { selection: { from: number; to: number } } } };
+    const selection = document.getSelection();
+    return {
+      focused: document.activeElement === element,
+      from: mounted.editor.state.selection.from,
+      to: mounted.editor.state.selection.to,
+      anchor: selection?.anchorNode?.textContent,
+      anchorOffset: selection?.anchorOffset,
+      focus: selection?.focusNode?.textContent,
+      focusOffset: selection?.focusOffset,
+      text: selection?.toString(),
+    };
+  });
+}
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`copy consumers publish fresh shared notices and preserve source selection — ${scheme} @webkit`, async ({ browser }) => {
+    const page = await openAppearanceApp(browser, scheme, "", false, {
+      viewport: { width: 1400, height: 1000 }, isMobile: false,
+    });
+    await page.setViewportSize({ width: 1400, height: 1000 });
+    const uuid = await createDoc(page, `Copy notices ${scheme}`);
+    const doc = new Y.Doc();
+    const secret = await importRootSecret(harness().authSecret);
+    const provider = new HocuspocusProvider({
+      url: harness().hubUrl, name: roomForDoc(harness().workspaceUuid, uuid), document: doc,
+      token: async () => wrapToken(await mintToken(secret, {
+        typ: "room", sub: randomUUID(), workspace: harness().workspaceUuid,
+        scope: "read-write", kid: null, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+      })),
+    });
+    try {
+      await new Promise<void>((resolve) => provider.on("synced", resolve));
+      const sources = [
+        [".ub-code", "code", "const answer = 42;\nanswer;"],
+        [".ub-mermaid", "mermaid", "graph TD; A-->B"],
+        [".ub-terminal", "terminal", "$ ub init\nworkspace ready"],
+        [".ub-chart[data-view=line]", "chart", JSON.stringify({ version: 1, type: "line", collection: "missing", x: { field: "day", type: "date" }, y: [{ field: "value" }] })],
+        [".ub-chart[data-view=table]", "chart", JSON.stringify({ version: 1, type: "table", collection: "missing", columns: [{ field: "value" }] })],
+      ] as const;
+      for (const [, type, text] of sources) appendBlock(doc, { type, text });
+      await expect(page.locator(".ub-copy")).toHaveCount(5);
+      await clipboardMode(page, "modern");
+      const link = page.locator(".ub-doc-meta .ub-copy-link");
+      const canonicalUrl = new URL(`/${harness().workspace}/${uuid}`, harness().appUrl).href;
+      await expect(link).toHaveAccessibleName(`uuid ${uuid.slice(0, 8)} — copies the canonical document URL for ${harness().workspace}/${uuid}`);
+      await activateCopy(page, link);
+      await expect(copyNotice(page, "URL copied to clipboard")).toHaveAttribute("data-type", "success");
+      await activateCopy(page, link, true);
+      await expect(copyNotice(page, "URL copied to clipboard")).toHaveAttribute("data-type", "success");
+      expect(await copiedTexts(page)).toEqual([canonicalUrl, canonicalUrl]);
+      await expect(page.locator(".ub-copied")).toHaveCount(0);
+
+      // These desktop and iPad sizes exposed header obstruction in the former
+      // top-right region. One source consumer also proves it uses the same region;
+      // the full source and clipboard contracts are checked separately below.
+      const codeCopy = page.locator(".ub-code .ub-copy");
+      const actions = page.getByRole("button", { name: "Document actions" });
+      for (const viewport of [
+        { width: 1440, height: 900 },
+        { width: 1280, height: 800 },
+        { width: 1024, height: 768 },
+        { width: 820, height: 1180 },
+        { width: 768, height: 1024 },
+      ]) {
+        await page.setViewportSize(viewport);
+        await activateCopy(page, link);
+        await expectCopyNoticeLeavesHeaderUsable(page, "URL copied to clipboard");
+        await activateCopy(page, link);
+        expect((await copiedTexts(page)).at(-1)).toBe(canonicalUrl);
+        await activateCopy(page, codeCopy);
+        await expectCopyNoticeLeavesHeaderUsable(page, "Copied to clipboard");
+        await actions.click();
+        await expect(page.getByRole("menuitem", { name: "Pin to sidebar" })).toBeVisible();
+        await expect(copyNotice(page, "Copied to clipboard")).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(actions).toBeFocused();
+      }
+      await page.setViewportSize({ width: 1400, height: 1000 });
+
+      await placeCaret(page);
+      await page.keyboard.insertText("Keep caret selection");
+      for (let step = 0; step < 4; step += 1) await page.keyboard.press("Shift+ArrowLeft");
+      await expect.poll(async () => {
+        const selection = await editorSelection(page);
+        return selection.to - selection.from;
+      }).toBe(4);
+      const selected = await editorSelection(page);
+      expect(selected.focused).toBe(true);
+      expect(selected.from).not.toBe(selected.to);
+      for (const [selector, , text] of sources) {
+        const copy = page.locator(selector).getByRole("button", { name: "copy", exact: true });
+        await activateCopy(page, copy);
+        await expect(copyNotice(page, "Copied to clipboard")).toHaveAttribute("data-type", "success");
+        await expect(copy).toHaveText("copy");
+        expect((await copiedTexts(page)).at(-1)).toBe(text);
+        expect(await editorSelection(page)).toEqual(selected);
+        await expect(page.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
+      }
+      await activateCopy(page, codeCopy);
+      await activateCopy(page, codeCopy);
+      await expect(copyNotice(page, "Copied to clipboard")).toHaveAttribute("data-type", "success");
+      expect(await editorSelection(page)).toEqual(selected);
+      // Each missing or refused modern API still succeeds through selection,
+      // without moving the editor's caret or keeping a second notice.
+      for (const mode of ["missing", "refused", "failed"] as const) {
+        await clipboardMode(page, mode);
+        const copy = page.locator(".ub-code .ub-copy");
+        await activateCopy(page, copy);
+        await expect(copyNotice(page, mode === "failed" ? "Copy failed" : "Copied to clipboard")).toHaveAttribute("data-type", mode === "failed" ? "error" : "success");
+        expect(await copiedTexts(page)).toEqual(mode === "failed" ? [] : [sources[0][2]]);
+        expect(await editorSelection(page)).toEqual(selected);
+        await expect(copy).toHaveText("copy");
+        await expect(page.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
+      }
+    } finally {
+      provider.destroy();
+      doc.destroy();
+    }
+
+    const waitingId = randomUUID();
+    const waiting = await openAppearanceApp(browser, scheme, `/${harness().workspace}/${waitingId}`, false, {
+      viewport: { width: 1400, height: 1000 }, isMobile: false,
+    });
+    const waitingCopy = waiting.getByRole("button", { name: `Copy link — copies the canonical document URL for ${harness().workspace}/${waitingId}`, exact: true });
+    await clipboardMode(waiting, "modern");
+    const bounds = await waitingCopy.boundingBox();
+    expect(bounds?.width).toBeGreaterThanOrEqual(44);
+    expect(bounds?.height).toBeGreaterThanOrEqual(44);
+    await activateCopy(waiting, waitingCopy);
+    await expect(copyNotice(waiting, "URL copied to clipboard")).toHaveAttribute("data-type", "success");
+    expect(await copiedTexts(waiting)).toEqual([new URL(`/${harness().workspace}/${waitingId}`, harness().appUrl).href]);
+    await expect(waiting.locator(".ub-copied")).toHaveCount(0);
+    await clipboardMode(waiting, "failed");
+    await activateCopy(waiting, waitingCopy, true);
+    await expect(copyNotice(waiting, "Copy failed")).toHaveAttribute("data-type", "error");
+    await expect(waiting.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
+  });
+}
 /**
  * The document's tags read as tags rather than as a form field (#958).
  *
@@ -2556,7 +2678,7 @@ for (const scheme of ["light"] as const) {
     const copy = waiting.getByRole("button", { name: /^Copy link/ });
     const before = await controlPaint(copy);
     await copy.tap();
-    await expect(waiting.locator(".ub-copied")).not.toHaveText("");
+    await expect(copyNotice(waiting, "URL copied to clipboard")).toBeVisible();
     await copy.evaluate((element) => (element as HTMLElement).blur());
     await expect.poll(() => controlPaint(copy)).toEqual(before);
     expect(await activeHoverRules(copy)).toEqual([]);

@@ -325,7 +325,6 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         appearance?.removeEventListener("change", schedule);
         openButton.removeEventListener("click", open);
         screen.removeEventListener("mousedown", open);
-        copy.destroy();
       },
     };
   };

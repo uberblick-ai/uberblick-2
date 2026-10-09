@@ -173,14 +173,22 @@ test("local-only status answers leave the readings and prose in place", async ({
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
     expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
     expect(await page.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
-    // At the retained 320px regression width the native notice covers the
-    // top-left restore control; keyboard activation still leaves the notice
-    // undismissed so navigation must resolve it when this header unmounts.
+    // Keyboard navigation leaves the recovery notice undismissed; entering
+    // Settings must resolve it when the document header unmounts.
     if (width < 1280) {
       await page.getByRole("button", { name: "Show document list", exact: true }).focus();
       await page.keyboard.press("Enter");
     }
-    await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+    const settings = page.getByRole("button", { name: "Workspace settings", exact: true });
+    if (width === 320) {
+      // The temporary lower-right corner covers this narrow sidebar footer.
+      // Keep the notice active through native keyboard navigation so leaving
+      // the document still has to resolve it. Desktop/iPad retain pointer proof.
+      await settings.focus();
+      await page.keyboard.press("Enter");
+    } else {
+      await settings.click();
+    }
     await expect(page.locator(".ub-status")).toHaveCount(0);
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
     await page.close();

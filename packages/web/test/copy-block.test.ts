@@ -8,13 +8,18 @@
  * between a copy affordance and a way to accidentally edit a shared document.
  */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { appendBlock } from "@uberblick/schema";
 import { codeBlockChrome, sourceBlockView } from "../src/editor/source-chrome.js";
 import type { NodeViewRendererProps } from "@tiptap/core";
 import { DecorationSet } from "@tiptap/pm/view";
 import { mountEditor, snapshotFragment } from "./helpers.js";
+import { notifyTransient } from "../src/notifications.js";
+
+vi.mock("../src/notifications.js", () => ({ notifyTransient: vi.fn() }));
+
+beforeEach(() => vi.mocked(notifyTransient).mockClear());
 
 const SHELL = "pnpm install\npnpm -r build\n";
 const DIAGRAM = "graph TD;\n  A-->B;";
@@ -78,8 +83,11 @@ describe("copying a source block", () => {
     expect(transactions).toBe(0);
     expect(editor.isFocused).toBe(false);
     expect(snapshotFragment(ydoc)).toEqual(before);
-    // The confirmation is the label, in the button's own reserved width.
-    await vi.waitFor(() => expect(buttons[0]!.textContent).toBe("copied"));
+    await vi.waitFor(() => expect(notifyTransient).toHaveBeenCalledTimes(2));
+    for (const [notice] of vi.mocked(notifyTransient).mock.calls) {
+      expect(notice).toEqual({ key: "clipboard", message: "Copied to clipboard", severity: "success" });
+    }
+    for (const button of buttons) expect(button.textContent).toBe("copy");
 
     editor.destroy();
   });
@@ -131,15 +139,30 @@ describe("copying a source block", () => {
     view.contentDOM!.parentNode!.removeChild(view.contentDOM!);
     expect(view.update!(editor.state.doc.child(0), [], DecorationSet.empty)).toBe(false);
 
-    view.destroy!();
+    view.destroy?.();
     editor.destroy();
   });
 
-  it("falls back to a selection copy where there is no clipboard API", async () => {
+  it.each(["missing", "refused"])("falls back to a selection copy when the clipboard API is %s", async (clipboard) => {
     // What a plain-http tailnet host looks like: no secure context, so
     // `navigator.clipboard` is simply not there (REMOTE.md).
     const ydoc = documentWithSourceBlocks();
     const { editor, element } = mountEditor(ydoc);
+    if (clipboard === "refused") {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: vi.fn().mockRejectedValue(new Error("Permission denied")) },
+      });
+    }
+    editor.commands.setTextSelection({ from: 2, to: 7 });
+    const selection = editor.state.selection;
+    // jsdom cannot measure a focused ProseMirror selection. Browser coverage
+    // checks the editor; here defend the fallback's native focus restoration.
+    const origin = document.createElement("input");
+    origin.value = "Selected text";
+    document.body.appendChild(origin);
+    origin.focus();
+    origin.setSelectionRange(2, 7);
     let copied: string | null = null;
     const execCommand = vi.fn((command: string) => {
       const scratch = document.activeElement;
@@ -160,7 +183,40 @@ describe("copying a source block", () => {
       element.querySelector<HTMLButtonElement>(".ub-copy")!.click();
       await vi.waitFor(() => expect(execCommand).toHaveBeenCalled());
       expect(copied).toBe(SHELL);
+      await vi.waitFor(() => expect(notifyTransient).toHaveBeenCalledWith({
+        key: "clipboard", message: "Copied to clipboard", severity: "success",
+      }));
+      expect(document.activeElement).toBe(origin);
+      expect([origin.selectionStart, origin.selectionEnd]).toEqual([2, 7]);
+      expect(editor.state.selection.eq(selection)).toBe(true);
+      expect(element.querySelector<HTMLButtonElement>(".ub-copy")!.textContent).toBe("copy");
       // The scratch textarea is gone again; it exists only for the selection.
+      expect(document.querySelector("textarea")).toBeNull();
+    } finally {
+      Reflect.deleteProperty(document, "execCommand");
+      origin.remove();
+      editor.destroy();
+    }
+  });
+
+  it.each([false, "throws"])("reports failure only after both clipboard paths refuse (%s)", async (fallback) => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error("Permission denied")) },
+    });
+    const execCommand = vi.fn(() => {
+      if (fallback === "throws") throw new Error("Copy unavailable");
+      return false;
+    });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
+    const { editor, element } = mountEditor(documentWithSourceBlocks());
+    try {
+      element.querySelector<HTMLButtonElement>(".ub-copy")!.click();
+      await vi.waitFor(() => expect(notifyTransient).toHaveBeenCalledWith({
+        key: "clipboard", message: "Copy failed", severity: "error",
+      }));
+      expect(execCommand).toHaveBeenCalledWith("copy");
+      expect(element.querySelector<HTMLButtonElement>(".ub-copy")!.textContent).toBe("copy");
       expect(document.querySelector("textarea")).toBeNull();
     } finally {
       Reflect.deleteProperty(document, "execCommand");

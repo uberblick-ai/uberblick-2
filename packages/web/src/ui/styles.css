@@ -445,12 +445,6 @@ body {
   text-align: left;
 }
 
-.ub-copied {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .ub-user-panel {
   display: grid;
   gap: 0.6rem;
@@ -722,53 +716,16 @@ h1.ub-heading {
   background: var(--destructive);
 }
 
-/* Anchor the confirmation to the copy control's own wrapper. */
 .ub-copy-wrap {
-  position: relative;
   display: inline-flex;
   flex: none;
 }
 
-/* Stretch the identity copy control to the row's reserved target height;
-   its confirmation uses the lower half without covering machine facts. */
-.ub-copy-identity {
-  align-self: stretch;
-}
-
-/* Keep confirmations out of flow and inside the control, clear of pane
-   clipping, the title and adjacent facts. Empty confirmations paint no box;
-   the identity variant uses the target's lower half. */
-.ub-copied {
-  position: absolute;
-  inset: 0;
-  border-radius: var(--radius-sm);
-  background: var(--secondary);
-  color: var(--secondary-foreground);
-  padding: 0.15rem;
-  font-size: 0.65rem;
-  line-height: 1.1;
-  text-align: center;
-  pointer-events: none;
-}
-
-.ub-copied:empty {
-  display: none;
-}
-
 .ub-title,
-.ub-copy-identity .ub-copied,
 .ub-terminal-toggle,
 .ub-copy,
 .ub-docs-open {
   background: none;
-}
-
-.ub-copy-identity .ub-copied {
-  inset: auto 0 0;
-  border-radius: 0;
-  font-size: 0.6rem;
-  line-height: 1;
-  white-space: nowrap;
 }
 
 /* Small identity initials and overflow counts keep their heavier UI weight. */
@@ -1904,9 +1861,6 @@ h3.ub-heading {
    on hover or keyboard focus. */
 .ub-copy {
   right: 0.4rem;
-  /* Reserve "copied" and "failed" plus padding and tracking inside this
-     border-box width, so confirmation never resizes the control. */
-  min-width: 8ch;
   color: var(--muted-foreground);
   transition:
     opacity 120ms ease,

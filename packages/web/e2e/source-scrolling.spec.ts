@@ -240,6 +240,7 @@ async function editorSelection(page: Page) {
 async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
   await openDocument(page);
   const sourceText = `${LONG_LINE}\nsecond line with trailing spaces    `;
+  const notices = page.locator("[data-sonner-toast]:not([data-removed=true])");
   for (const name of ["Code", "Mermaid", "Terminal demo"] as const) await insertSource(page, name, sourceText);
   for (const path of ["clipboard", "selection"] as const) {
     // Record the product's clipboard boundary; OS clipboard permissions are
@@ -283,9 +284,20 @@ async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
         expect(before.focused).toBe(true);
         expect(before.text).toBe(collapsed ? "" : sourceText.slice(0, 4));
         await page.locator("html").evaluate((element) => element.removeAttribute("data-copied-source"));
+        const previous = (await notices.elementHandles())[0];
         if (touch) await copy.tap();
         else await copy.click();
-        await expect(copy).toHaveText("copied");
+        await expect(copy).toHaveText("copy");
+        // Wait for native dismissal so the previous success cannot satisfy
+        // assertions before the replacement has been published.
+        if (previous !== undefined) {
+          await expect.poll(() => previous.evaluate((element) => element.isConnected)).toBe(false);
+          await previous.dispose();
+        }
+        await expect(notices).toHaveCount(1);
+        await expect(notices).toBeVisible();
+        await expect(notices.locator("[data-description]")).toHaveText("Copied to clipboard");
+        await expect(notices).toHaveAttribute("data-type", "success");
         await expect(page.locator("html")).toHaveAttribute("data-copied-source", sourceText);
         await expect.poll(() => editorSelection(page)).toEqual(before);
         await expect.poll(() => source.textContent()).toBe(sourceText);
@@ -394,7 +406,11 @@ test("code preserves an empty caret and trailing spaces, reveals typed line ends
   await expect(copy).toBeInViewport();
   if (info.project.use.hasTouch === true) await copy.tap();
   else await copy.click();
-  await expect(copy).toHaveText("copied");
+  await expect(copy).toHaveText("copy");
+  const copied = page.locator("[data-sonner-toast]:not([data-removed=true])").filter({
+    has: page.locator("[data-description]", { hasText: /^Copied to clipboard$/ }),
+  });
+  await expect(copied).toHaveAttribute("data-type", "success");
   await expect(page.locator("html")).toHaveAttribute("data-copied-source", edited);
   await expectContained(page);
 });
