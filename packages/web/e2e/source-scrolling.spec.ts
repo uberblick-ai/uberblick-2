@@ -26,7 +26,21 @@ async function insertSource(page: Page, name: "Code" | "Mermaid" | "Terminal dem
   const source = page.locator(selector).last();
   await source.click();
   for (const [index, line] of text.split("\n").entries()) {
-    if (index > 0) await page.keyboard.press("Enter");
+    if (index > 0) {
+      await page.keyboard.press("Enter");
+      // WebKit's native range can lag the editor's newline transaction. Wait
+      // for the caret before sending the next fixture line to insertText.
+      const prefix = `${text.split("\n").slice(0, index).join("\n")}\n`;
+      await expect.poll(() => source.evaluate((element) => {
+        const selection = document.getSelection();
+        if (selection === null || !selection.isCollapsed || selection.focusNode === null ||
+          !element.contains(selection.focusNode)) return null;
+        const beforeCaret = document.createRange();
+        beforeCaret.selectNodeContents(element);
+        beforeCaret.setEnd(selection.focusNode, selection.focusOffset);
+        return beforeCaret.toString();
+      })).toBe(prefix);
+    }
     if (line !== "") await page.keyboard.insertText(line);
   }
   await expect.poll(() => source.textContent()).toBe(text);
