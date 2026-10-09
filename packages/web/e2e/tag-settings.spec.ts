@@ -228,25 +228,15 @@ for (const appearance of ["light", "dark"] as const) {
     await expect(page.getByRole("alert")).toContainText("already an active tag");
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
 
-    const active = page.getByRole("region", { name: "Active", exact: true }).getByRole("button");
-    const activeNames = await active.allTextContents();
-    const at = activeNames.findIndex((text) => text.trim() === `Retire ${tag}`);
-    expect(at).toBeGreaterThanOrEqual(0);
-    const activeAfterRetire = activeNames.filter((_, index) => index !== at);
-    const nextName = activeAfterRetire[Math.min(at, activeAfterRetire.length - 1)];
-    if (nextName === undefined) throw new Error("e2e: no tag-list refocus target");
+    // The keyboard catalog test above owns the exact refocus target; shared
+    // feedback must leave lifecycle focus in the tag lists.
+    const tagLists = page.getByRole("region", { name: /^(Active|Retired)$/ });
     await page.getByRole("button", { name: `Retire ${tag}`, exact: true }).press("Enter");
     await expectSuccess(page, `Retired “${tag}”.`);
     await expect(page.getByRole("alert")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: nextName.trim(), exact: true })).toBeFocused();
-    const retired = page.getByRole("region", { name: "Retired", exact: true }).getByRole("button");
-    const retiredNames = await retired.allTextContents();
-    const retiredAt = retiredNames.findIndex((text) => text.trim() === `Restore ${tag}`);
-    expect(retiredAt).toBeGreaterThanOrEqual(0);
-    const retiredAfterRestore = retiredNames.filter((_, index) => index !== retiredAt);
-    const restoredFocus = retiredAfterRestore[Math.min(retiredAt, retiredAfterRestore.length - 1)]?.trim() ?? `Retire ${tag}`;
+    await expect(tagLists.locator("button:focus")).toHaveCount(1);
     await page.getByRole("button", { name: `Restore ${tag}`, exact: true }).press("Enter");
     await expectSuccess(page, `Restored “${tag}”.`);
-    await expect(page.getByRole("button", { name: restoredFocus, exact: true })).toBeFocused();
+    await expect(tagLists.locator("button:focus")).toHaveCount(1);
   });
 }
