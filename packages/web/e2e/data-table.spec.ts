@@ -516,7 +516,7 @@ test("Recent days dates and fifteen number columns keep compact rows at laptop a
   });
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA,
     replaceRecords: [8, 9].map(day => ({ id: String(day), value: {
-      day: `2026-10-0${day}`, ...Object.fromEntries(numbers.map(({ field }, index) => [field, index + day + 0.5])),
+      day: `2026-10-0${day}`, ...Object.fromEntries(numbers.map(({ field }, index) => [field, field === "run_h_median" ? 1_234_567_890_123.5 : index + day + 0.5])),
     } })),
   }] });
   for (const width of [1280, 820]) {
@@ -529,6 +529,7 @@ test("Recent days dates and fifteen number columns keep compact rows at laptop a
     await expect(cells.first()).toHaveText("Oct 8, 2026");
     await expect(cells.nth(3)).toHaveText("11 %");
     await expect(cells.nth(7)).toHaveText("14.5 h");
+    await expect(cells.nth(9)).toHaveText("1,234,567,890,123.5 h");
     expect(await cellLines(cells)).toEqual(Array.from({ length: 32 }, () => 1));
     const scroll = page.locator(".ub-table-scroll");
     expect(await scroll.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);

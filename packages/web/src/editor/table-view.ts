@@ -12,8 +12,9 @@ function renderCell(cell: HTMLTableCellElement, value: TableCell, format: TableC
   }
   // Scalar formatting stays on one line regardless of length. Short stored
   // text keeps explicit whitespace; only long text/markers/URLs soft-wrap.
+  const short = value.text.length <= 20 || (value.text.length <= 40 && [...value.text].length <= 20);
   const wrap = value.state === "valid" && (format === "number" || format === "date")
-    ? "scalar" : [...value.text].length <= 20 ? "short" : "long";
+    ? "scalar" : short ? "short" : "long";
   if (content.dataset.wrap !== wrap) content.dataset.wrap = wrap;
   if (value.href !== undefined) {
     let anchor = content.firstElementChild as HTMLAnchorElement | null;
