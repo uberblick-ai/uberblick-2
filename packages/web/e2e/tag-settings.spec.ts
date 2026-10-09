@@ -27,6 +27,11 @@ async function expectSuccess(page: Page, message: string): Promise<void> {
   })).toEqual({ withinViewport: true, lowerRight: true, receivesPointer: true });
 }
 
+async function expectSubmissionFocusRetained(page: Page): Promise<void> {
+  expect(await page.evaluate(() => document.activeElement ===
+    (window as unknown as { settingsSubmissionOrigin?: Element }).settingsSubmissionOrigin)).toBe(true);
+}
+
 test("a workspace rename reaches another page live and preserves its document links", async ({
   browser,
 }) => {
@@ -188,10 +193,15 @@ test("Tags settings is address-selected and its catalog changes converge", async
 });
 
 for (const appearance of ["light", "dark"] as const) {
-  test(`settings successes use shared notices and preserve native submission focus — ${appearance}`, async ({ browser }) => {
+  test(`settings successes use shared notices and preserve native submission focus — ${appearance} @webkit`, async ({ browser }) => {
     const page = await openApp(browser, `/${harness().workspace}/settings`, {
-      contextOptions: { colorScheme: appearance }, readySelector: "[data-settings-page]",
+      contextOptions: { colorScheme: appearance, viewport: { width: 1440, height: 900 }, isMobile: false }, readySelector: "[data-settings-page]",
     });
+    // Capture the browser's native focus before the product submit handler:
+    // Safari pointer activation can blur a field without focusing the button.
+    await page.evaluate(() => document.addEventListener("submit", () => {
+      (window as unknown as { settingsSubmissionOrigin: Element | null }).settingsSubmissionOrigin = document.activeElement;
+    }, true));
     const name = page.getByLabel("Workspace name");
     const save = page.getByRole("button", { name: "Save", exact: true });
     await expect(name).toBeEnabled();
@@ -216,7 +226,7 @@ for (const appearance of ["light", "dark"] as const) {
       await name.fill(nextName);
       await save.click();
       await expectSuccess(page, `Saved “${nextName}”.`);
-      await expect(save).toBeFocused();
+      await expectSubmissionFocusRetained(page);
       expect(await save.evaluate((element) => {
         const box = element.getBoundingClientRect();
         return element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
@@ -235,7 +245,7 @@ for (const appearance of ["light", "dark"] as const) {
     await field.fill(`${tag}-two`);
     await create.click();
     await expectSuccess(page, `Created “${tag}-two”.`);
-    await expect(create).toBeFocused();
+    await expectSubmissionFocusRetained(page);
 
     // With the preceding success dismissed, neither validation failure adds
     // a notice. Field edits clear alerts; later lifecycle success does too.

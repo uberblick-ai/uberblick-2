@@ -2091,8 +2091,10 @@ function editorSelection(page: Page) {
 }
 
 for (const scheme of ["light", "dark"] as const) {
-  test(`copy consumers publish fresh shared notices and preserve source selection — ${scheme}`, async ({ browser }) => {
-    const page = await openAppearanceApp(browser, scheme);
+  test(`copy consumers publish fresh shared notices and preserve source selection — ${scheme} @webkit`, async ({ browser }) => {
+    const page = await openAppearanceApp(browser, scheme, "", false, {
+      viewport: { width: 1400, height: 1000 }, isMobile: false,
+    });
     await page.setViewportSize({ width: 1400, height: 1000 });
     const uuid = await createDoc(page, `Copy notices ${scheme}`);
     const doc = new Y.Doc();
@@ -2194,7 +2196,9 @@ for (const scheme of ["light", "dark"] as const) {
     }
 
     const waitingId = randomUUID();
-    const waiting = await openAppearanceApp(browser, scheme, `/${harness().workspace}/${waitingId}`);
+    const waiting = await openAppearanceApp(browser, scheme, `/${harness().workspace}/${waitingId}`, false, {
+      viewport: { width: 1400, height: 1000 }, isMobile: false,
+    });
     const waitingCopy = waiting.getByRole("button", { name: `Copy link — copies the canonical document URL for ${harness().workspace}/${waitingId}`, exact: true });
     await clipboardMode(waiting, "modern");
     const bounds = await waitingCopy.boundingBox();
