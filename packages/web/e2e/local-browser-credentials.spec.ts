@@ -173,9 +173,8 @@ test("local-only status answers leave the readings and prose in place", async ({
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
     expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
     expect(await page.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
-    // At the retained 320px regression width the native notice covers the
-    // top-left restore control; keyboard activation still leaves the notice
-    // undismissed so navigation must resolve it when this header unmounts.
+    // Keyboard navigation leaves the recovery notice undismissed; entering
+    // Settings must resolve it when the document header unmounts.
     if (width < 1280) {
       await page.getByRole("button", { name: "Show document list", exact: true }).focus();
       await page.keyboard.press("Enter");

@@ -369,7 +369,11 @@ test("an active sticky notice stays reachable through a burst of transients in a
   await page.keyboard.press("Shift+F8");
   const sticky = notice(page, "Ongoing failure");
   await expect(sticky).toHaveAttribute("data-expanded", "true");
-  await page.waitForTimeout(500);
+  // Flush and finish native expansion before focus scrolls to a notice. A
+  // wall-clock delay can leave WebKit scrolling to the pre-transition box.
+  await page.locator("[data-sonner-toaster]").evaluate(async (element) => {
+    await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished));
+  });
   // Keyboard traversal must reach the older condition without a history UI.
   const nextControl = browserName === "webkit" ? "Alt+Tab" : "Tab";
   for (let index = 0; index < 37; index += 1) await page.keyboard.press(nextControl);

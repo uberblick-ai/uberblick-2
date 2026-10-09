@@ -55,7 +55,10 @@ import type { RemotePresence } from "../src/ui/doc-chrome.js";
 /** Nobody else in the room: these cases are about addresses, not the strip. */
 const NOBODY: readonly RemotePresence[] = [];
 
-vi.mock("../src/notifications.js", () => ({ notifyTransient: vi.fn() }));
+vi.mock("../src/notifications.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/notifications.js")>(),
+  notifyTransient: vi.fn(),
+}));
 
 const UUID = "3231bff4-2f1c-4a49-9f0a-6f8b2c1d7e55";
 const OTHER = "8c9a1b20-77de-4d31-bd2e-1f0f3a5c6b90";
