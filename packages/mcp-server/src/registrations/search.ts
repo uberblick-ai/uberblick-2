@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { failureContract } from "../failures.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
@@ -6,7 +6,7 @@ import type { ToolContext } from "../tools/context.js";
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, searchOperation } from "../tools/search.js";
 
-export function registerSearch(server: McpServer, context: ToolContext): void {
+export function registerSearch(server: ToolRegistrar, context: ToolContext): void {
   server.registerTool("search", {
     title: "Search documents",
     description:

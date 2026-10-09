@@ -17,11 +17,11 @@ export function toolResult(payload: object, isError = false): CallToolResult {
  * Admit and drain calls inside the failure boundary; mismatches are logged
  * text-only internal errors.
  *
- * Concurrency invariant: operations await only their opening settle, then
+ * Concurrency invariant: workspace operations await only their opening settle, then
  * perform every read and write synchronously. Never add an await after settle:
  * another operation could interleave writes to the same Y.Doc. The
  * handler-invariants test checks every registered operation body and the
- * delegated opening settle in collectSyncStatus.
+ * delegated opening settle in collectSyncStatus. Static get_help never settles.
  */
 export function guarded<Args>(
   tool: keyof typeof outputSchemas,

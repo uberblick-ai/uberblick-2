@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { BLOCK_TYPES } from "@uberblick/schema";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
@@ -7,7 +7,7 @@ import { ARCHIVED_IS_READ_ONLY, DECIDED_IS_READ_ONLY, SYNCED_IS_ACKNOWLEDGED, TL
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, insertBlockOperation } from "../tools/insert-block.js";
 
-export function registerInsertBlock(server: McpServer, context: ToolContext): void {
+export function registerInsertBlock(server: ToolRegistrar, context: ToolContext): void {
   const { toolContract } = context;
   server.registerTool("insert_block", {
     title: "Insert a block",

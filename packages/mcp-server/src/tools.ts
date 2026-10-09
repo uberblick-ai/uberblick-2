@@ -1,7 +1,7 @@
 /**
  * The v0 MCP tool set.
  *
- * Twenty-nine tools and no more: list_tags, create_doc, get_doc, get_data, update_data, list_docs, search,
+ * Thirty tools: get_help, list_tags, create_doc, get_doc, get_data, update_data, list_docs, search,
  * backlinks, find_decisions, edit_block, insert_block, delete_block, set_tags, set_links,
  * set_title, set_description, set_tldr, set_status, set_changelog_suggestion,
  * archive_doc,
@@ -21,7 +21,7 @@
  * `{applied, synced}` plus the hub's state, because "applied locally" is not
  * "synced" and an agent deserves to know which one it got — and `synced` is not
  * "stored by the hub" either, which is why `SYNCED_MEANS` in ./tools/descriptions.ts says so in the
- * tool descriptions rather than leaving the word to be read generously.
+ * tool descriptions and bundled help rather than leaving the word to be read generously.
  *
  * Every registration calls its operation through ./tool-adapter.ts, which
  * validates the payload and serializes the MCP answer. ./failures.ts stamps
@@ -37,6 +37,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { GuidanceBriefing } from "./guidance.js";
 import type { Replicas } from "./replica.js";
 import type { ServerWork } from "./server-work.js";
+import { HelpCatalog } from "./help.js";
+import { createToolRegistrar } from "./help-resources.js";
 import { registerSidebarTools } from "./registrations/sidebar-tools.js";
 import { createToolContext } from "./tools/context.js";
 import { registerListTags } from "./registrations/list-tags.js";
@@ -64,40 +66,45 @@ import { registerAnnotate } from "./registrations/annotate.js";
 import { registerLinkRange } from "./registrations/link-range.js";
 import { registerExportMarkdown } from "./registrations/export-markdown.js";
 import { registerSyncStatus } from "./registrations/sync-status.js";
+import { registerGetHelp } from "./registrations/get-help.js";
 
 export function registerTools(
   server: McpServer,
   replicas: Replicas,
   briefing: GuidanceBriefing,
   work: ServerWork,
-): void {
-  const context = createToolContext(replicas, briefing, work);
+): HelpCatalog {
+  const help = new HelpCatalog();
+  const context = createToolContext(replicas, briefing, work, help);
+  const registrar = createToolRegistrar(server, help);
 
-  registerListTags(server, context);
-  registerCreateDoc(server, context);
-  registerGetDoc(server, context);
-  registerGetData(server, context);
-  registerUpdateData(server, context);
-  registerListDocs(server, context);
-  registerSearch(server, context);
-  registerBacklinks(server, context);
-  registerFindDecisions(server, context);
-  registerEditBlock(server, context);
-  registerInsertBlock(server, context);
-  registerDeleteBlock(server, context);
-  registerSetTags(server, context);
-  registerSetLinks(server, context);
-  registerSetTitle(server, context);
-  registerSetDescription(server, context);
-  registerSetTldr(server, context);
-  registerSetStatus(server, context);
-  registerSetChangelogSuggestion(server, context);
-  registerArchiveDoc(server, context);
-  registerRestoreDoc(server, context);
-  registerAnnotate(server, context);
-  registerLinkRange(server, context);
-  registerExportMarkdown(server, context);
-  registerSyncStatus(server, context);
+  registerListTags(registrar, context);
+  registerCreateDoc(registrar, context);
+  registerGetDoc(registrar, context);
+  registerGetData(registrar, context);
+  registerUpdateData(registrar, context);
+  registerListDocs(registrar, context);
+  registerSearch(registrar, context);
+  registerBacklinks(registrar, context);
+  registerFindDecisions(registrar, context);
+  registerEditBlock(registrar, context);
+  registerInsertBlock(registrar, context);
+  registerDeleteBlock(registrar, context);
+  registerSetTags(registrar, context);
+  registerSetLinks(registrar, context);
+  registerSetTitle(registrar, context);
+  registerSetDescription(registrar, context);
+  registerSetTldr(registrar, context);
+  registerSetStatus(registrar, context);
+  registerSetChangelogSuggestion(registrar, context);
+  registerArchiveDoc(registrar, context);
+  registerRestoreDoc(registrar, context);
+  registerAnnotate(registrar, context);
+  registerLinkRange(registrar, context);
+  registerExportMarkdown(registrar, context);
+  registerSyncStatus(registrar, context);
 
-  registerSidebarTools(server, context);
+  registerSidebarTools(registrar, context);
+  registerGetHelp(registrar, context);
+  return help;
 }

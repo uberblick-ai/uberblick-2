@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
 import { ARCHIVED_IS_READ_ONLY, DECIDED_IS_READ_ONLY, SYNCED_MEANS, TLDR_AFTER_CONTENT_CHANGE } from "../tools/descriptions.js";
@@ -24,7 +24,7 @@ const MARKS_ANCHOR_TO_POSITIONS =
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, editBlockOperation } from "../tools/edit-block.js";
 
-export function registerEditBlock(server: McpServer, context: ToolContext): void {
+export function registerEditBlock(server: ToolRegistrar, context: ToolContext): void {
   const { toolContract } = context;
   server.registerTool("edit_block", {
     title: "Edit one block",

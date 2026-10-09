@@ -8,6 +8,7 @@ import { exportMarkdownOperation } from "./tools/export-markdown.js";
 import { findDecisionsOperation } from "./tools/find-decisions.js";
 import { getDataOperation } from "./tools/get-data.js";
 import { getDocOperation } from "./tools/get-doc.js";
+import { getHelpOperation } from "./tools/get-help.js";
 import { insertBlockOperation } from "./tools/insert-block.js";
 import { linkRangeOperation } from "./tools/link-range.js";
 import { listDocsOperation } from "./tools/list-docs.js";
@@ -27,6 +28,7 @@ import { getSidebarOperation, pinDocOperation, unpinDocOperation, sidebarGroupOp
 
 /** SDK-free entry points; no CLI exports or new transports. */
 export const operations = {
+  get_help: getHelpOperation,
   annotate: annotateOperation,
   archive_doc: archiveDocOperation,
   backlinks: backlinksOperation,

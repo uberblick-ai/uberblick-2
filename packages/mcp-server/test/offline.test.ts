@@ -58,6 +58,7 @@ describe("with the hub stopped", () => {
       "find_decisions",
       "get_data",
       "get_doc",
+      "get_help",
       "get_sidebar",
       "insert_block",
       "link_range",

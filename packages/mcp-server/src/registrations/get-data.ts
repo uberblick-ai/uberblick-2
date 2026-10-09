@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { failureContract } from "../failures.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
@@ -6,7 +6,7 @@ import type { ToolContext } from "../tools/context.js";
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, getDataOperation } from "../tools/get-data.js";
 
-export function registerGetData(server: McpServer, context: ToolContext): void {
+export function registerGetData(server: ToolRegistrar, context: ToolContext): void {
   server.registerTool("get_data", {
     title: "Read document data",
     description:

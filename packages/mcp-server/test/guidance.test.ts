@@ -26,6 +26,11 @@ function mark(rig: Rig, ...uuids: string[]) {
   createTagCatalogEntry(rig.instance.replicas.settings().doc, "guidance", marker);
   for (const uuid of uuids) setTags(rig.instance.replicas.replica(uuid).doc, [marker]);
 }
+/** Static product help shares resources/list without changing guidance visibility. */
+async function guidanceResources(rig: Rig) {
+  const result = await rig.client.listResources();
+  return { ...result, resources: result.resources.filter(({ uri }) => uri.startsWith("uberblick://doc/")) };
+}
 afterEach(async () => {
   vi.restoreAllMocks();
   for (const rig of rigs.splice(0)) await rig.close();
@@ -141,7 +146,7 @@ it("lists and serves current guidance independently of leases and stale cached t
   // Cached tags lie in both directions; hydrated document assignments win.
   upsertDirectoryEntry(replicas.directory().doc, { uuid: first.uuid, title: "Stale", tags: [] });
   upsertDirectoryEntry(replicas.directory().doc, { uuid: next.uuid, title: "Next", tags: [marker] });
-  const resources = await rig.client.listResources();
+  const resources = await guidanceResources(rig);
   expect(resources.resources).toMatchObject([{ uri: `uberblick://doc/${first.uuid}`, title: "First", name: first.uuid }]);
   const size = rig.instance.store.logSize();
   expect((await rig.client.readResource({ uri: `uberblick://doc/${first.uuid}` })).contents[0]).toMatchObject({ text: expect.stringContaining("Read before writing.") });
@@ -150,15 +155,15 @@ it("lists and serves current guidance independently of leases and stale cached t
   await rig.ok("get_doc", { uuid: first.uuid });
   setTags(replicas.replica(next.uuid).doc, [marker]);
   setTitle(replicas.replica(next.uuid).doc, "Current title");
-  expect((await rig.client.listResources()).resources).toHaveLength(2);
+  expect((await guidanceResources(rig)).resources).toHaveLength(2);
   expect((await rig.client.readResource({ uri: `uberblick://doc/${next.uuid}` })).contents[0]).toMatchObject({ text: expect.stringContaining("Current title") });
   tombstoneDirectoryEntry(replicas.directory().doc, first.uuid);
-  expect((await rig.client.listResources()).resources).toMatchObject([{ title: "Current title" }]);
+  expect((await guidanceResources(rig)).resources).toMatchObject([{ title: "Current title" }]);
   await expect(rig.client.readResource({ uri: `uberblick://doc/${first.uuid}` })).rejects.toThrow("No locally readable guidance");
   retireTagCatalogEntry(replicas.settings().doc, marker);
-  expect((await rig.client.listResources()).resources).toEqual([]);
+  expect((await guidanceResources(rig)).resources).toEqual([]);
   restoreTagCatalogEntry(replicas.settings().doc, marker);
-  expect((await rig.client.listResources()).resources).toHaveLength(1);
+  expect((await guidanceResources(rig)).resources).toHaveLength(1);
 });
 
 it("is inert for absent or retired markers and for archived or unhydrated guidance", async () => {
@@ -177,7 +182,7 @@ it("is inert for absent or retired markers and for archived or unhydrated guidan
   const result = await doc(rig, "No readable guidance");
   expect(result.applied).toBe(true);
   expect(result).not.toHaveProperty("unread");
-  expect((await rig.client.listResources()).resources).toEqual([]);
+  expect((await guidanceResources(rig)).resources).toEqual([]);
 });
 
 
@@ -187,9 +192,9 @@ it("refreshes guidance resources from another process's durable local updates", 
   const writer = await local(config);
   const guide = await doc(writer, "Another process");
   mark(writer, guide.uuid);
-  expect((await reader.client.listResources()).resources).toMatchObject([{ title: "Another process" }]);
+  expect((await guidanceResources(reader)).resources).toMatchObject([{ title: "Another process" }]);
   setTitle(writer.instance.replicas.replica(guide.uuid).doc, "Updated remotely");
   expect((await reader.client.readResource({ uri: `uberblick://doc/${guide.uuid}` })).contents[0]).toMatchObject({ text: expect.stringContaining("Updated remotely") });
   retireTagCatalogEntry(writer.instance.replicas.settings().doc, marker);
-  expect((await reader.client.listResources()).resources).toEqual([]);
+  expect((await guidanceResources(reader)).resources).toEqual([]);
 });

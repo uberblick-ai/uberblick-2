@@ -123,6 +123,8 @@ describe("successful MCP output contracts", () => {
     await success("archive_doc", { uuid });
     await success("restore_doc", { uuid });
     await success("sync_status");
+    await success("get_help");
+    await success("get_help", { topic: "get_doc" });
     expect([...seen].sort()).toEqual(registered.map(({ name }) => name).sort());
   });
 

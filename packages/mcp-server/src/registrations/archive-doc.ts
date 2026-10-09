@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
 import { ARCHIVE_IS_LAST_WRITE_WINS, DECISION_TOPIC_LIFECYCLE, SYNCED_IS_ACKNOWLEDGED } from "../tools/descriptions.js";
@@ -6,7 +6,7 @@ import { ARCHIVE_IS_LAST_WRITE_WINS, DECISION_TOPIC_LIFECYCLE, SYNCED_IS_ACKNOWL
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, archiveDocOperation } from "../tools/archive-doc.js";
 
-export function registerArchiveDoc(server: McpServer, context: ToolContext): void {
+export function registerArchiveDoc(server: ToolRegistrar, context: ToolContext): void {
   const { toolContract } = context;
   server.registerTool("archive_doc", {
     title: "Archive a document",

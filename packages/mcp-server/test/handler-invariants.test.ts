@@ -32,7 +32,7 @@ function expectOpeningWait(
   handler: ts.Node,
   source: ts.SourceFile,
   expression: RegExp,
-  skipSyncStatus = false,
+  skipUnsettledTools = false,
 ): void {
   const waits = awaits(handler);
   expect(waits).toHaveLength(1);
@@ -44,10 +44,12 @@ function expectOpeningWait(
     return;
   }
   const first = body.statements[0]!;
-  if (skipSyncStatus) {
+  if (skipUnsettledTools) {
     expect(ts.isIfStatement(first)).toBe(true);
     const branch = first as ts.IfStatement;
-    expect(branch.expression.getText(source)).toMatch(/^tool\s*!==\s*["']sync_status["']$/);
+    expect(branch.expression.getText(source)).toMatch(
+      /^tool\s*!==\s*["']sync_status["']\s*&&\s*tool\s*!==\s*["']get_help["']$/,
+    );
     expect(branch.thenStatement).toBe(wait.parent);
     expect(branch.elseStatement).toBeUndefined();
   } else {

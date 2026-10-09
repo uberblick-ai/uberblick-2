@@ -30,9 +30,9 @@ export function operation<Args, Payload extends object>(
   body: (context: ToolContext, args: Args, request: OperationRequest) => Payload | Promise<Payload>,
 ): Operation<Args, Payload> {
   return async (context, args, request) => {
-    // collectSyncStatus settles with requireHealthy:false so diagnostics survive
-    // a failed update log. All other operations use the normal healthy settle.
-    if (tool !== "sync_status") await context.replicas.settle();
+    // Diagnostics settle with requireHealthy:false; bundled help never reads
+    // replicas. Every workspace operation uses the normal healthy settle.
+    if (tool !== "sync_status" && tool !== "get_help") await context.replicas.settle();
     if (DOCUMENT_MUTATING_TOOLS.has(tool)) context.briefing.require();
     return body(context, args, request);
   };

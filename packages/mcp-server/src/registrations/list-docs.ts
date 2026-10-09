@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { failureContract } from "../failures.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
@@ -7,7 +7,7 @@ import { DECISION_AUTHORITY, LIFECYCLE_RECORDS_STATE } from "../tools/descriptio
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, listDocsOperation } from "../tools/list-docs.js";
 
-export function registerListDocs(server: McpServer, context: ToolContext): void {
+export function registerListDocs(server: ToolRegistrar, context: ToolContext): void {
   server.registerTool("list_docs", {
     title: "List documents",
     description:

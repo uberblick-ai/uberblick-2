@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
 import { ARCHIVED_IS_READ_ONLY, DESCRIPTION_IS_FOR_CHOOSING, SYNCED_IS_ACKNOWLEDGED } from "../tools/descriptions.js";
@@ -6,7 +6,7 @@ import { ARCHIVED_IS_READ_ONLY, DESCRIPTION_IS_FOR_CHOOSING, SYNCED_IS_ACKNOWLED
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, setDescriptionOperation } from "../tools/set-description.js";
 
-export function registerSetDescription(server: McpServer, context: ToolContext): void {
+export function registerSetDescription(server: ToolRegistrar, context: ToolContext): void {
   const { toolContract } = context;
   server.registerTool("set_description", {
     title: "Set a document's description",

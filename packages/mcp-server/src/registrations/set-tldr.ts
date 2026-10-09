@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { MAX_TLDR_LENGTH } from "@uberblick/schema";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
@@ -7,7 +7,7 @@ import { ARCHIVED_IS_READ_ONLY, DECIDED_IS_READ_ONLY, SYNCED_IS_ACKNOWLEDGED } f
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, setTldrOperation } from "../tools/set-tldr.js";
 
-export function registerSetTldr(server: McpServer, context: ToolContext): void {
+export function registerSetTldr(server: ToolRegistrar, context: ToolContext): void {
   const { toolContract } = context;
   server.registerTool("set_tldr", {
     title: "Set or clear a document's TL;DR",

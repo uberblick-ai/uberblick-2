@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
 import { DECIDED_IS_READ_ONLY, DECISION_AUTHORITY, DESCRIPTION_IS_FOR_CHOOSING, LIFECYCLE_RECORDS_STATE, SYNCED_MEANS } from "../tools/descriptions.js";
@@ -24,7 +24,7 @@ const CREATE_DOC_DURABILITY =
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, createDocOperation } from "../tools/create-doc.js";
 
-export function registerCreateDoc(server: McpServer, context: ToolContext): void {
+export function registerCreateDoc(server: ToolRegistrar, context: ToolContext): void {
   const { toolContract } = context;
   server.registerTool("create_doc", {
     title: "Create a document",
