@@ -105,9 +105,9 @@ export interface SandboxFiles {
   credentialsMode?: number;
   /**
    * Make the working directory look like an uberblick checkout: `mise.toml` and
-   * a root `package.json` named `uberblick`, which is what `ub workspace create` requires
-   * before it writes a derived mise config into a directory. Both markers are
-   * needed, so a bare mise project does not qualify.
+   * a root `package.json` named `uberblick`, for source-checkout command and
+   * bundle checks. Both markers are needed, so a bare mise project does not
+   * qualify.
    */
   checkout?: boolean;
 }
@@ -226,8 +226,8 @@ function createSandbox(parent: string, files: SandboxFiles): Sandbox {
  * The ceiling for a suite that starts no hub at all, applied to `box`.
  *
  * With nothing listening, every bounded wait for a hub is a wait for an answer
- * that cannot come — and `ub workspace create`'s starter seed makes several of them
- * against `ws://localhost:1234`, each one the full ceiling above. A ceiling
+ * that cannot come. Commands probing `ws://localhost:1234` each wait the full
+ * ceiling above. A ceiling
  * near zero reaches the same honest "no hub" answer at once. Only for suites
  * where no test starts a hub: a real one on loopback needs the 400 ms.
  */
