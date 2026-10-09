@@ -107,8 +107,10 @@ docker run --rm --platform linux/amd64 --entrypoint cat "ghcr.io/uberblick-ai/hu
 The JSON records `version`, `sourceCommit`, `syncProtocolVersion` and the two
 `images` references. Both images also carry version, source revision and
 protocol metadata as image labels. Client release numbers and hub release
-numbers are independent; matching protocol versions decide wire compatibility,
-not matching package version strings.
+numbers match from 0.5.0 on and both are published from the same commit through
+the [paired release procedure](RELEASING.md#cut-a-paired-release). Matching
+protocol versions still decide wire compatibility; a shared package version
+alone does not establish it.
 
 ### Updating the host — deliberately
 
