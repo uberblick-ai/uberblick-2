@@ -21,11 +21,10 @@ import {
   INTERNAL_ERROR_MESSAGE,
   MUTATING_TOOLS,
   READ_ONLY_TOOLS,
-  guarded,
   hydrationRecovery,
   toFailure,
 } from "../src/failures.js";
-import { ServerWork } from "../src/server-work.js";
+import { ServerShuttingDownError } from "../src/server-work.js";
 import { MirrorStore } from "../src/store.js";
 import type { SearchHit } from "../src/store.js";
 import {
@@ -463,7 +462,7 @@ describe("the failure contract", () => {
         if (!(error instanceof DataError)) throw error;
         rejected = true;
         const failure = toFailure("edit_block", error);
-        const payload = JSON.parse((failure.content[0] as { text: string }).text);
+        const payload = failure.payload;
         expect(failure.isError).toBe(true);
         expect(payload).toMatchObject({
           error: error.code, message: error.message, ...error.details,
@@ -497,13 +496,8 @@ describe("the failure contract", () => {
       ).payload,
     );
 
-    // Admission refusal uses the same failure floor, before the handler runs.
-    const stopped = new ServerWork();
-    stopped.stop();
-    const refused = await guarded("set_title", async () => {
-      throw new Error("A refused handler must not run.");
-    }, stopped)({});
-    record(JSON.parse((refused.content[0] as { text: string }).text));
+    // Admission refusals use the same failure floor as every other tool error.
+    record(toFailure("set_title", new ServerShuttingDownError()).payload);
 
     // Every code the code itself knows about was triggered above.
     expect([...failures.keys()].sort()).toEqual([...FAILURE_CODES].sort());

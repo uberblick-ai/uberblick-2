@@ -5,9 +5,11 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { guarded, INTERNAL_ERROR_MESSAGE } from "../src/failures.js";
+import { INTERNAL_ERROR_MESSAGE } from "../src/failures.js";
+import { guarded } from "../src/tool-adapter.js";
+import { ServerWork } from "../src/server-work.js";
+import type { ToolContext } from "../src/tools/context.js";
 import { outputSchemas } from "../src/outputs.js";
-import { json } from "../src/tools/helpers.js";
 import { removeTempDirs, startServer } from "./helpers.js";
 
 const close: (() => Promise<void>)[] = [];
@@ -29,7 +31,7 @@ async function probe(
   server.registerTool(tool, {
     inputSchema: z.object({}).strict(),
     outputSchema: outputSchemas[tool],
-  }, guarded(tool, async () => typeof answer === "function" ? answer() : json(answer)));
+  }, guarded(tool, { work: new ServerWork() } as ToolContext, async () => typeof answer === "function" ? answer() : answer));
   const client = new Client({ name: "output-contract-client", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   close.push(async () => {

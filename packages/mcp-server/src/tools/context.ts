@@ -31,8 +31,8 @@ import {
   failureContract,
   hydrationRecovery,
 } from "../failures.js";
-import { GUIDANCE_WRITE_INSTRUCTIONS } from "../guidance.js";
-import type { GuidanceBriefing } from "../guidance.js";
+import { GUIDANCE_WRITE_INSTRUCTIONS } from "../briefing.js";
+import type { GuidanceBriefing } from "../briefing.js";
 import { docLinkRanges } from "../replica.js";
 import type { Replica, Replicas } from "../replica.js";
 import type { ServerWork } from "../server-work.js";
@@ -106,6 +106,24 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     (DOCUMENT_MUTATING_TOOLS.has(tool) ? `\n\n${GUIDANCE_WRITE_INSTRUCTIONS}` : "") +
     failureContract(tool);
 
+  /** One refusal builder; callers retain their original message and identity field. */
+  const notKnownLocally = (
+    uuid: string,
+    source: "document" | "directory" | "doclink",
+  ): ToolError => {
+    const doclink = source === "doclink";
+    return new ToolError(
+      doclink ? "doclink_target_not_known_locally" : "doc_not_found",
+      `No document ${uuid} in ${source === "document" ? "" : "the directory of "}workspace ${replicas.config.workspaceId}` +
+        (doclink ? ", so an inline reference to it would point at nothing this replica can resolve" : ""),
+      {
+        ...(doclink ? { docId: uuid } : { uuid }),
+        inDirectory: false,
+        hub: replicas.sync.state(),
+      },
+    );
+  };
+
   /**
    * Resolve a document, or fail with a hub-aware message: a uuid in the
    * directory whose room has not reached this replica yet is a different
@@ -118,11 +136,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   const requireDoc = (uuid: string): Replica => {
     const stub = getDirectoryEntry(replicas.directory().doc, uuid);
     if (!replicas.known(uuid) && stub === null && !replicas.hasLog(uuid)) {
-      throw new ToolError(
-        "doc_not_found",
-        `No document ${uuid} in workspace ${replicas.config.workspaceId}`,
-        { uuid, inDirectory: false, hub: replicas.sync.state() },
-      );
+      throw notKnownLocally(uuid, "document");
     }
 
     const replica = replicas.replica(uuid);
@@ -168,11 +182,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   const requireStub = (uuid: string): DirectoryEntry => {
     const stub = getDirectoryEntry(replicas.directory().doc, uuid);
     if (stub === null) {
-      throw new ToolError(
-        "doc_not_found",
-        `No document ${uuid} in the directory of workspace ${replicas.config.workspaceId}`,
-        { uuid, inDirectory: false, hub: replicas.sync.state() },
-      );
+      throw notKnownLocally(uuid, "directory");
     }
     return stub;
   };
@@ -284,12 +294,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   const linkTitle = (docId: string): string => {
     const stub = getDirectoryEntry(replicas.directory().doc, docId);
     if (stub === null) {
-      throw new ToolError(
-        "doclink_target_not_known_locally",
-        `No document ${docId} in the directory of workspace ${replicas.config.workspaceId}, so an inline ` +
-          "reference to it would point at nothing this replica can resolve",
-        { docId, inDirectory: false, hub: replicas.sync.state() },
-      );
+      throw notKnownLocally(docId, "doclink");
     }
     return titleFor(docId, stub);
   };

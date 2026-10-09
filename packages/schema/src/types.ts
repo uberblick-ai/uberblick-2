@@ -15,6 +15,7 @@ export const BLOCK_TYPES = [
   "quote",
   "table",
   "terminal",
+  "chart",
 ] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];
@@ -29,7 +30,7 @@ export function isBlockType(value: string): value is BlockType {
  * The block types whose text is prose: they carry the inline mark set, and the
  * markdown reader resolves inline syntax inside them.
  *
- * `code`, `mermaid` and `terminal` carry source text and only `comment`.
+ * `code`, `mermaid`, `terminal` and `chart` carry source text and only `comment`.
  * Tables carry structured cells with the same inline mark set; they
  * do not expose block-level link ranges or prose offsets.
  */

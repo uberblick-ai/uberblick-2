@@ -18,7 +18,8 @@ import type { DocLinkContext } from "./doc-links.js";
 import { ExternalLinks } from "./external-links.js";
 import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
-import { paletteExtensions } from "./nodes.js";
+import { ChartBlock, paletteExtensions } from "./nodes.js";
+import { ChartBlocks } from "./chart.js";
 import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TableBlocks } from "./table.js";
 import { TerminalBlocks } from "./terminal.js";
@@ -62,7 +63,8 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     if (options.canWrite?.() !== false) seedNewTableCells(transaction);
   };
   const extensions: Extensions = [
-    ...paletteExtensions,
+    ...paletteExtensions.map((extension) => extension.name === "chart"
+      ? ChartBlock.configure({ ydoc: options.fragment.doc }) : extension),
     BlockIds.configure({
       ...(options.newBlockId === undefined ? {} : { newId: options.newBlockId }),
       ...(options.canWrite === undefined ? {} : { canWrite: options.canWrite }),
@@ -89,6 +91,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // demonstration's transcript under the caret — which is also what stops the
     // demonstration playing while it is being written.
     TerminalBlocks,
+    ChartBlocks,
     // …and the document reference's: the two typed and pasted spellings, the
     // live anchor, and the address they resolve against. Behaviour again — the
     // mark itself is schema, declared once in `marks.ts`, because

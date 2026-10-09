@@ -228,7 +228,8 @@
                   "list-item",
                   "quote",
                   "table",
-                  "terminal"
+                  "terminal",
+                  "chart"
                 ]
               },
               "text": {
@@ -246,7 +247,7 @@
                 "type": "string"
               },
               "inline": {
-                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid and terminal hold source text and ignore it; tables also ignore it and take exactly one GFM table through `text`.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
+                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; tables also ignore it and take exactly one GFM table through `text`.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
                 "type": "array",
                 "items": {
                   "type": "object",
@@ -859,7 +860,8 @@
                     "enum": [
                       "mermaid",
                       "table",
-                      "terminal"
+                      "terminal",
+                      "chart"
                     ]
                   }
                 },
@@ -2831,7 +2833,8 @@
                     "enum": [
                       "mermaid",
                       "table",
-                      "terminal"
+                      "terminal",
+                      "chart"
                     ]
                   }
                 },
@@ -4917,7 +4920,8 @@
                       "enum": [
                         "mermaid",
                         "table",
-                        "terminal"
+                        "terminal",
+                        "chart"
                       ]
                     }
                   },
@@ -5079,7 +5083,8 @@
             "list-item",
             "quote",
             "table",
-            "terminal"
+            "terminal",
+            "chart"
           ]
         },
         "text": {
@@ -5097,7 +5102,7 @@
           "type": "string"
         },
         "inline": {
-          "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid and terminal hold source text and ignore it; tables also ignore it and take exactly one GFM table through `text`.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
+          "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; tables also ignore it and take exactly one GFM table through `text`.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
           "type": "array",
           "items": {
             "type": "object",
@@ -5313,7 +5318,8 @@
                       "enum": [
                         "mermaid",
                         "table",
-                        "terminal"
+                        "terminal",
+                        "chart"
                       ]
                     }
                   },
@@ -5439,7 +5445,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Insert one block after `after_block_id`, or at the top of the document when it is omitted. Block types are the closed set the schema owns — paragraph, heading, code, mermaid, list-item, quote, table, terminal — which is the editor's whole palette too. A list is a run of adjacent list-item blocks. A table's `text` must be exactly one GFM table, or `invalid_table` refuses the write; its rows and cells are stored structurally. Alignment markers are accepted but not stored. Inline markdown stores cell formatting and escaped punctuation stays literal. Document-link targets must be known to this replica's directory, otherwise `doclink_target_not_known_locally` refuses before any write. A terminal's text is a transcript in which a line beginning `$ ` is a command typed out and every other line is output shown whole — the format has no escape, so an output line that itself begins `$ ` cannot be written. Every block has one text an agent can edit.\n\nA decided decision record's title, decision line, blocks and structured data are read-only: this tool refuses with `decision_read_only` and changes nothing. Use a new superseding record for any content change. Comments, description, tags, curated links and changelog suggestion stay writable. This check runs on this replica at call time; an unseen offline edit can still merge later, detected as changed after approval.\n\nArchived documents are read-only. While a document's directory stub is tombstoned this tool refuses with `doc_archived` and changes nothing; restore_doc is the only mutation an archived document accepts, and the only way back. Reading is unaffected — get_doc, export_markdown, backlinks and `list_docs` with `include_deleted: true` all still answer for it; a decision additionally needs a matching `kind`, `status` or `tag` predicate in list_docs.\n\nThe honest scope, the same discipline `rev` has: the check runs against THIS replica's directory stub at the moment of the call. It is refusal-at-call, not a cross-replica lock — an edit made on a replica that has not seen the archive yet is an ordinary CRDT write and merges normally when the two replicas meet.\n\n`synced` here means hub-acknowledged, not hub-stored — see sync_status for the exact claim and its crash window.\n\nAfter changing document content, review its TL;DR and call set_tldr when the summary needs to change.\n\nRequires a guidance briefing: discover guidance resources at uberblick://doc/<uuid>, then read them with get_doc. On guidance_required, read the listed unread documents and retry. Completion grants a ten-minute process-local lease; expiry or restart requires fresh reads.\n\nFailures: JSON with `error`, `message` and, where recovery is actionable, `recoveryClass` (`retry`|`reread`|`manual`) and a `recovery` sentence. A failure here also carries `applied`, `partial` and `synced`."
+    "description": "Insert one block after `after_block_id`, or at the top of the document when it is omitted. Block types are the closed set the schema owns — paragraph, heading, code, mermaid, list-item, quote, table, terminal, chart — which is the editor's whole palette too. A list is a run of adjacent list-item blocks. A table's `text` must be exactly one GFM table, or `invalid_table` refuses the write; its rows and cells are stored structurally. Alignment markers are accepted but not stored. Inline markdown stores cell formatting and escaped punctuation stays literal. Document-link targets must be known to this replica's directory, otherwise `doclink_target_not_known_locally` refuses before any write. A terminal's text is a transcript in which a line beginning `$ ` is a command typed out and every other line is output shown whole — the format has no escape, so an output line that itself begins `$ ` cannot be written. A chart's text is a JSON mapping, for example `{\"version\":1,\"type\":\"line\",\"collection\":\"observations\",\"x\":{\"field\":\"day\",\"type\":\"date\"},\"y\":[{\"field\":\"count\"}]}`. It names top-level record fields: x type is number or date, and y has one to eight numeric series. Optional x and y labels, y units, title and missing (gap or connect, default gap) control presentation. The chart only reads its document's collection; use update_data to write records. Invalid mappings stay editable source and show a problem message. Every block has one text an agent can edit.\n\nA decided decision record's title, decision line, blocks and structured data are read-only: this tool refuses with `decision_read_only` and changes nothing. Use a new superseding record for any content change. Comments, description, tags, curated links and changelog suggestion stay writable. This check runs on this replica at call time; an unseen offline edit can still merge later, detected as changed after approval.\n\nArchived documents are read-only. While a document's directory stub is tombstoned this tool refuses with `doc_archived` and changes nothing; restore_doc is the only mutation an archived document accepts, and the only way back. Reading is unaffected — get_doc, export_markdown, backlinks and `list_docs` with `include_deleted: true` all still answer for it; a decision additionally needs a matching `kind`, `status` or `tag` predicate in list_docs.\n\nThe honest scope, the same discipline `rev` has: the check runs against THIS replica's directory stub at the moment of the call. It is refusal-at-call, not a cross-replica lock — an edit made on a replica that has not seen the archive yet is an ordinary CRDT write and merges normally when the two replicas meet.\n\n`synced` here means hub-acknowledged, not hub-stored — see sync_status for the exact claim and its crash window.\n\nAfter changing document content, review its TL;DR and call set_tldr when the summary needs to change.\n\nRequires a guidance briefing: discover guidance resources at uberblick://doc/<uuid>, then read them with get_doc. On guidance_required, read the listed unread documents and retry. Completion grants a ten-minute process-local lease; expiry or restart requires fresh reads.\n\nFailures: JSON with `error`, `message` and, where recovery is actionable, `recoveryClass` (`retry`|`reread`|`manual`) and a `recovery` sentence. A failure here also carries `applied`, `partial` and `synced`."
   },
   {
     "name": "delete_block",
@@ -7485,7 +7491,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Turn a range of a block's text into an inline reference to another document. The range's own characters are the label — this tool writes a mark and never a character, so the block's `text` and `rev` come back exactly as get_doc gave them. `annotate` anchors a comment to a range the same way; this is that operation with a document uuid instead of a thread.\n\n`start` and `end` are character offsets into the block's text, and `rev` is REQUIRED: offsets mean nothing without the text they were measured against. A stale `rev` refuses with `stale_block`, carrying `currentText` and `currentRev` to re-measure against. Indices are clamped to the text and swapped if reversed; a range that clamps to nothing is refused.\n\nA range that is already a reference is RETARGETED. A range that is already an external link is refused — one range cannot be both — and so is a code, mermaid, table or terminal block, which holds source text. The answer carries the target's current `title` for information; the label in the document is the text you linked, and it does not follow a later rename.\n\nThe target must be a document this replica's directory knows, or the call refuses with `doclink_target_not_known_locally` and writes nothing. An archived target is accepted.\n\nThe edge shows up in backlinks without touching `meta.links`, which stays the curated doc-level list set_links owns.\n\nA decided decision record's title, decision line, blocks and structured data are read-only: this tool refuses with `decision_read_only` and changes nothing. Use a new superseding record for any content change. Comments, description, tags, curated links and changelog suggestion stay writable. This check runs on this replica at call time; an unseen offline edit can still merge later, detected as changed after approval.\n\nArchived documents are read-only. While a document's directory stub is tombstoned this tool refuses with `doc_archived` and changes nothing; restore_doc is the only mutation an archived document accepts, and the only way back. Reading is unaffected — get_doc, export_markdown, backlinks and `list_docs` with `include_deleted: true` all still answer for it; a decision additionally needs a matching `kind`, `status` or `tag` predicate in list_docs.\n\nThe honest scope, the same discipline `rev` has: the check runs against THIS replica's directory stub at the moment of the call. It is refusal-at-call, not a cross-replica lock — an edit made on a replica that has not seen the archive yet is an ordinary CRDT write and merges normally when the two replicas meet.\n\n`synced` here means hub-acknowledged, not hub-stored — see sync_status for the exact claim and its crash window.\n\nRequires a guidance briefing: discover guidance resources at uberblick://doc/<uuid>, then read them with get_doc. On guidance_required, read the listed unread documents and retry. Completion grants a ten-minute process-local lease; expiry or restart requires fresh reads.\n\nFailures: JSON with `error`, `message` and, where recovery is actionable, `recoveryClass` (`retry`|`reread`|`manual`) and a `recovery` sentence. A failure here also carries `applied`, `partial` and `synced`."
+    "description": "Turn a range of a block's text into an inline reference to another document. The range's own characters are the label — this tool writes a mark and never a character, so the block's `text` and `rev` come back exactly as get_doc gave them. `annotate` anchors a comment to a range the same way; this is that operation with a document uuid instead of a thread.\n\n`start` and `end` are character offsets into the block's text, and `rev` is REQUIRED: offsets mean nothing without the text they were measured against. A stale `rev` refuses with `stale_block`, carrying `currentText` and `currentRev` to re-measure against. Indices are clamped to the text and swapped if reversed; a range that clamps to nothing is refused.\n\nA range that is already a reference is RETARGETED. A range that is already an external link is refused — one range cannot be both — and so is a code, mermaid, table, terminal or chart block, which holds source text. The answer carries the target's current `title` for information; the label in the document is the text you linked, and it does not follow a later rename.\n\nThe target must be a document this replica's directory knows, or the call refuses with `doclink_target_not_known_locally` and writes nothing. An archived target is accepted.\n\nThe edge shows up in backlinks without touching `meta.links`, which stays the curated doc-level list set_links owns.\n\nA decided decision record's title, decision line, blocks and structured data are read-only: this tool refuses with `decision_read_only` and changes nothing. Use a new superseding record for any content change. Comments, description, tags, curated links and changelog suggestion stay writable. This check runs on this replica at call time; an unseen offline edit can still merge later, detected as changed after approval.\n\nArchived documents are read-only. While a document's directory stub is tombstoned this tool refuses with `doc_archived` and changes nothing; restore_doc is the only mutation an archived document accepts, and the only way back. Reading is unaffected — get_doc, export_markdown, backlinks and `list_docs` with `include_deleted: true` all still answer for it; a decision additionally needs a matching `kind`, `status` or `tag` predicate in list_docs.\n\nThe honest scope, the same discipline `rev` has: the check runs against THIS replica's directory stub at the moment of the call. It is refusal-at-call, not a cross-replica lock — an edit made on a replica that has not seen the archive yet is an ordinary CRDT write and merges normally when the two replicas meet.\n\n`synced` here means hub-acknowledged, not hub-stored — see sync_status for the exact claim and its crash window.\n\nRequires a guidance briefing: discover guidance resources at uberblick://doc/<uuid>, then read them with get_doc. On guidance_required, read the listed unread documents and retry. Completion grants a ten-minute process-local lease; expiry or restart requires fresh reads.\n\nFailures: JSON with `error`, `message` and, where recovery is actionable, `recoveryClass` (`retry`|`reread`|`manual`) and a `recovery` sentence. A failure here also carries `applied`, `partial` and `synced`."
   },
   {
     "name": "export_markdown",
@@ -7536,7 +7542,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Render the document as markdown, including fenced code, mermaid and terminal blocks. Tables export as GFM padded to their widest row, with cell formatting as inline markdown and literal cell punctuation escaped. Structured document data is omitted; documents holding data include an omission notice. Export only: markdown is never the storage format, and there is no import tool.\n\nFailures: JSON with `error`, `message` and, where recovery is actionable, `recoveryClass` (`retry`|`reread`|`manual`) and a `recovery` sentence."
+    "description": "Render the document as markdown, including fenced code, mermaid, terminal and chart blocks. A chart exports its JSON mapping in a chart fence, without record values. Tables export as GFM padded to their widest row, with cell formatting as inline markdown and literal cell punctuation escaped. Structured document data is omitted; documents holding data include an omission notice. Export only: markdown is never the storage format, and there is no import tool.\n\nFailures: JSON with `error`, `message` and, where recovery is actionable, `recoveryClass` (`retry`|`reread`|`manual`) and a `recovery` sentence."
   },
   {
     "name": "sync_status",
