@@ -48,17 +48,43 @@ describe("chart axis and legend units", () => {
 });
 
 describe("compact chart ticks", () => {
-  it("uses locale compact notation with at most one decimal and the axis unit", () => {
-    expect(formatChartTick(1_540_000, "EUR", "en-US")).toBe("1.5M EUR");
-    expect(formatChartTick(12_000, "", "en-US")).toBe("12K");
-    expect(formatChartTick(-1_540_000, "EUR", "en-US")).toBe("-1.5M EUR");
-    expect(formatChartTick(12_500, "", "de-DE")).toBe(new Intl.NumberFormat("de-DE", { notation: "compact", maximumFractionDigits: 1 }).format(12_500));
+  function labels(values: number[], unit = "", locale = "en-US"): string[] {
+    const ticks = values.map(value => ({ value }));
+    return values.map(value => formatChartTick(value, unit, ticks, locale));
+  }
+
+  it("keeps broad ranges compact and appends the axis unit", () => {
+    expect(labels([0, 500_000, 1_000_000, 1_500_000], "EUR")).toEqual(["0 EUR", "500K EUR", "1M EUR", "1.5M EUR"]);
+    expect(labels([0, 6_000, 12_000])).toEqual(["0", "6K", "12K"]);
+    expect(labels([-1_500_000, -1_000_000, -500_000], "EUR")).toEqual(["-1.5M EUR", "-1M EUR", "-500K EUR"]);
   });
 
   it("attaches percent directly without scaling the value", () => {
-    expect(formatChartTick(90, "%", "en-US")).toBe("90%");
-    expect(formatChartTick(0, "%", "en-US")).toBe("0%");
-    expect(formatChartTick(0.125, "%", "en-US")).toBe("0.1%");
+    expect(labels([0, 30, 60, 90], "%")).toEqual(["0%", "30%", "60%", "90%"]);
+    expect(labels([0, 0.05, 0.1, 0.15], "%")).toEqual(["0%", "0.05%", "0.1%", "0.15%"]);
+  });
+
+  it.each([
+    [[1_000, 1_050, 1_100, 1_150, 1_200], "", ["1K", "1.05K", "1.1K", "1.15K", "1.2K"]],
+    [[99.9, 99.92, 99.94, 99.96, 99.98, 100], "%", ["99.9%", "99.92%", "99.94%", "99.96%", "99.98%", "100%"]],
+    [[0.05, 0.1, 0.15, 0.2, 0.25], "s", ["0.05 s", "0.1 s", "0.15 s", "0.2 s", "0.25 s"]],
+    [[0, 0.05, 0.1, 0.15], "", ["0", "0.05", "0.1", "0.15"]],
+    [[1_200_000, 1_220_000, 1_240_000, 1_260_000, 1_280_000, 1_300_000], "EUR", ["1.2M EUR", "1.22M EUR", "1.24M EUR", "1.26M EUR", "1.28M EUR", "1.3M EUR"]],
+    [[-1_200, -1_150, -1_100, -1_050, -1_000], "", ["-1.2K", "-1.15K", "-1.1K", "-1.05K", "-1K"]],
+    [[0, 0.1, 0.1 + 0.2, 0.4], "", ["0", "0.1", "0.3", "0.4"]],
+  ] as const)("preserves the scale's tick precision for %j", (values, unit, expected) => {
+    expect(labels([...values], unit)).toEqual(expected);
+  });
+
+  it("preserves fine steps across each locale's compact thresholds", () => {
+    const values = [10_000, 10_050, 10_100, 10_150, 10_200];
+    expect(labels(values, "", "ja-JP")).toEqual(["1万", "1.005万", "1.01万", "1.015万", "1.02万"]);
+    expect(labels([99.9, 99.92, 99.94], "%", "de-DE")).toEqual(["99,9%", "99,92%", "99,94%"]);
+  });
+
+  it("retains numeric precision when there is no tick step", () => {
+    expect(formatChartTick(0.125, "%", [{ value: 0.125 }], "en-US")).toBe("0.125%");
+    expect(formatChartTick(0, "", [{ value: 0 }], "en-US")).toBe("0");
   });
 });
 

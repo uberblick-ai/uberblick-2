@@ -195,13 +195,13 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
               },
               y: {
                 type: "linear",
-                ticks: { color: colors.color, font, maxTicksLimit: 6, callback: value => formatChartTick(Number(value), axes.leftUnit) },
+                ticks: { color: colors.color, font, maxTicksLimit: 6, callback: (value, _index, ticks) => formatChartTick(Number(value), axes.leftUnit, ticks) },
                 grid: { color: colors.borderTopColor },
                 border: { display: false },
               },
               ...(axes.rightUnit !== undefined ? { yRight: {
                 type: "linear" as const, position: "right" as const,
-                ticks: { color: colors.color, font, maxTicksLimit: 6, callback: (value: string | number) => formatChartTick(Number(value), axes.rightUnit ?? "") },
+                ticks: { color: colors.color, font, maxTicksLimit: 6, callback: (value: string | number, _index: number, ticks: { value: number }[]) => formatChartTick(Number(value), axes.rightUnit ?? "", ticks) },
                 grid: { drawOnChartArea: false },
                 border: { display: false },
               } } : {}),

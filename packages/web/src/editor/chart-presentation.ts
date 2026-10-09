@@ -20,8 +20,21 @@ export function chartAxes(series: ChartSeriesMapping[]): ChartAxes {
   };
 }
 
-export function formatChartTick(value: number, unit: string, locale?: string): string {
-  const number = new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(value);
+export function formatChartTick(value: number, unit: string, ticks: readonly { value: number }[], locale?: string): string {
+  let magnitude = Math.abs(value);
+  let step = Infinity;
+  for (let index = 0; index < ticks.length; index += 1) {
+    magnitude = Math.max(magnitude, Math.abs(ticks[index]?.value ?? 0));
+    if (index > 0) {
+      const delta = Math.abs((ticks[index]?.value ?? 0) - (ticks[index - 1]?.value ?? 0));
+      if (delta > 0) step = Math.min(step, delta);
+    }
+  }
+  // Preserve Chart.js's nice tick step even when Intl compacts by a locale-specific divisor.
+  const maximumSignificantDigits = Number.isFinite(step) && magnitude > 0
+    ? Math.min(21, Math.max(2, Math.floor(Math.log10(magnitude)) - Math.floor(Math.log10(step)) + 1))
+    : 12;
+  const number = new Intl.NumberFormat(locale, { notation: "compact", maximumSignificantDigits }).format(value);
   return `${number}${unit ? `${unit === "%" ? "" : " "}${unit}` : ""}`;
 }
 

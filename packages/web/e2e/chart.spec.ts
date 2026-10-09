@@ -472,6 +472,36 @@ test("calendar ink, independent unit axes and nearest-x tooltips keep sparse and
   await expectCornerControls(page);
 });
 
+test("narrow-band compact ticks preserve the step on both value axes in both appearances", async ({ browser }) => {
+  const session = writer();
+  const mapping = { ...MAPPING, title: "Service metrics", y: [
+    { field: "latency", label: "Users", unit: "requests" },
+    { field: "errors", label: "Uptime", unit: "%" },
+  ] };
+  const uuid = await chartDoc(session, "Narrow-band chart", mapping);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
+    { id: "first", value: { day: "2026-01-01", latency: 1_000, errors: 100 } },
+    { id: "last", value: { day: "2026-01-02", latency: 1_200, errors: 99.9 } },
+  ] }] });
+  for (const appearance of ["light", "dark"] as const) {
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      beforeNavigate: (loading) => installProbe(loading, uuid),
+      contextOptions: { locale: "en-US", colorScheme: appearance },
+    });
+    const canvas = page.getByRole("img", { name: "Service metrics", exact: true });
+    await expect(canvas).toHaveAccessibleDescription(/Uptime: 99\.9 %/);
+    const painted = () => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts);
+    await expect.poll(painted).toContain("1.05K requests");
+    await expect.poll(painted).toContain("99.92%");
+    const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+    const left = ink.filter(entry => /^[\d.]+K requests$/.test(entry.text));
+    const right = ink.filter(entry => /^[\d.]+%$/.test(entry.text));
+    expect(new Set(left.map(entry => entry.text))).toEqual(new Set(["1K requests", "1.05K requests", "1.1K requests", "1.15K requests", "1.2K requests"]));
+    expect(new Set(right.map(entry => entry.text))).toEqual(new Set(["99.9%", "99.92%", "99.94%", "99.96%", "99.98%", "100%"]));
+    expect(Math.max(...left.map(entry => entry.x))).toBeLessThan(Math.min(...right.map(entry => entry.x)));
+  }
+});
+
 test("a 360px three-series chart keeps compact ticks and a readable capped canvas", { tag: "@webkit-iphone" }, async ({ browser }, info) => {
   const session = writer();
   const mapping = { ...MAPPING, title: "Delivery trend", y: [
