@@ -118,7 +118,7 @@ for (const settings of [
     }
     await openSidebar();
     const title = docTitle("attribution");
-    const uuid = await createDoc(page, title, { pin: true });
+    const uuid = await createDoc(page, title, { pin: !settings.touch });
     await placeCaret(page);
     await page.keyboard.type("watch this", { delay: 15 });
     // Freeze before departure, so the last millisecond of the shared grace is
@@ -140,10 +140,13 @@ for (const settings of [
         uuid,
         `watch this — written by ${session.name}, who has already gone`,
       );
-      await expect(label).toHaveText(session.name);
-      await expect(label).toBeVisible();
       await expect(peer).toHaveCount(1);
       await expect(peer).toHaveAccessibleName(new RegExp(`^${session.name} · agent.* · left$`));
+      // y-prosemirror batches awareness decorations through a zero-delay
+      // timer. Drain that ordinary editor work without unfreezing the grace.
+      await page.clock.runFor(1);
+      await expect(label).toHaveText(session.name);
+      await expect(label).toBeVisible();
       await expect(peer).not.toHaveAccessibleName(/active|editing/);
       await expect(avatar).toBeVisible();
 
@@ -194,14 +197,16 @@ for (const settings of [
 
       // Run every intermediate callback, including provider heartbeats: a
       // reconnect cannot stand in for the presentation expiring on its own.
-      await page.clock.runFor(READABLE_MS);
+      await page.clock.runFor(READABLE_MS - 1);
       await expect(label).toHaveText(session.name);
       await expect(label).toBeVisible();
       await expect(avatar).toBeVisible();
       await page.clock.runFor(AGENT_CURSOR_GRACE_MS - READABLE_MS - 1);
       await expect(label).toBeVisible();
       await expect(avatar).toBeVisible();
-      await page.clock.runFor(1);
+      // Expiry queues the same decoration refresh: cross the deadline and
+      // drain its next event-loop turn as well.
+      await page.clock.runFor(2);
       await expect(cursor).toHaveCount(0);
       await expect(peer).toHaveCount(0);
       expect(socketCloses).toBe(0);
@@ -209,6 +214,8 @@ for (const settings of [
 
     if (!settings.touch) {
       await writeAndLeave({ name: "Codex" }, uuid, "a retained departure that must not survive navigation");
+      await expect(peer).toHaveAccessibleName(/^Codex · agent.* · left$/);
+      await page.clock.runFor(1);
       await expect(label).toHaveText("Codex");
       await expect(avatar).toBeVisible();
       // Navigate inside the mounted app; reopening before expiry must not
