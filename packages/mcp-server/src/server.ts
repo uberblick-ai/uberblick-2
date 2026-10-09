@@ -20,6 +20,7 @@ import { GuidanceBriefing, GUIDANCE_INSTRUCTIONS, registerGuidanceResources } fr
 import { log } from "./log.js";
 import { Replicas } from "./replica.js";
 import { MirrorStore } from "./store.js";
+import { ServerWork } from "./server-work.js";
 import { seedTagCatalogOnce } from "./tag-catalog.js";
 import { registerTools } from "./tools.js";
 
@@ -49,7 +50,7 @@ export interface UberblickMcpServer {
   readonly store: MirrorStore;
   /** Attach a transport and start serving. */
   connect(transport: Transport): Promise<void>;
-  /** Release the hub connection, the replicas and the database handle. */
+  /** Close transport, drain admitted work, then release replicas and the store. */
   close(): Promise<void>;
 }
 
@@ -64,6 +65,7 @@ export function createMcpServer(
 ): UberblickMcpServer {
   const replicas = new Replicas(config, store);
   const briefing = new GuidanceBriefing(replicas);
+  const work = new ServerWork();
 
   const server = new McpServer(
     { name: "uberblick", version: "0.0.0" },
@@ -93,10 +95,11 @@ export function createMcpServer(
     replicas.setAgentName(agentDisplayName(server.server.getClientVersion()));
   };
 
-  registerTools(server, replicas, briefing);
-  registerGuidanceResources(server, replicas, briefing);
+  registerTools(server, replicas, briefing, work);
+  registerGuidanceResources(server, replicas, briefing, work);
 
   let closed = false;
+  let closing: Promise<void> | null = null;
 
   return {
     server,
@@ -105,26 +108,40 @@ export function createMcpServer(
     async connect(transport: Transport) {
       // Seed before attaching the transport: list_tags can therefore state a
       // complete catalog, and a read never has to materialise missing examples.
-      await seedTagCatalogOnce(replicas);
-      await server.connect(transport);
-      log.info("serving", {
-        workspace: config.workspaceId,
-        database: config.databasePath,
-        hub: replicas.sync.enabled ? config.hubUrl : "disabled",
-        session: config.sessionId,
+      if (closed) return;
+      await work.run(async () => {
+        await seedTagCatalogOnce(replicas);
+        if (closed) return;
+        // SDK connect attaches its transport synchronously before its first
+        // await. A racing close therefore sees and closes that transport.
+        await server.connect(transport);
+        if (closed) return;
+        log.info("serving", {
+          workspace: config.workspaceId,
+          database: config.databasePath,
+          hub: replicas.sync.enabled ? config.hubUrl : "disabled",
+          session: config.sessionId,
+        });
       });
     },
-    async close() {
-      if (closed) {
-        return;
-      }
+    close() {
+      if (closing !== null) return closing;
       closed = true;
-      replicas.destroy();
-      await replicas.sync.waitForDeviceWork();
-      await server.close().catch((error: unknown) => {
-        log.warn("closing the MCP server failed", error);
+      work.stop();
+      // Assign the shared promise before transport onclose callbacks can
+      // reenter close(). Admission has already stopped synchronously.
+      closing = Promise.resolve().then(async () => {
+        await server.close().catch((error: unknown) => {
+          log.warn("closing the MCP server failed", error);
+        });
+        // SDK close aborts requests and drops replies but does not await
+        // handlers. Their local writes still need the live replica and log.
+        await work.drain();
+        replicas.destroy();
+        await replicas.sync.waitForDeviceWork();
+        store.close();
       });
-      store.close();
+      return closing;
     },
   };
 }

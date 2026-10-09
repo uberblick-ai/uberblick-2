@@ -12,6 +12,7 @@ import { outputSchemas } from "../src/outputs.js";
 import { PersistenceError, Replicas } from "../src/replica.js";
 import { pinDocOperation, unpinDocOperation } from "../src/sidebar-tools.js";
 import { MirrorStore } from "../src/store.js";
+import { ServerWork } from "../src/server-work.js";
 import type { UpdateOrigin } from "../src/store.js";
 import { guarded } from "../src/tool-adapter.js";
 import { createToolContext } from "../src/tools/context.js";
@@ -56,7 +57,7 @@ function local(databasePath?: string) {
   };
   const store = new FailingOperationStore(config.databasePath, workspaceId);
   const replicas = new Replicas(config, store);
-  const context = createToolContext(replicas, new GuidanceBriefing(replicas));
+  const context = createToolContext(replicas, new GuidanceBriefing(replicas), new ServerWork());
   close.push(async () => {
     replicas.destroy();
     await replicas.sync.waitForDeviceWork();

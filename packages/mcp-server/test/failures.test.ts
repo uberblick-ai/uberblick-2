@@ -24,6 +24,7 @@ import {
   hydrationRecovery,
   toFailure,
 } from "../src/failures.js";
+import { ServerShuttingDownError } from "../src/server-work.js";
 import { MirrorStore } from "../src/store.js";
 import type { SearchHit } from "../src/store.js";
 import {
@@ -95,6 +96,7 @@ const EXPECTED: Record<
   string,
   { recoveryClass: string | null; detail: string[] }
 > = {
+  server_shutting_down: { recoveryClass: "manual", detail: [] },
   data_invalid_input: { recoveryClass: "manual", detail: ["collection", "recordId"] },
   data_collection_not_found: { recoveryClass: "reread", detail: ["uuid", "collection"] },
   data_schema_invalid: { recoveryClass: "manual", detail: ["collection", "path"] },
@@ -493,6 +495,9 @@ describe("the failure contract", () => {
         })
       ).payload,
     );
+
+    // Admission refusals use the same failure floor as every other tool error.
+    record(toFailure("set_title", new ServerShuttingDownError()).payload);
 
     // Every code the code itself knows about was triggered above.
     expect([...failures.keys()].sort()).toEqual([...FAILURE_CODES].sort());

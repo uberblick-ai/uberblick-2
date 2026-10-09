@@ -13,7 +13,16 @@ export function toolResult(payload: object, isError = false): CallToolResult {
   };
 }
 
-/** Validate inside the failure boundary; mismatches are logged text-only internal errors. */
+/**
+ * Admit and drain calls inside the failure boundary; mismatches are logged
+ * text-only internal errors.
+ *
+ * Concurrency invariant: operations await only their opening settle, then
+ * perform every read and write synchronously. Never add an await after settle:
+ * another operation could interleave writes to the same Y.Doc. The
+ * handler-invariants test checks every registered operation body and the
+ * delegated opening settle in collectSyncStatus.
+ */
 export function guarded<Args>(
   tool: keyof typeof outputSchemas,
   context: ToolContext,
@@ -21,11 +30,11 @@ export function guarded<Args>(
 ): (args: Args, extra: Pick<OperationRequest, "signal" | "_meta">) => Promise<CallToolResult> {
   return async (args, extra) => {
     try {
-      const payload = await call(context, args, {
+      const payload = await context.work.run(() => call(context, args, {
         signal: extra.signal,
         ...(extra._meta === undefined ? {} : { _meta: extra._meta }),
         ...(extra._meta?.progressToken === undefined ? {} : { progressToken: extra._meta.progressToken }),
-      });
+      }));
       const parsed = outputSchemas[tool].safeParse(payload);
       if (!parsed.success) {
         throw new Error(`Output validation failed for ${tool}: ${parsed.error.message}`);

@@ -35,6 +35,7 @@ import { GUIDANCE_WRITE_INSTRUCTIONS } from "../briefing.js";
 import type { GuidanceBriefing } from "../briefing.js";
 import { docLinkRanges } from "../replica.js";
 import type { Replica, Replicas } from "../replica.js";
+import type { ServerWork } from "../server-work.js";
 import { activeTagCatalog } from "../tag-catalog.js";
 import { TLDR_AFTER_CONTENT_CHANGE } from "./descriptions.js";
 import type { DecisionAnswer, blockInputSchema, inlineArg } from "./schemas.js";
@@ -99,7 +100,7 @@ function toBlockInput(
 }
 
 /** Shared per-server helpers; each closure keeps the registering replica and briefing. */
-export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing) {
+export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing, work: ServerWork) {
 
   const toolContract = (tool: string): string =>
     (DOCUMENT_MUTATING_TOOLS.has(tool) ? `\n\n${GUIDANCE_WRITE_INSTRUCTIONS}` : "") +
@@ -486,6 +487,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   return {
     replicas,
     briefing,
+    work,
     requireStub,
     durability,
     tagCatalog,

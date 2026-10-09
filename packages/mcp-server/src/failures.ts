@@ -69,6 +69,7 @@ import {
 } from "@uberblick/schema";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
+import { ServerShuttingDownError } from "./server-work.js";
 
 /**
  * What the caller is told when a handler threw something nobody mapped. Fixed
@@ -170,6 +171,10 @@ interface Recovery {
  * the call that finishes it — but never contradict the class.
  */
 const RECOVERIES: Record<string, Recovery> = {
+  server_shutting_down: {
+    recoveryClass: "manual",
+    guidance: "Start a new MCP server session, then repeat the refused call. Nothing was written.",
+  },
   data_collection_not_found: {
     recoveryClass: "reread",
     guidance: "Call get_data with this uuid and no collection to read the collection summary, then choose an existing collection.",
@@ -545,6 +550,9 @@ function stamped(
  * caller can re-diff and retry without another round trip.
  */
 export function toFailure(tool: string, error: unknown): ToolFailure {
+  if (error instanceof ServerShuttingDownError) {
+    return stamped(tool, { error: "server_shutting_down", message: error.message });
+  }
   if (error instanceof DataError) {
     return stamped(tool, {
       error: error.code,
