@@ -22,7 +22,8 @@ set -eu
 
 printf 'uberblick\n'
 printf '\n'
-printf '  first time   mise run setup -- --yes\n'
+printf '  first time   mise run setup\n'
+printf '  sign in      ub auth login\n'
 printf '  develop      mise run dev\n'
 printf '  check        mise run lint\n'
 printf '               mise run typecheck\n'

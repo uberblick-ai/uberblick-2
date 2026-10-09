@@ -4,6 +4,7 @@
 
 import { normalizeRemoteUrl } from "./remote-url.js";
 import { usesDeviceCredentials } from "./auth-store.js";
+import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { StoragePaths } from "./storage.js";
@@ -72,6 +73,14 @@ export interface ResolvedConfig {
   /** Everything questionable about the configuration. For stderr, never stdout. */
   warnings: string[];
 }
+
+/** Recovery rotates a possibly leaked secret rather than trusting it again. */
+export function exposedSigningSecretRemedy(path: string): string {
+  return `delete ${path} so the next \`ub open\` makes a new secret; then restart running agents ` +
+    "and run `ub auth login` again if the file held hub logins";
+}
+
+export class SigningSecretExposureError extends Error {}
 
 /**
  * The directory `ub`'s own files live in: `$XDG_CONFIG_HOME/uberblick`, or
@@ -252,7 +261,7 @@ export function writeHubAdmission(
 /**
  * Read `config.json` for editing rather than for resolution.
  *
- * `ub init` has to preserve what it did not ask about — a `hubUrl` from
+ * Configuration writers preserve what they did not ask about — a `hubUrl` from
  * `ub workspace use`, a field a later version writes — so it gets the raw object
  * back as well as the fields it understands. Resolution stays in
  * {@link resolveConfig}, which needs origins and per-layer labels this does not.
@@ -349,8 +358,8 @@ function credentialsAreExposed(path: string, warnings: string[]): boolean {
   }
   warnings.push(
     `refusing ${path}: mode ${permissions.toString(8).padStart(4, "0")} lets ` +
-      "other users read the hub signing secret, so the secret in it was not " +
-      `used — fix it with: chmod 600 ${path}`,
+      "other users read the hub signing secret, so its secret may have leaked — " +
+      exposedSigningSecretRemedy(path),
   );
   return true;
 }
@@ -361,9 +370,8 @@ function credentialsAreExposed(path: string, warnings: string[]): boolean {
  * **`signingSecret` is the file's value whether or not the file is exposed.**
  * Anything *resolving* configuration must treat an exposed file as absent — see
  * {@link credentialsAreExposed} and how {@link resolveConfig} uses this. The
- * value is still returned because `ub init` repairs the mode of such a file by
- * rewriting it, and rewriting it means keeping what it held: regenerating would
- * cut this machine off from every other client already holding that secret.
+ * raw fields are still returned so writers can preserve unrelated credentials;
+ * signing-secret creation refuses an exposed file without rewriting it.
  */
 export function readCredentials(env: NodeJS.ProcessEnv = process.env): {
   path: string;
@@ -438,8 +446,6 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
     secretFromFile !== null &&
     secretFromEnv !== secretFromFile
   ) {
-    // `ub init` refuses this outright when a hub is in force; everywhere else
-    // it is a warning. The same sentence, so the two tell one story.
     warnings.push(
       `HUB_AUTH_TOKEN in the environment is in force; ${paths.credentials} ` +
         "holds a different signing secret — make them equal, or unset one",
@@ -530,8 +536,7 @@ export function writeCredentials(
  * Put a signing secret in `credentials.json` and return the one now on disk —
  * which is not necessarily the candidate.
  *
- * This is the race `ub init` must not lose. Two fresh runs (a `mise run setup`
- * and an editor's MCP client starting at the same moment) would each generate a
+ * Two fresh workspace creators starting at the same moment would each generate a
  * secret, and last-write-wins leaves one of them convinced of a value that is no
  * longer there. So the claim is exclusive: exactly one process can publish the
  * file, and every loser adopts the winner's secret rather than its own.
@@ -548,11 +553,9 @@ export function writeCredentials(
  *
  * The remaining case is a `credentials.json` that already exists *without* a
  * signing secret in it (a remote token from #84, say). Adding one there is an
- * ordinary read-modify-write of a file this user already owns, and two of those
- * can still interleave. That is accepted: it is not the security-bearing race —
- * no two secrets can exist after this function — and callers re-read the file
- * before deriving anything from it, so they converge on what the last writer
- * left.
+ * ordinary read-modify-write. Callers must hold the shared configuration lock
+ * through this claim, so both secret creators and hub-login writers preserve
+ * the winning secret and unrelated credential fields.
  */
 export function claimSigningSecret(
   candidate: string,
@@ -572,6 +575,9 @@ export function claimSigningSecret(
   // Somebody else holds the name. Their secret is the one every other client on
   // this machine will use, so it becomes ours.
   const existing = readCredentials(env);
+  if (existing.exposed) {
+    throw new SigningSecretExposureError(existing.warnings[0]);
+  }
   if (existing.signingSecret !== null) {
     return existing.signingSecret;
   }
@@ -586,6 +592,31 @@ export function claimSigningSecret(
   }
   writeCredentials({ ...existing.raw, [SIGNING_SECRET_KEY]: candidate }, env);
   return candidate;
+}
+
+/**
+ * Ensure the local hub's secret while holding the shared configuration lock.
+ * Only workspace create and local-hub startup call this writer; configuration
+ * readers and the hub process never create credentials.
+ */
+export function ensureLocalSigningSecret(env: NodeJS.ProcessEnv = process.env): {
+  secret: string;
+  created: boolean;
+  path: string;
+} {
+  const path = credentialsPath(env);
+  const fromEnv = trimmed(env.HUB_AUTH_TOKEN);
+  if (fromEnv !== null) return { secret: fromEnv, created: false, path };
+  const credentials = readCredentials(env);
+  if (credentials.exposed) {
+    throw new SigningSecretExposureError(credentials.warnings[0]);
+  }
+  if (credentials.signingSecret !== null) {
+    return { secret: credentials.signingSecret, created: false, path };
+  }
+  const candidate = randomBytes(32).toString("hex");
+  const secret = claimSigningSecret(candidate, env);
+  return { secret, created: secret === candidate, path };
 }
 
 /** Refuse before opening a database or spawning a workspace-dependent child. */

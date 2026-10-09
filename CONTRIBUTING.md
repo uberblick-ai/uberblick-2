@@ -42,20 +42,16 @@ and `typecheck` both run `tsc --noEmit`. No resolution path uses `dist/`.
 With `git` and [mise](https://mise.jdx.dev) installed, run from a fresh clone:
 
 ```sh
-mise trust && mise run setup -- --yes
+mise trust && mise run setup
 ```
 
-`mise run setup` installs the pinned toolchain and frozen lockfile, then runs
-`ub init`, which settles awareness identity (display name and cursor colour),
-workspace selection (a UUID, optionally given a display slug), and a local
-development signing secret when appropriate. `--yes` takes every default
-without prompting; omit it to be asked. Setup is idempotent and does not replace
-an existing secret. `mise run init` repeats only the initialization step.
-The committed project binding selects the team's hub, so setup requires a login
-with access to that workspace; it is not the release's local-workspace quick-start.
+`mise run setup` installs only the pinned toolchain and frozen dependencies.
+It creates no workspace or signing secret and takes no initialization flags.
+The committed project binding selects the team's hub. Run `ub auth login` to
+sign in with access to that workspace; setup itself works without a login.
 
-Mise refuses an untrusted configuration with an `[env]` block as a hard error.
-`ub init` also trusts the file it writes for that reason.
+Mise refuses an untrusted configuration with an `[env]` block as a hard error,
+which is why the first command is `mise trust`.
 
 Entering the checkout prints a short quick-start, check tasks and a pointer to
 `mise tasks`. This project hook needs [mise activated in your
@@ -71,10 +67,11 @@ inside the checkout; changing out of it removes that checkout's binaries from
 PATH. Without activation or in CI, use `mise x -- ub status`. Setup must run
 before the first use because there are no linked binaries before installation.
 
-Prefer `mise run init` to a direct checkout `ub init`: its `fnox exec` wrapper
-makes any decryptable secret available before initialization decides whether
-to generate one. User-facing initialization flags and remote initialization are
-described in the [user guide](USER_GUIDE.md#the-ub-command-line).
+For a separate local workspace, run `ub workspace create <name>` in a fresh
+directory outside this checkout. It seeds the starter documents and creates a
+local signing secret if none is already supplied. Joining a shared workspace
+uses `ub auth login` and `ub workspace use <link>` instead, as described in the
+[user guide](USER_GUIDE.md#the-ub-command-line).
 
 ## Updating
 
@@ -91,11 +88,13 @@ exits 1 before starting a hub or creating a database file, naming the build task
 no remote access and is never sent to a remote hub; remote access is described
 in [REMOTE.md](REMOTE.md).
 
-The repository holds no copy. Unless a secret is already supplied, local
-`ub init` writes 32 random bytes to owner-only `credentials.json` (mode 0600),
-at the [user guide's configuration root](USER_GUIDE.md#where-your-files-live).
-It generates a secret only while this machine has no hub endpoint stored. A
-machine bound to a loopback-only hub needs that hub's secret.
+The repository holds no copy. Unless a secret is already supplied,
+`ub workspace create` writes 32 random bytes to owner-only `credentials.json`
+(mode 0600), at the [user guide's configuration root](USER_GUIDE.md#where-your-files-live).
+`ub open` creates it only if still missing, and only for a local workspace whose
+hub it starts here. A remote or device-authenticated hub, including one on
+localhost, creates none. The dev hub creates no secret: on a local binding,
+run `ub workspace create` or `ub open` first, or export `HUB_AUTH_TOKEN`.
 
 Development processes resolve the project binding and credentials through the
 same resolver as `ub`. The MCP task runs `ub mcp serve`, which resolves them
@@ -105,8 +104,12 @@ a loopback endpoint. Device credentials remain in the credential store, never
 child environments. The [user guide](USER_GUIDE.md#configuration) owns the
 secret's environment-over-file precedence.
 
-The secret is never printed by `ub init`, `ub status` or an error path. At most,
-they say where it came from.
+The secret is never printed by a command or an error path. At most, they say
+where it came from. A credentials file others can read is refused because its
+secret may have leaked. Delete it, run `ub open` to make a new one, then restart
+running agents. If it held hub logins, sign in again with `ub auth login`.
+`ub workspace create` still creates a workspace in this state but makes no
+secret; it leaves the file and its permissions alone.
 
 ## Running things
 
@@ -205,17 +208,20 @@ and explains which waits may be capped.
 
 `mise run fue` executes the checkout setup above. It builds `Dockerfile.fue`:
 Debian with git and mise, no Node, pnpm, age key or secrets. It copies the
-working tree and runs `mise trust && mise run setup -- --yes` verbatim. In a
+working tree and runs `mise trust && mise run setup` verbatim. In a
 container started with `--network none`, `scripts/fue-assert.mjs` then checks:
 
-- `ub status` exits 0 and names the workspace generated by `ub init`;
-  `ub status --json` reports a signing secret through the `fnox --if-missing
-  warn` path.
+- Setup leaves the committed binding alone and creates no private workspace or
+  signing secret. `ub workspace create` in a fresh directory creates a new
+  local workspace and an owner-only secret, and `ub status` names it.
 - `list_docs` answers over a real `ub mcp serve` client using newline-delimited
-  JSON-RPC on stdio. Either an empty corpus or starter documents passes.
+  JSON-RPC on stdio and returns both starter documents.
+- `ub open --no-browser` starts the local hub, which accepts the generated
+  secret. Ctrl-C releases its hub and web ports.
 - `mise run dev` brings up a hub accepting this machine's credential and a web
   server answering `/`, the redirect's workspace and the workspace address
-  itself. An open port alone would not prove authentication.
+  itself, using an explicit local workspace environment pair so the committed
+  remote binding remains unchanged. An open port alone would not prove authentication.
 - Ctrl-C stops everything: `dev` exits 130 and frees both ports.
 
 The cold runtime is about 70 seconds. Only installation has network; assertions
@@ -331,8 +337,6 @@ ambient for the checkout, so the `ws://localhost:1234` default lives in client
 code, while explicit project/environment binding through the shared resolver
 selects the endpoint actually dialed.
 
-Development tasks read the private credential store directly and need no age key.
-`mise run init` retains `fnox exec --if-missing warn`: a secret that cannot be
-decrypted causes a warning and leaves that variable as it was. See
+Development tasks read the private credential store directly and need no age key. See
 [The signing secret](#the-signing-secret) for precedence. User credential handling
 and database identity safeguards are in the [user guide](USER_GUIDE.md).

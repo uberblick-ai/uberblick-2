@@ -12,7 +12,6 @@
 
 import { authCommand } from "./auth.js";
 import { doctorCommand } from "./doctor.js";
-import { initCommand } from "./init.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
@@ -28,8 +27,6 @@ export const HELP = `uberblick — local-first, CRDT-backed collaborative docume
 usage: ub <command> [options]
 
 commands:
-  init [hub-url]         identity, workspace and a signing secret — with a hub
-                         given, the new workspace is created on that hub
   update                 update the Homebrew installation; for a checkout, run
                          git pull, then mise run setup
   open [options]         serve the web app and a hub in the foreground, and
@@ -74,9 +71,6 @@ export async function runCli(
   if (command === "--version" || command === "-v") {
     io.out(`${cliVersion()}\n`);
     return 0;
-  }
-  if (command === "init") {
-    return await initCommand(rest, io);
   }
   if (command === "update") {
     return await updateCommand(rest, io);

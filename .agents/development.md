@@ -6,7 +6,7 @@ The commands that build, run and validate a change:
 | --- | --- |
 | `mise trust` | prepare a new worktree to run the project's tasks |
 | `mise run install` | install dependencies |
-| `git pull`, then `mise run setup` | update a source checkout's code, toolchain and dependencies, then run `ub init` |
+| `git pull`, then `mise run setup` | update a source checkout's code, toolchain and dependencies; `ub auth login` joins the committed workspace |
 | `ub update` | update the Homebrew installation; a checkout binary refuses and names `git pull`, then `mise run setup` |
 | `mise run build-web` | build the default bundle for checkout `ub open`, which refuses a missing or stale bundle without building it |
 | `mise run dev` | local development services |

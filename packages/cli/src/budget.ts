@@ -32,7 +32,7 @@
  * What it must not cap at any value is a deadline whose holder deliberately
  * holds it for longer than a suite's ceiling: shortening that turns a success
  * into a failure instead of reaching an answer sooner. `init-lock.ts`'s
- * `WAIT_TIMEOUT_MS` waits for a live sibling `ub init` to finish writing, and
+ * `WAIT_TIMEOUT_MS` waits for a live sibling `ub workspace create` to finish writing, and
  * the suite's own cases hold that lock for half a second (`test/open.test.ts`),
  * so it is deliberately left uncapped and `test/init-lock.test.ts` holds that
  * line. Capping it made `ub open` give up on a lock a test was still

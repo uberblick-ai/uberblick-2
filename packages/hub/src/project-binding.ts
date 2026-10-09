@@ -24,7 +24,7 @@ export interface ResolvedBinding {
   path: string | null;
 }
 
-export const NO_BINDING = "No workspace selected. Add a .uberblick.json binding, run `ub init` for a local workspace, " +
+export const NO_BINDING = "No workspace selected. Add a .uberblick.json binding, run `ub workspace create <name>` for a local workspace, " +
   "`ub workspace use <link>` to fetch from a hub, or set UB_WORKSPACE_ID (add UB_HUB_URL with a hub address or local until this machine has its record).";
 
 /** Find the nearest entry, including a broken symlink: invalid files must fail. */

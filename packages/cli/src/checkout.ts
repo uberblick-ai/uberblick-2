@@ -1,11 +1,8 @@
 /**
  * Whether `ub` is being run inside an uberblick checkout.
  *
- * One question, one answer, and only ever used to decide whether to *mention*
- * the contributor tasks: the mise tasks exist in a checkout and nowhere else, so
- * `ub init` names `mise run dev` there and stays quiet outside. Nothing is
- * written by this detector. Development tasks resolve the project binding and
- * this machine's private credentials themselves.
+ * Used by `ub update` to recognize the source-checkout installation. Nothing is
+ * written by this detector.
  */
 
 import { existsSync, readFileSync } from "node:fs";

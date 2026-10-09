@@ -165,12 +165,12 @@ describe("resolveMcpConfig", () => {
       );
     }
     const { WORKSPACE_ID: _omitted, ...withoutWorkspace } = env();
-    expect(() => resolveMcpConfig(withoutWorkspace)).toThrow(/ub init/);
+    expect(() => resolveMcpConfig(withoutWorkspace)).toThrow(/ub workspace create/);
   });
 });
 
 describe("the server process", () => {
-  it("exits non-zero and names `ub init` when WORKSPACE_ID is unset", async () => {
+  it("exits non-zero and names `ub workspace create` when WORKSPACE_ID is unset", async () => {
     // The whole interface is the environment an MCP client hands the process,
     // so "it refuses" has to be true of the process, not only of the function.
     // stdout is the JSON-RPC transport: the complaint goes to stderr.
@@ -178,6 +178,6 @@ describe("the server process", () => {
 
     expect(run.code).not.toBe(0);
     expect(run.stderr).toMatch(/WORKSPACE_ID/);
-    expect(run.stderr).toMatch(/ub init/);
+    expect(run.stderr).toMatch(/ub workspace create/);
   });
 });

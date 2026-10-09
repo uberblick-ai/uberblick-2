@@ -16,7 +16,7 @@
  * - **The production path.** Global setup builds the checkout's current sources
  *   once into a private directory, then every `ub open` serves them and its real
  *   `/uberblick-config.json`. The harness writes the same configuration files
- *   `ub init` writes and removes inherited configuration pins before spawning
+ *   `ub workspace create` writes and removes inherited configuration pins before spawning
  *   it, so no developer machine state can steer the run.
  *
  * The upstream hub is startable and stoppable on its own: the local-first

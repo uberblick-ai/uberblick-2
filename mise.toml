@@ -49,30 +49,10 @@ quiet = true
 run = 'sh "{{config_root}}/bin/mise-welcome.sh"'
 
 [tasks.setup]
-description = "Fresh checkout to running: pinned toolchain, frozen dependencies, then `ub init`"
-# The fresh-checkout entry point, and a superset of `ub init` rather than a
-# synonym for it: everything here runs from TypeScript source through `tsx`, so
-# `ub` needs Node, pnpm and a completed install before it executes a line.
-#
-# Each step is a nested `mise run`, which re-resolves the tool paths — `mise
-# install` on line one may be what put node and pnpm there in the first place.
-#
-# mise appends a task's arguments to the LAST line of its script, so
-# `mise run setup -- --yes` becomes `mise run init -- --yes` here and
-# `ub init --yes` in `init` below. Keep the hand-off last.
-run = """
-mise install
-mise run install
-mise run init --
-"""
-
-[tasks.init]
-description = "Identity, workspace and a local development signing secret (`ub init`)"
-# Through `fnox exec` so that on the owner's machine the decryptable
-# HUB_AUTH_TOKEN is visible: `ub init` generates a secret only when nobody else
-# supplies one, and fnox is somebody else. Without the age key this warns and
-# `ub init` generates its own.
-run = "fnox exec --if-missing warn -- node packages/cli/bin/ub.mjs init"
+description = "Install the pinned toolchain and frozen dependencies, then name `ub auth login`"
+# The fresh-checkout entry point: `ub` needs Node, pnpm and a completed install
+# before it executes a line. Setup leaves the committed project binding alone.
+run = 'sh "{{config_root}}/bin/setup.sh"'
 
 [tasks.hub]
 description = "Start the Hocuspocus sync hub (binds HUB_HOST:PORT, default 127.0.0.1:1234)"
@@ -191,11 +171,11 @@ description = "First-user experience: run the documented install path on a clean
 #
 # The context is the working tree — this is a proof of the install path in front
 # of you, not of one on a server — filtered by `Dockerfile.fue.dockerignore`,
-# which is stricter than the review runner's: nothing `ub init` or a local run is
+# which is stricter than the review runner's: nothing workspace creation or a local run is
 # supposed to create may reach the image.
 #
-# No `fnox exec`: a new user has no age key, and the whole point is that
-# `--if-missing warn` carries them through to a generated development secret.
+# No credentials: setup needs none, and the offline assertions create their own
+# local workspace and signing secret.
 # Standing rule, as everywhere: no secrets, no host mounts, no privileged mode,
 # no Docker socket.
 run = """
@@ -205,7 +185,7 @@ root="$(git rev-parse --show-toplevel)"
 tag="uberblick-fue:latest"
 
 if ! docker build --file "$root/Dockerfile.fue" --tag "$tag" "$root"; then
-  printf 'fue: FAILED at the documented install path — `mise trust && mise run setup -- --yes` did not complete on a clean machine; the failing step is the last command above.\\n' >&2
+  printf 'fue: FAILED at the documented install path — `mise trust && mise run setup` did not complete on a clean machine; the failing step is the last command above.\\n' >&2
   exit 1
 fi
 

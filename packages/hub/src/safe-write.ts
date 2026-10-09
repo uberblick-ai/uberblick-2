@@ -198,7 +198,7 @@ export function publishOwnerOnly(
   path: string,
   contents: string,
   /** The command named in a refusal — whichever one the user actually ran. */
-  command = "ub init",
+  command = "ub open",
 ): void {
   const target = classify(path);
   if (target.kind === "refused") {

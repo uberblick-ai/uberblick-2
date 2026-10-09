@@ -50,13 +50,13 @@ describe("ub status", () => {
     expect(run.stdout).toContain("local (this computer)");
   });
 
-  it("reports that no workspace is selected, and names `ub init`", () => {
+  it("reports that no workspace is selected, and names `ub workspace create`", () => {
     // The one value with no default. A guessed workspace would open a corpus
     // nobody chose, so the answer is the command that creates one.
     const run = runUb(["status"], unboundSandbox());
     expect(run.status).toBe(0);
     expect(run.stdout).toMatch(/No workspace selected/);
-    expect(run.stdout).toMatch(/ub init/);
+    expect(run.stdout).toMatch(/ub workspace create/);
     expect(run.stderr).toBe("");
   });
 
@@ -183,7 +183,7 @@ describe("ub status", () => {
     expect(report.hub.status).toBe("disabled");
     // The refusal and its fix are on stderr, and the secret is on neither stream.
     expect(run.stderr).toMatch(/refusing/);
-    expect(run.stderr).toMatch(/chmod 600/);
+    expect(run.stderr).toMatch(/secret may have leaked/);
     expect(run.output).not.toContain(secret);
   });
 

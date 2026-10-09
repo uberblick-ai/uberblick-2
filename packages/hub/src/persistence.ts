@@ -125,7 +125,7 @@ export class HubDatabase implements Extension {
     }
     // Owner-only, and created here because the hub is often the first thing to
     // touch the user's data tree: a directory it left world-readable would
-    // still be world-readable when `ub init` writes credentials.json into the
+    // still be world-readable when `ub workspace create` writes credentials.json into the
     // same tree, where `mode: 0o700` on an existing directory does nothing.
     const durable = !isEphemeralDatabase(this.databasePath);
     const fresh = durable && !existsSync(this.databasePath);

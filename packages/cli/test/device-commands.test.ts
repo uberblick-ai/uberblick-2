@@ -67,7 +67,7 @@ describe("remote device commands", () => {
   it("initializes a remote binding only under workspace access, without generating or copying a secret", async () => {
     const { endpoint, box, login } = await rig(true);
     const before = readFileSync(file(box, "credentials.json"));
-    const initialized = await runUbAsync(["init", endpoint, "--workspace", WORKSPACE, "--yes", "--no-mcp"], box);
+    const initialized = await runUbAsync(["workspace", "use", `${endpoint}/${WORKSPACE}`], box);
     expect(initialized.status, initialized.stderr).toBe(0);
     expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).hubUrl).toBe(endpoint);
     expect(readFileSync(file(box, "credentials.json"))).toEqual(before);
@@ -79,7 +79,7 @@ describe("remote device commands", () => {
     if (kind === "revoked") hub.revoke(login.credential.record.id);
     const configFile = join(box.cwd, ".uberblick.json");
     const before = readFileSync(configFile);
-    for (const args of [["workspace", "use", `${endpoint}/${WORKSPACE}`], ["init", endpoint, "--workspace", WORKSPACE, "--yes"]]) {
+    for (const args of [["workspace", "use", `${endpoint}/${WORKSPACE}`]]) {
       const refused = await runUbAsync(args, box);
       expect(refused.status, refused.output).toBe(1);
       expect(refused.output).toContain(kind === "no-access" ? "administrator for access" : "ub auth login");
