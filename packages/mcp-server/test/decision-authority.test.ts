@@ -166,9 +166,8 @@ describe("decision authority through MCP", () => {
     await rig.ok("set_description", { uuid: record.uuid, description: "Updated discovery copy." });
     await rig.ok("set_tags", { uuid: record.uuid, tags: ["mcp"] });
     await rig.ok("set_links", { uuid: record.uuid, links: [target.uuid] });
-    await rig.ok("set_changelog_suggestion", { uuid: record.uuid, suggestion: "Explain the storage choice." });
     const read = await rig.ok("get_doc", { uuid: record.uuid });
-    expect(read).toMatchObject({ title: "Persistence", tldr: "Use the update log.", approvalChanged: false, description: "Updated discovery copy.", changelogSuggestion: "Explain the storage choice." });
+    expect(read).toMatchObject({ title: "Persistence", tldr: "Use the update log.", approvalChanged: false, description: "Updated discovery copy." });
     expect(read.blocks[0].text).toBe(block.text);
     expect(getDirectoryEntry(rig.instance.replicas.directory().doc, record.uuid)).toMatchObject({ approvalChanged: false, commentCount: 2 });
   });

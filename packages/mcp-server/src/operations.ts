@@ -15,7 +15,6 @@ import { listDocsOperation } from "./tools/list-docs.js";
 import { listTagsOperation } from "./tools/list-tags.js";
 import { restoreDocOperation } from "./tools/restore-doc.js";
 import { searchOperation } from "./tools/search.js";
-import { setChangelogSuggestionOperation } from "./tools/set-changelog-suggestion.js";
 import { setDescriptionOperation } from "./tools/set-description.js";
 import { setLinksOperation } from "./tools/set-links.js";
 import { setStatusOperation } from "./tools/set-status.js";
@@ -45,7 +44,6 @@ export const operations = {
   list_tags: listTagsOperation,
   restore_doc: restoreDocOperation,
   search: searchOperation,
-  set_changelog_suggestion: setChangelogSuggestionOperation,
   set_description: setDescriptionOperation,
   set_links: setLinksOperation,
   set_status: setStatusOperation,

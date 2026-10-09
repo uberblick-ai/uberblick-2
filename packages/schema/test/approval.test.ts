@@ -22,7 +22,6 @@ import {
   listDirectory,
   restoreDirectoryEntry,
   setAnnotationResolved,
-  setChangelogSuggestion,
   setDescription,
   setInlineLink,
   setBlockType,
@@ -150,8 +149,8 @@ describe("decision approval content", () => {
     setDescription(doc, "Changed description");
     setTags(doc, ["another-tag"]);
     setLinks(doc, [TARGET]);
-    setChangelogSuggestion(doc, "A release note");
     const meta = getMetaMap(doc);
+    meta.set("changelogSuggestion", "A legacy release note");
     meta.set("agentStance", false);
     meta.set("decidedBy", "another-person");
     meta.set("decidedAt", "2026-10-04T12:00:00Z");

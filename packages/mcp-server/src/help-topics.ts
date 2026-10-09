@@ -74,7 +74,7 @@ A requirement's \`decisions\` are a derived, oldest-topic-first log resolved ent
 
 Both content locks leave document-room access and structured-data reads available.
 
-A decided decision record's title, decision line, blocks and structured data are read-only: content-writing tools refuse with \`decision_read_only\` and change nothing. Use a new superseding record for any content change. Comments, description, tags, curated links and changelog suggestion stay writable. This check runs on this replica at call time; an unseen offline edit can still merge later, detected as changed after approval.
+A decided decision record's title, decision line, blocks and structured data are read-only: content-writing tools refuse with \`decision_read_only\` and change nothing. Use a new superseding record for any content change. Comments, description, tags and curated links stay writable. This check runs on this replica at call time; an unseen offline edit can still merge later, detected as changed after approval.
 
 Archived documents are read-only. While a document's directory stub is tombstoned document mutations refuse with \`doc_archived\` and change nothing; restore_doc is the only mutation an archived document accepts, and the only way back. Reading is unaffected — get_doc, export_markdown, backlinks and \`list_docs\` with \`include_deleted: true\` all still answer for it; a decision additionally needs a matching \`kind\`, \`status\` or \`tag\` predicate in list_docs.
 

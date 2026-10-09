@@ -213,25 +213,6 @@ export const toolHelpDetails = {
     "omit pageSize from new mappings. Unknown mapping keys and options are invalid. Both views only " +
     "read their document's collection and contain no record values; use update_data to write records. Invalid mappings stay " +
     "editable source and show a problem message. Every block has one text an agent can edit.",
-  set_changelog_suggestion:
-    "Record one sentence of draft release-note copy for the work this document describes — what a reader of a " +
-    "changelog would want to know, in simple English about the user-visible outcome. Write it when delivered " +
-    "work makes you update the document; nothing generates, publishes or asks for one, and nothing renders it " +
-    "yet.\n\n" +
-    "It is document metadata beside the description, not prose in the document: writing it leaves the title, " +
-    "description, tags, links, kind and status exactly where they were, and get_doc answers with it as " +
-    "`changelogSuggestion`.\n\n" +
-    "Three states, and they are different answers. No `changelogSuggestion` at all means nobody has written " +
-    "one. `null` means this work deliberately needs no user-facing entry — say it, so an internal-only change " +
-    "does not read as unfinished. A non-empty string is the suggestion itself. The empty string — or any " +
-    "string that is only whitespace, since the argument is trimmed first — is not a fourth state: it takes " +
-    "the stored value back to the first one.\n\n" +
-    "That clear is the one answer whose concurrency guarantee is weaker, and it is local: it takes back only " +
-    "the value this replica has already seen, so a concurrent `null` or sentence from another writer outlives " +
-    "it and the field converges on theirs. Writing `null` or a sentence competes normally — concurrent " +
-    "writers converge on one of the two. If a clear must stick, read the document back with get_doc.\n\n" +
-    "The directory stub does not cache it and the search index does not carry it, so list_docs and search " +
-    "neither answer with it nor match on it.",
   archive_doc:
     "Hide a document: tombstones its directory stub, so it leaves list_docs and the search index. This is not " +
     "erasure and not a delete. Every block, mark and annotation stays exactly where it was: get_doc still " +

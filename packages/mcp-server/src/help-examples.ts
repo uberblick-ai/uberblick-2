@@ -130,11 +130,6 @@ export const toolHelpEntries: Record<string, ToolHelpEntry> = {
     example: { uuid, status: "planned" },
     related: documentContracts,
   },
-  set_changelog_suggestion: {
-    details: toolHelpDetails.set_changelog_suggestion,
-    example: { uuid, suggestion: "Find product help by topic directly from your MCP client." },
-    related: documentContracts,
-  },
   archive_doc: {
     details: toolHelpDetails.archive_doc,
     example: { uuid },

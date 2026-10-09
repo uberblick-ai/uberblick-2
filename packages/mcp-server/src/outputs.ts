@@ -247,7 +247,6 @@ export const outputSchemas = {
     title: z.string(),
     description,
     tldr,
-    changelogSuggestion: z.string().nullable().optional(),
     tags,
     links: z.array(z.string()),
     ...lifecycle,
@@ -306,11 +305,6 @@ export const outputSchemas = {
     kind: z.enum(DOCUMENT_KINDS),
     status,
     ...decisionAuthority,
-    ...documentDurability,
-  }).strict(),
-  set_changelog_suggestion: z.object({
-    uuid,
-    changelogSuggestion: z.string().nullable().optional(),
     ...documentDurability,
   }).strict(),
   archive_doc: z.object({

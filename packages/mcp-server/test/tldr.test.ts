@@ -163,10 +163,6 @@ describe("the TL;DR review reminder", () => {
         description: "Rewritten discovery copy.",
       }),
       await rig.ok("set_status", { uuid: source.uuid, status: "planned" }),
-      await rig.ok("set_changelog_suggestion", {
-        uuid: source.uuid,
-        suggestion: null,
-      }),
       await rig.ok("annotate", {
         uuid: source.uuid,
         block_id: read.blocks[0].id,

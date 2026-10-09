@@ -1,9 +1,9 @@
 /**
  * The v0 MCP tool set.
  *
- * Thirty tools: get_help, list_tags, create_doc, get_doc, get_data, update_data, list_docs, search,
+ * Twenty-nine tools: get_help, list_tags, create_doc, get_doc, get_data, update_data, list_docs, search,
  * backlinks, find_decisions, edit_block, insert_block, delete_block, set_tags, set_links,
- * set_title, set_description, set_tldr, set_status, set_changelog_suggestion,
+ * set_title, set_description, set_tldr, set_status,
  * archive_doc,
  * restore_doc, annotate, link_range,
  * export_markdown, sync_status, the four sidebar tools registered from
@@ -59,7 +59,6 @@ import { registerSetTitle } from "./registrations/set-title.js";
 import { registerSetDescription } from "./registrations/set-description.js";
 import { registerSetTldr } from "./registrations/set-tldr.js";
 import { registerSetStatus } from "./registrations/set-status.js";
-import { registerSetChangelogSuggestion } from "./registrations/set-changelog-suggestion.js";
 import { registerArchiveDoc } from "./registrations/archive-doc.js";
 import { registerRestoreDoc } from "./registrations/restore-doc.js";
 import { registerAnnotate } from "./registrations/annotate.js";
@@ -96,7 +95,6 @@ export function registerTools(
   registerSetDescription(registrar, context);
   registerSetTldr(registrar, context);
   registerSetStatus(registrar, context);
-  registerSetChangelogSuggestion(registrar, context);
   registerArchiveDoc(registrar, context);
   registerRestoreDoc(registrar, context);
   registerAnnotate(registrar, context);

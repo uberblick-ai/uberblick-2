@@ -57,7 +57,6 @@ it("refuses every document mutation before logging, teaches recovery, and leaves
     set_title: { uuid, title: "Changed" }, set_description: { uuid, description: "Changed" },
     set_tldr: { uuid, tldr: "Changed" }, set_status: { uuid, status: "planned" },
     update_data: { uuid, operations: [] },
-    set_changelog_suggestion: { uuid, suggestion: "Changed" },
     archive_doc: { uuid: first.uuid }, restore_doc: { uuid: archived.uuid },
     annotate: { uuid, block_id: block.id, start: 0, end: 4, text: "Comment" },
     link_range: { uuid, block_id: block.id, start: 0, end: 4, doc_id: first.uuid, rev: block.rev },

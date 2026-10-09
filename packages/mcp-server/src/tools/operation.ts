@@ -51,7 +51,6 @@ const DOCUMENT_WRITES = {
   set_links: { content: false, contentDurability: false },
   set_tags: { content: false, contentDurability: false },
   set_status: { content: false, contentDurability: false },
-  set_changelog_suggestion: { content: false, contentDurability: false },
   annotate: { content: false, contentDurability: false },
 } as const;
 
