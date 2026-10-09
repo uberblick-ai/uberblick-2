@@ -15,7 +15,7 @@ export function registerSetStatus(server: ToolRegistrar, context: ToolContext): 
       "other kind's status cannot change it. An open record can be withdrawn without an answer; decided records " +
       "cannot reopen or withdraw. Rejected and withdrawn are final. Rejection requires a non-empty `reason` and " +
       "a recorded person's answer, and applies only to an open proposal, an agent stance or a decided record in " +
-      "a conflict. It stores `rejectionReason`. All refusals change nothing." +
+      "a conflict. It stores `rejectionReason`. Validation refusals change nothing." +
       helpPointer("set_status"),
     outputSchema: outputSchemas.set_status,
     inputSchema,

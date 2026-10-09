@@ -19,6 +19,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   FAILURE_CODES,
   INTERNAL_ERROR_MESSAGE,
+  PERSISTENCE_ERROR_MESSAGE,
   MUTATING_TOOLS,
   READ_ONLY_TOOLS,
   hydrationRecovery,
@@ -586,11 +587,15 @@ describe("the failure contract", () => {
       title: "Refused",
     });
     expect(refusedWrite.payload.error).toBe("persistence_failed");
+    expect(refusedWrite.payload.message).toBe(PERSISTENCE_ERROR_MESSAGE);
+    expect(JSON.stringify(refusedWrite.payload)).not.toContain("simulated disk failure");
     expect(refusedWrite.payload.applied).toBe(false);
     expect(refusedWrite.payload.partial).toBe(false);
 
     const blockedRead = await failing.rig.call("get_doc", { uuid: doc.uuid });
     expect(blockedRead.payload.error).toBe("persistence_failed");
+    expect(blockedRead.payload.message).toBe(PERSISTENCE_ERROR_MESSAGE);
+    expect(JSON.stringify(blockedRead.payload)).not.toContain("simulated disk failure");
     expect(blockedRead.payload.room).toBeTruthy();
     expect(blockedRead.payload.recoveryClass).toBe("manual");
     expect(blockedRead.payload.applied).toBeUndefined();

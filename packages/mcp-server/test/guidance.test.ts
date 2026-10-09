@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
+import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   createTagCatalogEntry, retireTagCatalogEntry, restoreTagCatalogEntry,
   setTags, setTitle, tombstoneDirectoryEntry, upsertDirectoryEntry,
 } from "@uberblick/schema";
-import { DOCUMENT_MUTATING_TOOLS } from "../src/failures.js";
-import { removeTempDirs, startServer, testConfig } from "./helpers.js";
+import { DOCUMENT_MUTATING_TOOLS, PERSISTENCE_ERROR_MESSAGE } from "../src/failures.js";
+import { INTERNAL_RESOURCE_ERROR_MESSAGE } from "../src/resource-adapter.js";
+import { FailingStore, removeTempDirs, startServer, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
@@ -161,6 +163,66 @@ it("lists and serves current guidance independently of leases and stale cached t
   expect((await guidanceResources(rig)).resources).toEqual([]);
   restoreTagCatalogEntry(replicas.settings().doc, marker);
   expect((await guidanceResources(rig)).resources).toHaveLength(1);
+});
+
+it("returns the same safe quarantine sentence for guidance list/read and tools after a refused append", async () => {
+  const config = testConfig();
+  const store = new FailingStore(config.databasePath, config.workspaceId);
+  const rig = await startServer(config, store);
+  rigs.push(rig);
+  const guide = await doc(rig, "Guide");
+  mark(rig, guide.uuid);
+  await rig.ok("get_doc", { uuid: guide.uuid });
+  const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+  store.failing = true;
+  const refused = await rig.call("set_metadata", { uuid: guide.uuid, title: "Refused" });
+  expect(refused.payload.message).toBe(
+    "The replica refused a write to its update log; check sync_status and restart the MCP server.",
+  );
+  expect(refused).toMatchObject({ isError: true, payload: {
+    error: "persistence_failed", message: PERSISTENCE_ERROR_MESSAGE,
+    applied: false, partial: false, synced: false,
+  } });
+
+  // Through a real MCP client: the client adds this prefix to the wire's fixed sentence.
+  for (const result of [
+    () => rig.client.readResource({ uri: `uberblick://doc/${guide.uuid}` }),
+    () => rig.client.listResources(),
+  ]) {
+    await expect(result()).rejects.toMatchObject({
+      code: ErrorCode.InternalError,
+      message: `MCP error ${ErrorCode.InternalError}: ${PERSISTENCE_ERROR_MESSAGE}`,
+      data: undefined,
+    });
+  }
+  const blockedRead = await rig.call("get_doc", { uuid: guide.uuid });
+  expect(blockedRead.payload.message).toBe(PERSISTENCE_ERROR_MESSAGE);
+  expect(JSON.stringify([refused.payload, blockedRead.payload])).not.toContain("simulated disk failure");
+  const diagnostic = await rig.ok("sync_status");
+  expect(diagnostic.persistence.message).toContain("simulated disk failure");
+  const log = stderr.mock.calls.flat().join("\n");
+  expect(log).toContain("failed to append to the update log");
+  expect(log).toContain("simulated disk failure");
+});
+
+it.each(["list", "read"] as const)("sanitizes an unexpected guidance %s exception and logs its cause", async (route) => {
+  const rig = await local();
+  const guide = await doc(rig, "Guide");
+  mark(rig, guide.uuid);
+  const original = new Error("private database path and SQL");
+  const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.spyOn(rig.instance.replicas, "refresh").mockImplementation(() => { throw original; });
+  const result = route === "list"
+    ? rig.client.listResources()
+    : rig.client.readResource({ uri: `uberblick://doc/${guide.uuid}` });
+  await expect(result).rejects.toMatchObject({
+    code: ErrorCode.InternalError,
+    message: `MCP error ${ErrorCode.InternalError}: ${INTERNAL_RESOURCE_ERROR_MESSAGE}`,
+    data: undefined,
+  });
+  const log = stderr.mock.calls.flat().join("\n");
+  expect(log).toContain("resource call failed");
+  expect(log).toContain(original.stack);
 });
 
 it("is inert for absent or retired markers and for archived or unhydrated guidance", async () => {

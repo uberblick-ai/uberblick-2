@@ -5,6 +5,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { FAILURE_INSTRUCTIONS, READ_ONLY_TOOLS } from "../src/failures.js";
 import { GUIDANCE_INSTRUCTIONS } from "../src/briefing.js";
 import { toolHelpEntries } from "../src/help-examples.js";
+import { HelpCatalog } from "../src/help.js";
+import { log } from "../src/log.js";
+import { INTERNAL_RESOURCE_ERROR_MESSAGE } from "../src/resource-adapter.js";
 import {
   FailingStore, removeTempDirs, startServer, TEST_SECRET, testConfig,
 } from "./helpers.js";
@@ -73,8 +76,29 @@ it("refuses unknown topics through the tool failure contract and the resource-no
   expect(READ_ONLY_TOOLS.has("get_help")).toBe(true);
   const uri = `uberblick://help/${topic}`;
   await expect(rig.client.readResource({ uri })).rejects.toMatchObject({
-    code: -32002, data: { uri }, message: expect.stringContaining(uri),
+    code: -32002, data: { uri }, message: `MCP error -32002: MCP error -32002: Resource not found: ${uri}`,
   });
+});
+
+it.each(["list", "read"] as const)("contains an unexpected help resource %s failure and logs its original cause", async (route) => {
+  const rig = await local();
+  const cause = new Error("Private database path: /private/workspace.sqlite; SELECT secret FROM records");
+  const reported = vi.spyOn(log, "error");
+  const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.spyOn(HelpCatalog.prototype, route === "list" ? "list" : "get").mockImplementation(() => {
+    throw cause;
+  });
+
+  const response = route === "list"
+    ? rig.client.listResources()
+    : rig.client.readResource({ uri: "uberblick://help/orientation" });
+  await expect(response).rejects.toMatchObject({
+    code: -32603,
+    message: `MCP error -32603: ${INTERNAL_RESOURCE_ERROR_MESSAGE}`,
+    data: undefined,
+  });
+  expect(reported).toHaveBeenCalledWith("resource call failed", cause);
+  expect(stderr).toHaveBeenCalledWith(expect.stringContaining(cause.stack!));
 });
 
 it("renders each tool's actual full description and schemas, with an accepted example and owning-topic links", async () => {
