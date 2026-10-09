@@ -26,12 +26,9 @@ import type {
 } from "@uberblick/schema";
 import type { z } from "zod";
 import {
-  DOCUMENT_MUTATING_TOOLS,
   ToolError,
-  failureContract,
   hydrationRecovery,
 } from "../failures.js";
-import { GUIDANCE_WRITE_INSTRUCTIONS } from "../briefing.js";
 import type { GuidanceBriefing } from "../briefing.js";
 import { docLinkRanges } from "../replica.js";
 import type { Replica, Replicas } from "../replica.js";
@@ -102,10 +99,6 @@ function toBlockInput(
 
 /** Shared per-server helpers; each closure keeps the registering replica and briefing. */
 export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing, work: ServerWork, help = new HelpCatalog()) {
-
-  const toolContract = (tool: string): string =>
-    (DOCUMENT_MUTATING_TOOLS.has(tool) ? `\n\n${GUIDANCE_WRITE_INSTRUCTIONS}` : "") +
-    failureContract(tool);
 
   /** One refusal builder; callers retain their original message and identity field. */
   const notKnownLocally = (
@@ -199,7 +192,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
    * document only from the directory would otherwise answer `doc_not_hydrated`
    * — technically true, and useless. The caller needs to hear `restore_doc`.
    *
-   * Scope, stated the way ARCHIVED_IS_READ_ONLY in ./descriptions.ts states it to agents:
+   * Scope, as the lifecycle help topic states it to agents:
    * this reads THIS replica's stub at call time. There is no cross-replica
    * lock, so an edit racing an archive that has not arrived yet is an ordinary
    * CRDT write and merges. Enforcement is refusal-at-call — a client
@@ -423,7 +416,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
    * it has reached the hub — which, right after a write, it has not.
    *
    * `synced` is "the hub acknowledged it", never "the hub stored it"; see
-   * SYNCED_MEANS in ./descriptions.ts for the window that distinction leaves open.
+   * the tool-contracts help topic for the window that distinction leaves open.
    *
    * `assertHealthy` runs here, after the write: an append that failed during
    * *this* call must not be reported as applied. It throws, so the tool answers
@@ -493,7 +486,6 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     requireStub,
     durability,
     tagCatalog,
-    toolContract,
     requireWritableDoc,
     blockInputFor,
     recordAnswer,

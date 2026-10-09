@@ -16,12 +16,6 @@ export const GUIDANCE_INSTRUCTIONS =
   "With no locally readable guidance the gate is inert. Reads, sidebar tools and sync_status are ungated; " +
   "resource reads return current Markdown but do not count toward the briefing. No briefing state is persisted.";
 
-/** Compact per-tool recovery; tool-contracts help carries the complete common contract. */
-export const GUIDANCE_WRITE_INSTRUCTIONS =
-  "Requires a guidance briefing: discover guidance resources at uberblick://doc/<uuid>, then read them " +
-  "with get_doc. On guidance_required, read the listed unread documents and retry. Completion grants " +
-  "a ten-minute process-local lease; expiry or restart requires fresh reads.";
-
 export class GuidanceBriefing {
   private readonly reads = new Set<string>();
   private expiresAt = 0;

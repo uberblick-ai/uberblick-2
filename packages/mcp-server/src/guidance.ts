@@ -8,7 +8,7 @@ import type { GuidanceBriefing } from "./briefing.js";
 import type { Replicas } from "./replica.js";
 import type { ServerWork } from "./server-work.js";
 
-export { GuidanceBriefing, GUIDANCE_INSTRUCTIONS, GUIDANCE_WRITE_INSTRUCTIONS } from "./briefing.js";
+export { GuidanceBriefing, GUIDANCE_INSTRUCTIONS } from "./briefing.js";
 
 export function registerGuidanceResources(
   server: McpServer,

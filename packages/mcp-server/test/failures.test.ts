@@ -211,17 +211,29 @@ describe("the failure contract", () => {
         `${name} is neither in MUTATING_TOOLS nor READ_ONLY_TOOLS`,
       ).toBe(true);
       expect(MUTATING_TOOLS.has(name) && READ_ONLY_TOOLS.has(name)).toBe(false);
-      // And every tool names the shape it answers with — the machine contract,
-      // the mutation fields only where there is a write to report. The prose
-      // that explains them has its home in the tool-contracts help topic.
+      // Every tool points to the shared owner of the failure shape rather
+      // than repeating its prose in the model-facing catalog.
       expect(description, `${name} has no description`).toBeDefined();
-      expect(description).toContain("recoveryClass");
-      expect(description?.includes("`partial`")).toBe(MUTATING_TOOLS.has(name));
+      expect(description?.split("\n").at(-1), name).toContain("tool-contracts");
     }
     expect([...MUTATING_TOOLS, ...READ_ONLY_TOOLS].sort()).toEqual(
       registered.map((tool) => tool.name).sort(),
     );
     expect(READ_ONLY_TOOLS.has("get_help")).toBe(true);
+  });
+
+  it("documents the complete failure shape and recovery classes in shared help", async () => {
+    const rig = await localRig();
+    const { text } = await rig.ok("get_help", { topic: "tool-contracts" });
+    for (const field of ["error", "message", "recoveryClass", "recovery", "applied", "partial", "synced"]) {
+      expect(text, field).toContain(`\`${field}\``);
+    }
+    for (const recoveryClass of ["retry", "reread", "manual"]) {
+      expect(text, recoveryClass).toContain(`\`${recoveryClass}\``);
+    }
+    expect(text).toContain("internal_error");
+    expect(text).toContain("isError: true");
+    expect(text).toContain("structuredContent");
   });
 
   it("gives every failure code a message, its domain detail and a recovery class", async () => {

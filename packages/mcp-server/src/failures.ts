@@ -472,9 +472,8 @@ export const FAILURE_CODES: readonly string[] = [
  *
  * Repeating a hundred and fifty words on every tool cost each session tens of
  * kilobytes of `tools/list` to say the same thing once per tool, and the bill
- * grew with the tool set. The prose belongs where a client reads it once; the
- * per-tool descriptions carry {@link failureContract}, which is the machine
- * shape and nothing else.
+ * grew with the tool set. The prose belongs where a client reads it once;
+ * per-tool descriptions point to tool-contracts for the shared failure shape.
  */
 export const FAILURE_INSTRUCTIONS =
   "Failures are JSON with a stable `error` code and a human `message`, and — wherever recovery is actionable — a " +
@@ -491,28 +490,6 @@ export const FAILURE_INSTRUCTIONS =
   "the one code with no class and no detail — an unmapped crash cannot honestly say what it did — and arguments " +
   "that do not match a tool's input schema never reach the tool at all: the MCP layer rejects them with its own " +
   "plain-text validation error, and nothing durable changes.";
-
-/** The machine shape, per tool — one sentence, no prose. */
-const FAILURE_FLOOR =
-  "Failures: JSON with `error`, `message` and, where recovery is actionable, `recoveryClass` " +
-  "(`retry`|`reread`|`manual`) and a `recovery` sentence.";
-
-/** What a failing WRITE additionally names. */
-const MUTATION_FLOOR =
-  " A failure here also carries `applied`, `partial` and `synced`.";
-
-/**
- * The failure line for one tool's description, ready to append.
- *
- * Derived from {@link MUTATING_TOOLS} rather than written per tool, so a
- * mutating tool cannot document the read-only contract by accident. The full
- * contract this abbreviates is in {@link FAILURE_INSTRUCTIONS}.
- */
-export function failureContract(tool: string): string {
-  return MUTATING_TOOLS.has(tool)
-    ? `\n\n${FAILURE_FLOOR}${MUTATION_FLOOR}`
-    : `\n\n${FAILURE_FLOOR}`;
-}
 
 export interface ToolFailure {
   isError: true;

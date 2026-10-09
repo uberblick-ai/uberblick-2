@@ -20,8 +20,8 @@
  * reconnect, wait briefly for the hub. Every mutating handler ends with
  * `{applied, synced}` plus the hub's state, because "applied locally" is not
  * "synced" and an agent deserves to know which one it got — and `synced` is not
- * "stored by the hub" either, which is why `SYNCED_MEANS` in ./tools/descriptions.ts says so in the
- * tool descriptions and bundled help rather than leaving the word to be read generously.
+ * "stored by the hub" either; the bundled tool-contracts help topic states
+ * that distinction rather than leaving the word to be read generously.
  *
  * Every registration calls its operation through ./tool-adapter.ts, which
  * validates the payload and serializes the MCP answer. ./failures.ts stamps

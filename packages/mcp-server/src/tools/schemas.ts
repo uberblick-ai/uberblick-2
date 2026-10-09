@@ -8,7 +8,6 @@ import {
   canonicalDocumentUuid,
 } from "@uberblick/schema";
 import { z } from "zod";
-import { DESCRIPTION_IS_FOR_CHOOSING } from "./descriptions.js";
 
 // Identity is UUIDs, so the boundary checks for one. A tool that accepted any
 // string would let an agent persist an identity nothing can ever resolve.
@@ -34,7 +33,7 @@ export const descriptionArg = z
     MAX_DESCRIPTION_LENGTH,
     `a description is at most ${MAX_DESCRIPTION_LENGTH} characters — one or two sentences, not a summary`,
   )
-  .describe(DESCRIPTION_IS_FOR_CHOOSING);
+  .describe("Agent-facing description used to choose whether to open the document.");
 
 export const tldrArg = z
   .string({

@@ -16,6 +16,13 @@ export function helpUri(topic: string): string {
   return `uberblick://help/${topic}`;
 }
 
+/** Short final pointer; the same ownership table supplies per-tool Related links. */
+export function helpPointer(tool: string): string {
+  const entry = toolHelpEntries[tool];
+  if (entry === undefined) throw new Error(`No help topics for registered tool: ${tool}`);
+  return `\n\nHelp: ${[tool, ...entry.related].join(", ")}.`;
+}
+
 function jsonBlock(value: unknown): string {
   return `\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``;
 }
@@ -41,6 +48,7 @@ export class HelpCatalog {
         `\n\n## Arguments\n\n${jsonBlock(tool.inputSchema)}` +
         `\n\n## Example\n\nCall \`${name}\` with these arguments; replace document and block identities with returned values.\n\n${jsonBlock(entry.example)}` +
         `\n\n## Output\n\n${jsonBlock(tool.outputSchema)}` +
+        (entry.details === undefined ? "" : `\n\n## Constraints\n\n${entry.details}`) +
         `\n\n## Related\n\n${related}\n`,
     });
     const index = this.topics.get("tools");

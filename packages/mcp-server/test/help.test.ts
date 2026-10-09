@@ -4,6 +4,7 @@ import { createTagCatalogEntry, setTags, validateCollectionSchema } from "@uberb
 import { afterEach, expect, it, vi } from "vitest";
 import { FAILURE_INSTRUCTIONS, READ_ONLY_TOOLS } from "../src/failures.js";
 import { GUIDANCE_INSTRUCTIONS } from "../src/briefing.js";
+import { toolHelpEntries } from "../src/help-examples.js";
 import {
   FailingStore, removeTempDirs, startServer, TEST_SECRET, testConfig,
 } from "./helpers.js";
@@ -87,6 +88,11 @@ it("renders each tool's actual full description and schemas, with an accepted ex
     const inputSchema = jsonSection(text, "Arguments");
     expect(inputSchema, tool.name).toEqual(tool.inputSchema);
     expect(jsonSection(text, "Output"), tool.name).toEqual(tool.outputSchema);
+    const details = toolHelpEntries[tool.name].details;
+    if (details !== undefined) {
+      const constraints = text.split("## Constraints\n")[1]?.split("\n## ")[0];
+      expect(constraints, `${tool.name} loses its expanded tool-specific contract`).toContain(details);
+    }
     const checked = validator.getValidator(inputSchema)(jsonSection(text, "Example"));
     expect(checked.valid, `${tool.name}: ${checked.errorMessage ?? "invalid example"}`).toBe(true);
     const related = text.split("## Related\n")[1] ?? "";
@@ -101,6 +107,45 @@ it("renders each tool's actual full description and schemas, with an accepted ex
     expect((await rig.ok("get_help", { topic: tool })).text.split("## Related\n")[1])
       .toContain(`uberblick://help/${topic}`);
   }
+});
+
+it("keeps tool-specific modes, refusals and recovery in the tool's own expanded help", async () => {
+  const rig = await local();
+  for (const [tool, guidance] of [
+    ["create_doc", "before a UUID is allocated or a room is written"],
+    ["create_doc", "rooms already `completed`"],
+    ["edit_block", "strictly inside unmarked text"],
+    ["edit_block", "invalid_table_mapping"],
+    ["edit_block", "currentText` and `currentRev"],
+    ["archive_doc", "rolledBack: false"],
+    ["archive_doc", "a later call retries it"],
+    ["get_data", "first remaining record"],
+    ["get_data", "Cursors are not snapshots"],
+  ]) {
+    const { text } = await rig.ok("get_help", { topic: tool });
+    const constraints = text.split("## Constraints\n")[1]?.split("\n## ")[0];
+    expect(constraints, `${tool}: ${guidance}`).toContain(guidance);
+  }
+});
+
+it("keeps shared guarantees in the owning topics after shortening descriptions", async () => {
+  const rig = await local();
+  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
+  for (const rule of [
+    "decision_read_only", "doc_archived", "answer: {who, when, where}", "approvalFingerprint",
+    "cross-replica lock", "structured-data reads available", "maximal decided record",
+    'list_docs({kind: "decision"})', "include_deleted: true", "predicate",
+  ]) expect(lifecycle, rule).toContain(rule);
+
+  const workspaces = (await rig.ok("get_help", { topic: "workspaces" })).text;
+  for (const rule of ["whole sidebar", "directory stubs", "left visible so it can be unpinned"]) {
+    expect(workspaces, rule).toContain(rule);
+  }
+  const contracts = (await rig.ok("get_help", { topic: "tool-contracts" })).text;
+  expect(contracts).toContain(GUIDANCE_INSTRUCTIONS);
+  expect(contracts).toContain("does NOT mean the hub has stored it");
+  expect(contracts).toContain("no rollback or cross-room remote atomicity");
+  expect(contracts).toContain("re-sends it on reconnect");
 });
 
 it("serves the short startup orientation verbatim and directs clients to the complete help catalog", async () => {

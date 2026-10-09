@@ -80,12 +80,11 @@ describe("with the hub stopped", () => {
       "update_data",
     ]);
 
-    // insert_block accepts every block type the schema owns, so its
-    // description has to name every one of them — the list went stale once
-    // already, which is why it is generated from BLOCK_TYPES and pinned here.
-    const insert = tools.find((tool) => tool.name === "insert_block");
+    // The complete insert_block vocabulary remains available on demand;
+    // tool descriptions may summarize it without repeating every detail.
+    const insertHelp = (await rig.ok("get_help", { topic: "insert_block" })).text;
     for (const type of BLOCK_TYPES) {
-      expect(insert?.description).toContain(type);
+      expect(insertHelp).toContain(type);
     }
   });
 

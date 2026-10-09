@@ -1,8 +1,7 @@
 import type { ToolRegistrar } from "../help-resources.js";
-import { failureContract } from "../failures.js";
+import { helpPointer } from "../help.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
-
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, searchOperation } from "../tools/search.js";
 
@@ -10,20 +9,13 @@ export function registerSearch(server: ToolRegistrar, context: ToolContext): voi
   server.registerTool("search", {
     title: "Search documents",
     description:
-      "Full-text search over document titles, descriptions and block text, from the local FTS5 index. " +
-      "The index is derived from the replicas and updated as updates are observed, so it reflects edits from any client this replica has seen.\n\n" +
-      "Matching is all-terms: every searchable term in `query` must occur in one and the same document. " +
-      "Letters and digits make a term; punctuation and emoji are not terms, so a query holding only those matches nothing. " +
-      "An underscore-separated group matches its words as an adjacent phrase: `list_docs` matches both `list_docs` and `list docs`, but not `a list of docs`. " +
-      "Case and accents are folded, but nothing is stemmed — `withdrawal` does not find a document that says " +
-      "`withdrawing`. A trailing `*` loosens one term to a prefix match, which is how to reach an inflection: " +
-      "`withdraw*` finds both `withdrawal` and `withdrawing`. No hits means no indexed document matched the whole query under those rules; it does not by itself mean the index is empty.\n\n" +
-      "Every hit carries the document's `description` — null where nobody has written one — so relevance can be " +
-      "judged from the result list rather than by opening each document in turn. Its tag assignments carry " +
-      "canonical ids, current names and retirement state. Pass `tag` as a catalog id or exact current name to " +
-      "restrict hits to that assignment; a value this catalog does not have is refused rather than answered with " +
-      "no hits." +
-      failureContract("search"),
+      "Search document titles, descriptions and block text in this replica's derived FTS5 index. Every " +
+      "searchable query term must occur in the same document. Punctuation or emoji alone matches nothing; " +
+      "underscore groups match adjacent words, case and accents fold, and words are not stemmed. A trailing * " +
+      "enables a prefix match. Hits include description and canonical tag assignments. Optional tag accepts a " +
+      "catalog id or exact current name; an unknown value refuses. No hits means no indexed document matches " +
+      "all terms, without proving the index is empty or the replica complete." +
+      helpPointer("search"),
     outputSchema: outputSchemas.search,
     inputSchema,
   }, guarded("search", context, searchOperation));

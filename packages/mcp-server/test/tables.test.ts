@@ -147,8 +147,8 @@ describe("structured tables through MCP", () => {
     }
     expect(updates).toBe(0);
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
-    const tool = (await rig.client.listTools()).tools.find(tool => tool.name === "annotate")!;
-    expect(tool.description).toContain("header as row 0");
+    const help = await rig.ok("get_help", { topic: "annotate" });
+    expect(help.text).toContain("header as row 0");
     const thread = (await rig.ok("get_doc", { uuid: created.uuid })).annotations[0];
     for (const coordinates of [{ row: 0 }, { column: 0 }, { row: 0, column: 0 }]) {
       const refused = await rig.call("annotate", { uuid: created.uuid, thread_id: thread.id, text: "Reply", ...coordinates });
@@ -803,8 +803,9 @@ describe("structured tables through MCP", () => {
       blocks: [{ type: "table", text: GFM }],
     });
     const tool = (await rig.client.listTools()).tools.find(tool => tool.name === "edit_block")!;
-    expect(tool.description).toContain("table_mapping_required");
-    expect(tool.description).toContain("invalid_table_mapping");
+    const help = await rig.ok("get_help", { topic: "edit_block" });
+    expect(help.text).toContain("table_mapping_required");
+    expect(help.text).toContain("invalid_table_mapping");
     const mappingSchema = (tool.inputSchema.properties as Record<string, any>).table_mapping;
     expect(mappingSchema.additionalProperties).toBe(false);
     expect(mappingSchema.required).toEqual(["rows", "columns"]);
@@ -892,8 +893,8 @@ describe("structured tables through MCP", () => {
     const annotations = (await rig.ok("get_doc", { uuid })).annotations;
     expect(annotations.find((entry: { id: string }) => entry.id === old.threadId)).toMatchObject({ range: null, comments: expect.any(Array) });
     expect(annotations.find((entry: { id: string }) => entry.id === old.threadId).comments).toHaveLength(3);
-    const tools = (await rig.client.listTools()).tools;
-    expect(tools.find(tool => tool.name === "annotate")!.description).toContain("zero-based GFM projection");
+    const help = await rig.ok("get_help", { topic: "annotate" });
+    expect(help.text).toContain("zero-based GFM projection");
   });
 
   it("normalizes persisted and late legacy writes, including decided records, and subsequent reads write nothing", async () => {
