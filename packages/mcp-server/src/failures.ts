@@ -35,15 +35,16 @@
  * happens to hold — a path, a SQL statement, a token — to the caller. The
  * original goes to the log, on stderr, where an operator reads it.
  *
- * Arguments that do not match a tool's input schema never reach a handler at
- * all: the MCP SDK rejects them at the protocol boundary with its own
+ * Over MCP, arguments that do not match a tool's input schema never reach a
+ * handler: the MCP SDK rejects them at the protocol boundary with its own
  * plain-text validation error, before any code here runs and therefore before
  * anything durable could change. That class is documented rather than wrapped —
  * disguising it as a handler failure would make a boundary rejection look like
  * a call that got somewhere. It covers every wrong argument, including the ones
  * that are individually well-formed but do not add up to a call: ./inputs.ts
  * states each multiplexed tool's valid shapes in the schema itself, so no
- * handler here is left holding an arguments complaint of its own.
+ * handler here is left holding an arguments complaint of its own. Direct
+ * operation callers must parse the exported inputSchema before calling it.
  *
  * Nothing here promises a rollback, and nothing here reconciles: a call that
  * touched several rooms reports what is durable and names the call that
@@ -51,7 +52,6 @@
  * room-by-room wording.
  */
 
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   AnnotationCellError,
   AnnotationRangeError,
@@ -68,7 +68,6 @@ import {
   TableMappingRequiredError,
 } from "@uberblick/schema";
 import { log } from "./log.js";
-import { outputSchemas } from "./outputs.js";
 import { PersistenceError } from "./replica.js";
 
 /**
@@ -505,11 +504,13 @@ export function failureContract(tool: string): string {
     : `\n\n${FAILURE_FLOOR}`;
 }
 
-function failure(payload: Record<string, unknown>): CallToolResult {
-  return {
-    isError: true,
-    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
-  };
+export interface ToolFailure {
+  isError: true;
+  payload: Record<string, unknown>;
+}
+
+function failure(payload: Record<string, unknown>): ToolFailure {
+  return { isError: true, payload };
 }
 
 /**
@@ -522,7 +523,7 @@ function failure(payload: Record<string, unknown>): CallToolResult {
 function stamped(
   tool: string,
   payload: Record<string, unknown> & { error: string },
-): CallToolResult {
+): ToolFailure {
   const recovery = RECOVERIES[payload.error];
   if (recovery === undefined) {
     return failure(payload);
@@ -543,7 +544,7 @@ function stamped(
  * Block comparison errors come back with `currentText` and `currentRev`, so a
  * caller can re-diff and retry without another round trip.
  */
-export function toFailure(tool: string, error: unknown): CallToolResult {
+export function toFailure(tool: string, error: unknown): ToolFailure {
   if (error instanceof DataError) {
     return stamped(tool, {
       error: error.code,
@@ -669,33 +670,4 @@ export function toFailure(tool: string, error: unknown): CallToolResult {
   // is safe to say.
   log.error("tool call failed", error);
   return stamped(tool, { error: "internal_error", message: INTERNAL_ERROR_MESSAGE });
-}
-
-/**
- * Validate successful answers inside the failure boundary. The SDK's own
- * output check runs later and produces a plain-text error without logging;
- * a server-produced mismatch must instead use our text-only internal_error.
- *
- * The tool's own name is what tells the contract whether this call could have
- * written anything — the single fact a failure payload cannot work out for
- * itself, since the same `doc_not_found` is a read's dead end and a write's.
- */
-export function guarded<Args>(
-  tool: keyof typeof outputSchemas,
-  handler: (args: Args) => Promise<CallToolResult>,
-): (args: Args) => Promise<CallToolResult> {
-  return async (args: Args) => {
-    try {
-      const result = await handler(args);
-      if (!result.isError) {
-        const parsed = outputSchemas[tool].safeParse(result.structuredContent);
-        if (!parsed.success) {
-          throw new Error(`Output validation failed for ${tool}: ${parsed.error.message}`);
-        }
-      }
-      return result;
-    } catch (error) {
-      return toFailure(tool, error);
-    }
-  };
 }

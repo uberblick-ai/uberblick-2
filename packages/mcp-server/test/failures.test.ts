@@ -460,7 +460,7 @@ describe("the failure contract", () => {
         if (!(error instanceof DataError)) throw error;
         rejected = true;
         const failure = toFailure("edit_block", error);
-        const payload = JSON.parse((failure.content[0] as { text: string }).text);
+        const payload = failure.payload;
         expect(failure.isError).toBe(true);
         expect(payload).toMatchObject({
           error: error.code, message: error.message, ...error.details,

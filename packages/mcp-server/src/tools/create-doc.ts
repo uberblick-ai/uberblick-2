@@ -1,51 +1,16 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  DECISION_STATUSES,
-  InvalidDocumentLifecycleError,
-  REQUIREMENT_STATUSES,
-  appendBlock,
-  assignDocumentTags,
-  canonicalDocumentUuid,
-  decisionDirectoryFields,
-  getDirectoryEntry,
-  getMeta,
-  getMetaMap,
-  initDoc,
-  isDocumentStatusForKind,
-  setKind,
-  setStatus,
-  setTldr,
-  upsertDirectoryEntry,
-} from "@uberblick/schema";
+import { DECISION_STATUSES, InvalidDocumentLifecycleError, REQUIREMENT_STATUSES, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionDirectoryFields, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
 import type { DocumentKind, DocumentStatus } from "@uberblick/schema";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { ToolError, guarded } from "../failures.js";
+import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
-import { outputSchemas } from "../outputs.js";
 import type { ToolMode } from "../inputs.js";
-import { placeInGroup, requireGroup } from "../sidebar-tools.js";
-import type { SidebarPlacement } from "../sidebar-tools.js";
+import { placeInGroup, requireGroup } from "../sidebar.js";
+import type { SidebarPlacement } from "../sidebar.js";
 import { resolveTagSelectors } from "../tag-catalog.js";
-import type { ToolContext } from "./context.js";
-import {
-  DECIDED_IS_READ_ONLY,
-  DECISION_AUTHORITY,
-  DESCRIPTION_IS_FOR_CHOOSING,
-  LIFECYCLE_RECORDS_STATE,
-  SYNCED_MEANS,
-} from "./descriptions.js";
-import { json, roomStages, stoppedPartWay } from "./helpers.js";
-import {
-  blockInputSchema,
-  decisionAnswerArg,
-  descriptionArg,
-  documentKindArg,
-  documentStatusArg,
-  titleArg,
-  tldrArg,
-  uuidArg,
-} from "./schemas.js";
+import { roomStages, stoppedPartWay } from "./helpers.js";
+import { blockInputSchema, decisionAnswerArg, descriptionArg, documentKindArg, documentStatusArg, titleArg, tldrArg, uuidArg } from "./schemas.js";
+import { operation } from "./operation.js";
 
 const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
@@ -106,27 +71,6 @@ const sidebarPlacementArg = z
       "entry point.",
   );
 
-/** What `create_doc` says about placement, in the words an agent reads. */
-const CREATE_DOC_PLACEMENT =
-  "`sidebar` is optional and is the only way to say where the document goes: omit it and the document is created " +
-  "unpinned (the default, unchanged), or pass `{group: {id, position?}}` to pin it into a group that ALREADY " +
-  "exists — the id comes from get_sidebar, `position` is clamped into range and omitted means last. There is no " +
-  "`pinned` flag and no `state`: placement implies pinning, so a contradiction cannot be expressed. An unknown or " +
-  "empty group id fails with `group_not_found` and creates nothing at all; this tool never creates a group, never " +
-  "resolves one by name, and never guesses a default — pin_doc is what brings a group into being. The answer " +
-  "echoes the placement it made as `sidebar: {group: {id, name}, position}`.";
-
-/** What `create_doc` says about touching its rooms, in the words an agent reads. */
-const CREATE_DOC_DURABILITY =
-  "This call writes up to three independently persisted rooms — the document, the directory, and the " +
-  "sidebar when you place it — so it reports them one by one. The governing requirement is never written. " +
-  "`rooms` lists every room it touched with its own `applied` and `synced`; the top-level `synced` is the AND over " +
-  "all of them and is never true while one is still pending. It is NOT transactional: there is no rollback and " +
-  "no remote atomicity. If the local update log refuses a write part-way, the call fails with `persistence_failed` " +
-  "carrying the `uuid`, the rooms already `completed`, the `failed` room, `rolledBack: false`, and a stage-aware " +
-  "`recovery` line — the earlier rooms stay durable, and recovery never risks creating the decision twice.";
-
-/** What to do after a partial create, by the room whose write the log refused. */
 const RECOVERY: Record<string, string> & { other: string } = {
   document:
     "Nothing survived: the refused write is the document's own room, and neither the directory stub nor the " +
@@ -145,99 +89,38 @@ const RECOVERY: Record<string, string> & { other: string } = {
     "predicate — and get_sidebar what the rooms in `completed` left behind.",
 };
 
-export function registerCreateDoc(server: McpServer, context: ToolContext): void {
-  const {
-    toolContract,
-    replicas,
-    briefing,
-    requireWritableDoc,
-    blockInputFor,
-    tagCatalog,
-    recordAnswer,
-    documentTags,
-    decisionAuthorityJson,
-    blocksJson,
-    durabilityAcross,
-    tldrReview,
-  } = context;
-
-  server.registerTool(
-    "create_doc",
-    {
-      title: "Create a document",
-      description:
-        "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
-        "search; a decision needs a matching `kind`, `status` or `tag` predicate in list_docs. " +
-        "Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
-        "Optional `tldr` supplies the decision line before a decided record freezes it, under set_tldr rules and limit. " +
-        "When the call seeds at least one block and stays editable, its answer carries the non-blocking TL;DR review reminder; " +
-        "a metadata-only create carries no such reminder. " +
-        "The write applies to the local replica and syncs in the background.\n\n" +
-        "`tags` is a complete assignment set of active catalog ids or exact active names. Names are selectors; " +
-        "the document stores canonical ids and the answer resolves each id beside its current name. An unknown or " +
-        "retired selection refuses the whole call before a document exists; list_tags is the active vocabulary.\n\n" +
-        "A `title` and a `description` are both REQUIRED here and the call fails without either, creating nothing. " +
-        "A title cannot be empty or whitespace: an untitled document cannot be picked out of a listing, and " +
-        "set_title is the repair for the untitled ones the web UI creates. " +
-        DESCRIPTION_IS_FOR_CHOOSING +
-        "\n\n" +
-        "Pass `kind` to create a lifecycle document. Its `status` defaults to that kind's first state; `status` " +
-        "without `kind`, or a status owned by the other kind, is refused before a document is created. " +
-        LIFECYCLE_RECORDS_STATE +
-        " A decision may pass `governs`, the UUID of a live, hydrated requirement in this replica. The decision " +
-        "stores `governs` in its own metadata; the requirement's decision log is derived from directory stubs. Any other use " +
-        "of `governs` is refused before a UUID is allocated or a room is written. " +
-        "A decision may also pass `supersedes`, the UUID of a hydrated decision in a live topic it replaces. The " +
-        "reference is immutable, and its predecessor's topic is copied forward; a first record uses its own UUID as topic. " +
-        "`topic` is never an input. Supersession is returned by get_doc and is a derived link: backlinks on the earlier " +
-        "decision exposes every successor without editing that earlier document. A non-decision target or a " +
-        "self-reference is refused before any room is written. An archived predecessor topic is refused with " +
-        "`doc_archived` before a UUID is allocated or a room is written; restore the topic before reconsidering it. " +
-        "Decisions are created only `open` or `decided`; rejected and withdrawn records must first exist as proposals. " +
-        "A decided successor without an answer is refused before allocating a UUID or writing any room. " +
-        DECISION_AUTHORITY +
-        "\n\n" +
-        DECIDED_IS_READ_ONLY +
-        "\n\n" +
-        CREATE_DOC_PLACEMENT +
-        "\n\n" +
-        CREATE_DOC_DURABILITY +
-        "\n\n" +
-        SYNCED_MEANS +
-        toolContract("create_doc"),
-      // `{sidebar: {...}, pinned: true}` must be refused wherever the redundant
-      // key sits, so the nested placement object is strict too — see
-      // {@link sidebarPlacementArg}. The top level is strict like every tool's.
-      outputSchema: outputSchemas.create_doc,
-      inputSchema: strictInput(
-        {
-          title: titleArg,
-          description: descriptionArg,
-          tldr: tldrArg.optional(),
-          answer: decisionAnswerArg.optional(),
-          tags: z.array(z.string().min(1)).optional(),
-          kind: documentKindArg.optional(),
-          status: documentStatusArg.optional(),
-          governs: uuidArg
-            .optional()
-            .describe(
-              "Requirement UUID this decision governs, stored on the decision. Accepted only with `kind: decision`.",
-            ),
-          supersedes: uuidArg
-            .optional()
-            .describe(
-              "Earlier decision UUID this new decision replaces. Immutable and accepted only with `kind: decision`.",
-            ),
-          blocks: z
-            .array(blockInputSchema)
-            .optional()
-            .describe("Initial blocks, in order."),
-          sidebar: sidebarPlacementArg,
-        },
-        CREATE_DOC_LIFECYCLE_MODES,
+// `{sidebar: {...}, pinned: true}` must be refused wherever the redundant
+// key sits, so the nested placement object is strict too — see
+// {@link sidebarPlacementArg}. The top level is strict like every tool's.
+export const inputSchema = strictInput(
+  {
+    title: titleArg,
+    description: descriptionArg,
+    tldr: tldrArg.optional(),
+    answer: decisionAnswerArg.optional(),
+    tags: z.array(z.string().min(1)).optional(),
+    kind: documentKindArg.optional(),
+    status: documentStatusArg.optional(),
+    governs: uuidArg
+      .optional()
+      .describe(
+        "Requirement UUID this decision governs, stored on the decision. Accepted only with `kind: decision`.",
       ),
-    },
-    guarded("create_doc", async ({
+    supersedes: uuidArg
+      .optional()
+      .describe(
+        "Earlier decision UUID this new decision replaces. Immutable and accepted only with `kind: decision`.",
+      ),
+    blocks: z
+      .array(blockInputSchema)
+      .optional()
+      .describe("Initial blocks, in order."),
+    sidebar: sidebarPlacementArg,
+  },
+  CREATE_DOC_LIFECYCLE_MODES,
+);
+
+export const createDocOperation = operation("create_doc", inputSchema, (context, {
       title,
       description,
       tldr,
@@ -249,226 +132,223 @@ export function registerCreateDoc(server: McpServer, context: ToolContext): void
       supersedes,
       blocks,
       sidebar,
-    }) => {
-      await replicas.settle();
-      briefing.require();
+    }, _request) => {
+  const { replicas, requireWritableDoc, blockInputFor, tagCatalog, recordAnswer, documentTags, decisionAuthorityJson, blocksJson, durabilityAcross, tldrReview } = context;
 
-      const lifecycle =
-        kind === undefined ? null : { kind, status: status ?? firstStatus(kind) };
-      if (
-        lifecycle !== null &&
-        !isDocumentStatusForKind(lifecycle.kind, lifecycle.status)
-      ) {
-        const error = new InvalidDocumentLifecycleError(
-          lifecycle.kind,
-          lifecycle.status,
-        );
-        throw new ToolError("invalid_document_lifecycle", error.message, {
-          kind: lifecycle.kind,
-          status: lifecycle.status,
-          recoveryClass: "manual",
-          recovery:
-            `Choose a status in the ${lifecycle.kind} lifecycle and call create_doc again. ` +
-            "Nothing was created by this refused call.",
-        });
-      }
+  const lifecycle =
+    kind === undefined ? null : { kind, status: status ?? firstStatus(kind) };
+  if (
+    lifecycle !== null &&
+    !isDocumentStatusForKind(lifecycle.kind, lifecycle.status)
+  ) {
+    const error = new InvalidDocumentLifecycleError(
+      lifecycle.kind,
+      lifecycle.status,
+    );
+    throw new ToolError("invalid_document_lifecycle", error.message, {
+      kind: lifecycle.kind,
+      status: lifecycle.status,
+      recoveryClass: "manual",
+      recovery:
+        `Choose a status in the ${lifecycle.kind} lifecycle and call create_doc again. ` +
+        "Nothing was created by this refused call.",
+    });
+  }
 
-      const requirement =
-        governs === undefined ? null : requireWritableDoc(governs);
-      const requirementKind =
-        requirement === null ? null : (getMeta(requirement.doc).kind ?? null);
-      if (requirement !== null && requirementKind !== "requirement") {
-        throw new ToolError(
-          "governs_not_requirement",
-          `Document ${governs} is not a requirement, so this decision cannot govern it`,
-          { governs, kind: requirementKind },
-        );
-      }
+  const requirement =
+    governs === undefined ? null : requireWritableDoc(governs);
+  const requirementKind =
+    requirement === null ? null : (getMeta(requirement.doc).kind ?? null);
+  if (requirement !== null && requirementKind !== "requirement") {
+    throw new ToolError(
+      "governs_not_requirement",
+      `Document ${governs} is not a requirement, so this decision cannot govern it`,
+      { governs, kind: requirementKind },
+    );
+  }
 
-      const supersedesUuid =
-        supersedes === undefined
-          ? null
-          : canonicalDocumentUuid(supersedes);
-      const superseded =
-        supersedesUuid === null ? null : requireWritableDoc(supersedesUuid);
-      const supersededKind =
-        superseded === null ? null : (getMeta(superseded.doc).kind ?? null);
-      if (superseded !== null && supersededKind !== "decision") {
-        throw new ToolError(
-          "supersedes_not_decision",
-          `Document ${supersedesUuid} is not a decision, so a new decision cannot supersede it`,
-          { supersedes: supersedesUuid, kind: supersededKind },
-        );
-      }
+  const supersedesUuid =
+    supersedes === undefined
+      ? null
+      : canonicalDocumentUuid(supersedes);
+  const superseded =
+    supersedesUuid === null ? null : requireWritableDoc(supersedesUuid);
+  const supersededKind =
+    superseded === null ? null : (getMeta(superseded.doc).kind ?? null);
+  if (superseded !== null && supersededKind !== "decision") {
+    throw new ToolError(
+      "supersedes_not_decision",
+      `Document ${supersedesUuid} is not a decision, so a new decision cannot supersede it`,
+      { supersedes: supersedesUuid, kind: supersededKind },
+    );
+  }
 
-      // Before allocating a document uuid: an invalid tag selection is an
-      // all-or-nothing refusal, not the first stage of a partial create.
-      const tagIds = resolveTagSelectors(replicas, tags ?? []);
+  // Before allocating a document uuid: an invalid tag selection is an
+  // all-or-nothing refusal, not the first stage of a partial create.
+  const tagIds = resolveTagSelectors(replicas, tags ?? []);
 
-      // Resolved before a uuid exists, because this is the one part of the call
-      // that can still be all-or-nothing: an unknown group must fail having
-      // created nothing. Everything after it is three independently persisted
-      // rooms, reported one by one.
-      const group =
-        sidebar === undefined
-          ? null
-          : requireGroup(replicas, sidebar.group.id);
+  // Resolved before a uuid exists, because this is the one part of the call
+  // that can still be all-or-nothing: an unknown group must fail having
+  // created nothing. Everything after it is three independently persisted
+  // rooms, reported one by one.
+  const group =
+    sidebar === undefined
+      ? null
+      : requireGroup(replicas, sidebar.group.id);
 
-      // Same reason, same place: an inline reference to a target this replica
-      // does not know refuses the whole call before there is a document.
-      const inputs = (blocks ?? []).map(blockInputFor);
+  // Same reason, same place: an inline reference to a target this replica
+  // does not know refuses the whole call before there is a document.
+  const inputs = (blocks ?? []).map(blockInputFor);
 
-      if (lifecycle?.kind === "decision") {
-        if (lifecycle.status !== "open" && lifecycle.status !== "decided") {
-          throw new ToolError("decision_transition_invalid", "Create a decision as open or decided; reject or withdraw an existing proposal.", lifecycle);
-        }
-        if (answer !== undefined && lifecycle.status !== "decided") {
-          throw new ToolError("decision_transition_invalid", "An answer at creation approves a decided decision record.", lifecycle);
-        }
-        if (lifecycle.status === "decided" && superseded !== null && answer === undefined) {
-          throw new ToolError("decision_answer_required", "Deciding a successor requires recording a person's answer (who, when, where). Nothing was created.", lifecycle);
-        }
-      }
+  if (lifecycle?.kind === "decision") {
+    if (lifecycle.status !== "open" && lifecycle.status !== "decided") {
+      throw new ToolError("decision_transition_invalid", "Create a decision as open or decided; reject or withdraw an existing proposal.", lifecycle);
+    }
+    if (answer !== undefined && lifecycle.status !== "decided") {
+      throw new ToolError("decision_transition_invalid", "An answer at creation approves a decided decision record.", lifecycle);
+    }
+    if (lifecycle.status === "decided" && superseded !== null && answer === undefined) {
+      throw new ToolError("decision_answer_required", "Deciding a successor requires recording a person's answer (who, when, where). Nothing was created.", lifecycle);
+    }
+  }
 
-      const uuid = randomUUID();
-      const replica = replicas.replica(uuid);
-      // The one write that opens its room directly instead of through
-      // `requireWritableDoc`, and it is working in the document like any other.
-      replicas.touch(replica);
-      const directory = replicas.directory();
-      const sidebarReplica = replicas.sidebar();
+  const uuid = randomUUID();
+  const replica = replicas.replica(uuid);
+  // The one write that opens its room directly instead of through
+  // `requireWritableDoc`, and it is working in the document like any other.
+  replicas.touch(replica);
+  const directory = replicas.directory();
+  const sidebarReplica = replicas.sidebar();
 
-      /** Which of this call's rooms a failed append names. */
-      const purposeOf = (room: string): string => {
-        if (room === replica.room) return "document";
-        if (room === directory.room) return "directory";
-        if (room === sidebarReplica.room) return "sidebar";
-        return "other";
-      };
+  /** Which of this call's rooms a failed append names. */
+  const purposeOf = (room: string): string => {
+    if (room === replica.room) return "document";
+    if (room === directory.room) return "directory";
+    if (room === sidebarReplica.room) return "sidebar";
+    return "other";
+  };
 
-      const { completed, stage } = roomStages(
-        replicas,
-        "create_doc",
+  const { completed, stage } = roomStages(
+    replicas,
+    "create_doc",
+    uuid,
+    purposeOf,
+    (_purpose, failedAt) => RECOVERY[failedAt] ?? RECOVERY.other,
+  );
+
+  stage("document", replica, () => {
+    // One transaction, so the document's room is ONE append: without it the
+    // metadata and each initial block are separate updates, and a refusal
+    // on the third block would leave the first two — and the directory stub
+    // the observer repaired from them — durable, under an error that says
+    // nothing survived. The stage boundary this call reports is only true
+    // if the write underneath it is atomic in the log.
+    replica.doc.transact(() => {
+      initDoc(replica.doc, {
         uuid,
-        purposeOf,
-        (_purpose, failedAt) => RECOVERY[failedAt] ?? RECOVERY.other,
-      );
-
-      stage("document", replica, () => {
-        // One transaction, so the document's room is ONE append: without it the
-        // metadata and each initial block are separate updates, and a refusal
-        // on the third block would leave the first two — and the directory stub
-        // the observer repaired from them — durable, under an error that says
-        // nothing survived. The stage boundary this call reports is only true
-        // if the write underneath it is atomic in the log.
-        replica.doc.transact(() => {
-          initDoc(replica.doc, {
-            uuid,
-            title,
-            description,
-            ...(governs === undefined ? {} : { governs }),
-            ...(lifecycle?.kind === "decision"
-              ? { topic: superseded === null ? uuid : (getMeta(superseded.doc).topic ?? getMeta(superseded.doc).uuid) }
-              : {}),
-            ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
-          });
-          // The same schema-owned catalog boundary set_tags uses. Validation
-          // already ran before identity allocation; this writes the canonical
-          // assignment representation inside the document's one update.
-          assignDocumentTags(replica.doc, tagCatalog(), tagIds);
-          if (lifecycle !== null) {
-            setKind(replica.doc, lifecycle.kind);
-            setStatus(replica.doc, lifecycle.status);
-          }
-          if (tldr !== undefined) setTldr(replica.doc, tldr);
-          for (const input of inputs) {
-            appendBlock(replica.doc, input);
-          }
-          if (lifecycle?.kind === "decision" && lifecycle.status === "decided") {
-            if (answer === undefined) getMetaMap(replica.doc).set("agentStance", true);
-            else recordAnswer(replica, answer);
-          }
-        });
-      });
-
-      // Observing the document's own update repairs the stub, but a brand-new
-      // document must be discoverable because create_doc said so, not because
-      // a side effect happened to fire.
-      stage("directory", directory, () => {
-        if (getDirectoryEntry(directory.doc, uuid) !== null) return;
-        const now = Date.now();
-        upsertDirectoryEntry(directory.doc, {
-          uuid,
-          title,
-          description,
-          ...(tags === undefined ? {} : { tags: tagIds }),
-          ...(lifecycle === null ? {} : lifecycle),
-          ...decisionDirectoryFields(replica.doc),
-          createdAt: now,
-          updatedAt: now,
-        });
-      });
-
-      let placement: SidebarPlacement | null = null;
-      if (group !== null && sidebar !== undefined) {
-        stage("sidebar", sidebarReplica, () => {
-          // The same pin operation pin_doc runs — see placeInGroup. A brand-new
-          // uuid is pinned rather than moved, so it can only appear once.
-          try {
-            const { position } = placeInGroup(
-              replicas,
-              group.id,
-              uuid,
-              sidebar.group.position,
-            );
-            placement = { group: { id: group.id, name: group.name }, position };
-          } catch (error) {
-            // A concurrent sidebar_group delete, landing between the lookup at
-            // the top of this call and this write. pin_doc answers that with
-            // its own `group_not_found` and nothing else to say; here the
-            // document and its stub are already durable, so the caller has to
-            // hear that before it retries a create it does not need.
-            if (
-              !(error instanceof ToolError) ||
-              error.code !== "group_not_found"
-            ) {
-              throw error;
-            }
-            throw stoppedPartWay({
-              code: "group_not_found",
-              message:
-                `Document ${uuid} was created, but sidebar group ${group.id} disappeared before it ` +
-                "could be pinned there. Nothing was rolled back: the document and its directory " +
-                "stub are durable, and only the placement is missing.",
-              uuid,
-              completed,
-              failed: { purpose: "sidebar", room: sidebarReplica.room },
-              recovery:
-                `The document exists — do NOT create it again. Call pin_doc with uuid ${uuid} and a ` +
-                "group that exists (get_sidebar lists them; pin_doc creates one by name).",
-              extra: { group: group.id },
-            });
-          }
-        });
-      }
-
-      return json({
-        uuid,
-        room: replica.room,
         title,
         description,
-        tags: documentTags(replica),
-        ...(lifecycle === null ? {} : lifecycle),
         ...(governs === undefined ? {} : { governs }),
-        ...(lifecycle?.kind === "decision" ? { topic: getMeta(replica.doc).topic } : {}),
+        ...(lifecycle?.kind === "decision"
+          ? { topic: superseded === null ? uuid : (getMeta(superseded.doc).topic ?? getMeta(superseded.doc).uuid) }
+          : {}),
         ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
-        ...(tldr === undefined ? {} : { tldr: getMeta(replica.doc).tldr }),
-        ...decisionAuthorityJson(replica),
-        blocks: blocksJson(replica),
-        ...(placement === null ? {} : { sidebar: placement }),
-        ...durabilityAcross(replica, completed),
-        ...(inputs.length === 0 || lifecycle?.status === "decided" ? {} : tldrReview(replica)),
       });
-    }),
-  );
-}
+      // The same schema-owned catalog boundary set_tags uses. Validation
+      // already ran before identity allocation; this writes the canonical
+      // assignment representation inside the document's one update.
+      assignDocumentTags(replica.doc, tagCatalog(), tagIds);
+      if (lifecycle !== null) {
+        setKind(replica.doc, lifecycle.kind);
+        setStatus(replica.doc, lifecycle.status);
+      }
+      if (tldr !== undefined) setTldr(replica.doc, tldr);
+      for (const input of inputs) {
+        appendBlock(replica.doc, input);
+      }
+      if (lifecycle?.kind === "decision" && lifecycle.status === "decided") {
+        if (answer === undefined) getMetaMap(replica.doc).set("agentStance", true);
+        else recordAnswer(replica, answer);
+      }
+    });
+  });
+
+  // Observing the document's own update repairs the stub, but a brand-new
+  // document must be discoverable because create_doc said so, not because
+  // a side effect happened to fire.
+  stage("directory", directory, () => {
+    if (getDirectoryEntry(directory.doc, uuid) !== null) return;
+    const now = Date.now();
+    upsertDirectoryEntry(directory.doc, {
+      uuid,
+      title,
+      description,
+      ...(tags === undefined ? {} : { tags: tagIds }),
+      ...(lifecycle === null ? {} : lifecycle),
+      ...decisionDirectoryFields(replica.doc),
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+
+  let placement: SidebarPlacement | null = null;
+  if (group !== null && sidebar !== undefined) {
+    stage("sidebar", sidebarReplica, () => {
+      // The same pin operation pin_doc runs — see placeInGroup. A brand-new
+      // uuid is pinned rather than moved, so it can only appear once.
+      try {
+        const { position } = placeInGroup(
+          replicas,
+          group.id,
+          uuid,
+          sidebar.group.position,
+        );
+        placement = { group: { id: group.id, name: group.name }, position };
+      } catch (error) {
+        // A concurrent sidebar_group delete, landing between the lookup at
+        // the top of this call and this write. pin_doc answers that with
+        // its own `group_not_found` and nothing else to say; here the
+        // document and its stub are already durable, so the caller has to
+        // hear that before it retries a create it does not need.
+        if (
+          !(error instanceof ToolError) ||
+          error.code !== "group_not_found"
+        ) {
+          throw error;
+        }
+        throw stoppedPartWay({
+          code: "group_not_found",
+          message:
+            `Document ${uuid} was created, but sidebar group ${group.id} disappeared before it ` +
+            "could be pinned there. Nothing was rolled back: the document and its directory " +
+            "stub are durable, and only the placement is missing.",
+          uuid,
+          completed,
+          failed: { purpose: "sidebar", room: sidebarReplica.room },
+          recovery:
+            `The document exists — do NOT create it again. Call pin_doc with uuid ${uuid} and a ` +
+            "group that exists (get_sidebar lists them; pin_doc creates one by name).",
+          extra: { group: group.id },
+        });
+      }
+    });
+  }
+
+  return {
+    uuid,
+    room: replica.room,
+    title,
+    description,
+    tags: documentTags(replica),
+    ...(lifecycle === null ? {} : lifecycle),
+    ...(governs === undefined ? {} : { governs }),
+    ...(lifecycle?.kind === "decision" ? { topic: getMeta(replica.doc).topic } : {}),
+    ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
+    ...(tldr === undefined ? {} : { tldr: getMeta(replica.doc).tldr }),
+    ...decisionAuthorityJson(replica),
+    blocks: blocksJson(replica),
+    ...(placement === null ? {} : { sidebar: placement }),
+    ...durabilityAcross(replica, completed),
+    ...(inputs.length === 0 || lifecycle?.status === "decided" ? {} : tldrReview(replica)),
+  };
+});
