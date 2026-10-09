@@ -11,7 +11,6 @@ const exclusions: readonly AccessibilityExclusion[] = [
 
 const elementExclusions = [
   { rule: "scrollable-region-focusable", selector: '[data-slot="caret-menu-content"] [role="listbox"][aria-label="Block types"]', issue: "https://github.com/uberblick-ai/uberblick-2/issues/1237" },
-  { rule: "target-size", selector: '#ub-rail [data-slot="sheet-close"]', issue: "https://github.com/uberblick-ai/uberblick-2/issues/1238" },
   { rule: "target-size", selector: '.ub-peers > .ub-peer-control[data-peer-id]:nth-child(2)', issue: "https://github.com/uberblick-ai/uberblick-2/issues/1223" },
   { rule: "target-size", selector: '.ub-peers > .ub-peer-control[data-peer-id]:nth-child(3)', issue: "https://github.com/uberblick-ai/uberblick-2/issues/1223" },
 ] as const;

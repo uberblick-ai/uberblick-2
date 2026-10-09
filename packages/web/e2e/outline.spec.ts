@@ -222,6 +222,80 @@ test.describe("fractional layout", () => {
   });
 });
 
+for (const hasTouch of [false, true]) {
+  test(`threads close target preserves its glyph and clears the first card — ${hasTouch ? "coarse" : "fine"} pointer`, async ({ browser }, info) => {
+    const context = await browser.newContext({ hasTouch, viewport: { width: 1400, height: 800 } });
+    const page = await context.newPage();
+    try {
+      await openDocument(page);
+      await page.keyboard.insertText("thread target");
+      await selectParagraph(page.locator(".ub-editor .ub-paragraph").first());
+      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      await page.getByPlaceholder(/Comment as/).fill("first conversation");
+      await page.keyboard.press("Enter");
+      await expect(page.locator(".ub-thread")).toHaveCount(1);
+      await page.setViewportSize({ width: 820, height: 1180 });
+      const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
+      const close = sheet.getByRole("button", { name: "Close threads", exact: true });
+      await expect(sheet).toBeVisible();
+      const geometry = await sheet.evaluate((node) => {
+        const button = node.querySelector<HTMLElement>('[data-slot="sheet-close"]')!;
+        const glyph = button.querySelector("svg")!;
+        const card = node.querySelector<HTMLElement>(".ub-thread")!;
+        return {
+          coarse: matchMedia("(any-pointer: coarse)").matches,
+          sheet: node.getBoundingClientRect().toJSON(),
+          close: button.getBoundingClientRect().toJSON(),
+          glyph: glyph.getBoundingClientRect().toJSON(),
+          card: card.getBoundingClientRect().toJSON(),
+          scrollTop: node.querySelector(".ub-threads")!.parentElement!.scrollTop,
+          otherControls: Array.from(node.querySelectorAll<HTMLElement>("button:not([data-slot=sheet-close]), textarea")).map((control) => control.getBoundingClientRect().toJSON()),
+        };
+      });
+      await info.attach("threads close geometry", { body: JSON.stringify(geometry, null, 2), contentType: "application/json" });
+      expect(geometry.coarse).toBe(hasTouch);
+      const minimum = hasTouch ? 44 : 24;
+      expect(geometry.close.width).toBeGreaterThanOrEqual(minimum);
+      expect(geometry.close.height).toBeGreaterThanOrEqual(minimum);
+      expect(geometry.glyph.width).toBe(16);
+      expect(geometry.glyph.height).toBe(16);
+      expect(geometry.glyph.top - geometry.sheet.top).toBe(17);
+      expect(geometry.sheet.right - geometry.glyph.right).toBe(22);
+      expect(geometry.scrollTop).toBe(0);
+      expect(geometry.close.bottom).toBeLessThanOrEqual(geometry.card.top);
+      for (const control of geometry.otherControls) {
+        expect(geometry.close.right <= control.left || geometry.close.left >= control.right
+          || geometry.close.bottom <= control.top || geometry.close.top >= control.bottom).toBe(true);
+      }
+
+      // The first card's top-right chips remain reachable beside the target.
+      if (hasTouch) {
+        await page.touchscreen.tap(geometry.card.right - 4, geometry.card.top + 4);
+        await expect(sheet).toBeVisible();
+        // Tap the outer hit area, well away from the visible glyph.
+        await page.touchscreen.tap(geometry.close.left + 2, geometry.close.bottom - 2);
+      } else {
+        await close.click();
+      }
+      await expect(sheet).toBeHidden();
+      const toggle = page.locator(".ub-threads-toggle");
+      await expect(toggle).toBeFocused();
+      for (const key of ["Enter", "Space", "Escape"]) {
+        await toggle.click();
+        await expect(sheet).toBeVisible();
+        await close.focus();
+        await expect(close).toBeFocused();
+        expect(await close.evaluate((node) => getComputedStyle(node).boxShadow)).not.toBe("none");
+        await close.press(key);
+        await expect(sheet).toBeHidden();
+        await expect(toggle).toBeFocused();
+      }
+    } finally {
+      await context.close();
+    }
+  });
+}
+
 for (const width of [390]) {
   test(`the threads sheet closes by touch without selecting covered prose at ${width}px`, async ({
     browser,
