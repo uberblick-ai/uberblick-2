@@ -144,6 +144,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
  * does not claim.
  */
 export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "get_help",
   "list_tags",
   "get_doc",
   "get_data",
@@ -171,6 +172,10 @@ interface Recovery {
  * the call that finishes it — but never contradict the class.
  */
 const RECOVERIES: Record<string, Recovery> = {
+  unknown_help_topic: {
+    recoveryClass: "manual",
+    guidance: "Choose one of the valid topic ids in topics, or call get_help with no topic to discover the catalog.",
+  },
   server_shutting_down: {
     recoveryClass: "manual",
     guidance: "Start a new MCP server session, then repeat the refused call. Nothing was written.",
@@ -231,7 +236,7 @@ const RECOVERIES: Record<string, Recovery> = {
   persistence_failed: {
     recoveryClass: "manual",
     guidance:
-      "The update log refused a write, so this server is fail-stopped: every tool refuses until the process is " +
+      "The update log refused a write, so this server is fail-stopped: ordinary workspace tools refuse until the process is " +
       "restarted, and repeating this call now cannot succeed. Restart the MCP server, then re-read before writing " +
       "again — a refused write never became durable anywhere.",
   },
@@ -463,7 +468,7 @@ export const FAILURE_CODES: readonly string[] = [
 
 /**
  * The whole contract, in the words an agent reads — carried ONCE, in the
- * server's `instructions` (see ./server.ts).
+ * bundled tool-contracts help topic (see ./help-topics.ts).
  *
  * Repeating a hundred and fifty words on every tool cost each session tens of
  * kilobytes of `tools/list` to say the same thing once per tool, and the bill
@@ -578,7 +583,7 @@ export function toFailure(tool: string, error: unknown): ToolFailure {
     });
   }
   if (error instanceof PersistenceError) {
-    // Fail-stop: every later call lands here too, until the server is restarted
+    // Fail-stop: later ordinary workspace calls land here until restart
     // — reads included, because a replica ahead of its own log may not hand out
     // what a restart will drop. The mutation state comes from the stamp like
     // every other code's, so a READ that lands here still reports on no write.

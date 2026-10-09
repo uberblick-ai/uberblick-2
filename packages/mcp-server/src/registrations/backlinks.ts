@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { failureContract } from "../failures.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
@@ -6,7 +6,7 @@ import type { ToolContext } from "../tools/context.js";
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, backlinksOperation } from "../tools/backlinks.js";
 
-export function registerBacklinks(server: McpServer, context: ToolContext): void {
+export function registerBacklinks(server: ToolRegistrar, context: ToolContext): void {
   server.registerTool("backlinks", {
     title: "Documents linking here",
     description:

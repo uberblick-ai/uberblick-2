@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
 import { ARCHIVED_IS_READ_ONLY, SYNCED_IS_ACKNOWLEDGED } from "../tools/descriptions.js";
@@ -14,7 +14,7 @@ const ANNOTATE_SHAPES =
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, annotateOperation } from "../tools/annotate.js";
 
-export function registerAnnotate(server: McpServer, context: ToolContext): void {
+export function registerAnnotate(server: ToolRegistrar, context: ToolContext): void {
   const { toolContract } = context;
   server.registerTool("annotate", {
     title: "Annotate a range, or reply to and resolve a thread",

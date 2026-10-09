@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { failureContract } from "../failures.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
@@ -7,7 +7,7 @@ import { DECISION_AUTHORITY, DECISION_EDGES, LIFECYCLE_RECORDS_STATE } from "../
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, getDocOperation } from "../tools/get-doc.js";
 
-export function registerGetDoc(server: McpServer, context: ToolContext): void {
+export function registerGetDoc(server: ToolRegistrar, context: ToolContext): void {
   server.registerTool("get_doc", {
     title: "Read a document",
     description:

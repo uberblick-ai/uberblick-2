@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
 import { ARCHIVED_IS_READ_ONLY, DECIDED_IS_READ_ONLY, SYNCED_IS_ACKNOWLEDGED } from "../tools/descriptions.js";
@@ -6,7 +6,7 @@ import { ARCHIVED_IS_READ_ONLY, DECIDED_IS_READ_ONLY, SYNCED_IS_ACKNOWLEDGED } f
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, linkRangeOperation } from "../tools/link-range.js";
 
-export function registerLinkRange(server: McpServer, context: ToolContext): void {
+export function registerLinkRange(server: ToolRegistrar, context: ToolContext): void {
   const { toolContract } = context;
   server.registerTool("link_range", {
     title: "Link a range of a block to another document",

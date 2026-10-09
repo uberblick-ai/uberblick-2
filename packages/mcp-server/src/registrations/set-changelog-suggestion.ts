@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
 import { ARCHIVED_IS_READ_ONLY, SYNCED_IS_ACKNOWLEDGED } from "../tools/descriptions.js";
@@ -6,7 +6,7 @@ import { ARCHIVED_IS_READ_ONLY, SYNCED_IS_ACKNOWLEDGED } from "../tools/descript
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, setChangelogSuggestionOperation } from "../tools/set-changelog-suggestion.js";
 
-export function registerSetChangelogSuggestion(server: McpServer, context: ToolContext): void {
+export function registerSetChangelogSuggestion(server: ToolRegistrar, context: ToolContext): void {
   const { toolContract } = context;
   server.registerTool("set_changelog_suggestion", {
     title: "Set a document's changelog suggestion",

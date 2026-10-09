@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { failureContract } from "../failures.js";
 import { outputSchemas } from "../outputs.js";
 import { guarded } from "../tool-adapter.js";
@@ -20,7 +20,7 @@ const SIDEBAR_GROUP_SHAPES =
 import type { ToolContext } from "../tools/context.js";
 import { getSidebarInput, getSidebarOperation, pinDocInput, pinDocOperation, unpinDocInput, unpinDocOperation, sidebarGroupInput, sidebarGroupOperation } from "../sidebar-tools.js";
 
-export function registerSidebarTools(server: McpServer, context: ToolContext): void {
+export function registerSidebarTools(server: ToolRegistrar, context: ToolContext): void {
   server.registerTool("get_sidebar", {
     title: "Read the sidebar",
     description:

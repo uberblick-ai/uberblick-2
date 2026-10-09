@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { failureContract } from "../failures.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
@@ -6,7 +6,7 @@ import type { ToolContext } from "../tools/context.js";
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, exportMarkdownOperation } from "../tools/export-markdown.js";
 
-export function registerExportMarkdown(server: McpServer, context: ToolContext): void {
+export function registerExportMarkdown(server: ToolRegistrar, context: ToolContext): void {
   server.registerTool("export_markdown", {
     title: "Export a document as markdown",
     description:

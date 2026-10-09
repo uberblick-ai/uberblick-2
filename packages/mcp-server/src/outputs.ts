@@ -187,6 +187,23 @@ const getData = strictInput({
 ]);
 
 const groupIdentity = z.object({ id: z.string(), name: z.string() }).strict();
+const helpTopic = z.object({
+  id: z.string().describe("Help topic id; registered tool names identify per-tool help."),
+  title: z.string(),
+  description: z.string(),
+  uri: z.string().describe("MCP resource URI for this help topic."),
+}).strict();
+const getHelp = strictInput({
+  topic: z.string().optional(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  uri: z.string().optional(),
+  text: z.string().optional().describe("The same Markdown text as the topic's MCP resource."),
+  topics: z.array(helpTopic).optional(),
+}, [
+  { title: "Help catalog", when: { field: "topic", present: false }, requires: ["topics"], forbids: ["title", "description", "uri", "text"] },
+  { title: "Help topic", when: { field: "topic", present: true }, requires: ["title", "description", "uri", "text"], forbids: ["topics"] },
+]);
 const sidebar = {
   workspace: z.string(),
   groups: z.array(groupIdentity.extend({
@@ -200,6 +217,7 @@ const sidebar = {
 
 /** All registered tools use these exact objects for advertisement and checking. */
 export const outputSchemas = {
+  get_help: getHelp,
   list_tags: z.object({
     workspace: z.string(),
     complete: z.boolean(),

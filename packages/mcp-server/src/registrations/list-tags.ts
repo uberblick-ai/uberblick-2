@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { failureContract } from "../failures.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
@@ -6,7 +6,7 @@ import type { ToolContext } from "../tools/context.js";
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, listTagsOperation } from "../tools/list-tags.js";
 
-export function registerListTags(server: McpServer, context: ToolContext): void {
+export function registerListTags(server: ToolRegistrar, context: ToolContext): void {
   server.registerTool("list_tags", {
     title: "List assignable tags",
     description:

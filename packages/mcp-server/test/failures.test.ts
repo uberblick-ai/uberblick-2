@@ -110,6 +110,7 @@ const EXPECTED: Record<
   invalid_table_mapping: { recoveryClass: "manual", detail: [] },
   annotation_cell: { recoveryClass: "manual", detail: ["blockId", "reason"] },
   invalid_github_reference: { recoveryClass: "manual", detail: ["github_ref"] },
+  unknown_help_topic: { recoveryClass: "manual", detail: ["topics"] },
   persistence_failed: { recoveryClass: "manual", detail: ["room"] },
   stale_block: {
     recoveryClass: "reread",
@@ -212,7 +213,7 @@ describe("the failure contract", () => {
       expect(MUTATING_TOOLS.has(name) && READ_ONLY_TOOLS.has(name)).toBe(false);
       // And every tool names the shape it answers with — the machine contract,
       // the mutation fields only where there is a write to report. The prose
-      // that explains them is carried once, in the server's instructions.
+      // that explains them has its home in the tool-contracts help topic.
       expect(description, `${name} has no description`).toBeDefined();
       expect(description).toContain("recoveryClass");
       expect(description?.includes("`partial`")).toBe(MUTATING_TOOLS.has(name));
@@ -220,6 +221,7 @@ describe("the failure contract", () => {
     expect([...MUTATING_TOOLS, ...READ_ONLY_TOOLS].sort()).toEqual(
       registered.map((tool) => tool.name).sort(),
     );
+    expect(READ_ONLY_TOOLS.has("get_help")).toBe(true);
   });
 
   it("gives every failure code a message, its domain detail and a recovery class", async () => {
@@ -233,6 +235,7 @@ describe("the failure contract", () => {
     record((await rig.call("get_doc", { uuid: randomUUID() })).payload);
     record((await rig.call("get_data", { uuid: doc.uuid, collection: "missing" })).payload);
     record((await rig.call("find_decisions", { github_ref: "#1" })).payload);
+    record((await rig.call("get_help", { topic: "no-such-help-topic" })).payload);
     record((await rig.call("insert_block", {
       uuid: doc.uuid, type: "table", text: "not a GFM table",
     })).payload);

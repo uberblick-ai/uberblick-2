@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
 import { ARCHIVED_IS_READ_ONLY, DECIDED_IS_READ_ONLY, SYNCED_IS_ACKNOWLEDGED, TLDR_AFTER_CONTENT_CHANGE } from "../tools/descriptions.js";
@@ -6,7 +6,7 @@ import { ARCHIVED_IS_READ_ONLY, DECIDED_IS_READ_ONLY, SYNCED_IS_ACKNOWLEDGED, TL
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, deleteBlockOperation } from "../tools/delete-block.js";
 
-export function registerDeleteBlock(server: McpServer, context: ToolContext): void {
+export function registerDeleteBlock(server: ToolRegistrar, context: ToolContext): void {
   const { toolContract } = context;
   server.registerTool("delete_block", {
     title: "Delete a block",

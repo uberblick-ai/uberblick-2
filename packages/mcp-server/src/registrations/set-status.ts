@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
 import { ARCHIVED_IS_READ_ONLY, DECISION_AUTHORITY, LIFECYCLE_RECORDS_STATE, SYNCED_IS_ACKNOWLEDGED } from "../tools/descriptions.js";
@@ -6,7 +6,7 @@ import { ARCHIVED_IS_READ_ONLY, DECISION_AUTHORITY, LIFECYCLE_RECORDS_STATE, SYN
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, setStatusOperation } from "../tools/set-status.js";
 
-export function registerSetStatus(server: McpServer, context: ToolContext): void {
+export function registerSetStatus(server: ToolRegistrar, context: ToolContext): void {
   const { toolContract } = context;
   server.registerTool("set_status", {
     title: "Set a document's lifecycle status",

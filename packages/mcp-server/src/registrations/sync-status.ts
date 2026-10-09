@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolRegistrar } from "../help-resources.js";
 import { failureContract } from "../failures.js";
 import { outputSchemas } from "../outputs.js";
 import type { ToolContext } from "../tools/context.js";
@@ -7,7 +7,7 @@ import { SYNCED_MEANS } from "../tools/descriptions.js";
 import { guarded } from "../tool-adapter.js";
 import { inputSchema, syncStatusOperation } from "../tools/sync-status.js";
 
-export function registerSyncStatus(server: McpServer, context: ToolContext): void {
+export function registerSyncStatus(server: ToolRegistrar, context: ToolContext): void {
   server.registerTool("sync_status", {
     title: "Sync status",
     description:

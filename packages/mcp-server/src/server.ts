@@ -15,8 +15,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpConfig } from "./config.js";
-import { FAILURE_INSTRUCTIONS } from "./failures.js";
-import { GuidanceBriefing, GUIDANCE_INSTRUCTIONS, registerGuidanceResources } from "./guidance.js";
+import { GuidanceBriefing, registerGuidanceResources } from "./guidance.js";
+import { registerHelpResources } from "./help-resources.js";
+import { STARTUP_ORIENTATION } from "./help-topics.js";
 import { log } from "./log.js";
 import { Replicas } from "./replica.js";
 import { MirrorStore } from "./store.js";
@@ -70,19 +71,7 @@ export function createMcpServer(
   const server = new McpServer(
     { name: "uberblick", version: "0.0.0" },
     {
-      // The failure contract lives here, once, rather than on every tool
-      // description: it is the same contract for every tool, and a client
-      // reads `instructions` once per session instead of paying for it in every
-      // `tools/list`. Each tool description still names the shape it answers
-      // with — see `failureContract` in ./failures.ts.
-      instructions:
-        "uberblick documents are CRDT-backed and edited concurrently by humans and agents. " +
-        "Read with get_doc, which returns a `rev` per block, and write one block at a time with " +
-        "edit_block, passing the old_text and rev you read. There is no whole-document write. " +
-        "Discovery is list_docs and search; links and backlinks are by document UUID.\n\n" +
-        "get_doc summarizes structured data without schemas or records; use get_data for bounded deliberate reads " +
-        "and update_data for validated collection batches.\n\n" +
-        GUIDANCE_INSTRUCTIONS + "\n\n" + FAILURE_INSTRUCTIONS,
+      instructions: STARTUP_ORIENTATION,
     },
   );
 
@@ -95,7 +84,8 @@ export function createMcpServer(
     replicas.setAgentName(agentDisplayName(server.server.getClientVersion()));
   };
 
-  registerTools(server, replicas, briefing, work);
+  const help = registerTools(server, replicas, briefing, work);
+  registerHelpResources(server, help, work);
   registerGuidanceResources(server, replicas, briefing, work);
 
   let closed = false;
