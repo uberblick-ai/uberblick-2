@@ -131,33 +131,57 @@ describe("ub open: hub, ports and serving role", () => {
     } finally { expect((await app.interrupt()).status).toBe(0); }
   });
 
-  it("opens the default origin and refuses collisions without choosing another port", async () => {
+  it("opens an allocated origin and refuses collisions without choosing another port", async () => {
     const { box, env } = configured();
+    const port = await freePort();
+    const args = ["--port", String(port)];
     const browser = browserRecorder(box);
-    const app = await open(box, [], { ...env, BROWSER: browser.command });
+    const app = await open(box, args, { ...env, BROWSER: browser.command });
 
-    expect(app.url).toBe("http://127.0.0.1:13379/");
+    expect(app.url).toBe(`http://127.0.0.1:${port}/`);
     expect((await get(app.url)).status).toBe(200);
     const configuration = await (await get(`${app.url}uberblick-config.json`)).json();
-    expect(configuration).toMatchObject({ hubUrl: "ws://127.0.0.1:13379" });
+    expect(configuration).toMatchObject({ hubUrl: `ws://127.0.0.1:${port}` });
     const recording = (): string =>
       existsSync(browser.opened) ? readFileSync(browser.opened, "utf8") : "";
-    await waitUntil("the browser to record the default URL", () => recording().endsWith("\n"));
+    await waitUntil("the browser to record the allocated URL", () => recording().endsWith("\n"));
     expect(recording().trim()).toBe(app.url);
 
     // The serving role is acquired before binding: even with both the store
     // and port held, the original store refusal still wins.
-    const sameStore = await openFails(box, [], env);
+    const sameStore = await openFails(box, args, env);
     expect(sameStore.status).toBe(1);
     expect(sameStore.output).toContain("another `ub open` is already serving this store");
-    expect(sameStore.output).not.toContain("port 13379 is");
+    expect(sameStore.output).not.toContain(`port ${port} is`);
 
     const other = configured();
-    const samePort = await openFails(other.box, [], other.env);
+    const samePort = await openFails(other.box, args, other.env);
     expect(samePort.status).toBe(1);
-    expect(samePort.output).toContain("port 13379 is already serving an uberblick web app");
+    expect(samePort.output).toContain(`port ${port} is already serving an uberblick web app`);
     expect(samePort.output).not.toContain("uberblick is at");
 
+    expect((await app.interrupt()).status).toBe(0);
+  });
+
+  // The mandatory immutable review runs with CI=true in a container whose
+  // network is isolated from the developer's running app. Local tests exercise
+  // real binding and collision behavior above without reserving the product port.
+  it.runIf(process.env.CI === "true")("uses the literal default origin in isolated review", async () => {
+    const { box, env } = configured();
+    const browser = browserRecorder(box);
+    const app = await open(box, [], { ...env, BROWSER: browser.command });
+    expect(app.url).toBe("http://127.0.0.1:13379/");
+    expect((await get(app.url)).status).toBe(200);
+    expect(await (await get(`${app.url}uberblick-config.json`)).json())
+      .toMatchObject({ hubUrl: "ws://127.0.0.1:13379" });
+    await waitUntil("the browser to record the default URL", () =>
+      existsSync(browser.opened) && readFileSync(browser.opened, "utf8").endsWith("\n"));
+    expect(readFileSync(browser.opened, "utf8").trim()).toBe(app.url);
+    const other = configured();
+    const collision = await openFails(other.box, [], other.env);
+    expect(collision.status).toBe(1);
+    expect(collision.output).toContain("port 13379 is already serving an uberblick web app");
+    expect(collision.output).not.toContain("uberblick is at");
     expect((await app.interrupt()).status).toBe(0);
   });
 
