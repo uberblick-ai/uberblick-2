@@ -257,6 +257,12 @@ its payload, and on demand from the Actions tab, through
 
 ## Review isolation
 
+Local CLI startup and collision tests use allocated ports. The literal default-web-port
+startup proof runs with `CI=true` in the mandatory container review, where networking
+is isolated from the developer host. A local `mise run test` leaves that proof to
+`mise run review <commit>`; do not set `CI=true` for a host run while the default port
+is occupied. Product startup still uses its documented default and refuses collisions.
+
 `mise run review <commit>` resolves its argument (default `HEAD`), extracts
 that commit with `git archive`, and builds it with freshly fetched
 `origin/main`'s `Dockerfile.review`. A disposable container runs lint,
