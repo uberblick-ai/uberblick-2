@@ -436,6 +436,8 @@ export function StatusLine({
   const factLabel = [facts.primary, facts.hub, facts.hubDetail].filter(
     (value): value is string => value !== null,
   );
+  // The serving view's intrinsic minimum protects its fixed fact slots and
+  // already exceeds the target floor, even while the status words are blank.
   const syncReading =
     !syncDetails ? (
       <>
@@ -446,7 +448,7 @@ export function StatusLine({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className={`ub-status-sync ub-sync-toggle inline-flex cursor-pointer items-center gap-2 -my-[0.2rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.3rem] py-[0.2rem] [font:inherit] text-inherit hover:bg-(--card-accent) hover:text-(--secondary-foreground) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1${hubAcked === undefined ? " flex-none" : " min-w-min max-w-full flex-wrap"}`}
+          className={`ub-status-sync ub-sync-toggle inline-flex min-h-6 [@media(any-pointer:coarse)]:min-h-11 cursor-pointer items-center gap-2 -my-[0.2rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.3rem] py-[0.2rem] [font:inherit] text-inherit hover:bg-(--card-accent) hover:text-(--secondary-foreground) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1${hubAcked === undefined ? " flex-none min-w-6 [@media(any-pointer:coarse)]:min-w-11" : " min-w-min max-w-full flex-wrap"}`}
           aria-label={
             factLabel.length === 0
               ? hub === null
