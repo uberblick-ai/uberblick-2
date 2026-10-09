@@ -240,6 +240,7 @@ async function editorSelection(page: Page) {
 async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
   await openDocument(page);
   const sourceText = `${LONG_LINE}\nsecond line with trailing spaces    `;
+  const notices = page.locator("[data-sonner-toast]:not([data-removed=true])");
   for (const name of ["Code", "Mermaid", "Terminal demo"] as const) await insertSource(page, name, sourceText);
   for (const path of ["clipboard", "selection"] as const) {
     // Record the product's clipboard boundary; OS clipboard permissions are
@@ -285,7 +286,11 @@ async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
         await page.locator("html").evaluate((element) => element.removeAttribute("data-copied-source"));
         if (touch) await copy.tap();
         else await copy.click();
-        await expect(copy).toHaveText("copied");
+        await expect(copy).toHaveText("copy");
+        await expect(notices).toHaveCount(1);
+        await expect(notices).toBeVisible();
+        await expect(notices.locator("[data-description]")).toHaveText("Copied to clipboard");
+        await expect(notices).toHaveAttribute("data-type", "success");
         await expect(page.locator("html")).toHaveAttribute("data-copied-source", sourceText);
         await expect.poll(() => editorSelection(page)).toEqual(before);
         await expect.poll(() => source.textContent()).toBe(sourceText);
