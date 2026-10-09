@@ -1,21 +1,32 @@
 /** Native, continuous read-only table. Unchanged rows retain their DOM and cells. */
 import { tableCellFormatter, tableAccessibleName } from "./table-data.js";
-import type { TableCell, TableProjection } from "./table-data.js";
+import type { TableCell, TableColumnMapping, TableProjection } from "./table-data.js";
 
-function renderCell(cell: HTMLTableCellElement, value: TableCell): void {
+function renderCell(cell: HTMLTableCellElement, value: TableCell, format: TableColumnMapping["format"] | undefined): void {
   if (cell.dataset.state !== value.state) cell.dataset.state = value.state;
+  let content = cell.firstElementChild as HTMLElement | null;
+  if (content === null) {
+    content = document.createElement("div");
+    content.className = "ub-data-cell";
+    cell.append(content);
+  }
+  // Scalar formatting stays on one line regardless of length. Short stored
+  // text keeps explicit whitespace; only long text/markers/URLs soft-wrap.
+  const wrap = value.state === "valid" && (format === "number" || format === "date")
+    ? "scalar" : [...value.text].length <= 20 ? "short" : "long";
+  if (content.dataset.wrap !== wrap) content.dataset.wrap = wrap;
   if (value.href !== undefined) {
-    let anchor = cell.firstElementChild as HTMLAnchorElement | null;
+    let anchor = content.firstElementChild as HTMLAnchorElement | null;
     if (anchor === null) {
       anchor = document.createElement("a");
       anchor.className = "ub-data-link";
       anchor.target = "_blank";
       anchor.rel = "noopener noreferrer";
-      cell.replaceChildren(anchor);
+      content.replaceChildren(anchor);
     }
     if (anchor.getAttribute("href") !== value.href) anchor.href = value.href;
     if (anchor.textContent !== value.text) anchor.textContent = value.text;
-  } else if (cell.firstElementChild !== null || cell.textContent !== value.text) cell.textContent = value.text;
+  } else if (content.firstElementChild !== null || content.textContent !== value.text) content.textContent = value.text;
 }
 
 export function dataTableView(): {
@@ -87,9 +98,9 @@ export function dataTableView(): {
         let row = rendered.get(record.id);
         if (row === undefined) {
           const element = document.createElement("tr");
-          for (const format of formatters) {
+          for (const [index, format] of formatters.entries()) {
             const cell = document.createElement("td");
-            renderCell(cell, format(record));
+            renderCell(cell, format(record), config.columns[index]?.format);
             element.append(cell);
           }
           row = { element, value };
@@ -98,7 +109,7 @@ export function dataTableView(): {
           const cells = row.element.cells;
           formatters.forEach((format, index) => {
             const cell = cells[index];
-            if (cell !== undefined) renderCell(cell, format(record));
+            if (cell !== undefined) renderCell(cell, format(record), config.columns[index]?.format);
           });
           row.value = value;
         }
