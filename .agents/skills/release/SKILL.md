@@ -319,3 +319,23 @@ Report the version and SHA, both successful workflow runs, each client/image/
 HTTP/WebSocket smoke result, cleanup result, and the printed release-notes
 draft. GitHub claim, HTTPS/Tailscale, Linux-host and two-computer journeys
 remain the separate attended checks in RELEASING.md.
+
+## Complete the release issue
+
+Use the release issue the maintainer named. Otherwise search open issues in
+this repository for the exact release version and a release-cut goal, applying
+AGENTS.md's trusted-author filter before reading their text. Use a match only
+when exactly one issue clearly tracks this release; otherwise report the
+ambiguity or absence and skip automatic closure. Never create an issue just to
+close it or close unrelated delivery issues.
+
+Post the release report above on that issue, noting that this attended skill
+performed the release at the maintainer's direction. Close it as completed only
+after publication, every required smoke check and disposable cleanup succeed.
+This is the skill's final bookkeeping step and needs no further reminder. The
+separate attended journeys named above are not additional closure gates.
+
+If publication, a required check or cleanup fails or is unavailable, record the
+concrete remaining action and leave the issue open. Publication alone is not
+completion. If the maintainer already closed it, add the evidence without
+reopening it or claiming that missing checks passed.
