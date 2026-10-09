@@ -3,13 +3,16 @@
  * next-themes; Sonner retains its native stack, timers, focus and gestures.
  */
 import type { CSSProperties, ReactElement } from "react";
+import { createPortal } from "react-dom";
 import { Toaster } from "sonner";
 import { TRANSIENT_DURATION } from "../../notifications.js";
 import { useAppearance } from "../theme.js";
 
 export function NotificationToaster(): ReactElement {
   const [appearance] = useAppearance();
-  return (
+  // Radix preserves live regions when hiding a modal's background. Keep this
+  // region outside #root so it can hide the app as one subtree.
+  return createPortal(
     <Toaster
       theme={appearance}
       position="top-right"
@@ -38,6 +41,7 @@ export function NotificationToaster(): ReactElement {
           closeButton: "left-auto! right-2! top-2! transform-none! size-6! text-card-foreground! bg-card! border-(--border)! hover:bg-secondary! focus-visible:shadow-[0_0_0_2px_var(--card-foreground)]!",
         },
       }}
-    />
+    />,
+    document.body,
   );
 }
