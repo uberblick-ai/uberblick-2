@@ -3,7 +3,7 @@
  * The writer is a different `ub mcp serve` process with its own SQLite state;
  * none of these browsers bypasses `ub open` by dialing the upstream hub.
  */
-import { expect, test } from "@playwright/test";
+import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { writeFileSync } from "node:fs";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
@@ -55,9 +55,63 @@ const SCHEMA = {
   },
 };
 
-interface PaintedText { text: string; x: number; y: number; font: string; rotated: boolean }
+interface PaintedText { text: string; x: number; y: number; width: number; left: number; right: number; font: string; rotated: boolean }
 interface PaintedPoint { x: number; y: number; radius: number }
 interface ChartPaintProbe { texts: string[]; ink: PaintedText[]; points: PaintedPoint[] }
+
+/** Tick anchors and point anchors are observed independently from canvas calls. */
+async function expectObservationGeometry(
+  page: Page, observations: { value: number; label: string }[], pattern: RegExp, all = false,
+): Promise<PaintedText[]> {
+  const probe = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
+  const pointXs = [...new Set(probe.points.map((point) => Number(point.x.toFixed(6))))].sort((a, b) => a - b);
+  expect(pointXs).toHaveLength(observations.length);
+  const first = pointXs[0], last = pointXs.at(-1);
+  const firstValue = observations[0]?.value, lastValue = observations.at(-1)?.value;
+  if (first === undefined || last === undefined || firstValue === undefined || lastValue === undefined) {
+    throw new Error("e2e: chart observation anchors are missing");
+  }
+  if (observations.length > 1) {
+    observations.forEach((observation, index) => {
+      expect(((pointXs[index] ?? NaN) - first) / (last - first))
+        .toBeCloseTo((observation.value - firstValue) / (lastValue - firstValue), 5);
+    });
+  }
+  const labels = probe.ink.filter((entry) => pattern.test(entry.text)).sort((a, b) => a.x - b.x);
+  expect(labels.length).toBeGreaterThan(0);
+  const labeled = new Set<number>();
+  for (const label of labels) {
+    const index = pointXs.findIndex((pointX) => Math.abs(pointX - label.x) < 0.5);
+    expect(index, `tick ${label.text} has no plotted observation`).toBeGreaterThanOrEqual(0);
+    expect(label.text).toBe(observations[index]?.label);
+    expect(labeled.has(index)).toBe(false);
+    labeled.add(index);
+    expect(label.rotated).toBe(false);
+  }
+  for (let index = 1; index < labels.length; index += 1) {
+    expect(labels[index - 1]?.right ?? Infinity).toBeLessThanOrEqual((labels[index]?.left ?? -Infinity) + 0.5);
+  }
+  if (all) expect(labels).toHaveLength(observations.length);
+  else {
+    const widths = await page.locator(".ub-chart canvas").evaluate((element, options) => {
+      const context = (element as HTMLCanvasElement).getContext("2d");
+      if (context === null) throw new Error("e2e: chart has no drawing context");
+      context.save();
+      context.font = options.font;
+      const measured = options.labels.map((label) => context.measureText(label).width);
+      context.restore();
+      return measured;
+    }, { font: labels[0]?.font ?? "", labels: observations.map((observation) => observation.label) });
+    observations.forEach((_observation, index) => {
+      if (labeled.has(index)) return;
+      const x = pointXs[index] ?? NaN;
+      const halfWidth = (widths[index] ?? NaN) / 2;
+      expect(labels.some((label) => x - halfWidth < label.x + label.width / 2
+        && x + halfWidth > label.x - label.width / 2), `observation ${index} was omitted without overlap`).toBe(true);
+    });
+  }
+  return labels;
+}
 
 /** Controls share the title's line and stay inside the panel in every state. */
 async function expectCornerControls(page: Page, sourceName = "Open chart source"): Promise<void> {
@@ -239,6 +293,16 @@ async function installProbe(page: Page, uuid: string): Promise<void> {
       }
     });
     mutations.observe(document, { childList: true, subtree: true, characterData: true });
+    const clearRect = CanvasRenderingContext2D.prototype.clearRect;
+    CanvasRenderingContext2D.prototype.clearRect = function (...args: Parameters<typeof clearRect>): void {
+      if (this.canvas.closest(".ub-chart") !== null && args[0] === 0 && args[1] === 0
+        && args[2] === this.canvas.width && args[3] === this.canvas.height) {
+        // Geometry belongs to the current draw, not an accumulation of old
+        // ranges, responsive layouts or appearance changes.
+        probe.ink = []; probe.points = [];
+      }
+      clearRect.apply(this, args);
+    };
     const fillText = CanvasRenderingContext2D.prototype.fillText;
     CanvasRenderingContext2D.prototype.fillText = function (...args: Parameters<typeof fillText>): void {
       if (this.canvas.closest(".ub-chart") !== null) {
@@ -247,8 +311,13 @@ async function installProbe(page: Page, uuid: string): Promise<void> {
         const transform = this.getTransform();
         const position = transform.transformPoint({ x: args[1], y: args[2] });
         const box = this.canvas.getBoundingClientRect();
+        const metrics = this.measureText(args[0]);
+        const left = transform.transformPoint({ x: args[1] - metrics.actualBoundingBoxLeft, y: args[2] });
+        const right = transform.transformPoint({ x: args[1] + metrics.actualBoundingBoxRight, y: args[2] });
         probe.ink.push({ text: args[0], x: position.x * box.width / this.canvas.width,
-          y: position.y * box.height / this.canvas.height, font: this.font,
+          y: position.y * box.height / this.canvas.height,
+          width: metrics.width * Math.hypot(transform.a, transform.b) * box.width / this.canvas.width,
+          left: left.x * box.width / this.canvas.width, right: right.x * box.width / this.canvas.width, font: this.font,
           rotated: Math.abs(transform.b) > 0.000001 || Math.abs(transform.c) > 0.000001 });
       }
       fillText.apply(this, args);
@@ -270,6 +339,7 @@ async function installProbe(page: Page, uuid: string): Promise<void> {
       for (const [initial, listener] of initialDocs) initial.off("afterTransaction", listener);
       initialDocs.clear();
       Map.prototype.set = nativeSet;
+      CanvasRenderingContext2D.prototype.clearRect = clearRect;
       CanvasRenderingContext2D.prototype.fillText = fillText;
       CanvasRenderingContext2D.prototype.arc = arc;
     });
@@ -384,7 +454,7 @@ test("MCP updates and remote mapping edits redraw through ub open, preserve data
   const paintedText = await page.evaluate(() => (window as unknown as { chartProbe: { texts: string[] } }).chartProbe.texts);
   expect(paintedText).toContain("Latency (ms)");
   expect(paintedText).toContain("Errors (requests)");
-  expect(paintedText).toContain("2026");
+  expect(paintedText).not.toContain("2026");
   expect(paintedText.some((text) => /^Jan [12]$/.test(text))).toBe(true);
   expect(paintedText.some((text) => /Jan [12], 2026/.test(text))).toBe(false);
   expect(navigations).toBe(0);
@@ -398,7 +468,107 @@ test("MCP updates and remote mapping edits redraw through ub open, preserve data
   expect(data.records.find((entry) => entry.id === "latest")?.value).toEqual({ day: "2026-01-02", latency: 375, errors: 11 });
 });
 
-test("calendar ink, independent unit axes and nearest-x tooltips keep sparse and single-x charts readable", async ({ browser }) => {
+test("daily observation labels fit at desktop and iPad widths in both appearances", { tag: "@webkit" }, async ({ browser }, info) => {
+  test.skip(info.project.name === "webkit-iphone", "Explicit desktop and iPad contexts own this paired proof.");
+  test.setTimeout(120_000);
+  const session = writer();
+  const uuid = await chartDoc(session, "Daily chart observations");
+  const observations = Array.from({ length: 7 }, (_, index) => ({
+    value: Date.UTC(2026, 9, index + 1), label: `Oct ${index + 1}`,
+  }));
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA,
+    replaceRecords: [
+      ...observations.map((observation, index) => ({ id: `day-${index}`, value: {
+        day: new Date(observation.value).toISOString().slice(0, 10), latency: 80 + index * 5, errors: 3 + index,
+      } })),
+      { id: "tied", value: { day: "2026-10-03", latency: 98, errors: 6 } },
+      { id: "empty-intraday", value: { day: "2026-10-02T12:00:00Z", latency: null, errors: null } },
+      { id: "empty-last", value: { day: "2026-10-08", latency: null, errors: null } },
+    ],
+  }] });
+  for (const touch of [false, true]) {
+    for (const appearance of ["light", "dark"] as const) {
+      const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+        beforeNavigate: (loading) => installProbe(loading, uuid),
+        contextOptions: {
+          ...(touch ? devices["iPad Pro 11"] : { viewport: { width: 1280, height: 800 }, hasTouch: false, isMobile: false }),
+          locale: "en-US", colorScheme: appearance,
+        },
+      });
+      await expectReady(page);
+      expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(touch);
+      const labels = await expectObservationGeometry(page, observations, /^Oct \d+$/, true);
+      expect(new Set(labels.map((label) => label.y)).size).toBe(1);
+      const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+      expect(ink.some((entry) => /^2026$|^\d{2}:\d{2}(?::\d{2})?$|^UTC$/.test(entry.text))).toBe(false);
+      expect(ink.some((entry) => entry.text === "Oct 8")).toBe(false);
+      await canvasEvidence(page.locator(".ub-chart"), info, `chart-daily-${touch ? "ipad" : "desktop"}-${appearance}`);
+    }
+  }
+});
+
+test("number labels keep irregular continuous positions and ignore empty rows under both missing modes", async ({ browser }) => {
+  const session = writer();
+  const observations = [1, 2, 7, 7.5, 40].map((value) => ({ value, label: String(value) }));
+  for (const missing of ["gap", "connect"] as const) {
+    const mapping = { ...MAPPING, title: "Numeric observations", missing,
+      x: { field: "sample", type: "number", label: "Observation" },
+      y: [{ field: "latency", label: "Latency", unit: "ms" }],
+    };
+    const uuid = await chartDoc(session, `Numeric chart ${missing}`, mapping);
+    await session.call("update_data", { uuid, operations: [{ collection: "measurements",
+      schema: { version: 1, schema: { type: "object", properties: {
+        sample: { type: "number" }, latency: { type: ["number", "null"] },
+      } } },
+      replaceRecords: [
+        ...observations.map((observation, index) => ({ id: `point-${index}`, value: { sample: observation.value, latency: 80 + index * 5 } })),
+        { id: "empty", value: { sample: 3, latency: null } },
+      ],
+    }] });
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      beforeNavigate: (loading) => installProbe(loading, uuid),
+      contextOptions: { viewport: { width: 1280, height: 800 }, locale: "en-US" },
+    });
+    await expect(page.getByRole("img", { name: "Numeric observations", exact: true })).toBeVisible();
+    await expectObservationGeometry(page, observations, /^[\d.]+$/);
+    const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+    expect(ink.filter((entry) => entry.text === "Observation")).toHaveLength(1);
+    expect(ink.some((entry) => entry.text === "3")).toBe(false);
+  }
+});
+
+test("intraday observation labels carry day and UTC context while full tooltips stay unchanged", async ({ browser }) => {
+  const session = writer();
+  const timestamps = ["2026-10-07T09:00:00Z", "2026-10-07T12:00:00Z", "2026-10-08T09:00:00Z"];
+  const uuid = await chartDoc(session, "Intraday chart observations");
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA,
+    replaceRecords: timestamps.map((day, index) => ({ id: `point-${index}`, value: { day, latency: 80 + index * 5, errors: 3 + index } })),
+  }] });
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: (loading) => installProbe(loading, uuid),
+    contextOptions: { viewport: { width: 1280, height: 800 }, locale: "en-US" },
+  });
+  await expectReady(page);
+  const labels = await expectObservationGeometry(page, timestamps.map((timestamp, index) => ({
+    value: Date.parse(timestamp), label: index === 1 ? "12:00" : "09:00",
+  })), /^\d{2}:\d{2}$/, true);
+  const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+  const days = ink.filter((entry) => /^Oct [78]$/.test(entry.text));
+  expect(days.map((entry) => entry.text)).toEqual(["Oct 7", "Oct 8"]);
+  expect(days[0]?.x).toBeCloseTo(labels[0]?.x ?? NaN, 5);
+  expect(days[1]?.x).toBeCloseTo(labels[2]?.x ?? NaN, 5);
+  expect(ink.filter((entry) => entry.text === "UTC")).toHaveLength(1);
+  expect(ink.some((entry) => entry.text === "2026")).toBe(false);
+  const canvas = page.getByRole("img", { name: "API latency", exact: true });
+  const box = await canvas.boundingBox();
+  if (box === null) throw new Error("e2e: intraday chart has no canvas box");
+  await page.evaluate(() => { (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts = []; });
+  await page.mouse.move(box.x + (labels[2]?.x ?? 0) - 1, box.y + box.height / 3);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts))
+    .toContain("Oct 8, 2026, 9:00:00 AM UTC");
+});
+
+test("observation ink, independent unit axes and nearest-x tooltips keep sparse and single-x charts readable", async ({ browser }) => {
   const session = writer();
   const uuid = await chartDoc(session, "Chart layout contract", { ...MAPPING, missing: "connect" });
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
@@ -419,8 +589,9 @@ test("calendar ink, independent unit axes and nearest-x tooltips keep sparse and
   expect(leftTicks.length).toBeGreaterThan(0);
   expect(rightTicks.length).toBeGreaterThan(0);
   expect(Math.max(...leftTicks.map((entry) => entry.x))).toBeLessThan(Math.min(...rightTicks.map((entry) => entry.x)));
-  const calendar = ink.filter((entry) => /^Jan [123]$|^2026$|^\d{2}:\d{2}$|^UTC$/.test(entry.text));
-  expect(calendar.length).toBeGreaterThan(0);
+  const calendar = ink.filter((entry) => /^Jan [123]$/.test(entry.text));
+  expect(calendar).toHaveLength(3);
+  expect(ink.some((entry) => /^2026$|^\d{2}:\d{2}$|^UTC$/.test(entry.text))).toBe(false);
   expect(calendar.every((entry) => !entry.rotated && entry.font.includes("Geist"))).toBe(true);
   const legends = ink.filter((entry) => entry.text === "Latency (ms)" || entry.text === "Errors (requests)");
   expect(new Set(legends.map((entry) => entry.text))).toEqual(new Set(["Latency (ms)", "Errors (requests)"]));
@@ -604,9 +775,14 @@ test("a 360px three-series chart keeps compact ticks and a readable capped canva
     }
     expect(ink.some((entry) => /^[\d.,]+%$/.test(entry.text))).toBe(true);
     expect(ink.some((entry) => /^\d+ %$/.test(entry.text))).toBe(false);
-    const dates = ink.filter((entry) => /^Oct \d+$|^2026$/.test(entry.text));
+    const dates = ink.filter((entry) => /^Oct \d+$/.test(entry.text));
     expect(dates.length).toBeGreaterThan(0);
     expect(dates.every((entry) => !entry.rotated)).toBe(true);
+    expect(dates.length).toBeLessThan(14);
+    expect(ink.some((entry) => /^2026$|^\d{2}:\d{2}(?::\d{2})?$|^UTC$/.test(entry.text))).toBe(false);
+    await expectObservationGeometry(page, Array.from({ length: 14 }, (_, index) => ({
+      value: Date.UTC(2026, 9, index + 1), label: `Oct ${index + 1}`,
+    })), /^Oct \d+$/);
     await canvasEvidence(page.locator(".ub-chart"), info, `chart-phone-${appearance}`);
   }
 });
