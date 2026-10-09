@@ -986,11 +986,7 @@ test("document actions stay reachable, close with the route, and archive into Re
 
   await uuid.click();
   await expect(copyNotice(page, "URL copied to clipboard")).toBeVisible();
-  // Shared notices can cover header actions in this narrow viewport. Use the
-  // native dismiss control before continuing the independent lifecycle proof.
-  await copyNotice(page, "URL copied to clipboard").getByRole("button", { name: "Dismiss notification" }).click();
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-
+  // Copy feedback leaves the document actions immediately reachable.
   await trigger.click();
   await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
   await trigger.click();
@@ -2015,6 +2011,25 @@ function copyNotice(page: Page, message: string): Locator {
   });
 }
 
+/** Observe painted placement and hit targets while feedback remains visible. */
+async function expectCopyNoticeLeavesHeaderUsable(page: Page, message: string): Promise<void> {
+  const notice = copyNotice(page, message);
+  await expect.poll(() => notice.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return {
+      withinViewport: box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight,
+      lowerRight: box.left > innerWidth / 2 && box.top > innerHeight / 2,
+      receivesPointer: element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)),
+    };
+  })).toEqual({ withinViewport: true, lowerRight: true, receivesPointer: true });
+  for (const control of [page.locator(".ub-doc-meta .ub-copy-link"), page.getByRole("button", { name: "Document actions" })]) {
+    expect(await control.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+    })).toBe(true);
+  }
+}
+
 /** Wait for native dismissal before inspecting the replacement's content. */
 async function activateCopy(page: Page, control: Locator, keyboard = false): Promise<void> {
   const previous = (await page.locator("[data-sonner-toast]").elementHandles())[0];
@@ -2111,6 +2126,33 @@ for (const scheme of ["light", "dark"] as const) {
       expect(await copiedTexts(page)).toEqual([canonicalUrl, canonicalUrl]);
       await expect(page.locator(".ub-copied")).toHaveCount(0);
 
+      // These desktop and iPad sizes exposed header obstruction in the former
+      // top-right region. One source consumer also proves it uses the same region;
+      // the full source and clipboard contracts are checked separately below.
+      const codeCopy = page.locator(".ub-code .ub-copy");
+      const actions = page.getByRole("button", { name: "Document actions" });
+      for (const viewport of [
+        { width: 1440, height: 900 },
+        { width: 1280, height: 800 },
+        { width: 1024, height: 768 },
+        { width: 820, height: 1180 },
+        { width: 768, height: 1024 },
+      ]) {
+        await page.setViewportSize(viewport);
+        await activateCopy(page, link);
+        await expectCopyNoticeLeavesHeaderUsable(page, "URL copied to clipboard");
+        await activateCopy(page, link);
+        expect((await copiedTexts(page)).at(-1)).toBe(canonicalUrl);
+        await activateCopy(page, codeCopy);
+        await expectCopyNoticeLeavesHeaderUsable(page, "Copied to clipboard");
+        await actions.click();
+        await expect(page.getByRole("menuitem", { name: "Pin to sidebar" })).toBeVisible();
+        await expect(copyNotice(page, "Copied to clipboard")).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(actions).toBeFocused();
+      }
+      await page.setViewportSize({ width: 1400, height: 1000 });
+
       await placeCaret(page);
       await page.keyboard.insertText("Keep caret selection");
       for (let step = 0; step < 4; step += 1) await page.keyboard.press("Shift+ArrowLeft");
@@ -2130,7 +2172,6 @@ for (const scheme of ["light", "dark"] as const) {
         expect(await editorSelection(page)).toEqual(selected);
         await expect(page.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
       }
-      const codeCopy = page.locator(".ub-code .ub-copy");
       await activateCopy(page, codeCopy);
       await activateCopy(page, codeCopy);
       await expect(copyNotice(page, "Copied to clipboard")).toHaveAttribute("data-type", "success");

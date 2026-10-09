@@ -17,6 +17,14 @@ async function expectSuccess(page: Page, message: string): Promise<void> {
   await expect(successNotice(page, message)).toHaveAttribute("data-type", "success");
   await expect(successNotice(page, message).locator("[data-description]")).toHaveText(message);
   await expect(page.locator("[data-settings-page]").getByText(message, { exact: true })).toHaveCount(0);
+  await expect.poll(() => successNotice(page, message).evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return {
+      withinViewport: box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight,
+      lowerRight: box.left > innerWidth / 2 && box.top > innerHeight / 2,
+      receivesPointer: element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)),
+    };
+  })).toEqual({ withinViewport: true, lowerRight: true, receivesPointer: true });
 }
 
 test("a workspace rename reaches another page live and preserves its document links", async ({
@@ -196,10 +204,25 @@ for (const appearance of ["light", "dark"] as const) {
     await name.press("Enter");
     await expectSuccess(page, `Saved “Notification ${appearance}”.`);
     await expect(name).toBeFocused();
-    await name.fill(`Pointer ${appearance}`);
-    await save.click();
-    await expectSuccess(page, `Saved “Pointer ${appearance}”.`);
-    await expect(save).toBeFocused();
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 1280, height: 800 },
+      { width: 1024, height: 768 },
+      { width: 820, height: 1180 },
+      { width: 768, height: 1024 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const nextName = `Pointer ${appearance} ${viewport.width}`;
+      await name.fill(nextName);
+      await save.click();
+      await expectSuccess(page, `Saved “${nextName}”.`);
+      await expect(save).toBeFocused();
+      expect(await save.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+      })).toBe(true);
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     await page.getByRole("navigation", { name: "Workspace settings" }).getByRole("button", { name: "Tags", exact: true }).click();
     const field = page.getByLabel("Create a tag");
