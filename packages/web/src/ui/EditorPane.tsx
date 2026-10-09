@@ -421,20 +421,24 @@ export function StatusLine({
   // A retained serving cause is not a hub claim while its acknowledgement is
   // unknown. Publish only the condition the compact facts actually name.
   const hubProblem = facts.hub === "not shared with hub" ? facts.hubDetail : null;
-  const saveKey = `document-status:${connection.room}:save`;
-  const hubKey = `document-status:${connection.room}:hub`;
   useEffect(() => {
+    const saveKey = `document-status:${connection.room}:save`;
+    const hubKey = `document-status:${connection.room}:hub`;
     if (saveProblem === null) resolveSticky(saveKey);
     else notifySticky({ key: saveKey, message: saveProblem, severity: "error" });
     if (hubProblem === null) resolveSticky(hubKey);
     else notifySticky({ key: hubKey, message: hubProblem, severity: "warning" });
-  }, [connection, saveKey, hubKey, saveProblem, hubProblem]);
+  }, [connection, saveProblem, hubProblem]);
   // Cause changes update the same notice; only leaving this source ends its
   // ownership. RoutePane mounts either the waiting or hydrated header.
-  useEffect(() => () => {
-    resolveSticky(saveKey);
-    resolveSticky(hubKey);
-  }, [connection, saveKey, hubKey]);
+  useEffect(() => {
+    const saveKey = `document-status:${connection.room}:save`;
+    const hubKey = `document-status:${connection.room}:hub`;
+    return () => {
+      resolveSticky(saveKey);
+      resolveSticky(hubKey);
+    };
+  }, [connection]);
   const hub =
     endpoint === null || (hubAcked !== undefined && !facts.twoFact)
       ? null
