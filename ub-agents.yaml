@@ -6,7 +6,7 @@ queue:
   priority:
     labels: [priority:urgent, priority:high, priority:medium, priority:low]
     default: priority:medium
-  milestones: ignore
+  milestones: gate
   dependencies: wait
 
 stop-labels: [needs-human]
