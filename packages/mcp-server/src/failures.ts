@@ -79,6 +79,10 @@ export const INTERNAL_ERROR_MESSAGE =
   "The tool failed for an unhandled reason. Nothing here says whether anything was written; check sync_status, " +
   "re-read the document, and see this server's stderr log for the cause.";
 
+/** Shared tool/resource quarantine refusal; raw store detail belongs to sync_status and stderr. */
+export const PERSISTENCE_ERROR_MESSAGE =
+  "The replica refused a write to its update log; check sync_status and restart the MCP server.";
+
 /** A tool failure with a stable machine-readable code. */
 export class ToolError extends Error {
   readonly code: string;
@@ -561,7 +565,7 @@ export function toFailure(tool: string, error: unknown): ToolFailure {
     // every other code's, so a READ that lands here still reports on no write.
     return stamped(tool, {
       error: "persistence_failed",
-      message: error.message,
+      message: PERSISTENCE_ERROR_MESSAGE,
       room: error.room,
     });
   }

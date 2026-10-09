@@ -206,11 +206,12 @@ it("refuses tool and resource callbacks dispatched while the transport is closin
     }>;
     _registeredResourceTemplates: Record<string, {
       resourceTemplate: { listCallback(): unknown };
-      readCallback(uri: URL, variables: { uuid: string }): unknown;
+      readCallback(uri: URL, variables: { uuid?: string; topic?: string }): unknown;
     }>;
   };
   const rename = registered._registeredTools.set_metadata!.handler;
   const guidance = registered._registeredResourceTemplates.guidance!;
+  const help = registered._registeredResourceTemplates.help!;
   const held = gate();
   const serverClose = rig.instance.server.close.bind(rig.instance.server);
   vi.spyOn(rig.instance.server, "close").mockImplementation(async () => {
@@ -229,8 +230,11 @@ it("refuses tool and resource callbacks dispatched while the transport is closin
     expect(content?.type).toBe("text");
     if (content?.type !== "text") throw new Error("A refusal must contain its JSON failure payload.");
     expect(JSON.parse(content.text)).toMatchObject({ error: "server_shutting_down", applied: false });
-    expect(() => guidance.resourceTemplate.listCallback()).toThrow(/shutting down/i);
-    expect(() => guidance.readCallback(new URL(`uberblick://doc/${uuid}`), { uuid })).toThrow(/shutting down/i);
+    const shutdownMessage = "The MCP server is shutting down and cannot start another call.";
+    await expect(guidance.resourceTemplate.listCallback()).rejects.toThrow(shutdownMessage);
+    await expect(guidance.readCallback(new URL(`uberblick://doc/${uuid}`), { uuid })).rejects.toThrow(shutdownMessage);
+    await expect(help.resourceTemplate.listCallback()).rejects.toThrow(shutdownMessage);
+    await expect(help.readCallback(new URL("uberblick://help/orientation"), { topic: "orientation" })).rejects.toThrow(shutdownMessage);
     expect(settle).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
     expect(append).not.toHaveBeenCalled();

@@ -6076,7 +6076,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Record a document's lifecycle status. On an ordinary document this also adopts the kind that owns the status; the result names both, so adoption is never silent. A document that already has a kind accepts only that kind's statuses. Its kind is fixed through MCP: if it was adopted in error, retrying with the other kind's status cannot change it. An open record can be withdrawn without an answer; decided records cannot reopen or withdraw. Rejected and withdrawn are final. Rejection requires a non-empty `reason` and a recorded person's answer, and applies only to an open proposal, an agent stance or a decided record in a conflict. It stores `rejectionReason`. All refusals change nothing.\n\nHelp: set_status, workspaces, lifecycle, tool-contracts."
+    "description": "Record a document's lifecycle status. On an ordinary document this also adopts the kind that owns the status; the result names both, so adoption is never silent. A document that already has a kind accepts only that kind's statuses. Its kind is fixed through MCP: if it was adopted in error, retrying with the other kind's status cannot change it. An open record can be withdrawn without an answer; decided records cannot reopen or withdraw. Rejected and withdrawn are final. Rejection requires a non-empty `reason` and a recorded person's answer, and applies only to an open proposal, an agent stance or a decided record in a conflict. It stores `rejectionReason`. Validation refusals change nothing.\n\nHelp: set_status, workspaces, lifecycle, tool-contracts."
   },
   {
     "name": "archive_doc",

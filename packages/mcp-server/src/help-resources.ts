@@ -3,10 +3,10 @@ import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { normalizeObjectSchema } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { toJsonSchemaCompat, parseWithCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
-import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { toolHelpEntries } from "./help-examples.js";
 import type { HelpCatalog } from "./help.js";
 import type { ServerWork } from "./server-work.js";
+import { ClientSafeResourceError, guardedResource } from "./resource-adapter.js";
 
 /** Registrations need only this public SDK method, allowing help to capture its result. */
 export type ToolRegistrar = Pick<McpServer, "registerTool">;
@@ -43,20 +43,20 @@ export function registerHelpResources(server: McpServer, help: HelpCatalog, work
   server.registerResource(
     "help",
     new ResourceTemplate("uberblick://help/{topic}", {
-      list: () => {
+      list: guardedResource(() => {
         work.assertOpen();
         return { resources: help.list().map(({ id, ...entry }) => ({ ...entry, name: id, mimeType: "text/markdown" })) };
-      },
+      }),
     }),
     { title: "Product help", description: "Bundled, version-matched, workspace-agnostic product help.", mimeType: "text/markdown" },
-    (uri, { topic }) => {
+    guardedResource((uri: URL, { topic }: { topic?: string | string[] }) => {
       work.assertOpen();
       const found = typeof topic === "string" ? help.get(topic) : undefined;
       if (found === undefined) {
         // MCP 2025-11-25 specifies resource-not-found; SDK 1.31 has no named constant.
-        throw new McpError(-32002, `Resource not found: ${uri.href}`, { uri: uri.href });
+        throw new ClientSafeResourceError(-32002, `Resource not found: ${uri.href}`, { uri: uri.href });
       }
       return { contents: [{ uri: uri.href, mimeType: "text/markdown", text: found.text }] };
-    },
+    }),
   );
 }
