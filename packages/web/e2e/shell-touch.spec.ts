@@ -11,11 +11,11 @@ const group = (page: Page, name: string): Locator => page.locator(".ub-group")
 const pin = (page: Page, title: string): Locator => page.locator(".ub-docs-row")
   .filter({ hasText: title }).locator(".ub-docs-pin");
 
-async function showSidebar(page: Page): Promise<void> {
+async function showSidebar(page: Page, settings = false): Promise<void> {
   if ((page.viewportSize()?.width ?? 1280) < 1280 && await drawer(page).count() === 0) {
-    await page.getByRole("button", { name: "Show document list", exact: true }).click();
+    await page.getByRole("button", { name: settings ? "Show sidebar" : "Show document list", exact: true }).click();
   }
-  await expect(page.locator(".ub-list-head")).toBeVisible();
+  await expect(page.locator(settings ? ".ub-settings-nav" : ".ub-list-head")).toBeVisible();
 }
 
 async function addGroup(page: Page, name: string): Promise<void> {
@@ -26,15 +26,123 @@ async function addGroup(page: Page, name: string): Promise<void> {
   await expect(group(page, name)).toBeVisible();
 }
 
-async function seed(page: Page): Promise<void> {
+async function seed(page: Page, title = "Pinned reference", groupName = "Reading"): Promise<void> {
   await showSidebar(page);
-  await createDoc(page, "Pinned reference");
+  await createDoc(page, title);
   await page.getByRole("button", { name: "Document actions", exact: true }).click();
   await page.getByRole("menuitem", { name: "Pin to sidebar", exact: true }).click();
   await showSidebar(page);
   await createDoc(page, "Loose note");
   await showSidebar(page);
-  await addGroup(page, "Reading");
+  await addGroup(page, groupName);
+}
+
+async function expectNavigationGeometry(page: Page, controls: Locator[], coarse: boolean): Promise<void> {
+  for (const control of controls) {
+    await expect(control).toBeVisible();
+    const reading = await control.evaluate((element) => {
+      const sidebar = element.closest(".ub-list");
+      if (sidebar === null) throw new Error("e2e: navigation control has no sidebar");
+      const box = element.getBoundingClientRect();
+      const bounds = sidebar.getBoundingClientRect();
+      return { name: element.getAttribute("aria-label") ?? element.textContent,
+        heading: element.classList.contains("ub-group-toggle"), height: box.height,
+        minHeight: getComputedStyle(element).minHeight,
+        left: box.left - bounds.left, right: bounds.right - box.right };
+    });
+    expect(reading.height, `${reading.name} height`).toBeGreaterThanOrEqual(coarse ? 44 : 24);
+    if (!coarse && !reading.heading) {
+      expect(reading.minHeight, `${reading.name} compact minimum`).toBe("34px");
+      expect(reading.height, `${reading.name} compact row`).toBeLessThan(44);
+    }
+    expect(reading.left, `${reading.name} left edge`).toBeGreaterThanOrEqual(0);
+    expect(reading.right, `${reading.name} right edge`).toBeGreaterThanOrEqual(0);
+  }
+  const overflowing = await page.locator(".ub-list").evaluate((sidebar) =>
+    [sidebar, ...sidebar.querySelectorAll("*")]
+      .filter((element): element is HTMLElement => element instanceof HTMLElement)
+      .filter((element) => {
+        const style = getComputedStyle(element);
+        return [style.overflowX, style.overflowY].some((overflow) => /^(auto|scroll)$/.test(overflow))
+          && element.scrollWidth > element.clientWidth;
+      }).map((element) => element.className),
+  );
+  expect(overflowing).toEqual([]);
+}
+
+for (const { coarse, width } of [
+  { coarse: true, width: 375 },
+  { coarse: true, width: 1366 },
+  { coarse: false, width: 1280 },
+]) {
+  test(`sidebar navigation rows meet the ${coarse ? "touch" : "compact pointer"} floor at ${width}px`,
+    { tag: coarse && width === 375 ? "@webkit-touch" : [] }, async ({ browser }, info) => {
+      const page = await openApp(browser, "/", {
+        upstream: true,
+        // WebKit keeps its actual phone input and viewport; Chromium proves
+        // the coarse drawer and iPad landscape docked surfaces explicitly.
+        contextOptions: info.project.name === "chromium"
+          ? { hasTouch: coarse, isMobile: coarse, viewport: { width, height: 900 } }
+          : {},
+        beforeNavigate: (page) => page.emulateMedia({ reducedMotion: "reduce" }),
+        readySelector: ".ub-pane",
+      });
+      expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(coarse);
+      const title = "Pinned reference with a title long enough to truncate within its sidebar row ".repeat(3);
+      const name = "Reading group with a name long enough to truncate within its heading ".repeat(3);
+      await seed(page, title, name);
+      if ((page.viewportSize()?.width ?? width) < 1280) await expect(drawer(page)).toBeVisible();
+      else await expect(drawer(page)).toHaveCount(0);
+      const activate = async (control: Locator): Promise<void> => {
+        if (coarse) await control.tap();
+        else await control.press("Enter");
+      };
+      const create = page.getByRole("button", { name: "+ new doc", exact: true });
+      const allDocs = page.getByRole("button", { name: "All docs", exact: true });
+      const settings = page.getByRole("button", { name: "Workspace settings", exact: true });
+      const add = page.getByRole("button", { name: "+ group", exact: true });
+      const headings = page.locator(".ub-group-toggle");
+      const pinned = page.locator(".ub-pin-row > button");
+      await expect(headings).toHaveCount(2);
+      await expect(pinned).toHaveCount(1);
+      await expectNavigationGeometry(page, [create, allDocs, settings, add, ...await headings.all(), ...await pinned.all()], coarse);
+
+      // A quick activation still belongs to each enlarged drag handle.
+      const heading = group(page, "Pinned").getByRole("button", { name: "Pinned", exact: true });
+      await activate(heading);
+      await expect(heading).toHaveAttribute("aria-expanded", "false");
+      await activate(heading);
+      await expect(heading).toHaveAttribute("aria-expanded", "true");
+      await expect(pinned).toHaveAttribute("title", title);
+      await activate(pinned);
+      await expect(page.locator(".ub-title")).toHaveValue(title);
+      await showSidebar(page);
+      await expect(pinned).toHaveAttribute("aria-current", "page");
+      await expect(page.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
+
+      await activate(settings);
+      await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+      await showSidebar(page, true);
+      const navigation = page.locator(".ub-settings-nav");
+      const entries = ["General", "Tags", "Access"].map((label) =>
+        navigation.getByRole("button", { name: label, exact: true }));
+      await expectNavigationGeometry(page, entries, coarse);
+      await expect(navigation.getByRole("button", { name: "General", exact: true })).toHaveAttribute("aria-current", "page");
+      await activate(navigation.getByRole("button", { name: "Access", exact: true }));
+      await expect(page.getByRole("heading", { name: "Access", exact: true })).toBeVisible();
+      await showSidebar(page, true);
+      await expect(navigation.getByRole("button", { name: "Access", exact: true })).toHaveAttribute("aria-current", "page");
+      await page.locator(".ub-settings-back").click();
+      await showSidebar(page);
+
+      // The unavailable create row shares the same floor without losing its
+      // native disabled state or explanation when the direct hub disconnects.
+      await harness().stopHub();
+      const unavailable = page.getByRole("button", { name: "new doc unavailable", exact: true });
+      await expect(unavailable).toBeDisabled();
+      await expect(unavailable).toHaveAttribute("title", "New document unavailable while the directory is read-only");
+      await expectNavigationGeometry(page, [unavailable], coarse);
+    });
 }
 
 async function rest(page: Page): Promise<void> {
