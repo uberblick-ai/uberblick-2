@@ -87,7 +87,7 @@ it("closes the transport, drains a write waiting on the hub, then destroys repli
     storeClose();
   });
 
-  const write = rig.call("set_title", { uuid, title: "Written during shutdown" }).catch((error: unknown) => error);
+  const write = rig.call("set_metadata", { uuid, title: "Written during shutdown" }).catch((error: unknown) => error);
   let closing: Promise<void> | undefined;
   try {
     await held.entered;
@@ -162,7 +162,7 @@ it("rejects later calls without a write and lets repeated closes await the same 
   });
   const held = holdHubWait(rig.instance.replicas);
   const storeClose = vi.spyOn(rig.instance.store, "close");
-  const admitted = rig.call("set_title", { uuid, title: "Admitted" }).catch((error: unknown) => error);
+  const admitted = rig.call("set_metadata", { uuid, title: "Admitted" }).catch((error: unknown) => error);
   let first: Promise<void> | undefined;
   let second: Promise<void> | undefined;
   try {
@@ -172,7 +172,7 @@ it("rejects later calls without a write and lets repeated closes await the same 
     second = rig.instance.close().then(() => { secondFinished = true; });
     await sleep(25);
     const secondFinishedWhileWaiting = secondFinished;
-    const late = await rig.call("set_title", { uuid, title: "Too late" }).catch((error: unknown) => error);
+    const late = await rig.call("set_metadata", { uuid, title: "Too late" }).catch((error: unknown) => error);
     expect(late).toBeInstanceOf(Error);
     held.release();
     await Promise.all([first, second]);
@@ -209,7 +209,7 @@ it("refuses tool and resource callbacks dispatched while the transport is closin
       readCallback(uri: URL, variables: { uuid: string }): unknown;
     }>;
   };
-  const rename = registered._registeredTools.set_title!.handler;
+  const rename = registered._registeredTools.set_metadata!.handler;
   const guidance = registered._registeredResourceTemplates.guidance!;
   const held = gate();
   const serverClose = rig.instance.server.close.bind(rig.instance.server);

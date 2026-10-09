@@ -143,7 +143,7 @@ describe("a description reaches every discovery surface", () => {
       title: "Citing",
       description: "Points at Sync.",
     });
-    await rig.ok("set_links", { uuid: source.uuid, links: [doc.uuid] });
+    await rig.ok("set_metadata", { uuid: source.uuid, links: [doc.uuid] });
     expect(await rig.ok("backlinks", { uuid: doc.uuid })).toMatchObject({
       backlinks: [
         { uuid: source.uuid, title: "Citing", description: "Points at Sync." },
@@ -177,7 +177,7 @@ describe("a description reaches every discovery surface", () => {
   });
 });
 
-describe("set_description", () => {
+describe("set_metadata", () => {
   it("replaces wholesale, reports durability, and updates the stub at once", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
@@ -185,7 +185,7 @@ describe("set_description", () => {
       description: "A first attempt.",
     });
 
-    const set = await rig.ok("set_description", {
+    const set = await rig.ok("set_metadata", {
       uuid: doc.uuid,
       description: "What it actually turned out to be about.",
     });
@@ -225,7 +225,7 @@ describe("set_description", () => {
     // schema can do it, the tool will not. A document that advertises nothing
     // is a gap to fill, not a state to ask for.
     for (const description of ["", "   ", "\n\t "]) {
-      const refused = await rig.call("set_description", {
+      const refused = await rig.call("set_metadata", {
         uuid: doc.uuid,
         description,
       });
@@ -259,19 +259,19 @@ describe("a document nobody described", () => {
     });
     expect(inserted.applied).toBe(true);
     expect(inserted.description).toBeNull();
-    expect(inserted.descriptionHint).toContain("set_description");
+    expect(inserted.descriptionHint).toContain("set_metadata");
 
     // Every mutator, not one — the nudge lives where durability is reported.
-    const tagged = await rig.ok("set_tags", { uuid, tags: ["auth"] });
-    expect(tagged.descriptionHint).toContain("set_description");
+    const tagged = await rig.ok("set_metadata", { uuid, tags: ["auth"] });
+    expect(tagged.descriptionHint).toContain("set_metadata");
 
     // And it stops the moment the gap is closed.
-    const described = await rig.ok("set_description", {
+    const described = await rig.ok("set_metadata", {
       uuid,
       description: "What the browser made, now that somebody said so.",
     });
     expect(described.descriptionHint).toBeUndefined();
-    const after = await rig.ok("set_tags", { uuid, tags: ["mcp"] });
+    const after = await rig.ok("set_metadata", { uuid, tags: ["mcp"] });
     expect(after.descriptionHint).toBeUndefined();
   });
 
@@ -299,7 +299,7 @@ describe("directory churn", () => {
 
     // A description is written wholesale by one tool. There is no per-keystroke
     // path into it, so the cost the workspace pays is a rename's.
-    await rig.ok("set_description", {
+    await rig.ok("set_metadata", {
       uuid: doc.uuid,
       description: "A second description.",
     });
@@ -307,7 +307,7 @@ describe("directory churn", () => {
 
     // Rewriting it with the same text changes nothing the stub caches, so the
     // stub repair writes nothing at all.
-    await rig.ok("set_description", {
+    await rig.ok("set_metadata", {
       uuid: doc.uuid,
       description: "A second description.",
     });
@@ -441,11 +441,11 @@ describe("lifecycle metadata reaches discovery", () => {
       status: "done",
     });
 
-    await rig.ok("set_description", {
+    await rig.ok("set_metadata", {
       uuid: requirement.uuid,
       description: "The document repairs its lifecycle cache.",
     });
-    await rig.ok("set_description", {
+    await rig.ok("set_metadata", {
       uuid: ordinary.uuid,
       description: "The document clears a lifecycle it does not carry.",
     });

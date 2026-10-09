@@ -24,7 +24,7 @@ export const uuidArg = z.uuid().describe("Document UUID.");
 export const descriptionArg = z
   .string({
     error:
-      "create_doc and set_description require a `description`: one or two sentences saying what the document " +
+      "create_doc requires `description`, and set_metadata accepts it: one or two sentences saying what the document " +
       "is for, so agents can judge it from list_docs and search without opening it.",
   })
   .trim()
@@ -67,7 +67,7 @@ export type DecisionAnswer = z.infer<typeof decisionAnswerArg>;
  * bounds a title anywhere else; emptiness is the only thing that makes a
  * document unfindable in a listing.
  *
- * `create_doc` and `set_title` share it so the MCP surface has one rule for
+ * `create_doc` and `set_metadata` share it so the MCP surface has one rule for
  * titles: neither tool can put a document into a state the other refuses to
  * leave it in.
  */

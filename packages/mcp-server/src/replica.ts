@@ -987,7 +987,7 @@ export class Replicas {
    * for nothing.
    *
    * The description is cached exactly like the title, and costs the directory
-   * exactly what a rename costs: it is written wholesale by `set_description`,
+   * exactly what a rename costs: it is written wholesale by `set_metadata`,
    * so a change to it is a metadata change and publishes one directory update.
    * There is no per-keystroke path into it — nothing edits a description a
    * character at a time.

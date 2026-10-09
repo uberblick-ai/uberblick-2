@@ -4588,7 +4588,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Documents that reference this one, by UUID and never by path or title. The answer is the union of two kinds of edge, which it does not distinguish: the curated doc-level `links` set_links owns, and every inline reference in a prose block or table cell — written by link_range, an `inline` run, or a table cell's inline markdown. A citation needs no `links` entry to appear here.\n\nEach one carries its `description` — null where it has none — so a citing document can be judged without opening it.\n\nHelp: backlinks, workspaces, lifecycle, tool-contracts."
+    "description": "Documents that reference this one, by UUID and never by path or title. The answer is the union of two kinds of edge, which it does not distinguish: the curated doc-level `links` set_metadata owns, and every inline reference in a prose block or table cell — written by link_range, an `inline` run, or a table cell's inline markdown. A citation needs no `links` entry to appear here.\n\nEach one carries its `description` — null where it has none — so a citing document can be judged without opening it.\n\nHelp: backlinks, workspaces, lifecycle, tool-contracts."
   },
   {
     "name": "find_decisions",
@@ -5581,8 +5581,8 @@
     "description": "Delete one block. Deleting is never how a block changes type — use insert_block plus edit_block only for new content, and never delete-and-reinsert to re-type, which churns the block id and orphans its annotations.\n\nHelp: delete_block, workspaces, lifecycle, tool-contracts, markdown."
   },
   {
-    "name": "set_tags",
-    "title": "Set a document's tags",
+    "name": "set_metadata",
+    "title": "Set document metadata together",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -5592,20 +5592,79 @@
           "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
           "description": "Document UUID."
         },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Display title. Identity is the document's UUID, never this."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "Agent-facing description used to choose whether to open the document."
+        },
+        "tldr": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "One or two sentences of plain English for a person opening the document. At most 300 characters; null clears it."
+        },
         "tags": {
           "type": "array",
           "items": {
             "type": "string",
             "minLength": 1
           }
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Target document UUID."
+          }
         }
       },
       "required": [
-        "uuid",
-        "tags"
+        "uuid"
       ],
       "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "title"
+          ]
+        },
+        {
+          "required": [
+            "description"
+          ]
+        },
+        {
+          "required": [
+            "tldr"
+          ]
+        },
+        {
+          "required": [
+            "tags"
+          ]
+        },
+        {
+          "required": [
+            "links"
+          ]
+        }
+      ]
     },
     "outputSchema": {
       "type": "object",
@@ -5613,6 +5672,114 @@
         "uuid": {
           "type": "string",
           "description": "Document identity; a UUID, never a title or path."
+        },
+        "applied": {
+          "type": "boolean",
+          "const": true,
+          "description": "The write is durable in this replica's local update log."
+        },
+        "synced": {
+          "type": "boolean",
+          "description": "The hub acknowledged this write; acknowledgement does not mean hub storage."
+        },
+        "hub": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "disabled",
+                "connecting",
+                "connected",
+                "hub-down",
+                "auth-failed",
+                "update-required",
+                "quarantined"
+              ]
+            },
+            "url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Configured hub endpoint; null when synchronization is disabled."
+            },
+            "reason": {
+              "type": "string"
+            },
+            "recoveryClass": {
+              "type": "string",
+              "enum": [
+                "retry",
+                "manual"
+              ]
+            },
+            "authRecovery": {
+              "type": "string",
+              "enum": [
+                "sign-in-required",
+                "no-workspace-access",
+                "credential-store",
+                "renewal-unavailable"
+              ]
+            },
+            "protocolVersion": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "This client's sync protocol version, including while offline."
+            },
+            "hubProtocolVersion": {
+              "description": "Hub protocol version, learned from a protocol refusal.",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "status",
+            "url",
+            "protocolVersion"
+          ],
+          "additionalProperties": false,
+          "description": "Current connection state; an acknowledgement does not claim hub storage."
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Agent-facing document description; null when unwritten."
+        },
+        "descriptionHint": {
+          "description": "Non-blocking request to supply the missing document description.",
+          "type": "string"
+        },
+        "tagHint": {
+          "description": "Non-blocking request to assign tags from the active vocabulary.",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "tldr": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Person-facing document summary or decision line; null when unwritten."
         },
         "tags": {
           "type": "array",
@@ -5667,501 +5834,11 @@
           },
           "description": "Canonical tag identities, current names and active, retired or unresolved state."
         },
-        "applied": {
-          "type": "boolean",
-          "const": true,
-          "description": "The write is durable in this replica's local update log."
-        },
-        "synced": {
-          "type": "boolean",
-          "description": "The hub acknowledged this write; acknowledgement does not mean hub storage."
-        },
-        "hub": {
-          "type": "object",
-          "properties": {
-            "status": {
-              "type": "string",
-              "enum": [
-                "disabled",
-                "connecting",
-                "connected",
-                "hub-down",
-                "auth-failed",
-                "update-required",
-                "quarantined"
-              ]
-            },
-            "url": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Configured hub endpoint; null when synchronization is disabled."
-            },
-            "reason": {
-              "type": "string"
-            },
-            "recoveryClass": {
-              "type": "string",
-              "enum": [
-                "retry",
-                "manual"
-              ]
-            },
-            "authRecovery": {
-              "type": "string",
-              "enum": [
-                "sign-in-required",
-                "no-workspace-access",
-                "credential-store",
-                "renewal-unavailable"
-              ]
-            },
-            "protocolVersion": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991,
-              "description": "This client's sync protocol version, including while offline."
-            },
-            "hubProtocolVersion": {
-              "description": "Hub protocol version, learned from a protocol refusal.",
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            }
-          },
-          "required": [
-            "status",
-            "url",
-            "protocolVersion"
-          ],
-          "additionalProperties": false,
-          "description": "Current connection state; an acknowledgement does not claim hub storage."
-        },
-        "description": {
-          "description": "Present when the written document has no agent-facing description.",
-          "type": "null"
-        },
-        "descriptionHint": {
-          "description": "Non-blocking request to supply the missing document description.",
-          "type": "string"
-        },
-        "tagHint": {
-          "description": "Non-blocking request to assign tags from the active vocabulary.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "uuid",
-        "tags",
-        "applied",
-        "synced",
-        "hub"
-      ],
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false
-    },
-    "description": "Replace the document's complete tag assignment set with catalog ids or exact active names. Names resolve to canonical ids before storage. An existing retired or unresolved assignment may be preserved by passing the id returned by get_doc; it may be removed, but cannot be newly added. Any unknown or newly assigned retired value refuses the whole mutation before the document, directory stub or index changes and names every invalid value; call list_tags for the active vocabulary. This is the tool the `tagHint` on an untagged write points at.\n\nHelp: set_tags, workspaces, lifecycle, tool-contracts."
-  },
-  {
-    "name": "set_links",
-    "title": "Set a document's outbound links",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "uuid": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
-        },
-        "links": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-            "description": "Target document UUID."
-          }
-        }
-      },
-      "required": [
-        "uuid",
-        "links"
-      ],
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false
-    },
-    "outputSchema": {
-      "type": "object",
-      "properties": {
-        "uuid": {
-          "type": "string",
-          "description": "Document identity; a UUID, never a title or path."
-        },
         "links": {
           "type": "array",
           "items": {
             "type": "string"
           }
-        },
-        "applied": {
-          "type": "boolean",
-          "const": true,
-          "description": "The write is durable in this replica's local update log."
-        },
-        "synced": {
-          "type": "boolean",
-          "description": "The hub acknowledged this write; acknowledgement does not mean hub storage."
-        },
-        "hub": {
-          "type": "object",
-          "properties": {
-            "status": {
-              "type": "string",
-              "enum": [
-                "disabled",
-                "connecting",
-                "connected",
-                "hub-down",
-                "auth-failed",
-                "update-required",
-                "quarantined"
-              ]
-            },
-            "url": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Configured hub endpoint; null when synchronization is disabled."
-            },
-            "reason": {
-              "type": "string"
-            },
-            "recoveryClass": {
-              "type": "string",
-              "enum": [
-                "retry",
-                "manual"
-              ]
-            },
-            "authRecovery": {
-              "type": "string",
-              "enum": [
-                "sign-in-required",
-                "no-workspace-access",
-                "credential-store",
-                "renewal-unavailable"
-              ]
-            },
-            "protocolVersion": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991,
-              "description": "This client's sync protocol version, including while offline."
-            },
-            "hubProtocolVersion": {
-              "description": "Hub protocol version, learned from a protocol refusal.",
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            }
-          },
-          "required": [
-            "status",
-            "url",
-            "protocolVersion"
-          ],
-          "additionalProperties": false,
-          "description": "Current connection state; an acknowledgement does not claim hub storage."
-        },
-        "description": {
-          "description": "Present when the written document has no agent-facing description.",
-          "type": "null"
-        },
-        "descriptionHint": {
-          "description": "Non-blocking request to supply the missing document description.",
-          "type": "string"
-        },
-        "tagHint": {
-          "description": "Non-blocking request to assign tags from the active vocabulary.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "uuid",
-        "links",
-        "applied",
-        "synced",
-        "hub"
-      ],
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false
-    },
-    "description": "Replace the document's curated outbound link set. Values are target document UUIDs — never paths, never titles. The backlinks index follows immediately.\n\nPassing get_doc's effective links back stores derived governs and supersedes UUIDs in the curated array too; get_doc deduplicates the resulting edges.\n\nHelp: set_links, workspaces, lifecycle, tool-contracts."
-  },
-  {
-    "name": "set_title",
-    "title": "Rename a document",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "uuid": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
-        },
-        "title": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Display title. Identity is the document's UUID, never this."
-        }
-      },
-      "required": [
-        "uuid",
-        "title"
-      ],
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false
-    },
-    "outputSchema": {
-      "type": "object",
-      "properties": {
-        "uuid": {
-          "type": "string",
-          "description": "Document identity; a UUID, never a title or path."
-        },
-        "title": {
-          "type": "string"
-        },
-        "applied": {
-          "type": "boolean",
-          "const": true,
-          "description": "The write is durable in this replica's local update log."
-        },
-        "synced": {
-          "type": "boolean",
-          "description": "The hub acknowledged this write; acknowledgement does not mean hub storage."
-        },
-        "hub": {
-          "type": "object",
-          "properties": {
-            "status": {
-              "type": "string",
-              "enum": [
-                "disabled",
-                "connecting",
-                "connected",
-                "hub-down",
-                "auth-failed",
-                "update-required",
-                "quarantined"
-              ]
-            },
-            "url": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Configured hub endpoint; null when synchronization is disabled."
-            },
-            "reason": {
-              "type": "string"
-            },
-            "recoveryClass": {
-              "type": "string",
-              "enum": [
-                "retry",
-                "manual"
-              ]
-            },
-            "authRecovery": {
-              "type": "string",
-              "enum": [
-                "sign-in-required",
-                "no-workspace-access",
-                "credential-store",
-                "renewal-unavailable"
-              ]
-            },
-            "protocolVersion": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991,
-              "description": "This client's sync protocol version, including while offline."
-            },
-            "hubProtocolVersion": {
-              "description": "Hub protocol version, learned from a protocol refusal.",
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            }
-          },
-          "required": [
-            "status",
-            "url",
-            "protocolVersion"
-          ],
-          "additionalProperties": false,
-          "description": "Current connection state; an acknowledgement does not claim hub storage."
-        },
-        "description": {
-          "description": "Present when the written document has no agent-facing description.",
-          "type": "null"
-        },
-        "descriptionHint": {
-          "description": "Non-blocking request to supply the missing document description.",
-          "type": "string"
-        },
-        "tagHint": {
-          "description": "Non-blocking request to assign tags from the active vocabulary.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "uuid",
-        "title",
-        "applied",
-        "synced",
-        "hub"
-      ],
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false
-    },
-    "description": "Replace the document's title. A title is rewritten rather than patched, so there is nothing to splice here and no `old_text` to assert. Identity is the uuid and a rename never touches it, so every link, backlink and annotation survives one.\n\n`meta.title` in the document is authoritative and the directory stub caches it. This writes the document and the stub follows in the same call, so the next search and get_sidebar answer with the new title without opening a single document room. list_docs does too.\n\nAn empty title, and a title of nothing but whitespace, are both refused: a document nobody can name is a document nobody can pick out of a listing.\n\nHelp: set_title, workspaces, lifecycle, tool-contracts."
-  },
-  {
-    "name": "set_description",
-    "title": "Set a document's description",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "uuid": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
-        },
-        "description": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 300,
-          "description": "Agent-facing description used to choose whether to open the document."
-        }
-      },
-      "required": [
-        "uuid",
-        "description"
-      ],
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false
-    },
-    "outputSchema": {
-      "type": "object",
-      "properties": {
-        "uuid": {
-          "type": "string",
-          "description": "Document identity; a UUID, never a title or path."
-        },
-        "applied": {
-          "type": "boolean",
-          "const": true,
-          "description": "The write is durable in this replica's local update log."
-        },
-        "synced": {
-          "type": "boolean",
-          "description": "The hub acknowledged this write; acknowledgement does not mean hub storage."
-        },
-        "hub": {
-          "type": "object",
-          "properties": {
-            "status": {
-              "type": "string",
-              "enum": [
-                "disabled",
-                "connecting",
-                "connected",
-                "hub-down",
-                "auth-failed",
-                "update-required",
-                "quarantined"
-              ]
-            },
-            "url": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Configured hub endpoint; null when synchronization is disabled."
-            },
-            "reason": {
-              "type": "string"
-            },
-            "recoveryClass": {
-              "type": "string",
-              "enum": [
-                "retry",
-                "manual"
-              ]
-            },
-            "authRecovery": {
-              "type": "string",
-              "enum": [
-                "sign-in-required",
-                "no-workspace-access",
-                "credential-store",
-                "renewal-unavailable"
-              ]
-            },
-            "protocolVersion": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991,
-              "description": "This client's sync protocol version, including while offline."
-            },
-            "hubProtocolVersion": {
-              "description": "Hub protocol version, learned from a protocol refusal.",
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            }
-          },
-          "required": [
-            "status",
-            "url",
-            "protocolVersion"
-          ],
-          "additionalProperties": false,
-          "description": "Current connection state; an acknowledgement does not claim hub storage."
-        },
-        "description": {
-          "type": "string"
-        },
-        "descriptionHint": {
-          "description": "Non-blocking request to supply the missing document description.",
-          "type": "string"
-        },
-        "tagHint": {
-          "description": "Non-blocking request to assign tags from the active vocabulary.",
-          "type": "string"
         }
       },
       "required": [
@@ -6169,163 +5846,16 @@
         "applied",
         "synced",
         "hub",
-        "description"
-      ],
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false
-    },
-    "description": "Replace the document's description wholesale. A description is rewritten rather than patched, so there is nothing to splice here and no `old_text` to assert. The directory stub follows immediately, the way it does for a rename, so the next list_docs, search and backlinks answer with it.\n\nThis is the tool the `descriptionHint` on a write points at: a document created in the web UI has no description, and an agent that has just worked inside one is the party who can write it.\n\nThere is no way to clear a description from here: the empty string, and a string of nothing but whitespace, are both refused. Removing one is a schema-level operation, not a tool — a document that advertises nothing is a gap to fill rather than a state to ask for. Replace a description you dislike with a better one.\n\nHelp: set_description, workspaces, lifecycle, tool-contracts."
-  },
-  {
-    "name": "set_tldr",
-    "title": "Set or clear a document's TL;DR",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "uuid": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
-        },
-        "tldr": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 300
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "One or two sentences of plain English for a person opening the document. At most 300 characters; null clears it."
-        }
-      },
-      "required": [
-        "uuid",
-        "tldr"
-      ],
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false
-    },
-    "outputSchema": {
-      "type": "object",
-      "properties": {
-        "uuid": {
-          "type": "string",
-          "description": "Document identity; a UUID, never a title or path."
-        },
-        "tldr": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Person-facing document summary or decision line; null when unwritten."
-        },
-        "applied": {
-          "type": "boolean",
-          "const": true,
-          "description": "The write is durable in this replica's local update log."
-        },
-        "synced": {
-          "type": "boolean",
-          "description": "The hub acknowledged this write; acknowledgement does not mean hub storage."
-        },
-        "hub": {
-          "type": "object",
-          "properties": {
-            "status": {
-              "type": "string",
-              "enum": [
-                "disabled",
-                "connecting",
-                "connected",
-                "hub-down",
-                "auth-failed",
-                "update-required",
-                "quarantined"
-              ]
-            },
-            "url": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Configured hub endpoint; null when synchronization is disabled."
-            },
-            "reason": {
-              "type": "string"
-            },
-            "recoveryClass": {
-              "type": "string",
-              "enum": [
-                "retry",
-                "manual"
-              ]
-            },
-            "authRecovery": {
-              "type": "string",
-              "enum": [
-                "sign-in-required",
-                "no-workspace-access",
-                "credential-store",
-                "renewal-unavailable"
-              ]
-            },
-            "protocolVersion": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991,
-              "description": "This client's sync protocol version, including while offline."
-            },
-            "hubProtocolVersion": {
-              "description": "Hub protocol version, learned from a protocol refusal.",
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            }
-          },
-          "required": [
-            "status",
-            "url",
-            "protocolVersion"
-          ],
-          "additionalProperties": false,
-          "description": "Current connection state; an acknowledgement does not claim hub storage."
-        },
-        "description": {
-          "description": "Present when the written document has no agent-facing description.",
-          "type": "null"
-        },
-        "descriptionHint": {
-          "description": "Non-blocking request to supply the missing document description.",
-          "type": "string"
-        },
-        "tagHint": {
-          "description": "Non-blocking request to assign tags from the active vocabulary.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "uuid",
+        "description",
+        "title",
         "tldr",
-        "applied",
-        "synced",
-        "hub"
+        "tags",
+        "links"
       ],
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Replace the person-facing TL;DR wholesale with one or two sentences of plain English, or pass null to clear it. It is independent of the agent-facing description: writing either leaves the other untouched. The value lives in document metadata; decision stubs also cache it as the decision line for discovery. Ordinary document stubs, search and Markdown do not carry it.\n\nAn empty or whitespace-only string is refused rather than treated as a clear, and an overlong value is refused rather than truncated. The shared limit is 300 characters.\n\nHelp: set_tldr, workspaces, lifecycle, tool-contracts."
+    "description": "Set any non-empty subset of `title`, `description`, `tldr`, `tags` and curated `links` in one call; omitted fields keep their values. All named fields are validated before any write, so a refusal changes nothing and a field-specific failure names `field`. The answer returns all five fields as get_doc would read them, with write durability and no TL;DR review reminder.\n\nTitle and description must be nonempty and cannot be cleared; `tldr: null` clears the person-facing summary. Tags and links each replace their complete curated set, and `[]` clears one. Tag selectors are active catalog ids or exact names from list_tags; already assigned retired or unresolved ids can be preserved. Newly added link UUIDs must be known to this replica's directory; archived targets are accepted, and existing curated targets may be passed back unchanged.\n\nA decided record refuses any call naming title or tldr, while description, tags and links remain writable. Archived documents refuse every metadata field; status changes use set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts."
   },
   {
     "name": "set_status",

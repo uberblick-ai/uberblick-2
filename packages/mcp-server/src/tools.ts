@@ -1,9 +1,8 @@
 /**
  * The v0 MCP tool set.
  *
- * Twenty-nine tools: get_help, list_tags, create_doc, get_doc, get_data, update_data, list_docs, search,
- * backlinks, find_decisions, edit_block, insert_block, delete_block, set_tags, set_links,
- * set_title, set_description, set_tldr, set_status,
+ * Twenty-five tools: get_help, list_tags, create_doc, get_doc, get_data, update_data, list_docs, search,
+ * backlinks, find_decisions, edit_block, insert_block, delete_block, set_metadata, set_status,
  * archive_doc,
  * restore_doc, annotate, link_range,
  * export_markdown, sync_status, the four sidebar tools registered from
@@ -53,11 +52,7 @@ import { registerFindDecisions } from "./registrations/find-decisions.js";
 import { registerEditBlock } from "./registrations/edit-block.js";
 import { registerInsertBlock } from "./registrations/insert-block.js";
 import { registerDeleteBlock } from "./registrations/delete-block.js";
-import { registerSetTags } from "./registrations/set-tags.js";
-import { registerSetLinks } from "./registrations/set-links.js";
-import { registerSetTitle } from "./registrations/set-title.js";
-import { registerSetDescription } from "./registrations/set-description.js";
-import { registerSetTldr } from "./registrations/set-tldr.js";
+import { registerSetMetadata } from "./registrations/set-metadata.js";
 import { registerSetStatus } from "./registrations/set-status.js";
 import { registerArchiveDoc } from "./registrations/archive-doc.js";
 import { registerRestoreDoc } from "./registrations/restore-doc.js";
@@ -89,11 +84,7 @@ export function registerTools(
   registerEditBlock(registrar, context);
   registerInsertBlock(registrar, context);
   registerDeleteBlock(registrar, context);
-  registerSetTags(registrar, context);
-  registerSetLinks(registrar, context);
-  registerSetTitle(registrar, context);
-  registerSetDescription(registrar, context);
-  registerSetTldr(registrar, context);
+  registerSetMetadata(registrar, context);
   registerSetStatus(registrar, context);
   registerArchiveDoc(registrar, context);
   registerRestoreDoc(registrar, context);

@@ -449,10 +449,11 @@ describe("an archived document is read-only", () => {
         { uuid: doc.uuid, block_id: blockId, old_text: BODY, new_text: "No." },
       ],
       ["insert_block", { uuid: doc.uuid, type: "paragraph", text: "No." }],
-      ["set_tags", { uuid: doc.uuid, tags: ["billing"] }],
-      ["set_title", { uuid: doc.uuid, title: "Renamed while archived" }],
-      ["set_description", { uuid: doc.uuid, description: "Should not land." }],
-      ["set_tldr", { uuid: doc.uuid, tldr: "This must not land." }],
+      ["set_metadata", { uuid: doc.uuid, tags: ["billing"] }],
+      ["set_metadata", { uuid: doc.uuid, title: "Renamed while archived" }],
+      ["set_metadata", { uuid: doc.uuid, description: "Should not land." }],
+      ["set_metadata", { uuid: doc.uuid, tldr: "This must not land." }],
+      ["set_metadata", { uuid: doc.uuid, links: [] }],
     ] as const) {
       const refused = await rig.call(tool, args);
       expect(refused.isError).toBe(true);
@@ -501,7 +502,7 @@ describe("an archived document is read-only", () => {
   it("keeps serving reads", async () => {
     const rig = await localRig();
     const doc = await seedDoc(rig);
-    await rig.ok("set_links", { uuid: doc.uuid, links: [] });
+    await rig.ok("set_metadata", { uuid: doc.uuid, links: [] });
     await rig.ok("archive_doc", { uuid: doc.uuid });
 
     const exported = await rig.ok("export_markdown", { uuid: doc.uuid });

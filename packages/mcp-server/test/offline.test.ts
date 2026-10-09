@@ -67,12 +67,8 @@ describe("with the hub stopped", () => {
       "pin_doc",
       "restore_doc",
       "search",
-      "set_description",
-      "set_links",
+      "set_metadata",
       "set_status",
-      "set_tags",
-      "set_title",
-      "set_tldr",
       "sidebar_group",
       "sync_status",
       "unpin_doc",
@@ -128,7 +124,7 @@ describe("with the hub stopped", () => {
     expect(created.blocks).toHaveLength(4);
 
     const target = await rig.ok("create_doc", { title: "Link target", description: "A test document." });
-    await rig.ok("set_links", {
+    await rig.ok("set_metadata", {
       uuid: created.uuid,
       links: [target.uuid],
     });
@@ -162,7 +158,7 @@ describe("with the hub stopped", () => {
       block_id: inserted.block.id,
     });
 
-    await rig.ok("set_tags", { uuid: created.uuid, tags: ["mcp", "sync"] });
+    await rig.ok("set_metadata", { uuid: created.uuid, tags: ["mcp", "sync"] });
 
     const listed = await rig.ok("list_docs", {});
     expect(listed.docs.map((doc: { uuid: string }) => doc.uuid).sort()).toEqual(
@@ -228,8 +224,8 @@ describe("with the hub stopped", () => {
     expect(block.synced).toBe(false);
 
     for (const call of [
-      rig.ok("set_tags", { uuid: created.uuid, tags: ["auth"] }),
-      rig.ok("set_links", { uuid: created.uuid, links: [] }),
+      rig.ok("set_metadata", { uuid: created.uuid, tags: ["auth"] }),
+      rig.ok("set_metadata", { uuid: created.uuid, links: [] }),
       rig.ok("set_status", { uuid: created.uuid, status: "planned" }),
     ]) {
       const payload = await call;

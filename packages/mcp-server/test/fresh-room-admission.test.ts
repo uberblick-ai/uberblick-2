@@ -170,7 +170,7 @@ describe("fresh-room admission", () => {
     internals.rebuilding = true;
     internals.socket.disconnect();
     const writes = created.map(({ uuid }: { uuid: string }, index: number) =>
-      rig.ok("set_title", { uuid, title: `Reconnected ${index}` }),
+      rig.ok("set_metadata", { uuid, title: `Reconnected ${index}` }),
     );
 
     await Promise.all(writes);

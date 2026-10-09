@@ -153,8 +153,8 @@ describe("decision authority through MCP", () => {
     const record = await decision(rig, { status: "decided", answer, tldr: "Use the update log." });
     const block = record.blocks[0];
     const mutations: [string, Record<string, unknown>][] = [
-      ["set_title", { title: "Reworded topic" }],
-      ["set_tldr", { tldr: "Changed decision line." }],
+      ["set_metadata", { title: "Reworded topic" }],
+      ["set_metadata", { tldr: "Changed decision line." }],
       ["edit_block", { block_id: block.id, old_text: block.text, new_text: "Changed text.", rev: block.rev }],
       ["insert_block", { type: "paragraph", text: "Additional reasoning." }],
       ["delete_block", { block_id: block.id }],
@@ -163,9 +163,9 @@ describe("decision authority through MCP", () => {
     for (const [name, args] of mutations) await refuse(rig, name, { uuid: record.uuid, ...args }, "decision_read_only", record.uuid);
     const thread = await rig.ok("annotate", { uuid: record.uuid, block_id: block.id, start: 0, end: 3, text: "Discuss the rationale." });
     await rig.ok("annotate", { uuid: record.uuid, thread_id: thread.annotation.id, text: "Resolved in discussion.", resolved: true });
-    await rig.ok("set_description", { uuid: record.uuid, description: "Updated discovery copy." });
-    await rig.ok("set_tags", { uuid: record.uuid, tags: ["mcp"] });
-    await rig.ok("set_links", { uuid: record.uuid, links: [target.uuid] });
+    await rig.ok("set_metadata", { uuid: record.uuid, description: "Updated discovery copy." });
+    await rig.ok("set_metadata", { uuid: record.uuid, tags: ["mcp"] });
+    await rig.ok("set_metadata", { uuid: record.uuid, links: [target.uuid] });
     const read = await rig.ok("get_doc", { uuid: record.uuid });
     expect(read).toMatchObject({ title: "Persistence", tldr: "Use the update log.", approvalChanged: false, description: "Updated discovery copy." });
     expect(read.blocks[0].text).toBe(block.text);
@@ -180,7 +180,7 @@ describe("decision authority through MCP", () => {
       expect((await rig.ok("get_doc", { uuid: record.uuid })).tldr).toBe(tldr);
       expect(getDirectoryEntry(rig.instance.replicas.directory().doc, record.uuid)?.tldr).toBe(tldr);
       expect((await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs.find((row: any) => row.uuid === record.uuid)?.tldr).toBe(tldr);
-      expect(JSON.stringify(record)).not.toContain("set_tldr");
+      expect(record).not.toHaveProperty("tldrHint");
     }
     expect(getMetaMap(rig.instance.replicas.replica(next.uuid).doc).get("approvalFingerprint")).toEqual(expect.any(String));
     expect((await rig.ok("get_doc", { uuid: (await decision(rig)).uuid })).tldr).toBeNull();
@@ -189,7 +189,7 @@ describe("decision authority through MCP", () => {
     expect((await rig.ok("get_doc", { uuid: exact.uuid })).tldr).toHaveLength(MAX_TLDR_LENGTH);
     for (const tldr of ["", "  ", "x".repeat(MAX_TLDR_LENGTH + 1)]) {
       const before = state(rig);
-      expect((await rig.call("create_doc", { title: "Invalid line", description: "The same TL;DR limits as set_tldr.", kind: "decision", status: "decided", tldr })).payload.error).toBe("schema_validation");
+      expect((await rig.call("create_doc", { title: "Invalid line", description: "The same TL;DR limits as set_metadata.", kind: "decision", status: "decided", tldr })).payload.error).toBe("schema_validation");
       expect(state(rig)).toEqual(before);
     }
   });

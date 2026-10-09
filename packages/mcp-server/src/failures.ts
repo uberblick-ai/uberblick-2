@@ -117,11 +117,7 @@ export const DOCUMENT_MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "edit_block",
   "insert_block",
   "delete_block",
-  "set_tags",
-  "set_links",
-  "set_title",
-  "set_description",
-  "set_tldr",
+  "set_metadata",
   "set_status",
   "archive_doc",
   "restore_doc",
@@ -644,6 +640,7 @@ export function toFailure(tool: string, error: unknown): ToolFailure {
       message: error.message,
       unknown: error.unknown,
       retired: error.retired,
+      ...(tool === "set_metadata" ? { field: "tags" } : {}),
     });
   }
   if (error instanceof ToolError) {
