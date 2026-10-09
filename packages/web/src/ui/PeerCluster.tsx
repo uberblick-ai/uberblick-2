@@ -134,6 +134,7 @@ export function PeerCluster({
                 </TooltipTrigger>
                 <TooltipContent align="end">
                   {session.name} · {session.kind === "agent" ? "agent" : "person"}
+                  {session.departed ? " · left" : ""}
                 </TooltipContent>
               </Tooltip>
             );
@@ -144,7 +145,7 @@ export function PeerCluster({
                 ref={overflowTrigger}
                 type="button"
                 className={`${PEER_CONTROL_CLASS} ub-peer-more border border-solid border-(--border) bg-(--secondary) text-(--secondary-foreground) font-(family-name:--font-sans) text-[0.7rem] font-semibold [line-height:inherit]`}
-                aria-label={`${remaining.length} more active ${
+                aria-label={`${remaining.length} more ${
                   remaining.length === 1 ? "collaborator" : "collaborators"
                 }`}
                 onFocus={() => {
@@ -163,7 +164,7 @@ export function PeerCluster({
             ref={overflow}
             align="end"
             className="ub-peer-overflow"
-            aria-label="More active collaborators"
+            aria-label="More collaborators"
             onInteractOutside={() => {
               interactedOutside.current = true;
             }}
@@ -194,6 +195,7 @@ export function PeerCluster({
                 <span className="ub-peer-overflow-name">{session.name}</span>
                 <span className="ub-muted">
                   {session.kind === "agent" ? "agent" : "person"}
+                  {session.departed ? " · left" : ""}
                 </span>
               </button>
             ))}

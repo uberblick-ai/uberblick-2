@@ -87,6 +87,7 @@ import {
   useHubEndpoint,
   useIdentity,
   usePresence,
+  useTitlePresence,
   useRoom,
   useRoomStatus,
   useSidebar,
@@ -606,11 +607,11 @@ export function App(): ReactElement {
     chromeRoom?.room ?? directory?.room ?? null,
   );
   /**
-   * Who else is in that room, read *here* and handed to every reader of it. The
-   * status line's strip draws them as circles and the sync panel lists them in
-   * words; one subscription over the awareness map keeps both views identical.
+   * Present now reads live awareness. The title cluster also shows departed
+   * agents for exactly as long as their named editor cursors remain visible.
    */
   const presence = usePresence(chromeRoom);
+  const titlePresence = useTitlePresence(chromeRoom);
   /**
    * The agent sessions the user menu counts. It is a workspace-wide fact, so
    * the directory is the room every session joins.
@@ -1066,7 +1067,7 @@ export function App(): ReactElement {
               route={route}
               configured={hubReady}
               connection={doc}
-              presence={presence}
+              presence={titlePresence}
               endpoint={statusEndpoint}
               hubAcked={serving === null ? undefined : servingStatus?.hubAcked ?? null}
               notSharedReason={servingStatus?.notSharedReason ?? null}
@@ -1107,7 +1108,7 @@ export function App(): ReactElement {
               onToggleThreads={onToggleThreads}
               syncDetails
             />
-            {/* The popover reads the same room and sessions as its status trigger. */}
+            {/* Connection reporting excludes the title's retained departures. */}
             {route.kind === "doc" && (
               <PopoverContent
                 align="start"

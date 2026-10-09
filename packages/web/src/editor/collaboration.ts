@@ -25,8 +25,8 @@ import type * as Y from "yjs";
 import { AGENT_CLIENT } from "../collab/identity.js";
 
 /**
- * How long a departed agent's caret stays on screen after its session left the
- * room (ms).
+ * How long a departed agent's caret and title avatar stay after its session
+ * left the room (ms).
  *
  * An MCP client that writes one block and exits is gone from awareness within
  * milliseconds of the tool response, so the caret that says *who* wrote is on
@@ -39,10 +39,30 @@ import { AGENT_CLIENT } from "../collab/identity.js";
  * write while a session is connected, this one from the moment it leaves — so
  * an agent that writes, lingers and then exits is drawn for up to the sum.
  * Mistaking it for presence is ruled out elsewhere, not by the number: the
- * retention is a decoration inside this one editor, and every count and
- * presence list reads the real awareness states.
+ * title avatar is muted and labelled as left. Connection counts and the sync
+ * panel's Present now list still read the real awareness states.
  */
 export const AGENT_CURSOR_GRACE_MS = 30_000;
+
+/** Local presentation metadata; never an awareness field published on the wire. */
+export type AgentCursorAwareness = Awareness & {
+  isDeparted(clientId: number): boolean;
+};
+
+const documentViews = new WeakMap<Awareness, AgentCursorAwareness>();
+
+/**
+ * One retention decision per provider's document room. The shell's subscription
+ * keeps it alive across editor rebinds; the last reader leaving clears it.
+ */
+export function agentCursorAwareness(awareness: Awareness): AgentCursorAwareness {
+  let view = documentViews.get(awareness);
+  if (view === undefined) {
+    view = withDepartedAgentCursors(awareness, AGENT_CURSOR_GRACE_MS);
+    documentViews.set(awareness, view);
+  }
+  return view;
+}
 
 /** An awareness state as it arrives on the wire — see `collab/identity.ts`. */
 type AwarenessState = Record<string, unknown> & {
@@ -79,24 +99,22 @@ function isAttributedAgentCursor(
  * that drew them.
  *
  * A *view*, deliberately: the retained state is never written back into the
- * awareness instance the rest of the app reads. Presence chips, the agent
- * count and the sync panel all read the real states, so a session that left
- * stops being present the instant it leaves — the grace is a decoration in one
- * editor and nothing else. Nothing is republished, no transport is held open,
+ * awareness instance the rest of the app reads. The title cluster shares this
+ * view and labels retained sessions as left; connection counts and Present now
+ * read real states. Nothing is republished, no transport is held open,
  * and nothing reaches the Y.Doc; a reload starts with an empty map.
  *
- * Only the handful of members `yCursorPlugin` uses are implemented, hence the
- * cast at the end. Its `change` listener is the one the expiry has to reach, so
- * that subscription is ours; every other event is passed straight through.
+ * Only the members the cursor plugin and title presence reader use are
+ * implemented, hence the cast at the end. Expiry reaches their `change`
+ * listeners; every other event is passed straight through.
  *
  * Exported so the grace can be driven on fake timers without an editor and a
- * hub in the way; the one caller in the extension below is the production
- * wiring, and passes {@link AGENT_CURSOR_GRACE_MS}.
+ * hub in the way; production readers share {@link agentCursorAwareness}.
  */
 export function withDepartedAgentCursors(
   awareness: Awareness,
   graceMs: number,
-): Awareness {
+): AgentCursorAwareness {
   type Listener = (...args: unknown[]) => void;
   interface Change {
     added: number[];
@@ -159,6 +177,8 @@ export function withDepartedAgentCursors(
   };
 
   return {
+    clientID: awareness.clientID,
+    isDeparted: (clientId: number) => retained.has(clientId),
     getStates(): Map<number, AwarenessState> {
       const live = awareness.getStates() as Map<number, AwarenessState>;
       if (retained.size === 0) return live;
@@ -177,9 +197,9 @@ export function withDepartedAgentCursors(
         awareness.on(event, listener);
         return;
       }
-      // Subscribed for exactly as long as somebody is watching: the plugin's
-      // own `destroy` is what takes the last listener away, so this view leaves
-      // nothing behind on an awareness instance shared by every open room.
+      // Subscribed for exactly as long as somebody is watching. An editor
+      // rebind cannot reset the title's lifetime; leaving the document takes
+      // both readers away and clears every retained state and timer.
       if (listeners.size === 0) {
         remember();
         awareness.on("change", onChange);
@@ -197,7 +217,7 @@ export function withDepartedAgentCursors(
       for (const clientId of [...retained.keys()]) forget(clientId);
       lastSeen.clear();
     },
-  } as unknown as Awareness;
+  } as unknown as AgentCursorAwareness;
 }
 
 export interface CollaborationOptions {
@@ -221,7 +241,7 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     if (awareness !== null) {
       plugins.push(
         yCursorPlugin(
-          withDepartedAgentCursors(awareness, AGENT_CURSOR_GRACE_MS),
+          agentCursorAwareness(awareness),
         ) as unknown as Plugin,
       );
     }

@@ -5,13 +5,14 @@
  */
 
 import { act, render, type RenderResult } from "./react-render.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { flushSync } from "react-dom";
 import * as Y from "yjs";
 import {
   applyAwarenessUpdate,
   Awareness,
   encodeAwarenessUpdate,
+  removeAwarenessStates,
 } from "y-protocols/awareness";
 import {
   appendBlock,
@@ -25,6 +26,7 @@ import {
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { AGENT_CLIENT, AWARENESS_FALLBACK_COLOR } from "../src/collab/identity.js";
 import { readPresence } from "../src/ui/doc-chrome.js";
+import { AGENT_CURSOR_GRACE_MS, agentCursorAwareness } from "../src/editor/collaboration.js";
 import {
   useAgentSessions,
   useDirectory,
@@ -38,6 +40,7 @@ import {
   useRawBlocks,
   useSidebar,
   useThreads,
+  useTitlePresence,
 } from "../src/ui/hooks.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
@@ -66,6 +69,7 @@ afterEach(() => {
     fixture.peerDoc.destroy();
     fixture.ydoc.destroy();
   }
+  vi.useRealTimers();
 });
 
 function fixture(room: string, title?: string): Fixture {
@@ -151,6 +155,7 @@ function useReading(connection: RoomConnection | null) {
     peers: usePeers(connection),
     agentSessions: useAgentSessions(connection),
     presence: usePresence(connection),
+    titlePresence: useTitlePresence(connection),
     rev: useDocRev(connection),
     blocks: useRawBlocks(connection),
     outline: useOutline(connection),
@@ -167,6 +172,7 @@ const EMPTY = {
   peers: [],
   agentSessions: 0,
   presence: [],
+  titlePresence: [],
   rev: null,
   blocks: [],
   outline: [],
@@ -201,6 +207,7 @@ describe("connection-scoped readings", () => {
       expect(populated.peers).toHaveLength(1);
       expect(populated.agentSessions).toBe(1);
       expect(populated.presence).toHaveLength(1);
+      expect(populated.titlePresence).toHaveLength(1);
       expect(populated.rev).toMatch(/^[0-9a-f]{8}$/);
       expect(populated.blocks).toHaveLength(3);
       expect(populated.outline).toHaveLength(1);
@@ -327,9 +334,11 @@ describe("connection-scoped readings", () => {
     join(fix, {});
     let peers: ReturnType<typeof usePeers> = [];
     let agents = 0;
+    let titlePresence: ReturnType<typeof useTitlePresence> = [];
     function Probe(): null {
       peers = usePeers(fix.connection);
       agents = useAgentSessions(fix.connection);
+      titlePresence = useTitlePresence(fix.connection);
       return null;
     }
 
@@ -343,6 +352,7 @@ describe("connection-scoped readings", () => {
     });
     expect(agents).toBe(1);
     const presence = readPresence(fix.ydoc, fix.awareness);
+    expect(titlePresence).toEqual(presence);
     expect(presence.map(({ clientId }) => clientId).sort()).toEqual(
       [fallback.clientId, agent.clientId, human.clientId, cursorOnly.clientId].sort(),
     );
@@ -375,5 +385,82 @@ describe("connection-scoped readings", () => {
       session: null,
       block: 1,
     });
+    expect(titlePresence).toEqual(readPresence(fix.ydoc, fix.awareness));
+    act(() => removeAwarenessStates(fix.awareness, [agent.clientId], "test"));
+    expect(titlePresence.some(({ clientId }) => clientId === agent.clientId)).toBe(false);
+  });
+
+  it("retains title attribution with the cursor while live reporting drops the departed agent", () => {
+    vi.useFakeTimers();
+    const fix = fixture(`${WORKSPACE}/departure`);
+    const state = {
+      user: { name: "Agent", color: "#123456" },
+      client: AGENT_CLIENT,
+      cursor: { anchor: 3, head: 3 },
+    };
+    publish(fix, state);
+    let reading: Pick<ReturnType<typeof useReading>, "titlePresence" | "presence" | "agentSessions">;
+    function Probe(): null {
+      reading = {
+        titlePresence: useTitlePresence(fix.connection),
+        presence: usePresence(fix.connection),
+        agentSessions: useAgentSessions(fix.connection),
+      };
+      return null;
+    }
+    render(<Probe />);
+    const cursorView = agentCursorAwareness(fix.awareness);
+    expect(reading!.titlePresence).toEqual(reading!.presence);
+    expect(reading!.agentSessions).toBe(1);
+    act(() => removeAwarenessStates(fix.awareness, [fix.peer.clientID], "test"));
+    expect(reading!.titlePresence).toMatchObject([
+      { clientId: fix.peer.clientID, name: "Agent", departed: true },
+    ]);
+    expect(reading!.presence).toEqual([]);
+    expect(reading!.agentSessions).toBe(0);
+    expect(cursorView.getStates().get(fix.peer.clientID)?.cursor).toEqual(state.cursor);
+
+    act(() => vi.advanceTimersByTime(1_000));
+    act(() => publish(fix, { ...state, cursor: { anchor: 9, head: 9 } }));
+    expect(reading!.titlePresence).toHaveLength(1);
+    expect(reading!.titlePresence[0]?.departed).toBeUndefined();
+    expect(reading!.titlePresence).toEqual(reading!.presence);
+    expect(reading!.agentSessions).toBe(1);
+    act(() => vi.advanceTimersByTime(AGENT_CURSOR_GRACE_MS - 1_000));
+    expect(reading!.titlePresence).toHaveLength(1);
+    expect(cursorView.getStates().get(fix.peer.clientID)?.cursor).toEqual({ anchor: 9, head: 9 });
+
+    act(() => removeAwarenessStates(fix.awareness, [fix.peer.clientID], "test"));
+    act(() => vi.advanceTimersByTime(AGENT_CURSOR_GRACE_MS - 1));
+    expect(reading!.titlePresence).toHaveLength(1);
+    expect(reading!.presence).toEqual([]);
+    expect(reading!.agentSessions).toBe(0);
+    act(() => vi.advanceTimersByTime(1));
+    expect(reading!.titlePresence).toEqual([]);
+    expect(cursorView.getStates().has(fix.peer.clientID)).toBe(false);
+  });
+
+  it("clears retained title and cursor readings when leaving and reopening the document", () => {
+    vi.useFakeTimers();
+    const fix = fixture(`${WORKSPACE}/departure`);
+    publish(fix, {
+      user: { name: "Agent", color: "#123456" },
+      client: AGENT_CLIENT,
+      cursor: { anchor: 3, head: 3 },
+    });
+    const seen: Array<ReturnType<typeof useTitlePresence>> = [];
+    function Probe({ current }: { current: RoomConnection | null }): null {
+      seen.push(useTitlePresence(current));
+      return null;
+    }
+    const view = render(<Probe current={fix.connection} />);
+    act(() => removeAwarenessStates(fix.awareness, [fix.peer.clientID], "test"));
+    expect(seen.at(-1)?.[0]?.departed).toBe(true);
+    const before = seen.length;
+    view.rerender(<Probe current={null} />);
+    for (const reading of seen.slice(before)) expect(reading).toEqual([]);
+    expect(agentCursorAwareness(fix.awareness).getStates().has(fix.peer.clientID)).toBe(false);
+    view.rerender(<Probe current={fix.connection} />);
+    expect(seen.at(-1)).toEqual([]);
   });
 });
