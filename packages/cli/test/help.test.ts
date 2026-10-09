@@ -32,7 +32,6 @@ import {
   AUTH_STATUS_HELP,
 } from "../src/auth.js";
 import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
-import { ENV_HELP } from "../src/env.js";
 import { INIT_HELP, INIT_OPTIONS } from "../src/init.js";
 import { INSTALL_HELP, INSTALL_OPTIONS } from "../src/install.js";
 import { OPEN_HELP, OPEN_OPTIONS } from "../src/open.js";
@@ -154,7 +153,6 @@ const PATHS: Path[] = [
   { argv: ["auth", "logout"], help: AUTH_LOGOUT_HELP, options: AUTH_LOGOUT_OPTIONS },
   { argv: ["mcp"], help: MCP_HELP, options: {}, children: ["install"] },
   { argv: ["mcp", "install"], help: INSTALL_HELP, options: INSTALL_OPTIONS },
-  { argv: ["env"], help: ENV_HELP, options: {} },
 ];
 
 ROOT_PATH.children = PATHS.flatMap(({ argv }) => (argv.length === 1 ? argv : []));
@@ -341,6 +339,17 @@ describe("every human-facing command path", () => {
     expect(removed.stdout).toBe("");
     expect(removed.stderr).toContain("unknown command");
   });
+
+  it.each([{ argv: ["env"] }, { argv: ["env", "--", process.execPath, "-e", "process.exit(99)"] }])(
+    "refuses the removed wrapper through generic unknown-command handling: %j",
+    async ({ argv }) => {
+      expect(HELP).not.toMatch(/^ {2}env\b/m);
+      const removed = await dispatch(argv);
+      expect(removed.status).toBe(2);
+      expect(removed.stdout).toBe("");
+      expect(removed.stderr).toBe(`ub: unknown command "env"\n\n${HELP}`);
+    },
+  );
 
   it("describes init's MCP option as print-only", () => {
     expect(INIT_HELP).toMatch(

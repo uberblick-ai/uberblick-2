@@ -364,7 +364,7 @@ describe("the committed mise config", () => {
   // programs that do read it — vite bakes it into a dev bundle — so a committed
   // endpoint here would still bind a checkout to whatever the repository
   // guessed (#376, #385). The address belongs in the clients' code as a
-  // fallback, and the real one in this machine's `config.json`, which `ub env`
+  // fallback, and the real one in this machine's `config.json`, which the resolver
   // is what puts in front of a task.
   it("exports no HUB_URL, so a checkout binds no endpoint", () => {
     const assignments = readFileSync(join(REPO_ROOT, "mise.toml"), "utf8")

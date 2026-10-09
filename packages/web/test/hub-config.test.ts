@@ -35,7 +35,6 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { devConfigDocument } from "../dev-config-document.js";
 import {
@@ -49,13 +48,14 @@ import {
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(webRoot, "../..");
+declare const __HUB_URL__: string;
 
 /**
  * The value `vite.config.ts` injects, which is what the dev server, `pnpm test`
  * and a default build all see. Named rather than repeated so these tests read
  * as being about precedence rather than about one address.
  */
-const INJECTED = process.env.HUB_URL ?? "ws://localhost:1234";
+const INJECTED = __HUB_URL__;
 
 /** Two workspaces a served document could name — one decorated, one bare. */
 const FIRST = "uberblick-6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
@@ -114,7 +114,7 @@ function serving(...answers: Array<{ status?: number; body: string }>): {
  * The workspaces this build carries, read back through the module rather than
  * restated here.
  *
- * `WORKSPACE_ID` and `WORKSPACES` come from the environment vite was started
+ * The workspace binding and `WORKSPACES` come from the configuration vite resolved
  * in, and a contributor's machine has its own ids. What these tests pin is the
  * precedence — that every unusable answer lands on the *same* built-in list —
  * not what one developer's configuration happens to say.
@@ -311,16 +311,13 @@ describe("the served configuration", () => {
     }
   });
 
-  it("keeps the development key when an unbound checkout uses its compiled loopback endpoint", async () => {
-    // Plain ub init stores no hub binding. ub env supplies its signing key,
-    // while the dev server's document names no endpoint and the bundle falls
-    // back to its compiled value.
+  it("keeps the development key for a local binding and its loopback endpoint", async () => {
     const config = await readClientConfig(serving({
-      body: devConfigDocument({ HUB_AUTH_TOKEN: "dev-secret" }),
+      body: devConfigDocument({ UB_WORKSPACE_ID: FIRST, UB_HUB_URL: "local", HUB_AUTH_TOKEN: "dev-secret" }),
     }).fetch);
-    expect(config.hubUrl).toBe(INJECTED);
-    expect(config.hubUrlSource).toBe("define");
-    expect(config.hubAuthToken).toBe(isLoopbackEndpoint(INJECTED) ? "dev-secret" : "");
+    expect(config.hubUrl).toBe("ws://localhost:1234/");
+    expect(config.hubUrlSource).toBe("document");
+    expect(config.hubAuthToken).toBe("dev-secret");
   });
 });
 
@@ -591,17 +588,17 @@ describe("the deployments that serve it", () => {
     expect(guard).toContain("*[!A-Za-z0-9,-]*)");
     expect(guard).not.toContain("HUB_AUTH_TOKEN");
 
-    // The dev server answers the same path from one middleware, out of the
-    // environment `ub env` resolves — `mise run web`, `mise run dev`, the e2e
+    // The dev server answers the same path from one middleware, through the
+    // shared binding resolver — `mise run web`, `mise run dev`, the e2e
     // harness and the first-user proof all read this. Repeating the default
     // workspace in `WORKSPACES` is the ordinary configuration, and the menu
     // must not show it twice.
     expect(
       JSON.parse(
         devConfigDocument({
-          HUB_URL: "ws://127.0.0.1:4321",
+          UB_HUB_URL: "ws://127.0.0.1:4321",
           HUB_AUTH_TOKEN: "dev-secret",
-          WORKSPACE_ID: FIRST,
+          UB_WORKSPACE_ID: FIRST,
           WORKSPACES: `${FIRST},${SECOND}`,
         }),
       ),

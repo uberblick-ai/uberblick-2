@@ -12,7 +12,6 @@
 
 import { authCommand } from "./auth.js";
 import { doctorCommand } from "./doctor.js";
-import { envCommand } from "./env.js";
 import { initCommand } from "./init.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
@@ -40,8 +39,6 @@ commands:
   workspace [command]    create, promote, join, list or select a workspace
   auth [command]         sign in to a remote hub and manage this machine's login
   mcp <command>          register uberblick with an MCP client
-  env -- <command...>    run a command with uberblick's configuration in its
-                         environment
 
 options:
   -h, --help        show this help; after a command, that command's help
@@ -98,9 +95,6 @@ export async function runCli(
   }
   if (command === "auth") {
     return await authCommand(rest, io);
-  }
-  if (command === "env") {
-    return await envCommand(rest, io);
   }
   if (command === "mcp") {
     const [subcommand, ...args] = rest;

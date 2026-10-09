@@ -4,9 +4,8 @@
  * One question, one answer, and only ever used to decide whether to *mention*
  * the contributor tasks: the mise tasks exist in a checkout and nowhere else, so
  * `ub init` names `mise run dev` there and stays quiet outside. Nothing is
- * written into a checkout and nothing is read out of one — the configuration a
- * task needs comes from `ub env`, which resolves it from this machine's own
- * files.
+ * written by this detector. Development tasks resolve the project binding and
+ * this machine's private credentials themselves.
  */
 
 import { existsSync, readFileSync } from "node:fs";

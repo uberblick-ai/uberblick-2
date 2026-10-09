@@ -287,7 +287,7 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
   await expect(docButton(page, title)).toBeVisible();
 });
 
-test("an unbound development config keeps its local key with the compiled loopback endpoint", async ({ browser }) => {
+test("a development binding keeps its local key with its loopback endpoint", async ({ browser }) => {
   // This one proof needs a bundle whose compiled endpoint is a real hub.
   // The file's ordinary harness continues serving the shared run artifact.
   const context = trackContext(await browser.newContext());
@@ -296,7 +296,7 @@ test("an unbound development config keeps its local key with the compiled loopba
     await context.route("**/uberblick-config.json", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json",
         body: devConfigDocument({
-          WORKSPACE_ID: fallback.workspace, HUB_AUTH_TOKEN: fallback.authSecret,
+          UB_WORKSPACE_ID: fallback.workspace, UB_HUB_URL: fallback.hubUrl, HUB_AUTH_TOKEN: fallback.authSecret,
         }),
       });
     });
@@ -309,7 +309,7 @@ test("an unbound development config keeps its local key with the compiled loopba
     await editor(page).fill("A development write reaches the hub.");
 
     // A separate upstream browser receives the new document and edit, proving
-    // admission and transport through the fallback rather than only a UI state.
+    // admission and transport through the dev document rather than only a UI state.
     const upstream = await openUpstreamApp(browser, fallback, `/${fallback.workspace}/${uuid}`);
     const observer = upstream.page;
     trackContext(upstream.context);

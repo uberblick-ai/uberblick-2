@@ -11,7 +11,7 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "preview": "vite preview",
-    "agent-cursor": "tsx scripts/agent-cursor-demo.ts"
+    "agent-cursor": "node --import tsx scripts/agent-cursor-demo.ts"
   },
   "dependencies": {
     "@atlaskit/pragmatic-drag-and-drop-live-region": "2.1.0",

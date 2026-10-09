@@ -8,6 +8,7 @@ import { dirname } from "node:path";
 import { validateWorkspaceName } from "@uberblick/schema";
 import { credentialsPath } from "./storage.js";
 export { CREDENTIALS_FILE, credentialsPath } from "./storage.js";
+import { authenticationOrigin, isLoopbackEndpoint } from "./remote-url.js";
 import { acquireInitLock } from "./init-lock.js";
 import { publishOwnerOnly, writeTempBeside } from "./safe-write.js";
 
@@ -169,6 +170,14 @@ function readStore(env: NodeJS.ProcessEnv): Store {
 export function readHubLogins(env: NodeJS.ProcessEnv = process.env): HubLogins {
   const { raw: _raw, ...result } = readStore(env);
   return result;
+}
+
+/** A loopback proxy can reach a hub whose own bind requires device credentials. */
+export function usesDeviceCredentials(endpoint: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!isLoopbackEndpoint(endpoint) || env.HUB_ADMISSION === "device") return true;
+  const origin = authenticationOrigin(endpoint);
+  const store = readHubLogins(env);
+  return store.logins[origin] !== undefined || store.unreadableHubs.includes(origin);
 }
 
 function editableStore(env: NodeJS.ProcessEnv): Store {

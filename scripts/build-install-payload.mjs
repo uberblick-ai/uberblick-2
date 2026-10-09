@@ -81,8 +81,8 @@ async function main() {
 		let webDist = process.env.UBERBLICK_PAYLOAD_WEB_DIST;
 		if (webDist === undefined) {
 			webDist = join(scratch, "web-dist");
-			const buildEnvironment = { ...process.env };
-			for (const key of ["HUB_AUTH_TOKEN", "HUB_URL", "WORKSPACE_ID", "WORKSPACES"]) {
+			const buildEnvironment = { ...process.env, UBERBLICK_RELEASE_WEB: "1" };
+			for (const key of ["HUB_AUTH_TOKEN", "HUB_URL", "WORKSPACE_ID", "WORKSPACES", "UB_WORKSPACE_ID", "UB_HUB_URL"]) {
 				delete buildEnvironment[key];
 			}
 			// The package build cannot redirect Vite away from the checkout's dist,

@@ -8,10 +8,9 @@
  * server for it — Caddy's `respond`, or `ub open`'s handler — and this file is
  * deliberately not part of the bundle.
  *
- * It answers from `process.env`, read per request rather than at config time:
- * the e2e harness sets `HUB_URL`, `HUB_AUTH_TOKEN`, `WORKSPACE_ID` and
- * `WORKSPACES` around `createServer`, and `mise run web` gets them from
- * `fnox exec -- ub env --`, which is this machine's own configuration.
+ * It resolves the project binding and private credentials on each request,
+ * through the same resolver as the CLI. A local binding uses the dev hub's
+ * loopback address; an explicit UB_WORKSPACE_ID/UB_HUB_URL pair overrides it.
  *
  * **It serves the signing secret**, because since #426 that is where the client
  * reads it. On a dev server that is the owner's own secret handed to anything
@@ -20,30 +19,26 @@
  */
 
 import type { Plugin } from "vite";
+import { resolveDevProjectConfig } from "./dev-project-config.js";
+export { resolveDevProjectConfig } from "./dev-project-config.js";
 
 /** Contract, shared with `src/config.ts`, the Caddyfile and `ub open`. */
 const HUB_CONFIG_PATH = "/uberblick-config.json";
 
 /**
- * The document this machine's environment describes.
+ * The document this project's binding and machine credentials describe.
  *
- * The workspace list is `WORKSPACE_ID` first — it is what `/` opens — then
+ * The workspace list is the bound workspace first — it is what `/` opens — then
  * `WORKSPACES`, deduplicated, exactly as the build-time defines composed it:
  * naming the default workspace in both is the ordinary configuration, and a
  * menu that offered it twice would be a bug the reader sees.
  */
-export function devConfigDocument(env: NodeJS.ProcessEnv): string {
-  const workspaces = [
-    ...new Set(
-      [env.WORKSPACE_ID ?? "", ...(env.WORKSPACES ?? "").split(",")]
-        .map((entry) => entry.trim())
-        .filter((entry) => entry !== ""),
-    ),
-  ];
+export function devConfigDocument(env: NodeJS.ProcessEnv, cwd = process.cwd()): string {
+  const config = resolveDevProjectConfig({ env, cwd });
   return JSON.stringify({
-    hubUrl: env.HUB_URL ?? "",
-    workspaces,
-    hubAuthToken: env.HUB_AUTH_TOKEN ?? "",
+    hubUrl: config.hubUrl,
+    workspaces: config.workspaces,
+    hubAuthToken: config.hubAuthToken,
   });
 }
 

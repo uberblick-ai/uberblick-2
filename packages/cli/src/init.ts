@@ -47,8 +47,8 @@
  * with, not a token. When a secret is already in force — from fnox, or from the
  * user's own shell — nothing is generated. Otherwise a fresh 32-byte value is
  * written to `credentials.json` (mode 0600), which is the authority every reader
- * goes to: the mise tasks reach it through `ub env`, and `.mcp.json` spawns
- * `ub mcp serve`, which resolves it. It is never printed: not by the report
+ * goes to: development tasks and `ub mcp serve` use the same resolver.
+ * It is never printed: not by the report
  * below, not by an error path, not by a warning. The one thing said about it is
  * where it came from.
  *

@@ -201,6 +201,10 @@ it("a release build has no endpoint or workspace fallback, and takes every deplo
   const before = { ...process.env };
   try {
     process.env.UBERBLICK_RELEASE_WEB = "1";
+    // Even an invalid project override must be ignored: release assets never
+    // inspect the builder's binding or credential configuration.
+    process.env.UB_HUB_URL = "wss://release-build-sentinel.invalid/ws";
+    process.env.UB_WORKSPACE_ID = "release-build-workspace-sentinel";
     process.env.HUB_URL = "wss://release-build-sentinel.invalid/ws";
     process.env.WORKSPACE_ID = "release-build-workspace-sentinel";
     process.env.WORKSPACES = "release-build-workspaces-sentinel";

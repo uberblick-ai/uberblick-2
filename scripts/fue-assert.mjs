@@ -337,17 +337,13 @@ async function get(path, accept) {
 }
 
 async function main() {
-  // 0. `ub` itself, before anything asks it a question. Every task in the
-  //    checkout runs its command through `ub env --`, so a `mise run dev` on a
-  //    machine where the install did not put `ub` on PATH fails at the wrapper
-  //    with nothing said about the endpoint or the secret — and the first
-  //    honest report of that belongs here, ahead of the tasks.
+  // 0. `ub` itself, before starting the development services. The documented
+  //    install must put the CLI on PATH for contributors and MCP clients.
   await assert("`ub` is on PATH after the documented install", async () => {
     const found = await run("sh", ["-c", "command -v ub"]);
     if (found.code !== 0 || found.stdout.trim() === "") {
       throw new Error(
-        "`ub` is not on PATH after `mise run setup`, so every mise task that " +
-          "wraps its command in `ub env --` would fail before it started",
+        "`ub` is not on PATH after `mise run setup`; contributor commands and MCP clients cannot start it",
       );
     }
     const version = await run("ub", ["--version"]);
