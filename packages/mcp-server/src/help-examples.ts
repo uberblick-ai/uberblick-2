@@ -1,6 +1,9 @@
+import { toolHelpDetails } from "./help-details.js";
+
 /** Examples and shared-contract links for the tools registered by this server. */
 export interface ToolHelpEntry {
   example: Record<string, unknown>;
+  details?: string;
   related: readonly string[];
 }
 
@@ -16,6 +19,7 @@ export const toolHelpEntries: Record<string, ToolHelpEntry> = {
     related: ["workspaces", "tool-contracts"],
   },
   create_doc: {
+    details: toolHelpDetails.create_doc,
     example: {
       title: "Release checklist",
       description: "The steps and checks used to prepare a product release.",
@@ -24,10 +28,12 @@ export const toolHelpEntries: Record<string, ToolHelpEntry> = {
     related: proseContracts,
   },
   get_doc: {
+    details: toolHelpDetails.get_doc,
     example: { uuid },
     related: [...proseContracts, "data"],
   },
   get_data: {
+    details: toolHelpDetails.get_data,
     example: { uuid, collection: "tasks", limit: 20 },
     related: dataContracts,
   },
@@ -54,10 +60,12 @@ export const toolHelpEntries: Record<string, ToolHelpEntry> = {
     related: dataContracts,
   },
   list_docs: {
+    details: toolHelpDetails.list_docs,
     example: { kind: "requirement", status: "planned" },
     related: documentContracts,
   },
   search: {
+    details: toolHelpDetails.search,
     example: { query: "release checklist", limit: 10 },
     related: documentContracts,
   },
@@ -66,10 +74,12 @@ export const toolHelpEntries: Record<string, ToolHelpEntry> = {
     related: documentContracts,
   },
   find_decisions: {
+    details: toolHelpDetails.find_decisions,
     example: { github_ref: "example/project#42" },
     related: documentContracts,
   },
   edit_block: {
+    details: toolHelpDetails.edit_block,
     example: {
       uuid,
       block_id: "paragraph-1",
@@ -80,6 +90,7 @@ export const toolHelpEntries: Record<string, ToolHelpEntry> = {
     related: proseContracts,
   },
   insert_block: {
+    details: toolHelpDetails.insert_block,
     example: {
       uuid,
       after_block_id: "paragraph-1",
@@ -120,18 +131,22 @@ export const toolHelpEntries: Record<string, ToolHelpEntry> = {
     related: documentContracts,
   },
   set_changelog_suggestion: {
+    details: toolHelpDetails.set_changelog_suggestion,
     example: { uuid, suggestion: "Find product help by topic directly from your MCP client." },
     related: documentContracts,
   },
   archive_doc: {
+    details: toolHelpDetails.archive_doc,
     example: { uuid },
     related: documentContracts,
   },
   restore_doc: {
+    details: toolHelpDetails.restore_doc,
     example: { uuid },
     related: documentContracts,
   },
   annotate: {
+    details: toolHelpDetails.annotate,
     example: {
       uuid,
       block_id: "paragraph-1",
@@ -142,6 +157,7 @@ export const toolHelpEntries: Record<string, ToolHelpEntry> = {
     related: proseContracts,
   },
   link_range: {
+    details: toolHelpDetails.link_range,
     example: {
       uuid,
       block_id: "paragraph-1",
@@ -157,6 +173,7 @@ export const toolHelpEntries: Record<string, ToolHelpEntry> = {
     related: [...proseContracts, "data"],
   },
   sync_status: {
+    details: toolHelpDetails.sync_status,
     example: {},
     related: ["workspaces", "tool-contracts"],
   },

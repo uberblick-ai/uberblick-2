@@ -1,19 +1,8 @@
 /** Built-in product concepts. No workspace content or replica state enters these pages. */
-import { BLOCK_TYPES, DATA_LIMITS, MAX_TLDR_LENGTH } from "@uberblick/schema";
+import { BLOCK_TYPES, DATA_LIMITS, MAX_DESCRIPTION_LENGTH, MAX_TLDR_LENGTH } from "@uberblick/schema";
 import { GUIDANCE_INSTRUCTIONS } from "./briefing.js";
 import { FAILURE_INSTRUCTIONS } from "./failures.js";
-import {
-  ARCHIVED_IS_READ_ONLY,
-  ARCHIVE_IS_LAST_WRITE_WINS,
-  DECIDED_IS_READ_ONLY,
-  DECISION_AUTHORITY,
-  DECISION_EDGES,
-  DECISION_TOPIC_LIFECYCLE,
-  DESCRIPTION_IS_FOR_CHOOSING,
-  LIFECYCLE_RECORDS_STATE,
-  SYNCED_MEANS,
-  TLDR_AFTER_CONTENT_CHANGE,
-} from "./tools/descriptions.js";
+import { TLDR_AFTER_CONTENT_CHANGE } from "./tools/descriptions.js";
 
 export interface HelpTopic {
   id: string;
@@ -46,7 +35,7 @@ Start with \`get_sidebar({})\` for curated entry points, \`list_docs({})\` for d
 ## Metadata
 
 - \`title\` names the document. MCP creation requires a non-empty title and description; \`set_title\` repairs untitled documents.
-- \`description\` helps an agent choose whether to open a document. ${DESCRIPTION_IS_FOR_CHOOSING}
+- \`description\` is written for an agent deciding whether to open this document. One or two sentences saying what is in it and what it is for, concrete enough to tell it apart from its neighbours — list_docs, search and backlinks all answer with it, so a good one saves a get_doc and a bad one wastes it. At most ${MAX_DESCRIPTION_LENGTH} characters.
 - \`tldr\` is one or two sentences of plain English for a person opening the document, independent of its description. \`set_tldr\` accepts up to ${MAX_TLDR_LENGTH} characters, refuses empty or whitespace-only strings, and accepts null to clear it. Decision directory stubs cache it as the decision line; ordinary stubs, search and Markdown do not carry it. ${TLDR_AFTER_CONTENT_CHANGE}
 - \`tags\` store stable catalog ids. Call \`list_tags\` before choosing active ids or exact current names. \`set_tags\` replaces the complete assignment set. Existing retired or unresolved assignments may be preserved by their returned ids, or removed; they cannot be newly assigned. MCP cannot curate the catalog. \`list_tags\` reports \`complete: false\` until the catalog arrives from a configured hub, so an unseen selection cannot be assumed invalid in the full workspace.
 - Curated \`links\` are target document UUIDs, replaced by \`set_links\`. Inline document references also contribute backlinks. Decision-derived links and lifecycle metadata are explained in \`lifecycle\`.
@@ -55,7 +44,7 @@ Reads return absent description and TL;DR as null. Document writes can return no
 
 ## Sidebar organization
 
-The sidebar holds ordered named groups and pinned document UUIDs. Unpinned documents remain discoverable through listings, search, links and backlinks. Every sidebar tool returns the whole sidebar: ordered \`groups\` with \`id\`, \`name\` and ordered \`docs\`. Pinned titles come from directory stubs without opening document rooms. A pin's status is \`ok\`, \`archived\` (a pin that outlived an archive), or \`unknown\` (no directory entry).
+The sidebar holds ordered named groups and pinned document UUIDs. Unpinned documents remain discoverable through listings, search, links and backlinks. Every sidebar tool returns the whole sidebar: ordered \`groups\` with \`id\`, \`name\` and ordered \`docs\`, so a caller never has to re-read to see where a change landed. Pinned titles come from directory stubs without opening document rooms. A pin's status is \`ok\`, \`archived\` (the document is tombstoned but still pinned — archive_doc unpins, so this pin outlived the archive), or \`unknown\` (no directory entry at all — a document nothing can resolve, left visible so it can be unpinned).
 
 \`pin_doc\` creates a missing group by name and pins or moves a document; each document has at most one pin. \`index\` chooses its position, omitted means last. \`unpin_doc\` removes the pin without changing the document, and beats a concurrent move. \`sidebar_group\` renames, moves or deletes a group; deleting removes its pins and leaves its documents intact. \`create_doc\` may place a new document in an existing group by the id returned by \`get_sidebar\`; omitting placement creates it unpinned.
 
@@ -65,35 +54,39 @@ The sidebar holds ordered named groups and pinned document UUIDs. Unpinned docum
 
 const lifecycle = `# Decision records and lifecycle
 
-Ordinary documents omit \`kind\` and \`status\`. Requirements have kind \`requirement\` and states \`draft\`, \`planned\`, \`implementing\`, \`done\`; decisions have kind \`decision\` and states \`open\`, \`decided\`, \`rejected\`, \`withdrawn\`. ${LIFECYCLE_RECORDS_STATE}
+Ordinary documents omit \`kind\` and \`status\`. Requirements have kind \`requirement\` and states \`draft\`, \`planned\`, \`implementing\`, \`done\`; decisions have kind \`decision\` and states \`open\`, \`decided\`, \`rejected\`, \`withdrawn\`. \`kind\` and \`status\` record what sort of document this is and where it stands. They do not authorize execution: that authority comes from the owner's recorded GitHub decision.
 
 \`create_doc\` with a kind defaults to its first state. \`set_status\` can adopt the kind owning a status on an ordinary document; an existing kind is fixed through MCP. A decision is created only open or decided. An open proposal may withdraw without an answer. Decided records cannot reopen or withdraw; rejected and withdrawn records are final. Rejection requires a non-empty reason and a recorded person's answer, and applies to an open proposal, an agent stance or a decided record in conflict.
 
 ## Decision topics and authority
 
-${DECISION_AUTHORITY}
+A decision record is a topic followed by the decision itself, then its enduring reasons and guidance. A Reconsidering section is optional. Every MCP call follows the agent-account rule: a topic's first record, with no \`supersedes\`, may become \`decided\` as an \`agentStance\`. A topic crossing the agent workflow's boundary table starts \`open\` with the agent's recommendation, even as a first record. Any other move to \`decided\`, or confirming an agent stance, requires \`answer: {who, when, where}\`, recording a person's answer. The answer stores \`decidedBy\`, \`decidedAt\` and \`decidedWhere\`, clears the stance marker and approves the current title, decision line, ordered block text and structured data with an \`approvalFingerprint\`. Comments, comment anchors and approval bookkeeping are excluded. \`approvalChanged: true\` means changed after approval; recording an answer again approves the current content. get_doc returns where; list_docs and every \`inForce\`, \`pending\` and \`conflicts\` entry expose the stance, who, when and approvalChanged from stubs. During version skew, older clients fingerprint without structured data, so a decided record holding data can show \`approvalChanged\` differently per client.
 
 MCP validates the lifecycle transition and whether a recorded answer is required. It stores the supplied answer; it does not authenticate that person's external approval or decide which choices a project's workflow reserves to a person. Callers must obtain the authority their workflow requires before recording an answer or acting on a decision.
 
 A first record uses its own UUID as its immutable \`topic\`. A superseding record names its predecessor with \`supersedes\` and inherits that topic; topic is not a caller-supplied field. Optional \`governs\` identifies a live requirement. Both targets must be readable on this replica at creation. A successor to an archived topic is refused until that topic is restored.
 
-${DECISION_EDGES}
+A requirement's \`decisions\` are a derived, oldest-topic-first log resolved entirely from directory stubs. Each decision carries its own \`governs\`, immutable \`topic\` and immutable \`supersedes\`. \`governs\` and \`supersedes\` are derived outbound edges in the decision's effective \`links\`: backlinks on a requirement finds its decisions, and backlinks on a predecessor finds its direct successors without editing those documents. A decision read returns every predecessor, every direct successor with its status, and its topic's resolution. Conflicts name every maximal decided record and have nothing in force; no successor is selected as the replacement. \`set_links\` still replaces only the curated link array; passing get_doc's effective \`links\` back to it stores those UUIDs there too, and get_doc deduplicates the resulting edges.
 
 \`list_docs({})\` omits decision records. Use \`list_docs({kind: "decision"})\` for one row per topic; a status or tag filter also asks for exact matching topics. Each row presents its record in force, otherwise a pending record, otherwise the first record. \`include_superseded: true\` returns individual records. A topic with conflicting maximal decided records has nothing in force; get_doc returns every predecessor, direct successor and the resolution rather than choosing one replacement.
 
 ## Content locks
 
-${DECIDED_IS_READ_ONLY.replace("this tool refuses", "content-writing tools refuse")}
+Both content locks leave document-room access and structured-data reads available.
 
-${ARCHIVED_IS_READ_ONLY.replace("this tool refuses", "document mutations refuse")}
+A decided decision record's title, decision line, blocks and structured data are read-only: content-writing tools refuse with \`decision_read_only\` and change nothing. Use a new superseding record for any content change. Comments, description, tags, curated links and changelog suggestion stay writable. This check runs on this replica at call time; an unseen offline edit can still merge later, detected as changed after approval.
+
+Archived documents are read-only. While a document's directory stub is tombstoned document mutations refuse with \`doc_archived\` and change nothing; restore_doc is the only mutation an archived document accepts, and the only way back. Reading is unaffected — get_doc, export_markdown, backlinks and \`list_docs\` with \`include_deleted: true\` all still answer for it; a decision additionally needs a matching \`kind\`, \`status\` or \`tag\` predicate in list_docs.
+
+The honest scope, the same discipline \`rev\` has: the check runs against THIS replica's directory stub at the moment of the call. It is refusal-at-call, not a cross-replica lock — an edit made on a replica that has not seen the archive yet is an ordinary CRDT write and merges normally when the two replicas meet.
 
 ## Archive and explicit restoration
 
 \`archive_doc\` tombstones the directory entry and removes its sidebar pin. \`restore_doc\` is an explicit lifecycle action: it reactivates the document without changing its content, bypassing decided-content locks or changing workspace access. A generic content or metadata write cannot restore a document.
 
-${DECISION_TOPIC_LIFECYCLE}
+For a decision, archive_doc and restore_doc act on every record in its topic. Only the first record's directory tombstone decides whether the topic is archived; individual tombstones never change resolution. No individual decision record can be archived or restored. This does not change the governing requirement, and archiving a requirement does not archive its decision topics.
 
-${ARCHIVE_IS_LAST_WRITE_WINS}
+Concurrency: a directory entry is written as a whole object, so an archive_doc racing a restore_doc on another replica converges on whichever update Yjs orders last — not on whichever call happened later by the clock. The same applies to a plain rename or retag made on a replica that had not yet seen the archive: it is a whole-entry write too, so it can bring the document back with nobody calling restore_doc. An archive holds against writers that have seen it, which is not the same as holding against every concurrent one. When it matters which way it went, re-read with list_docs and \`include_deleted: true\`; for a decision, also pass a matching \`kind\`, \`status\` or \`tag\` predicate.
 
 ## Related
 
@@ -212,7 +205,7 @@ Unknown help topics through get_help are manual refusals and name all valid topi
 
 Successful writes report \`applied\`, \`synced\` and \`hub\`. Applied means this server's local update log holds the write. Hub describes the connection, not remote storage. Calls touching multiple rooms report each room independently; aggregate synced is true only when every touched room is acknowledged. There is no rollback or cross-room remote atomicity.
 
-${SYNCED_MEANS}
+\`synced: true\` means the hub acknowledged this update: it is in the hub's memory, and a healthy hub has scheduled the write on its store debounce — by default 2s after the last change to the document, 10s at the outside. It does NOT mean the hub has stored it: the write is still ahead of the hub's disk, and the store itself can fail. A hub that dies abruptly inside that window (SIGKILL, a crash, power loss) loses its volatile copy of the update. That is recoverable rather than fatal: \`applied: true\` is the durable half — this server's append-only update log holds the write before the tool returns and re-sends it on reconnect — so losing it for good takes the crash plus no replica holding that update ever coming back.
 
 ## Guidance briefing
 
