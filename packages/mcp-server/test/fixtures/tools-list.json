@@ -5445,7 +5445,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Insert one block after after_block_id, or at the top when omitted. Types cover the editor's closed block palette; lists use adjacent list-item blocks. Table text must be exactly one GFM table or invalid_table refuses; it stores parsed cells and inline formatting. Document-link targets must be known in this replica's directory or doclink_target_not_known_locally refuses before writing. Other block text is plain or literal source. Terminal lines starting with a dollar sign and space are demonstrated commands; other lines are output, with no escape for output beginning that way. Chart text is a JSON mapping reading this document's collection; invalid mappings remain editable source with a problem message. Use update_data to change chart records.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown."
+    "description": "Insert one block after after_block_id, or at the top when omitted. Types cover the editor's closed block palette; lists use adjacent list-item blocks. Table text must be exactly one GFM table or invalid_table refuses; it stores parsed cells and inline formatting. Document-link targets must be known in this replica's directory or doclink_target_not_known_locally refuses before writing. Other block text is plain or literal source. Terminal lines starting with a dollar sign and space are demonstrated commands; other lines are output, with no escape for output beginning that way. Chart text is a JSON mapping for a line chart or data table reading this document's collection; invalid mappings remain editable source with a problem message. Use update_data to change view records.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown."
   },
   {
     "name": "delete_block",
@@ -5917,7 +5917,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Replace the document's curated outbound link set. Values are target document UUIDs — never paths, never titles.  The backlinks index follows immediately.\n\nPassing get_doc's effective links back stores derived governs and supersedes UUIDs in the curated array too; get_doc deduplicates the resulting edges.\n\nHelp: set_links, workspaces, lifecycle, tool-contracts."
+    "description": "Replace the document's curated outbound link set. Values are target document UUIDs — never paths, never titles. The backlinks index follows immediately.\n\nPassing get_doc's effective links back stores derived governs and supersedes UUIDs in the curated array too; get_doc deduplicates the resulting edges.\n\nHelp: set_links, workspaces, lifecycle, tool-contracts."
   },
   {
     "name": "set_title",

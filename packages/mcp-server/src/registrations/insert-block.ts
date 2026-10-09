@@ -14,9 +14,9 @@ export function registerInsertBlock(server: ToolRegistrar, context: ToolContext)
       "refuses; it stores parsed cells and inline formatting. Document-link targets must be known in this " +
       "replica's directory or doclink_target_not_known_locally refuses before writing. Other block text is " +
       "plain or literal source. Terminal lines starting with a dollar sign and space are demonstrated commands; " +
-      "other lines are output, with no escape for output beginning that way. Chart text is a JSON mapping " +
-      "reading this document's collection; invalid mappings remain editable source with a problem message. Use " +
-      "update_data to change chart records." +
+      "other lines are output, with no escape for output beginning that way. Chart text is a JSON mapping for " +
+      "a line chart or data table reading this document's collection; invalid mappings remain editable source " +
+      "with a problem message. Use update_data to change view records." +
       helpPointer("insert_block"),
     outputSchema: outputSchemas.insert_block,
     inputSchema,

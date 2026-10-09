@@ -10,7 +10,7 @@ export function registerSetLinks(server: ToolRegistrar, context: ToolContext): v
     title: "Set a document's outbound links",
     description:
       "Replace the document's curated outbound link set. Values are target document UUIDs — never paths, never " +
-      "titles.  The backlinks index follows immediately.\n\n" +
+      "titles. The backlinks index follows immediately.\n\n" +
       "Passing get_doc's effective links back stores derived governs and supersedes UUIDs in the curated array " +
       "too; get_doc deduplicates the resulting edges." +
       helpPointer("set_links"),

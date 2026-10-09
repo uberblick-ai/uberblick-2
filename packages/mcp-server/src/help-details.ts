@@ -198,7 +198,18 @@ export const toolHelpDetails = {
     "transcript in which a line beginning `$ ` is a command typed out and every other line is output shown " +
     "whole — the format has no escape, so an output line that itself begins `$ ` cannot be written. A chart's " +
     "text is a JSON mapping, for example " +
-    "`{\"version\":1,\"type\":\"line\",\"collection\":\"observations\",\"x\":{\"field\":\"day\",\"type\":\"date\"},\"y\":[{\"field\":\"count\"}]}`. It names top-level record fields: x type is number or date, and y has one to eight numeric series. Optional x and y labels, y units, title and missing (gap or connect, default gap) control presentation. The chart only reads its document's collection; use update_data to write records. Invalid mappings stay editable source and show a problem message. Every block has one text an agent can edit.",
+    "`{\"version\":1,\"type\":\"line\",\"collection\":\"observations\",\"x\":{\"field\":\"day\",\"type\":\"date\"}," +
+    "\"y\":[{\"field\":\"count\"}]}`. It names top-level record fields: x type is number or date, " +
+    "and y has one to eight numeric series. Optional x and y labels, y units, title and " +
+    "missing (gap or connect, default gap) control presentation. A data table also uses a chart block, " +
+    "for example `{\"version\":1,\"type\":\"table\",\"collection\":\"observations\",\"columns\":[{\"field\":\"day\",\"format\":\"date\"}," +
+    "{\"field\":\"count\",\"label\":\"Count\",\"format\":\"number\"}],\"sort\":{\"field\":\"day\",\"direction\":\"desc\"},\"pageSize\":25}`. " +
+    "Its one to thirty ordered columns name fields, optional labels and formats text (default), number, date or link. " +
+    "Only number accepts unit (a suffix) and decimals (an integer from zero to ten). Optional title, " +
+    "sort (one column field, direction asc or desc) and pageSize (one to one hundred, default twenty-five) " +
+    "control the read-only view. Unknown mapping keys and options are invalid. Both views only " +
+    "read their document's collection and contain no record values; use update_data to write records. Invalid mappings stay " +
+    "editable source and show a problem message. Every block has one text an agent can edit.",
   set_changelog_suggestion:
     "Record one sentence of draft release-note copy for the work this document describes — what a reader of a " +
     "changelog would want to know, in simple English about the user-visible outcome. Write it when delivered " +
@@ -231,7 +242,7 @@ export const toolHelpDetails = {
     "archive and leave the document archived AND pinned. get_sidebar is where you see that — such a pin lists " +
     "with `status: \"archived\"` — and unpin_doc is what removes it. restore_doc does NOT put a pin back — " +
     "pin_doc is how a restored document becomes an entry point again, and it still wins over this unpin.\n\n" +
-    "So this call always writes two independently persisted rooms — the directory and the sidebar —. If the " +
+    "So this call always writes two independently persisted rooms — the directory and the sidebar. If the " +
     "local update log refuses the unpin, the call fails with `persistence_failed` carrying the `uuid`, the " +
     "rooms already `completed`, the `failed` room, `rolledBack: false` and a recovery line — never as a " +
     "completed archive.\n\n" +
@@ -278,6 +289,8 @@ export const toolHelpDetails = {
     "are the label — this tool writes a mark and never a character, so the block's `text` and `rev` come back " +
     "exactly as get_doc gave them. `annotate` anchors a comment to a range the same way; this is that " +
     "operation with a document uuid instead of a thread.\n\n" +
+    "`link_range` counts as a block write: a decided decision record refuses it with `decision_read_only`, " +
+    "even though its text and rev do not change.\n\n" +
     "`start` and `end` are character offsets into the block's text, and `rev` is REQUIRED: offsets mean " +
     "nothing without the text they were measured against. A stale `rev` refuses with `stale_block`, carrying " +
     "`currentText` and `currentRev` to re-measure against. Indices are clamped to the text and swapped if " +

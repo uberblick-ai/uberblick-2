@@ -197,6 +197,7 @@ describe("the registry", () => {
       "Mermaid",
       "Terminal demo",
       "Line chart",
+      "Data table",
     ]);
   });
 
@@ -238,6 +239,7 @@ describe("the registry", () => {
     expect(labels("```")).toEqual(["Code"]);
     expect(labels("diagram")).toEqual(["Mermaid"]);
     expect(labels("console")).toEqual(["Terminal demo"]);
+    expect(labels("table")).toEqual(["Table", "Data table"]);
     expect(labels("nothing here")).toEqual([]);
   });
 });
@@ -410,6 +412,27 @@ describe("the slash menu", () => {
     } finally {
       unmount();
     }
+  });
+
+  it("converts to a data table with editable chart source in one keyboard gesture", () => {
+    const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
+    const mounted = mountMenu(ydoc);
+    try {
+      caret(mounted.editor, 0, 0);
+      type(mounted.editor, "/datatable");
+      expect(mounted.entryLabels()).toEqual(["Data table"]);
+      mounted.press("Enter");
+      const blocks = getBlocks(ydoc);
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0]).toMatchObject({ id: ids[0], type: "chart" });
+      expect(JSON.parse(blocks[0]!.text)).toEqual({
+        version: 1, type: "table", collection: "records",
+        columns: [{ field: "value", format: "text" }], pageSize: 25,
+      });
+      expect(mounted.editor.state.selection.$head.parent.type.name).toBe("chart");
+      act(() => { expect(mounted.editor.commands.keyboardShortcut("Mod-z")).toBe(true); });
+      expect(getBlocks(ydoc)[0]).toMatchObject({ id: ids[0], type: "paragraph", text: "/datatable" });
+    } finally { mounted.unmount(); }
   });
 
   it("leaves the slash as text when Esc dismisses it", () => {
@@ -905,6 +928,28 @@ describe("the gutter menu", () => {
     } finally {
       mounted.unmount();
     }
+  });
+
+  it.each(["Data table", "Line chart"])("inserts %s through the pointer menu as ordinary chart content", (label) => {
+    const { ydoc, ids } = docWith([{ type: "paragraph", text: "Above" }]);
+    const mounted = mountMenu(ydoc);
+    try {
+      openGutterMenu(mounted, 0);
+      pick(mounted, label);
+      const blocks = getBlocks(ydoc);
+      expect(blocks.map((block) => block.type)).toEqual(["paragraph", "chart"]);
+      expect(blocks[0]).toMatchObject({ id: ids[0], text: "Above" });
+      expect(soundIds(ydoc)[1]).not.toBe(ids[0]);
+      if (label === "Data table") {
+        expect(JSON.parse(blocks[1]!.text)).toEqual({
+          version: 1, type: "table", collection: "records",
+          columns: [{ field: "value", format: "text" }], pageSize: 25,
+        });
+      } else expect(blocks[1]!.text).toBe("");
+      expect(mounted.editor.state.selection.$head.parent.type.name).toBe("chart");
+      act(() => { expect(mounted.editor.commands.keyboardShortcut("Mod-z")).toBe(true); });
+      expect(getBlocks(ydoc).map((block) => block.id)).toEqual(ids);
+    } finally { mounted.unmount(); }
   });
 
   /**

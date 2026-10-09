@@ -161,7 +161,7 @@ Canonical UTF-8 JSON limits are ${DATA_LIMITS.area} bytes (4 MiB) for the data a
 
 ## Bind a document view to data
 
-A \`chart\` block holds editable JSON source, configured with ordinary \`create_doc\`, \`insert_block\` or \`edit_block\` calls. A line chart reads a collection from its own document. Its mapping names literal top-level fields; it contains no record values:
+A \`chart\` block holds editable JSON source, configured with ordinary \`create_doc\`, \`insert_block\` or \`edit_block\` calls. A line chart or data table reads a collection from its own document. Its mapping names literal top-level fields; it contains no record values:
 
 \`\`\`json
 {"version":1,"type":"line","collection":"observations","x":{"field":"day","type":"date"},"y":[{"field":"count","label":"Count"}],"missing":"gap"}
@@ -169,7 +169,19 @@ A \`chart\` block holds editable JSON source, configured with ordinary \`create_
 
 Mapping fields are version 1, type line, collection, x with field and type number or date (optional label), and one to eight numeric y series with field (optional label and unit). Optional title and missing gap or connect control presentation; gap is the default. A numeric x is finite; a date x is an ISO date-only string or an RFC 3339 date-time string with an explicit timezone. Date-only values are UTC days. Charts sort by x then record id, never coerce or aggregate values, omit schema-invalid records and report omissions. Missing/null y values break a series under gap and bridge under connect; wrong types remain gaps. At most the latest 5,000 eligible x records are plotted.
 
-\`update_data\` refreshes an open chart without changing its source. A chart is a read-only view of data; invalid mappings, missing collections, unsupported schemas and incompatible fields show problems without repairing stored content. Charts remain readable in locked documents. Search indexes titles, descriptions and block text, not record values; Markdown exports mappings while omitting datasets.
+### Data tables
+
+People insert Data table from the block menu, then edit its JSON source. Agents use the same \`chart\` block type:
+
+\`\`\`json
+{"version":1,"type":"table","collection":"observations","columns":[{"field":"day","label":"Day","format":"date"},{"field":"count","label":"Count","format":"number","decimals":0},{"field":"run_h","label":"Run time","format":"number","unit":"h","decimals":1},{"field":"url","format":"link"}],"sort":{"field":"day","direction":"desc"},"pageSize":25}
+\`\`\`
+
+A table mapping has version 1, type table, collection and 1–30 ordered columns. Each column has field, optional label and optional format: text (default), number, date or link. Only number accepts unit as a suffix and decimals as an integer from 0–10 setting exact fraction digits; without decimals it uses the line chart's number formatting. Optional title names the view. Optional sort names one column field and direction asc or desc. Optional pageSize is an integer from 1–100, default 25. Unknown keys or options are invalid, including percent, currency, duration and textField.
+
+Text shows strings verbatim and other values as compact JSON. Number shows JSON numbers in the reader's locale. Date accepts the line chart's ISO dates and RFC 3339 date-times. Link shows only external http(s) URLs as links, opening without an opener or referrer. Absent, null and invalid values have distinct visible markers; invalid markers include the stored value as text. Values never become markup. Sort uses numbers, date instants or Unicode code points for text and links; absent, null and invalid values follow valid ones in either direction. Ties and unsorted rows follow record id. Schema-invalid records are omitted and counted. Page controls show at most pageSize rows and keep the current page, clamped to the last page, when data changes.
+
+\`update_data\` refreshes open charts and tables without changing their source. All mounted views in one document share one validated data snapshot. Views are read-only; invalid mappings, missing collections, unsupported schemas and incompatible fields show problems without repairing stored content. Tables also report an empty collection. Charts and tables remain readable in locked documents, where table paging stays available. Search indexes titles, descriptions and block text, not record values; Markdown exports mappings while omitting datasets.
 
 ## Related
 

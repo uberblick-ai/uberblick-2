@@ -40,6 +40,7 @@ import {
 } from "@uberblick/schema";
 import { ThreadsPane } from "../src/ui/ThreadsPane.js";
 import {
+  blockRefLabel,
   commentTimestamp,
   focusThread,
   observeThreads,
@@ -93,6 +94,22 @@ function replicas(): { local: Y.Doc; remote: Y.Doc; blocks: string[] } {
 }
 
 describe("a thread over a marked range becomes a card", () => {
+  it("names chart-table threads consistently and tolerates incomplete source", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "table-view-threads", title: "View comments" });
+    const source = '{"version":1,"type":"table","collection":"records","columns":[{"field":"value"}]}';
+    const id = appendBlock(ydoc, { type: "chart", text: source });
+    createAnnotation(ydoc, id, 0, 1, "Reader", "Table mapping");
+    expect(threadsFromDoc(ydoc)[0]).toMatchObject({ blockRef: "Data table 1" });
+    expect(blockRefLabel("chart", 0, source)).toBe("Data table 1");
+    expect(blockRefLabel("chart", 0, '{"type":"line"}')).toBe("Line chart 1");
+    expect(blockRefLabel("chart", 0, '{"type":')).toBe("Line chart 1");
+    expect(blockRefLabel("table", 0, source)).toBe("Table 1");
+    editBlock(ydoc, id, source, source.replace('"table"', '"line"'));
+    expect(threadsFromDoc(ydoc)[0]).toMatchObject({ blockRef: "Line chart 1" });
+    ydoc.destroy();
+  });
+
   it("quotes cell characters and orders threads by table, row, column and offset", () => {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: "cell-threads", title: "Table comments" });

@@ -123,6 +123,7 @@ it("keeps tool-specific modes, refusals and recovery in the tool's own expanded 
     ["archive_doc", "a later call retries it"],
     ["get_data", "first remaining record"],
     ["get_data", "Cursors are not snapshots"],
+    ["link_range", "decision_read_only"],
   ]) {
     const { text } = await rig.ok("get_help", { topic: tool });
     const constraints = text.split("## Constraints\n")[1]?.split("\n## ")[0];
@@ -241,4 +242,38 @@ it("documents the closed version-1 data vocabulary and demonstrates a schema the
   const example = text.match(/```json\n([\s\S]*?)\n```/)?.[1];
   expect(example).toBeDefined();
   expect(() => validateCollectionSchema(JSON.parse(example!))).not.toThrow();
+});
+
+it("documents the table mapping through both help routes and accepts its source as ordinary chart text", async () => {
+  const rig = await local();
+  const { text } = await rig.ok("get_help", { topic: "data" });
+  const section = text.split("### Data tables\n")[1];
+  const source = section?.match(/```json\n([\s\S]*?)\n```/)?.[1];
+  expect(source).toBeDefined();
+  expect(JSON.parse(source!)).toMatchObject({
+    version: 1, type: "table", collection: "observations",
+    columns: [
+      { field: "day", label: "Day", format: "date" },
+      { field: "count", label: "Count", format: "number", decimals: 0 },
+      { field: "run_h", label: "Run time", format: "number", unit: "h", decimals: 1 },
+      { field: "url", format: "link" },
+    ],
+    sort: { field: "day", direction: "desc" }, pageSize: 25,
+  });
+  const created = await rig.ok("create_doc", {
+    title: "Help table example", description: "A synthetic help example.",
+    blocks: [{ type: "chart", text: source }],
+  });
+  expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks[0]).toMatchObject({ type: "chart", text: source });
+  expect((await rig.client.readResource({ uri: "uberblick://help/data" })).contents[0]).toMatchObject({ text });
+  const insertHelp = await rig.ok("get_help", { topic: "insert_block" });
+  const constraints = insertHelp.text.split("## Constraints\n")[1]?.split("\n## ")[0];
+  for (const guidance of [
+    '"type":"table"', "one to thirty ordered columns", "text (default), number, date or link",
+    "Only number accepts unit (a suffix) and decimals (an integer from zero to ten)",
+    "sort (one column field, direction asc or desc)", "pageSize (one to one hundred, default twenty-five)",
+    "Unknown mapping keys and options are invalid", "contain no record values",
+  ]) expect(constraints, guidance).toContain(guidance);
+  expect((await rig.client.readResource({ uri: "uberblick://help/insert_block" })).contents[0])
+    .toMatchObject({ text: insertHelp.text });
 });

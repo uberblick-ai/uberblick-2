@@ -77,8 +77,17 @@ const BLOCK_LABELS: Record<BlockType, string> = {
  * same way a card names the block it is anchored in, because they are the same
  * sentence at two moments.
  */
-export function blockRefLabel(type: BlockType, index: number): string {
-  return `${BLOCK_LABELS[type]} ${index + 1}`;
+export function blockRefLabel(type: BlockType, index: number, source = ""): string {
+  let label = BLOCK_LABELS[type];
+  if (type === "chart") {
+    try {
+      const mapping: unknown = JSON.parse(source);
+      if (mapping !== null && typeof mapping === "object" && "type" in mapping && mapping.type === "table") {
+        label = "Data table";
+      }
+    } catch { /* Incomplete source keeps the chart label. */ }
+  }
+  return `${label} ${index + 1}`;
 }
 
 /**
@@ -278,7 +287,7 @@ function blockRefFor(
   const block = byId.get(blockId);
   const index = order.get(blockId);
   if (block === undefined || index === undefined) return "deleted block";
-  return blockRefLabel(block.type, index);
+  return blockRefLabel(block.type, index, block.text);
 }
 
 /**
