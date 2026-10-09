@@ -7,11 +7,43 @@
  * except the MCP transport itself — use these helpers instead.
  */
 
+import { readFileSync } from "node:fs";
+import { SourceMap } from "node:module";
+import { fileURLToPath } from "node:url";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
+
+let sourceMap: SourceMap | null | undefined;
+
+/** Map only logged frames in the installed bundle, paying nothing until an error. */
+function loggedStack(stack: string): string {
+  const bundleUrl = import.meta.url;
+  if (!bundleUrl.endsWith("/mcp.mjs")) return stack;
+
+  try {
+    const locations = [bundleUrl, fileURLToPath(bundleUrl)]
+      .map((path) => path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|");
+    // V8's named, anonymous and async frames, restricted to this exact file.
+    const frame = new RegExp(`^(\\s+at (?:.*[ (])?)(?:${locations}):(\\d+):(\\d+)(\\)?)$`, "gm");
+    return stack.replace(frame, (original, head: string, line: string, column: string, tail: string) => {
+      if (sourceMap === undefined) {
+        sourceMap = new SourceMap(JSON.parse(readFileSync(new URL(`${bundleUrl}.map`), "utf8")));
+      }
+      const origin = sourceMap?.findOrigin(Number(line), Number(column));
+      if (origin === undefined || !("fileName" in origin)) return original;
+      return `${head}${origin.fileName}:${origin.lineNumber}:${origin.columnNumber}${tail}`;
+    });
+  } catch {
+    // Missing, unreadable or invalid maps must never hide the original error.
+    sourceMap = null;
+    return stack;
+  }
+}
 
 function formatDetail(detail: unknown): string {
   if (detail instanceof Error) {
-    return detail.stack ?? `${detail.name}: ${detail.message}`;
+    return detail.stack === undefined ? `${detail.name}: ${detail.message}` : loggedStack(detail.stack);
   }
   if (typeof detail === "string") {
     return detail;
