@@ -46,7 +46,7 @@ COPY --chown=fue:fue . .
 
 # The documented install path, from CONTRIBUTING.md "Contributor setup" and
 # .agents/development.md, unattended. This is the line under test.
-RUN mise trust && mise run setup -- --yes
+RUN mise trust && mise run setup
 
 # Deliberately the only thing the assertion container does. `mise exec` is what
 # CONTRIBUTING.md tells anyone without an activated shell to use, and it puts

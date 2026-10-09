@@ -474,7 +474,7 @@ export class InvalidWorkspaceIdError extends Error {
       `${label} must be a workspace id: a lowercase uuid, optionally prefixed ` +
         "for display as <slug>-<uuid>, where the slug is made of lowercase " +
         "letters, digits and hyphens, starts and ends with a letter or digit, " +
-        "and is joined to the uuid by a single hyphen. Run `ub init` to " +
+        "and is joined to the uuid by a single hyphen. Run `ub workspace create <name>` to " +
         "create one.",
     );
     this.name = "InvalidWorkspaceIdError";

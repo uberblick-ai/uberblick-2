@@ -368,7 +368,7 @@ function storedSecret(box: Sandbox): unknown {
 }
 
 describe("workspace link configuration", () => {
-  // One normalizer for `ub workspace use` and `ub init` alike (#436): the host
+  // One normalizer for `ub workspace use` and `ub workspace create` alike (#436): the host
   // `tailscale status` prints and the address a browser hands back both name
   // the deployment's endpoint, and an endpoint somebody typed in full is what
   // they meant — including a plain hub, which has no path at all.
@@ -421,7 +421,7 @@ describe("workspace link configuration", () => {
   });
 
   // The other half of the same rule: an endpoint typed in full is cut out of
-  // the string it was typed in, so `join` stores exactly what `ub init` would.
+  // the string it was typed in, so `join` stores exactly what `ub workspace create` would.
   // Rebuilding it through `URL` would fold the case and drop the port, and the
   // two verbs would then disagree about the endpoint they had both been given.
   it.each([
@@ -870,7 +870,7 @@ describe("ub workspace use <link>", () => {
     const fromWeb = await webDoc(remote, "Shared note", OTHER_SECRET);
     const other = await webDoc(remote, "Second note", OTHER_SECRET);
 
-    // Nothing here: no `ub init`, no workspace, no endpoint, no credential —
+    // Nothing here: no `ub workspace create`, no workspace, no endpoint, no credential —
     // the second machine as the owner decided it should work.
     const box = unboundSandbox({ credentials: { signingSecret: OTHER_SECRET } });
     expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
@@ -1289,7 +1289,7 @@ describe("ub workspace use <link>", () => {
     // A machine that already has its own local-only workspace and starter
     // documents. The link must switch the project without changing that corpus.
     const box = unboundSandbox({ credentials: { signingSecret: SECRET } });
-    expect((await runUbAsync(["init", "--yes"], box)).status).toBe(0);
+    expect((await runUbAsync(["workspace", "create", "Local workspace"], box)).status).toBe(0);
     const mine = readConfigFile(box, "config.json").workspaceId as string;
     expect(mine).not.toBe(WORKSPACE);
     const seeded = await readMirror(box, mine);

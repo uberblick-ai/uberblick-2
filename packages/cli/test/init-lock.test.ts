@@ -1,7 +1,7 @@
 /**
  * The lock's one dangerous operation is the unlink, because the thing it removes
  * is what another process is waiting for. Everything else about it — waiting,
- * timing out, the message — is observable through `ub init` and tested there.
+ * timing out, the message — is observable through `ub workspace create` and tested there.
  */
 
 import {
@@ -38,7 +38,7 @@ describe("the init lock", () => {
 
   it("releases the file it created, not whatever holds the name later", async () => {
     // Somebody deletes the lock while this run is still going, and a second
-    // `ub init` takes it. The name is theirs now, so releasing must not touch
+    // `ub workspace create` takes it. The name is theirs now, so releasing must not touch
     // it — otherwise "nothing removes a lock it did not create" is true only of
     // the happy path, and the second run loses its lock to the first one's
     // teardown.

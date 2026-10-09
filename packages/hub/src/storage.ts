@@ -15,7 +15,7 @@
  * databases under `~/.local/share/uberblick`.
  *
  * **Nothing here creates anything.** Resolution is string joins; the writers
- * (`ub init`, the replicas, the hub) create directories when they write.
+ * (`ub workspace create`, the replicas, the hub) create directories when they write.
  *
  * **Why this module is in `@uberblick/hub`.** The cli, the MCP server and the
  * hub must agree on one layout, and the hub is the lowest of the three in the
@@ -37,7 +37,7 @@ export interface StorageOptions {
 }
 
 export interface StoragePaths {
-  /** Holds `config.json`, `credentials.json` and `ub init`'s lock. */
+  /** Holds `config.json`, `credentials.json` and `ub workspace create`'s lock. */
   configDir: string;
   /** The data root: everything durable is under it, and it is what to name. */
   dataDir: string;
@@ -84,7 +84,7 @@ function xdgDir(value: string | undefined): string | null {
  * Create a directory in the user's storage tree, owner-only, parents included.
  *
  * The first writer is whoever runs first — the hub opening `hub.sqlite`, a
- * replica opening its workspace file, `ub init` writing `credentials.json` —
+ * replica opening its workspace file, `ub workspace create` writing `credentials.json` —
  * and `mkdirSync` applies its mode only to directories it creates. So a
  * process that made `uberblick/` at the umask's 0755 would leave every later
  * `mode: 0o700` a no-op on a directory anyone can already read. One helper, so

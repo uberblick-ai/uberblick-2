@@ -235,7 +235,7 @@ describe("ub doctor", () => {
     expect([...checks.keys()]).toEqual(NAMES);
     for (const one of checks.values()) expect(one.reason).not.toBe("");
     expect(check(checks, "workspace").status).toBe("fail");
-    expect(check(checks, "workspace").fix).toMatch(/ub init/);
+    expect(check(checks, "workspace").fix).toMatch(/ub workspace create/);
     expect(check(checks, "workspace").fix).toMatch(/ub workspace use/);
     expect(check(checks, "workspace").fix).toMatch(/ub workspace use/);
     expect(check(checks, "workspace").reason).toContain(".uberblick.json");
@@ -283,7 +283,7 @@ describe("ub doctor", () => {
     expect(check(checks, "login").status).toBe("skipped");
     expect(local.status).toBe("fail");
     expect(local.reason).toMatch(/mode 0644/);
-    expect(local.fix).toMatch(/chmod 600 .*credentials\.json/);
+    expect(local.fix).toMatch(/delete .*credentials\.json/);
     expect(JSON.stringify(report)).not.toContain(SECRET);
   });
 

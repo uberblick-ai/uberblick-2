@@ -256,7 +256,7 @@ export function RoutePane({
           Open a document link — they look like{" "}
           <code>/&lt;workspace&gt;/&lt;uuid&gt;</code> — or run{" "}
           <code>ub status</code> to find your workspace id, and{" "}
-          <code>ub init</code> if this machine has none yet.
+          <code>ub workspace create &lt;name&gt;</code> if this machine has none yet.
         </p>
       </PaneNotice>
     );

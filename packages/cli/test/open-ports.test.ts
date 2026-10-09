@@ -5,7 +5,7 @@
  * rig; the fixtures are in `open-fixtures.ts`.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
@@ -14,13 +14,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { localBrowserKey } from "../src/browser-key.js";
 import { whoHoldsPort } from "../src/open.js";
-import { probePort } from "../src/probes.js";
+import { probeHub, probePort } from "../src/probes.js";
 import { pointAt, waitUntil } from "./helpers.js";
 import {
   SECRET,
   WORKSPACE,
   answeringListener,
   authMessage,
+  bearer,
   browserRecorder,
   cleanUp,
   configDir,
@@ -40,6 +41,96 @@ import {
 afterEach(cleanUp);
 
 describe("ub open: hub, ports and serving role", () => {
+  it("creates the missing secret and gives it to the local hub and serving replica", async () => {
+    const { box, env } = configured();
+    const path = join(configDir(box), "credentials.json");
+    rmSync(path);
+    const hubUrl = `ws://127.0.0.1:${await freePort()}`;
+    pointAt(box, hubUrl);
+
+    const app = await open(box, ["--no-browser", "--port", String(await freePort())], env);
+    try {
+      const secret = JSON.parse(readFileSync(path, "utf8")).signingSecret as string;
+      expect(secret).toMatch(/^[0-9a-f]{64}$/);
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+      expect(app.stdout()).toContain(`secret     created ${path} (0600)`);
+      expect(app.stdout()).toContain("started here");
+      expect(app.stdout() + app.stderr()).not.toContain(secret);
+      expect(await probeHub(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE,
+        HUB_AUTH_TOKEN: secret, UBERBLICK_DB: join(box.cwd, "generated-secret-probe.sqlite") }), hubUrl)).toBe("connected");
+      const status = async () => await (await fetch(`${app.url}api/status`, {
+        headers: bearer(await authMessage(localBrowserKey(WORKSPACE, box.env))),
+      })).json() as { caughtUp: boolean };
+      await waitUntil("the serving replica to sync with its new local secret", async () => (await status()).caughtUp);
+      const document = await (await get(`${app.url}uberblick-config.json`)).text();
+      expect(JSON.parse(document)).toMatchObject({ remoteHubUrl: hubUrl });
+      expect(JSON.parse(document)).not.toHaveProperty("rebound");
+      expect(document).not.toContain(secret);
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
+  it.each(["file", "environment"])("keeps the %s secret and credential store unchanged", async source => {
+    const { box, env } = configured();
+    const path = join(configDir(box), "credentials.json");
+    const before = readFileSync(path, "utf8");
+    if (source === "environment") rmSync(path);
+    const hubUrl = `ws://127.0.0.1:${await freePort()}`;
+    pointAt(box, hubUrl);
+    const app = await open(box, ["--port", String(await freePort())], {
+      ...env, ...(source === "environment" ? { HUB_AUTH_TOKEN: SECRET } : {}),
+    });
+    try {
+      if (source === "environment") expect(existsSync(path)).toBe(false);
+      else {
+        expect(readFileSync(path, "utf8")).toBe(before);
+        expect(statSync(path).mode & 0o777).toBe(0o600);
+      }
+      expect(app.stdout()).not.toContain("secret     created");
+      expect(await hubAnswers(box, hubUrl)).toBe(true);
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
+  it.each(["free", "occupied"])("refuses exposed local credentials unchanged with a %s hub port", async state => {
+    const { box, env } = configured();
+    const path = join(configDir(box), "credentials.json");
+    const before = readFileSync(path, "utf8");
+    chmodSync(path, 0o644);
+    const hubPort = await freePort();
+    if (state === "occupied") await silentListener(hubPort);
+    pointAt(box, `ws://127.0.0.1:${hubPort}`);
+    const webPort = await freePort();
+    const refused = await openFails(box, ["--no-browser", "--port", String(webPort)], env);
+    expect(refused.status).toBe(1);
+    expect(refused.output).toContain("may have leaked");
+    expect(refused.output).toContain(path);
+    expect(refused.output).toMatch(/delete|rm /);
+    expect(refused.output).toContain("ub open");
+    expect(refused.output).toContain("restart");
+    expect(refused.output).toContain("ub auth login");
+    expect(refused.output).not.toContain("chmod 600");
+    expect(refused.output).not.toContain(SECRET);
+    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(statSync(path).mode & 0o777).toBe(0o644);
+    expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
+    expect(existsSync(join(box.cwd, "started-hub.sqlite"))).toBe(false);
+  });
+
+  it("uses an environment secret without repairing an exposed credential file", async () => {
+    const { box, env } = configured();
+    const path = join(configDir(box), "credentials.json");
+    const before = readFileSync(path, "utf8");
+    chmodSync(path, 0o644);
+    const hubUrl = `ws://127.0.0.1:${await freePort()}`;
+    pointAt(box, hubUrl);
+    const app = await open(box, ["--port", String(await freePort())], { ...env, HUB_AUTH_TOKEN: SECRET });
+    try {
+      expect(readFileSync(path, "utf8")).toBe(before);
+      expect(statSync(path).mode & 0o777).toBe(0o644);
+      expect(app.stdout()).not.toContain("secret     created");
+      expect(await hubAnswers(box, hubUrl)).toBe(true);
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
   it("opens the default origin and refuses collisions without choosing another port", async () => {
     const { box, env } = configured();
     const browser = browserRecorder(box);
@@ -72,6 +163,8 @@ describe("ub open: hub, ports and serving role", () => {
 
   it("keeps a stopped loopback deployment external after logout", async () => {
     const { box, env } = configured();
+    const credentials = join(configDir(box), "credentials.json");
+    rmSync(credentials);
     const port = await freePort();
     const endpoint = `ws://127.0.0.1:${port}/custom-proxy-path`;
     pointAt(box, endpoint);
@@ -80,6 +173,8 @@ describe("ub open: hub, ports and serving role", () => {
     const app = await open(box, ["--port", String(await freePort())], env);
     try {
       expect(app.stdout()).toContain("hub unreachable; nothing started here");
+      expect(existsSync(credentials)).toBe(false);
+      expect(app.stdout()).not.toContain("secret     created");
       expect((await probePort("127.0.0.1", port)).state).toBe("free");
     } finally { expect((await app.interrupt()).status).toBe(0); }
   });

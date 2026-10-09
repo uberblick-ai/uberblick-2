@@ -94,7 +94,7 @@ import {
 } from "@uberblick/mcp-server";
 import { budget, resolveMcpConfig } from "./budget.js";
 import { openBrowser } from "./browser.js";
-import { resolveConfig, requireBinding } from "./config.js";
+import { ensureLocalSigningSecret, readCredentials, resolveConfig, requireBinding } from "./config.js";
 import { takeHelp } from "./help.js";
 import { isInstallPayload } from "./installation.js";
 import { acquireInitLock, tryAcquireInitLock } from "./init-lock.js";
@@ -420,7 +420,7 @@ function resolvedConfigDocument(resolved: ReturnType<typeof resolveConfig>): str
  * The per-request source of the unbound configuration document. It refreshes
  * the hub endpoint and publishes no workspace or browser key.
  *
- * `ub init` and `ub workspace use` publish configuration
+ * `ub workspace create`, `ub workspace use` and `ub open` publish configuration
  * files as separate atomic writes, holding `.init.lock` across the publication.
  * Each file is therefore whole whenever it is read. This source uses the same
  * lock so its resolution sees a completed configuration publication.
@@ -499,14 +499,37 @@ function servingConfigSource(
 }
 
 /** Resolve the startup binding and its first served document as one snapshot. */
-async function initialConfig(env: NodeJS.ProcessEnv): Promise<{
+async function initialConfig(env: NodeJS.ProcessEnv, ensureSecret = false): Promise<{
   resolved: ReturnType<typeof resolveConfig>;
   document: string;
+  secretCreated: string | null;
 }> {
-  const lock = await acquireInitLock(env);
+  const lock = await acquireInitLock(env, { command: "ub open" });
   try {
-    const resolved = resolveConfig({ env });
-    return { resolved, document: resolvedConfigDocument(resolved) };
+    let resolved = resolveConfig({ env });
+    let secretCreated: string | null = null;
+    if (ensureSecret) {
+      const hubUrl = trimmed(resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
+      const endpoint = endpointOf(hubUrl);
+      // A device-authenticated deployment stays external even on localhost.
+      // A secret is useful only for an endpoint this command can start here.
+      if (endpoint !== null && isLocalHost(endpoint.host) &&
+          !usesDeviceLogin(hubUrl, resolved.env) &&
+          whyNotStartable(hubUrl, new URL(hubUrl)) === null &&
+          trimmed(resolved.env.HUB_AUTH_TOKEN) === null) {
+        // Refuse an exposed store before looking for an existing local hub;
+        // repairing its permissions would keep a possibly leaked secret.
+        if (readCredentials(env).exposed) ensureLocalSigningSecret(env);
+        // An occupied endpoint belongs to a hub or another process that this
+        // command will leave alone. It needs none of our new credentials.
+        if ((await probePort(endpoint.host, endpoint.port)).state === "free") {
+          const secret = ensureLocalSigningSecret(env);
+          if (secret.created) secretCreated = secret.path;
+          resolved = resolveConfig({ env });
+        }
+      }
+    }
+    return { resolved, document: resolvedConfigDocument(resolved), secretCreated };
   } finally {
     lock.release();
   }
@@ -1002,7 +1025,7 @@ async function ensureHub(
       started: null,
       note:
         `${hubUrl} (not started: no signing secret, so a hub here would accept ` +
-        "anything — `ub init` writes a local development one)",
+        "anything — run `ub workspace create <name>` or `ub open` with a free local hub port)",
     };
   }
 
@@ -1256,16 +1279,15 @@ export async function openCommand(
   // re-resolves from this original environment. Resolving from the output of a
   // prior resolution would turn file values into permanent pins.
   const startupEnv: NodeJS.ProcessEnv = { ...process.env };
-  const initial = await initialConfig(startupEnv);
-  const resolved = initial.resolved;
-  const projectBinding = requireBinding(resolved);
-  for (const warning of resolved.warnings) {
+  let initial = await initialConfig(startupEnv);
+  let projectBinding = requireBinding(initial.resolved);
+  for (const warning of initial.resolved.warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }
   // The default lives in the MCP server's configuration, which is where every
   // other client reads it from; restating it here would be a second address.
-  const hubUrl = trimmed(resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
-  const env: NodeJS.ProcessEnv = { ...resolved.env, HUB_URL: hubUrl };
+  let hubUrl = trimmed(initial.resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
+  let env: NodeJS.ProcessEnv = { ...initial.resolved.env, HUB_URL: hubUrl };
 
   const owned: Owned = {
     hub: null,
@@ -1289,6 +1311,10 @@ export async function openCommand(
   }
 
   try {
+    initial = await initialConfig(startupEnv, true);
+    projectBinding = requireBinding(initial.resolved);
+    hubUrl = trimmed(initial.resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
+    env = { ...initial.resolved.env, HUB_URL: hubUrl };
     const decided = await ensureHub(env, hubUrl, io);
     owned.hub = decided.started;
     hubNote = decided.note;
@@ -1421,8 +1447,9 @@ export async function openCommand(
 
   const url = servedUrl.href;
   let banner = `uberblick is at ${url}\n\n`;
+  if (initial.secretCreated !== null) banner += `  secret     created ${initial.secretCreated} (0600)\n`;
   banner += `  hub        ${hubNote}\n`;
-  banner += `  workspace  ${workspace ?? "none configured — run `ub init`"}\n\n`;
+  banner += `  workspace  ${workspace ?? "none configured — run `ub workspace create <name>`"}\n\n`;
   banner += "Ctrl-C to stop.\n";
   io.out(banner);
 

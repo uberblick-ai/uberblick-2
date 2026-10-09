@@ -22,7 +22,8 @@ const WELCOME = join(REPO_ROOT, "bin", "mise-welcome.sh");
 /** Exactly what a contributor sees, and the only copy of it outside the script. */
 const EXPECTED = `uberblick
 
-  first time   mise run setup -- --yes
+  first time   mise run setup
+  sign in      ub auth login
   develop      mise run dev
   check        mise run lint
                mise run typecheck

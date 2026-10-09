@@ -7,7 +7,7 @@
  *
  * Titles come from directory stubs, never by opening pinned documents. Unknown
  * and archived pins stay visible so readers can unpin unresolved entries.
- * Tags never derive navigation: `ub init` writes an optional starter sidebar
+ * Tags never derive navigation: `ub workspace create` writes an optional starter sidebar
  * explicitly, and these helpers expose only the curation a caller requested.
  */
 import {

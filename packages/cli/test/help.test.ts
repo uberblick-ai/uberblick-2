@@ -32,7 +32,6 @@ import {
   AUTH_STATUS_HELP,
 } from "../src/auth.js";
 import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
-import { INIT_HELP, INIT_OPTIONS } from "../src/init.js";
 import { INSTALL_HELP, INSTALL_OPTIONS } from "../src/install.js";
 import { OPEN_HELP, OPEN_OPTIONS } from "../src/open.js";
 import { WORKSPACE_CREATE_HELP } from "../src/workspace-create.js";
@@ -121,7 +120,6 @@ const ROOT_PATH: Path = { argv: [], help: HELP, options: {} };
 
 const PATHS: Path[] = [
   ROOT_PATH,
-  { argv: ["init"], help: INIT_HELP, options: INIT_OPTIONS },
   { argv: ["update"], help: UPDATE_HELP, options: {} },
   { argv: ["open"], help: OPEN_HELP, options: OPEN_OPTIONS },
   { argv: ["status"], help: STATUS_HELP, options: STATUS_OPTIONS },
@@ -212,28 +210,20 @@ function tree(box: Sandbox): string[] {
     .sort();
 }
 
-describe("ub init --help", () => {
-  // The regression this issue is named for: top-level help advertised the
-  // option and `ub init` answered `Unknown option '--help'`.
-  for (const flag of ["--help", "-h"]) {
-    it(`answers ${flag} with the init options, and writes nothing`, () => {
+describe("removed ub init", () => {
+  it.each([[], ["--help"], ["-h"], ["--yes"], ["https://hub.example.invalid", "--name", "Ada"]].map(args => ({ args })))(
+    "rejects every former invocation without writing: %j",
+    ({ args }) => {
       const box = sandbox({ checkout: true });
       const before = tree(box);
-
-      const run = runUb(["init", flag], box);
-
-      expect(run.status).toBe(0);
-      expect(run.stderr).toBe("");
-      expect(run.stdout).toBe(INIT_HELP);
-      expect(run.stdout).toMatch(/^usage: ub init/);
-      for (const option of Object.keys(INIT_OPTIONS)) {
-        expect(run.stdout).toContain(`--${option}`);
-      }
-      // No config, no credential, no workspace, no starter documents: asking
-      // what a command does must never be the same as running it.
+      const run = runUb(["init", ...args], box);
+      expect(run.status).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toBe(`ub: unknown command "init"\n\n${HELP}`);
+      expect(HELP).not.toMatch(/^ {2}init\b/m);
       expect(tree(box)).toEqual(before);
-    });
-  }
+    },
+  );
 });
 
 describe("every human-facing command path", () => {
@@ -351,12 +341,6 @@ describe("every human-facing command path", () => {
     },
   );
 
-  it("describes init's MCP option as print-only", () => {
-    expect(INIT_HELP).toMatch(
-      /--mcp, --no-mcp.*printing the MCP client snippet.*It prints;.*registering a client is `ub mcp install`/s,
-    );
-  });
-
   it("prints auth's complete command catalog with no options block", async () => {
     const expected = `usage: ub auth [command]
 
@@ -452,7 +436,6 @@ describe("help before the work", () => {
   // other half of the proof, since every one of these announces its warnings
   // and its failures there.
   const inert: string[][] = [
-    ["init", "--mcp", "--no-mcp", "--help"],
     ["open", "--port", "0", "-h"],
     ["workspace", "use", "ws://example.invalid:1234", "-h"],
     ["auth", "login", "--help"],
@@ -546,7 +529,7 @@ describe("what is not a request for help", () => {
   });
 
   it("still refuses an unknown option, on stderr, with exit 2", async () => {
-    for (const argv of [["init", "--bogus"], ["status", "--bogus"], ["mcp", "install", "--bogus"]]) {
+    for (const argv of [["status", "--bogus"], ["mcp", "install", "--bogus"]]) {
       const run = await dispatch(argv);
       expect(run.status, argv.join(" ")).toBe(2);
       expect(run.stdout, argv.join(" ")).toBe("");

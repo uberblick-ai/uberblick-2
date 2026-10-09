@@ -19,8 +19,8 @@ export default defineConfig({
     // timeouts have to allow a full spawn/connect/shutdown round trip.
     //
     // Deliberately well above the sum of the waits any one test makes in
-    // sequence — the longest chains here are `ub init`'s concurrency test (four
-    // rounds, each bounded by the 25 s `runUbAsync` gives a spawned run) and
+    // sequence — concurrent workspace creation is bounded by the 25 s
+    // `runUbAsync` gives each spawned run, and
     // `ub open`'s port-release test (two starts and two interrupts, each
     // bounded by WAIT_TIMEOUT_MS in test/helpers.ts). Whichever timeout fires
     // first is the one that gets to explain the failure, and a bare "test timed

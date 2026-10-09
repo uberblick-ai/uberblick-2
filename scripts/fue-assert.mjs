@@ -19,12 +19,20 @@
  */
 
 import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { createConnection } from "node:net";
+import { dirname, join } from "node:path";
 
 /** Where the documented `mise run dev` puts the two servers. */
 const HUB_PORT = 1234;
 const WEB_PORT = 5173;
 const WEB_ORIGIN = `http://localhost:${WEB_PORT}`;
+const OPEN_PORT = 13379;
+const REPOSITORY_ROOT = process.cwd();
+const PROJECT_ROOT = join(dirname(REPOSITORY_ROOT), "fue-workspace");
+const CONFIG_ROOT = join(process.env.XDG_CONFIG_HOME ?? join(process.env.HOME, ".config"), "uberblick");
+const DATA_ROOT = join(process.env.XDG_DATA_HOME ?? join(process.env.HOME, ".local", "share"), "uberblick");
+const credentialsPath = join(CONFIG_ROOT, "credentials.json");
 
 /** The step in progress, so a failure anywhere can name it. */
 let step = "startup";
@@ -59,9 +67,9 @@ async function assert(name, fn) {
 }
 
 /** Run a command to completion, capturing both streams. Never hangs. */
-function run(command, args, { timeoutMs = 120_000 } = {}) {
+function run(command, args, { timeoutMs = 120_000, cwd, env } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => {
@@ -96,10 +104,12 @@ function run(command, args, { timeoutMs = 120_000 } = {}) {
  * tsx. Signalling the group is what actually stops the server rather than
  * orphaning it and leaving the port bound.
  */
-function background(label, command, args) {
+function background(label, command, args, { cwd, env } = {}) {
   const child = spawn(command, args, {
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
+    cwd,
+    env,
   });
   const chunks = [];
   const collect = (chunk) => {
@@ -117,6 +127,7 @@ function background(label, command, args) {
   child.once("error", (error) => {
     stopped = `would not start: ${error.message}`;
   });
+  const closed = new Promise(resolve => child.once("close", resolve));
   const signalGroup = (signal) => {
     try {
       process.kill(-child.pid, signal);
@@ -132,13 +143,15 @@ function background(label, command, args) {
     interrupt: () => signalGroup("SIGINT"),
     /** The safety net at exit: nothing gets to decline this one. */
     stop: () => signalGroup("SIGKILL"),
+    closed,
   };
   services.push(service);
   return service;
 }
 
-function stopServices() {
+async function stopServices() {
   for (const service of services) service.stop();
+  await Promise.all(services.map(service => service.closed));
 }
 
 /**
@@ -174,9 +187,9 @@ async function waitFor(what, probe, { timeoutMs, service = null }) {
 }
 
 /** The opposite of {@link tcpOpen}, and never an error: refusal is the answer. */
-function tcpRefused(port) {
+function tcpRefused(port, host = "127.0.0.1") {
   return new Promise((resolve) => {
-    const socket = createConnection({ host: "127.0.0.1", port });
+    const socket = createConnection({ host, port });
     socket.once("connect", () => {
       socket.destroy();
       resolve(false);
@@ -188,9 +201,9 @@ function tcpRefused(port) {
   });
 }
 
-function tcpOpen(port) {
+function tcpOpen(port, host = "127.0.0.1") {
   return new Promise((resolve, reject) => {
-    const socket = createConnection({ host: "127.0.0.1", port });
+    const socket = createConnection({ host, port });
     socket.once("connect", () => {
       socket.destroy();
       resolve(true);
@@ -202,8 +215,8 @@ function tcpOpen(port) {
   });
 }
 
-async function ubStatusJson() {
-  const result = await run("ub", ["status", "--json"]);
+async function ubStatusJson(options = {}) {
+  const result = await run("ub", ["status", "--json"], options);
   if (result.code !== 0) {
     throw new Error(
       `\`ub status --json\` exited ${result.code}: ${firstLine(result.stderr)}`,
@@ -227,10 +240,13 @@ async function ubStatusJson() {
  * mismatch hide behind another — and a stray byte on stdout, which the server
  * must never write, shows up here as the corrupted session it is.
  */
-async function listDocsOverStdio() {
+async function listDocsOverStdio({ cwd, env } = {}) {
   const child = spawn("ub", ["mcp", "serve"], {
     stdio: ["pipe", "pipe", "pipe"],
+    cwd,
+    env,
   });
+  const closed = new Promise(resolve => child.once("close", resolve));
   let stderr = "";
   child.stderr.on("data", (chunk) => {
     stderr += chunk;
@@ -320,11 +336,14 @@ async function listDocsOverStdio() {
   } finally {
     clearTimeout(timeout);
     child.stdin.end();
+    const forceStop = setTimeout(() => child.kill("SIGKILL"), 5_000);
     try {
       child.kill("SIGTERM");
     } catch {
       // Gone already.
     }
+    await closed;
+    clearTimeout(forceStop);
   }
 }
 
@@ -355,18 +374,48 @@ async function main() {
     process.stdout.write(`fue:   ub at ${found.stdout.trim()}\n`);
   });
 
-  // 1. The command a new user runs first to find out whether any of this
-  //    worked. It has to exit 0 and name the workspace `ub init` just made.
+  const committedBinding = readFileSync(join(REPOSITORY_ROOT, ".uberblick.json"));
+  await assert("setup creates no workspace or signing secret", async () => {
+    if (existsSync(CONFIG_ROOT) || existsSync(DATA_ROOT)) {
+      throw new Error("`mise run setup` created private Uberblick configuration or data");
+    }
+  });
+
+  // Setup preserves the committed remote binding. Exercise the independent
+  // local-first journey in a fresh directory outside that checkout.
+  let secret;
+  await assert("`ub workspace create` seeds a fresh local workspace and secret", async () => {
+    mkdirSync(PROJECT_ROOT);
+    const created = await run("ub", ["workspace", "create", "First-user workspace"], { cwd: PROJECT_ROOT });
+    if (created.code !== 0) {
+      throw new Error(`\`ub workspace create\` exited ${created.code}: ${firstLine(created.stderr)}`);
+    }
+    const credentials = JSON.parse(readFileSync(credentialsPath, "utf8"));
+    secret = credentials.signingSecret;
+    if (typeof secret !== "string" || secret.trim() === "") {
+      throw new Error("`ub workspace create` left no local signing secret");
+    }
+    if ((statSync(credentialsPath).mode & 0o777) !== 0o600) {
+      throw new Error("`ub workspace create` did not publish credentials.json with mode 0600");
+    }
+    if (created.stdout.includes(secret) || created.stderr.includes(secret)) {
+      throw new Error("`ub workspace create` printed its signing secret");
+    }
+    if (!readFileSync(join(REPOSITORY_ROOT, ".uberblick.json")).equals(committedBinding)) {
+      throw new Error("creating a separate workspace changed the checkout's committed binding");
+    }
+  });
+
   const report = await assert("`ub status` names the fresh workspace", async () => {
-    const human = await run("ub", ["status"]);
+    const human = await run("ub", ["status"], { cwd: PROJECT_ROOT });
     if (human.code !== 0) {
       throw new Error(
         `\`ub status\` exited ${human.code}: ${firstLine(human.stderr)}`,
       );
     }
-    const json = await ubStatusJson();
+    const json = await ubStatusJson({ cwd: PROJECT_ROOT });
     if (typeof json.workspace !== "string" || json.workspace === "") {
-      throw new Error("`ub status` reported no workspace after `mise run setup`");
+      throw new Error("`ub status` reported no workspace after `ub workspace create`");
     }
     if (
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -380,13 +429,8 @@ async function main() {
     if (!human.stdout.includes(json.workspace)) {
       throw new Error("`ub status` did not print the workspace it reports as JSON");
     }
-    // With no age key and no fnox secret, `ub init` must have generated one:
-    // this is the contributor path, and a machine that can never authenticate
-    // to a hub is the failure it would otherwise hide until `mise run dev`.
     if (json.credentialPresent !== true) {
-      throw new Error(
-        "`ub init` left this machine with no hub signing secret — the generated development secret is missing",
-      );
+      throw new Error("`ub workspace create` left this machine with no usable hub signing secret");
     }
     process.stdout.write(
       `fue:   workspace ${json.workspace}, credential from ${json.credentialSource}\n`,
@@ -397,7 +441,7 @@ async function main() {
   // 2. What an agent gets. `ub mcp serve` is the line every MCP client is
   //    pointed at, and `list_docs` is the first thing one calls.
   await assert("`list_docs` answers through `ub mcp serve`", async () => {
-    const listed = await listDocsOverStdio();
+    const listed = await listDocsOverStdio({ cwd: PROJECT_ROOT });
     if (!Array.isArray(listed.docs)) {
       throw new Error("`list_docs` did not return a `docs` array");
     }
@@ -406,14 +450,46 @@ async function main() {
         `\`list_docs\` answered for workspace ${listed.workspace}, not the configured ${report.workspaceUuid}`,
       );
     }
-    // Conditional on purpose: a fresh install ships starter documents once #192
-    // lands, and until then an empty corpus is the correct answer. Either is a
-    // pass; a server that cannot answer at all is not.
+    const titles = new Set(listed.docs.map(doc => doc.title));
+    if (!titles.has("Welcome to Überblick") || !titles.has("How to Use It") || listed.docs.length !== 2) {
+      throw new Error("`list_docs` did not return the two starter documents");
+    }
     process.stdout.write(
-      listed.docs.length === 0
-        ? "fue:   empty corpus, served healthily — no starter documents in this build\n"
-        : `fue:   ${listed.docs.length} document(s): ${listed.docs.map((doc) => doc.title).join(", ")}\n`,
+      `fue:   ${listed.docs.length} document(s): ${listed.docs.map((doc) => doc.title).join(", ")}\n`,
     );
+  });
+
+  await assert("the checkout web app builds offline", async () => {
+    const built = await run("mise", ["run", "build-web"], { timeoutMs: 180_000 });
+    if (built.code !== 0) {
+      throw new Error(`\`mise run build-web\` exited ${built.code}: ${firstLine(built.stderr)}`);
+    }
+  });
+
+  const open = background("`ub open --no-browser`", "ub", ["open", "--no-browser"], { cwd: PROJECT_ROOT });
+  await assert("`ub open --no-browser` starts a hub accepting the created secret", async () => {
+    // `ub open` binds the selected ws://localhost endpoint, which can resolve
+    // to IPv6 on Linux. Probe that host; the dev task below binds IPv4 instead.
+    await waitFor("the local hub to listen", () => tcpOpen(HUB_PORT, "localhost"), { timeoutMs: 90_000, service: open });
+    await waitFor("the local web app to listen", () => tcpOpen(OPEN_PORT), { timeoutMs: 90_000, service: open });
+    await waitFor("`ub open` to report its local hub", () => open.output().includes("started here"), { timeoutMs: 90_000, service: open });
+    await waitFor("the local hub to accept the stored secret", async () => {
+      const status = await ubStatusJson({ cwd: PROJECT_ROOT });
+      return status.hub?.status === "connected";
+    }, { timeoutMs: 90_000, service: open });
+    if (JSON.parse(readFileSync(credentialsPath, "utf8")).signingSecret !== secret) {
+      throw new Error("`ub open` replaced the secret workspace create supplied to agents");
+    }
+    if (open.output().includes(secret)) {
+      throw new Error("`ub open` printed its signing secret");
+    }
+  });
+  await assert("Ctrl-C stops the hub and web app `ub open` started", async () => {
+    open.interrupt();
+    await waitFor("`ub open` to exit", () => open.stopped() !== null, { timeoutMs: 30_000 });
+    await open.closed;
+    await waitFor("the local hub port to close", () => tcpRefused(HUB_PORT, "localhost"), { timeoutMs: 30_000 });
+    await waitFor("the local web port to close", () => tcpRefused(OPEN_PORT), { timeoutMs: 30_000 });
   });
 
   // 3. `mise run dev` — the command CONTRIBUTING.md gives a contributor, not
@@ -423,7 +499,8 @@ async function main() {
   //    because `depends` serializes two long-running tasks under MISE_JOBS=1,
   //    and a regression back to `depends` is a dev loop where the web server
   //    never starts — invisible to a proof that starts it by hand.
-  const dev = background("`mise run dev`", "mise", ["run", "dev"]);
+  const localEnv = { ...process.env, UB_WORKSPACE_ID: report.workspaceUuid, UB_HUB_URL: "local" };
+  const dev = background("`mise run dev`", "mise", ["run", "dev"], { env: localEnv });
   await assert("`mise run dev` starts the hub", () =>
     waitFor(
       `the hub to accept connections on ${HUB_PORT}`,
@@ -433,13 +510,13 @@ async function main() {
   );
 
   // The port alone proves a process; this proves the credential. A hub that
-  // rejects the secret `ub init` generated is exactly the broken first run this
+  // rejects the secret workspace creation generated is exactly the broken first run this
   // task exists to catch, and it is invisible from outside the connection.
   await assert("the hub accepts this machine's credential", () =>
     waitFor(
       "`ub status` to report the hub connected",
       async () => {
-        const json = await ubStatusJson();
+        const json = await ubStatusJson({ env: localEnv });
         if (json.hub?.status === "auth-failed") {
           throw new Error(`the hub rejected this machine's token: ${json.hub.reason}`);
         }
@@ -529,6 +606,7 @@ async function main() {
     await waitFor("`mise run dev` to exit", () => dev.stopped() !== null, {
       timeoutMs: 30_000,
     });
+    await dev.closed;
     await waitFor(
       `the hub to release port ${HUB_PORT}`,
       () => tcpRefused(HUB_PORT),
@@ -548,10 +626,10 @@ try {
   process.stdout.write(
     `\nfue: PASSED — the documented install path works, offline (${elapsed()})\n`,
   );
-  stopServices();
+  await stopServices();
   process.exit(0);
 } catch (error) {
   process.stderr.write(`\nfue: FAILED at ${step} — ${firstLine(error.message)}\n`);
-  stopServices();
+  await stopServices();
   process.exit(1);
 }

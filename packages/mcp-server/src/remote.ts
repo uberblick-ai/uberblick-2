@@ -4,7 +4,7 @@
  * `ub workspace use <link>` is the one command that composes both: it reads the remote
  * as a fresh client, refuses what it cannot verify, and only then attaches this
  * machine's replica to it. Each half is also used alone — `ub doctor`'s hub
- * probe inspects, `ub init`'s starter seed syncs. They live here because they
+ * probe inspects, `ub workspace create`'s starter seed syncs. They live here because they
  * are about Y.Docs and hub connections rather than about a command line:
  *
  * - {@link syncWorkspace} boots a real replica set over the mirror, hydrates it

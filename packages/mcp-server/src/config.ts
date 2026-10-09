@@ -155,7 +155,7 @@ function trimmed(value: string | undefined): string | null {
 
 /** Direct server entry is internal; public `ub mcp serve` resolves the binding. */
 function missingWorkspace(): string {
-  return "WORKSPACE_ID is not set for the internal MCP server. Use `ub mcp serve` with a .uberblick.json binding or UB_WORKSPACE_ID; add UB_HUB_URL (a hub address, or local) if this machine has no record for that workspace. Run `ub init` for local setup or `ub workspace use <hub>/<workspace>` to fetch an existing workspace.";
+  return "WORKSPACE_ID is not set for the internal MCP server. Use `ub mcp serve` with a .uberblick.json binding or UB_WORKSPACE_ID; add UB_HUB_URL (a hub address, or local) if this machine has no record for that workspace. Run `ub workspace create <name>` for local setup or `ub workspace use <link|id>` to use an existing workspace.";
 }
 
 export function resolveMcpConfig(
