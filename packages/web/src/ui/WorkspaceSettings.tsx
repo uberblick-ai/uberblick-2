@@ -19,6 +19,7 @@ import type { TagCatalogEntry } from "@uberblick/schema";
 import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint, LocalServing } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
+import { notifyTransient } from "../notifications.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
 import { useRoomStatus } from "./hooks.js";
 import type { SettingsPage, Workspace } from "./route.js";
@@ -102,8 +103,6 @@ function GeneralSettings({
   );
 }
 
-type Feedback = { kind: "error" | "success"; text: string };
-
 function WorkspaceNameForm({
   workspace,
   connection,
@@ -117,7 +116,7 @@ function WorkspaceNameForm({
   const currentName = arrived ? sharedName : null;
   const [draft, setDraft] = useState(currentName ?? "");
   const previousName = useRef(currentName ?? "");
-  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const writable = arrived && status.writable;
 
   useEffect(() => {
@@ -135,15 +134,16 @@ function WorkspaceNameForm({
       !connection.status.hasReceivedServerState ||
       !connection.status.writable
     ) {
-      setFeedback({ kind: "error", text: "Reconnect before renaming the workspace." });
+      setError("Reconnect before renaming the workspace.");
       return;
     }
     try {
       const name = setWorkspaceName(connection.ydoc, draft);
       setDraft(name);
-      setFeedback({ kind: "success", text: `Saved “${name}”.` });
+      setError(null);
+      notifyTransient({ key: "workspace-settings", message: `Saved “${name}”.`, severity: "success" });
     } catch (error) {
-      setFeedback({ kind: "error", text: error instanceof Error ? error.message : "The workspace name is invalid." });
+      setError(error instanceof Error ? error.message : "The workspace name is invalid.");
     }
   };
 
@@ -158,11 +158,11 @@ function WorkspaceNameForm({
             value={draft}
             placeholder="Unnamed workspace"
             disabled={!writable}
-            aria-invalid={feedback?.kind === "error"}
+            aria-invalid={error !== null}
             aria-describedby="ub-workspace-name-help"
             onChange={(event) => {
               setDraft(event.currentTarget.value);
-              setFeedback(null);
+              setError(null);
             }}
           />
           <Button type="submit" disabled={!writable}>Save</Button>
@@ -174,7 +174,7 @@ function WorkspaceNameForm({
       {!writable && <p className="m-0 text-sm" role="status">
         {arrived ? "Workspace renaming is unavailable while this page is disconnected." : "Waiting for workspace settings…"}
       </p>}
-      {feedback !== null && <p className="m-0 text-sm" role={feedback.kind === "error" ? "alert" : "status"}>{feedback.text}</p>}
+      {error !== null && <p className="m-0 text-sm" role="alert">{error}</p>}
     </div>
   );
 }
@@ -189,7 +189,7 @@ function TagSettings({
   const status = useRoomStatus(connection);
   const catalog = useTagCatalog(connection);
   const [draft, setDraft] = useState("");
-  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const groups = useRef<HTMLDivElement | null>(null);
   /**
    * The lifecycle action this client just activated, and where its entry stood.
@@ -271,34 +271,25 @@ function TagSettings({
   const create = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     if (connection === null || !connection.status.writable) {
-      setFeedback({
-        kind: "error",
-        text: "Reconnect before changing the tag catalog.",
-      });
+      setError("Reconnect before changing the tag catalog.");
       return;
     }
     if (!isTagName(draft)) {
-      setFeedback({
-        kind: "error",
-        text: "Use 1–30 lowercase letters or numbers, separated by single hyphens.",
-      });
+      setError("Use 1–30 lowercase letters or numbers, separated by single hyphens.");
       return;
     }
     const existing = listTagCatalog(connection.ydoc).find(
       (entry) => entry.name === draft,
     );
     if (existing !== undefined) {
-      setFeedback({
-        kind: "error",
-        text:
-          existing.state === "retired"
-            ? `“${draft}” is retired. Restore it from the retired list.`
-            : `“${draft}” is already an active tag.`,
-      });
+      setError(existing.state === "retired"
+        ? `“${draft}” is retired. Restore it from the retired list.`
+        : `“${draft}” is already an active tag.`);
       return;
     }
     createTagCatalogEntry(connection.ydoc, draft);
-    setFeedback({ kind: "success", text: `Created “${draft}”.` });
+    setError(null);
+    notifyTransient({ key: "workspace-settings", message: `Created “${draft}”.`, severity: "success" });
     setDraft("");
   };
 
@@ -307,9 +298,11 @@ function TagSettings({
     if (entry.state === "active") retireTagCatalogEntry(connection.ydoc, entry.id);
     else restoreTagCatalogEntry(connection.ydoc, entry.id);
     setRefocus({ from: entry.state, at, moved: entry.id });
-    setFeedback({
-      kind: "success",
-      text: `${entry.state === "active" ? "Retired" : "Restored"} “${entry.name}”.`,
+    setError(null);
+    notifyTransient({
+      key: "workspace-settings",
+      message: `${entry.state === "active" ? "Retired" : "Restored"} “${entry.name}”.`,
+      severity: "success",
     });
   };
 
@@ -364,7 +357,7 @@ function TagSettings({
                 aria-describedby="ub-tag-name-help"
                 onChange={(event) => {
                   setDraft(event.currentTarget.value);
-                  setFeedback(null);
+                  setError(null);
                 }}
               />
               <Button type="submit" disabled={!writable}>
@@ -381,16 +374,9 @@ function TagSettings({
               Tag changes are unavailable while this page is disconnected.
             </p>
           )}
-          {feedback !== null && (
-            <p
-              className={
-                feedback.kind === "error"
-                  ? "m-0 rounded-(--radius-sm) border border-destructive p-2 text-sm"
-                  : "m-0 text-sm"
-              }
-              role={feedback.kind === "error" ? "alert" : "status"}
-            >
-              {feedback.text}
+          {error !== null && (
+            <p className="m-0 rounded-(--radius-sm) border border-destructive p-2 text-sm" role="alert">
+              {error}
             </p>
           )}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2" ref={groups}>

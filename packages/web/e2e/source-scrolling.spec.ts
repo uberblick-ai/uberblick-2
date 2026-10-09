@@ -206,7 +206,11 @@ test("code preserves an empty caret and trailing spaces, reveals typed line ends
   await expect(copy).toBeInViewport();
   if (info.project.use.hasTouch === true) await copy.tap();
   else await copy.click();
-  await expect(copy).toHaveText("copied");
+  await expect(copy).toHaveText("copy");
+  const copied = page.locator("[data-sonner-toast]:not([data-removed=true])").filter({
+    has: page.locator("[data-description]", { hasText: /^Copied to clipboard$/ }),
+  });
+  await expect(copied).toHaveAttribute("data-type", "success");
   await expect(page.locator("html")).toHaveAttribute("data-copied-source", edited);
   await expectContained(page);
 });

@@ -11,10 +11,8 @@
  * - It is `contenteditable="false"` and its events are stopped before they
  *   reach ProseMirror (`stopEvent`), so clicking it does not focus the editor
  *   or move the caret.
- * - It changes its own label to confirm, which is a DOM mutation inside the
- *   NodeView but outside `contentDOM` — `ignoreMutation` is what stops
- *   ProseMirror reading that back as a document change. Nothing here dispatches
- *   a transaction, so there is no undo step to make either.
+ * - It publishes through the shared notification facility. Nothing here
+ *   dispatches a transaction, so there is no undo step to make either.
  *
  * The text copied is `node.textContent`: the block's own text, joined with
  * nothing, newlines intact. Not markdown, not a fence — the source.
@@ -31,9 +29,7 @@ import { NodeSelection, Plugin } from "@tiptap/pm/state";
 import type { EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { NodeView } from "@tiptap/pm/view";
-
-/** How long the confirmation stands before the label goes back to "copy". */
-const CONFIRM_MS = 1_500;
+import { notifyTransient } from "../notifications.js";
 
 /**
  * Put `text` on the clipboard, or report that we could not.
@@ -88,7 +84,6 @@ function copyViaSelection(text: string): boolean {
 
 export function copyButton(source: () => string): {
   element: HTMLButtonElement;
-  destroy: () => void;
 } {
   const element = document.createElement("button");
   element.type = "button";
@@ -96,7 +91,6 @@ export function copyButton(source: () => string): {
   element.contentEditable = "false";
   element.textContent = "copy";
   element.title = "Copy this block's source";
-  let revert: ReturnType<typeof setTimeout> | null = null;
 
   // mousedown, not click: the browser moves focus and the caret on mousedown, so
   // preventing the default there is what keeps the editor untouched. By click
@@ -105,23 +99,15 @@ export function copyButton(source: () => string): {
   element.addEventListener("click", (event) => {
     event.preventDefault();
     void writeToClipboard(source()).then((copied) => {
-      // Both words are six characters, and the button reserves the width for
-      // them (styles.css) — the confirmation replaces the label in place.
-      element.textContent = copied ? "copied" : "failed";
-      if (revert !== null) clearTimeout(revert);
-      revert = setTimeout(() => {
-        element.textContent = "copy";
-        revert = null;
-      }, CONFIRM_MS);
+      notifyTransient({
+        key: "clipboard",
+        message: copied ? "Copied to clipboard" : "Copy failed",
+        severity: copied ? "success" : "error",
+      });
     });
   });
 
-  return {
-    element,
-    destroy: () => {
-      if (revert !== null) clearTimeout(revert);
-    },
-  };
+  return { element };
 }
 
 /** Mirror one node attribute onto the DOM, or remove it when unset. */
@@ -191,7 +177,6 @@ export function sourceBlockView(chrome: SourceBlockChrome): NodeViewRenderer {
       // document — every later keystroke lands on screen and nowhere else.
       ignoreMutation: (mutation: { target: Node }): boolean =>
         button.element.contains(mutation.target) || caption?.contains(mutation.target) === true,
-      destroy: button.destroy,
     };
   };
 }

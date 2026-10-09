@@ -25,7 +25,7 @@
 
 import { act, render } from "./react-render.js";
 import { within } from "@testing-library/react";
-import { afterEach, describe, expect, it, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, beforeEach, vi } from "vitest";
 import type { ReactElement } from "react";
 import * as Y from "yjs";
 import {
@@ -36,7 +36,8 @@ import {
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
 import { RoutePane } from "../src/ui/App.js";
-import { DocMetaLine } from "../src/ui/DocChrome.js";
+import { CopyLink, DocMetaLine } from "../src/ui/DocChrome.js";
+import { notifyTransient } from "../src/notifications.js";
 import { useDocMeta } from "../src/ui/hooks.js";
 import {
   canonicalPath,
@@ -53,6 +54,8 @@ import type { RemotePresence } from "../src/ui/doc-chrome.js";
 
 /** Nobody else in the room: these cases are about addresses, not the strip. */
 const NOBODY: readonly RemotePresence[] = [];
+
+vi.mock("../src/notifications.js", () => ({ notifyTransient: vi.fn() }));
 
 const UUID = "3231bff4-2f1c-4a49-9f0a-6f8b2c1d7e55";
 const OTHER = "8c9a1b20-77de-4d31-bd2e-1f0f3a5c6b90";
@@ -640,13 +643,21 @@ async function clickCopy(
   await act(async () => {
     button?.click();
   });
-  const said = within(button.parentElement!).getByRole("status").textContent ?? "";
+  expect(within(button.parentElement!).queryByRole("status")).toBeNull();
+  expect(notifyTransient).toHaveBeenLastCalledWith({
+    key: "clipboard",
+    message: expect.any(String),
+    severity: expect.stringMatching(/^(success|error)$/),
+  });
+  const said = vi.mocked(notifyTransient).mock.lastCall![0].message;
 
   return { label, ariaLabel, said, revisionIsInsideControl };
 }
 
 describe("the copy control hands back the document's canonical link", () => {
   const realExecCommand = (document as unknown as { execCommand?: unknown }).execCommand;
+
+  beforeEach(() => vi.mocked(notifyTransient).mockClear());
 
   afterEach(() => {
     Reflect.deleteProperty(navigator, "clipboard");
@@ -684,6 +695,7 @@ describe("the copy control hands back the document's canonical link", () => {
       uuid: UUID,
     });
     expect(said).toBe("URL copied to clipboard");
+    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: said, severity: "success" });
   });
 
   it("copies the workspace as the address spells it, slug and all", async () => {
@@ -754,5 +766,30 @@ describe("the copy control hands back the document's canonical link", () => {
     (document as unknown as { execCommand: unknown }).execCommand = (): boolean => false;
 
     expect((await clickCopy()).said).toBe("Copy failed");
+    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "Copy failed", severity: "error" });
+  });
+
+  it("publishes every copy again under the same key, including the waiting control", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const view = render(<>
+      <CopyLink room={`${WS}/${UUID}`} segment={DECORATED} shortUuid={UUID.slice(0, 8)} />
+      <CopyLink room={`${WS}/${OTHER}`} segment={DECORATED} />
+    </>);
+    const buttons = within(view.container).getAllByRole("button");
+    for (const button of [buttons[0]!, buttons[0]!, buttons[1]!]) {
+      await act(async () => button.click());
+    }
+    expect(writeText.mock.calls).toEqual([
+      [`${window.location.origin}/${DECORATED}/${UUID}`],
+      [`${window.location.origin}/${DECORATED}/${UUID}`],
+      [`${window.location.origin}/${DECORATED}/${OTHER}`],
+    ]);
+    expect(notifyTransient).toHaveBeenCalledTimes(3);
+    for (const [notice] of vi.mocked(notifyTransient).mock.calls) {
+      expect(notice).toEqual({ key: "clipboard", message: "URL copied to clipboard", severity: "success" });
+    }
+    expect(buttons[1]!.getAttribute("aria-label")).toBe(`Copy link — copies the canonical document URL for ${DECORATED}/${OTHER}`);
+    expect(within(view.container).queryByRole("status")).toBeNull();
   });
 });

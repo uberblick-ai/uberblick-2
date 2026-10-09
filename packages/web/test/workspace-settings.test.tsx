@@ -14,6 +14,7 @@ import {
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { HubEndpoint } from "../src/config.js";
+import { notifyTransient } from "../src/notifications.js";
 import { WorkspaceSettings } from "../src/ui/WorkspaceSettings.js";
 import type { Workspace } from "../src/ui/route.js";
 import type { AccessAction, AccessAnswer, AccessMember, AccessRole } from "../src/shell/workspace-access.js";
@@ -22,6 +23,7 @@ vi.mock("../src/collab/rooms.js", async (original) => ({
   ...await original<typeof import("../src/collab/rooms.js")>(),
   mintHubAuthMessage: vi.fn(async () => `local-browser-bearer-${crypto.randomUUID()}`),
 }));
+vi.mock("../src/notifications.js", () => ({ notifyTransient: vi.fn() }));
 
 const WORKSPACE: Workspace = {
   uuid: "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4",
@@ -94,6 +96,7 @@ let mounted: RenderResult | null = null;
 afterEach(() => {
   mounted = null;
   vi.unstubAllGlobals();
+  vi.mocked(notifyTransient).mockClear();
 });
 
 async function mount(
@@ -315,18 +318,22 @@ it("validates unique names and converges create, retire, and restore with a peer
   expect(within(host).getByRole("alert").textContent).toBe(
     "“auth” is already an active tag.",
   );
+  expect(notifyTransient).not.toHaveBeenCalled();
 
-  act(() => {
-    typeInto(input, "product");
-    submit.click();
-  });
+  act(() => typeInto(input, "product"));
+  expect(within(host).queryByRole("alert")).toBeNull();
+  act(() => submit.click());
   const created = listTagCatalog(peer).find((entry) => entry.name === "product");
   expect(created).toMatchObject({ name: "product", state: "active" });
+  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Created “product”.", severity: "success" });
+  expect(host.textContent).not.toContain("Created “product”.");
 
   act(() => within(within(host).getByRole("region", { name: "Active" })).getByRole<HTMLButtonElement>("button", { name: /^Retire\s*product$/ }).click());
   expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)?.state).toBe(
     "retired",
   );
+  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Retired “product”.", severity: "success" });
+  expect(host.textContent).not.toContain("Retired “product”.");
 
   act(() => {
     typeInto(input, "product");
@@ -335,11 +342,15 @@ it("validates unique names and converges create, retire, and restore with a peer
   expect(within(host).getByRole("alert").textContent).toBe(
     "“product” is retired. Restore it from the retired list.",
   );
+  expect(notifyTransient).toHaveBeenCalledTimes(2);
 
   act(() => within(within(host).getByRole("region", { name: "Retired" })).getByRole<HTMLButtonElement>("button", { name: /^Restore\s*product$/ }).click());
   expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)?.state).toBe(
     "active",
   );
+  expect(within(host).queryByRole("alert")).toBeNull();
+  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Restored “product”.", severity: "success" });
+  expect(host.textContent).not.toContain("Restored “product”.");
 
   act(() => {
     createTagCatalogEntry(peer, "zeta");
@@ -434,14 +445,19 @@ it("renames only shared workspace state and refuses invalid drafts without chang
 
   for (const invalid of ["   ", "x".repeat(65), "Control\u0007name", "Format\u200bname"]) {
     act(() => typeInto(input, invalid));
+    expect(within(host).queryByRole("alert")).toBeNull();
     act(() => submit.click());
     expect(within(host).getByRole("alert").textContent).toContain("1–64 characters after trimming");
     expect(getWorkspaceName(settings.connection.ydoc)).toBe("Current name");
   }
+  expect(notifyTransient).not.toHaveBeenCalled();
   act(() => typeInto(input, "  Product Research  "));
   act(() => submit.click());
   expect(getWorkspaceName(settings.connection.ydoc)).toBe("Product Research");
   expect(input.value).toBe("Product Research");
+  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Saved “Product Research”.", severity: "success" });
+  expect(host.textContent).not.toContain("Saved “Product Research”.");
+  expect(within(host).queryByRole("alert")).toBeNull();
   expect(listTagCatalog(settings.connection.ydoc)).toEqual(catalog);
   expect(facts(host).get("Workspace UUID")).toBe(WORKSPACE.uuid);
   expect(facts(host).get("Address segment")).toBe(WORKSPACE.segment);
@@ -502,8 +518,56 @@ it("waits for settings state and refuses renaming when its room cannot write", a
   act(() => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   expect(getWorkspaceName(settings.connection.ydoc)).toBe("Existing name");
   expect(host.textContent).toContain("Reconnect before renaming");
+  expect(within(host).getByRole("alert").textContent).toBe("Reconnect before renaming the workspace.");
+  expect(notifyTransient).not.toHaveBeenCalled();
   settings.update({ writable: true, connected: true, synced: true });
   expect(button.disabled).toBe(false);
+  act(() => button.click());
+  expect(within(host).queryByRole("alert")).toBeNull();
+  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Saved “Disconnected overwrite”.", severity: "success" });
+  settings.connection.ydoc.destroy();
+});
+
+it.each(["input", "submit"])("preserves the focused %s when name or tag submission publishes success", async (focus) => {
+  const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  let host = await mount(null, ENDPOINT, settings.connection);
+  let input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Workspace name" });
+  let submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Save" });
+  act(() => {
+    typeInto(input, "New name");
+    (focus === "input" ? input : submit).focus();
+    submit.click();
+  });
+  expect(document.activeElement).toBe(focus === "input" ? input : submit);
+  expect(within(host).queryByRole("status")).toBeNull();
+
+  mounted?.unmount();
+  host = await mountTags(settings.connection);
+  input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Create a tag" });
+  submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Create" });
+  act(() => {
+    typeInto(input, "product");
+    (focus === "input" ? input : submit).focus();
+    submit.click();
+  });
+  expect(document.activeElement).toBe(focus === "input" ? input : submit);
+  expect(within(host).queryByRole("status")).toBeNull();
+  settings.connection.ydoc.destroy();
+});
+
+it("keeps tag reconnect refusal inline and clears it when submission later succeeds", async () => {
+  const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  const host = await mountTags(settings.connection);
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Create a tag" });
+  act(() => typeInto(input, "product"));
+  settings.update({ writable: false, connected: false, synced: false });
+  act(() => input.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(within(host).getByRole("alert").textContent).toBe("Reconnect before changing the tag catalog.");
+  expect(notifyTransient).not.toHaveBeenCalled();
+  settings.update({ writable: true, connected: true, synced: true });
+  act(() => within(host).getByRole<HTMLButtonElement>("button", { name: "Create" }).click());
+  expect(within(host).queryByRole("alert")).toBeNull();
+  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Created “product”.", severity: "success" });
   settings.connection.ydoc.destroy();
 });
 
