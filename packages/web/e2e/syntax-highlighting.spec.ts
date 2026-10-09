@@ -234,10 +234,13 @@ for (const deviceName of ["iPhone 13", "iPad Pro 11"] as const) {
     expect(header.height).toBeGreaterThanOrEqual(44);
     expect(header.width).toBeGreaterThanOrEqual(44);
     expect(header.bottom).toBeLessThanOrEqual(header.sourceTop);
-    expect(await earlier.evaluate((element) =>
-      Number.parseFloat(getComputedStyle(element).paddingTop) /
-        Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
-    )).toBeLessThanOrEqual(1.6);
+    // Inactive blocks also reserve a touch target above their editable source.
+    const inactiveCopy = await earlier.locator(":scope > .ub-copy").boundingBox();
+    const inactiveSource = await earlier.locator(":scope > code").boundingBox();
+    if (inactiveCopy === null || inactiveSource === null) throw new Error("e2e: missing inactive code geometry");
+    expect(inactiveCopy.width).toBeGreaterThanOrEqual(44);
+    expect(inactiveCopy.height).toBeGreaterThanOrEqual(44);
+    expect(inactiveCopy.y + inactiveCopy.height).toBeLessThanOrEqual(inactiveSource.y);
     await capture(page, info, `code-language-${deviceName}-closed`);
     // The touch target stays above the source: tapping the first line near its
     // left edge must still place the native selection in editable text.

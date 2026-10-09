@@ -147,6 +147,7 @@ async function expectSourceControl(control: Locator, source: Locator, floor: num
   if (button === null) throw new Error("e2e: missing source-control geometry");
   expect(button.width).toBeGreaterThanOrEqual(floor);
   expect(button.height).toBeGreaterThanOrEqual(floor);
+  expect(button.y + button.height).toBeLessThanOrEqual(await source.evaluate((element) => element.getBoundingClientRect().top));
   expect(button.y + button.height).toBeLessThanOrEqual(textTop);
 }
 
@@ -179,6 +180,13 @@ async function exerciseSourceTargets(page: Page, touch: boolean): Promise<void> 
       const languageBox = await language.boundingBox();
       if (copyBox === null || languageBox === null) throw new Error("e2e: missing code language geometry");
       expect(languageBox.x + languageBox.width).toBeLessThanOrEqual(copyBox.x);
+      const labelCenter = (control: Locator) => control.evaluate((element) => {
+        const range = document.createRange();
+        range.selectNodeContents(element.querySelector("span") ?? element);
+        const label = range.getBoundingClientRect();
+        return label.top + label.height / 2;
+      });
+      expect(Math.abs(await labelCenter(language) - await labelCenter(copy))).toBeLessThanOrEqual(1);
     }
   }
 

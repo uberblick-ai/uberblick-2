@@ -1370,6 +1370,7 @@ h3.ub-heading {
 .ub-mermaid::before,
 .ub-terminal::before {
   display: block;
+  min-height: 1.5rem;
   margin-bottom: 0.2rem;
   padding-right: 7rem;
 }
@@ -1451,6 +1452,13 @@ h3.ub-heading {
 .ub-terminal > .ub-copy {
   min-height: 1.5rem;
   min-width: max(1.5rem, 8ch);
+}
+
+/* Keep the copy label on the language caption's line inside the taller target. */
+.ub-code > .ub-copy {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
 }
 
 @media (any-pointer: coarse) {
