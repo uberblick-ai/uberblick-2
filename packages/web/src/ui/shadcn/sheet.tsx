@@ -64,7 +64,9 @@ function SheetContent({
         {...props}
       >
         {children}
-        {showClose && <SheetClose className="absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+        {/* Center the target on the original 16px glyph (17px from the top,
+            22px from the right), independently of native button padding. */}
+        {showClose && <SheetClose className="absolute top-[0.8125rem] right-[1.125rem] inline-flex items-center justify-center p-0 min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 [@media(any-pointer:coarse)]:top-[0.1875rem] [@media(any-pointer:coarse)]:right-2 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
           <svg
             aria-hidden="true"
             className="size-4"

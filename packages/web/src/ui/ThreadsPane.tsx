@@ -470,8 +470,8 @@ export function ThreadsPane({
             }}
           >
             <SheetTitle className="sr-only">Threads</SheetTitle>
-            {/* Scroll the list inside the sheet so its close control stays put. */}
-            <div className="min-h-0 flex-1 overflow-y-auto p-3">{content}</div>
+            {/* Keep the fixed close target clear of the first unscrolled card. */}
+            <div className="min-h-0 flex-1 overflow-y-auto p-3 pt-4 [@media(any-pointer:coarse)]:pt-7">{content}</div>
           </SheetContent>
         </Sheet>
       </>
