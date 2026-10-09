@@ -154,6 +154,9 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           (document.documentElement.dataset.theme !== "light" && appearance?.matches === true);
         const palette = dark ? DARK : LIGHT;
         const axes = chartAxes(config.y);
+        // Chart.js also extends all-negative axes to zero when enabled.
+        const beginAtZero = (axis: "y" | "yRight"): boolean => !result.series.some((series, index) =>
+          axes.seriesAxes[index] === axis && series.points.some(point => point.y !== null && point.y < 0));
         const font = { family: colors.fontFamily, size: 11 };
         const dateLabels = new Map<number, string[]>();
         // Equal explicit limits leave a zero range in Chart.js. Only this
@@ -211,12 +214,14 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
               },
               y: {
                 type: "linear",
+                beginAtZero: beginAtZero("y"),
                 ticks: { color: colors.color, font, maxTicksLimit: 6, callback: (value, _index, ticks) => formatChartTick(Number(value), axes.leftUnit, ticks) },
                 grid: { color: colors.borderTopColor },
                 border: { display: false },
               },
               ...(axes.rightUnit !== undefined ? { yRight: {
                 type: "linear" as const, position: "right" as const,
+                beginAtZero: beginAtZero("yRight"),
                 ticks: { color: colors.color, font, maxTicksLimit: 6, callback: (value: string | number, _index: number, ticks: { value: number }[]) => formatChartTick(Number(value), axes.rightUnit ?? "", ticks) },
                 grid: { drawOnChartArea: false },
                 border: { display: false },

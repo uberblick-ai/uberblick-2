@@ -478,6 +478,62 @@ test("calendar ink, independent unit axes and nearest-x tooltips keep sparse and
   await expectCornerControls(page);
 });
 
+test("each value axis keeps a zero baseline only while its plotted values are non-negative", async ({ browser }) => {
+  const session = writer();
+  const uuid = await chartDoc(session, "Value-axis baselines");
+  const cases = [
+    { name: "positive", latency: [30, 36], errors: [100, 120], ranges: [[0, 36], [0, 120]] },
+    { name: "single value", latency: [30], errors: [36], ranges: [[0, 30], [0, 36]] },
+    { name: "all zero", latency: [0, 0], errors: [0, 0], ranges: [[0, 0], [0, 0]] },
+    { name: "all negative", latency: [-40, -30], errors: [-100, -90], ranges: [[-40, -30], [-100, -90]] },
+    { name: "mixed signs", latency: [-10, 30], errors: [-30, 10], ranges: [[-10, 30], [-30, 10]] },
+    { name: "positive left, negative right", latency: [30, 36], errors: [-40, -30], ranges: [[0, 36], [-40, -30]] },
+    { name: "negative left, positive right", latency: [-40, -30], errors: [30, 36], ranges: [[-40, -30], [0, 36]] },
+  ];
+  const replace = async (fixture: typeof cases[number]): Promise<void> => {
+    await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA,
+      replaceRecords: fixture.latency.map((latency, index) => ({ id: `point-${index}`, value: {
+        day: `2026-01-0${index + 1}`, latency, errors: fixture.errors[index],
+      } })),
+    }] });
+  };
+  const first = cases[0];
+  if (first === undefined) throw new Error("e2e: value-axis fixtures are empty");
+  await replace(first);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: (loading) => installProbe(loading, uuid), contextOptions: { locale: "en-US" },
+  });
+  await expectReady(page);
+  const canvas = page.getByRole("img", { name: "API latency", exact: true });
+  for (const [index, fixture] of cases.entries()) {
+    await test.step(fixture.name, async () => {
+      if (index > 0) {
+        // Earlier draws must not supply ticks for the new range.
+        await page.evaluate(() => { (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink = []; });
+        await replace(fixture);
+      }
+      await expect(canvas).toHaveAccessibleDescription(new RegExp(`Latency: ${fixture.latency.at(-1)} ms`));
+      await expect(canvas).toHaveAccessibleDescription(new RegExp(`Errors: ${fixture.errors.at(-1)} requests`));
+      for (const [axis, unit] of ["ms", "requests"].entries()) {
+        const range = fixture.ranges[axis];
+        if (range === undefined) throw new Error("e2e: value-axis range is missing");
+        const values = await page.evaluate((suffix) => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink
+          .filter((entry) => new RegExp(`^-?[\\d.]+ ${suffix}$`).test(entry.text))
+          .map((entry) => Number(entry.text.slice(0, -(suffix.length + 1)))), unit);
+        expect(values.length).toBeGreaterThan(1);
+        expect(Math.min(...values)).toBe(range[0]);
+        if (range[0] === 0) {
+          expect(Math.max(...values)).toBeGreaterThan(0);
+          expect(Math.max(...values)).toBeGreaterThanOrEqual(range[1] ?? 0);
+        } else {
+          // Chart.js's existing nice range is unchanged for these fixtures.
+          expect(Math.max(...values)).toBe(range[1]);
+        }
+      }
+    });
+  }
+});
+
 test("narrow-band compact ticks preserve the step on both value axes in both appearances", async ({ browser }) => {
   const session = writer();
   const mapping = { ...MAPPING, title: "Service metrics", y: [
@@ -486,8 +542,8 @@ test("narrow-band compact ticks preserve the step on both value axes in both app
   ] };
   const uuid = await chartDoc(session, "Narrow-band chart", mapping);
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
-    { id: "first", value: { day: "2026-01-01", latency: 1_000, errors: 100 } },
-    { id: "last", value: { day: "2026-01-02", latency: 1_200, errors: 99.9 } },
+    { id: "first", value: { day: "2026-01-01", latency: -1_000, errors: -100 } },
+    { id: "last", value: { day: "2026-01-02", latency: -1_200, errors: -99.9 } },
   ] }] });
   for (const appearance of ["light", "dark"] as const) {
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
@@ -495,15 +551,15 @@ test("narrow-band compact ticks preserve the step on both value axes in both app
       contextOptions: { locale: "en-US", colorScheme: appearance },
     });
     const canvas = page.getByRole("img", { name: "Service metrics", exact: true });
-    await expect(canvas).toHaveAccessibleDescription(/Uptime: 99\.9 %/);
+    await expect(canvas).toHaveAccessibleDescription(/Uptime: -99\.9 %/);
     const painted = () => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts);
-    await expect.poll(painted).toContain("1.05K requests");
-    await expect.poll(painted).toContain("99.92%");
+    await expect.poll(painted).toContain("-1.05K requests");
+    await expect.poll(painted).toContain("-99.92%");
     const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
-    const left = ink.filter(entry => /^[\d.]+K requests$/.test(entry.text));
-    const right = ink.filter(entry => /^[\d.]+%$/.test(entry.text));
-    expect(new Set(left.map(entry => entry.text))).toEqual(new Set(["1K requests", "1.05K requests", "1.1K requests", "1.15K requests", "1.2K requests"]));
-    expect(new Set(right.map(entry => entry.text))).toEqual(new Set(["99.9%", "99.92%", "99.94%", "99.96%", "99.98%", "100%"]));
+    const left = ink.filter(entry => /^-[\d.]+K requests$/.test(entry.text));
+    const right = ink.filter(entry => /^-[\d.]+%$/.test(entry.text));
+    expect(new Set(left.map(entry => entry.text))).toEqual(new Set(["-1K requests", "-1.05K requests", "-1.1K requests", "-1.15K requests", "-1.2K requests"]));
+    expect(new Set(right.map(entry => entry.text))).toEqual(new Set(["-99.9%", "-99.92%", "-99.94%", "-99.96%", "-99.98%", "-100%"]));
     expect(Math.max(...left.map(entry => entry.x))).toBeLessThan(Math.min(...right.map(entry => entry.x)));
   }
 });
