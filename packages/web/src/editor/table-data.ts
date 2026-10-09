@@ -1,7 +1,7 @@
-/** Tables retain record references and format only cells on the visible page. */
+/** Detached projections retain every valid record for a native read-only table. */
 import { compareCodePoints, isExternalHref } from "@uberblick/schema";
 import type { DataRecord, DocData } from "@uberblick/schema";
-import { chartDate, formatChartNumber, formatChartX } from "./chart-data.js";
+import { chartDate, chartDateFormatter, chartNumberFormatter } from "./chart-data.js";
 import { bindCollection, incompatible, keys, name, numeric, object, optionalText, own } from "./view-data.js";
 
 export type TableFormat = "text" | "number" | "date" | "link";
@@ -127,29 +127,39 @@ export function prepareTable(source: string, data: DocData | null): TableProject
   return parsed.ok ? projectTable(parsed.config, data) : { status: "invalid-configuration", message: parsed.message };
 }
 
+/** Reuse Intl formatters within a column, keeping the chart's locale semantics. */
+export function tableCellFormatter(column: TableColumnMapping, locale?: string): (record: DataRecord) => TableCell {
+  let number: ((value: number) => string) | undefined;
+  let date: ((value: number) => string) | undefined;
+  return (record) => {
+    const value = own(record.value, column.field);
+    if (value === undefined) return { state: "absent", text: "Absent" };
+    if (value === null) return { state: "null", text: "Null" };
+    switch (column.format) {
+      case "text": return { state: "valid", text: storedText(value) };
+      case "number": {
+        if (!numeric(value)) break;
+        number ??= column.decimals === undefined ? chartNumberFormatter(locale)
+          : new Intl.NumberFormat(locale, { minimumFractionDigits: column.decimals, maximumFractionDigits: column.decimals }).format;
+        return { state: "valid", text: `${number(value)}${column.unit ? ` ${column.unit}` : ""}` };
+      }
+      case "date": {
+        const instant = chartDate(value);
+        if (instant === null) break;
+        date ??= chartDateFormatter(locale);
+        return { state: "valid", text: date(instant) };
+      }
+      case "link":
+        if (isExternalHref(value)) return { state: "valid", text: value, href: value };
+        break;
+    }
+    return { state: "invalid", text: `Invalid: ${storedText(value)}` };
+  };
+}
+
 /** Text is always assigned as text by the renderer; only href activates a link. */
 export function formatTableCell(column: TableColumnMapping, record: DataRecord, locale?: string): TableCell {
-  const value = own(record.value, column.field);
-  if (value === undefined) return { state: "absent", text: "Absent" };
-  if (value === null) return { state: "null", text: "Null" };
-  switch (column.format) {
-    case "text": return { state: "valid", text: storedText(value) };
-    case "number": {
-      if (!numeric(value)) break;
-      const formatted = column.decimals === undefined ? formatChartNumber(value, locale)
-        : new Intl.NumberFormat(locale, { minimumFractionDigits: column.decimals, maximumFractionDigits: column.decimals }).format(value);
-      return { state: "valid", text: `${formatted}${column.unit ? ` ${column.unit}` : ""}` };
-    }
-    case "date": {
-      const instant = chartDate(value);
-      if (instant !== null) return { state: "valid", text: formatChartX(instant, "date", locale) };
-      break;
-    }
-    case "link":
-      if (isExternalHref(value)) return { state: "valid", text: value, href: value };
-      break;
-  }
-  return { state: "invalid", text: `Invalid: ${storedText(value)}` };
+  return tableCellFormatter(column, locale)(record);
 }
 
 export function tableAccessibleName(config: TableConfig): string { return config.title || `Data table of ${config.collection}`; }

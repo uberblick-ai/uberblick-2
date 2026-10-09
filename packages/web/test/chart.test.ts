@@ -61,6 +61,34 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("the chart's derived lifecycle", () => {
+  it("switches table and line presentation with the source while preserving annotation and source access", () => {
+    const { doc, directory, id } = fixture();
+    editBlock(doc, id, mapping, tableMapping);
+    const { editor } = mountEditor(doc);
+    flush();
+    const root = editor.view.dom.querySelector(".ub-chart") as HTMLElement;
+    const source = root.querySelector(".ub-chart-open") as HTMLButtonElement;
+    expect(root.dataset.view).toBe("table");
+    expect(source.getAttribute("aria-label")).toBe("Open table source");
+    expect(root.querySelector("caption")?.textContent).toBe("Data table of trend");
+    source.click();
+    expect(root.classList.contains("ub-chart-editing")).toBe(true);
+    editor.commands.setTextSelection(1);
+    createAnnotation(doc, id, 0, 5, "reader", "Table mapping note");
+    flush();
+    expect(root.getAttribute("data-annotated")).toBe("true");
+    expect(readDocData).toHaveBeenCalledTimes(1);
+    editBlock(doc, id, tableMapping, mapping);
+    flush();
+    expect(root.dataset.view).toBe("line");
+    expect(root.querySelectorAll(".ub-data-table tbody tr")).toHaveLength(0);
+    expect(source.getAttribute("aria-label")).toBe("Open chart source");
+    expect(root.querySelector(".ub-chart-notice")?.hasAttribute("hidden")).toBe(true);
+    expect(charts.instances).toHaveLength(1);
+    expect(readDocData).toHaveBeenCalledTimes(1);
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
   it("shows a shared reader failure in every view and recovers on a valid update without writes", () => {
     const { doc, directory } = fixture();
     appendBlock(doc, { type: "chart", text: tableMapping });
@@ -79,12 +107,16 @@ describe("the chart's derived lifecycle", () => {
     expect(readDocData).toHaveBeenCalledTimes(2);
     expect(editor.view.dom.querySelectorAll(".ub-chart-panel[data-state=ready]")).toHaveLength(2);
     expect(editor.view.dom.querySelector(".ub-data-table tbody")?.textContent).toBe("19");
+    peer.getMap("data").set(JSON.stringify(["record", "trend", "a"]), { day: 1, value: NaN });
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));
+    flush();
+    expect(editor.view.dom.querySelector(".ub-chart[data-view=table] .ub-chart-notice")?.hasAttribute("hidden")).toBe(true);
     editor.destroy();
     expect(local).toBe(0);
     doc.destroy(); peer.destroy(); directory.destroy();
   });
 
-  it("shares one full read and observer across mixed views, with no reads for source, caret, prose, annotation or paging", () => {
+  it("shares one full read and observer across mixed views, with no reads for source, caret, prose or annotation", () => {
     const { doc, directory, id } = fixture();
     applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "b", value: { day: 2, value: 4 } }] }]);
     for (let index = 0; index < 9; index += 1) appendBlock(doc, { type: "chart", text: mapping });
@@ -99,17 +131,11 @@ describe("the chart's derived lifecycle", () => {
     flush();
     expect(observe).toHaveBeenCalledTimes(1);
     expect(readDocData).toHaveBeenCalledTimes(1);
-    expect(editor.view.dom.querySelectorAll(".ub-data-table tbody tr")).toHaveLength(10);
+    expect(editor.view.dom.querySelectorAll(".ub-data-table tbody tr")).toHaveLength(20);
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
     expect(local).toBe(0);
-    const next = editor.view.dom.querySelector(".ub-table-view:not([hidden]) .ub-table-pager button:last-child") as HTMLButtonElement;
-    const selection = editor.state.selection;
-    next.click(); next.click();
-    flush();
-    expect(editor.state.selection).toBe(selection);
-    expect(local).toBe(0);
-    expect(readDocData).toHaveBeenCalledTimes(1);
-    expect(editor.view.dom.querySelector(".ub-table-view:not([hidden]) tbody")?.textContent).toBe("24");
+    expect(editor.view.dom.querySelector(".ub-table-pager")).toBeNull();
+    expect(editor.view.dom.querySelector(".ub-table-view:not([hidden]) tbody")?.textContent).toBe("1324");
     const firstChart = editor.view.dom.querySelector(".ub-chart-open") as HTMLButtonElement;
     firstChart.click();
     editor.commands.setTextSelection(1);
@@ -122,7 +148,7 @@ describe("the chart's derived lifecycle", () => {
     Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
     local = 0;
     const chartUpdates = charts.instances.map(chart => chart.updates);
-    const tableRenders = [...editor.view.dom.querySelectorAll(".ub-data-table tbody")].map(body => vi.spyOn(body, "replaceChildren"));
+    const retainedRows = [...editor.view.dom.querySelectorAll(".ub-data-table tbody tr:first-child")];
     for (let value = 5; value < 10; value += 1) {
       applyDocData(peer, directory, [{ collection: "trend", upsert: [{ id: "b", value: { day: 2, value } }] }]);
       Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));
@@ -130,8 +156,8 @@ describe("the chart's derived lifecycle", () => {
     flush();
     expect(readDocData).toHaveBeenCalledTimes(2);
     expect(charts.instances.map((chart, index) => chart.updates - (chartUpdates[index] ?? 0))).toEqual(Array(10).fill(1));
-    expect(tableRenders.every(render => render.mock.calls.length === 1)).toBe(true);
-    expect(editor.view.dom.querySelector(".ub-table-view:not([hidden]) tbody")?.textContent).toBe("29");
+    expect([...editor.view.dom.querySelectorAll(".ub-data-table tbody tr:first-child")]).toEqual(retainedRows);
+    for (const body of editor.view.dom.querySelectorAll(".ub-data-table tbody")) expect(body.textContent).toBe("1329");
     expect(editor.view.dom.querySelectorAll(".ub-chart-panel[data-state=ready]")).toHaveLength(20);
     editor.destroy();
     expect(unobserve).toHaveBeenCalledTimes(1);
@@ -170,7 +196,7 @@ describe("the chart's derived lifecycle", () => {
     doc.destroy(); directory.destroy(); next.doc.destroy(); next.directory.destroy();
   });
 
-  it("pages current and arriving data in an unwritable table, clamps deleted pages, and renders safe native cells without writes", () => {
+  it("renders every current and arriving record in an unwritable table with safe native cells and no writes", () => {
     const { doc, directory } = fixture();
     getBlocksFragment(doc).delete(1, 1);
     appendBlock(doc, { type: "chart", text: JSON.stringify({ version: 1, type: "table", collection: "trend", title: "Evidence", pageSize: 1,
@@ -193,16 +219,26 @@ describe("the chart's derived lifecycle", () => {
     expect(element.querySelector(".ub-data-table caption")?.textContent).toBe("Evidence");
     expect(element.querySelectorAll("th[scope=col]")).toHaveLength(4);
     expect(element.querySelector(".ub-data-table img")).toBeNull();
-    const next = element.querySelector(".ub-table-pager button:last-child") as HTMLButtonElement;
-    next.click();
-    flush();
-    expect(element.querySelector(".ub-table-range")?.textContent).toContain("Records 2–2 of 2");
+    expect(element.querySelectorAll(".ub-data-table tbody tr")).toHaveLength(2);
+    expect(element.querySelector(".ub-table-range, .ub-table-pager")).toBeNull();
     expect(element.querySelector(".ub-data-table tbody")?.textContent).toMatch(/Invalid.*javascript:alert\(1\).*Absent/i);
-    expect(element.querySelector(".ub-data-table a")).toBeNull();
+    expect(element.querySelectorAll(".ub-data-table a")).toHaveLength(1);
+    expect(element.querySelector(".ub-chart-title")?.hasAttribute("hidden")).toBe(true);
+    expect(element.querySelector(".ub-chart-notice")?.textContent).toBe("Generated from document data · read-only");
+    expect(element.querySelector(".ub-chart-notice")?.hasAttribute("aria-live")).toBe(false);
+    expect(element.querySelector(".ub-chart")?.getAttribute("data-view")).toBe("table");
     applyDocData(peer, directory, [{ collection: "trend", upsert: [{ id: "b", value: { day: 2, value: 9 } }] }]);
     Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));
     flush();
     expect(element.querySelector(".ub-data-table tbody")?.textContent).toContain("29");
+    // A peer's merged value can violate the schema even though local writes validate.
+    peer.getMap("data").set(JSON.stringify(["record", "trend", "a"]), { day: "wrong type", value: 3 });
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));
+    flush();
+    expect(element.querySelectorAll(".ub-data-table tbody tr")).toHaveLength(1);
+    expect(element.querySelector(".ub-chart-diagnostics")?.textContent).toBe("1 records not shown (invalid under the collection schema).");
+    expect(element.querySelector(".ub-chart-diagnostics")?.hasAttribute("aria-live")).toBe(false);
+    expect(element.querySelector(".ub-table-view")?.nextElementSibling?.textContent).toBe("Generated from document data · read-only");
     applyDocData(peer, directory, [{ collection: "trend", replaceRecords: [] }]);
     Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));
     flush();
@@ -213,13 +249,11 @@ describe("the chart's derived lifecycle", () => {
     Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));
     flush();
     expect(element.querySelector(".ub-data-table tbody")?.textContent).toContain("13");
-    next.click();
-    flush();
     applyDocData(peer, directory, [{ collection: "trend", deleteRecords: ["b"] }]);
     Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));
     flush();
     expect(element.querySelector(".ub-data-table tbody")?.textContent).toContain("13");
-    expect(element.querySelector(".ub-table-pager")?.hasAttribute("hidden")).toBe(true);
+    expect(element.querySelectorAll(".ub-data-table tbody tr")).toHaveLength(1);
     editor.destroy(); element.remove();
     expect(local).toBe(0);
     doc.destroy(); peer.destroy(); directory.destroy();

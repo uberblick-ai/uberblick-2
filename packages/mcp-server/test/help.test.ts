@@ -258,8 +258,14 @@ it("documents the table mapping through both help routes and accepts its source 
       { field: "run_h", label: "Run time", format: "number", unit: "h", decimals: 1 },
       { field: "url", format: "link" },
     ],
-    sort: { field: "day", direction: "desc" }, pageSize: 25,
+    sort: { field: "day", direction: "desc" },
   });
+  expect(JSON.parse(source!)).not.toHaveProperty("pageSize");
+  expect(section).toContain("Every valid record appears in one continuous native table");
+  expect(section).toContain("Generated from document data · read-only");
+  expect(section).toContain("never affect display; omit pageSize from new mappings");
+  expect(section).not.toContain("Page controls");
+  expect(section).not.toContain("paging stays available");
   const created = await rig.ok("create_doc", {
     title: "Help table example", description: "A synthetic help example.",
     blocks: [{ type: "chart", text: source }],
@@ -271,9 +277,14 @@ it("documents the table mapping through both help routes and accepts its source 
   for (const guidance of [
     '"type":"table"', "one to thirty ordered columns", "text (default), number, date or link",
     "Only number accepts unit (a suffix) and decimals (an integer from zero to ten)",
-    "sort (one column field, direction asc or desc)", "pageSize (one to one hundred, default twenty-five)",
+    "sort (one column field, direction asc or desc)", "supplies only the table's accessible name",
+    "Every valid record appears in one continuous native table", "Generated from document data · read-only",
+    "Open table source appears on hover or keyboard focus and stays reachable without hover",
     "Unknown mapping keys and options are invalid", "contain no record values",
   ]) expect(constraints, guidance).toContain(guidance);
+  const insertSource = constraints?.match(/`(\{"version":1,"type":"table"[^`]+)`/)?.[1];
+  expect(insertSource).toBeDefined();
+  expect(JSON.parse(insertSource!)).not.toHaveProperty("pageSize");
   expect((await rig.client.readResource({ uri: "uberblick://help/insert_block" })).contents[0])
     .toMatchObject({ text: insertHelp.text });
 });

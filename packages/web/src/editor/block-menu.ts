@@ -238,7 +238,6 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
       type: "table",
       collection: "records",
       columns: [{ field: "value", format: "text" }],
-      pageSize: 25,
     }, null, 2),
   },
 ];
