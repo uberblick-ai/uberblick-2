@@ -11,9 +11,7 @@
  * - No client config has to change again when internals move. `ub mcp serve` is
  *   the stable line; where the server lives is our problem, not the client's.
  *
- * The spawn itself is `runChild` — shared with `ub env`, which hands the same
- * environment to any command, so a mise task and an MCP client cannot end up
- * configured differently.
+ * The spawn itself is `runChild`, which owns signal forwarding and exit codes.
  */
 
 import { existsSync } from "node:fs";

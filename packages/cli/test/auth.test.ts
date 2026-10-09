@@ -493,34 +493,21 @@ describe("hub-driven CLI GitHub sign-in", () => {
       expect(request.authorization).toBeUndefined();
       expect(Object.keys(request.body).sort()).toEqual(request.path.endsWith("start") || request.path === "/auth/claim-state" ? [] : ["collectionSecret", "requestId"]);
     }
-    // The child compares private values in memory and prints only conclusions.
-    // A successful test must not teach people to dump a resolved environment.
-    const bridgeCheck = `
-      const fs = require("node:fs");
-      const path = require("node:path");
-      const stored = JSON.parse(fs.readFileSync(path.join(process.env.XDG_CONFIG_HOME, "uberblick", "credentials.json"), "utf8"));
-      const values = Object.values(process.env);
-      process.stdout.write(JSON.stringify({
-        deviceCredentialsAbsent: Object.values(stored.hubLogins).every(login => values.every(value => !value.includes(login.credential.key))),
-        signingSecretAbsent: process.env.HUB_AUTH_TOKEN === undefined,
-        workspace: process.env.WORKSPACE_ID,
-        hub: process.env.HUB_URL
-      }));
-    `;
-    const bridge = await runUbAsync(["env", "--", process.execPath, "-e", bridgeCheck], box);
+    const bridge = resolveConfig({ env: box.env, cwd: box.cwd }).env;
+    const values = Object.values(bridge);
+    expect(Object.values(readStore(box).hubLogins ?? {}).every(login =>
+      values.every(value => !value?.includes(login.credential.key)))).toBe(true);
+    expect(bridge.HUB_AUTH_TOKEN).toBeUndefined();
+    expect(bridge.WORKSPACE_ID).toBe(WORKSPACE);
+    expect(bridge.HUB_URL).toBe(`${remote.origin.replace("http:", "ws:")}/ws`);
     const snippet = await runUbAsync(["mcp", "install", "zed", "--print"], box);
-    for (const text of [bridge.output, snippet.output, readFileSync(configPath(box), "utf8")]) {
+    for (const text of [snippet.output, readFileSync(configPath(box), "utf8")]) {
       expect(text.includes(stored.credential.key), "credential key is only persisted in its private store").toBe(false);
       for (const request of remote.requests) {
         const secret = request.body.collectionSecret;
         if (typeof secret === "string") expect(text.includes(secret)).toBe(false);
       }
     }
-    expect(bridge.status).toBe(0);
-    expect(JSON.parse(bridge.stdout)).toEqual({
-      deviceCredentialsAbsent: true, signingSecretAbsent: true,
-      workspace: WORKSPACE, hub: `${remote.origin.replace("http:", "ws:")}/ws`,
-    });
     await remote.hub.stop();
     const requestCount = remote.requests.length;
     expect((await runUbAsync(["auth", "status"], box)).status).toBe(0);

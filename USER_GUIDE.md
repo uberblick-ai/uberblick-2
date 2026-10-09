@@ -168,12 +168,14 @@ with somebody's agent on its own, even with a vendor CLI installed: running
 ## Configuration
 
 Workspace selection is explicit and atomic: workspace ID plus hub URL. Terminal
-commands, `ub open`, `ub env` and `ub mcp serve` use one resolver:
+commands, `ub open`, `ub mcp serve` and checkout development tasks use one resolver:
 
-1. Both `UB_WORKSPACE_ID` and `UB_HUB_URL` in the environment override the whole
-   project binding. A missing, blank or invalid half is an error; values are never
-   borrowed from another layer. Set `UB_HUB_URL=local` for local-only use. These
-   variables work with mise, direnv and per-entry MCP environments.
+1. `UB_WORKSPACE_ID` in the environment overrides the project binding and uses
+   this machine's recorded hub for that workspace. Add `UB_HUB_URL` for an
+   explicit hub, or `local` for local-only use; it is required until this machine
+   has a record. A hub URL alone, or a blank or invalid value, is an error;
+   values are never borrowed from the project file. These variables work with
+   mise, direnv and per-entry MCP environments.
 2. Otherwise, search from the current directory up to the filesystem root for
    the nearest `.uberblick.json`. An invalid nearest file fails; it never falls
    through to a parent. A file in a common ancestor intentionally covers its
@@ -182,8 +184,6 @@ commands, `ub open`, `ub env` and `ub mcp serve` use one resolver:
    `.uberblick.json` there explicitly; selection commands update the nearest file.
 3. Without either, `ub status` reports **No workspace selected** without opening
    a database. Workspace-dependent commands refuse until a binding is chosen.
-   `ub env -- <command>` can still run non-workspace commands, with no workspace
-   or hub selection exported.
 
 ```json
 {

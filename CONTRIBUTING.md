@@ -97,14 +97,13 @@ at the [user guide's configuration root](USER_GUIDE.md#where-your-files-live).
 It generates a secret only while this machine has no hub endpoint stored. A
 machine bound to a loopback-only hub needs that hub's secret.
 
-Tasks that need configuration wrap their command in `fnox exec -- ub env -- …`.
-`ub env -- <command…>` executes the command under the configuration `ub`
-resolved and passes the signing secret only for local admission. Stored login
+Development processes resolve the project binding and credentials through the
+same resolver as `ub`. The MCP task runs `ub mcp serve`, which resolves them
+for its child. The signing secret is used only for local admission. Stored login
 or a verified device-authenticated binding selects device credentials even at
 a loopback endpoint. Device credentials remain in the credential store, never
 child environments. The [user guide](USER_GUIDE.md#configuration) owns the
-secret's environment-over-file precedence. There is no bare `ub env`, because printing that
-environment would print the secret.
+secret's environment-over-file precedence.
 
 The secret is never printed by `ub init`, `ub status` or an error path. At most,
 they say where it came from.
@@ -329,12 +328,11 @@ The private key belongs at `~/.config/fnox/age.txt`, never in the repository.
 Only actual secrets go there. Plaintext local defaults such as `HUB_DB_PATH`
 belong in `mise.toml`'s `[env]`. `HUB_URL` deliberately does not: that block is
 ambient for the checkout, so the `ws://localhost:1234` default lives in client
-code, while explicit project/environment binding through `ub env` selects the
-endpoint actually dialed.
+code, while explicit project/environment binding through the shared resolver
+selects the endpoint actually dialed.
 
-Contributors without an age key can still run the task wrappers. They pass
-`fnox exec --if-missing warn`: a secret that cannot be decrypted causes a
-warning, leaves that variable as it was and does not abort. See
-[The signing secret](#the-signing-secret) for precedence. Lint, test and
-typecheck do not shell through fnox. User credential handling and database
-identity safeguards are in the [user guide](USER_GUIDE.md).
+Development tasks read the private credential store directly and need no age key.
+`mise run init` retains `fnox exec --if-missing warn`: a secret that cannot be
+decrypted causes a warning and leaves that variable as it was. See
+[The signing secret](#the-signing-secret) for precedence. User credential handling
+and database identity safeguards are in the [user guide](USER_GUIDE.md).

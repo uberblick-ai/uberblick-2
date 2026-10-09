@@ -9,6 +9,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./config": "./src/config.ts",
+    "./project-config": "./src/project-config.ts",
+    "./project-binding": "./src/project-binding.ts",
+    "./workspace-registry": "./src/workspace-registry.ts",
     "./protocol": "./src/protocol.ts",
     "./storage": "./src/storage.ts",
     "./token": "./src/token.ts",
@@ -21,7 +24,7 @@
     "./test-device-sync": "./test/device-sync-hub.ts"
   },
   "scripts": {
-    "start": "tsx src/main.ts",
+    "start": "node --import tsx --import ./src/dev-config.ts src/main.ts",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

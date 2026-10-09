@@ -64,7 +64,7 @@ async function main() {
 		version, sourceCommit, syncProtocolVersion: Number(protocolVersion), images: { hub: hubImage, web: webImage },
 	}, null, 2)}\n`);
 	const environment = { ...process.env, UBERBLICK_RELEASE_WEB: "1" };
-	for (const key of ["HUB_URL", "HUB_AUTH_TOKEN", "WORKSPACE_ID", "WORKSPACES",
+	for (const key of ["HUB_URL", "HUB_AUTH_TOKEN", "WORKSPACE_ID", "WORKSPACES", "UB_WORKSPACE_ID", "UB_HUB_URL",
 		"WEB_HUB_URL", "WEB_WORKSPACES", "WEB_HOST", "HTTPS_BIND_IP", "LOOPBACK_PORT", "TAILSCALE_HOST", "TAILSCALE_IP"]) delete environment[key];
 	const result = spawnSync("pnpm", ["--filter", "@uberblick/web", "exec", "vite", "build",
 		"--outDir", join(destination, "web"), "--emptyOutDir"], {

@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { resolveConfig } from "../src/config.js";
 import { resolveProjectBinding, writeProjectBinding } from "../src/project-binding.js";
 import { rememberWorkspaceBinding, readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
 import { sandbox, unboundSandbox, removeTempDirs, runUb } from "./helpers.js";
@@ -91,16 +92,16 @@ describe("atomic project bindings", () => {
   it.each([null, "wss://recorded.example.test/ws"])("resolves id-only overrides by machine record (%s) and keeps child environments complete", async (hubUrl) => {
     const box = sandbox({ projectBinding: { workspaceId: second, hubUrl: "https://project.example.test" } });
     await rememberWorkspaceBinding({ workspaceId: first, hubUrl }, box.env);
+    vi.stubEnv("XDG_CONFIG_HOME", box.configHome);
     for (const id of [first, `notes-${first}`]) {
       const run = runUb(["workspace", "status"], box, { UB_WORKSPACE_ID: id });
       expect(run.status, run.output).toBe(0);
       expect(run.stdout).toContain(first);
       expect(run.stdout).toContain(hubUrl ?? "local");
       expect(run.stdout).toMatch(/^chosen by\s+environment$/m);
-      const child = runUb(["env", "--", process.execPath, "-e",
-        "process.stdout.write(JSON.stringify([process.env.UB_WORKSPACE_ID,process.env.UB_HUB_URL]))"], box, { UB_WORKSPACE_ID: id });
-      expect(child.status, child.output).toBe(0);
-      expect(JSON.parse(child.stdout)).toEqual([id, hubUrl ?? "local"]);
+      const resolved = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: id }, cwd: box.cwd });
+      expect([resolved.env.UB_WORKSPACE_ID, resolved.env.UB_HUB_URL])
+        .toEqual([id, hubUrl ?? "local"]);
     }
   });
 

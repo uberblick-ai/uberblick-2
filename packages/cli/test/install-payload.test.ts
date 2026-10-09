@@ -155,6 +155,37 @@ beforeAll(() => {
 });
 
 describe("the versioned install payload", () => {
+  it("builds web assets without the builder's environment or checkout binding", () => {
+    const isolatedOutput = join(scratch, "real-web-output");
+    const isolatedExtracted = join(scratch, "real-web-extracted");
+    const environment: NodeJS.ProcessEnv = {
+      ...process.env,
+      UBERBLICK_PAYLOAD_OUTPUT_DIR: isolatedOutput,
+      UB_WORKSPACE_ID: "builder-89c7e520-1111-4111-8111-123456789abc",
+      UB_HUB_URL: "wss://builder-binding.invalid/ws",
+      HUB_AUTH_TOKEN: "builder-secret-must-never-reach-the-web-bundle",
+    };
+    delete environment.UBERBLICK_PAYLOAD_WEB_DIST;
+    const built = spawnSync(process.execPath, [BUILD_SCRIPT, VERSION], {
+      cwd: REPO_ROOT, env: environment, encoding: "utf8", timeout: 120_000,
+    });
+    expect(built.status, built.stderr).toBe(0);
+    mkdirSync(isolatedExtracted);
+    const unpacked = spawnSync("tar", ["-xzf", join(isolatedOutput, `uberblick-${VERSION}.tar.gz`), "-C", isolatedExtracted], {
+      encoding: "utf8", timeout: 30_000,
+    });
+    expect(unpacked.status, unpacked.stderr).toBe(0);
+    const bundle = filesBelow(join(isolatedExtracted, `uberblick-${VERSION}`, "packages", "web", "dist"))
+      .filter(path => path.endsWith(".js")).map(path => readFileSync(path, "utf8")).join("\n");
+    const checkout = JSON.parse(readFileSync(join(REPO_ROOT, ".uberblick.json"), "utf8")) as {
+      workspaceId: string; hubUrl: string;
+    };
+    for (const value of [environment.UB_WORKSPACE_ID, environment.UB_HUB_URL, environment.HUB_AUTH_TOKEN,
+      checkout.workspaceId, checkout.workspaceId.slice(-36), checkout.hubUrl]) {
+      expect(bundle.includes(value ?? ""), "builder configuration is absent from packaged web assets").toBe(false);
+    }
+  }, 150_000);
+
   it("refuses the checkout placeholder as a release version", () => {
     const invalidOutput = join(scratch, "invalid");
     const invalid = build("0.0.0", invalidOutput);

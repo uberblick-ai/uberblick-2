@@ -18,9 +18,10 @@ The commands that build, run and validate a change:
 | `python3 scripts/cleanup-agent-worktree.py` | ub-agents hook before private-worktree removal; uses `UB_AGENTS_RUN` and `UB_AGENTS_WORKTREE` |
 | `sh bin/housekeeping.sh <review sha>...` | the host cleanup an integrator runs after a durable outcome |
 
-Prefer these to direct package-manager invocations, and run a command that needs
-the project's configuration through `fnox exec -- ub env -- <command>`. Do not
-dump resolved environment or credentials. Keep secrets in the supported
+Prefer these to direct package-manager invocations. Development tasks resolve
+the project's binding and private credentials themselves; `ub mcp serve` does
+so for the MCP server. Do not dump resolved environment or credentials.
+Keep secrets in the supported
 credential store; never commit plaintext tokens or create secret .env files.
 Where a corpus document governs the behavior you are changing, read it first.
 

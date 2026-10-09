@@ -1,11 +1,8 @@
 /**
  * Running another program under `ub`'s resolved configuration.
  *
- * Two commands do it — `ub mcp serve`, which runs the MCP server, and `ub env`,
- * which runs whatever it is given — and they must be the same act, because that
- * is the whole claim `ub env` makes: the environment a mise task gets is the
- * environment an MCP client's server gets. One spawn, one signal policy, one set
- * of exit-code rules, here.
+ * `ub mcp serve` runs the MCP server with one spawn, one signal policy and one
+ * set of exit-code rules, here.
  *
  * stdio is inherited, so the child's streams are this process's streams: for
  * `ub mcp serve` that is what keeps the JSON-RPC transport between the client

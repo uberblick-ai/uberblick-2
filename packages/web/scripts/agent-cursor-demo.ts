@@ -8,8 +8,8 @@
  *
  * Entry point: `mise run agent-cursor`. It takes an optional `<docUuid>`
  * (`mise run agent-cursor -- <docUuid>`); with no uuid the script picks the
- * first entry from the directory doc. HUB_AUTH_TOKEN has to come from
- * `fnox exec`, which the task wraps.
+ * first entry from the directory doc. The project binding and private signing
+ * secret are resolved exactly as they are for `ub open`.
  *
  * ============================================================================
  * THE AWARENESS CURSOR FORMAT — read out of y-prosemirror 1.3.7, not guessed
@@ -72,6 +72,7 @@
 
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { wrapToken } from "@uberblick/hub/protocol";
+import { resolveDevProjectConfig } from "../dev-project-config.js";
 import * as Y from "yjs";
 import {
   directoryRoom,
@@ -86,25 +87,12 @@ import {
   mintToken,
 } from "../src/collab/token.js";
 
-const HUB_URL = process.env.HUB_URL ?? "ws://localhost:1234";
-const HUB_AUTH_TOKEN = process.env.HUB_AUTH_TOKEN ?? "";
-/**
- * The workspace to park a cursor in. Required: there is no default workspace,
- * and a demo that guessed one would connect to a corpus nobody chose. `mise run
- * agent-cursor` inherits it from the same mise `[env]` every other task reads.
- */
-const WORKSPACE = ((): string => {
-  const configured = process.env.WORKSPACE_ID?.trim();
-  if (configured === undefined || configured === "") {
-    console.error(
-      "agent-cursor: WORKSPACE_ID is not set — run `ub init`, or `ub status` " +
-        "to see the workspace in force",
-    );
-    process.exit(1);
-  }
-  // Decorated or bare, only the uuid names a room or signs a claim.
-  return parseWorkspaceId(configured).uuid;
-})();
+const config = resolveDevProjectConfig();
+for (const warning of config.warnings) console.error(warning);
+const HUB_URL = config.hubUrl;
+const HUB_AUTH_TOKEN = config.hubAuthToken;
+// Decorated or bare, only the uuid names a room or signs a claim.
+const WORKSPACE = parseWorkspaceId(config.workspaceId).uuid;
 
 const AGENT_NAME = "Claude · demo agent";
 /** 6-digit hex only — y-prosemirror rejects every other colour notation. */
@@ -191,7 +179,7 @@ async function resolveUuid(argv: string[]): Promise<string> {
 async function main(): Promise<void> {
   if (HUB_AUTH_TOKEN === "") {
     throw new Error(
-      "HUB_AUTH_TOKEN is unset — run this under `fnox exec` (see mise.toml)",
+      "No loopback signing secret is available — run `ub init` for local setup; use `ub open` for remote work.",
     );
   }
 

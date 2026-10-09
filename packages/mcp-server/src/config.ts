@@ -23,8 +23,8 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { resolveStorage } from "@uberblick/hub/storage";
-import { authenticationOrigin, isLoopbackEndpoint } from "@uberblick/hub/remote-url";
-import { readHubLogins } from "@uberblick/hub/auth-store";
+import { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/hub/auth-store";
+export { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/hub/auth-store";
 import { parseWorkspaceId } from "@uberblick/schema";
 
 /**
@@ -151,14 +151,6 @@ export function defaultDatabasePath(
 function trimmed(value: string | undefined): string | null {
   const text = value?.trim();
   return text === undefined || text === "" ? null : text;
-}
-
-/** A loopback proxy can reach a hub whose own bind requires device credentials. */
-export function usesDeviceLogin(endpoint: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  if (!isLoopbackEndpoint(endpoint) || env.HUB_ADMISSION === "device") return true;
-  const origin = authenticationOrigin(endpoint);
-  const store = readHubLogins(env);
-  return store.logins[origin] !== undefined || store.unreadableHubs.includes(origin);
 }
 
 /** Direct server entry is internal; public `ub mcp serve` resolves the binding. */
