@@ -21,7 +21,7 @@ import * as open from "../src/open.js";
 import * as probes from "../src/probes.js";
 import { rememberWorkspaceBinding } from "../src/workspace-registry.js";
 import type { Run, Sandbox } from "./helpers.js";
-import { DEAD_HUB_URL, pointAt, removeTempDirs, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
+import { DEAD_HUB_URL, freePort, pointAt, removeTempDirs, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
 
 const WORKSPACE = "9f2c47a1-5b83-4e60-91d7-2a6c8b40e3f5";
 const PINNED = "3e8b1d09-47af-4c62-8f10-95d3c7b6a204";
@@ -92,15 +92,6 @@ async function silentServer(offsetSeconds: number | null = 0): Promise<{ port: n
   if (address === null || typeof address === "string") throw new Error("no silent server port");
   reading.port = address.port;
   return reading;
-}
-
-async function freePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (address === null || typeof address === "string") throw new Error("no reserved port");
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  return address.port;
 }
 
 async function doctor(box: Sandbox, extraEnv: NodeJS.ProcessEnv = {}): Promise<{ report: DoctorReport; checks: Map<string, Check>; ok: boolean }> {

@@ -23,6 +23,7 @@ import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   REPO_ROOT,
+  freePort,
   pointAt,
   removeTempDirs,
   sandbox,
@@ -116,18 +117,6 @@ function treeDigest(root: string): string {
     hash.update(stat.isSymbolicLink() ? readlinkSync(path) : readFileSync(path));
   }
   return hash.digest("hex");
-}
-
-async function freePort(): Promise<number> {
-  const { createServer } = await import("node:net");
-  const server = createServer();
-  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("could not reserve a port");
-  }
-  await new Promise<void>((done) => server.close(() => done()));
-  return address.port;
 }
 
 beforeAll(() => {

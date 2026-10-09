@@ -32,6 +32,8 @@ import {
   waitUntil,
 } from "./helpers.js";
 
+export { freePort } from "./helpers.js";
+
 export const WORKSPACE = "b4d1f0a7-3c62-4e91-8f05-7ad2c9e61b38";
 export const SECRET = "open-test-signing-secret-9d31fa";
 
@@ -67,17 +69,6 @@ export async function cleanUp(): Promise<void> {
 
 // --- fixtures ----------------------------------------------------------------
 
-/** A port nothing is listening on: bound, read back, and released. */
-export async function freePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("could not reserve a port");
-  }
-  await new Promise<void>((done) => server.close(() => done()));
-  return address.port;
-}
 
 /**
  * A second connection to a store a live `ub open` process is serving.

@@ -19,9 +19,11 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +33,7 @@ import { findProjectConfig } from "../src/project-binding.js";
 declare module "vitest" {
   export interface ProvidedContext {
     boundFixtureRoot: string;
+    testPortOffset: number;
   }
 }
 
@@ -154,7 +157,9 @@ export function unboundSandbox(files: SandboxFiles = {}): Sandbox {
 }
 
 function createSandbox(parent: string, files: SandboxFiles): Sandbox {
-  const root = mkdtempSync(join(parent, "uberblick-cli-"));
+  // `ub` reports the paths it resolves, so a symlinked TMPDIR (macOS's
+  // /var -> /private/var) must not differ from the paths tests expect.
+  const root = realpathSync(mkdtempSync(join(parent, "uberblick-cli-")));
   tempDirs.push(root);
 
   const cwd = join(root, "checkout");
@@ -356,6 +361,44 @@ export function runUbAsync(
 
 /** A hub address nothing listens on: `ub status` must not wait on the network. */
 export const DEAD_HUB_URL = "ws://127.0.0.1:1";
+
+/**
+ * Where {@link freePort} picks: below 32768, outside the default ephemeral
+ * ranges (Linux starts there, macOS at 49152), in one slice per concurrent
+ * worker.
+ */
+export const TEST_PORTS = { first: 20_000, count: 12_000, perWorker: 100 };
+let portCursor = 0;
+
+/**
+ * A loopback port nothing is listening on, for a test to hand to `ub`.
+ *
+ * Not `listen(0)`: a port read back from that and released is in the kernel's
+ * ephemeral range, which every in-process hub and client socket draws from
+ * too. On a busy host one of them can take it before the `ub` under test binds
+ * it, and `ub open` rightly refuses an occupied port (#1216). Only explicit
+ * picks land below that range. Each worker walks its own slice, rotated by an
+ * offset drawn once per run, so one suite's workers never pick alike and a
+ * second suite on the host would have to probe the same port at the same time.
+ */
+export async function freePort(): Promise<number> {
+  const worker = Number(process.env.VITEST_POOL_ID ?? "1");
+  const slice = inject("testPortOffset") + worker * TEST_PORTS.perWorker;
+  for (let tried = 0; tried < TEST_PORTS.perWorker; tried += 1) {
+    const step = portCursor++ % TEST_PORTS.perWorker;
+    const port = TEST_PORTS.first + ((slice + step) % TEST_PORTS.count);
+    if (await canListen(port)) return port;
+  }
+  throw new Error("no free port in this worker's test slice");
+}
+
+async function canListen(port: number): Promise<boolean> {
+  const server = createServer();
+  return await new Promise((done) => {
+    server.once("error", () => done(false));
+    server.listen(port, "127.0.0.1", () => server.close(() => done(true)));
+  });
+}
 
 /**
  * Two signing secrets to put in conflicting layers, and never to find again.
