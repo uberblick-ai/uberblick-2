@@ -1,8 +1,7 @@
 /** A chart derives a bounded view from the shared reader; it never repairs data. */
-import {
-  compareCodePoints, DATA_LIMITS, validateCollectionSchema,
-} from "@uberblick/schema";
-import type { DataSchema, DocData, JSONObject } from "@uberblick/schema";
+import { compareCodePoints } from "@uberblick/schema";
+import type { DocData, JSONObject } from "@uberblick/schema";
+import { bindCollection, incompatible, keys, name, numeric, object, optionalText, own } from "./view-data.js";
 
 export const CHART_RECORD_LIMIT = 5_000;
 
@@ -48,20 +47,6 @@ export interface ChartProblem {
   notice?: string;
 }
 export type ChartProjection = ChartReady | ChartProblem;
-
-function object(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-function text(value: unknown): value is string {
-  return typeof value === "string" && !/[\uD800-\uDFFF]/u.test(value);
-}
-function name(value: unknown): value is string { return text(value) && value.length > 0; }
-function keys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
-  return Object.keys(value).every((key) => allowed.includes(key));
-}
-function optionalText(value: Record<string, unknown>, key: string): boolean {
-  return !Object.hasOwn(value, key) || text(value[key]);
-}
 
 export function parseChartConfig(source: string):
   { ok: true; config: ChartConfig } | { ok: false; message: string } {
@@ -130,31 +115,12 @@ export function chartDate(value: unknown): number | null {
   return result;
 }
 
-function numeric(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value); }
-function own(value: JSONObject, key: string): unknown { return Object.hasOwn(value, key) ? value[key] : undefined; }
-function incompatible(schema: DataSchema, field: string, expected: "number" | "date"): boolean {
-  const property = schema.properties !== undefined && Object.hasOwn(schema.properties, field)
-    ? schema.properties[field] : undefined;
-  if (property === undefined) return schema.additionalProperties === false;
-  if (property.type === undefined) return false;
-  const types = typeof property.type === "string" ? [property.type] : property.type;
-  return expected === "date" ? !types.includes("string") : !types.includes("number") && !types.includes("integer");
-}
-
 export function projectChart(config: ChartConfig, data: DocData | null): ChartProjection {
-  const collection = data?.collections.find((candidate) => candidate.name === config.collection);
-  if (collection === undefined) return { status: "collection-absent", message: `Chart collection “${config.collection}” is absent.` };
-  if (data !== null && (data.bytes > DATA_LIMITS.area || data.errors.some((error) => error.details.limit === "area"))) {
-    return { status: "collection-unusable", message: "Chart collection is unusable: the document data area exceeds its limit." };
-  }
-  const schema = collection.schema;
-  try { validateCollectionSchema(schema); }
-  catch { return { status: "collection-unusable", message: "Chart collection is unusable: its schema is missing or unsupported." }; }
-  if (collection.errors.some((error) => error.code === "data_schema_invalid" || error.details.limit === "schema")) {
-    return { status: "collection-unusable", message: "Chart collection is unusable: its schema is missing, unsupported or over its limit." };
-  }
-  const badField = incompatible(schema.schema, config.x.field, config.x.type) ? config.x.field
-    : config.y.find((series) => incompatible(schema.schema, series.field, "number"))?.field;
+  const binding = bindCollection(data, config.collection, "Chart");
+  if (binding.status !== "ready") return binding;
+  const { collection, schema } = binding;
+  const badField = incompatible(schema, config.x.field, config.x.type) ? config.x.field
+    : config.y.find((series) => incompatible(schema, series.field, "number"))?.field;
   if (badField !== undefined) return { status: "mapping-incompatible", message: `Chart mapping is incompatible with the schema: field “${badField}” is missing or has an incompatible type.` };
 
   const diagnostics: ChartDiagnostics = {

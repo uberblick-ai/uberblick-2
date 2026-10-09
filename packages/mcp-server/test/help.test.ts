@@ -195,3 +195,29 @@ it("documents the closed version-1 data vocabulary and demonstrates a schema the
   expect(example).toBeDefined();
   expect(() => validateCollectionSchema(JSON.parse(example!))).not.toThrow();
 });
+
+it("documents the table mapping through both help routes and accepts its source as ordinary chart text", async () => {
+  const rig = await local();
+  const { text } = await rig.ok("get_help", { topic: "data" });
+  const section = text.split("### Data tables\n")[1];
+  const source = section?.match(/```json\n([\s\S]*?)\n```/)?.[1];
+  expect(source).toBeDefined();
+  expect(JSON.parse(source!)).toMatchObject({
+    version: 1, type: "table", collection: "observations",
+    columns: [
+      { field: "day", label: "Day", format: "date" },
+      { field: "count", label: "Count", format: "number", decimals: 0 },
+      { field: "run_h", label: "Run time", format: "number", unit: "h", decimals: 1 },
+      { field: "url", format: "link" },
+    ],
+    sort: { field: "day", direction: "desc" }, pageSize: 25,
+  });
+  const created = await rig.ok("create_doc", {
+    title: "Help table example", description: "A synthetic help example.",
+    blocks: [{ type: "chart", text: source }],
+  });
+  expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks[0]).toMatchObject({ type: "chart", text: source });
+  expect((await rig.client.readResource({ uri: "uberblick://help/data" })).contents[0]).toMatchObject({ text });
+  const { tools } = await rig.client.listTools();
+  expect(tools.find(({ name }) => name === "insert_block")?.description).toContain('"type":"table"');
+});

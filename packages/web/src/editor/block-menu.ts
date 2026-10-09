@@ -95,6 +95,8 @@ export interface BlockMenuEntry {
   keywords: readonly string[];
   type: BlockType;
   attrs: RetypeAttrs;
+  /** Ordinary source text authored when this entry is picked. */
+  initialText?: string;
 }
 
 /**
@@ -222,6 +224,22 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     keywords: ["chart", "trend", "data", "series", "graph"],
     type: "chart",
     attrs: {},
+  },
+  {
+    id: "data-table",
+    label: "Data table",
+    group: "Source",
+    trigger: null,
+    keywords: ["data", "records", "collection", "rows", "columns"],
+    type: "chart",
+    attrs: {},
+    initialText: JSON.stringify({
+      version: 1,
+      type: "table",
+      collection: "records",
+      columns: [{ field: "value", format: "text" }],
+      pageSize: 25,
+    }, null, 2),
   },
 ];
 
@@ -459,6 +477,7 @@ export function convertBlockAtTrigger(
       tableFromRows(editor.state.schema, [["", "", ""], ["", "", ""], ["", "", ""]], live.blockId));
   } else {
     retypeBlockInTransaction(tr, found.pos, entry.type, entry.attrs);
+    if (entry.initialText !== undefined) tr.insertText(entry.initialText, contentStart);
   }
   tr.setSelection(TextSelection.near(tr.doc.resolve(contentStart)));
 
@@ -468,7 +487,7 @@ export function convertBlockAtTrigger(
 }
 
 /**
- * Insert an empty block of `entry`'s type directly below the block with id
+ * Insert a block of `entry`'s type and initial text directly below the block with id
  * `blockId`, with the caret inside it. One transaction, so one undo step.
  *
  * By id for the same reason as the conversion above: the menu was opened over a
@@ -489,7 +508,8 @@ export function insertBlockBelow(
   if (nodeType === undefined) return false;
   const fresh = entry.type === "table"
     ? tableFromRows(state.schema, [["", "", ""], ["", "", ""], ["", "", ""]], null)
-    : nodeType.createAndFill(attrsForNewBlock(entry));
+    : nodeType.createAndFill(attrsForNewBlock(entry),
+      entry.initialText === undefined ? undefined : state.schema.text(entry.initialText));
   if (fresh === null) return false;
 
   endUndoCapture(state);

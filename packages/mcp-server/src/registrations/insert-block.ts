@@ -25,8 +25,14 @@ export function registerInsertBlock(server: ToolRegistrar, context: ToolContext)
       "`{\"version\":1,\"type\":\"line\",\"collection\":\"observations\",\"x\":{\"field\":\"day\",\"type\":\"date\"}," +
       "\"y\":[{\"field\":\"count\"}]}`. It names top-level record fields: x type is number or date, " +
       "and y has one to eight numeric series. Optional x and y labels, y units, title and " +
-      "missing (gap or connect, default gap) control presentation. The chart only " +
-      "reads its document's collection; use update_data to write records. Invalid mappings stay " +
+      "missing (gap or connect, default gap) control presentation. A data table also uses a chart block, " +
+      "for example `{\"version\":1,\"type\":\"table\",\"collection\":\"observations\",\"columns\":[{\"field\":\"day\",\"format\":\"date\"}," +
+      "{\"field\":\"count\",\"label\":\"Count\",\"format\":\"number\"}],\"sort\":{\"field\":\"day\",\"direction\":\"desc\"},\"pageSize\":25}`. " +
+      "Its one to thirty ordered columns name fields, optional labels and formats text (default), number, date or link. " +
+      "Only number accepts unit (a suffix) and decimals (an integer from zero to ten). Optional title, " +
+      "sort (one column field, direction asc or desc) and pageSize (one to one hundred, default twenty-five) " +
+      "control the read-only view. Unknown mapping keys and options are invalid. Both views only " +
+      "read their document's collection and contain no record values; use update_data to write records. Invalid mappings stay " +
       "editable source and show a problem message. Every block has one text an agent can edit.\n\n" +
       DECIDED_IS_READ_ONLY +
       "\n\n" +

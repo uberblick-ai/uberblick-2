@@ -5,10 +5,18 @@ import { removeTempDirs, startServer } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
-const mapping = JSON.stringify({
+const lineMapping = JSON.stringify({
   version: 1, type: "line", collection: "observations",
   x: { field: "day", type: "date" },
   y: [{ field: "count", label: "quartzchartmapping", unit: "issues" }],
+});
+const tableMapping = JSON.stringify({
+  version: 1, type: "table", collection: "observations",
+  columns: [
+    { field: "day", format: "date" },
+    { field: "count", label: "quartzchartmapping", format: "number", unit: "issues", decimals: 0 },
+  ],
+  sort: { field: "day", direction: "desc" }, pageSize: 25,
 });
 
 async function local(): Promise<Rig> {
@@ -22,7 +30,10 @@ afterEach(async () => {
 });
 afterAll(removeTempDirs);
 
-describe("chart mappings through MCP", () => {
+describe.each([
+  { type: "line", mapping: lineMapping },
+  { type: "table", mapping: tableMapping },
+])("$type mappings through MCP", ({ mapping }) => {
   it("creates, inserts, reads and edits source without copying or changing data", async () => {
     const rig = await local();
     const created = await rig.ok("create_doc", {
