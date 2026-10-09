@@ -993,7 +993,6 @@ h3.ub-heading {
 /* Without a title the controls fit in the existing top padding, clear of
    the plot or table header, without a header row. Source chrome stays intact. */
 .ub-chart:not(.ub-chart-editing):not([data-annotated="true"]):has(.ub-chart-title[hidden]) > .ub-copy { top: 0; line-height: 1; }
-.ub-chart-panel:has(> .ub-chart-title[hidden]) > .ub-chart-open { top: 0; }
 
 .ub-chart-panel {
   padding: 0.75rem;
@@ -1020,6 +1019,7 @@ h3.ub-heading {
   letter-spacing: 0.04em;
   cursor: pointer;
 }
+.ub-chart-panel:has(> .ub-chart-title[hidden]) > .ub-chart-open { top: 0; }
 .ub-chart-message, .ub-chart-diagnostics, .ub-chart-notice {
   font-size: 0.8rem;
   margin: 0.5rem 0 0;
