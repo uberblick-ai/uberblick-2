@@ -63,8 +63,8 @@ routes do not change the review or merge tiers below.
      may merge by hand.
    - **Immutable review.** Local CI runs the isolated review
      (`mise run review <sha>`) at the head, so every change has one. A change
-     where the base moved under the PR also passes the merged-tree gate
-     (`integration.md`). At stateful boundaries —
+     whose head does not contain freshly fetched `origin/main` also passes the
+     merged-tree gate (`integration.md`). At stateful boundaries —
      persistence, startup and shutdown, networking, concurrency — passing
      happy-path tests is not enough: run focused failure-path probes and post
      reproducible findings. Worktree tests help while building but are never
