@@ -34,6 +34,8 @@ export interface RemotePresence {
    * agent whose bundle predates the field.
    */
   session: string | null;
+  /** A locally retained departure, never a claim published in awareness. */
+  departed?: boolean;
   /**
    * 1-based position of the block its caret is in, or null when there is no
    * saying: no cursor published, or one anchored where no reader is looking.
@@ -121,7 +123,11 @@ function blockOf(
  * name and nowhere to point, and a row for it would be a session invented out
  * of an empty map entry.
  */
-export function readPresence(ydoc: Y.Doc, awareness: Awareness): RemotePresence[] {
+export function readPresence(
+  ydoc: Y.Doc,
+  awareness: Awareness,
+  isDeparted: (clientId: number) => boolean = () => false,
+): RemotePresence[] {
   const blocks = visibleBlocks(getBlocksFragment(ydoc));
   const found: RemotePresence[] = [];
   awareness.getStates().forEach((state, clientId) => {
@@ -141,6 +147,7 @@ export function readPresence(ydoc: Y.Doc, awareness: Awareness): RemotePresence[
       color: peer.color,
       kind: peer.kind,
       session: peer.session,
+      ...(isDeparted(clientId) ? { departed: true } : {}),
       block: location?.block ?? null,
       blockId: location?.blockId ?? null,
     });
@@ -167,7 +174,8 @@ function sameSession(a: RemotePresence | null, b: RemotePresence | null): boolea
     a.name === b.name &&
     a.color === b.color &&
     a.kind === b.kind &&
-    a.session === b.session
+    a.session === b.session &&
+    (a.departed === true) === (b.departed === true)
   );
 }
 
@@ -176,16 +184,18 @@ function sameSession(a: RemotePresence | null, b: RemotePresence | null): boolea
  *
  * Every control names the complete session and whether it is a person or an
  * agent. An agent also names its published session id, and either kind names a
- * resolved caret location. Optional tail parts drop out cleanly.
+ * resolved caret location while live. A retained departure says it left
+ * instead of claiming it is editing. Optional tail parts drop out cleanly.
  */
 export function presenceLabel(session: RemotePresence): string {
   const parts = [session.name, session.kind === "agent" ? "agent" : "person"];
   if (session.session !== null) parts.push(session.session);
-  if (session.block !== null) parts.push(`editing block ${session.block}`);
+  if (session.departed) parts.push("left");
+  else if (session.block !== null) parts.push(`editing block ${session.block}`);
   return parts.join(" · ");
 }
 
-/** Whether two readings would draw the same present-now list. */
+/** Whether two readings would draw the same presence list. */
 export function samePresence(
   a: readonly RemotePresence[],
   b: readonly RemotePresence[],

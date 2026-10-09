@@ -352,10 +352,10 @@ export function StatusLine({
 }: {
   connection: RoomConnection;
   /**
-   * Who else is in this room, read once by the shell and handed down — the same
-   * snapshot the sync panel draws from (`App.tsx`).
+   * This room's title roster, including departed agents whose named cursors
+   * are still retained. The sync panel receives the shell's live-only reading.
    *
-   * A prop rather than a `usePresence` of its own, because the shell already
+   * A prop rather than a `useTitlePresence` of its own, because the shell already
    * holds this room's reading: a second subscription would add an awareness
    * `change` listener and a fragment observer that re-derive, on every
    * keystroke anyone types, a reading the shell has already made.

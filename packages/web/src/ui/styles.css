@@ -314,6 +314,18 @@ body {
   line-height: 1;
 }
 
+/* A departure is visible on touch as well as hover. Keep muted ink at full
+   strength and change the ring shape; opacity would dilute the initial. */
+.ub-avatar-departed {
+  border-color: var(--muted-foreground);
+  border-style: dashed;
+  color: var(--muted-foreground);
+}
+
+.ub-avatar-departed .ub-avatar-agent-badge {
+  filter: grayscale(1);
+}
+
 .ub-list-head,
 .ub-doc-meta,
 .ub-waiting-meta,

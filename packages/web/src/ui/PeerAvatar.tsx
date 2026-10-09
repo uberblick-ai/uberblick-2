@@ -5,7 +5,8 @@
  * and the sync panel's present-now list.
  *
  * The name initial is primary for every session. An agent adds one small robot
- * badge, while the ring remains the session colour its caret uses in the prose.
+ * badge. Live sessions use their caret colour; retained departures use muted
+ * ink and a dashed ring without lowering the initial's contrast.
  */
 
 import type { ReactElement } from "react";
@@ -35,12 +36,12 @@ export function initialOf(name: string): string {
 export function PeerAvatar({ session }: { session: RemotePresence }): ReactElement {
   return (
     <span
-      className="ub-avatar"
+      className={`ub-avatar${session.departed ? " ub-avatar-departed" : ""}`}
       aria-hidden="true"
       // The awareness palette is `#rrggbb` literals rather than theme tokens
       // (see src/collab/identity.ts), so both are written inline. The letter
       // takes the colour as well as the ring; the robot brings its own.
-      style={{ borderColor: session.color, color: session.color }}
+      style={session.departed ? undefined : { borderColor: session.color, color: session.color }}
     >
       {initialOf(session.name)}
       {session.kind === "agent" && (

@@ -131,6 +131,10 @@ const pairs: Pair[] = [
   // strength (#1062). CSS opacity and real backing remain browser obligations.
   ...["--card", "--brand-subtle"].flatMap((ground) => ["--card-foreground", "--foreground", "--muted-foreground"].map((ink) => text("enabled conversation ink", ink, ground))),
   text("source copy ink", "--muted-foreground", "--muted"),
+  // Retained avatar initials and their dashed rings use full-strength muted
+  // ink on the title cluster and the overflow row, including its hover fill.
+  ...["--background", "--card", "--card-accent"]
+    .map((ground) => text("departed avatar ink", "--muted-foreground", ground)),
   // Terminal controls have their existing stricter floors, not generic AA.
   { name: "terminal toggle at rest", ink: "--terminal-control-ink", ground: "--terminal-screen", floor: 7.054520 },
   { name: "terminal copy at rest", ink: "--terminal-control-ink", ground: "--terminal-screen", opacity: 0.6, floor: 3.317915 },

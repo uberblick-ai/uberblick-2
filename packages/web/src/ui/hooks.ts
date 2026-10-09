@@ -31,6 +31,8 @@ import { getSetting, subscribeSettings } from "../settings.js";
 import type { Settings } from "../settings.js";
 import { parseRemoteAwareness } from "../collab/remote-awareness.js";
 import type { AwarenessUser } from "../collab/identity.js";
+import type { Awareness } from "y-protocols/awareness";
+import { agentCursorAwareness } from "../editor/collaboration.js";
 import { findForeignBlocks, findLinkConflicts } from "../editor/palette.js";
 import type { ForeignBlock, LinkConflict } from "../editor/palette.js";
 import { blockText, plainText } from "../editor/ytext.js";
@@ -495,9 +497,8 @@ const NOBODY: readonly RemotePresence[] = [];
 /**
  * Every remote session in the room, live.
  *
- * Read once by the shell and handed down: the document status line and sync
- * panel are two views of this one snapshot, so there is one subscription
- * rather than one per reader.
+ * The sync panel reads real awareness. The title cluster has a separate
+ * presentation reading that shares departure grace with the editor cursor.
  *
  * Never returns a reading made in another room — `useRoom`'s guard, for the
  * same reason: the stored reading is state, so it lags `connection` by one
@@ -524,16 +525,43 @@ export function usePresence(
   return useConnectionReading(connection, NOBODY, observePresence, samePresence)[0];
 }
 
+/** The title roster, including agents whose named cursor is in departure grace. */
+export function useTitlePresence(
+  connection: RoomConnection | null,
+): readonly RemotePresence[] {
+  return useConnectionReading(connection, NOBODY, observeTitlePresence, samePresence)[0];
+}
+
 function observePresence(
   connection: RoomConnection,
   emit: (value: readonly RemotePresence[]) => void,
 ): () => void {
   const awareness = connection.provider.awareness ?? null;
   if (awareness === null) return () => {};
+  return observeRoomPresence(connection, awareness, emit);
+}
+
+function observeTitlePresence(
+  connection: RoomConnection,
+  emit: (value: readonly RemotePresence[]) => void,
+): () => void {
+  const awareness = connection.provider.awareness ?? null;
+  if (awareness === null) return () => {};
+  const view = agentCursorAwareness(awareness);
+  return observeRoomPresence(connection, view, emit, view.isDeparted);
+}
+
+function observeRoomPresence(
+  connection: RoomConnection,
+  awareness: Awareness,
+  emit: (value: readonly RemotePresence[]) => void,
+  isDeparted?: (clientId: number) => boolean,
+): () => void {
   const fragment = getBlocksFragment(connection.ydoc);
-  const read = (): void => emit(readPresence(connection.ydoc, awareness));
-  read();
+  const read = (): void => emit(readPresence(connection.ydoc, awareness, isDeparted));
+  // Subscribe before reading: this seeds the shared view with live cursors.
   awareness.on("change", read);
+  read();
   fragment.observe(read);
   return () => {
     awareness.off("change", read);

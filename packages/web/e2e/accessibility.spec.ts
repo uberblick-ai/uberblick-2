@@ -125,7 +125,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await scan("collaborator tooltip");
       await page.locator(".ub-title").focus();
       await page.locator(".ub-peer-more").click();
-      await expect(page.getByRole("dialog", { name: "More active collaborators" })).toBeVisible();
+      await expect(page.getByRole("dialog", { name: "More collaborators" })).toBeVisible();
       await scan("collaborator overflow");
       await page.keyboard.press("Escape");
 

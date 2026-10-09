@@ -36,7 +36,7 @@ import type { ReactElement } from "react";
 import { StatusLine } from "../src/ui/EditorPane.js";
 import { PeerCluster } from "../src/ui/PeerCluster.js";
 import { usePresence } from "../src/ui/hooks.js";
-import { presenceLabel } from "../src/ui/doc-chrome.js";
+import { presenceLabel, samePresence } from "../src/ui/doc-chrome.js";
 import type { RemotePresence } from "../src/ui/doc-chrome.js";
 import { AGENT_CLIENT, WEB_CLIENT } from "../src/collab/identity.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
@@ -58,6 +58,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -110,6 +111,15 @@ describe("what an avatar says when a circle cannot", () => {
       ),
     ).toBe("Ben · person");
   });
+
+  it("identifies a retained departure without describing it as editing", () => {
+    const live = reading({});
+    const departed = reading({ departed: true });
+    expect(presenceLabel(departed)).toBe(`Claude Code · agent · ${SESSION} · left`);
+    expect(samePresence([live], [departed])).toBe(false);
+    expect(samePresence([departed], [live])).toBe(false);
+    expect(samePresence([live], [reading({ departed: false })])).toBe(true);
+  });
 });
 
 describe("the compact collaborator cluster", () => {
@@ -135,14 +145,14 @@ describe("the compact collaborator cluster", () => {
     expect(visible[0]?.getAttribute("aria-label")).toContain("Peer 1 · person");
     expect(within(visible[0]!).getByText("P").textContent).toBe("P");
 
-    const more = within(host).getByRole<HTMLButtonElement>("button", { name: "2 more active collaborators" });
+    const more = within(host).getByRole<HTMLButtonElement>("button", { name: "2 more collaborators" });
     expect(more?.textContent).toBe("+2");
     expect(more?.getAttribute("aria-label")).toBe(
-      "2 more active collaborators",
+      "2 more collaborators",
     );
     act(() => more?.click());
 
-    const overflow = screen.getByRole("dialog", { name: "More active collaborators" });
+    const overflow = screen.getByRole("dialog", { name: "More collaborators" });
     const rows = within(overflow).getAllByRole<HTMLButtonElement>("button", { name: /^Peer \d+ ·/ });
     expect(rows).toHaveLength(2);
     expect(rows[0]?.textContent).toContain("Peer 4");
@@ -153,7 +163,50 @@ describe("the compact collaborator cluster", () => {
     expect(activate).toHaveBeenCalledWith(
       expect.objectContaining({ clientId: 4, blockId: "block-4" }),
     );
-    expect(screen.queryByRole("dialog", { name: "More active collaborators" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "More collaborators" })).toBeNull();
+  });
+
+  it("marks retained avatars and overflow rows as left, then restores their live display", () => {
+    vi.useFakeTimers();
+    const visible = reading({ departed: true });
+    const overflowPeer = reading({
+      clientId: 4,
+      name: "Overflow Agent",
+      departed: true,
+    });
+    const sessions = [visible, ...peers(3).slice(1), overflowPeer];
+    const view = render(<PeerCluster presence={sessions} />);
+    const host = view.container;
+    const control = within(host).getByRole<HTMLButtonElement>("button", {
+      name: `Claude Code · agent · ${SESSION} · left`,
+    });
+    const avatar = control.querySelector<HTMLElement>(".ub-avatar");
+    expect(avatar?.classList.contains("ub-avatar-departed")).toBe(true);
+    // The inline live palette must not override the muted departure tokens.
+    expect(avatar?.style.color).toBe("");
+    expect(avatar?.style.borderColor).toBe("");
+    act(() => {
+      control.focus();
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(screen.getByRole("tooltip").textContent).toBe("Claude Code · agent · left");
+    act(() => within(host).getByRole<HTMLButtonElement>("button", {
+      name: "1 more collaborator",
+    }).click());
+    const row = within(screen.getByRole("dialog", { name: "More collaborators" }))
+      .getByRole<HTMLButtonElement>("button", {
+        name: `Overflow Agent · agent · ${SESSION} · left`,
+      });
+    expect(row.textContent).toContain("agent · left");
+    expect(row.querySelector(".ub-avatar-departed")).not.toBeNull();
+
+    view.rerender(<PeerCluster presence={[reading({}), ...sessions.slice(1)]} />);
+    const returned = within(host).getByRole<HTMLButtonElement>("button", {
+      name: `Claude Code · agent · ${SESSION} · editing block 5`,
+    });
+    expect(returned.querySelector(".ub-avatar-departed")).toBeNull();
+    expect(returned.querySelector<HTMLElement>(".ub-avatar")?.style.color)
+      .toBe("rgb(123, 94, 199)");
   });
 
   it("leaves outside focus alone and recovers after live removal", async () => {
@@ -170,9 +223,9 @@ describe("the compact collaborator cluster", () => {
     const draw = (sessions: readonly RemotePresence[]): void => {
       view.rerender(tree(sessions));
     };
-    const more = within(host).getByRole<HTMLButtonElement>("button", { name: "1 more active collaborator" });
+    const more = within(host).getByRole<HTMLButtonElement>("button", { name: "1 more collaborator" });
     act(() => more?.click());
-    expect(screen.queryByRole("dialog", { name: "More active collaborators" })).not.toBeNull();
+    expect(screen.queryByRole("dialog", { name: "More collaborators" })).not.toBeNull();
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
     const sync = within(host).getByRole<HTMLButtonElement>("button", { name: "Sync details" });
     act(() => {
@@ -181,7 +234,7 @@ describe("the compact collaborator cluster", () => {
       sync?.focus();
     });
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-    expect(screen.queryByRole("dialog", { name: "More active collaborators" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "More collaborators" })).toBeNull();
     expect(document.activeElement).toBe(sync);
 
     act(() => more?.focus());
@@ -191,9 +244,9 @@ describe("the compact collaborator cluster", () => {
     );
 
     draw(peers(4));
-    const restoredMore = within(host).getByRole<HTMLButtonElement>("button", { name: "1 more active collaborator" });
+    const restoredMore = within(host).getByRole<HTMLButtonElement>("button", { name: "1 more collaborator" });
     act(() => restoredMore?.click());
-    const nextRow = within(screen.getByRole("dialog", { name: "More active collaborators" })).getByRole<HTMLButtonElement>("button", { name: `Peer 4 · agent · ${SESSION} · editing block 4` });
+    const nextRow = within(screen.getByRole("dialog", { name: "More collaborators" })).getByRole<HTMLButtonElement>("button", { name: `Peer 4 · agent · ${SESSION} · editing block 4` });
     act(() => nextRow?.focus());
     draw([peers(4)[0]!, peers(4)[2]!, peers(4)[3]!]);
     expect(document.activeElement).toBe(

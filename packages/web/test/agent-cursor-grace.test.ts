@@ -24,8 +24,10 @@ import * as Y from "yjs";
 import { AGENT_CLIENT } from "../src/collab/identity.js";
 import {
   AGENT_CURSOR_GRACE_MS,
+  agentCursorAwareness,
   withDepartedAgentCursors,
 } from "../src/editor/collaboration.js";
+import { readPresence } from "../src/ui/doc-chrome.js";
 
 const AGENT_NAME = "Uberblick Coordinator Agent";
 
@@ -88,7 +90,7 @@ it("holds a departed agent's caret for the grace the editor wires, then drops it
   publishAgentCursor(3);
   agentLeaves();
 
-  // Presence is gone the instant the session is: only the view keeps the caret.
+  // Real presence is gone immediately; only the presentation view retains it.
   expect(viewer.getStates().has(agent.clientID)).toBe(false);
   expect(view.getStates().get(agent.clientID)?.user).toEqual({
     name: AGENT_NAME,
@@ -121,11 +123,14 @@ it("drops a departed session that never claimed to be an agent", () => {
 });
 
 it("lets a returning session replace its own retained caret at once", () => {
-  const view = withDepartedAgentCursors(viewer, AGENT_CURSOR_GRACE_MS);
+  const view = agentCursorAwareness(viewer);
   view.on("change", () => {});
 
   publishAgentCursor(3);
   agentLeaves();
+  expect(readPresence(viewer.doc, view, view.isDeparted)).toMatchObject([
+    { clientId: agent.clientID, name: AGENT_NAME, departed: true },
+  ]);
   vi.advanceTimersByTime(1_000);
 
   // The agent is back and writing somewhere else. The live state is what the
@@ -136,8 +141,137 @@ it("lets a returning session replace its own retained caret at once", () => {
     viewer.getStates().get(agent.clientID),
   );
   expect(caretIn(view)).toEqual({ anchor: 9, head: 9 });
+  const returned = readPresence(viewer.doc, view, view.isDeparted);
+  expect(returned).toHaveLength(1);
+  expect(returned[0]?.departed).toBeUndefined();
 
   // ...and the departure's own timer, had it survived, would fire about here.
   vi.advanceTimersByTime(29_500);
   expect(caretIn(view)).toEqual({ anchor: 9, head: 9 });
+  expect(view.isDeparted(agent.clientID)).toBe(false);
+});
+
+it("shares one departure and expiry between the title roster and editor cursors", () => {
+  const cursorView = agentCursorAwareness(viewer);
+  const titleView = agentCursorAwareness(viewer);
+  expect(titleView).toBe(cursorView);
+  // The projection must still identify and omit the reader's own session.
+  viewer.setLocalState({ user: { name: "Self", color: "#a33" } });
+  const title = () => readPresence(viewer.doc, titleView, titleView.isDeparted);
+  cursorView.on("change", () => {});
+  titleView.on("change", () => {});
+
+  publishAgentCursor(3);
+  expect(title()).toHaveLength(1);
+  agentLeaves();
+  expect(title()).toMatchObject([
+    { clientId: agent.clientID, name: AGENT_NAME, departed: true },
+  ]);
+  expect(readPresence(viewer.doc, viewer)).toEqual([]);
+  vi.advanceTimersByTime(AGENT_CURSOR_GRACE_MS - 1);
+  expect(title()).toHaveLength(1);
+  expect(caretIn(cursorView)).toEqual({ anchor: 3, head: 3 });
+  vi.advanceTimersByTime(1);
+  expect(title()).toEqual([]);
+  expect(caretIn(cursorView)).toBeUndefined();
+});
+
+it("does not restart departure grace when the editor rebinds under the title reader", () => {
+  const view = agentCursorAwareness(viewer);
+  const oldEditor = () => {};
+  const title = () => {};
+  const newEditor = () => {};
+  view.on("change", oldEditor);
+  view.on("change", title);
+  publishAgentCursor(3);
+  agentLeaves();
+
+  vi.advanceTimersByTime(10_000);
+  view.off("change", oldEditor);
+  agentCursorAwareness(viewer).on("change", newEditor);
+  vi.advanceTimersByTime(AGENT_CURSOR_GRACE_MS - 10_001);
+  expect(caretIn(view)).toEqual({ anchor: 3, head: 3 });
+  vi.advanceTimersByTime(1);
+  expect(view.getStates().has(agent.clientID)).toBe(false);
+});
+
+it("clears both retained displays when the final document reader leaves", () => {
+  const view = agentCursorAwareness(viewer);
+  const editor = () => {};
+  const title = () => {};
+  view.on("change", editor);
+  view.on("change", title);
+  publishAgentCursor(3);
+  agentLeaves();
+
+  view.off("change", editor);
+  expect(view.isDeparted(agent.clientID)).toBe(true);
+  view.off("change", title);
+  expect(view.getStates().has(agent.clientID)).toBe(false);
+  expect(view.isDeparted(agent.clientID)).toBe(false);
+  const reopened = agentCursorAwareness(viewer);
+  reopened.on("change", title);
+  expect(readPresence(viewer.doc, reopened, reopened.isDeparted)).toEqual([]);
+  publishAgentCursor(9);
+  expect(readPresence(viewer.doc, reopened, reopened.isDeparted)).toMatchObject([
+    { clientId: agent.clientID, name: AGENT_NAME },
+  ]);
+  vi.advanceTimersByTime(AGENT_CURSOR_GRACE_MS - 1);
+  expect(caretIn(reopened)).toEqual({ anchor: 9, head: 9 });
+});
+
+it.each([
+  ["a human", { user: { name: AGENT_NAME }, client: "web", cursor: { anchor: 3 } }],
+  ["an agent without a cursor", { user: { name: AGENT_NAME }, client: AGENT_CLIENT }],
+  ["an agent without a name", { user: {}, client: AGENT_CLIENT, cursor: { anchor: 3 } }],
+  ["an agent with a blank name", { user: { name: "  " }, client: AGENT_CLIENT, cursor: { anchor: 3 } }],
+])("does not retain the avatar or cursor of %s", (_reason, state) => {
+  const view = agentCursorAwareness(viewer);
+  view.on("change", () => {});
+  agent.setLocalState(state);
+  applyAwarenessUpdate(viewer, encodeAwarenessUpdate(agent, [agent.clientID]), "test");
+  agentLeaves();
+  expect(view.getStates().has(agent.clientID)).toBe(false);
+  expect(readPresence(viewer.doc, view, view.isDeparted)).toEqual([]);
+});
+
+it("does not restore a cursor withdrawn before the agent departs", () => {
+  const view = agentCursorAwareness(viewer);
+  view.on("change", () => {});
+  publishAgentCursor(3);
+  agent.setLocalStateField("cursor", null);
+  applyAwarenessUpdate(viewer, encodeAwarenessUpdate(agent, [agent.clientID]), "test");
+  agentLeaves();
+  expect(view.getStates().has(agent.clientID)).toBe(false);
+  expect(readPresence(viewer.doc, view, view.isDeparted)).toEqual([]);
+});
+
+it("keeps distinct same-named agent sessions on their own departure lifetimes", () => {
+  const second = new Awareness(new Y.Doc());
+  try {
+    const view = agentCursorAwareness(viewer);
+    view.on("change", () => {});
+    publishAgentCursor(3);
+    second.setLocalState({
+      user: { name: AGENT_NAME, color: "#33a" },
+      client: AGENT_CLIENT,
+      cursor: { anchor: 9, head: 9 },
+    });
+    applyAwarenessUpdate(viewer, encodeAwarenessUpdate(second, [second.clientID]), "test");
+    agentLeaves();
+    vi.advanceTimersByTime(5_000);
+    removeAwarenessStates(viewer, [second.clientID], "test");
+    expect(readPresence(viewer.doc, view, view.isDeparted)).toHaveLength(2);
+    vi.advanceTimersByTime(AGENT_CURSOR_GRACE_MS - 5_000);
+    expect(view.getStates().has(agent.clientID)).toBe(false);
+    expect(view.getStates().get(second.clientID)?.cursor).toEqual({ anchor: 9, head: 9 });
+    expect(readPresence(viewer.doc, view, view.isDeparted)).toMatchObject([
+      { clientId: second.clientID, name: AGENT_NAME, color: "#33a", departed: true },
+    ]);
+    vi.advanceTimersByTime(5_000);
+    expect(readPresence(viewer.doc, view, view.isDeparted)).toEqual([]);
+  } finally {
+    second.destroy();
+    second.doc.destroy();
+  }
 });

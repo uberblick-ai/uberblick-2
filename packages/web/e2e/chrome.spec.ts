@@ -1314,7 +1314,7 @@ test(`the document collaborator cluster stays compact and jumps once without mov
     dora.provider.setAwarenessField("cursor", caretAt(dora.doc, 0));
     await more.focus();
     await page.keyboard.press("Enter");
-    const overflow = page.getByRole("dialog", { name: "More active collaborators" });
+    const overflow = page.getByRole("dialog", { name: "More collaborators" });
     await expect(overflow).toBeVisible();
     const deltaPerson = page.getByRole("button", {
       name: /^Delta · person · .*editing block 1$/,
