@@ -987,6 +987,13 @@ h3.ub-heading {
   font: 0.75rem var(--font-mono);
 }
 
+.ub-chart:not(.ub-chart-editing):not([data-annotated="true"]) { padding-top: 0; }
+.ub-chart:not(.ub-chart-editing):not([data-annotated="true"])::before { display: none; }
+.ub-chart:not(.ub-chart-editing):not([data-annotated="true"]) > .ub-copy { top: 0.75rem; right: 0.75rem; }
+/* Without a title the controls fit in the existing top padding, clear of
+   the plot or table header, without a header row. Source chrome stays intact. */
+.ub-chart:not(.ub-chart-editing):not([data-annotated="true"]):has(.ub-chart-title[hidden]) > .ub-copy { top: 0; line-height: 1; }
+
 .ub-chart-panel {
   padding: 0.75rem;
   border: 1px solid var(--border);
@@ -995,18 +1002,24 @@ h3.ub-heading {
   color: var(--prose-text);
 }
 
-.ub-chart-title { margin: 0 0 0.5rem; font-weight: 500; }
-.ub-chart-screen { position: relative; height: 300px; }
+.ub-chart-title { margin: 0 0 0.5rem; padding-right: 7rem; font-weight: 500; }
+.ub-chart-screen { position: relative; width: 100%; aspect-ratio: 2 / 1; min-height: 200px; max-height: 300px; }
 .ub-chart-open {
+  position: absolute;
+  top: 0.75rem;
+  right: 5rem;
+  z-index: 1;
   color: var(--muted-foreground);
   background: transparent;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius-sm);
-  padding: 0.25rem 0.5rem;
-  margin-bottom: 0.5rem;
-  font: 0.75rem var(--font-mono);
+  padding: 0.05rem 0.3rem;
+  font: 0.7rem var(--font-mono);
+  line-height: 1;
+  letter-spacing: 0.04em;
   cursor: pointer;
 }
+.ub-chart-panel:has(> .ub-chart-title[hidden]) > .ub-chart-open { top: 0; }
 .ub-chart-message, .ub-chart-diagnostics, .ub-chart-notice {
   font-size: 0.8rem;
   margin: 0.5rem 0 0;
@@ -1027,7 +1040,7 @@ h3.ub-heading {
 .ub-chart[data-annotated="true"] > .ub-chart-source { display: block; }
 .ub-chart-editing > .ub-chart-panel,
 .ub-chart[data-annotated="true"] > .ub-chart-panel { display: none; }
-.ub-chart-probe { position: absolute; visibility: hidden; color: var(--prose-text); border-color: var(--border); }
+.ub-chart-probe { position: absolute; visibility: hidden; font-family: var(--font-sans); color: var(--muted-foreground); border-color: var(--border); }
 
 .ub-table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
 .ub-data-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 0.85rem; }
