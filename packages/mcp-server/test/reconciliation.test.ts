@@ -334,7 +334,7 @@ describe("a rename that only half landed", () => {
 
     store.failRoom = (room) => room === `${WORKSPACE}/_directory`;
     store.failing = true;
-    const refused = await rig.call("set_title", {
+    const refused = await rig.call("set_metadata", {
       uuid: created.uuid,
       title: "New name",
     });
@@ -411,7 +411,7 @@ describe("a rename that only half landed", () => {
 
     // The next write to the document is what heals it — the "repaired on write"
     // half of the rule, in that direction only.
-    await rig.ok("set_description", {
+    await rig.ok("set_metadata", {
       uuid: created.uuid,
       description: "Described after the stub ran ahead.",
     });

@@ -142,7 +142,7 @@ export function readSeedDocs(dir: string): SeedDoc[] {
     }
     // Trimmed here rather than by the importer, and measured after: the reader
     // is a lossless converter that gives back what the file said, while *this*
-    // path holds a template to the same bar `create_doc` and `set_description`
+    // path holds a template to the same bar `create_doc` and `set_metadata`
     // hold an agent to. Quoted padding — `description: "   "` — is the only
     // spelling that reaches here untrimmed, and it is no more a description
     // than an absent line is.

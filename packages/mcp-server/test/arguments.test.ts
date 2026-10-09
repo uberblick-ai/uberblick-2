@@ -112,7 +112,7 @@ describe("unknown fields", () => {
 
     // A mutation field with a typo in it. The write it asked for is the one
     // that must not happen quietly under a different field.
-    const renamed = await rig.call("set_title", {
+    const renamed = await rig.call("set_metadata", {
       uuid: doc.uuid,
       titel: "Typo",
     });

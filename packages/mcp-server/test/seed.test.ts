@@ -369,7 +369,7 @@ describe("seed import", () => {
       old_text: "Original prose.",
       new_text: "Prose an agent rewrote.",
     });
-    await editing.ok("set_tags", { uuid, tags: ["mcp"] });
+    await editing.ok("set_metadata", { uuid, tags: ["mcp"] });
     const added = await editing.ok("insert_block", {
       uuid,
       after_block_id: paragraph.id,

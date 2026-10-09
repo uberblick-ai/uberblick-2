@@ -103,36 +103,20 @@ export const toolHelpEntries: Record<string, ToolHelpEntry> = {
     example: { uuid, block_id: "paragraph-1" },
     related: proseContracts,
   },
-  set_tags: {
-    example: { uuid, tags: ["Release"] },
-    related: documentContracts,
-  },
-  set_links: {
-    example: { uuid, links: [targetUuid] },
-    related: documentContracts,
-  },
-  set_title: {
-    example: { uuid, title: "Release preparation checklist" },
-    related: documentContracts,
-  },
-  set_description: {
+  set_metadata: {
+    details: toolHelpDetails.set_metadata,
     example: {
       uuid,
+      title: "Release preparation checklist",
       description: "The release preparation steps, checks and responsibilities for the team.",
+      tldr: "Review the release notes and confirm all checks before publishing.",
+      tags: ["Release"],
+      links: [targetUuid],
     },
-    related: documentContracts,
-  },
-  set_tldr: {
-    example: { uuid, tldr: "Review the release notes and confirm all checks before publishing." },
     related: documentContracts,
   },
   set_status: {
     example: { uuid, status: "planned" },
-    related: documentContracts,
-  },
-  set_changelog_suggestion: {
-    details: toolHelpDetails.set_changelog_suggestion,
-    example: { uuid, suggestion: "Find product help by topic directly from your MCP client." },
     related: documentContracts,
   },
   archive_doc: {

@@ -90,7 +90,7 @@ describe("inline document references", () => {
       title: "Hub",
       description: DESCRIPTION,
     });
-    await rig.ok("set_title", { uuid: target.uuid, title: "The Hub" });
+    await rig.ok("set_metadata", { uuid: target.uuid, title: "The Hub" });
     // The stub is a cache and the document's own title is authoritative, so a
     // stale stub must not be what a label is resolved from.
     upsertDirectoryEntry(rig.instance.replicas.directory().doc, {

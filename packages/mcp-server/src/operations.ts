@@ -15,13 +15,8 @@ import { listDocsOperation } from "./tools/list-docs.js";
 import { listTagsOperation } from "./tools/list-tags.js";
 import { restoreDocOperation } from "./tools/restore-doc.js";
 import { searchOperation } from "./tools/search.js";
-import { setChangelogSuggestionOperation } from "./tools/set-changelog-suggestion.js";
-import { setDescriptionOperation } from "./tools/set-description.js";
-import { setLinksOperation } from "./tools/set-links.js";
+import { setMetadataOperation } from "./tools/set-metadata.js";
 import { setStatusOperation } from "./tools/set-status.js";
-import { setTagsOperation } from "./tools/set-tags.js";
-import { setTitleOperation } from "./tools/set-title.js";
-import { setTldrOperation } from "./tools/set-tldr.js";
 import { syncStatusOperation } from "./tools/sync-status.js";
 import { updateDataOperation } from "./tools/update-data.js";
 import { getSidebarOperation, pinDocOperation, unpinDocOperation, sidebarGroupOperation } from "./sidebar-tools.js";
@@ -45,13 +40,8 @@ export const operations = {
   list_tags: listTagsOperation,
   restore_doc: restoreDocOperation,
   search: searchOperation,
-  set_changelog_suggestion: setChangelogSuggestionOperation,
-  set_description: setDescriptionOperation,
-  set_links: setLinksOperation,
+  set_metadata: setMetadataOperation,
   set_status: setStatusOperation,
-  set_tags: setTagsOperation,
-  set_title: setTitleOperation,
-  set_tldr: setTldrOperation,
   sync_status: syncStatusOperation,
   update_data: updateDataOperation,
   get_sidebar: getSidebarOperation,
