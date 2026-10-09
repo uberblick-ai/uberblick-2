@@ -4,12 +4,13 @@
  * The word fixtures below change only rendered readings, keeping the production
  * slots and marks. They exercise every label without manufacturing transport
  * failures; status-line and serving-status unit tests own state selection.
- * Real delayed acknowledgements and hub loss prove note transitions preserve
+ * Real delayed acknowledgements and hub loss prove status transitions preserve
  * the status rule and the prose, including beside the desktop threads rail.
  */
 
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { keys, placeCaret } from "./harness.js";
 
@@ -21,13 +22,28 @@ const directReadings = [
 ];
 const localReadings = ["", "saved here", "saving here…", "offline"];
 const hubReadings = ["", "synced with hub", "not synced with hub", "not shared with hub"];
-const hubReasons = [
-  "this machine has no credentials for its hub",
-  "sign-in required — run ub auth login for this hub on this machine",
-  "no access to this workspace — ask its administrator for membership; this machine will retry with its existing login",
-  "this machine cannot read its login — run ub auth status and follow its credential-store recovery",
-  "this hub cannot renew the login — ask its operator to configure sign-in",
-];
+
+async function expectCompactHeader(page: Page): Promise<void> {
+  await expect(page.locator(".ub-status-notes, .ub-status-reason, .ub-status .ub-pending")).toHaveCount(0);
+  expect(Math.abs(await page.locator(".ub-status").evaluate((status) => {
+    const row = status.firstElementChild;
+    if (row === null) throw new Error("e2e: missing compact status row");
+    const style = getComputedStyle(status);
+    return status.getBoundingClientRect().height - row.getBoundingClientRect().height -
+      Number.parseFloat(style.paddingTop) - Number.parseFloat(style.paddingBottom) -
+      Number.parseFloat(style.borderTopWidth) - Number.parseFloat(style.borderBottomWidth);
+  })), "the status rule follows only the compact row and its padding").toBeLessThan(0.5);
+}
+
+async function expectBacklog(page: Page, pending: boolean): Promise<void> {
+  const trigger = page.getByRole("button", { name: /^Sync details/ });
+  await trigger.click();
+  const backlog = page.locator(".ub-sync-fact").filter({ has: page.locator("dt", { hasText: /^Backlog$/ }) }).locator("dd");
+  await expect(backlog).toHaveText(pending ? /^[1-9]\d* sync messages? unacked$/ : "0 sync messages unacked");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Sync and presence", exact: true })).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+}
 
 async function settlePane(page: Page): Promise<void> {
   await page.locator(".ub-document-pane").evaluate(async (pane) => {
@@ -65,7 +81,7 @@ async function statusGeometry(page: Page) {
     const peerCluster = status.querySelector(".ub-peers");
     const cluster = peerCluster === null ? null : box(peerCluster);
     const updated = box(find(".ub-last-updated"));
-    const notes = [...status.querySelectorAll(".ub-not-saved, .ub-pending, .ub-status-reason")]
+    const notes = [...status.querySelectorAll(".ub-not-saved")]
       .filter((note) => note.getClientRects().length > 0)
       .map((note) => ({ text: note.textContent, rect: box(note) }));
     const facts = [...status.querySelectorAll(".ub-status-word")].map((word) => {
@@ -135,14 +151,8 @@ async function statusGeometry(page: Page) {
 async function checkReadings(page: Page, upstream: boolean) {
   const primary = page.locator(".ub-status-word").first();
   const hub = page.locator(".ub-status-word--hub");
-  const reason = page.locator(".ub-status-reason");
   const original = await primary.textContent();
   const originalHub = upstream ? null : await hub.textContent();
-  const originalReason = upstream ? null : await reason.evaluate((node) => ({
-    text: node.textContent,
-    className: node.getAttribute("class") ?? "",
-    ariaHidden: node.getAttribute("aria-hidden"),
-  }));
   const positions: Array<{ status: Awaited<ReturnType<typeof statusGeometry>>["status"]; prose: Awaited<ReturnType<typeof statusGeometry>>["prose"] }> = [];
   try {
     for (const reading of upstream ? directReadings : localReadings) {
@@ -151,36 +161,17 @@ async function checkReadings(page: Page, upstream: boolean) {
         if (!upstream) {
           await hub.evaluate((word, text) => { word.textContent = text; }, hubReading);
         }
-        for (const hubReason of hubReading === "not shared with hub" ? hubReasons : [null]) {
-          if (originalReason !== null) {
-            // Reuse the production reason line, including its reserved invisible
-            // reading when no cause is shown; only replace its rendered ink.
-            await reason.evaluate((node, fixture) => {
-              node.textContent = fixture.detail ?? fixture.reserved;
-              node.classList.toggle("invisible", fixture.detail === null);
-              node.setAttribute("aria-hidden", String(fixture.detail === null));
-            }, { detail: hubReason, reserved: originalReason.text });
-          }
-          const geometry = await statusGeometry(page);
-          const label = `${page.viewportSize()?.width}px: ${reading} / ${hubReading} / ${hubReason ?? ""}`;
-          expect(geometry.scrollWidth, label).toBe(geometry.clientWidth);
-          expect(geometry.problems, label).toEqual([]);
-          positions.push({ status: geometry.status, prose: geometry.prose });
-        }
+        const geometry = await statusGeometry(page);
+        const label = `${page.viewportSize()?.width}px: ${reading} / ${hubReading}`;
+        expect(geometry.scrollWidth, label).toBe(geometry.clientWidth);
+        expect(geometry.problems, label).toEqual([]);
+        positions.push({ status: geometry.status, prose: geometry.prose });
       }
     }
   } finally {
     await primary.evaluate((word, text) => { word.textContent = text; }, original);
     if (!upstream) {
       await hub.evaluate((word, text) => { word.textContent = text; }, originalHub);
-    }
-    if (originalReason !== null) {
-      await reason.evaluate((node, saved) => {
-        node.textContent = saved.text;
-        node.setAttribute("class", saved.className);
-        if (saved.ariaHidden === null) node.removeAttribute("aria-hidden");
-        else node.setAttribute("aria-hidden", saved.ariaHidden);
-      }, originalReason);
     }
   }
   return positions;
@@ -191,6 +182,7 @@ for (const upstream of [true, false]) {
     browser, browserName, contextOptions, viewport, hasTouch, isMobile,
     deviceScaleFactor, userAgent,
   }) => {
+    test.setTimeout(90_000);
     // openApp owns fresh contexts; pass the project's device/input explicitly.
     const device = {
       ...contextOptions, viewport, hasTouch, isMobile,
@@ -233,12 +225,25 @@ for (const upstream of [true, false]) {
     await expect(page.locator(".ub-status-word").first()).toHaveText(upstream ? "synced" : "saved here");
     if (!upstream) await expect(page.locator(".ub-status-word--hub")).toHaveText("synced with hub");
     await expect(page.locator(".ub-peers [data-peer-id]")).toHaveCount(0);
+    const waitingPath = new URL(page.url()).pathname.replace(/[^/]+$/, randomUUID());
+    const calmWaiting = await openApp(browser, waitingPath, { upstream, contextOptions: device });
+    try {
+      await expect(calmWaiting.locator(".ub-waiting-meta")).toBeVisible();
+      await expect(calmWaiting.locator(".ub-status-word").first()).toHaveText(upstream ? "synced" : "saved here");
+      await expectCompactHeader(calmWaiting);
+      await expect(calmWaiting.locator("[data-sonner-toast]")).toHaveCount(0);
+    } finally {
+      await calmWaiting.context().close();
+    }
 
     const widths = browserName === "chromium" ? layoutWidths : [page.viewportSize()?.width ?? 1280];
     const height = page.viewportSize()?.height ?? 800;
     const empty = new Map<number, Awaited<ReturnType<typeof statusGeometry>>>();
     const emptyReadings = new Map<number, Awaited<ReturnType<typeof checkReadings>>>();
     const queueUpdate = async () => {
+      // Peer contexts and the waiting-screen proof have opened other tabs.
+      // Restore this tab before using the browser's native caret keys.
+      await page.bringToFront();
       // placeCaret proves the first block's edge. Desktop retains the old
       // paragraph selection, so move to the document start before using it.
       if (browserName === "chromium") {
@@ -249,7 +254,9 @@ for (const upstream of [true, false]) {
       // Real whitespace update, without another rendered prose line.
       await page.keyboard.type(" ");
       await page.locator(".ub-title").focus();
-      await expect(page.locator(".ub-pending:visible")).toHaveText(/\d+ sync messages? unacked/);
+      await expect(page.locator(".ub-status-word").first()).toHaveText(upstream ? "syncing…" : "saving here…");
+      await expectBacklog(page, true);
+      await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
     };
     const expectStable = async (state: string) => {
       for (const width of widths) {
@@ -257,6 +264,7 @@ for (const upstream of [true, false]) {
         await settlePane(page);
         const geometry = await statusGeometry(page);
         const label = `${state} at ${width}px`;
+        await expectCompactHeader(page);
         expect(geometry.scrollWidth, label).toBe(geometry.clientWidth);
         expect(geometry.problems, label).toEqual([]);
         expect(geometry.status, `${label}: status moved`).toEqual(empty.get(width)?.status);
@@ -267,6 +275,7 @@ for (const upstream of [true, false]) {
       if (browserName === "chromium") await page.setViewportSize({ width, height });
       await settlePane(page);
       await expect(page.getByRole("button", { name: "Contents 1" })).toBeVisible();
+      await expectCompactHeader(page);
       empty.set(width, await statusGeometry(page));
       emptyReadings.set(width, await checkReadings(page, upstream));
     }
@@ -296,7 +305,7 @@ for (const upstream of [true, false]) {
           expect(circle.overlap).toBeLessThan(circle.width / 2);
         }
       }
-      await expect(page.locator(".ub-pending:visible")).toHaveCount(0);
+      await expectBacklog(page, false);
       holdReplies = true;
       try {
         await queueUpdate();
@@ -305,8 +314,8 @@ for (const upstream of [true, false]) {
       } finally {
         releaseReplies();
       }
-      await expect(page.locator(".ub-pending:visible")).toHaveCount(0);
       await expect(page.locator(".ub-status-word").first()).toHaveText(upstream ? "synced" : "saved here");
+      await expectBacklog(page, false);
       await expectStable("acknowledged update");
     } finally {
       releaseReplies();
@@ -335,7 +344,9 @@ for (const upstream of [true, false]) {
       try {
         await expect(page.locator(".ub-status-word").first()).toHaveText("offline");
         await expect(page.locator(".ub-not-saved:visible")).toHaveText("not saved");
-        await expect(page.locator(".ub-pending:visible")).toHaveText(/\d+ sync messages? unacked/);
+        await expect(page.locator("[data-sonner-toast][data-type=error]")).toContainText(/changes are not saved/i);
+        await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
+        await expectBacklog(page, true);
         await expectStable("real offline / not saved / pending update");
         const waiting = await openApp(browser, new URL(page.url()).pathname, {
           upstream: true,
@@ -343,6 +354,11 @@ for (const upstream of [true, false]) {
         });
         try {
           await expect(waiting.locator(".ub-waiting-meta")).toBeVisible();
+          await expect(waiting.locator(".ub-status-word").first()).toHaveText("offline");
+          await expect(waiting.locator(".ub-not-saved")).toHaveText("not saved");
+          await expect(waiting.locator("[data-sonner-toast][data-type=error]")).toContainText(/changes are not saved/i);
+          await expect(waiting.locator("[data-sonner-toast]")).toHaveCount(1);
+          await expectCompactHeader(waiting);
           const waitingPeers = waiting.locator(".ub-waiting-meta .ub-peers");
           await expect(waitingPeers).toBeAttached();
           expect(await waitingPeers.evaluate((node) => node.getBoundingClientRect().width), "empty presence does not reserve a gap on the waiting screen").toBe(0);
@@ -354,7 +370,8 @@ for (const upstream of [true, false]) {
       }
       await expect(page.locator(".ub-status-word").first()).toHaveText("synced", { timeout: 40_000 });
       await expect(page.locator(".ub-not-saved:visible")).toHaveCount(0);
-      await expect(page.locator(".ub-pending:visible")).toHaveCount(0);
+      await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+      await expectBacklog(page, false);
       await expectStable("reconnected / saved");
     }
     if (browserName === "chromium" || (page.viewportSize()?.width ?? 0) >= 1280) {
@@ -377,7 +394,7 @@ for (const upstream of [true, false]) {
       if (browserName === "chromium") await page.setViewportSize({ width: 1280, height });
       await settlePane(page);
       await page.locator(".ub-title").focus();
-      await expect(page.locator(".ub-pending:visible")).toHaveCount(0);
+      await expectBacklog(page, false);
       const baseline = await statusGeometry(page);
       holdReplies = true;
       try {
@@ -390,10 +407,30 @@ for (const upstream of [true, false]) {
       } finally {
         releaseReplies();
       }
-      await expect(page.locator(".ub-pending:visible")).toHaveCount(0);
+      await expect(page.locator(".ub-status-word").first()).toHaveText(upstream ? "synced" : "saved here");
+      await expectBacklog(page, false);
       const recovered = await statusGeometry(page);
       expect(recovered.status, "threads rail / ack").toEqual(baseline.status);
       expect(recovered.prose, "threads rail / ack").toEqual(baseline.prose);
+      if (upstream) {
+        await harness().stopHub();
+        try {
+          await expect(page.locator(".ub-status-word").first()).toHaveText("offline");
+          await expect(page.locator(".ub-not-saved")).toHaveText("not saved");
+          await expect(page.locator("[data-sonner-toast][data-type=error]")).toContainText("Changes are not saved.");
+          const offline = await statusGeometry(page);
+          expect(offline.problems, "threads rail / not saved").toEqual([]);
+          expect(offline.status, "threads rail / not saved").toEqual(baseline.status);
+          expect(offline.prose, "threads rail / not saved").toEqual(baseline.prose);
+        } finally {
+          await harness().startHub();
+        }
+        await expect(page.locator(".ub-status-word").first()).toHaveText("synced", { timeout: 40_000 });
+        await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+        const saved = await statusGeometry(page);
+        expect(saved.status, "threads rail / reconnected").toEqual(baseline.status);
+        expect(saved.prose, "threads rail / reconnected").toEqual(baseline.prose);
+      }
     }
   });
 }

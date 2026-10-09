@@ -28,7 +28,8 @@ import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
 import type { NotSharedReason } from "../shell/document-search.js";
-import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
+import { notifySticky, resolveSticky } from "../notifications.js";
+import { rawSyncState, useCalmSyncState } from "./calm.js";
 import type { SyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
 import { documentSyncFacts } from "./sync-facts.js";
@@ -318,25 +319,18 @@ function TldrCallout({
 }
 
 /**
- * Exported for the label test only.
- *
- * The backlog count names its unit (`backlogLabel`, shared with the sync
- * panel), because `sync_status` reports a *rooms* count under a similar name.
- *
- * Three things keep the line still while someone types (#76):
+ * The compact document reading, also used while waiting for sync.
+ * Three things keep the line still while someone types:
  *
  * 1. The state is debounced (`useCalmSyncState`) — the truth is unchanged, the
  *    redraw cadence is.
  * 2. The mark and the word each sit in a fixed-width slot, so swapping the dot
  *    for the spinner and "synced" for "syncing…" moves nothing to their right.
- * 3. The fixed sync slots keep the freshness and peer readings still. In a
- *    document, the reserved warning band keeps the rule and prose still too,
- *    while the transient backlog fact appears only when relevant.
+ * 3. Recovery sentences live in shared sticky notices and Sync details, so
+ *    appearing problems need no reserved bands below the compact row.
  *
- * The suppression in (3) is safe only because a non-empty backlog is itself
- * part of what makes the state busy (`rawSyncState`). A backlog that outlives
- * the settle window moves the indicator to `syncing…` and brings the badge back
- * with it; the pair can delay the news by 400ms, never swallow it.
+ * A backlog still makes `rawSyncState` busy: one that outlives the calm window
+ * reads `syncing…` or `saving here…`. Its count belongs only in Sync details.
  */
 export function StatusLine({
   connection,
@@ -376,7 +370,7 @@ export function StatusLine({
   syncDetails?: boolean;
   /** Reveal one currently resolvable remote caret without following it. */
   onActivatePresence?: ((session: RemotePresence) => void) | undefined;
-  /** Reserve warnings and presence only beside hydrated prose. */
+  /** Reserve the capped presence width beside hydrated prose. */
   documentLayout?: boolean;
 }): ReactElement {
   const status = useRoomStatus(connection);
@@ -387,7 +381,7 @@ export function StatusLine({
   const facts = documentSyncFacts(status, state, reading, hubAcked, notSharedReason, localWorkspace);
   const saveNote =
     !status.writable && reading.detail === null ? (
-      <span className="ub-muted ub-not-saved">not saved</span>
+      <span className="ub-muted ub-not-saved flex-none whitespace-nowrap">not saved</span>
     ) : null;
   // Presence is independent of the connection's settled status word. Keep the
   // current room's roster in its ordinary slot while that word is blank; the
@@ -423,17 +417,29 @@ export function StatusLine({
     </span>
   ) : null;
   const blank = facts.primary === null;
-  const pendingReading =
-    reading.detail === null && state !== "synced" && status.unsyncedChanges > 0 ? (
-      <span className="ub-pending rounded-(--radius-sm) bg-(--status-warning-subtle) text-(--foreground) px-[0.3rem]">
-        {backlogLabel(status.unsyncedChanges)}
-      </span>
-    ) : null;
+  const saveProblem = blank ? null : reading.detail ?? (!status.writable ? "Changes are not saved." : null);
+  // A retained serving cause is not a hub claim while its acknowledgement is
+  // unknown. Publish only the condition the compact facts actually name.
+  const hubProblem = facts.hub === "not shared with hub" ? facts.hubDetail : null;
+  const saveKey = `document-status:${connection.room}:save`;
+  const hubKey = `document-status:${connection.room}:hub`;
+  useEffect(() => {
+    if (saveProblem === null) resolveSticky(saveKey);
+    else notifySticky({ key: saveKey, message: saveProblem, severity: "error" });
+    if (hubProblem === null) resolveSticky(hubKey);
+    else notifySticky({ key: hubKey, message: hubProblem, severity: "warning" });
+  }, [connection, saveKey, hubKey, saveProblem, hubProblem]);
+  // Cause changes update the same notice; only leaving this source ends its
+  // ownership. RoutePane mounts either the waiting or hydrated header.
+  useEffect(() => () => {
+    resolveSticky(saveKey);
+    resolveSticky(hubKey);
+  }, [connection, saveKey, hubKey]);
   const hub =
     endpoint === null || (hubAcked !== undefined && !facts.twoFact)
       ? null
       : `${endpoint.url ?? "unknown"} (${endpointSourceLabel(endpoint.source)})`;
-  const factLabel = [facts.primary, facts.hub, facts.hubDetail].filter(
+  const factLabel = [facts.primary, facts.hub].filter(
     (value): value is string => value !== null,
   );
   const syncReading =
@@ -489,16 +495,13 @@ export function StatusLine({
     return () => onLastUpdatedChange?.(connection.room, undefined);
   }, [connection.room, onLastUpdatedChange, shownUpdatedAt]);
 
-  // A refusal replaces the rest of the line rather than decorating it: the
-  // backlog and peer strip are about a connection that is working or returning.
+  // Refusals retain their compact word; recovery stays in notices and details.
   return (
     <div className="ub-status min-w-0 text-[0.8rem]/[1.2] text-[var(--muted-foreground)] py-[0.35rem] border-b border-[var(--border)] mb-3">
       <div className="flex min-w-0 min-h-7 items-center gap-2">
         {syncReading}
-        {reading.detail !== null && <span className="ub-muted">{reading.detail}</span>}
-        {!documentLayout && !blank && saveNote}
+        {!blank && saveNote}
         {!blank && updatedReading}
-        {!documentLayout && !blank && pendingReading}
         {/* Circles, not name pills (#494): the strip is the constrained surface,
             and a row of words pushes the status line around as sessions come and
             go. The detail a name carried is on the avatar's hover instead — which
@@ -506,26 +509,6 @@ export function StatusLine({
             caret sits in is resolved once, in `readPresence`. */}
         {reading.detail === null && peerStrip}
       </div>
-      {/* Reserve two lines for simultaneous not-saved and backlog readings,
-          including a long count. Only ink changes while typing or reconnecting,
-          even when a desktop Threads rail leaves too little room inline. */}
-      {documentLayout && (
-        <div className="ub-status-notes flex min-w-0 min-h-[2lh] items-start gap-2 mt-2 [&>.ub-not-saved]:flex-none [&>.ub-pending]:min-w-0">
-          {!blank && saveNote}
-          {!blank && pendingReading}
-        </div>
-      )}
-      {/* Reserve the full wrapping line even before the first status answer,
-          through room changes, failed polls and refusals. Visibility changes
-          ink only; the readings row and prose keep their geometry. */}
-      {hubAcked !== undefined && (
-        <div
-          className={`ub-status-reason ub-muted min-w-0 mt-2${facts.hubDetail === null ? " invisible" : ""}`}
-          aria-hidden={facts.hubDetail === null}
-        >
-          {facts.hubDetail ?? "this machine has no credentials for its hub"}
-        </div>
-      )}
     </div>
   );
 }

@@ -159,9 +159,9 @@ describe("the sync indicator only draws a state that has persisted", () => {
   /**
    * The one the calm treatment could have swallowed. `provider.isSynced` is
    * raised by the initial handshake and never lowered again, so a room whose
-   * writes are piling up unacknowledged still reports `synced: true` — and the
-   * status line suppresses the backlog badge while it reads "synced". Left to
-   * the flag alone, the indicator would sit there claiming everything was fine.
+   * writes are piling up unacknowledged still reports `synced: true`. Left to
+   * the flag alone, the compact indicator would claim everything was fine;
+   * the backlog count itself lives in Sync details.
    */
   it("goes busy on a climbing backlog even while the provider still says synced", () => {
     const view = probe(room());
