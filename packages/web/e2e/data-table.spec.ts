@@ -204,6 +204,26 @@ async function installProbe(page: Page, uuid: string, tables = 0, charts = 0): P
   }, { targetUuid: uuid, tableCount: tables, chartCount: charts });
 }
 
+async function expectClearTableActions(block: Locator): Promise<void> {
+  const geometry = await block.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const table = element.querySelector(".ub-data-table")?.getBoundingClientRect();
+    const notice = element.querySelector(".ub-chart-notice");
+    const range = document.createRange();
+    if (notice !== null) range.selectNodeContents(notice);
+    const text = Array.from(range.getClientRects());
+    return Array.from(element.querySelectorAll(".ub-chart-open, .ub-copy")).map((action) => {
+      const rect = action.getBoundingClientRect();
+      return {
+        belowTable: table !== undefined && rect.top >= table.bottom,
+        withinBlock: rect.left >= bounds.left && rect.right <= bounds.right,
+        overlapsFootnote: text.some(line => rect.left < line.right && rect.right > line.left && rect.top < line.bottom && rect.bottom > line.top),
+      };
+    });
+  });
+  expect(geometry).toEqual(Array.from({ length: 2 }, () => ({ belowTable: true, withinBlock: true, overlapsFootnote: false })));
+}
+
 test("all rows read like an ordinary table with secondary source and isolated links in both appearances", async ({ browser }, info) => {
   const session = writer();
   for (const appearance of ["light", "dark"] as const) {
@@ -268,6 +288,12 @@ test("all rows read like an ordinary table with secondary source and isolated li
     await expect(panel).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     expect(await cellStyle(table.locator("th").first())).toEqual(await cellStyle(ordinary.locator("th").first()));
     expect(await cellStyle(table.locator("td").first())).toEqual(await cellStyle(ordinary.locator("td").first()));
+    const headerLines = await table.getByRole("columnheader", { name: "Autonomous", exact: true }).evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return Array.from(range.getClientRects()).filter(rect => rect.width > 0 && rect.height > 0).length;
+    });
+    expect(headerLines).toBe(1);
     const generatedWidth = await table.evaluate((element) => element.getBoundingClientRect().width);
     const contentWidth = await editor(page).evaluate((element) => element.clientWidth);
     expect(Math.abs(generatedWidth - contentWidth)).toBeLessThanOrEqual(2);
@@ -310,13 +336,16 @@ test("all rows read like an ordinary table with secondary source and isolated li
     await expect(openSource).toHaveCSS("opacity", "1");
     await expect(copy).toHaveCSS("opacity", "1");
     expect(await table.boundingBox()).toEqual(restingBounds);
+    await expectClearTableActions(block);
     await openSource.click();
     await expect(source).toBeVisible();
+    await expect(copy).toBeVisible();
     await editor(page).locator(":scope > p").first().click();
     await tabTo(page, openSource);
     await expect(openSource).toHaveCSS("opacity", "1");
     await expect(copy).toHaveCSS("opacity", "1");
     expect(await table.boundingBox()).toEqual(restingBounds);
+    await expectClearTableActions(block);
     await tabTo(page, copy);
     await expect(copy).toBeFocused();
     await expect(copy).toHaveCSS("opacity", "1");
@@ -468,6 +497,11 @@ test("legacy page sizes keep all rows and source remains reachable without hover
   const openSource = page.getByRole("button", { name: "Open table source", exact: true });
   await expect(openSource).toBeVisible();
   expect(Number(await openSource.evaluate((element) => getComputedStyle(element).opacity))).toBeGreaterThan(0);
+  const block = page.locator(".ub-chart[data-view='table']");
+  await expectClearTableActions(block);
+  await page.setViewportSize({ width: 390, height: 900 });
+  await expectClearTableActions(block);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await openSource.tap();
   await expect(page.locator(".ub-chart-source")).toBeVisible();
   await editor(page).locator(":scope > p").first().tap();
@@ -535,6 +569,7 @@ async function timingEvidence(page: Page, session: McpSession, uuid: string, mix
   expect(initial.availableEntries).toBe(4402);
   for (const table of await page.locator(".ub-data-table").all()) await expect(table.locator("tbody tr")).toHaveCount(4035);
   await expect(page.locator(".ub-data-table").first().getByRole("columnheader")).toHaveCount(10);
+  expect(await page.locator(".ub-table-scroll").first().evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   for (let iteration = 0; iteration < 10; iteration += 1) {
     const value = 900 + iteration;

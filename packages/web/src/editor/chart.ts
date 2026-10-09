@@ -72,13 +72,17 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     diagnostics.className = "ub-chart-diagnostics";
     const notice = document.createElement("p");
     notice.className = "ub-chart-notice";
+    const footer = document.createElement("div");
+    footer.className = "ub-chart-footer";
+    footer.contentEditable = "false";
+    footer.hidden = true;
     // Resolve CSS light-dark tokens as actual canvas colors, not raw variables.
     const probe = document.createElement("span");
     probe.className = "ub-chart-probe";
     probe.setAttribute("aria-hidden", "true");
     panel.append(title, openButton, screen, table.element, description, message, diagnostics, notice, probe);
     const copy = copyButton(() => current.textContent);
-    dom.append(panel, copy.element, contentDOM);
+    dom.append(panel, footer, copy.element, contentDOM);
 
     const releaseChart = (): void => {
       instance?.destroy();
@@ -103,8 +107,16 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         const result = prepared;
         const view = tableSource ? "table" : "line";
         if (dom.dataset.view !== view) dom.dataset.view = view;
-        const noticePredecessor = tableSource ? table.element : diagnostics;
-        if (noticePredecessor.nextElementSibling !== notice) noticePredecessor.after(notice);
+        // Reserve the actions beside the footnote, outside the table and its
+        // scrolling area. Source mode keeps copy available in this chrome.
+        if (tableSource && notice.parentNode !== footer) {
+          footer.append(notice, openButton, copy.element, diagnostics);
+        } else if (!tableSource && notice.parentNode !== panel) {
+          screen.before(openButton);
+          panel.append(diagnostics, notice, probe);
+          contentDOM.before(copy.element);
+        }
+        footer.hidden = !tableSource;
         openButton.setAttribute("aria-label", tableSource ? "Open table source" : "Open chart source");
         panel.dataset.state = result.status;
         if (result.status !== "ready") {
@@ -283,11 +295,13 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         return true;
       },
       stopEvent: event => event.target instanceof Node &&
-        (panel.contains(event.target) || copy.element.contains(event.target)),
+        (panel.contains(event.target) || footer.contains(event.target) || copy.element.contains(event.target)),
       // The derived root presentation is chrome too, never content to reparse.
       ignoreMutation: mutation =>
         (mutation.type === "attributes" && mutation.target === dom && mutation.attributeName === "data-view") ||
-        panel.contains(mutation.target) || copy.element.contains(mutation.target),
+        (mutation.type === "childList" && mutation.target === dom &&
+          [...mutation.addedNodes, ...mutation.removedNodes].every(child => child === copy.element)) ||
+        panel.contains(mutation.target) || footer.contains(mutation.target) || copy.element.contains(mutation.target),
       destroy: () => {
         destroyed = true;
         binding.destroy();

@@ -3,8 +3,11 @@
 Synthetic generated and ordinary tables in the same document, under an author's
 Changelog heading: [light](light.png), [dark](dark.png). The browser proof compares
 computed cell borders, padding, font size/weight, text color and header background;
-it also checks footnote contrast, native naming, secondary source/copy actions,
-keyboard and no-hover access, source editing, locks and horizontal containment.
+it also checks whole-word headers, footnote contrast, native naming, secondary
+source/copy actions, keyboard and no-hover access, source editing and locks.
+Revealed actions clear both table and footnote text, including at a 390px touch
+viewport. The ten-column timing workload and a thirty-column table scroll
+horizontally within their blocks.
 
 Regenerate the screenshots and timing attachments with:
 
@@ -20,8 +23,8 @@ record ten single-record updates each:
 
 | Workload | First DOM completion | Median update | Maximum update |
 | --- | ---: | ---: | ---: |
-| One table | 256.6 ms | 135.9 ms | 161.6 ms |
-| Ten tables + ten charts | 1,248.4 ms | 243.8 ms | 803.0 ms |
+| One table | 256.8 ms | 133.2 ms | 155.0 ms |
+| Ten tables + ten charts | 1,361.6 ms | 292.4 ms | 603.3 ms |
 
 Every measured update reads the complete data area once; the renderer makes no
 local Yjs update. The original 500 ms first-render budget for one table and

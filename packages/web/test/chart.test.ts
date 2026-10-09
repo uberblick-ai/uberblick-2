@@ -62,15 +62,18 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("the chart's derived lifecycle", () => {
-  it("switches table and line presentation with the source while preserving annotation and source access", () => {
+  it("switches table and line presentation with the source while preserving annotation and source access", async () => {
     const { doc, directory, id } = fixture();
     editBlock(doc, id, mapping, tableMapping);
     const { editor } = mountEditor(doc);
     flush();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(getBlocks(doc).find(block => block.id === id)?.text).toBe(tableMapping);
     const root = editor.view.dom.querySelector(".ub-chart") as HTMLElement;
     const source = root.querySelector(".ub-chart-open") as HTMLButtonElement;
     expect(root.dataset.view).toBe("table");
     expect(source.getAttribute("aria-label")).toBe("Open table source");
+    expect(root.querySelector(".ub-chart-footer .ub-copy")).not.toBeNull();
     expect(root.querySelector("caption")?.textContent).toBe("Data table of trend");
     source.click();
     expect(root.classList.contains("ub-chart-editing")).toBe(true);
@@ -81,9 +84,13 @@ describe("the chart's derived lifecycle", () => {
     expect(readDocData).toHaveBeenCalledTimes(1);
     editBlock(doc, id, tableMapping, mapping);
     flush();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(getBlocks(doc).find(block => block.id === id)?.text).toBe(mapping);
     expect(root.dataset.view).toBe("line");
     expect(root.querySelectorAll(".ub-data-table tbody tr")).toHaveLength(0);
     expect(source.getAttribute("aria-label")).toBe("Open chart source");
+    expect(root.querySelector(":scope > .ub-copy")).not.toBeNull();
+    expect(root.querySelector(".ub-chart-footer")?.hasAttribute("hidden")).toBe(true);
     expect(root.querySelector(".ub-chart-notice")?.hasAttribute("hidden")).toBe(true);
     expect(charts.instances).toHaveLength(1);
     expect(readDocData).toHaveBeenCalledTimes(1);
@@ -289,7 +296,7 @@ describe("the chart's derived lifecycle", () => {
     expect(element.querySelectorAll(".ub-data-table tbody tr")).toHaveLength(1);
     expect(element.querySelector(".ub-chart-diagnostics")?.textContent).toBe("1 records not shown (invalid under the collection schema).");
     expect(element.querySelector(".ub-chart-diagnostics")?.hasAttribute("aria-live")).toBe(false);
-    expect(element.querySelector(".ub-table-view")?.nextElementSibling?.textContent).toBe("Generated from document data · read-only");
+    expect(element.querySelector(".ub-chart-panel")?.nextElementSibling?.querySelector(".ub-chart-notice")?.textContent).toBe("Generated from document data · read-only");
     applyDocData(peer, directory, [{ collection: "trend", replaceRecords: [] }]);
     Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));
     flush();
