@@ -71,7 +71,10 @@ describe("checkout web project configuration", () => {
     chmodSync(credentials, 0o644);
     const exposed = resolveDevProjectConfig({ cwd, env });
     expect(exposed.hubAuthToken).toBe("");
-    expect(exposed.warnings.join("\n")).toContain("chmod 600");
+    expect(exposed.warnings.join("\n")).toContain("secret may have leaked");
+    expect(exposed.warnings.join("\n")).toContain(`delete ${credentials}`);
+    expect(exposed.warnings.join("\n")).toContain("restart running agents");
+    expect(exposed.warnings.join("\n")).not.toContain("chmod 600");
     expect(exposed.warnings.join("\n")).not.toContain(SECRET);
     chmodSync(credentials, 0o600);
     const endpoint = "ws://127.0.0.1:4321";

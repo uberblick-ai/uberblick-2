@@ -187,9 +187,9 @@ async function waitFor(what, probe, { timeoutMs, service = null }) {
 }
 
 /** The opposite of {@link tcpOpen}, and never an error: refusal is the answer. */
-function tcpRefused(port) {
+function tcpRefused(port, host = "127.0.0.1") {
   return new Promise((resolve) => {
-    const socket = createConnection({ host: "127.0.0.1", port });
+    const socket = createConnection({ host, port });
     socket.once("connect", () => {
       socket.destroy();
       resolve(false);
@@ -201,9 +201,9 @@ function tcpRefused(port) {
   });
 }
 
-function tcpOpen(port) {
+function tcpOpen(port, host = "127.0.0.1") {
   return new Promise((resolve, reject) => {
-    const socket = createConnection({ host: "127.0.0.1", port });
+    const socket = createConnection({ host, port });
     socket.once("connect", () => {
       socket.destroy();
       resolve(true);
@@ -468,7 +468,9 @@ async function main() {
 
   const open = background("`ub open --no-browser`", "ub", ["open", "--no-browser"], { cwd: PROJECT_ROOT });
   await assert("`ub open --no-browser` starts a hub accepting the created secret", async () => {
-    await waitFor("the local hub to listen", () => tcpOpen(HUB_PORT), { timeoutMs: 90_000, service: open });
+    // `ub open` binds the selected ws://localhost endpoint, which can resolve
+    // to IPv6 on Linux. Probe that host; the dev task below binds IPv4 instead.
+    await waitFor("the local hub to listen", () => tcpOpen(HUB_PORT, "localhost"), { timeoutMs: 90_000, service: open });
     await waitFor("the local web app to listen", () => tcpOpen(OPEN_PORT), { timeoutMs: 90_000, service: open });
     await waitFor("`ub open` to report its local hub", () => open.output().includes("started here"), { timeoutMs: 90_000, service: open });
     await waitFor("the local hub to accept the stored secret", async () => {
@@ -486,7 +488,7 @@ async function main() {
     open.interrupt();
     await waitFor("`ub open` to exit", () => open.stopped() !== null, { timeoutMs: 30_000 });
     await open.closed;
-    await waitFor("the local hub port to close", () => tcpRefused(HUB_PORT), { timeoutMs: 30_000 });
+    await waitFor("the local hub port to close", () => tcpRefused(HUB_PORT, "localhost"), { timeoutMs: 30_000 });
     await waitFor("the local web port to close", () => tcpRefused(OPEN_PORT), { timeoutMs: 30_000 });
   });
 
