@@ -12,13 +12,17 @@ import {
   Chart, LineController, LineElement, PointElement, LinearScale, Legend, Tooltip,
 } from "chart.js";
 import type { ChartConfiguration } from "chart.js";
-import { COMMENT_MARK, DATA_KEY, readDocData } from "@uberblick/schema";
+import { COMMENT_MARK } from "@uberblick/schema";
+import type { DocData } from "@uberblick/schema";
 import type * as Y from "yjs";
 import {
   prepareChart, formatChartX, formatChartNumber, chartAccessibleName,
   chartAccessibleDescription, chartDiagnosticsText,
 } from "./chart-data.js";
 import { chartChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js";
+import { prepareTable, tableDiagnosticsText } from "./table-data.js";
+import { dataTableView } from "./table-view.js";
+import { bindDocView } from "./view-bindings.js";
 
 // Both axes are linear. Epoch milliseconds plus Intl date labels require no
 // date adapter. No auto registry, decimator, transform or chart plugin package.
@@ -32,10 +36,11 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
   return ({ node, editor, getPos }: NodeViewRendererProps): NodeView => {
     let current: PMNode = node;
     let instance: Chart<"line", Point[]> | null = null;
-    let frame: number | null = null;
     let destroyed = false;
     let dirty = true;
-    let prepared: ReturnType<typeof prepareChart> | null = null;
+    let snapshot: DocData | null = null;
+    let tableSource = false;
+    let prepared: ReturnType<typeof prepareChart> | ReturnType<typeof prepareTable> | null = null;
     const dom = chartChrome.root();
     const contentDOM = chartChrome.content();
     const panel = document.createElement("div");
@@ -56,6 +61,8 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     description.id = `chart-description-${crypto.randomUUID()}`;
     canvas.setAttribute("aria-describedby", description.id);
     screen.append(canvas);
+    const table = dataTableView(() => schedule());
+    table.element.hidden = true;
     const message = document.createElement("p");
     message.className = "ub-chart-message";
     const diagnostics = document.createElement("p");
@@ -66,7 +73,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     const probe = document.createElement("span");
     probe.className = "ub-chart-probe";
     probe.setAttribute("aria-hidden", "true");
-    panel.append(title, openButton, screen, description, message, diagnostics, notice, probe);
+    panel.append(title, openButton, screen, table.element, description, message, diagnostics, notice, probe);
     const copy = copyButton(() => current.textContent);
     dom.append(panel, copy.element, contentDOM);
 
@@ -79,18 +86,23 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
       element.hidden = value === "";
     };
 
-    const draw = (): void => {
-      frame = null;
+    const draw = (data: DocData | null, readError?: unknown): void => {
       if (destroyed) return;
       try {
-        if (dirty || prepared === null) {
-          prepared = prepareChart(current.textContent, ydoc === null ? null : readDocData(ydoc));
+        if (readError !== undefined) throw readError;
+        if (dirty || prepared === null || snapshot !== data) {
+          try { tableSource = JSON.parse(current.textContent)?.type === "table"; }
+          catch { tableSource = false; }
+          prepared = tableSource ? prepareTable(current.textContent, data) : prepareChart(current.textContent, data);
+          snapshot = data;
           dirty = false;
         }
         const result = prepared;
+        openButton.textContent = tableSource ? "Open table source" : "Open chart source";
         panel.dataset.state = result.status;
-        text(diagnostics, chartDiagnosticsText(result));
         if (result.status !== "ready") {
+          table.render(result);
+          text(diagnostics, tableSource ? tableDiagnosticsText(result) : chartDiagnosticsText(result));
           releaseChart();
           screen.hidden = true;
           description.textContent = "";
@@ -99,6 +111,19 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           text(notice, "");
           return;
         }
+        if ("rows" in result) {
+          releaseChart();
+          screen.hidden = true;
+          description.textContent = "";
+          text(title, result.config.title ?? "");
+          text(message, "");
+          text(notice, "");
+          text(diagnostics, tableDiagnosticsText(result));
+          table.render(result);
+          return;
+        }
+        table.element.hidden = true;
+        text(diagnostics, chartDiagnosticsText(result));
         const { config } = result;
         text(title, config.title ?? "");
         text(message, "");
@@ -176,17 +201,14 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
       } catch (error) {
         releaseChart();
         screen.hidden = true;
+        table.element.hidden = true;
         description.textContent = "";
         panel.dataset.state = "collection-unusable";
         text(message, `Chart unavailable: ${error instanceof Error ? error.message : "Rendering failed"}`);
       }
     };
-    const schedule = (): void => {
-      if (!destroyed && frame === null) frame = requestAnimationFrame(draw);
-    };
-    const onData = (): void => { dirty = true; schedule(); };
-    const data = ydoc?.getMap(DATA_KEY);
-    data?.observe(onData);
+    const binding = bindDocView(ydoc, draw);
+    const schedule = (): void => { if (!destroyed) binding.schedule(); };
     const appearance = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
     appearance?.addEventListener("change", schedule);
     const theme = new MutationObserver(schedule);
@@ -227,8 +249,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
       ignoreMutation: mutation => panel.contains(mutation.target) || copy.element.contains(mutation.target),
       destroy: () => {
         destroyed = true;
-        if (frame !== null) cancelAnimationFrame(frame);
-        data?.unobserve(onData);
+        binding.destroy();
         releaseChart();
         theme.disconnect();
         appearance?.removeEventListener("change", schedule);

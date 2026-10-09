@@ -1,0 +1,473 @@
+/** Data tables consume the document's data through the production ub open replica. */
+import { expect, test } from "@playwright/test";
+import type { Locator, Page, TestInfo } from "@playwright/test";
+import { writeFileSync } from "node:fs";
+import { createDoc, editor, setupHarness } from "./app-helpers.js";
+import { renderedText } from "./contrast-helpers.js";
+import { McpAgent } from "./mcp-agent.js";
+import type { McpSession } from "./mcp-agent.js";
+
+const { harness, openApp } = setupHarness();
+let agent: McpAgent | null = null;
+test.beforeAll(() => {
+  agent = new McpAgent({
+    workspace: harness().workspace,
+    hubUrl: harness().hubUrl,
+    authSecret: harness().authSecret,
+    statePrefix: `uberblick-e2e-data-table-${process.env.UB_AGENTS_RUN ?? "local"}-`,
+  });
+});
+test.afterEach(async () => { await agent?.closeSessions(); });
+test.afterAll(async () => { await agent?.close(); agent = null; });
+
+function writer(): McpSession {
+  if (agent === null) throw new Error("e2e: data-table MCP agent is not configured");
+  return agent.open({ name: "data-table-e2e" });
+}
+
+interface DocPayload {
+  uuid: string;
+  blocks: { id: string; type: string; text: string; rev: string }[];
+}
+const TARGET = "https://example.invalid/table-evidence";
+const MAPPING = {
+  version: 1, type: "table", collection: "measurements", title: "Delivery evidence", pageSize: 2,
+  columns: [
+    { field: "name", label: "Name" },
+    { field: "value", label: "Autonomous", format: "number", unit: "%", decimals: 2 },
+    { field: "day", label: "Day", format: "date" },
+    { field: "url", label: "Evidence", format: "link" },
+  ],
+};
+const SCHEMA = { version: 1, schema: { type: "object" } };
+const RECORDS = [
+  { id: "a", value: { name: "<strong>kept as text</strong>", value: 12.5, day: "2026-01-01", url: TARGET } },
+  { id: "b", value: {} },
+  { id: "c", value: { name: null, value: null, day: null, url: null } },
+  { id: "d", value: { name: "Invalid values", value: "12", day: "2026-02-31", url: "javascript:alert(1)" } },
+  { id: "e", value: { name: { compact: true }, value: 20, day: "2026-01-02T12:30:00Z", url: "data:text/html,<script>alert(1)</script>" } },
+  { id: "f", value: { name: "Relative link", value: 0, day: "2026-01-03", url: "/relative" } },
+];
+
+async function tableDoc(session: McpSession, title: string, mapping: unknown = MAPPING, decision = false): Promise<string> {
+  const result = await session.call<{ uuid: string }>("create_doc", {
+    title, description: "Read-only evidence projected from document-owned measurements.",
+    ...(decision ? { kind: "decision", status: "open", tldr: "Keep these observations visible." } : {}),
+    blocks: [{ type: "paragraph", text: "Read the live evidence below." }, { type: "chart", text: JSON.stringify(mapping) }],
+  });
+  return result.uuid;
+}
+
+async function editMapping(session: McpSession, uuid: string, text: string): Promise<void> {
+  const doc = await session.call<DocPayload>("get_doc", { uuid });
+  const block = doc.blocks.find((entry) => entry.type === "chart");
+  if (block === undefined) throw new Error("e2e: no data-table chart block in get_doc");
+  await session.call("edit_block", { uuid, block_id: block.id, old_text: block.text, new_text: text, rev: block.rev });
+}
+
+async function measurements(session: McpSession, uuid: string): Promise<void> {
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: RECORDS }] });
+}
+
+async function tabTo(page: Page, target: Locator): Promise<void> {
+  for (let count = 0; count < 40; count += 1) {
+    if (await target.evaluate((element) => element === document.activeElement)) return;
+    await page.keyboard.press("Tab");
+  }
+  await expect(target).toBeFocused();
+}
+
+async function expectPopup(page: Page, activate: () => Promise<unknown>): Promise<void> {
+  const [popup] = await Promise.all([page.context().waitForEvent("page", { timeout: 5_000 }), activate()]);
+  try {
+    await popup.waitForLoadState();
+    await expect(popup).toHaveURL(TARGET);
+    expect(await popup.evaluate(() => window.opener)).toBeNull();
+    expect(await popup.evaluate(() => document.referrer)).toBe("");
+  } finally { await popup.close(); await page.bringToFront(); }
+}
+
+/**
+ * Instrument the existing y-sync document, never a production test hook. The
+ * data reader enumerates the complete map once through entries(); its wrapper
+ * counts reads without inspecting values. Native map integration lets that
+ * wrapper attach before the first editor render. DOM completion waits for all
+ * mounted views to show the current stored revision, after synchronous drawing.
+ */
+async function installProbe(page: Page, uuid: string, tables = 0, charts = 0): Promise<void> {
+  await page.addInitScript(({ targetUuid, tableCount, chartCount }) => {
+    type DataMap = {
+      size: number; _map?: Map<string, unknown>; doc?: SharedDoc;
+      entries(): IterableIterator<unknown>;
+      get(key: string): unknown;
+      observe(listener: () => void): void;
+      unobserve(listener: () => void): void;
+    };
+    type SharedDoc = {
+      share: Map<string, DataMap>;
+      getMap(name: string): { get(key: string): unknown };
+      on(event: string, listener: (...args: unknown[]) => void): void;
+      off(event: string, listener: (...args: unknown[]) => void): void;
+    };
+    type EditorState = { plugins: { key: string; getState(state: EditorState): { doc?: SharedDoc } }[] };
+    type MountedEditor = HTMLElement & { editor?: { state: EditorState } };
+    const probe = {
+      localUpdates: 0, reads: 0, appliedAt: 0, availableAt: 0, availableEntries: 0,
+      first: null as number | null, durations: [] as number[], readsPerUpdate: [] as number[],
+    };
+    (window as unknown as { tableProbe: typeof probe }).tableProbe = probe;
+    let doc: SharedDoc | undefined;
+    let data: DataMap | undefined;
+    let restoreEntries: (() => void) | undefined;
+    let readsBeforeUpdate = 0;
+    let completedAt = 0;
+    const applied = (): void => { probe.appliedAt = performance.now(); readsBeforeUpdate = probe.reads; };
+    const updated = (...args: unknown[]): void => {
+      if ((args[3] as { local?: boolean } | undefined)?.local === true) probe.localUpdates += 1;
+    };
+    const attach = (owning: SharedDoc): void => {
+      if (!owning.share.has("meta") || owning.getMap("meta").get("uuid") !== targetUuid) return;
+      const root = owning.share.get("data");
+      if (root === undefined || typeof root.entries !== "function") return;
+      if (doc !== owning) { doc?.off("update", updated); doc = owning; doc.on("update", updated); }
+      if (data !== root) {
+        data?.unobserve(applied);
+        restoreEntries?.();
+        data = root;
+        const descriptor = Object.getOwnPropertyDescriptor(root, "entries");
+        const entries = root.entries;
+        root.entries = function (): IterableIterator<unknown> { probe.reads += 1; return entries.call(this); };
+        restoreEntries = (): void => {
+          if (descriptor === undefined) delete (root as Partial<DataMap>).entries;
+          else Object.defineProperty(root, "entries", descriptor);
+        };
+        root.observe(applied);
+        if (root.size > 0 && probe.appliedAt === 0) applied();
+      }
+      if (probe.availableAt === 0 && root.size > 0) {
+        probe.availableAt = performance.now();
+        probe.availableEntries = root.size;
+      }
+    };
+    const nativeSet = Map.prototype.set;
+    const initialDocs = new Map<SharedDoc, (...args: unknown[]) => void>();
+    Map.prototype.set = function (key: unknown, value: unknown): Map<unknown, unknown> {
+      const result = nativeSet.call(this, key, value) as Map<unknown, unknown>;
+      if (key === "data" && typeof value === "object" && value !== null) {
+        const owning = (value as DataMap).doc;
+        if (owning?.share === this && !initialDocs.has(owning)) {
+          const after = (): void => { attach(owning); };
+          initialDocs.set(owning, after);
+          owning.on("afterTransaction", after);
+        }
+      }
+      return result;
+    };
+    const mutations = new MutationObserver(() => {
+      const state = document.querySelector<MountedEditor>(".ub-editor .ProseMirror")?.editor?.state;
+      const mounted = state?.plugins.find((plugin) => plugin.key.startsWith("y-sync"))?.getState(state).doc;
+      if (mounted !== undefined) attach(mounted);
+      if (tableCount === 0 || data === undefined || probe.availableAt === 0 || probe.appliedAt === completedAt) return;
+      const latest = data.get(JSON.stringify(["record", "observations", "observation-04034"])) as { value0?: number } | undefined;
+      if (latest?.value0 === undefined) return;
+      const expected = new Intl.NumberFormat(navigator.language, { maximumSignificantDigits: 12 }).format(latest.value0);
+      const summary = data.get(JSON.stringify(["record", "summaries", "summary-00364"])) as { value0?: number } | undefined;
+      const chartExpected = summary?.value0 === undefined ? "" : new Intl.NumberFormat(navigator.language, { maximumSignificantDigits: 12 }).format(summary.value0);
+      const renderedTables = [...document.querySelectorAll<HTMLTableElement>(".ub-data-table")];
+      const descriptions = [...document.querySelectorAll(".ub-chart-description")].filter((entry) => entry.textContent !== "");
+      if (renderedTables.length !== tableCount || descriptions.length !== chartCount ||
+          !renderedTables.every((table) => table.querySelector("tbody tr td:nth-child(2)")?.textContent === expected) ||
+          !descriptions.every((entry) => entry.textContent?.includes(`Metric 0: ${chartExpected} ms`))) return;
+      completedAt = probe.appliedAt;
+      if (probe.first === null) probe.first = performance.now() - probe.availableAt;
+      else {
+        probe.durations.push(performance.now() - probe.appliedAt);
+        probe.readsPerUpdate.push(probe.reads - readsBeforeUpdate);
+      }
+    });
+    mutations.observe(document, { childList: true, subtree: true, characterData: true });
+    addEventListener("pagehide", () => {
+      mutations.disconnect(); doc?.off("update", updated); data?.unobserve(applied); restoreEntries?.();
+      for (const [initial, listener] of initialDocs) initial.off("afterTransaction", listener);
+      initialDocs.clear(); Map.prototype.set = nativeSet;
+    });
+  }, { targetUuid: uuid, tableCount: tables, chartCount: charts });
+}
+
+test("table insertion, source, native paging and isolated links work by pointer and keyboard in both appearances", async ({ browser }, info) => {
+  const session = writer();
+  for (const appearance of ["light", "dark"] as const) {
+    const page = await openApp(browser, "/", { contextOptions: { colorScheme: appearance, locale: "en-US" } });
+    await page.context().route("https://example.invalid/**", (route) => route.fulfill({ contentType: "text/html", body: "<p>Evidence</p>" }));
+    await expect(page.locator(".ub-list-head")).toBeVisible();
+    const uuid = await createDoc(page, `Data table source ${appearance}`);
+    await editor(page).locator(":scope > p").first().click();
+    await page.keyboard.insertText("A source-editable table follows.");
+    await editor(page).locator(":scope > *").last().hover();
+    await page.getByRole("button", { name: "Insert block below" }).click();
+    await expect(page.getByRole("option", { name: "Table", exact: true })).toBeVisible();
+    await page.getByRole("option", { name: "Data table", exact: true }).click();
+    const source = page.locator(".ub-chart-source");
+    await expect(source).toBeVisible();
+    await source.click();
+    await source.evaluate((element) => {
+      const range = document.createRange(); range.selectNodeContents(element);
+      const selection = document.getSelection(); selection?.removeAllRanges(); selection?.addRange(range);
+    });
+    await page.keyboard.insertText(JSON.stringify(MAPPING));
+    await expect.poll(async () => {
+      try { return (await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text; }
+      catch (error) { if (error instanceof Error && /doc_not_hydrated|doc_not_found/.test(error.message)) return null; throw error; }
+    }).toBe(JSON.stringify(MAPPING));
+    await measurements(session, uuid);
+    await editor(page).locator(":scope > p").first().click();
+    const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
+    await expect(table).toBeVisible();
+    await expect(source).toBeHidden();
+    await expect(table.getByRole("columnheader")).toHaveText(["Name", "Autonomous", "Day", "Evidence"]);
+    await expect(table.getByRole("cell", { name: "<strong>kept as text</strong>", exact: true })).toBeVisible();
+    await expect(table.locator("strong, script, style")).toHaveCount(0);
+    await expect(table.locator("tbody tr")).toHaveCount(2);
+    await expect(table.locator("tbody tr").first()).toContainText("12.50 %");
+    await expect(table.locator("tbody tr").first()).toContainText("Jan 1, 2026");
+    await expect(table.locator("tbody tr").nth(1)).toContainText(/absent/i);
+    await expect(page.locator(".ub-table-range")).toHaveText("Records 1–2 of 6");
+    expect(await table.ariaSnapshot()).toContain('table "Delivery evidence"');
+    const before = await session.call("get_data", { uuid });
+    const link = table.getByRole("link", { name: TARGET, exact: true });
+    await expectPopup(page, () => link.click());
+    await editor(page).locator(":scope > p").first().click();
+    await tabTo(page, link);
+    await expectPopup(page, () => page.keyboard.press("Enter"));
+    const next = page.getByRole("button", { name: "Next page", exact: true });
+    await next.click();
+    await expect(page.locator(".ub-table-range")).toHaveText("Records 3–4 of 6");
+    await expect(table.locator("tbody tr").first()).toContainText(/null/i);
+    await expect(table.locator("tbody tr").nth(1)).toContainText(/invalid/i);
+    await expect(table).toContainText("2026-02-31");
+    await expect(table).toContainText("javascript:alert(1)");
+    await expect(table.getByRole("link")).toHaveCount(0);
+    await tabTo(page, next);
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".ub-table-range")).toHaveText("Records 5–6 of 6");
+    await expect(table).toContainText('{"compact":true}');
+    await expect(table).toContainText("data:text/html,<script>alert(1)</script>");
+    await expect(table).toContainText("/relative");
+    await expect(table.getByRole("link")).toHaveCount(0);
+    await expect(next).toBeDisabled();
+    const previous = page.getByRole("button", { name: "Previous page", exact: true });
+    await tabTo(page, previous);
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".ub-table-range")).toHaveText("Records 3–4 of 6");
+    const openSource = page.getByRole("button", { name: "Open table source", exact: true });
+    await openSource.click();
+    await expect(source).toBeVisible();
+    await editor(page).locator(":scope > p").first().click();
+    await tabTo(page, openSource);
+    await page.keyboard.press("Enter");
+    await expect(source).toBeVisible();
+    await editor(page).locator(":scope > p").first().click();
+    await expect(table).toBeVisible();
+    for (const reading of await renderedText(page, ".ub-chart-panel")) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+    for (const state of await page.locator(".ub-chart-message, .ub-chart-diagnostics, .ub-table-range").all()) {
+      await expect(state).not.toHaveAttribute("aria-live", /.*/);
+    }
+    const screenshot = info.outputPath(`data-table-${appearance}.png`);
+    await page.screenshot({ path: screenshot });
+    await info.attach(`data-table-${appearance}`, { path: screenshot, contentType: "image/png" });
+    expect(await session.call("get_data", { uuid })).toEqual(before);
+    expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(MAPPING));
+  }
+});
+
+test("MCP data and mapping updates preserve pages, clamp deletions and survive reload and reopen", async ({ browser }) => {
+  const session = writer();
+  const uuid = await tableDoc(session, "Live data table");
+  await measurements(session, uuid);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { beforeNavigate: (loading) => installProbe(loading, uuid) });
+  const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
+  await expect(table).toBeVisible();
+  await page.getByRole("button", { name: "Next page", exact: true }).click();
+  let navigations = 0;
+  page.on("framenavigated", (frame) => { if (frame === page.mainFrame()) navigations += 1; });
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [{ id: "d", value: { name: "Arriving update", value: 42, day: "2026-01-04", url: TARGET } }] }] });
+  await expect(table).toContainText("Arriving update");
+  await expect(page.locator(".ub-table-range")).toHaveText("Records 3–4 of 6");
+  const beforeMapping = await session.call("get_data", { uuid });
+  const updated = { ...MAPPING, title: "Live evidence", columns: MAPPING.columns.map((column) => column.field === "name" ? { ...column, label: "Observation" } : column) };
+  await editMapping(session, uuid, JSON.stringify(updated));
+  const renamed = page.getByRole("table", { name: "Live evidence", exact: true });
+  await expect(renamed.getByRole("columnheader", { name: "Observation", exact: true })).toBeVisible();
+  expect(await session.call("get_data", { uuid })).toEqual(beforeMapping);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [{ id: "d", value: { name: "Later update", value: 43, day: "2026-01-04", url: TARGET } }] }] });
+  await expect(renamed).toContainText("Later update");
+  await page.getByRole("button", { name: "Next page", exact: true }).click();
+  await expect(page.locator(".ub-table-range")).toHaveText("Records 5–6 of 6");
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", deleteRecords: ["e", "f"] }] });
+  await expect(page.locator(".ub-table-range")).toHaveText("Records 3–4 of 4");
+  await expect(renamed).toContainText("Later update");
+  expect(navigations).toBe(0);
+  expect(await page.evaluate(() => (window as unknown as { tableProbe: { localUpdates: number } }).tableProbe.localUpdates)).toBe(0);
+  const lightInk = await renamed.evaluate((element) => getComputedStyle(element.querySelector("td") ?? element).color);
+  await page.getByTestId("account-menu").click();
+  await page.getByRole("button", { name: "Dark", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect.poll(() => renamed.evaluate((element) => getComputedStyle(element.querySelector("td") ?? element).color)).not.toBe(lightInk);
+  await page.reload();
+  await expect(renamed).toBeVisible();
+  await expect(page.locator(".ub-table-range")).toHaveText("Records 1–2 of 4");
+  const reopened = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  await expect(reopened.getByRole("table", { name: "Live evidence", exact: true })).toBeVisible();
+  await expect(reopened.locator(".ub-table-range")).toHaveText("Records 1–2 of 4");
+  await reopened.getByRole("button", { name: "Next page", exact: true }).click();
+  await expect(reopened.getByRole("table", { name: "Live evidence", exact: true })).toContainText("Later update");
+  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(updated));
+});
+
+test("problem states recover without editing stored values and decided or archived tables remain pageable", async ({ browser }) => {
+  const session = writer();
+  const uuid = await tableDoc(session, "Table states", MAPPING, true);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "collection-absent");
+  await editMapping(session, uuid, "{invalid JSON");
+  await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "invalid-configuration");
+  await editMapping(session, uuid, JSON.stringify(MAPPING));
+  await measurements(session, uuid);
+  await expect(page.getByRole("table", { name: "Delivery evidence", exact: true })).toBeVisible();
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [] }] });
+  await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "no-records");
+  await measurements(session, uuid);
+  const stored = await session.call<DocPayload>("get_doc", { uuid });
+  const data = await session.call("get_data", { uuid });
+  await session.call("set_status", { uuid, status: "decided" });
+  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+  await page.getByRole("button", { name: "Next page", exact: true }).click();
+  await expect(page.locator(".ub-table-range")).toHaveText("Records 3–4 of 6");
+  await expect(editMapping(session, uuid, "{}")).rejects.toThrow(/decision_read_only/);
+  await session.call("archive_doc", { uuid });
+  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+  const previous = page.getByRole("button", { name: "Previous page", exact: true });
+  await tabTo(page, previous);
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".ub-table-range")).toHaveText("Records 1–2 of 6");
+  await expect(editMapping(session, uuid, "{}")).rejects.toThrow(/doc_archived/);
+  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks).toEqual(stored.blocks);
+  expect(await session.call("get_data", { uuid })).toEqual(data);
+});
+
+interface Timings {
+  first: number; updates: number[]; readsPerUpdate: number[]; availableEntries: number;
+  bytes: number; records: number; tables: number; charts: number; cpuThrottle: number;
+}
+
+async function workload(session: McpSession, mixed: boolean): Promise<{ uuid: string; bytes: number }> {
+  const table = {
+    version: 1, type: "table", collection: "observations", pageSize: 25,
+    sort: { field: "day", direction: "desc" },
+    columns: [
+      { field: "day", label: "Day", format: "date" },
+      ...Array.from({ length: 3 }, (_, index) => ({ field: `value${index}`, label: `Metric ${index}`, format: "number" })),
+      { field: "endpoint", label: "Endpoint" }, { field: "source", label: "Source" },
+      { field: "status", label: "Status" }, { field: "revision", label: "Revision", format: "number" },
+      { field: "url", label: "Evidence", format: "link" }, { field: "detail", label: "Detail" },
+    ],
+  };
+  const chart = {
+    version: 1, type: "line", collection: "summaries", x: { field: "day", type: "date", label: "Day" },
+    y: Array.from({ length: 3 }, (_, index) => ({ field: `value${index}`, label: `Metric ${index}`, unit: "ms" })),
+  };
+  const result = await session.call<{ uuid: string }>("create_doc", {
+    title: mixed ? "Twenty shared views timing" : "Data table timing",
+    description: "Synthetic one-year API-health workload for Chromium timing.",
+    blocks: [
+      { type: "paragraph", text: "One-year API-health observations and summaries." },
+      ...(mixed ? Array.from({ length: 10 }, (_, index) => ({ type: "chart", text: JSON.stringify({ ...chart, title: `Timing chart ${index}` }) })) : []),
+      ...Array.from({ length: mixed ? 10 : 1 }, (_, index) => ({ type: "chart", text: JSON.stringify({ ...table, title: `Timing table ${index}` }) })),
+    ],
+  });
+  const summaries = Array.from({ length: 365 }, (_, index) => ({
+    id: `summary-${String(index).padStart(5, "0")}`,
+    value: { day: new Date(Date.UTC(2012, 0, 1 + index)).toISOString().slice(0, 10), value0: index, value1: index + 1, value2: index + 2 },
+  }));
+  await session.call("update_data", { uuid: result.uuid, operations: [{ collection: "summaries", schema: SCHEMA, replaceRecords: summaries }] });
+  const observations = Array.from({ length: 4035 }, (_, index) => ({
+    id: `observation-${String(index).padStart(5, "0")}`,
+    value: {
+      day: new Date(Date.UTC(2012, 0, 1 + index)).toISOString().slice(0, 10),
+      value0: index, value1: index + 1, value2: index + 2,
+      endpoint: `/synthetic/endpoint-${index % 10}`, source: "api-health", status: "ok", revision: 0,
+      url: TARGET, detail: "x".repeat(400),
+    },
+  }));
+  for (let offset = 0; offset < observations.length; offset += 1000) {
+    await session.call("update_data", { uuid: result.uuid, operations: [{ collection: "observations", ...(offset === 0 ? { schema: SCHEMA } : {}), upsert: observations.slice(offset, offset + 1000) }] });
+  }
+  const summary = await session.call<{ data: { bytes: number } }>("get_data", { uuid: result.uuid });
+  return { uuid: result.uuid, bytes: summary.data.bytes };
+}
+
+async function timingEvidence(page: Page, session: McpSession, uuid: string, mixed: boolean, bytes: number): Promise<Timings> {
+  await expect(page.locator(".ub-data-table")).toHaveCount(mixed ? 10 : 1);
+  await expect(page.locator(".ub-chart-panel[data-state='ready']")).toHaveCount(mixed ? 20 : 1);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { tableProbe: { first: number | null } }).tableProbe.first)).not.toBeNull();
+  const initial = await page.evaluate(() => (window as unknown as { tableProbe: { first: number; availableEntries: number } }).tableProbe);
+  expect(initial.availableEntries).toBe(4402);
+  await expect(page.locator(".ub-data-table").first().locator("tbody tr")).toHaveCount(25);
+  await expect(page.locator(".ub-data-table").first().getByRole("columnheader")).toHaveCount(10);
+  const firstScroll = page.locator(".ub-table-scroll").first();
+  expect(await firstScroll.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  for (let iteration = 0; iteration < 10; iteration += 1) {
+    const value = 900 + iteration;
+    const previous = await page.evaluate(() => (window as unknown as { tableProbe: { durations: number[] } }).tableProbe.durations.length);
+    await session.call("update_data", {
+      uuid, operations: [
+        { collection: "observations", upsert: [{ id: "observation-04034", value: {
+          day: new Date(Date.UTC(2012, 0, 4035)).toISOString().slice(0, 10), value0: value, value1: value + 1, value2: value + 2,
+          endpoint: "/synthetic/endpoint-4", source: "api-health", status: "ok", revision: iteration + 1, url: TARGET, detail: "x".repeat(400),
+        } }] },
+        ...(mixed ? [{ collection: "summaries", upsert: [{ id: "summary-00364", value: { day: new Date(Date.UTC(2012, 0, 365)).toISOString().slice(0, 10), value0: value, value1: value + 1, value2: value + 2 } }] }] : []),
+      ],
+    });
+    await expect.poll(() => page.evaluate(() => (window as unknown as { tableProbe: { durations: number[] } }).tableProbe.durations.length)).toBe(previous + 1);
+  }
+  const probe = await page.evaluate(() => (window as unknown as { tableProbe: { durations: number[]; readsPerUpdate: number[]; localUpdates: number } }).tableProbe);
+  expect(probe.localUpdates).toBe(0);
+  expect(probe.readsPerUpdate).toEqual(Array.from({ length: 10 }, () => 1));
+  return { first: initial.first, updates: probe.durations, readsPerUpdate: probe.readsPerUpdate, availableEntries: initial.availableEntries,
+    bytes, records: 4400, tables: mixed ? 10 : 1, charts: mixed ? 10 : 0, cpuThrottle: 2 };
+}
+
+async function publishTimings(info: TestInfo, result: Timings, label: string): Promise<void> {
+  const ordered = [...result.updates].sort((a, b) => a - b);
+  const median = ((ordered[4] ?? Infinity) + (ordered[5] ?? Infinity)) / 2;
+  const record = { ...result, median, min: ordered[0], max: ordered.at(-1) };
+  console.log(`data table timing ${label}: ${JSON.stringify(record)}`);
+  const evidence = info.outputPath(`data-table-timing-${label}.json`);
+  writeFileSync(evidence, `${JSON.stringify(record, null, 2)}\n`);
+  await info.attach(`data-table-timing-${label}`, { path: evidence, contentType: "application/json" });
+  if (process.env.UB_CHART_TIMING_BUDGETS !== "1") return;
+  if (label === "single") expect(result.first).toBeLessThanOrEqual(500);
+  expect(median).toBeLessThanOrEqual(label === "single" ? 250 : 500);
+}
+
+test("one table and twenty shared views record bounded Chromium live-update timings", async ({ browser }, info) => {
+  test.setTimeout(180_000);
+  const session = writer();
+  for (const mixed of [false, true]) {
+    const { uuid, bytes } = await workload(session, mixed);
+    expect(bytes).toBeGreaterThan(2_500_000);
+    expect(bytes).toBeLessThan(3_000_000);
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      beforeNavigate: async (loading) => {
+        const cdp = await loading.context().newCDPSession(loading);
+        await cdp.send("Emulation.setCPUThrottlingRate", { rate: 2 });
+        await installProbe(loading, uuid, mixed ? 10 : 1, mixed ? 10 : 0);
+      },
+      contextOptions: { viewport: { width: 1366, height: 768 }, locale: "en-US" },
+    });
+    await publishTimings(info, await timingEvidence(page, session, uuid, mixed, bytes), mixed ? "mixed" : "single");
+    await page.context().close();
+  }
+});

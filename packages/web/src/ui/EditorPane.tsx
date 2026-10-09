@@ -753,10 +753,11 @@ const BoundEditor = memo(function BoundEditor({
       if (anchor !== null) {
         // Editable links open through ProseMirror's non-moving handleClick,
         // never this DOM click (which also fires after a selection drag). A
-        // read-only link keeps its native target/rel behavior. Refuse other
-        // schemes at this boundary too, even if an anchor's DOM was changed.
+        // read-only link keeps its native target/rel behavior, including links
+        // in a data view's noneditable chrome inside an editable document.
+        // Refuse other schemes even if an anchor's DOM was changed.
         if (
-          binding.editor?.isEditable ||
+          (binding.editor?.isEditable && anchor.closest(".ub-chart-panel") === null) ||
           event.shiftKey ||
           !isExternalHref(anchor.getAttribute("href"))
         ) {

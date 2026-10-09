@@ -445,7 +445,8 @@ export function CommentComposer({
   const cell = "cellPos" in target;
   const prose = !target.clamped && isProseBlockType(target.blockType);
   const formatting = (prose || (cell && !target.clamped)) && !contentReadOnly && editor.isEditable;
-  const blockRef = blockRefLabel(target.blockType, target.blockIndex);
+  const blockRef = blockRefLabel(target.blockType, target.blockIndex,
+    editor.state.doc.nodeAt(target.contentStart - 1)?.textContent);
 
   const close = (): void => {
     setMode("toolbar");
