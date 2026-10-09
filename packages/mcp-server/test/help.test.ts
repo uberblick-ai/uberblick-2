@@ -88,7 +88,9 @@ it("renders each tool's actual full description and schemas, with an accepted ex
     const inputSchema = jsonSection(text, "Arguments");
     expect(inputSchema, tool.name).toEqual(tool.inputSchema);
     expect(jsonSection(text, "Output"), tool.name).toEqual(tool.outputSchema);
-    const details = toolHelpEntries[tool.name].details;
+    const entry = toolHelpEntries[tool.name];
+    expect(entry, `${tool.name} has no per-tool help entry`).toBeDefined();
+    const details = entry!.details;
     if (details !== undefined) {
       const constraints = text.split("## Constraints\n")[1]?.split("\n## ")[0];
       expect(constraints, `${tool.name} loses its expanded tool-specific contract`).toContain(details);
