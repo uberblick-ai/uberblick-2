@@ -25,7 +25,24 @@ async function insertSource(page: Page, name: "Code" | "Mermaid" | "Terminal dem
   const selector = name === "Code" ? ".ub-code > code" : name === "Mermaid" ? ".ub-mermaid > pre" : ".ub-terminal-source";
   const source = page.locator(selector).last();
   await source.click();
-  if (text !== "") await page.keyboard.insertText(text);
+  for (const [index, line] of text.split("\n").entries()) {
+    if (index > 0) {
+      await page.keyboard.press("Enter");
+      // WebKit's native range can lag the editor's newline transaction. Wait
+      // for the caret before sending the next fixture line to insertText.
+      const prefix = `${text.split("\n").slice(0, index).join("\n")}\n`;
+      await expect.poll(() => source.evaluate((element) => {
+        const selection = document.getSelection();
+        if (selection === null || !selection.isCollapsed || selection.focusNode === null ||
+          !element.contains(selection.focusNode)) return null;
+        const beforeCaret = document.createRange();
+        beforeCaret.selectNodeContents(element);
+        beforeCaret.setEnd(selection.focusNode, selection.focusOffset);
+        return beforeCaret.toString();
+      })).toBe(prefix);
+    }
+    if (line !== "") await page.keyboard.insertText(line);
+  }
   await expect.poll(() => source.textContent()).toBe(text);
 }
 
@@ -114,6 +131,177 @@ test("wide fenced panels share smaller monospace type and contain horizontal scr
 test("wide fenced panels stay contained at iPad width", { tag: "@webkit-touch" }, async ({ browser }) => {
   const context = trackContext(await browser.newContext(devices["iPad Pro 11"]));
   await exercisePanels(await context.newPage(), false);
+});
+
+async function expectSourceControl(control: Locator, source: Locator, floor: number): Promise<void> {
+  await expect(control).toBeVisible();
+  const button = await control.boundingBox();
+  const textTop = await source.evaluate((element) => {
+    const first = document.createTreeWalker(element, NodeFilter.SHOW_TEXT).nextNode();
+    if (first === null) throw new Error("e2e: missing source text");
+    const range = document.createRange();
+    range.setStart(first, 0);
+    range.setEnd(first, 1);
+    return range.getBoundingClientRect().top;
+  });
+  if (button === null) throw new Error("e2e: missing source-control geometry");
+  expect(button.width).toBeGreaterThanOrEqual(floor);
+  expect(button.height).toBeGreaterThanOrEqual(floor);
+  expect(button.y + button.height).toBeLessThanOrEqual(await source.evaluate((element) => element.getBoundingClientRect().top));
+  expect(button.y + button.height).toBeLessThanOrEqual(textTop);
+}
+
+async function expectPinned(control: Locator, scroller: Locator): Promise<void> {
+  await scroller.scrollIntoViewIfNeeded();
+  await scroller.evaluate((element) => { element.scrollLeft = 0; });
+  const before = await control.boundingBox();
+  await scroller.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+  expect(await scroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  expect(await control.boundingBox()).toEqual(before);
+}
+
+async function exerciseSourceTargets(page: Page, touch: boolean): Promise<void> {
+  await openDocument(page);
+  expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(touch);
+  const floor = touch ? 44 : 24;
+  for (const [name, selector] of [
+    ["Code", ".ub-code > code"],
+    ["Mermaid", ".ub-mermaid > pre"],
+    ["Terminal demo", ".ub-terminal-source"],
+  ] as const) {
+    await insertSource(page, name, LONG_LINE);
+    const source = page.locator(selector);
+    const copy = source.locator("..").locator(":scope > .ub-copy");
+    await expectSourceControl(copy, source, floor);
+    await expectPinned(copy, source);
+    if (name === "Code") {
+      const language = page.getByRole("button", { name: "Code language" });
+      const copyBox = await copy.boundingBox();
+      const languageBox = await language.boundingBox();
+      if (copyBox === null || languageBox === null) throw new Error("e2e: missing code language geometry");
+      expect(languageBox.x + languageBox.width).toBeLessThanOrEqual(copyBox.x);
+      const labelCenter = (control: Locator) => control.evaluate((element) => {
+        const range = document.createRange();
+        range.selectNodeContents(element.querySelector("span") ?? element);
+        const label = range.getBoundingClientRect();
+        return label.top + label.height / 2;
+      });
+      expect(Math.abs(await labelCenter(language) - await labelCenter(copy))).toBeLessThanOrEqual(1);
+    }
+  }
+
+  // Playback chrome stays outside the same scrolling screen as the frame.
+  await page.locator(".ub-editor .ProseMirror > p").first().click();
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  const toggle = page.locator(".ub-terminal-toggle");
+  await expect(toggle).toHaveText("Pause");
+  await expect.poll(() => page.locator(".ub-terminal-frame").textContent()).toContain(LONG_LINE);
+  if (touch) await toggle.tap();
+  else await toggle.click();
+  await expect(toggle).toHaveText("Play");
+  const frame = page.locator(".ub-terminal-frame");
+  await expectSourceControl(toggle, frame, floor);
+  const copy = page.locator(".ub-terminal > .ub-copy");
+  await expectSourceControl(copy, frame, floor);
+  for (const control of [toggle, copy]) await expectPinned(control, page.locator(".ub-terminal-screen"));
+  if (touch) await toggle.tap();
+  else {
+    await toggle.focus();
+    await page.keyboard.press("Enter");
+  }
+  await expect(toggle).toHaveText("Pause");
+  await expectContained(page);
+}
+
+test("source controls meet fine-pointer floors without covering source or scrolling with it", { tag: "@webkit" }, async ({ page }) => {
+  test.skip(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches), "fine-pointer proof");
+  await exerciseSourceTargets(page, false);
+});
+
+test("source controls meet iPad touch floors without covering source or scrolling with it", { tag: "@webkit-touch" }, async ({ browser }) => {
+  const context = trackContext(await browser.newContext(devices["iPad Pro 11"]));
+  await exerciseSourceTargets(await context.newPage(), true);
+});
+
+async function editorSelection(page: Page) {
+  return page.locator(".ub-editor .ProseMirror").evaluate((editor) => {
+    const selection = document.getSelection();
+    return {
+      focused: document.activeElement === editor,
+      anchor: selection?.anchorNode?.textContent,
+      anchorOffset: selection?.anchorOffset,
+      focus: selection?.focusNode?.textContent,
+      focusOffset: selection?.focusOffset,
+      text: selection?.toString(),
+    };
+  });
+}
+
+async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
+  await openDocument(page);
+  const sourceText = `${LONG_LINE}\nsecond line with trailing spaces    `;
+  for (const name of ["Code", "Mermaid", "Terminal demo"] as const) await insertSource(page, name, sourceText);
+  for (const path of ["clipboard", "selection"] as const) {
+    // Record the product's clipboard boundary; OS clipboard permissions are
+    // outside this proof. The fallback must use a focused, fully selected field.
+    await page.evaluate((mode) => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: mode === "clipboard" ? { writeText: async (text: string) => {
+          document.documentElement.setAttribute("data-copied-source", text);
+        } } : undefined,
+      });
+      document.execCommand = (command: string): boolean => {
+        const field = document.activeElement;
+        if (command !== "copy" || !(field instanceof HTMLTextAreaElement) ||
+          field.selectionStart !== 0 || field.selectionEnd !== field.value.length) return false;
+        document.documentElement.setAttribute("data-copied-source", field.value);
+        return true;
+      };
+    }, path);
+    for (const selector of [".ub-code > code", ".ub-mermaid > pre", ".ub-terminal-source"]) {
+      const source = page.locator(selector);
+      // Clicking a drawn terminal opens its editable transcript.
+      if (selector === ".ub-terminal-source" && !await source.isVisible()) await page.locator(".ub-terminal-screen").click();
+      await source.scrollIntoViewIfNeeded();
+      const copy = source.locator("..").locator(":scope > .ub-copy");
+      for (const collapsed of [true, false]) {
+        await page.locator(".ub-editor .ProseMirror").focus();
+        await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+        await source.evaluate((element, caretOnly) => {
+          const first = document.createTreeWalker(element, NodeFilter.SHOW_TEXT).nextNode();
+          if (first === null) throw new Error("e2e: missing source text");
+          const range = document.createRange();
+          range.setStart(first, 0);
+          range.setEnd(first, caretOnly ? 0 : 4);
+          const selection = document.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+        }, collapsed);
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+        const before = await editorSelection(page);
+        expect(before.focused).toBe(true);
+        expect(before.text).toBe(collapsed ? "" : sourceText.slice(0, 4));
+        await page.locator("html").evaluate((element) => element.removeAttribute("data-copied-source"));
+        if (touch) await copy.tap();
+        else await copy.click();
+        await expect(copy).toHaveText("copied");
+        await expect(page.locator("html")).toHaveAttribute("data-copied-source", sourceText);
+        await expect.poll(() => editorSelection(page)).toEqual(before);
+        await expect.poll(() => source.textContent()).toBe(sourceText);
+      }
+    }
+  }
+}
+
+test("source copy preserves desktop caret, selection and focus through both clipboard paths", { tag: "@webkit" }, async ({ page }) => {
+  test.skip(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches), "fine-pointer proof");
+  await exerciseSourceCopy(page, false);
+});
+
+test("source copy preserves iPad caret, selection and focus through both clipboard paths", { tag: "@webkit-touch" }, async ({ browser }) => {
+  const context = trackContext(await browser.newContext(devices["iPad Pro 11"]));
+  await exerciseSourceCopy(await context.newPage(), true);
 });
 
 test("code preserves an empty caret and trailing spaces, reveals typed line ends, and pins copy and language", { tag: "@webkit" }, async ({ page }, info) => {

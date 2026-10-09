@@ -223,7 +223,7 @@ function TagStrip({
         <button
           ref={trigger}
           type="button"
-          className="ub-tags ub-tag-picker-trigger group/tags flex min-w-0 flex-auto cursor-pointer flex-wrap items-center gap-[0.3rem] border-0 bg-transparent p-0 text-left [font:inherit] text-inherit focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+          className="ub-tags ub-tag-picker-trigger group/tags flex min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 flex-auto cursor-pointer flex-wrap items-center gap-[0.3rem] border-0 bg-transparent p-0 text-left [font:inherit] text-inherit focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
           aria-label="Edit tags"
           aria-expanded={open}
           aria-haspopup="listbox"
@@ -256,7 +256,7 @@ function TagStrip({
               <input
                 ref={search}
                 type="search"
-                className="ub-tag-search min-w-0 flex-auto border-0 bg-transparent p-0 text-inherit [font:inherit] placeholder:text-muted-foreground placeholder:opacity-100 focus-visible:outline-none"
+                className="ub-tag-search min-h-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:text-base min-w-0 flex-auto border-0 bg-transparent p-0 text-inherit [font:inherit] placeholder:text-muted-foreground placeholder:opacity-100 focus-visible:outline-none"
                 value={query}
                 placeholder="Search tags"
                 aria-label="Search tags"

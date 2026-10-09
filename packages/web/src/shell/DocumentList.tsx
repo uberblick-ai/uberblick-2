@@ -373,7 +373,7 @@ export function DocumentList({
                 >
                   <button
                     type="button"
-                    className={`ub-docs-sort flex w-full cursor-pointer items-center gap-[0.3rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 [font:inherit] text-inherit hover:bg-(--accent) hover:text-(--accent-foreground) ${option === "changed" ? "justify-end" : ""}`}
+                    className={`ub-docs-sort flex min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 w-full cursor-pointer items-center gap-[0.3rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 [font:inherit] text-inherit hover:bg-(--accent) hover:text-(--accent-foreground) ${option === "changed" ? "justify-end" : ""}`}
                     onClick={() =>
                       setSort((current) =>
                         current.order === option
@@ -430,7 +430,7 @@ export function DocumentList({
                   <th scope="row" className="ub-docs-title-cell">
                     <button
                       type="button"
-                      className="ub-docs-open"
+                      className="ub-docs-open min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11"
                       onClick={() => onSelect(entry.uuid)}
                       title={entry.uuid}
                     >
