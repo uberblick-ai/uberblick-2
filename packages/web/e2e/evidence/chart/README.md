@@ -21,7 +21,10 @@ The geometry probe resets on each canvas clear and measures painted text
 extents, so previous draws cannot satisfy a current-layout assertion.
 Daily labels are one month/day line in a single year; tied observations and
 empty rows do not introduce time labels. Intraday labels retain UTC and day
-context, and full tooltips stay unchanged. The desktop and explicit iPad touch
+context, and full tooltips stay unchanged. An omitted close pair leaves hourly
+labels compact for both millisecond and microsecond source timestamps. Daily
+endpoint glyphs stay inside 311–317 px canvases across responsive draws.
+The desktop and explicit iPad touch
 contexts run in both appearances, with paired Chromium and WebKit coverage.
 The suite also checks legend placement, opposite-side unit ticks, the editor's
 font, same-x tooltips for sparse series and a visible single-x point.

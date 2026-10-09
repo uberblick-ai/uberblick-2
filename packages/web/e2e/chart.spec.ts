@@ -507,6 +507,49 @@ test("daily observation labels fit at desktop and iPad widths in both appearance
   }
 });
 
+test("crowded daily endpoint labels stay inside the canvas after resizing", { tag: "@webkit" }, async ({ browser }, info) => {
+  test.skip(info.project.name === "webkit-iphone", "Explicit canvas widths own this desktop resize proof.");
+  const session = writer();
+  const uuid = await chartDoc(session, "Daily endpoint padding", {
+    ...MAPPING, y: [{ field: "latency", label: "Latency", unit: "ms" }],
+  });
+  const observations = Array.from({ length: 21 }, (_, index) => ({
+    value: Date.UTC(2026, 6, index + 1), label: `Jul ${index + 1}`,
+  }));
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA,
+    replaceRecords: observations.map((observation, index) => ({ id: `day-${index}`, value: {
+      day: new Date(observation.value).toISOString().slice(0, 10), latency: 80 + index * 5,
+    } })),
+  }] });
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: (loading) => installProbe(loading, uuid),
+    contextOptions: { viewport: { width: 1280, height: 800 }, locale: "en-US" },
+  });
+  await expectReady(page);
+  await page.evaluate(() => document.fonts.ready);
+  const canvas = page.locator(".ub-chart canvas");
+  // At 312px the old build/fit reselection newly retained Jul 21 without
+  // fitting its endpoint padding. Nearby widths also exercise responsive draws.
+  for (const width of [312, 317, 311]) {
+    await page.locator(".ub-chart-screen").evaluate((element, nextWidth) => {
+      const probe = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe;
+      probe.ink = []; probe.points = [];
+      (element as HTMLElement).style.width = `${nextWidth}px`;
+    }, width);
+    await expect.poll(() => canvas.evaluate((element) => ({
+      css: element.getBoundingClientRect().width,
+      bitmap: (element as HTMLCanvasElement).width / devicePixelRatio,
+    }))).toEqual({ css: width, bitmap: width });
+    await expect.poll(() => page.evaluate(() =>
+      (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.points.length)).toBe(observations.length);
+    const labels = await expectObservationGeometry(page, observations, /^Jul \d+$/);
+    for (const label of labels) {
+      expect(label.left, `${label.text} left edge at ${width}px`).toBeGreaterThanOrEqual(0);
+      expect(label.right, `${label.text} right edge at ${width}px`).toBeLessThanOrEqual(width);
+    }
+  }
+});
+
 test("number labels keep irregular continuous positions and ignore empty rows under both missing modes", async ({ browser }) => {
   const session = writer();
   const observations = [1, 2, 7, 7.5, 40].map((value) => ({ value, label: String(value) }));
@@ -534,6 +577,41 @@ test("number labels keep irregular continuous positions and ignore empty rows un
     const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
     expect(ink.filter((entry) => entry.text === "Observation")).toHaveLength(1);
     expect(ink.some((entry) => entry.text === "3")).toBe(false);
+  }
+});
+
+test("omitted close intraday pairs leave retained hourly labels compact", async ({ browser }) => {
+  const session = writer();
+  for (const fraction of ["131", "131676"]) {
+    const uuid = await chartDoc(session, `Hourly observations ${fraction}`, {
+      ...MAPPING, y: [{ field: "latency", label: "Latency", unit: "ms" }],
+    });
+    const records = [
+      ...Array.from({ length: 24 }, (_, hour) => ({
+        day: `2026-10-07T${String(hour).padStart(2, "0")}:00:00.${fraction}Z`, label: `${String(hour).padStart(2, "0")}:00`,
+      })),
+      { day: `2026-10-07T13:00:00.331${fraction.length === 6 ? "676" : ""}Z`, label: "13:00" },
+    ].sort((a, b) => a.day.localeCompare(b.day));
+    await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA,
+      replaceRecords: records.map((record, index) => ({ id: `event-${index}`, value: { day: record.day, latency: 80 + index * 5 } })),
+    }] });
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      beforeNavigate: (loading) => installProbe(loading, uuid),
+      contextOptions: { viewport: { width: 1280, height: 800 }, locale: "en-US" },
+    });
+    await expectReady(page);
+    await page.evaluate(() => document.fonts.ready);
+    await page.locator(".ub-chart-screen").evaluate(element => {
+      const probe = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe;
+      probe.ink = []; probe.points = [];
+      (element as HTMLElement).style.width = "900px";
+    });
+    await expect.poll(() => page.locator(".ub-chart canvas").evaluate(element => element.getBoundingClientRect().width)).toBe(900);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.points.length)).toBe(records.length);
+    const labels = await expectObservationGeometry(page, records.map(record => ({ value: Date.parse(record.day), label: record.label })), /^\d{2}:\d{2}$/);
+    expect(labels).toHaveLength(24);
+    const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+    expect(ink.some(entry => /^\d{2}:\d{2}:\d{2}/.test(entry.text))).toBe(false);
   }
 });
 

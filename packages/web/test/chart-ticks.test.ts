@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { observationTicks } from "../src/editor/chart-ticks.js";
+import { chartDate } from "../src/editor/chart-data.js";
+import { observationEndpoints, observationTicks } from "../src/editor/chart-ticks.js";
 
 const epoch = (date: string): number => Date.parse(date);
 const measure = (text: string): number => text.length * 6;
@@ -32,24 +33,51 @@ describe("observation ticks", () => {
     expect(dates(["2026-12-31T22:00:00Z", "2026-12-31T23:00:00Z", "2027-01-01T00:00:00Z"]).map(tick => tick.label))
       .toEqual([["22:00", "Dec 31", "2026", "UTC"], ["23:00"], ["00:00", "Jan 1", "2027"]]);
     expect(dates(["2026-10-07T09:00:01Z", "2026-10-07T09:00:02Z"]).map(tick => tick.label[0]))
-      .toEqual(["09:00:01", "09:00:02"]);
+      .toEqual(["09:00", "09:00:02"]);
     expect(dates(["2026-10-07T09:00:00.100Z", "2026-10-07T09:00:00.200Z"]).map(tick => tick.label[0]))
-      .toEqual(["09:00:00.100", "09:00:00.200"]);
+      .toEqual(["09:00", "09:00:00.2"]);
   });
 
-  it("distinguishes sub-millisecond observations without truncation, also before the epoch", () => {
-    for (const xs of [[0.1, 0.2], [-0.2, -0.1], [1_000.1, 1_000.2]]) {
+  it("distinguishes retained fractional observations without binary tails or second rollover", () => {
+    for (const { xs, last } of [
+      { xs: [0.1, 0.2], last: "00:00:00.0002" },
+      { xs: [-0.6, -0.2], last: "23:59:59.9998" },
+      { xs: [1_000.1, 1_000.2], last: "00:00:01.0002" },
+    ]) {
       const result = observationTicks(xs, "date", xs[0] as number, xs[1] as number, 800, measure, "en-US");
       expect(result).toHaveLength(2);
       expect(new Set(result.map(tick => tick.label[0])).size).toBe(2);
-      expect(result[0]?.label[0]).toMatch(/ms$/);
+      expect(result[1]?.label[0]).toBe(last);
       expect(result[0]?.label).toContain(xs[0] as number < 0 ? "Dec 31" : "Jan 1");
     }
-    const closeNegative = observationTicks([-0.10000000000000002, -0.1], "date", -0.10000000000000002, -0.1, 800, measure, "en-US");
-    expect(closeNegative).toHaveLength(2);
-    expect(closeNegative.map(tick => tick.label[1])).toEqual(["-0.10000000000000002 epoch ms", "-0.1 epoch ms"]);
-    expect(observationTicks([-Number.MIN_VALUE, Number.MIN_VALUE], "date", -Number.MIN_VALUE, Number.MIN_VALUE, 800, measure, "en-US").map(tick => tick.label))
-      .toEqual([["Dec 31", "1969"], ["Jan 1", "1970"]]);
+    const xs = ["2026-10-07T04:00:00.131676Z", "2026-10-07T04:00:00.131677Z"].map(value => chartDate(value) as number);
+    expect(observationTicks(xs, "date", xs[0] as number, xs[1] as number, 800, measure, "en-US").map(tick => tick.label[0]))
+      .toEqual(["04:00", "04:00:00.131677"]);
+    expect(observationTicks(xs, "date", xs[0] as number, xs[1] as number, 800, measure, "de-DE")[1]?.label[0])
+      .toBe("04:00:00,131677");
+  });
+
+  it("keeps hourly labels compact when an omitted close pair needs finer precision", () => {
+    for (const fraction of ["131", "131676"]) {
+      for (const closeSecond of ["00.331", "20.131"]) {
+        const xs = [
+          ...Array.from({ length: 24 }, (_, hour) => chartDate(`2026-10-07T${String(hour).padStart(2, "0")}:00:00.${fraction}Z`) as number),
+          chartDate(`2026-10-07T13:00:${closeSecond}Z`) as number,
+        ].sort((a, b) => a - b);
+        const result = observationTicks(xs, "date", xs[0] as number, xs.at(-1) as number, 900, measure, "en-US");
+        expect(result).toHaveLength(24);
+        expect(result.map(tick => tick.label[0])).toEqual(Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}:00`));
+      }
+    }
+  });
+
+  it("reserves endpoints with full-data context and enough width for final fractional labels", () => {
+    const xs = ["2026-12-31T22:00:00Z", "2026-12-31T23:00:00Z", "2027-01-01T00:00:00.100Z", "2027-01-01T00:00:00.200Z"].map(epoch);
+    const endpoints = observationEndpoints(xs, "date", "en-US");
+    expect(endpoints.map(tick => tick.value)).toEqual([xs[0], xs.at(-1)]);
+    expect(endpoints.map(tick => tick.label)).toEqual([["22:00", "Dec 31", "2026", "UTC"], ["00:00:00.2", "Jan 1", "2027", "UTC"]]);
+    const selected = observationTicks(xs, "date", xs[0] as number, xs.at(-1) as number, 100_000, measure, "en-US");
+    expect(Math.max(...(endpoints[1]?.label ?? []).map(measure))).toBeGreaterThanOrEqual(Math.max(...(selected.at(-1)?.label ?? []).map(measure)));
   });
 
   it("keeps irregular numeric observations and enough precision for adjacent doubles", () => {

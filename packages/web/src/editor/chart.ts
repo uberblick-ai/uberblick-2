@@ -23,7 +23,7 @@ import { chartChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js
 import { prepareTable, tableDiagnosticsText } from "./table-data.js";
 import { dataTableView } from "./table-view.js";
 import { bindDocView } from "./view-bindings.js";
-import { observationTicks } from "./chart-ticks.js";
+import { observationEndpoints, observationTicks } from "./chart-ticks.js";
 import { chartAxes, chartPointRadius, formatChartTick } from "./chart-presentation.js";
 
 // Both axes are linear. Epoch milliseconds plus Intl date labels require no
@@ -161,6 +161,11 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         const xValues = [...new Set(result.series.flatMap(series =>
           series.points.filter(point => point.y !== null).map(point => point.x)))].sort((a, b) => a - b);
         const xLabels = new Map<number, string[]>();
+        const setTicks = (scale: Scale, ticks: ReturnType<typeof observationTicks>): void => {
+          xLabels.clear();
+          for (const tick of ticks) xLabels.set(tick.value, tick.label);
+          scale.ticks = ticks;
+        };
         const selectTicks = (scale: Scale): void => {
           const ctx = scale.chart.ctx;
           ctx.save();
@@ -168,9 +173,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           const ticks = observationTicks(xValues, config.x.type, scale.min, scale.max, scale.width,
             label => ctx.measureText(label).width);
           ctx.restore();
-          xLabels.clear();
-          for (const tick of ticks) xLabels.set(tick.value, tick.label);
-          scale.ticks = ticks;
+          setTicks(scale, ticks);
         };
         // Equal explicit limits leave a zero range in Chart.js. Only this
         // degenerate case gets a small range, placing its point in the middle.
@@ -207,9 +210,9 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
                 type: "linear",
                 min, max,
                 title: { display: config.x.type === "number", text: config.x.label || config.x.field, color: colors.color, font },
-                afterBuildTicks: selectTicks,
-                // Chart.js fitting reserves end-label and value-axis space.
-                // Reselect against that fitted width before drawing labels.
+                // Reserve both endpoints even if crowding will omit one, so
+                // the fitted selection cannot introduce an unpadded end label.
+                afterBuildTicks: scale => setTicks(scale, observationEndpoints(xValues, config.x.type)),
                 afterFit: selectTicks,
                 ticks: {
                   color: colors.color, font,
