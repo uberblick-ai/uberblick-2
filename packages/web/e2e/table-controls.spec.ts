@@ -247,18 +247,20 @@ async function capture(page: Page, info: TestInfo, label: string, colorScheme: "
   await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH, `${label}-${colorScheme}.png`) });
 }
 
-/**
- * Native Tab from the insertion shortcut must reach the named button. Like
- * Safari, WebKit on macOS tabs only to text fields; Option+Tab reaches buttons.
- */
+/** Like Safari, WebKit on macOS tabs only to text fields; Option+Tab reaches buttons. */
+function nextControlKey(page: Page): string {
+  const webkitMac = process.platform === "darwin" && page.context().browser()?.browserType().name() === "webkit";
+  return webkitMac ? "Alt+Tab" : "Tab";
+}
+
+/** Native Tab from the insertion shortcut must reach the named button. */
 async function tabTo(page: Page, name: string): Promise<void> {
   const target = button(page, name);
-  const webkitMac = process.platform === "darwin" && page.context().browser()?.browserType().name() === "webkit";
   for (let index = 0; index < 40; index += 1) {
     const focusedName = await page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.tagName);
     expect(await target.count(), `Tab reached ${focusedName ?? "no element"} and lost the table controls`).toBe(1);
     if (await target.evaluate((element) => element === document.activeElement)) return;
-    await page.keyboard.press(webkitMac ? "Alt+Tab" : "Tab");
+    await page.keyboard.press(nextControlKey(page));
   }
   await expect(target).toBeFocused();
 }
@@ -498,7 +500,7 @@ test("keyboard reaches insertion buttons from a table caret and each button inse
       await expect.poll(() => control.evaluate((element) => getComputedStyle(element).opacity)).toBe("1");
       const focusedRow = /^(?:Insert row after |Row )(\d+)/.exec(name)?.[1];
       await revealedRows(table, focusedRow === undefined ? [2] : [...new Set([2, Number(focusedRow)])].sort());
-      if (index < order.length - 1) await page.keyboard.press("Tab");
+      if (index < order.length - 1) await page.keyboard.press(nextControlKey(page));
     }
     await activate(table.locator("td").first(), info);
     await page.mouse.move(0, 0);
