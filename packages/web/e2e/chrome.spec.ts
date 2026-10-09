@@ -986,6 +986,10 @@ test("document actions stay reachable, close with the route, and archive into Re
 
   await uuid.click();
   await expect(copyNotice(page, "URL copied to clipboard")).toBeVisible();
+  // Shared notices can cover header actions in this narrow viewport. Use the
+  // native dismiss control before continuing the independent lifecycle proof.
+  await copyNotice(page, "URL copied to clipboard").getByRole("button", { name: "Dismiss notification" }).click();
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
 
   await trigger.click();
   await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
