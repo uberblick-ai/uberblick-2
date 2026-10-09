@@ -1,5 +1,6 @@
 /** Composed TableKit surface: direct input, contained overflow and caret reveal. */
 import { expect, test } from "@playwright/test";
+import type { Locator } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { HocuspocusProvider } from "@hocuspocus/provider";
@@ -10,7 +11,7 @@ import * as Y from "yjs";
 import { createDoc, docTitle, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
 
-const { harness, ws } = setupHarness();
+const { harness, openApp, ws } = setupHarness();
 
 test("TableKit cells stay drawn and wide tables contain horizontal scrolling", { tag: "@webkit" }, async ({ page }, info) => {
   await page.goto(harness().appUrl);
@@ -81,6 +82,75 @@ test("TableKit cells stay drawn and wide tables contain horizontal scrolling", {
     }
   }
 });
+
+for (const input of [
+  { name: "desktop", viewport: { width: 1280, height: 800 }, hasTouch: false },
+  { name: "iPad-sized touch", viewport: { width: 1024, height: 1366 }, hasTouch: true },
+] as const) {
+  test(`nested table edits move the chrome rev and match a fresh reading — ${input.name}`, async ({ browser }) => {
+    const page = await openApp(browser, "/", { contextOptions: { viewport: input.viewport, hasTouch: input.hasTouch } });
+    if (input.viewport.width < 1280) {
+      await page.getByRole("button", { name: "Show document list", exact: true }).click();
+    }
+    await createDoc(page, docTitle("Table revision"));
+    await placeCaret(page);
+    await page.keyboard.type("/table");
+    await page.keyboard.press("Enter");
+    const table = page.locator(".ub-table");
+    const first = table.locator("th").first();
+    const revision = page.locator(".ub-doc-rev");
+    await expect(table.locator("th")).toHaveCount(3);
+    await expect(revision).toHaveText(/rev [0-9a-f]{8}$/);
+    let before = await revision.innerText();
+
+    const activate = async (control: Locator): Promise<void> => {
+      if (input.hasTouch) await control.tap();
+      else await control.click();
+    };
+    const checkFreshRev = async (): Promise<void> => {
+      await expect(revision).not.toHaveText(before);
+      await expect(page.locator(".ub-status-word--saved")).toHaveText("saved here");
+      const after = await revision.innerText();
+      // Reload starts a new observer against the saved document; it must agree
+      // with the revision maintained incrementally while the editor was open.
+      await page.reload();
+      await expect(table).toBeVisible();
+      await expect(revision).toHaveText(after);
+      before = after;
+    };
+
+    await activate(first);
+    await page.keyboard.insertText("Alpha");
+    await expect(first).toHaveText("Alpha");
+    await checkFreshRev();
+    await expect(first).toHaveText("Alpha");
+
+    await activate(first);
+    // Native range setup follows the cell-formatting proofs: selectionchange
+    // imports the range into the real editor and its stock formatting toolbar.
+    await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+    await first.locator("p").evaluate((element, pointerType) => {
+      element.dispatchEvent(new PointerEvent("pointerdown", { pointerType, bubbles: true, pointerId: 1 }));
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }, input.hasTouch ? "touch" : "mouse");
+    const formatting = page.getByRole("toolbar", { name: "Text formatting and comment", exact: true });
+    await expect(formatting).toBeVisible();
+    await activate(formatting.getByRole("button", { name: "Bold", exact: true }));
+    await expect(first.locator("strong")).toHaveText("Alpha");
+    await checkFreshRev();
+    await expect(first.locator("strong")).toHaveText("Alpha");
+
+    await activate(first);
+    await activate(page.getByRole("button", { name: "Insert column after 1", exact: true }));
+    await expect(table.locator("th")).toHaveCount(4);
+    await checkFreshRev();
+    await expect(table.locator("th")).toHaveCount(4);
+  });
+}
 
 test("a document link typed in a table cell opens its target and Back restores the table", async ({ page }, info) => {
   await page.goto(harness().appUrl);
