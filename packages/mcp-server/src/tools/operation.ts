@@ -44,14 +44,9 @@ const DOCUMENT_WRITES = {
   insert_block: { content: true, contentDurability: true },
   delete_block: { content: true, contentDurability: true },
   link_range: { content: true, contentDurability: false },
-  set_title: { content: true, contentDurability: false },
-  set_tldr: { content: true, contentDurability: false },
   update_data: { content: true, contentDurability: false },
-  set_description: { content: false, contentDurability: false },
-  set_links: { content: false, contentDurability: false },
-  set_tags: { content: false, contentDurability: false },
+  set_metadata: { content: false, contentDurability: false },
   set_status: { content: false, contentDurability: false },
-  set_changelog_suggestion: { content: false, contentDurability: false },
   annotate: { content: false, contentDurability: false },
 } as const;
 

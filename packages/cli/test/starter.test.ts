@@ -261,7 +261,7 @@ it("leaves a freshly seeded document nothing to backfill", async () => {
   );
 
   await withTools(async (call) => {
-    const result = await call("set_tags", {
+    const result = await call("set_metadata", {
       uuid: PINS[0]!,
       tags: ["mcp"],
     });

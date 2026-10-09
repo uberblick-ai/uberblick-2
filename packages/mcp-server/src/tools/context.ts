@@ -40,17 +40,17 @@ import type { DecisionAnswer, blockInputSchema, inlineArg } from "./schemas.js";
 
 /** The one-line prompt a mutating tool carries when a document has none. */
 const DESCRIPTION_NUDGE =
-  "This document has no description: call set_description with one or two sentences saying what it is for, so " +
+  "This document has no description: call set_metadata with `description`: one or two sentences saying what it is for, so " +
   "list_docs and search can answer for it without anyone opening it.";
 
 /** The one-line prompt a mutating tool carries when a document has no tags. */
 const TAG_NUDGE =
-  "This document has no tag assignments: call list_tags for the active workspace vocabulary, then call set_tags " +
-  "to assign one or more tags.";
+  "This document has no tag assignments: call list_tags for the active workspace vocabulary, then call set_metadata " +
+  "with `tags` to assign one or more tags.";
 
 /** The stronger prompt returned when a changed document has no summary yet. */
 const TLDR_MISSING_NUDGE =
-  "This content change left the document without a TL;DR: call set_tldr with one or two sentences of plain " +
+  "This content change left the document without a TL;DR: call set_metadata with `tldr`: one or two sentences of plain " +
   "English for a person opening it.";
 
 /**

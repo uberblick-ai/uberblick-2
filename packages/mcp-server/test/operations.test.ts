@@ -20,8 +20,7 @@ import { createDocOperation } from "../src/tools/create-doc.js";
 import { editBlockOperation } from "../src/tools/edit-block.js";
 import { getDocOperation } from "../src/tools/get-doc.js";
 import type { OperationRequest } from "../src/tools/operation.js";
-import { setDescriptionOperation } from "../src/tools/set-description.js";
-import { setTitleOperation } from "../src/tools/set-title.js";
+import { setMetadataOperation } from "../src/tools/set-metadata.js";
 import { syncStatusOperation } from "../src/tools/sync-status.js";
 
 const workspaceId = "9c1f0b4a-6d27-4e83-9b5a-1f2e3d4c5b6a";
@@ -99,7 +98,7 @@ it("exposes every tool operation and settles foreign durable updates before dire
   const writer = local();
   const reader = local(writer.config.databasePath);
   const created = await document(writer.context);
-  const renamed = await setTitleOperation(writer.context, { uuid: created.uuid, title: "Written elsewhere" }, request);
+  const renamed = await setMetadataOperation(writer.context, { uuid: created.uuid, title: "Written elsewhere" }, request);
   expect(renamed).toMatchObject({ applied: true, synced: false, hub: { status: "disabled" } });
   expect(await getDocOperation(reader.context, { uuid: created.uuid }, request)).toMatchObject({ title: "Written elsewhere" });
 });
@@ -116,15 +115,15 @@ it("keeps settle, briefing, archive and hydration refusals in that order for dir
   const args = { uuid: archived, title: "Refused title" };
   const settleFailure = new Error("settle refuses before briefing");
   vi.spyOn(rig.replicas, "settle").mockRejectedValueOnce(settleFailure);
-  await expect(setTitleOperation(rig.context, args, request)).rejects.toBe(settleFailure);
-  expect(await refused("set_title", setTitleOperation(rig.context, args, request))).toMatchObject({
+  await expect(setMetadataOperation(rig.context, args, request)).rejects.toBe(settleFailure);
+  expect(await refused("set_metadata", setMetadataOperation(rig.context, args, request))).toMatchObject({
     isError: true, payload: { error: "guidance_required", applied: false, partial: false, synced: false },
   });
   const pinned = await pinDocOperation(rig.context, { uuid: archived, group: "Archived" }, request);
   expect(pinned).toMatchObject({ applied: true, groups: [{ docs: [{ uuid: archived, status: "archived" }] }] });
   expect(await unpinDocOperation(rig.context, { uuid: randomUUID() }, request)).toMatchObject({ unpinned: false, applied: true });
   await getDocOperation(rig.context, { uuid: guide.uuid }, request);
-  expect(await refused("set_title", setTitleOperation(rig.context, args, request))).toMatchObject({
+  expect(await refused("set_metadata", setMetadataOperation(rig.context, args, request))).toMatchObject({
     isError: true, payload: { error: "doc_archived", uuid: archived },
   });
 });
@@ -142,8 +141,8 @@ it("retains decided-content locks without locking editable metadata", async () =
     ["insert_block", () => operations.insert_block(rig.context, { uuid: decided.uuid, type: "paragraph", text: "Changed" }, request)],
     ["delete_block", () => operations.delete_block(rig.context, { uuid: decided.uuid, block_id: block.id }, request)],
     ["link_range", () => operations.link_range(rig.context, { uuid: decided.uuid, block_id: block.id, start: 0, end: 1, doc_id: decided.uuid, rev: block.rev }, request)],
-    ["set_title", () => operations.set_title(rig.context, { uuid: decided.uuid, title: "Changed" }, request)],
-    ["set_tldr", () => operations.set_tldr(rig.context, { uuid: decided.uuid, tldr: "Changed" }, request)],
+    ["set_metadata", () => operations.set_metadata(rig.context, { uuid: decided.uuid, title: "Changed" }, request)],
+    ["set_metadata", () => operations.set_metadata(rig.context, { uuid: decided.uuid, tldr: "Changed" }, request)],
     ["update_data", () => operations.update_data(rig.context, { uuid: decided.uuid, operations: [] }, request)],
   ] as const;
   const size = rig.store.logSize();
@@ -153,7 +152,7 @@ it("retains decided-content locks without locking editable metadata", async () =
     });
     expect(rig.store.logSize(), tool).toBe(size);
   }
-  expect(await setDescriptionOperation(rig.context, { uuid: decided.uuid, description: "Editable metadata" }, request)).toMatchObject({ applied: true });
+  expect(await setMetadataOperation(rig.context, { uuid: decided.uuid, description: "Editable metadata" }, request)).toMatchObject({ applied: true });
   expect(getMeta(rig.replicas.replica(decided.uuid).doc).description).toBe("Editable metadata");
 });
 
@@ -162,7 +161,7 @@ it("assembles ordinary and content durability on the operation path", async () =
   const created = await document(rig.context);
   const block = created.blocks[0];
   if (block === undefined) throw new Error("Missing fixture block");
-  const metadata = await setTitleOperation(rig.context, { uuid: created.uuid, title: "Renamed" }, request);
+  const metadata = await setMetadataOperation(rig.context, { uuid: created.uuid, title: "Renamed" }, request);
   expect(metadata).toMatchObject({ applied: true, synced: false, hub: { status: "disabled" } });
   expect(metadata).not.toHaveProperty("tldrHint");
   const content = await editBlockOperation(rig.context, {
@@ -175,7 +174,7 @@ it("maps a direct failed append neutrally while sync_status still answers diagno
   const rig = local();
   const created = await document(rig.context);
   rig.store.failRoom = room => room.endsWith(`/${created.uuid}`);
-  expect(await refused("set_title", setTitleOperation(rig.context, { uuid: created.uuid, title: "Not durable" }, request))).toMatchObject({
+  expect(await refused("set_metadata", setMetadataOperation(rig.context, { uuid: created.uuid, title: "Not durable" }, request))).toMatchObject({
     isError: true, payload: { error: "persistence_failed", applied: false, partial: false, synced: false, room: `${workspaceId}/${created.uuid}` },
   });
   await expect(getDocOperation(rig.context, { uuid: created.uuid }, request)).rejects.toBeInstanceOf(PersistenceError);

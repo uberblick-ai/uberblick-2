@@ -129,7 +129,7 @@ describe("decision topics through directory stubs", () => {
     expect((await rig.ok("list_docs", { kind: "decision" })).docs).toEqual([]);
     expect((await rig.ok("get_doc", { uuid: requirement.uuid })).decisions).toEqual([]);
     expect((await rig.ok("search", { query: "constraints" })).hits).toEqual([]);
-    expect((await rig.call("set_title", { uuid: b.uuid, title: "Refused" })).payload.error).toBe("doc_archived");
+    expect((await rig.call("set_metadata", { uuid: b.uuid, title: "Refused" })).payload.error).toBe("doc_archived");
     expect((await rig.ok("get_doc", { uuid: b.uuid })).resolution).toMatchObject({ inForce: { uuid: b.uuid }, archived: true });
     const restored = await rig.ok("restore_doc", { uuid: b.uuid });
     expect(restored.records.sort()).toEqual([a.uuid, b.uuid].sort());
@@ -189,7 +189,7 @@ describe("decision topics through directory stubs", () => {
       getMetaMap(doc).set("decidedBy", "A person");
       getMetaMap(doc).set("decidedAt", "2026-10-04T12:00:00Z");
     });
-    await rig.ok("set_tldr", { uuid: record.uuid, tldr: "A concise answer." });
+    await rig.ok("set_metadata", { uuid: record.uuid, tldr: "A concise answer." });
     const opened = await rig.ok("annotate", { uuid: record.uuid, block_id: record.blocks[1].id, start: 0, end: 2, text: "Question" });
     await rig.ok("annotate", { uuid: record.uuid, thread_id: opened.annotation.id, text: "Reply" });
     const directory = rig.instance.replicas.directory().doc;

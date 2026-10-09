@@ -53,6 +53,7 @@ it("lists every concept and registered tool once, with the same Markdown through
     const help = await rig.ok("get_help", { topic: id });
     expect(help).toMatchObject({ topic: id, title, description, uri, text: expect.any(String) });
     expect(help.text.length).toBeGreaterThan(0);
+    expect(help.text, id).not.toMatch(/set_(title|description|tldr|tags|links|changelog_suggestion)\b/);
     expect((await rig.client.readResource({ uri })).contents).toEqual([
       { uri, mimeType: "text/markdown", text: help.text },
     ]);
@@ -102,7 +103,7 @@ it("renders each tool's actual full description and schemas, with an accepted ex
     expect(index, tool.name).toContain(`uberblick://help/${tool.name}`);
   }
   for (const [tool, topic] of [
-    ["set_tags", "workspaces"], ["set_title", "workspaces"], ["get_sidebar", "workspaces"],
+    ["set_metadata", "workspaces"], ["get_sidebar", "workspaces"],
     ["edit_block", "lifecycle"], ["archive_doc", "lifecycle"], ["set_status", "lifecycle"],
     ["get_data", "data"], ["update_data", "data"], ["export_markdown", "markdown"],
   ]) {
@@ -183,7 +184,7 @@ it("keeps every topic workspace-independent and reads help without settling or o
   });
   const tag = createTagCatalogEntry(workspace.instance.replicas.settings().doc, "guidance");
   setTags(workspace.instance.replicas.replica(doc.uuid).doc, [tag.id]);
-  expect((await workspace.call("set_title", { uuid: doc.uuid, title: "Blocked" })).payload.error)
+  expect((await workspace.call("set_metadata", { uuid: doc.uuid, title: "Blocked" })).payload.error)
     .toBe("guidance_required");
   const before = workspace.instance.store.logSize();
   const catalog = await empty.ok("get_help");
@@ -219,7 +220,7 @@ it("keeps help readable after a persistence failure quarantines ordinary replica
   const catalog = await rig.ok("get_help");
   const doc = await rig.ok("create_doc", { title: "Persistence fixture", description: "A refused write." });
   store.failing = true;
-  expect((await rig.call("set_title", { uuid: doc.uuid, title: "Refused" })).payload.error)
+  expect((await rig.call("set_metadata", { uuid: doc.uuid, title: "Refused" })).payload.error)
     .toBe("persistence_failed");
   expect((await rig.call("get_doc", { uuid: doc.uuid })).payload.error).toBe("persistence_failed");
   expect(await rig.ok("get_help")).toEqual(catalog);

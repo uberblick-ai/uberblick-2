@@ -2,13 +2,13 @@
  * Renaming a document.
  *
  * `meta.title` in the document is authoritative and the directory stub is a
- * cache of it — so what `set_title` owes a caller is that both are right when
+ * cache of it — so what `set_metadata` owes a caller is that both are right when
  * the call returns, that discovery answers from the stub rather than by opening
  * a room, and that two replicas renaming at once end up holding one title
  * rather than two.
  *
  * `create_doc` holds the same rule, so the MCP surface cannot create the state
- * `set_title` refuses to leave a document in.
+ * `set_metadata` refuses to leave a document in.
  */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -56,7 +56,7 @@ afterAll(() => {
   removeTempDirs();
 });
 
-describe("set_title", () => {
+describe("set_metadata", () => {
   it("renames the document and the stub in one call, and reports durability", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
@@ -64,7 +64,7 @@ describe("set_title", () => {
       description: "The starter document nobody got round to naming.",
     });
 
-    const renamed = await rig.ok("set_title", {
+    const renamed = await rig.ok("set_metadata", {
       uuid: doc.uuid,
       title: "How to use it",
     });
@@ -100,7 +100,7 @@ describe("set_title", () => {
     });
 
     for (const title of ["", "   "]) {
-      const refused = await rig.call("set_title", { uuid: doc.uuid, title });
+      const refused = await rig.call("set_metadata", { uuid: doc.uuid, title });
       expect(refused.isError).toBe(true);
     }
 
@@ -139,8 +139,8 @@ describe("set_title", () => {
 
     // Neither has seen the other's rename when it makes its own.
     await Promise.all([
-      first.ok("set_title", { uuid: doc.uuid, title: "Named by the first" }),
-      second.ok("set_title", { uuid: doc.uuid, title: "Named by the second" }),
+      first.ok("set_metadata", { uuid: doc.uuid, title: "Named by the first" }),
+      second.ok("set_metadata", { uuid: doc.uuid, title: "Named by the second" }),
     ]);
 
     const titleOf = (rig: Rig): string =>

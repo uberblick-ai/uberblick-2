@@ -138,7 +138,7 @@ describe("directory timestamps", () => {
     const doc = await rig.ok("create_doc", { title: "Before", description: "A test document." });
 
     vi.setSystemTime(T0 + 1_000);
-    await rig.ok("set_tags", { uuid: doc.uuid, tags: ["mcp"] });
+    await rig.ok("set_metadata", { uuid: doc.uuid, tags: ["mcp"] });
     expect(stub(rig, doc.uuid).updatedAt).toBe(T0 + 1_000);
 
     // The web editor's path: the title lives in the document, and the stub

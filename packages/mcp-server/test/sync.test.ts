@@ -161,7 +161,7 @@ describe("hub sync", () => {
       uuid: directUuid,
       title: "Direct retry",
     });
-    const written = await rig.ok("set_title", {
+    const written = await rig.ok("set_metadata", {
       uuid: directUuid,
       title: "Acknowledged after retry",
     });
@@ -495,7 +495,7 @@ describe("hub sync", () => {
     const other = await peer(running.port, `${WORKSPACE}/${created.uuid}`);
     await other.synced;
 
-    await rig.ok("set_tldr", {
+    await rig.ok("set_metadata", {
       uuid: created.uuid,
       tldr: "Written through MCP.",
     });

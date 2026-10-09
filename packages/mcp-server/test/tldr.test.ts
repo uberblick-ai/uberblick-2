@@ -23,7 +23,7 @@ afterAll(() => {
   removeTempDirs();
 });
 
-describe("set_tldr", () => {
+describe("set_metadata", () => {
   it("sets, trims and explicitly clears the summary without touching description", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
@@ -33,7 +33,7 @@ describe("set_tldr", () => {
 
     expect((await rig.ok("get_doc", { uuid: doc.uuid })).tldr).toBeNull();
 
-    const written = await rig.ok("set_tldr", {
+    const written = await rig.ok("set_metadata", {
       uuid: doc.uuid,
       tldr: "  A quick summary for a person.  ",
     });
@@ -49,7 +49,7 @@ describe("set_tldr", () => {
       tldr: "A quick summary for a person.",
     });
 
-    await rig.ok("set_description", {
+    await rig.ok("set_metadata", {
       uuid: doc.uuid,
       description: "Rewritten agent-facing copy.",
     });
@@ -58,7 +58,7 @@ describe("set_tldr", () => {
     );
 
     for (const tldr of ["", "   ", "x".repeat(MAX_TLDR_LENGTH + 1)]) {
-      expect((await rig.call("set_tldr", { uuid: doc.uuid, tldr })).isError).toBe(
+      expect((await rig.call("set_metadata", { uuid: doc.uuid, tldr })).isError).toBe(
         true,
       );
     }
@@ -66,7 +66,7 @@ describe("set_tldr", () => {
       "A quick summary for a person.",
     );
 
-    const cleared = await rig.ok("set_tldr", { uuid: doc.uuid, tldr: null });
+    const cleared = await rig.ok("set_metadata", { uuid: doc.uuid, tldr: null });
     expect(cleared).toMatchObject({ tldr: null, applied: true, synced: false });
     expect((await rig.ok("get_doc", { uuid: doc.uuid })).tldr).toBeNull();
     expect(
@@ -81,7 +81,7 @@ describe("set_tldr", () => {
       description: "Discovery copy without the unusual summary word.",
       blocks: [{ type: "paragraph", text: "ordinary content" }],
     });
-    await rig.ok("set_tldr", {
+    await rig.ok("set_metadata", {
       uuid: doc.uuid,
       tldr: "A quokka-only summary for a person.",
     });
@@ -114,7 +114,7 @@ describe("the TL;DR review reminder", () => {
       blocks: [{ type: "paragraph", text: "Read the target" }],
     });
     expect(source).toMatchObject({ tldr: null });
-    expect(source.tldrHint).toContain("set_tldr");
+    expect(source.tldrHint).toContain("set_metadata");
 
     const first = source.blocks[0];
     const edited = await rig.ok("edit_block", {
@@ -136,10 +136,10 @@ describe("the TL;DR review reminder", () => {
     });
     for (const result of [edited, inserted, deleted]) {
       expect(result).toMatchObject({ tldr: null });
-      expect(result.tldrHint).toContain("set_tldr");
+      expect(result.tldrHint).toContain("set_metadata");
     }
 
-    await rig.ok("set_tldr", {
+    await rig.ok("set_metadata", {
       uuid: source.uuid,
       tldr: "A summary that may now be stale.",
     });
@@ -155,18 +155,14 @@ describe("the TL;DR review reminder", () => {
     expect(reviewed.tldrHint).toContain("review its TL;DR");
 
     const metadataResults = [
-      await rig.ok("set_tags", { uuid: source.uuid, tags: ["auth"] }),
-      await rig.ok("set_links", { uuid: source.uuid, links: [target.uuid] }),
-      await rig.ok("set_title", { uuid: source.uuid, title: "Renamed source" }),
-      await rig.ok("set_description", {
+      await rig.ok("set_metadata", { uuid: source.uuid, tags: ["auth"] }),
+      await rig.ok("set_metadata", { uuid: source.uuid, links: [target.uuid] }),
+      await rig.ok("set_metadata", { uuid: source.uuid, title: "Renamed source" }),
+      await rig.ok("set_metadata", {
         uuid: source.uuid,
         description: "Rewritten discovery copy.",
       }),
       await rig.ok("set_status", { uuid: source.uuid, status: "planned" }),
-      await rig.ok("set_changelog_suggestion", {
-        uuid: source.uuid,
-        suggestion: null,
-      }),
       await rig.ok("annotate", {
         uuid: source.uuid,
         block_id: read.blocks[0].id,

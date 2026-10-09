@@ -116,7 +116,7 @@ describe("two workspaces on one hub", () => {
       description: "A test document.",
       blocks: [{ type: "paragraph", text: "everything after the kickoff" }],
     });
-    await research.ok("set_links", { uuid: backlog.uuid, links: [kickoff.uuid] });
+    await research.ok("set_metadata", { uuid: backlog.uuid, links: [kickoff.uuid] });
 
     await waitForQuiet(uberblick);
     await waitForQuiet(research);
