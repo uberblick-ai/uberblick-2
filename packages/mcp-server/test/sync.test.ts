@@ -258,15 +258,47 @@ describe("hub sync", () => {
     await first.stop();
 
     const rig = await serverOn(port);
+    await waitUntil("the refused socket to record its connection cause", () =>
+      rig.instance.replicas.sync.state().cause === "refused",
+    );
+    const reading = rig.instance.replicas.sync.state();
+    expect(reading.status).toBe("hub-down");
+    expect(reading.detail).toContain("ECONNREFUSED");
+    const toolHub = {
+      status: "hub-down",
+      url: hubUrl(port),
+      reason: `no connection to ${hubUrl(port)}`,
+      protocolVersion: SYNC_PROTOCOL_VERSION,
+      recoveryClass: "retry",
+    };
     const created = await rig.ok("create_doc", {
       title: "Created offline",
       description: "A test document.",
       blocks: [{ type: "paragraph", text: "no hub was involved" }],
     });
     expect(created.synced).toBe(false);
+    expect(created.hub).toEqual(toolHub);
+
+    // These calls pass the strict tool output boundary while the client-only
+    // cause remains available. Reading, sidebar and writing hubs retain the
+    // same shape and fallback reason as the diagnostic tool.
+    for (const tool of ["list_docs", "list_tags", "get_sidebar"]) {
+      expect((await rig.ok(tool, {})).hub).toEqual(toolHub);
+    }
+    const written = await rig.ok("set_metadata", {
+      uuid: created.uuid,
+      title: "Created offline",
+    });
+    expect(written.hub).toEqual(toolHub);
+    const missing = await rig.call("get_doc", { uuid: randomUUID() });
+    expect(missing.isError).toBe(true);
+    expect(missing.payload.hub).toEqual(toolHub);
 
     const offline = await rig.ok("sync_status", {});
-    expect(offline.hub.status).toBe("hub-down");
+    expect(offline.hub).toEqual(toolHub);
+    // A retry can spend the short grace pending under load. Either reading
+    // stays available internally after MCP projected out the evidence.
+    expect(rig.instance.replicas.sync.state().cause).toMatch(/^(refused|timeout)$/);
     expect(
       (offline.pendingRooms as { room: string }[]).map((entry) => entry.room),
     ).toContain(`${WORKSPACE}/${created.uuid}`);

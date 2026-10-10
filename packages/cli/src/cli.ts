@@ -32,7 +32,8 @@ commands:
   open [options]         serve the web app and a hub in the foreground, and
                          open the browser
   status [--json]        workspace, hub, connection, pending work and failures
-  doctor [--json]        check the local stack against its known failure modes
+  doctor [--json]        check this project's Uberblick setup and name the fix
+                         for each problem
   workspace [command]    create, promote, join, list or select a workspace
   auth [command]         sign in to a remote hub and manage this machine's login
   mcp <command>          register uberblick with an MCP client

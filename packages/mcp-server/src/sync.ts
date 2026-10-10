@@ -59,6 +59,8 @@ import type * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
 import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
+import { HubConnection } from "./hub-connection.js";
+import type { HubFailureCause } from "./hub-failure.js";
 
 export type HubStatus =
   | "disabled"
@@ -78,6 +80,10 @@ export interface HubState {
    * here, never taken from the wire — see {@link AUTH_REJECTED}.
    */
   reason?: string;
+  /** Socket failure evidence for CLI diagnostics; excluded from MCP outputs. */
+  cause?: HubFailureCause;
+  /** Only a code, numbers and the dialled host/address/port; never wire text. */
+  detail?: string;
   /** Recovery keeps the established status meanings; no new status values. */
   recoveryClass?: "retry" | "manual";
   /** Safe device-login recovery detail, never credential contents. */
@@ -373,6 +379,8 @@ export class HubSync {
   /** A dial failed before opening; only a successful open clears it. */
   private failedDial = false;
 
+  private readonly connection: HubConnection;
+
   /**
    * When the current run of connection attempts started. A socket that has not
    * connected within the connect grace is reported as a hub that is down, even
@@ -537,6 +545,7 @@ export class HubSync {
       config = { ...config, authSecret: null, deviceLogin: config.deviceLogin ?? {} };
     }
     this.config = config;
+    this.connection = new HubConnection(config.connectTimeoutMs);
     this.onConnected = onConnected;
     this.enabled = config.deviceLogin !== undefined || config.authSecret !== null;
     this.silent = options.silent === true;
@@ -570,6 +579,7 @@ export class HubSync {
 
     this.socket = new UnqueuedHocuspocusProviderWebsocket({
       url: config.hubUrl,
+      WebSocketPolyfill: this.connection.websocket(),
       ...backoff,
       onStatus: ({ status }) => {
         const previous = this.socketStatus;
@@ -1247,6 +1257,7 @@ export class HubSync {
         status: "hub-down",
         url: this.config.hubUrl,
         reason: `no connection to ${this.config.hubUrl}`,
+        ...this.connection.failure(Date.now() - this.connectingSince > this.config.connectTimeoutMs),
       };
     }
     return { status: "connecting", url: this.config.hubUrl };

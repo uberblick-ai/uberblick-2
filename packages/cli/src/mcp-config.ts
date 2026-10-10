@@ -11,9 +11,9 @@
  * vendor's own CLI or prints a snippet for somebody to paste. Install asks
  * {@link presence} whether our entry is there and matches what it would register.
  * Doctor reads only the binding variables through {@link doctorEntry}, using
- * JSON or TOML parsing and shared entry validation. Install's TOML presence
- * comparison stays separate. No config is edited, so no byte-preserving
- * splicer is needed.
+ * JSON or TOML parsing and shared entry validation. Install parses TOML with
+ * the same options before comparing the entry. No config is edited, so no
+ * byte-preserving splicer is needed.
  *
  * **Nothing echoes a value back.** {@link presence} answers with one of four
  * words and never with anything it read. A config file is exactly where
@@ -144,9 +144,21 @@ export function presence(file: TargetFile, entry: Entry): Presence {
     return (error as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "unusable";
   }
   if (file.format === "toml") {
-    const table = tomlTable(text, entry.name);
-    if (table !== null) return table === tomlBlock(entry).trim() ? "ours" : "foreign";
-    return mentionsServer(text, entry.name) ? "foreign" : "absent";
+    try {
+      const doc = parseToml(text, { integersAsBigInt: "asNeeded" });
+      if (doc.mcp_servers === undefined) return "absent";
+      if (!doctorTable(doc.mcp_servers)) return "unusable";
+      if (!Object.hasOwn(doc.mcp_servers, entry.name)) return "absent";
+      const held = doc.mcp_servers[entry.name];
+      // Codex registers only command, args and env. Dates are scalar values,
+      // and JSON's optional stdio type is not part of the TOML entry we write.
+      if (!doctorTable(held) || Object.hasOwn(held, "type")) return "foreign";
+      if (held.env !== undefined && !doctorTable(held.env)) return "foreign";
+      return jsonMatches(held, entry) ? "ours" : "foreign";
+    } catch {
+      // Parser errors quote source lines that may contain credentials.
+      return "unusable";
+    }
   }
   let registered: unknown;
   try {
@@ -285,92 +297,6 @@ function jsonMatches(held: unknown, entry: Entry): boolean {
 }
 
 /**
- * A plain table header's dotted key, or null when the line is not one.
- *
- * `[mcp_servers.uberblick]`, `[mcp_servers."uberblick"]`, `[ mcp_servers.uberblick ]`
- * and `[mcp_servers.uberblick] # note` are one table spelled four ways, and an
- * exact-string match reads three of them as "no entry here" — which would send
- * `codex mcp add` at a file that already has one, to replace it. An
- * array-of-tables header (`[[…]]`) is deliberately not one of these: it names
- * something else.
- */
-function tableKey(line: string): string[] | null {
-  const match = /^\[\s*([^[\]]+?)\s*\]\s*(?:#.*)?$/.exec(line.trim());
-  return match === null ? null : dottedKey(match[1] as string);
-}
-
-/** The parts of a dotted key, unquoted: `mcp_servers."uberblick"` is two. */
-function dottedKey(text: string): string[] {
-  return text.split(".").map((part) => part.trim().replace(/^(["'])(.*)\1$/, "$2"));
-}
-
-/**
- * How many key parts a header adds under `[mcp_servers.<name>]` — 0 for the
- * table itself, 1 for its `env` sub-table — or null for any other table.
- */
-function ownedBy(line: string, name: string): number | null {
-  const key = tableKey(line);
-  if (key === null || key[0] !== "mcp_servers" || key[1] !== name) return null;
-  return key.length - 2;
-}
-
-/**
- * Whether anything in `text` defines or touches `mcp_servers.<name>` in some
- * spelling other than the table above.
- *
- * A header is not the only way to write the key: `uberblick = { … }` under
- * `[mcp_servers]`, a dotted `mcp_servers.uberblick.command = …` anywhere, and a
- * lone `[mcp_servers.uberblick.env]` are all definitions of it, and all of them
- * read as "nothing there" to a scan that looks only for the header — which
- * would run `codex mcp add`, whose duplicate add exits 0 and replaces what it
- * found. So this walks the file's table context and answers for any of them.
- * A false positive costs somebody one manual paste; a false negative costs them
- * their entry, which is why the doubtful answer is the positive one.
- */
-function mentionsServer(text: string, name: string): boolean {
-  let table: string[] = [];
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
-    if (line.startsWith("[")) {
-      if (ownedBy(line, name) !== null) return true;
-      table = tableKey(line) ?? [];
-      continue;
-    }
-    const equals = line.indexOf("=");
-    if (equals === -1 || line.startsWith("#")) continue;
-    const key = [...table, ...dottedKey(line.slice(0, equals))];
-    if (key[0] === "mcp_servers" && key[1] === name) return true;
-  }
-  return false;
-}
-
-/**
- * The lines `[mcp_servers.<name>]` owns — its keys and its `env` sub-table —
- * trimmed, or null when the header is not there.
- *
- * Only a header found here is compared, and the comparison is byte for byte
- * against what `codex mcp add` writes: a table spelled any other way is
- * therefore `foreign` rather than `absent`, which is the conservative answer.
- * Refusing a registration this cannot prove is ours costs somebody one manual
- * paste; treating it as absent costs them their entry.
- */
-function tomlTable(text: string, name: string): string | null {
-  const lines = text.split("\n");
-  const start = lines.findIndex((line) => ownedBy(line, name) === 0);
-  if (start === -1) return null;
-  let end = start + 1;
-  while (end < lines.length) {
-    const line = lines[end] as string;
-    if (line.trimStart().startsWith("[")) {
-      const depth = ownedBy(line, name);
-      if (depth === null || depth === 0) break;
-    }
-    end += 1;
-  }
-  return lines.slice(start, end).join("\n").trim();
-}
-
-/**
  * A TOML basic string.
  *
  * `JSON.stringify` is the whole implementation because a JSON string *is* a TOML
@@ -383,9 +309,8 @@ function tomlString(value: string): string {
 }
 
 /**
- * The block to paste into a Codex config, byte for byte what `codex mcp add`
- * writes for the same server — which is what lets a second run recognise either
- * one as installed.
+ * The block to paste into a Codex config, equivalent to what `codex mcp add`
+ * writes for the same server.
  */
 function tomlBlock(entry: Entry): string {
   const args = entry.args.map(tomlString).join(", ");
