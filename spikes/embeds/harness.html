@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Embeds spike</title>
+<style>
+  :root { color-scheme: light dark; --bar: oklch(0.62 0.1 190); --tint: oklch(0.955 0.02 190); --canvas: oklch(0.93 0.003 75); }
+  @media (prefers-color-scheme: dark) { :root { --bar: oklch(0.74 0.11 190); --tint: oklch(0.215 0.03 190); --canvas: oklch(0.24 0 0); } }
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 860px; padding: 24px 16px 400px; }
+  h1 { font-size: 20px; }
+  .case { margin: 28px 0; }
+  .block { border-left: 3px solid var(--bar); background: var(--tint); border-radius: 0 8px 8px 0; padding-bottom: 8px; }
+  .cap { display: flex; gap: 8px; align-items: center; padding: 6px 10px; font-size: 12px; }
+  .cap .title { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cap button { font: inherit; background: none; border: 0; padding: 2px 6px; cursor: pointer; }
+  .frame { position: relative; margin: 0 8px; border-radius: 6px; overflow: hidden; background: var(--canvas); }
+  .frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .frame.active { outline: 2px solid #777; outline-offset: 2px; }
+  .shield { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; cursor: pointer; }
+  .shield span { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); background: rgb(0 0 0 / 75%); color: #fff; border-radius: 999px; padding: 3px 10px; font-size: 12px; opacity: 0; transition: opacity .15s; }
+  .shield:hover span, .shield:focus-visible span { opacity: 1; }
+  .frame.active .shield { display: none; }
+  .meta { font: 11px/1.4 ui-monospace, monospace; color: #888; overflow-wrap: anywhere; margin: 4px 10px 0; }
+  .refused { padding: 10px; border: 1px dashed #999; border-radius: 6px; }
+  #scroller { height: 360px; overflow: auto; border: 1px solid #999; border-radius: 6px; }
+  #log { font: 11px/1.4 ui-monospace, monospace; white-space: pre-wrap; max-height: 300px; overflow: auto; border: 1px solid #999; padding: 8px; }
+</style>
+</head>
+<body>
+<h1>Embeds spike</h1>
+<p>Each case is one embed in the proposed block frame. Inert until clicked; "Done" or a click outside releases it.</p>
+<div id="cases"></div>
+<h2>Lazy loading inside a scroll container</h2>
+<p>The document pane scrolls inside its own container, like <code>.ub-document-pane</code>. The embed below sits 2400px down inside it.</p>
+<div id="scroller"><div style="height:2400px"></div><div id="lazy-slot"></div></div>
+<h2>Event log</h2>
+<div id="log"></div>
+<script type="module" src="harness.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "_note": "Public samples for the embeds spike. Replace or add entries; empty urls are skipped. Every url must be public (no sign-in) except entries marked private.",
+  "samples": [
+    { "name": "Figma community file", "url": "https://www.figma.com/community/file/1380235722331273046/simple-design-system", "note": "Figma's Simple Design System community file (id to verify). Tests whether community links embed at all." },
+    { "name": "Figma public design frame", "url": "", "note": "A /design/ link shared as 'anyone with the link can view', with a node-id. Find one in Figma's own docs or help center, or make one from a duplicated community file." },
+    { "name": "Figma public prototype", "url": "", "note": "A /proto/ link that is public." },
+    { "name": "FigJam public board", "url": "", "note": "A /board/ link that is public." },
+    { "name": "Figma broken link", "url": "https://www.figma.com/design/AAAAAAAAAAAAAAAAAAAAAA/Missing-file?node-id=1-2", "note": "A file that does not exist." },
+    { "name": "YouTube video", "url": "", "note": "Any public video, e.g. from Figma's official channel." },
+    { "name": "Loom video", "url": "", "note": "A public loom.com/share link, e.g. from Loom's own help pages." },
+    { "name": "Not a provider", "url": "https://example.com/some/page", "note": "Must be refused: no embed." }
+  ]
+}
