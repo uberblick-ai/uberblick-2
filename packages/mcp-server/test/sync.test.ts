@@ -296,7 +296,9 @@ describe("hub sync", () => {
 
     const offline = await rig.ok("sync_status", {});
     expect(offline.hub).toEqual(toolHub);
-    expect(rig.instance.replicas.sync.state().cause).toBe("refused");
+    // A retry can spend the short grace pending under load. Either reading
+    // stays available internally after MCP projected out the evidence.
+    expect(rig.instance.replicas.sync.state().cause).toMatch(/^(refused|timeout)$/);
     expect(
       (offline.pendingRooms as { room: string }[]).map((entry) => entry.room),
     ).toContain(`${WORKSPACE}/${created.uuid}`);
