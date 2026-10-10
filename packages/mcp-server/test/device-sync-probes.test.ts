@@ -36,6 +36,19 @@ it("spreads device retries through a growing band and caps long manual waits", (
   expect(deviceRetryDelayMs(1, 2_000, true, () => 1)).toBe(4_000);
 });
 
+it("keeps socket failure evidence on a probe using a stored device login", async () => {
+  const { hub, env, config } = await fixture();
+  hub.grant(WORKSPACE);
+  await writeHubLogin(hub.origin, hub.issue({ workspaces: [WORKSPACE] }), env);
+  await hub.pause();
+  const result = await inspectRemote(config);
+  expect(result.hub).toMatchObject({
+    status: "hub-down", cause: "refused", detail: `ECONNREFUSED 127.0.0.1:${hub.port}`,
+    reason: `no connection to ${hub.url}`,
+  });
+  expect(hub.renewalCount).toBe(0);
+});
+
 // Both probes share HubSync's recovery: each proves the revoked case, and
 // inspectRemote carries the remaining outcomes for both.
 describe.each([
@@ -84,6 +97,8 @@ describe("stored-login inspectRemote probe recovery", () => {
     const result = await inspectRemote(config);
     expect(result.hub).toMatchObject({ status: "hub-down", recoveryClass: "retry" });
     expect(result.hub).not.toHaveProperty("authRecovery");
+    expect(result.hub).not.toHaveProperty("cause");
+    expect(result.hub).not.toHaveProperty("detail");
     expect(hub.renewalCount).toBe(1);
     expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
   });
@@ -102,6 +117,8 @@ it("keeps a slow refusal check inside inspectRemote's existing settle budget", a
   expect(Date.now() - started).toBeLessThan(budget.connectTimeoutMs + budget.syncTimeoutMs);
   expect(result.hub).toMatchObject({ status: "hub-down", recoveryClass: "retry" });
   expect(result.hub).not.toHaveProperty("authRecovery");
+  expect(result.hub).not.toHaveProperty("cause");
+  expect(result.hub).not.toHaveProperty("detail");
   expect(hub.renewalCount).toBe(1);
   expect(readHubLogins(env).logins[hub.origin]).toEqual(login);
 });

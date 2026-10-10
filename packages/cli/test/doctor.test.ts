@@ -12,6 +12,7 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import type { StoredHubLogin } from "@uberblick/hub/auth-store";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { authenticationOrigin } from "@uberblick/hub/remote-url";
+import type { HubFailureCause } from "@uberblick/mcp-server";
 import { CLOCK_SKEW_SECONDS, REQUEST_PROOF_LIFETIME_SECONDS } from "@uberblick/hub/token";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startDeviceSyncHub } from "../../hub/test/device-sync-hub.js";
@@ -405,10 +406,53 @@ describe("ub doctor", () => {
     expect(check(checks, "login").status).toBe("pass");
     expect(hub.status).toBe("warn");
     expect(hub.fix).toBe("check your network or VPN, or ask whoever runs the hub; your work stays here and syncs once it is back");
-    expect(hub.reason).toContain(authenticationOrigin(endpoint));
+    expect(hub.reason).toBe(`refused by ${new URL(endpoint).host} (ECONNREFUSED)`);
     expect(hub.reason).not.toContain(endpoint);
     expect(hub.fix).not.toContain("ub open");
     expect(check(checks, "clock").status).toBe("skipped");
+  });
+
+  it.each<[HubFailureCause, string, string]>([
+    ["dns", "ENOTFOUND hub.uberblick.ai", "DNS lookup failed for hub.uberblick.ai (ENOTFOUND)"],
+    ["refused", "ECONNREFUSED 203.0.113.7:443", "refused by 203.0.113.7:443 (ECONNREFUSED)"],
+    ["refused", "ECONNREFUSED [::1]:443", "refused by [::1]:443 (ECONNREFUSED)"],
+    ["timeout", "1.5 203.0.113.7:443", "timed out after 1.5s connecting to 203.0.113.7:443"],
+    ["timeout", "1.5 hub.uberblick.ai:443 ETIMEDOUT", "timed out after 1.5s connecting to hub.uberblick.ai:443 (ETIMEDOUT)"],
+    ["tls", "ERR_TLS_CERT_ALTNAME_INVALID hub.uberblick.ai", "TLS certificate not valid for hub.uberblick.ai (ERR_TLS_CERT_ALTNAME_INVALID)"],
+    ["tls", "ERR_SSL_WRONG_VERSION_NUMBER hub.uberblick.ai", "TLS failed for hub.uberblick.ai (ERR_SSL_WRONG_VERSION_NUMBER)"],
+    ["http", "502 hub.uberblick.ai", "HTTP 502 from hub.uberblick.ai during WebSocket upgrade"],
+    ["closed", "1001", "closed by the hub (code 1001)"],
+  ])("names a %s socket failure without changing the hub warning or fix", async (cause, detail, reason) => {
+    const endpoint = "wss://hub.uberblick.ai/ws";
+    vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "hub-down", url: endpoint,
+      protocolVersion: SYNC_PROTOCOL_VERSION, cause, detail });
+    const { report, checks } = await doctor(deviceBox(endpoint));
+    expect(check(checks, "hub")).toEqual({ name: "hub", status: "warn", reason,
+      fix: "check your network or VPN, or ask whoever runs the hub; your work stays here and syncs once it is back" });
+    expect(renderDoctor(report)).toContain(reason);
+    expect(check(checks, "clock").status).toBe("skipped");
+  });
+
+  it("keeps the existing hub warning when a socket failure has no cause", async () => {
+    const endpoint = "wss://hub.example.invalid/ws";
+    vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "hub-down", url: endpoint,
+      protocolVersion: SYNC_PROTOCOL_VERSION });
+    const { checks } = await doctor(deviceBox(endpoint));
+    expect(check(checks, "hub")).toEqual({ name: "hub", status: "warn", reason: `${authenticationOrigin(endpoint)} does not answer`,
+      fix: "check your network or VPN, or ask whoever runs the hub; your work stays here and syncs once it is back" });
+  });
+
+  it.each<[HubFailureCause, string]>([
+    ["tls", "ERR_TLS_CERT_ALTNAME_INVALID hub.example.invalid certificate text"],
+    ["http", "502 wss://person:secret@hub.example.invalid/?token=secret"],
+    ["closed", "1001 private close reason"],
+  ])("does not render extra error or wire text in a %s detail", async (cause, detail) => {
+    const endpoint = "wss://hub.example.invalid/ws";
+    vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "hub-down", url: endpoint,
+      protocolVersion: SYNC_PROTOCOL_VERSION, cause, detail });
+    const { report, checks } = await doctor(deviceBox(endpoint));
+    expect(check(checks, "hub").reason).toBe(`${authenticationOrigin(endpoint)} does not answer`);
+    expect(renderDoctor(report)).not.toContain(detail);
   });
 
   it.each(["wss://hub.example.invalid/custom-sync-path", "ws://hub.example.invalid:8080/custom-sync-path"])(

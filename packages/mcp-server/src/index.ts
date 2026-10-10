@@ -48,6 +48,8 @@ export { inspectExistingStore, readWorkspaceName } from "./store.js";
 export { createMcpServer } from "./server.js";
 export type { UberblickMcpServer } from "./server.js";
 export type { HubState, HubStatus } from "./sync.js";
+export { formatHubFailure } from "./hub-failure.js";
+export type { HubFailureCause } from "./hub-failure.js";
 export { collectServingSyncStatus, collectSyncStatus } from "./status.js";
 export type {
   RoomSyncStatus,

@@ -13,6 +13,17 @@ export function toolResult(payload: object, isError = false): CallToolResult {
   };
 }
 
+/** Socket diagnostics belong to client readings, not the MCP hub contract. */
+function mcpPayload(payload: object): object {
+  if (!("hub" in payload) || payload.hub === null || typeof payload.hub !== "object") {
+    return payload;
+  }
+  const hub: Record<string, unknown> = { ...payload.hub };
+  delete hub.cause;
+  delete hub.detail;
+  return { ...payload, hub };
+}
+
 /**
  * Admit and drain calls inside the failure boundary; mismatches are logged
  * text-only internal errors.
@@ -30,11 +41,11 @@ export function guarded<Args>(
 ): (args: Args, extra: Pick<OperationRequest, "signal" | "_meta">) => Promise<CallToolResult> {
   return async (args, extra) => {
     try {
-      const payload = await context.work.run(() => call(context, args, {
+      const payload = mcpPayload(await context.work.run(() => call(context, args, {
         signal: extra.signal,
         ...(extra._meta === undefined ? {} : { _meta: extra._meta }),
         ...(extra._meta?.progressToken === undefined ? {} : { progressToken: extra._meta.progressToken }),
-      }));
+      })));
       const parsed = outputSchemas[tool].safeParse(payload);
       if (!parsed.success) {
         throw new Error(`Output validation failed for ${tool}: ${parsed.error.message}`);
@@ -42,7 +53,7 @@ export function guarded<Args>(
       return toolResult(payload);
     } catch (error) {
       const failure = toFailure(tool, error);
-      return toolResult(failure.payload, failure.isError);
+      return toolResult(mcpPayload(failure.payload), failure.isError);
     }
   };
 }

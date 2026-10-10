@@ -29,7 +29,7 @@ import {
 import { protocolSkew } from "@uberblick/hub/protocol";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { McpConfig } from "@uberblick/mcp-server";
-import { inspectExistingStore, readWorkspaceName } from "@uberblick/mcp-server";
+import { formatHubFailure, inspectExistingStore, readWorkspaceName } from "@uberblick/mcp-server";
 import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
 import type { ResolvedConfig } from "./config.js";
@@ -369,7 +369,7 @@ function hubVerdict(config: McpConfig, hub: HubProbe, name = "hub", deviceLogin:
   }
   return warn(
     name,
-    `${origin} does not answer`,
+    formatHubFailure(hub) ?? `${origin} does not answer`,
     "check your network or VPN, or ask whoever runs the hub; your work stays here and syncs once it is back",
   );
 }
