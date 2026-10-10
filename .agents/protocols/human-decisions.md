@@ -26,30 +26,30 @@ constraints. Before escalating replacement of an established primitive, identify
 it and the contract it would supply; custom application rendering alone does not
 establish such a replacement.
 
-Finish `needs-human` with a scannable question before the evidence. Keep this
-structure visible outside collapsed details:
+Finish `needs-human` with the questions in the report's `--action` lines,
+visible before the collapsed summary:
 
-- State what is blocked. Number each independent decision and letter its
-  alternatives `A`, `B`, etc. Keep identifiers stable in follow-ups so answers
-  such as `1A, 2B` suffice. Give implications, your recommendation and material
-  risks/tradeoffs; aim for one or two plain-language sentences per decision
-  without dropping essential information.
-- @-mention the person who opened the issue (for a PR, its issue's opener) if
-  they have write access; otherwise `@uberblick-ai/maintainers`. Never address
-  the question to an agent or bot.
-- Give one answer destination and one unambiguous next action:
+- Put each independent decision in its own `--action` line: one sentence naming
+  what is blocked, the decision needed and your recommendation. Number the
+  decisions and letter their alternatives (`A`, `B`, etc.); keep identifiers
+  stable in follow-ups so answers such as `1A, 2B` suffice. A single decision's
+  alternatives may instead use `--option` lines, with the recommendation first.
+- In the action or option lines, @-mention the person who opened the issue
+  (for a PR, its issue's opener) if they have write access; otherwise
+  `@uberblick-ai/maintainers`. Never address the question to an agent or bot.
+- Give one answer destination and one unambiguous next action in a separate
+  `--action` line:
   `Answer here, then remove needs-human and add <label>.`, with the label
   [Pause and resume](#pause-and-resume) names. Do not offer launcher-generated resume steps for the stopped role when a
   correction or handoff requires another role.
 
-Put supporting technical evidence, commits, CI results and resume mechanics in
-a collapsed `<details>` block with a descriptive `<summary>`, or link their
-existing record. If the launcher flattens Markdown or the explanation is long,
-post a structured decision comment and link the concise report summary's
-invitation to answer to it. The summary must still name every independent
-choice, recommendation and material risk; keep the prescribed closing line
-visible in both records. This presentation changes no answer authority,
-outcome or label rule.
+Put the reasoning, alternatives' implications and material risks, and supporting
+technical evidence, commits and CI results in `--summary`, which the launcher
+collapses, or link their existing record from it. For a long explanation, post a
+structured decision comment and link it from the summary; the report's action
+or option lines still carry the questions and @-mention, and its separate action
+line carries the prescribed closing line. This presentation changes no answer
+authority, outcome or label rule.
 
 Any person with write access may answer. A comment from a person's account is
 the answer; one from `uberblick-agent` or a bot never is. The next run works
