@@ -45,12 +45,12 @@ function RoleSelect({ value, onChange, label, disabled }: {
   </select>;
 }
 
-function ConfirmAction({ trigger, title, description, action, disabled, onConfirm }: {
-  trigger: string; title: string; description: string; action: string;
+function ConfirmAction({ trigger, triggerLabel, title, description, action, disabled, onConfirm }: {
+  trigger: string; triggerLabel?: string; title: string; description: string; action: string;
   disabled: boolean; onConfirm: () => void;
 }): ReactElement {
   return <AlertDialog>
-    <AlertDialogTrigger asChild><Button type="button" variant="outline" size="sm" disabled={disabled}>{trigger}</Button></AlertDialogTrigger>
+    <AlertDialogTrigger asChild><Button type="button" variant="outline" size="sm" disabled={disabled} aria-label={triggerLabel}>{trigger}</Button></AlertDialogTrigger>
     <AlertDialogContent>
       <AlertDialogTitle>{title}</AlertDialogTitle>
       <AlertDialogDescription>{description}</AlertDialogDescription>
@@ -236,9 +236,9 @@ export function AccessSettings({ workspace, serving, subject }: {
             devices.devices?.length === 0 ? <p className="m-0 text-sm">No signed-in devices.</p> : <div className="overflow-x-auto"><table className="w-full border-collapse" aria-label="Your devices">
               <thead><tr><th className={CELL} scope="col">Device</th><th className={CELL} scope="col">Signed in</th><th className={CELL} scope="col">Actions</th></tr></thead>
               <tbody>{devices.devices?.map((device) => <tr key={device.deviceId}>
-                <th className={`${CELL} max-w-56 wrap-anywhere`} scope="row">{device.deviceId}{device.current && <span className="mt-1 block font-normal">This computer</span>}</th>
+                <th className={`${CELL} max-w-56 wrap-anywhere`} scope="row">{device.deviceName ?? device.deviceId}{device.current && <span className="mt-1 block font-normal">This computer</span>}</th>
                 <td className={CELL}><time dateTime={new Date(device.signedInAt).toISOString()}>{new Date(device.signedInAt).toLocaleString()}</time></td>
-                <td className={CELL}><ConfirmAction trigger={`Revoke device ${device.deviceId}`} title={device.current ? "Revoke this computer?" : "Revoke device?"}
+                <td className={CELL}><ConfirmAction trigger="Revoke device" triggerLabel={`Revoke device ${device.deviceId}`} title={device.current ? "Revoke this computer?" : "Revoke device?"}
                   description={`This one device of yours loses access to this hub. Documents already downloaded stay where they are.${device.current ? ` This computer's sync with the hub stops until ub auth login ${hub ?? "<hub>"} is run again.` : ""}`}
                   action="Revoke device" disabled={!devicesReady} onConfirm={() => revoke(device)} /></td>
               </tr>)}</tbody>

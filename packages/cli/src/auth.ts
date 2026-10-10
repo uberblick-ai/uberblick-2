@@ -1,7 +1,8 @@
 /** Remote sign-in stores a device credential; live sync still uses its existing auth. */
 import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs } from "node:util";
-import { isGithubUsername } from "@uberblick/hub";
+import { hostname } from "node:os";
+import { isGithubUsername, sanitizeDeviceName } from "@uberblick/hub";
 import { parseWorkspaceId } from "@uberblick/schema";
 import {
   type StoredHubLogin,
@@ -423,7 +424,9 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
     if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
     // A start interrupted before its reply has no collection secret to cancel
     // with. Finish this bounded read so a late reply can still be abandoned.
-    const started = await post(selection.origin, "start", {}, new AbortController().signal, REQUEST_MS, (result) => {
+    let deviceName: string | undefined;
+    try { deviceName = sanitizeDeviceName(hostname()); } catch { /* Hostname metadata must never prevent sign-in. */ }
+    const start = (body: object) => post(selection.origin, "start", body, new AbortController().signal, REQUEST_MS, (result) => {
       // Valid authority permits cleanup even if the envelope or public fields
       // are malformed. Never display any of the private start fields.
       if (typeof result.requestId === "string" && UUID.test(result.requestId) &&
@@ -431,6 +434,13 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
         attempt = { requestId: result.requestId, collectionSecret: result.collectionSecret };
       }
     });
+    let started = await start(deviceName === undefined ? {} : { deviceName });
+    // Older hubs require an empty start body. Only a validated refusal with
+    // no attempt authority permits one unnamed retry; interrupted starts stop.
+    if (deviceName !== undefined && started.status === "invalid-request" &&
+        Object.keys(started).length === 1 && !interrupted.signal.aborted) {
+      started = await start({});
+    }
     if (started.status !== "pending") terminal(started);
     if (attempt === undefined ||
         started.verificationUri !== GITHUB_APPROVAL_URL ||

@@ -9,6 +9,7 @@ import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { HubDatabase } from "./persistence.js";
 import type { MembershipRegistry } from "./memberships.js";
+import { sanitizeDeviceName } from "./device-name.js";
 import {
   type ClampFailure,
   type RequestAction,
@@ -35,6 +36,7 @@ export interface CredentialRecord {
 export interface IssueCredentialRequest {
   principalId: string;
   deviceId: string;
+  deviceName?: string;
   workspaces: readonly string[];
 }
 
@@ -46,6 +48,7 @@ export interface IssuedCredential {
 
 export interface DeviceRecord {
   deviceId: string;
+  deviceName?: string;
   signedInAt: number;
   workspaces: string[];
 }
@@ -88,6 +91,7 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS hub_credentials (
   id TEXT PRIMARY KEY NOT NULL,
   principal_id TEXT NOT NULL,
   device_id TEXT NOT NULL,
+  device_name TEXT,
   workspaces TEXT NOT NULL,
   signing_key BLOB NOT NULL CHECK(length(signing_key) = 32),
   issued_at INTEGER NOT NULL,
@@ -120,6 +124,7 @@ export class CredentialRegistry {
   private readonly insert: StatementSync;
   private readonly select: StatementSync;
   private readonly selectKey: StatementSync;
+  private readonly selectDeviceName: StatementSync;
   private readonly markRevoked: StatementSync;
   private readonly markReplaced: StatementSync;
   private readonly selectDevices: StatementSync;
@@ -137,16 +142,23 @@ export class CredentialRegistry {
       .some((column) => column.name === "replaced_at")) {
       db.exec("ALTER TABLE hub_credentials ADD COLUMN replaced_at INTEGER");
     }
+    if (!db.prepare("PRAGMA table_info(hub_credentials)").all()
+      .some((column) => column.name === "device_name")) {
+      db.exec("ALTER TABLE hub_credentials ADD COLUMN device_name TEXT");
+    }
     this.insert = db.prepare(`
       INSERT INTO hub_credentials
-        (id, principal_id, device_id, workspaces, signing_key, issued_at)
-      VALUES ($id, $principalId, $deviceId, $workspaces, $key, $issuedAt)
+        (id, principal_id, device_id, device_name, workspaces, signing_key, issued_at)
+      VALUES ($id, $principalId, $deviceId, $deviceName, $workspaces, $key, $issuedAt)
     `);
     this.select = db.prepare(
       `SELECT ${PUBLIC_COLUMNS} FROM hub_credentials WHERE id = $id`,
     );
     this.selectKey = db.prepare(
       "SELECT signing_key FROM hub_credentials WHERE id = $id",
+    );
+    this.selectDeviceName = db.prepare(
+      "SELECT device_name FROM hub_credentials WHERE id = $id",
     );
     this.markRevoked = db.prepare(`
       UPDATE hub_credentials SET revoked_at = $revokedAt
@@ -159,7 +171,7 @@ export class CredentialRegistry {
     // Renewal appends rows; timestamp order can change when the clock moves.
     // Retained insertion order identifies the device's original sign-in.
     this.selectDevices = db.prepare(`
-      SELECT current.device_id, current.workspaces,
+      SELECT current.device_id, current.device_name, current.workspaces,
         (SELECT history.issued_at FROM hub_credentials AS history
           WHERE history.principal_id = current.principal_id
             AND history.device_id = current.device_id
@@ -207,6 +219,7 @@ export class CredentialRegistry {
       id: record.id,
       principalId: record.principalId,
       deviceId: record.deviceId,
+      deviceName: sanitizeDeviceName(request.deviceName) ?? null,
       workspaces: JSON.stringify(record.workspaces),
       key: keyBytes,
       issuedAt: record.issuedAt,
@@ -222,11 +235,15 @@ export class CredentialRegistry {
 
   /** Principal-level management; only devices with a current credential exist here. */
   listDevices(principalId: string): DeviceRecord[] {
-    return this.selectDevices.all({ principalId }).map((row) => ({
-      deviceId: row.device_id as string,
-      signedInAt: row.signed_in_at as number,
-      workspaces: JSON.parse(row.workspaces as string) as string[],
-    }));
+    return this.selectDevices.all({ principalId }).map((row) => {
+      const deviceName = sanitizeDeviceName(row.device_name);
+      return {
+        deviceId: row.device_id as string,
+        ...(deviceName === undefined ? {} : { deviceName }),
+        signedInAt: row.signed_in_at as number,
+        workspaces: JSON.parse(row.workspaces as string) as string[],
+      };
+    });
   }
 
   /**
@@ -318,7 +335,9 @@ export class CredentialRegistry {
         this.db.exec("COMMIT");
         return { status: "unchanged" };
       }
+      const deviceName = sanitizeDeviceName(this.selectDeviceName.get({ id: current.id })?.device_name);
       issued = this.issue({ principalId: current.principalId, deviceId: current.deviceId,
+        ...(deviceName === undefined ? {} : { deviceName }),
         workspaces });
       this.markReplaced.run({ id: current.id, replacedAt: Date.now() });
       this.db.exec("COMMIT");

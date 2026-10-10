@@ -1,6 +1,7 @@
 /** Live access requests use the local browser key; hub credentials stay in ub open. */
 import { mintHubAuthMessage } from "../collab/rooms.js";
 import type { RequestAction } from "@uberblick/hub/token";
+import { sanitizeDeviceName } from "@uberblick/hub/device-name";
 
 export type AccessAction = Exclude<RequestAction, { operation: "renew-credential" | "promote-workspace" }>;
 export type AccessRole = "member" | "admin";
@@ -12,6 +13,7 @@ export interface AccessMember {
 }
 export interface AccessDevice {
   deviceId: string;
+  deviceName?: string;
   signedInAt: number;
   current: boolean;
 }
@@ -76,7 +78,9 @@ function answer(value: unknown, action: AccessAction): AccessAnswer {
         if (device === null || typeof device.deviceId !== "string" ||
           typeof device.signedInAt !== "number" || !Number.isFinite(new Date(device.signedInAt).getTime()) ||
           typeof device.current !== "boolean") throw new Error("Invalid access answer");
-        return { deviceId: device.deviceId, signedInAt: device.signedInAt, current: device.current };
+        const deviceName = sanitizeDeviceName(device.deviceName);
+        return { deviceId: device.deviceId, ...(deviceName === undefined ? {} : { deviceName }),
+          signedInAt: device.signedInAt, current: device.current };
       });
       break;
   }

@@ -100,13 +100,18 @@ describe("authenticated hub access management", () => {
       expect(response.status).toBe(200);
       return response.json() as Promise<Record<string, unknown>>;
     };
-    const pending = await signInPost("start", {});
+    const pending = await signInPost("start", { deviceName: "remote-agent-server" });
     githubTime += 5_000;
     const completed = await signInPost("collect", { requestId: pending.requestId, collectionSecret: pending.collectionSecret });
     expect(completed.status).toBe("complete");
     const credential = completed.credential as { record: IssuedCredential["record"]; key: string };
     const issued: IssuedCredential = { record: credential.record, keyBytes: Buffer.from(credential.key, "base64url") };
     expect(issued.record.principalId).toBe(principal.id);
+    expect(issued.record).not.toHaveProperty("deviceName");
+    expect(credential).not.toHaveProperty("deviceName");
+    expect(await manage(hub, issued, { operation: "list-devices" })).toEqual({ code: 200,
+      result: { status: "ok", devices: [{ deviceId: issued.record.deviceId, signedInAt: issued.record.issuedAt,
+        workspaces: [WORKSPACE], current: true, deviceName: "remote-agent-server" }] } });
     const listed = await manage(hub, issued, { operation: "list-members", workspaceId: WORKSPACE });
     expect(listed).toEqual({ code: 200, result: { status: "ok", members: [{ principalId: principal.id,
       githubAccountId: "1234", githubUsername: "current-admin", role: "admin" }] } });

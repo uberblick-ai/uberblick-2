@@ -15,7 +15,12 @@ test("confirm a GitHub account, manage membership, and revoke only your devices"
   const devices = page.getByRole("table", { name: "Your devices", exact: true });
   await expect(members.getByText("browser-person", { exact: true })).toBeVisible();
   await expect(devices.getByText("This computer", { exact: true })).toBeVisible();
+  await expect(devices.getByRole("rowheader").filter({ hasText: access.deviceName })).toHaveCount(2);
+  await expect(devices.getByText(access.otherDeviceId, { exact: true })).toHaveCount(0);
+  await expect(devices.getByText(access.legacyDeviceId, { exact: true })).toBeVisible();
   await expect(devices.getByText(access.foreignDeviceId, { exact: true })).toHaveCount(0);
+  await expect(devices.getByText("private-foreign-device", { exact: true })).toHaveCount(0);
+  for (const button of await devices.getByRole("button").all()) await expect(button).toHaveText("Revoke device");
 
   for (const handle of ["@octocat", "https://github.com/octocat", "octo cat"]) {
     await page.getByLabel("GitHub account", { exact: true }).fill(handle);
@@ -66,12 +71,21 @@ test("confirm a GitHub account, manage membership, and revoke only your devices"
   await expect(page.getByLabel("Role for browser-person", { exact: true })).toHaveValue("admin");
 
   const otherDevice = access.otherDeviceId;
-  await page.getByRole("button", { name: `Revoke device ${otherDevice}`, exact: true }).click();
+  const otherTrigger = page.getByRole("button", { name: `Revoke device ${otherDevice}`, exact: true });
+  await expect(otherTrigger).toHaveText("Revoke device");
+  await otherTrigger.click();
   const revoke = page.getByRole("alertdialog", { name: "Revoke device?", exact: true });
   await expect(revoke).toContainText(/one device of yours/);
   await expect(revoke).toContainText(/Documents already downloaded stay/);
   await revoke.getByRole("button", { name: "Revoke device", exact: true }).click();
-  await expect(devices.getByText(otherDevice, { exact: true })).toHaveCount(0);
+  await expect(otherTrigger).toHaveCount(0);
+  await expect(devices.getByRole("rowheader").filter({ hasText: access.deviceName })).toHaveCount(1);
+  await expect(devices.getByText(access.legacyDeviceId, { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: `Revoke device ${access.legacyDeviceId}`, exact: true }).click();
+  await page.getByRole("alertdialog", { name: "Revoke device?", exact: true })
+    .getByRole("button", { name: "Revoke device", exact: true }).click();
+  await expect(devices.getByText(access.legacyDeviceId, { exact: true })).toHaveCount(0);
 
   // The current-device acknowledgement survives the refused follow-up reads.
   const current = devices.getByRole("row").filter({ hasText: "This computer" });

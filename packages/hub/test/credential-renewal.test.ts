@@ -85,6 +85,39 @@ afterEach(() => {
 });
 
 describe("device credential renewal", () => {
+  it("preserves the device name, UUID and original sign-in time across renewal and restart", async () => {
+    const path = tempDatabasePath();
+    const first = registry(path);
+    const original = first.store.issue({ principalId: PRINCIPAL, deviceId: DEVICE, deviceName: "agent-server", workspaces: [] });
+    const originalDevice = first.store.listDevices(PRINCIPAL)[0];
+    expect(originalDevice).toEqual({ deviceId: DEVICE, deviceName: "agent-server", signedInAt: original.record.issuedAt, workspaces: [] });
+    const renewed = replacement(await first.store.renew(await proof(original), first.memberships));
+    expect(renewed.record).not.toHaveProperty("deviceName");
+    expect(renewed.record.deviceId).toBe(original.record.deviceId);
+    expect(first.store.listDevices(PRINCIPAL)).toEqual([originalDevice]);
+    first.db.close();
+    const restarted = registry(path);
+    expect(restarted.store.listDevices(PRINCIPAL)).toEqual([originalDevice]);
+    const next = replacement(await restarted.store.renew(await proof(renewed), restarted.memberships));
+    expect(restarted.store.listDevices(PRINCIPAL)).toEqual([originalDevice]);
+    expect(restarted.store.revokeDevice(PRINCIPAL, DEVICE)).toBe(true);
+    expect(restarted.store.listDevices(PRINCIPAL)).toEqual([]);
+    expect(await restarted.store.verify(await roomToken(next))).toEqual({ failure: "revoked-credential" });
+  });
+
+  it("ignores invalid stored display metadata when listing and renewing a device", async () => {
+    const { db, store, memberships } = registry();
+    const original = issue(store, []);
+    db.connection.prepare("UPDATE hub_credentials SET device_name = ? WHERE id = ?")
+      .run("bad\nname", original.record.id);
+    expect(store.listDevices(PRINCIPAL)[0]).not.toHaveProperty("deviceName");
+    const renewed = replacement(await store.renew(await proof(original), memberships));
+    expect(store.listDevices(PRINCIPAL)[0]).not.toHaveProperty("deviceName");
+    expect(db.connection.prepare("SELECT device_name FROM hub_credentials WHERE id = ?")
+      .get(renewed.record.id)?.device_name).toBeNull();
+    expect(await store.verify(await roomToken(renewed))).toHaveProperty("record", renewed.record);
+  });
+
   it("checks unchanged memberships without retirement, then replaces only after a grant", async () => {
     const { db, store, memberships } = registry();
     memberships.grant({ principalId: PRINCIPAL, workspaceId: WORKSPACE, role: "admin" });
@@ -329,7 +362,7 @@ describe("device credential renewal", () => {
     expect(states(olderBackup.db)).toEqual([]);
   });
 
-  it("adds replacement state to the existing credential table while preserving active and revoked rows", async () => {
+  it("adds replacement state and optional names to legacy credentials while preserving active and revoked rows", async () => {
     const db = database();
     db.connection.exec(`CREATE TABLE hub_credentials (
       id TEXT PRIMARY KEY NOT NULL, principal_id TEXT NOT NULL, device_id TEXT NOT NULL,
@@ -355,6 +388,9 @@ describe("device credential renewal", () => {
 
     expect(store.get(original.record.id)).toEqual(original.record);
     expect(store.get(revoked.record.id)).toEqual(revoked.record);
+    expect(store.listDevices(PRINCIPAL)).toEqual([
+      { deviceId: DEVICE, signedInAt: original.record.issuedAt, workspaces: [WORKSPACE] },
+    ]);
     expect(await store.verify(await roomToken(original))).toHaveProperty("record", original.record);
     expect(await store.renew(await proof(revoked), memberships)).toEqual({ status: "sign-in-required" });
     expect((await store.renew(await proof(original), memberships)).status).toBe("renewed");

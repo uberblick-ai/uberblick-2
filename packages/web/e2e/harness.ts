@@ -163,7 +163,7 @@ async function startOpen(
 
 export interface Harness {
   /** Public fixture identities for access-control browser proofs. */
-  readonly access?: { otherDeviceId: string; foreignDeviceId: string };
+  readonly access?: { otherDeviceId: string; legacyDeviceId: string; foreignDeviceId: string; deviceName: string };
   /** Where the browser goes. This run's real `ub open` address. */
   readonly appUrl: string;
   /**
@@ -403,15 +403,19 @@ export async function startHarness(options: {
       memberships.grant({ workspaceId: workspaceUuid, principalId: principal.id, role: accessRole });
       const foreign = principals.identify("5678", "other-admin");
       memberships.grant({ workspaceId: workspaceUuid, principalId: foreign.id, role: "admin" });
-      const issue = (principalId: string) => registry.issue({ principalId, deviceId: randomUUID(), workspaces: [workspaceUuid] });
-      const current = issue(principal.id);
-      const other = issue(principal.id);
-      const foreignDevice = issue(foreign.id);
+      const issue = (principalId: string, deviceName?: string) => registry.issue({ principalId, deviceId: randomUUID(),
+        workspaces: [workspaceUuid], ...(deviceName === undefined ? {} : { deviceName }) });
+      const deviceName = "browser-laptop";
+      const current = issue(principal.id, deviceName);
+      const other = issue(principal.id, deviceName);
+      const legacy = issue(principal.id);
+      const foreignDevice = issue(foreign.id, "private-foreign-device");
       const { replacedAt: _replaced, ...record } = current.record;
       storedCredentials = { hubLogins: { [`http://127.0.0.1:${port}`]: {
         identity: principal, credential: { record, key: Buffer.from(current.keyBytes).toString("base64url") },
       } } };
-      access = { otherDeviceId: other.record.deviceId, foreignDeviceId: foreignDevice.record.deviceId };
+      access = { otherDeviceId: other.record.deviceId, legacyDeviceId: legacy.record.deviceId,
+        foreignDeviceId: foreignDevice.record.deviceId, deviceName };
     }
     let secondHubUrl: string | undefined;
     if (options.multiWorkspace === true) {
