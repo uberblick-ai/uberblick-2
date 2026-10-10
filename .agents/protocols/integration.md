@@ -142,7 +142,8 @@ move or a head mismatch returns to the applicable gates.
 Confirm every issue the PR closes auto-closed, and close a parent whose last
 open sub-issue it closed. Then apply the pull request's `Corpus update` through
 MCP, checked against the merged code. A block that describes intended behavior
-the merged code does not deliver yet stays as it is; when you cannot tell
+the merged code does not deliver yet stays as it is, tracked by an issue under
+[AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action); when you cannot tell
 whether a block is intent or a wrong claim, leave it and ask the maintainers on
 the PR. If MCP fails, open an issue titled `Corpus update outstanding for #<PR>`
 that quotes the concrete failure and the update still to apply, link it on the

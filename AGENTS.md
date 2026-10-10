@@ -145,8 +145,10 @@ A pointer is a route to the source, not a substitute for reading it.
   behavior, but do not weaken a guarantee or expand agent authority through a
   doc edit. An unsettled change to those commitments requires a maintainer decision.
   Pages describe intended behavior, which can be ahead of the code: never
-  remove or weaken intent because the code does not deliver it yet; that gap
-  is an issue. Change a page to match the code only where delivered behavior
+  remove or weaken intent because the code does not deliver it yet. An issue
+  tracks each such gap so the code catches up: whoever writes intent ahead of
+  the code files it, and whoever finds a gap with no issue files one or asks a
+  maintainer. Change a page to match the code only where delivered behavior
   changes or extends what it describes. When unsure which applies, ask a
   maintainer instead of editing.
 
