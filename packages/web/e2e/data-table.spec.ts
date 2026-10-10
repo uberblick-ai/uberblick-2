@@ -710,14 +710,29 @@ async function workload(session: McpSession, mixed: boolean): Promise<{ uuid: st
 }
 
 async function timingEvidence(page: Page, session: McpSession, uuid: string, mixed: boolean, bytes: number): Promise<Timings> {
-  await expect(page.locator(".ub-data-table")).toHaveCount(mixed ? 10 : 1, { timeout: mixed ? 60_000 : 20_000 });
-  await expect(page.locator(".ub-chart-panel[data-state='ready']")).toHaveCount(mixed ? 20 : 1);
+  // Ten continuous tables contain over 400,000 cells. Repeated Playwright
+  // selector walks dominate this workload; read one native DOM snapshot.
+  await expect.poll(() => page.evaluate(() => {
+    const tables = [...document.querySelectorAll<HTMLTableElement>(".ub-data-table")];
+    return {
+      tables: tables.length,
+      ready: document.querySelectorAll(".ub-chart-panel[data-state='ready']").length,
+      rows: tables.map(table => table.tBodies[0]?.rows.length ?? 0),
+      headers: tables[0]?.querySelectorAll("thead th[scope='col']").length ?? 0,
+    };
+  }), { timeout: mixed ? 60_000 : 20_000 }).toEqual({
+    tables: mixed ? 10 : 1,
+    ready: mixed ? 20 : 1,
+    rows: Array.from({ length: mixed ? 10 : 1 }, () => 4035),
+    headers: 10,
+  });
   await expect.poll(() => page.evaluate(() => (window as unknown as { tableProbe: { first: number | null } }).tableProbe.first)).not.toBeNull();
   const initial = await page.evaluate(() => (window as unknown as { tableProbe: { first: number; availableEntries: number } }).tableProbe);
   expect(initial.availableEntries).toBe(4402);
-  for (const table of await page.locator(".ub-data-table").all()) await expect(table.locator("tbody tr")).toHaveCount(4035);
-  await expect(page.locator(".ub-data-table").first().getByRole("columnheader")).toHaveCount(10);
-  expect(await page.locator(".ub-table-scroll").first().evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => {
+    const scroll = document.querySelector<HTMLElement>(".ub-table-scroll");
+    return scroll !== null && scroll.scrollWidth > scroll.clientWidth;
+  })).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   for (let iteration = 0; iteration < 10; iteration += 1) {
     const value = 900 + iteration;
