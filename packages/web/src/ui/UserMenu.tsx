@@ -70,12 +70,15 @@ export function UserMenu({
   }, [active]);
   useEffect(() => {
     setName(identity.name);
-  }, [identity.name, open]);
+  }, [identity.name]);
 
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <Popover open={active && open} onOpenChange={setOpen}>
+        <Popover open={active && open} onOpenChange={(next) => {
+          if (next) setName(identity.name);
+          setOpen(next);
+        }}>
           <PopoverTrigger asChild>
             <SidebarMenuButton data-testid="account-menu" aria-label={`${label}; preferences`}>
               <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
