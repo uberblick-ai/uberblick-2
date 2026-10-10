@@ -54,7 +54,11 @@ footprint, with contract and invariant tests rather than tests of trivia. Run
 focused checks while editing; before handoff run `mise run lint`,
 `mise run typecheck` and `mise run test` once against the final head, and record
 a real environmental limitation rather than replacing a failed command with a
-claim. Browser or e2e coverage is owed only for a browser-observable outcome.
+claim; a test or spec that failed the same way (same test, browser project and
+error) in the latest completed `CI` run on `main` at or before the `origin/main`
+you grounded on (`gh run list --workflow ci.yml --branch main --status completed`,
+then `gh run view <id> --log-failed`) is one. Browser or e2e coverage is owed
+only for a browser-observable outcome.
 
 Where the contract conflicts with the code, is unsafe, forces unnecessary
 complexity, or needs a person's decision, do not deviate. On an issue, finish

@@ -31,9 +31,12 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   That run uses the candidate's own e2e recipe, so for a browser-observable
   outcome read its output rather than trusting the status. A
   failure may be called environmental only after the same failing spec is run
-  against the base: green at the base and red at the head is a branch
-  regression to fix, even when the stale code is a test fixture rather than
-  production.
+  against the base, or when it failed the same way (same test, browser project
+  and error) in the latest completed `CI` run on `main` at or before the base
+  (`gh run list --workflow ci.yml --branch main --status completed`, then
+  `gh run view <id> --log-failed`): green at the base and red at the head is a
+  branch regression to fix, even when the stale code is a test fixture rather
+  than production.
 - Record every gate outcome against the commit SHA it ran at, and the exact
   base-ref SHA the exact-head gate set began from as its base-freshness point.
   Link the check or failure evidence; do not paste full logs, test counts or
