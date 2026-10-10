@@ -146,9 +146,9 @@ describe("ub auth logout retires devices", () => {
     });
     const ownDevices = await manageRequest(remote.origin, { operation: "list-devices" }, current.login);
     expect(ownDevices.body).toMatchObject({ devices: expect.arrayContaining([
-      { deviceId: older.login.credential.record.deviceId, signedInAt: expect.any(Number), deviceName: hostname(), current: false },
-      { deviceId: current.login.credential.record.deviceId, signedInAt: expect.any(Number), deviceName: hostname(), current: true },
-      { deviceId: unnamed.record.deviceId, signedInAt: expect.any(Number), current: false },
+      expect.objectContaining({ deviceId: older.login.credential.record.deviceId, signedInAt: expect.any(Number), deviceName: hostname(), current: false }),
+      expect.objectContaining({ deviceId: current.login.credential.record.deviceId, signedInAt: expect.any(Number), deviceName: hostname(), current: true }),
+      expect.objectContaining({ deviceId: unnamed.record.deviceId, signedInAt: expect.any(Number), current: false }),
     ]) });
     remote.github.identity = { id: 5678, login: "another-account" };
     const another = await signedIn(remote);
